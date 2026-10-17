@@ -5,7 +5,6 @@
 //! per-tile mappings. Brings out medium-scale structure (dust lanes, nebula filaments). Runs on the
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
-use crate::math::size2us::Size2us;
 use common::Introspect;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -14,6 +13,7 @@ use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
+use crate::math::size2us::Size2us;
 
 /// Histogram resolution for the per-tile mappings.
 const N_BINS: usize = 256;
@@ -49,7 +49,7 @@ impl LocalContrast {
     /// Enhance the local contrast of `image` in place via CLAHE.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         if self.strength == 0.0 {

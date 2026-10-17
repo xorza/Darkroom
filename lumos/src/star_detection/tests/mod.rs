@@ -29,6 +29,7 @@ mod subpixel_accuracy;
 use glam::DVec2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::{CosmicRays, add_bayer_pattern};
@@ -192,7 +193,7 @@ impl Scenario {
                 *p = p.clamp(0.0, 1.0);
             }
             frame.image = LinearImage::from_planar_channels(
-                ImageDimensions::new(self.size, 1),
+                ImageDimensions::new(self.size, ChannelLayout::Mono),
                 [px.into_vec()],
             );
         }

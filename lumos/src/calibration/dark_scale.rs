@@ -3,13 +3,12 @@
 
 use rayon::prelude::*;
 
+use crate::calibration::calibration_pass::Subtracted;
 use crate::calibration::defect_map::HotPixels;
 use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
-use crate::calibration::light_calibration::Subtracted;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::statistics::mad_to_sigma;
 use crate::math::statistics::median_mad::MedianMad;
 
 /// The fewest hot pixels the fit keeps for its factor to stand; with fewer the exposure ratio does.
@@ -67,7 +66,7 @@ impl DarkScale {
     /// dark's excess alone: selecting on the regressor leaves a least-squares slope
     /// unbiased, where selecting on the light would bias it. The light's excess is its sample less
     /// the bias, less the same reference the dark's excess was taken against — a robust plane
-    /// through the ring of its colour's photosites — so the sky, a gradient and the dark's
+    /// through the ring of its color's photosites — so the sky, a gradient and the dark's
     /// uniform current cancel. The flat does not shade dark current, so the fit reads the light
     /// before it. The fit is `l = k·d` through the origin, refitted on the pairs within 3σ of the
     /// residuals' median until they settle; its standard error is that σ over `√Σd²`.
@@ -100,14 +99,13 @@ impl FitLight<'_> {
     fn pairs(&self, hot: &HotPixels) -> Vec<Pair> {
         let image = self.light;
         let size = image.size();
-        let samples = image.data.pixels();
-        let saturation =
-            (!image.metadata.saturation_flagged).then(|| image.metadata.saturation_level());
+        let samples = image.data().pixels();
+        let saturation = (!image.metadata.derived.saturation_flagged())
+            .then(|| image.metadata.header.saturation_level());
         let excluded = QualityFlags::SATURATED.union(QualityFlags::NO_DATA);
         let unmeasured = |index: usize| {
             image
-                .flags
-                .as_ref()
+                .flags()
                 .is_some_and(|flags| flags.at(index).intersects(excluded))
                 || self
                     .imposed
@@ -127,7 +125,7 @@ impl FitLight<'_> {
                     size,
                     value: less_bias,
                 };
-                let level = ring.at(frame, &image.cfa_type, size.point_of(index))?;
+                let level = ring.at(frame, &image.cfa_type(), size.point_of(index))?;
                 Some(Pair {
                     dark: f64::from(excess) * self.dark_gain,
                     light: less_bias(index) - f64::from(level),
@@ -174,10 +172,10 @@ fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
                 .iter()
                 .zip(&kept)
                 .filter(|(_, kept)| **kept)
-                .map(|(pair, _)| (pair.light - slope * pair.dark) as f32),
+                .map(|(pair, _)| pair.light - slope * pair.dark),
         );
-        let MedianMad { median, mad } = MedianMad::of_mut(&mut residuals);
-        let sigma = f64::from(mad_to_sigma(mad));
+        let residual = MedianMad::of_mut(&mut residuals);
+        let sigma = residual.sigma();
         fit = Some(Fit {
             slope,
             standard_error: sigma / energy.sqrt(),
@@ -188,7 +186,7 @@ fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
         }
         let mut changed = false;
         for (pair, kept) in pairs.iter().zip(&mut kept) {
-            let keep = ((pair.light - slope * pair.dark) - f64::from(median)).abs()
+            let keep = ((pair.light - slope * pair.dark) - residual.median).abs()
                 <= FIT_CLIP_SIGMAS * sigma;
             changed |= keep != *kept;
             *kept = keep;

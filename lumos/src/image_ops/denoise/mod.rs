@@ -15,6 +15,8 @@
 //! A **linear-domain** operation: run after stacking and color calibration, before the stretch (the
 //! stretch's non-uniform gain would distort the noise statistics this relies on).
 
+use std::mem;
+
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -22,14 +24,12 @@ use rayon::prelude::*;
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
-use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::linear_image::{LinearImage, PlanesWithFlags};
 use crate::image::quality_map::QualityMap;
 use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
 use crate::math::wavelet;
-use crate::noise::mrs_noise::MrsNoise;
-use std::mem;
+use crate::noise::mrs_noise::NoisePlane;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
 ///
@@ -105,7 +105,7 @@ impl Denoise {
     /// Denoise every channel of `image` in place via starlet wavelet thresholding.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.apply_with_noise(image, ImageNoise::Measured)
     }
@@ -121,7 +121,7 @@ impl Denoise {
     /// coefficients carry less noise than this assumes.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters.
     ///
     /// # Panics
     /// If `variance` is not the image's size, or has another channel count.
@@ -145,13 +145,9 @@ impl Denoise {
         let size = Size2us::new(image.width(), image.height());
         let scales = self.scales.min(wavelet::max_scales(size));
         let mut scratch = DenoiseScratch::new(size);
-        let flags = image.flags.clone();
-        let excluded = |index: usize| {
-            flags
-                .as_ref()
-                .is_some_and(|flags| flags.at(index) != QualityFlags::default())
-        };
-        for (channel, plane) in image.planes_mut().enumerate() {
+        let PlanesWithFlags { planes, flags } = image.planes_mut_with_flags();
+        let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
+        for (channel, plane) in planes.enumerate() {
             let noise = match noise {
                 ImageNoise::Variance(variance) => {
                     let plane = variance.channel(channel);
@@ -162,7 +158,13 @@ impl Denoise {
                     );
                     PlaneNoise::Variance(plane.pixels())
                 }
-                ImageNoise::Measured => PlaneNoise::White(MrsNoise::estimate(plane, excluded)),
+                ImageNoise::Measured => PlaneNoise::White(
+                    NoisePlane {
+                        samples: plane,
+                        excluded,
+                    }
+                    .sigma(),
+                ),
             };
             let channel = Channel {
                 samples: plane.pixels_mut(),

@@ -3,28 +3,33 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::calibration::error::SubtractionError;
 use crate::combine::error::StackError;
 use crate::combine::frame_cache::core::CacheCore;
-use crate::combine::stack_config::StackConfig;
-use crate::error::FrameDimensionMismatch;
+use crate::combine::frame_cache::frame_step::{FrameStep, SteppedPaths};
+use crate::combine::frame_read::slots::Slots;
+use crate::combine::normalization::planned_normalization::SetCoverage;
+use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
+use crate::error::Cancelled;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
-use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::decode_cache::kept_frame::KeptFrame;
+use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_layout::StoredLayout;
 use crate::frame_store::tier::Tier;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_metadata::ImageMetadata;
+use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
-use crate::ingest::frame_step::{FrameStep, SteppedPaths};
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::error::ImageError;
+use crate::io::decoder::Decoder;
 use crate::io::load_context::LoadContext;
 use crate::memory::run_plan::RunPlan;
-use crate::progress::progress_monitor::ProgressMonitor;
+use crate::memory::stage::{Stage, Units};
 use crate::progress::stacking_progress::StackingStage;
 
 /// [`load_tiered`] output: the loaded frames plus the assembled [`CacheCore`].
@@ -34,36 +39,86 @@ pub(super) struct LoadedCache {
     pub(super) core: CacheCore,
 }
 
-/// The stage of [`StackConfig::stages`] that decodes the frames.
+/// The stage of [`stages`] that decodes the frames.
 const DECODE: usize = 0;
+
+/// The stages of a run that decodes `frame_count` frames such as `peek` straight into `combine`,
+/// on `workers`: each frame decoded and measured; the normalization; the combine, whose rows read
+/// every frame as it decoded. A frame may carry a mask its decode alone reveals, so the
+/// normalization is charged as over a set that shares only some pixels, which holds more than one
+/// every frame covers.
+fn stages(
+    combine: PlannedCombine,
+    peek: FramePeek,
+    frame_count: usize,
+    workers: usize,
+) -> [Stage; 3] {
+    let dimensions = peek.dimensions;
+    let decoded = peek.footprint(workers);
+    let [normalize, combine] = combine.stages(
+        PlannedFrames {
+            count: frame_count,
+            dimensions,
+            layout: StoredLayout::decoded(dimensions),
+            slots: Slots::new(peek.mosaic, dimensions.channels()),
+            coverage: SetCoverage::Common,
+            workers,
+        },
+        decoded.kept,
+    );
+    [
+        Stage {
+            kept: decoded.kept,
+            held: 0,
+            in_flight: decoded.transient(),
+            units: Units::Frames,
+        },
+        normalize,
+        combine,
+    ]
+}
 
 /// Load every frame into the tier its set fits, each through its step.
 ///
-/// A prepared frame is not what its source decodes to, so on the disk tier it is spilled for this
-/// run alone, never committed to the kept cache nor read back from it: a later run with another
-/// step, or none, would otherwise reuse it.
-pub(super) fn load_tiered<I: StackableImage>(
-    frames: SteppedPaths<'_, &Path, impl FrameStep<I, Error = SubtractionError>>,
-    config: &StackConfig,
+/// A frame through a step is not what its source decodes to, so its decode is read through the
+/// decode cache and the stepped frame goes to the tier, spilled for this run alone when the tier
+/// spills: a later run with another step, or none, would otherwise reuse it.
+pub(super) fn load_tiered<D, S, E>(
+    frames: SteppedPaths<'_, &Path, S>,
+    combine: PlannedCombine,
     run: IngestRun,
-) -> Result<LoadedCache, StackError> {
+) -> Result<LoadedCache, E>
+where
+    D: Decoder,
+    S: FrameStep<D::Image>,
+    E: From<StackError> + From<S::Error> + From<Cancelled> + Send,
+{
     let SteppedPaths { paths, step } = frames;
     debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0];
 
+    // A decode-level memo: looked up before any decode on every tier. An unstepped frame is its
+    // kept planes, mapped from the files whatever the tier, since a mapped plane reads as a
+    // resident one does.
+    let storage = stack(RunStorage::decoding(&run))?;
+    let load = FrameLoad::<D, _> {
+        paths,
+        storage: &storage,
+        kept: storage.kept().filter(|_| !step.changes_frames()),
+        context: &run.context,
+        step,
+        decoder: PhantomData,
+    };
+
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it, so the in-memory path can decode every frame in parallel rather than
-    // decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (peek, early) = if let Some(peek) = I::peek(first_path, &run.context) {
-        (peek, None)
+    // decoding frame 0 serially first; otherwise take frame 0 kept from a run before, or decode it,
+    // and store it below.
+    let (peek, early) = if let Some(info) = D::peek(first_path, &run.context) {
+        (FramePeek::from(info), None)
     } else {
-        let source = CachedSource::of(first_path, I::DECODER, &run.context);
-        let mut image = load_image::<I>(first_path, &run.context)?;
-        step.apply(0, &mut image)?;
-        (
-            FramePeek::of_decoded(&image),
-            Some(Decoded { image, source }),
-        )
+        let early = load.early::<E>()?;
+        (early.peek(), Some(early))
     };
     let dimensions = peek.dimensions;
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
@@ -72,7 +127,7 @@ pub(super) fn load_tiered<I: StackableImage>(
     let budget = run.budget;
     let plan = RunPlan::of(
         paths.len(),
-        &config.stages(peek, paths.len(), budget.workers()),
+        &stages(combine, peek, paths.len(), budget.workers()),
         budget,
     );
     tracing::info!(
@@ -83,25 +138,16 @@ pub(super) fn load_tiered<I: StackableImage>(
         "Image cache storage decision"
     );
 
-    // A decode-level memo: looked up before any decode on every tier, its planes mapped from the
-    // files whatever the tier, since a mapped plane reads as a resident one does. A frame through
-    // a step is not what its source decodes to, so a stepped run neither reads nor writes it.
-    let kept = (run.keep_cache && !step.changes_frames())
-        .then(|| DecodeCache::open(&run.cache_dir))
-        .transpose()?;
-    let tier = Tier::for_plan(
-        &plan,
-        if kept.is_some() {
+    let frame_bytes = peek.resident_bytes() as u64;
+    let writes = RunWrites {
+        kept: (storage.uncached::<D>(paths, &run.context) as u64).saturating_mul(frame_bytes),
+        spilled: if load.kept.is_some() {
             0
         } else {
-            (peek.resident_bytes() as u64).saturating_mul(paths.len() as u64)
+            frame_bytes.saturating_mul(paths.len() as u64)
         },
-        &run.cache_dir,
-    )?;
-    if let Some(kept) = &kept {
-        let missing = kept.missing::<I>(paths, &run.context) as u64;
-        kept.ensure_space(missing.saturating_mul(peek.resident_bytes() as u64))?;
-    }
+    };
+    let tier = stack(storage.tier(&plan, writes))?;
     let intake = FrameIntake::new(
         IntakePlan {
             dimensions,
@@ -111,22 +157,21 @@ pub(super) fn load_tiered<I: StackableImage>(
         },
         &run,
     );
-    let load = FrameLoad {
-        paths,
+    let store = FrameStore {
+        load: &load,
         tier: &tier,
-        kept: kept.as_ref(),
         intake: &intake,
-        step,
-        image: PhantomData,
     };
 
-    // Frame 0 carries the stack metadata, which a kept frame keeps with it. Frame 0 decoded for
-    // the plan is taken in first; every other frame in parallel.
-    let first = early.map(|early| load.frame(0, Some(early))).transpose()?;
+    // Frame 0 carries the stack metadata, which a kept frame keeps with it. Frame 0 taken for the
+    // plan is stored first; every other frame in parallel.
+    let first = early
+        .map(|early| store.frame::<E>(0, Some(early)))
+        .transpose()?;
     let start = usize::from(first.is_some());
     let mut slots = vec![(); plan.width(DECODE)];
     let rest = intake.map(start..paths.len(), &mut slots, |(), index| {
-        load.frame(index, None)
+        store.frame::<E>(index, None)
     })?;
     let mut metadata = None;
     let mut frames = Vec::with_capacity(paths.len());
@@ -146,27 +191,38 @@ pub(super) fn load_tiered<I: StackableImage>(
             tier,
             dimensions,
             metadata: metadata.expect("frame 0 provides metadata"),
-            monitor: ProgressMonitor::new(run.progress, run.context.cancel),
+            monitor: run.into_monitor(),
         },
     })
 }
 
-fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, StackError> {
-    match I::load(path, context) {
-        Ok(image) => Ok(image),
-        // Cancellation is the run stopping, not this file failing, so it leaves the load error
-        // behind and reports as the stack's own.
-        Err(ImageError::Cancelled { .. }) => Err(StackError::Cancelled),
-        Err(source) => Err(StackError::ImageLoad(source)),
-    }
-}
-
-/// A decoded frame and its source as it was before the decode, which only the kept cache reads —
-/// for its source-change check — so only the kept cache fails on it.
+/// A decoded frame, with its source as it was before the decode when a decode cache reads it.
 #[derive(Debug)]
 struct Decoded<I> {
     image: I,
-    source: Result<CachedSource, FrameStoreError>,
+    source: Option<CachedSource>,
+}
+
+/// Frame 0 taken before the plan: decoded, or kept by a run before.
+#[derive(Debug)]
+enum Early<I> {
+    Decoded(Decoded<I>),
+    Kept(Box<KeptFrame>),
+}
+
+impl<I: StackableImage> Early<I> {
+    /// What the frame tells the plan. A kept frame was decoded by a run before, so what its decoder
+    /// held is not known, as for a frame decoded here.
+    fn peek(&self) -> FramePeek {
+        match self {
+            Self::Decoded(decoded) => FramePeek::of_decoded(&decoded.image),
+            Self::Kept(kept) => FramePeek {
+                dimensions: kept.dimensions(),
+                decoder_bytes: 0,
+                mosaic: kept.admitted.facts.cfa_type.filter(CfaType::is_mosaic),
+            },
+        }
+    }
 }
 
 /// A frame in its tier, with the stack metadata when it is frame 0.
@@ -176,48 +232,83 @@ struct LoadedFrame {
     metadata: Option<ImageMetadata>,
 }
 
-/// One frame set's load into its tier: where each frame goes, and how it is taken in.
+/// How one frame set's frames are taken: decoded through its step, or from the decode cache.
 #[derive(Debug)]
-struct FrameLoad<'a, I, S> {
+struct FrameLoad<'a, D, S> {
     paths: &'a [&'a Path],
-    tier: &'a Tier,
-    /// The decode cache, when `keep_cache` asked for one.
+    storage: &'a RunStorage,
+    /// The decode cache whose planes are the frames: when `keep_cache` asked for one and the step
+    /// changes nothing.
     kept: Option<&'a DecodeCache>,
-    intake: &'a FrameIntake<'a>,
+    context: &'a LoadContext,
     step: &'a S,
-    image: PhantomData<fn() -> I>,
+    decoder: PhantomData<fn() -> D>,
 }
 
-impl<I: StackableImage, S: FrameStep<I, Error = SubtractionError>> FrameLoad<'_, I, S> {
-    /// Frame `index` decoded, through the step when there is one, with its source as it was
-    /// before the decode.
-    fn decode(&self, index: usize) -> Result<Decoded<I>, StackError> {
-        let path = self.paths[index];
-        let source = CachedSource::of(path, I::DECODER, self.intake.context());
-        let mut image = load_image::<I>(path, self.intake.context())?;
+impl<D: Decoder, S: FrameStep<D::Image>> FrameLoad<'_, D, S> {
+    /// Frame `index` decoded through the storage, through the step when there is one: how a frame
+    /// is taken when no decode cache holds the frames themselves.
+    fn decode<E: From<StackError> + From<S::Error>>(&self, index: usize) -> Result<D::Image, E> {
+        let mut image = stack(self.storage.decode::<D>(self.paths[index], self.context))?;
         self.step.apply(index, &mut image)?;
-        Ok(Decoded { image, source })
+        Ok(image)
     }
 
+    /// Frame 0 before the plan: kept by a run before when the decode cache holds it, decoded
+    /// otherwise. The decode cache holds the frames only when the step changes none, so a decode
+    /// it will keep takes no step.
+    fn early<E: From<StackError> + From<S::Error>>(&self) -> Result<Early<D::Image>, E> {
+        let Some(kept) = self.kept else {
+            return Ok(Early::Decoded(Decoded {
+                image: self.decode::<E>(0)?,
+                source: None,
+            }));
+        };
+        let source = stack(CachedSource::of(self.paths[0], D::KIND, self.context))?;
+        if let Some(reused) = kept.reuse(&source) {
+            return Ok(Early::Kept(Box::new(reused)));
+        }
+        Ok(Early::Decoded(Decoded {
+            image: stack(D::load(self.paths[0], self.context))?,
+            source: Some(source),
+        }))
+    }
+}
+
+/// One frame set's load into its tier: how each frame is taken, where it goes, and how it is
+/// taken in.
+#[derive(Debug)]
+struct FrameStore<'a, D, S> {
+    load: &'a FrameLoad<'a, D, S>,
+    tier: &'a Tier,
+    intake: &'a FrameIntake<'a>,
+}
+
+impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
     /// Frame `index` in its tier: with a decode cache, the planes it holds committed for this
     /// source and decoder, or a decode written there and committed; without one, a decode the tier
     /// keeps.
     ///
-    /// `decoded` is a frame already decoded, which is stored rather than looked up: the decode a
-    /// lookup would save is already spent. A frame through `step` is not what its source decodes
-    /// to, so it goes to the tier whatever the cache.
-    fn frame(&self, index: usize, decoded: Option<Decoded<I>>) -> Result<LoadedFrame, StackError> {
-        if let Some(kept) = self.kept {
-            return self.kept_frame(kept, index, decoded);
+    /// `early` is frame 0 already taken for the plan, which is stored rather than taken again. A
+    /// frame through `step` is not what its source decodes to, so it goes to the tier whatever the
+    /// cache.
+    fn frame<E: From<StackError> + From<S::Error>>(
+        &self,
+        index: usize,
+        early: Option<Early<D::Image>>,
+    ) -> Result<LoadedFrame, E> {
+        if let Some(kept) = self.load.kept {
+            return Ok(self.kept_frame(kept, index, early)?);
         }
-        let image = match decoded {
-            Some(decoded) => decoded.image,
-            None => self.decode(index)?.image,
+        let image = match early {
+            Some(Early::Decoded(decoded)) => decoded.image,
+            Some(Early::Kept(_)) => unreachable!("a frame is kept only with a decode cache"),
+            None => self.load.decode::<E>(index)?,
         };
-        let stats = self.intake.admit(index, &image)?;
+        let admitted = stack(self.intake.admit(index, &image))?;
         let metadata = (index == 0).then(|| image.metadata().clone());
         let quality = FrameQuality::for_unwarped(&image);
-        let frame = self.tier.store(image, quality, stats)?;
+        let frame = stack(self.tier.store(image, quality, admitted))?;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }
@@ -230,47 +321,61 @@ impl<I: StackableImage, S: FrameStep<I, Error = SubtractionError>> FrameLoad<'_,
         &self,
         kept: &DecodeCache,
         index: usize,
-        decoded: Option<Decoded<I>>,
+        early: Option<Early<D::Image>>,
     ) -> Result<LoadedFrame, StackError> {
-        let path = self.paths[index];
-        let dimensions = self.intake.dimensions();
-        let context = self.intake.context();
-        let (source, decoded_image) = match decoded {
-            Some(Decoded { image, source }) => (source?, Some(image)),
-            None => (CachedSource::of(path, I::DECODER, context)?, None),
+        debug_assert!(
+            !self.load.step.changes_frames(),
+            "a stepped run neither reads nor writes the decode cache"
+        );
+        let path = self.load.paths[index];
+        let context = self.load.context;
+        let (source, image) = match early {
+            Some(Early::Kept(reused)) => return self.reused(index, *reused),
+            Some(Early::Decoded(Decoded { image, source })) => (
+                source.expect("a decode with a decode cache reads its source"),
+                image,
+            ),
+            None => {
+                let source = CachedSource::of(path, D::KIND, context)?;
+                if let Some(reused) = kept.reuse(&source) {
+                    tracing::debug!(source = %path.display(), "Reusing existing cache files");
+                    return self.reused(index, reused);
+                }
+                (source, D::load(path, context)?)
+            }
         };
-
-        if decoded_image.is_none()
-            && let Some(reused) = kept.reuse(&source)?
-        {
-            tracing::debug!(source = %path.display(), "Reusing existing cache files");
-            FrameDimensionMismatch::check(index, dimensions, reused.dimensions)?;
-            let frame = reused.frame;
-            self.intake.check_facts(index, &frame.source_stats.facts)?;
-            let check = FrameCheck {
-                index,
-                cancel: &context.cancel,
-            };
-            check.stored_samples(&frame.channels, dimensions.pixel_count())?;
-            // Mapped from disk, so held to the pairing the combine divides by like any other planes.
-            check.stored_quality(&frame, dimensions)?;
-            self.intake.complete_one();
-            return Ok(LoadedFrame {
-                frame,
-                metadata: (index == 0).then_some(reused.metadata),
-            });
-        }
-
-        let image = match decoded_image {
-            Some(image) => image,
-            None => load_image::<I>(path, context)?,
-        };
-        let stats = self.intake.admit(index, &image)?;
-        let metadata = (index == 0).then(|| image.metadata().clone());
-        let frame = kept.keep(&source, &image, stats)?;
+        let admitted = self.intake.admit(index, &image)?;
+        let written = kept.keep(&source, &image, admitted)?;
+        drop(image);
+        let metadata = (index == 0).then(|| written.image.metadata.clone());
+        let frame = written.into_frame();
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }
+
+    /// Frame `index` as a run before kept it, held to the set's shape and facts and to the planes'
+    /// checks, as a decode is on admission.
+    fn reused(&self, index: usize, reused: KeptFrame) -> Result<LoadedFrame, StackError> {
+        let dimensions = self.intake.dimensions();
+        FrameDimensionMismatch::check(index, dimensions, reused.dimensions())?;
+        self.intake.check_facts(index, &reused.admitted.facts)?;
+        let metadata = (index == 0).then(|| reused.image.metadata.clone());
+        let frame = reused.into_frame();
+        let check = FrameCheck {
+            index,
+            cancel: &self.load.context.cancel,
+        };
+        check.stored_samples(&frame.channels, dimensions.pixel_count())?;
+        // Mapped from disk, so held to the pairing the combine divides by like any other planes.
+        check.stored_quality(&frame, dimensions)?;
+        self.intake.complete_one();
+        Ok(LoadedFrame { frame, metadata })
+    }
+}
+
+/// `result` with its error as the stack's: what a load fails with, but for its step.
+fn stack<T>(result: Result<T, impl Into<StackError>>) -> Result<T, StackError> {
+    result.map_err(Into::into)
 }
 
 #[cfg(test)]

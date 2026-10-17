@@ -9,7 +9,7 @@
 //! # Model
 //!
 //! Pixel coordinates (u, v) relative to a reference point are corrected by a 2D
-//! polynomial before the linear (homography) transform:
+//! polynomial before the linear transform, up to an affine map:
 //!
 //! ```text
 //! u' = u + Σ A_pq * u^p * v^q    (for 2 ≤ p+q ≤ order)
@@ -17,7 +17,7 @@
 //! ```
 //!
 //! Linear terms (p+q < 2) are excluded because they are already captured by
-//! the homography.
+//! the linear transform.
 //!
 //! # Coefficient counts by order
 //!
@@ -28,6 +28,8 @@
 //! | 4     | 12            | + higher-order |
 //! | 5     | 18            | Full SIP (HST-level) |
 
+pub(crate) mod sip_order;
+
 use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
@@ -35,20 +37,21 @@ use nalgebra::DMatrix;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::math::lstsq::Lstsq;
+use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::point_normalization::PointNormalization;
-use crate::registration::transform::{Transform, TransformType};
+use crate::registration::transform::Transform;
+use crate::registration::transform::linear_model::LinearModel;
 
-/// The highest polynomial order [`SipConfig::order`] accepts.
-const MAX_ORDER: usize = 5;
+/// The highest order a polynomial holds.
+const MAX_ORDER: usize = SipOrder::Five.get();
 
-const MAX_TERMS: usize = SipPolynomial::term_count(MAX_ORDER);
+const MAX_TERMS: usize = SipOrder::Five.term_count();
 
 /// Configuration for SIP polynomial fitting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SipConfig {
-    /// Polynomial order (2-5). Order 2 handles barrel/pincushion,
-    /// order 3 handles mustache distortion.
-    pub order: usize,
+    /// Polynomial order. Default: 3.
+    pub order: SipOrder,
 
     /// The polynomial's origin, typically the image centre: coordinates are taken relative to it.
     /// `None` takes the centre of the reference catalog's bounding box, which every frame
@@ -59,7 +62,7 @@ pub struct SipConfig {
 impl Default for SipConfig {
     fn default() -> Self {
         Self {
-            order: 3,
+            order: SipOrder::Three,
             reference_point: None,
         }
     }
@@ -67,8 +70,6 @@ impl Default for SipConfig {
 
 impl SipConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("SIP order", self.order)
-            .must_be("between 2 and 5", (2..=MAX_ORDER).contains(&self.order))?;
         if let Some(reference_point) = self.reference_point {
             ConfigValue::new("SIP reference_point x", reference_point.x).finite()?;
             ConfigValue::new("SIP reference_point y", reference_point.y).finite()?;
@@ -88,7 +89,7 @@ impl SipConfig {
 #[derive(Debug, Clone)]
 pub struct SipPolynomial {
     norm: PointNormalization,
-    terms: ArrayVec<(usize, usize), MAX_TERMS>,
+    order: SipOrder,
     coeffs_u: ArrayVec<f64, MAX_TERMS>,
     coeffs_v: ArrayVec<f64, MAX_TERMS>,
 }
@@ -96,7 +97,7 @@ pub struct SipPolynomial {
 /// A SIP correction's order and the origin its polynomial is taken about.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SipModel {
-    pub(crate) order: usize,
+    pub(crate) order: SipOrder,
     pub(crate) origin: DVec2,
 }
 
@@ -124,7 +125,7 @@ const MAX_SECANT_STEPS: usize = 50;
 #[derive(Debug)]
 struct SipSystem<'a> {
     pairs: SipPairs<'a>,
-    terms: ArrayVec<(usize, usize), MAX_TERMS>,
+    order: SipOrder,
     norm: PointNormalization,
 }
 
@@ -145,18 +146,6 @@ struct FixedLinearFit {
 }
 
 impl SipPolynomial {
-    /// The pairs a fit of `order` needs: three per term, astrometry.net's practice against
-    /// overfitting (order 4, 12 terms, about 36 points).
-    pub(crate) const fn required_points(order: usize) -> usize {
-        3 * Self::term_count(order)
-    }
-
-    /// The terms of each axis's polynomial at `order`, every `u^p·v^q` with `2 ≤ p + q ≤ order`:
-    /// the `(order + 1)(order + 2)/2` monomials up to `order` less the three of degree 0 and 1.
-    pub(crate) const fn term_count(order: usize) -> usize {
-        (order + 1) * (order + 2) / 2 - 3
-    }
-
     /// A transform of `model` and its correction `sip`, fitted together to the joint optimum, as
     /// astrometry.net's `fit_sip_wcs` fits a linear part and its correction: a correction `c`
     /// carried through a linear part `A` adds `A·c`, so with `H = A·c` the warp `A·r + t₀ + H(u)`
@@ -168,24 +157,21 @@ impl SipPolynomial {
     /// which a secant iteration drives to zero from the similarity's angle. A homography has no
     /// SIP fit: its perspective terms act to first order as the correction's quadratic ones, and
     /// the two are not determined together — which is why the SIP convention puts an affine map
-    /// under the polynomial, and why validation refuses the pairing. `None` when the pairs do not
+    /// under the polynomial, and why a [`LinearModel`] stops at one. `None` when the pairs do not
     /// determine the fit, or its linear part is singular.
     pub(crate) fn fit_with(
-        model: TransformType,
+        model: LinearModel,
         pairs: SipPairs<'_>,
         sip: SipModel,
     ) -> Option<SipFit> {
         let system = SipSystem::new(pairs, sip);
         match model {
-            TransformType::Translation => system
-                .fit_fixed(TransformType::Translation, DMat2::IDENTITY)
+            LinearModel::Translation => system
+                .fit_fixed(LinearModel::Translation, DMat2::IDENTITY)
                 .map(|fixed| fixed.fit),
-            TransformType::Euclidean => system.fit_rotation(),
-            TransformType::Similarity => system.fit_similarity(),
-            TransformType::Affine => system.fit_affine(),
-            TransformType::Homography => {
-                unreachable!("validation refuses a homography with a SIP correction")
-            }
+            LinearModel::Euclidean => system.fit_rotation(),
+            LinearModel::Similarity => system.fit_similarity(),
+            LinearModel::Affine => system.fit_affine(),
         }
     }
 
@@ -210,7 +196,7 @@ impl SipPolynomial {
         let mut value = DVec2::ZERO;
         let mut d_du = DVec2::ZERO;
         let mut d_dv = DVec2::ZERO;
-        for (i, &(pu, pv)) in self.terms.iter().enumerate() {
+        for (i, &(pu, pv)) in self.order.terms().iter().enumerate() {
             let coefficients = DVec2::new(self.coeffs_u[i], self.coeffs_v[i]);
             value += coefficients * (powers.u[pu] * powers.v[pv]);
             if pu > 0 {
@@ -234,18 +220,13 @@ impl SipPolynomial {
     /// bits.
     pub(crate) fn row(&self, y: f64) -> SipRow {
         let v = self.norm.normalize(DVec2::new(0.0, y)).y;
-        let order = self
-            .terms
-            .iter()
-            .map(|&(p, q)| p + q)
-            .max()
-            .expect("a SIP polynomial has terms");
+        let order = self.order.get();
         let mut v_powers = [1.0; MAX_ORDER + 1];
         for k in 1..=MAX_ORDER {
             v_powers[k] = v_powers[k - 1] * v;
         }
         let mut coefficients = [DVec2::ZERO; MAX_ORDER + 1];
-        for (i, &(p, q)) in self.terms.iter().enumerate() {
+        for (i, &(p, q)) in self.order.terms().iter().enumerate() {
             coefficients[p] += DVec2::new(self.coeffs_u[i], self.coeffs_v[i]) * v_powers[q];
         }
         SipRow {
@@ -259,16 +240,13 @@ impl SipPolynomial {
 
     /// Compute the correction vector at a point (without applying it).
     fn correction_at(&self, p: DVec2) -> DVec2 {
+        let terms = self.order.terms();
         let mut basis = [0.0; MAX_TERMS];
-        evaluate_basis(
-            self.norm.normalize(p),
-            &self.terms,
-            &mut basis[..self.terms.len()],
-        );
+        evaluate_basis(self.norm.normalize(p), terms, &mut basis[..terms.len()]);
 
         let mut du = 0.0;
         let mut dv = 0.0;
-        for (i, &b) in basis[..self.terms.len()].iter().enumerate() {
+        for (i, &b) in basis[..terms.len()].iter().enumerate() {
             du += self.coeffs_u[i] * b;
             dv += self.coeffs_v[i] * b;
         }
@@ -281,14 +259,14 @@ impl<'a> SipSystem<'a> {
     fn new(pairs: SipPairs<'a>, sip: SipModel) -> Self {
         Self {
             pairs,
-            terms: term_exponents(sip.order),
+            order: sip.order,
             norm: PointNormalization::around(pairs.reference, sip.origin),
         }
     }
 
     /// The solved warp and its correction `A⁻¹·H`, the transform typed as the `model` it was
     /// fitted as.
-    fn assemble(&self, model: TransformType, solution: JointSolution) -> Option<SipFit> {
+    fn assemble(&self, model: LinearModel, solution: JointSolution) -> Option<SipFit> {
         let JointSolution {
             linear,
             constant,
@@ -309,12 +287,12 @@ impl<'a> SipSystem<'a> {
         }
         let angle = linear.x_axis.y.atan2(linear.x_axis.x);
         let transform = match model {
-            TransformType::Translation => Transform::translation(constant),
-            TransformType::Euclidean => Transform::euclidean(constant, angle),
-            TransformType::Similarity => {
+            LinearModel::Translation => Transform::translation(constant),
+            LinearModel::Euclidean => Transform::euclidean(constant, angle),
+            LinearModel::Similarity => {
                 Transform::similarity(constant, angle, linear.x_axis.length())
             }
-            TransformType::Affine | TransformType::Homography => Transform::affine([
+            LinearModel::Affine => Transform::affine([
                 linear.x_axis.x,
                 linear.y_axis.x,
                 constant.x,
@@ -327,7 +305,7 @@ impl<'a> SipSystem<'a> {
             transform,
             sip: SipPolynomial {
                 norm: self.norm,
-                terms: self.terms.clone(),
+                order: self.order,
                 coeffs_u,
                 coeffs_v,
             },
@@ -337,8 +315,8 @@ impl<'a> SipSystem<'a> {
     /// With the pixel linear part held at `linear`, the constant and the terms by one weighted
     /// solve per axis on `t − A·r`, and the solved warp's weighted χ² and its residuals' first
     /// moment against `rotate(r)`: the angle derivative a rotation's fit needs.
-    fn fit_fixed(&self, model: TransformType, linear: DMat2) -> Option<FixedLinearFit> {
-        let k = self.terms.len();
+    fn fit_fixed(&self, model: LinearModel, linear: DMat2) -> Option<FixedLinearFit> {
+        let k = self.order.term_count();
         let n = self.pairs.reference.len();
         let mut design = DMatrix::zeros(n, 1 + k);
         let mut rhs = DMatrix::zeros(n, 2);
@@ -352,7 +330,7 @@ impl<'a> SipSystem<'a> {
             .enumerate()
         {
             let root = w.sqrt();
-            evaluate_basis(self.norm.normalize(r), &self.terms, &mut basis[..k]);
+            evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
             design[(row, 0)] = root;
             for (column, &value) in basis[..k].iter().enumerate() {
                 design[(row, 1 + column)] = root * value;
@@ -374,7 +352,7 @@ impl<'a> SipSystem<'a> {
             .zip(self.pairs.target)
             .zip(self.pairs.weights)
         {
-            evaluate_basis(self.norm.normalize(r), &self.terms, &mut basis[..k]);
+            evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
             let correction = h
                 .iter()
                 .zip(&basis[..k])
@@ -399,11 +377,15 @@ impl<'a> SipSystem<'a> {
     /// The rotation's angle by the secant method on the derivative of the optimum's χ², from the
     /// similarity's angle, to the rounding of the angle.
     fn fit_rotation(&self) -> Option<SipFit> {
-        let start = self.fit_similarity()?.transform.rotation_angle();
+        let start = self
+            .fit_similarity()?
+            .transform
+            .local_geometry(DVec2::ZERO)
+            .rotation;
         let at = |angle: f64| {
             let (sin, cos) = angle.sin_cos();
             self.fit_fixed(
-                TransformType::Euclidean,
+                LinearModel::Euclidean,
                 DMat2::from_cols_array(&[cos, sin, -sin, cos]),
             )
         };
@@ -431,7 +413,7 @@ impl<'a> SipSystem<'a> {
     /// `A = [a −b; b a]`: the two shared coefficients couple the axes, so both rows of every pair
     /// enter one solve.
     fn fit_similarity(&self) -> Option<SipFit> {
-        let k = self.terms.len();
+        let k = self.order.term_count();
         let n = self.pairs.reference.len();
         let mut design = DMatrix::zeros(2 * n, 4 + 2 * k);
         let mut rhs = DMatrix::zeros(2 * n, 1);
@@ -446,7 +428,7 @@ impl<'a> SipSystem<'a> {
         {
             let root = w.sqrt();
             let u = self.norm.normalize(r);
-            evaluate_basis(u, &self.terms, &mut basis[..k]);
+            evaluate_basis(u, self.order.terms(), &mut basis[..k]);
             let (x, y) = (2 * i, 2 * i + 1);
             design[(x, 0)] = root;
             design[(y, 1)] = root;
@@ -470,7 +452,7 @@ impl<'a> SipSystem<'a> {
             .map(|i| DVec2::new(solution[(4 + i, 0)], solution[(4 + k + i, 0)]))
             .collect();
         self.assemble(
-            TransformType::Similarity,
+            LinearModel::Similarity,
             JointSolution {
                 linear,
                 constant,
@@ -482,7 +464,7 @@ impl<'a> SipSystem<'a> {
     /// A free `A`: one weighted solve per axis of the full polynomial, constant and linear terms
     /// included.
     fn fit_affine(&self) -> Option<SipFit> {
-        let k = self.terms.len();
+        let k = self.order.term_count();
         let n = self.pairs.reference.len();
         let mut design = DMatrix::zeros(n, 3 + k);
         let mut rhs = DMatrix::zeros(n, 2);
@@ -497,7 +479,7 @@ impl<'a> SipSystem<'a> {
         {
             let root = w.sqrt();
             let u = self.norm.normalize(r);
-            evaluate_basis(u, &self.terms, &mut basis[..k]);
+            evaluate_basis(u, self.order.terms(), &mut basis[..k]);
             design[(row, 0)] = root;
             design[(row, 1)] = root * u.x;
             design[(row, 2)] = root * u.y;
@@ -518,7 +500,7 @@ impl<'a> SipSystem<'a> {
             .map(|i| DVec2::new(solution[(3 + i, 0)], solution[(3 + i, 1)]))
             .collect();
         self.assemble(
-            TransformType::Affine,
+            LinearModel::Affine,
             JointSolution {
                 linear,
                 constant,
@@ -559,19 +541,6 @@ impl SipRow {
     }
 }
 
-/// Generate the list of (p, q) exponent pairs for a given order.
-/// Only includes terms where 2 ≤ p+q ≤ order.
-fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
-    let mut terms = ArrayVec::new();
-    for total in 2..=order {
-        for p in (0..=total).rev() {
-            let q = total - p;
-            terms.push((p, q));
-        }
-    }
-    terms
-}
-
 /// The powers `u⁰..u^MAX_ORDER` and `v⁰..v^MAX_ORDER` of one normalized point, built by repeated
 /// multiplication: two multiplies per order.
 #[derive(Debug, Clone, Copy)]
@@ -609,6 +578,7 @@ fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
 pub(crate) mod internals {
     use super::*;
     use crate::math::size2us::Size2us;
+    use crate::registration::transform::TransformType;
 
     /// A fit's u and v coefficients.
     #[derive(Debug)]
@@ -640,7 +610,7 @@ pub(crate) mod internals {
         /// The u and v coefficients apart, on the reference-frame targets `J⁻¹·(t − T(r))` at
         /// weights `w·|det J|`.
         fn conformal(&self, transform: &Transform) -> Option<Coefficients> {
-            let k = self.terms.len();
+            let k = self.order.term_count();
             let n = self.pairs.reference.len();
             let mut design = DMatrix::zeros(n, k);
             let mut rhs = DMatrix::zeros(n, 2);
@@ -655,7 +625,7 @@ pub(crate) mod internals {
             {
                 let jacobian = transform.jacobian(r);
                 let root = (w * jacobian.determinant().abs()).sqrt();
-                evaluate_basis(self.norm.normalize(r), &self.terms, &mut basis[..k]);
+                evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
                 let target = self
                     .norm
                     .normalize_delta(jacobian.inverse() * (t - transform.apply(r)));
@@ -675,7 +645,7 @@ pub(crate) mod internals {
         /// Both coefficient sets in one system: each pair's two rows are `√w·J` applied to the
         /// correction's basis, against `√w·(t − T(r))`.
         fn coupled(&self, transform: &Transform) -> Option<Coefficients> {
-            let k = self.terms.len();
+            let k = self.order.term_count();
             let n = self.pairs.reference.len();
             let mut design = DMatrix::zeros(2 * n, 2 * k);
             let mut rhs = DMatrix::zeros(2 * n, 1);
@@ -689,7 +659,7 @@ pub(crate) mod internals {
                 .enumerate()
             {
                 let root = w.sqrt();
-                evaluate_basis(self.norm.normalize(r), &self.terms, &mut basis[..k]);
+                evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
                 let jacobian = transform.jacobian(r);
                 // A correction held in normalized units is `scale` times larger in pixels, so the
                 // residual is divided by the scale instead of every column multiplied by it.
@@ -738,7 +708,7 @@ pub(crate) mod internals {
             };
             Some(Self {
                 norm: system.norm,
-                terms: system.terms,
+                order: system.order,
                 coeffs_u: coefficients.u,
                 coeffs_v: coefficients.v,
             })

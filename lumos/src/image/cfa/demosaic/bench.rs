@@ -1,7 +1,6 @@
 //! The demosaic of a calibrated light, through `CfaImage::demosaic` as production calls it: the
 //! kernels with the camera's white balance applied as their tiles read.
 
-use common::CancelToken;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{self, Kind, Scale};
@@ -38,8 +37,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let mosaic = field.mosaic(FRAME, cfa_type);
             b.iter_batched(
                 || mosaic.clone(),
-                |mosaic| mosaic.demosaic(passes, &CancelToken::never()).unwrap(),
-                fixture::fresh_copies(size_of_val(mosaic.data.pixels())),
+                |mosaic| mosaic.demosaic_measured(passes),
+                fixture::fresh_copies(size_of_val(mosaic.data().pixels())),
             );
         });
     }

@@ -3,60 +3,29 @@
 //! Determines the effective FWHM for matched filtering by either using
 //! a manual value, auto-estimating from bright stars, or disabling.
 
-use crate::math::statistics::{mad_floored, mad_with_scratch, median_mut};
+use crate::math::statistics;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
-use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, FwhmMode};
+use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, MAX_FWHM, MIN_FWHM};
 use crate::star_detection::star_detector::detection_result::FwhmSource;
-use crate::star_detection::star_detector::stages::FWHM_MAD_FLOOR_FRACTION;
-use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
+use crate::star_detection::star_detector::stages::FwhmSpread;
+use crate::star_detection::star_detector::stages::detect::{Candidates, DetectionInput};
 use crate::star_detection::star_detector::stages::filter::FilterRejection;
-use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
+use crate::star_detection::star_detector::stages::prepared_frame::{MeasureRequest, PreparedFrame};
 
-/// Minimum plausible FWHM in pixels. Stars narrower than this are likely
-/// cosmic rays or hot pixels.
-const FWHM_MIN: f32 = 0.5;
-
-/// Maximum plausible FWHM in pixels. Sources broader than this are likely
-/// galaxies, nebulae, or artifacts rather than point sources.
-const FWHM_MAX: f32 = 20.0;
-
-/// MAD multiplier for outlier rejection in FWHM estimation.
-/// Stars with FWHM deviating more than this many MADs from the median are rejected.
-const FWHM_MAD_MULTIPLIER: f32 = 3.0;
-
-/// Determine the effective FWHM for matched filtering, and where it came from.
-///
-/// A [`FwhmSource::Configured`] answer is one this frame did not measure — a fixed FWHM, or an
-/// estimate's fallback when too few stars passed — and [`FwhmSource::Estimated`] carries the
-/// count of stars that actually produced the value.
-pub(crate) fn estimate(
-    frame: &PreparedFrame,
-    config: &StarDetectionConfig,
-    pool: &mut DetectionResources,
-) -> FwhmSource {
-    match config.fwhm.mode {
-        None => FwhmSource::Disabled,
-        Some(FwhmMode::Fixed(fwhm)) => FwhmSource::Configured(fwhm),
-        Some(FwhmMode::Auto { fallback }) => BrightStars {
-            frame,
-            config,
-            fallback,
-        }
-        .fwhm(pool),
-    }
-}
+/// The σ past the median FWHM a star's is an outlier at in the estimate: the filter's default clip.
+const FWHM_OUTLIER_SIGMA: f32 = 3.0;
 
 /// The FWHM estimate from a frame's bright stars: the frame, its configuration, and `fallback`,
 /// the configured seed.
 #[derive(Debug, Clone, Copy)]
-struct BrightStars<'a> {
-    frame: &'a PreparedFrame,
-    config: &'a StarDetectionConfig,
-    fallback: f32,
+pub(super) struct BrightStars<'a> {
+    pub(super) frame: &'a PreparedFrame,
+    pub(super) config: &'a StarDetectionConfig,
+    pub(super) fallback: f32,
 }
 
 impl BrightStars<'_> {
@@ -67,7 +36,7 @@ impl BrightStars<'_> {
     /// they assume, so a star measured at a seed far from its own width comes out biased toward
     /// the seed — a wide star clipped by too small a stamp reads narrow. The first measurement uses
     /// the seed; a second at the radius the first estimate implies corrects for it.
-    fn fwhm(self, pool: &mut DetectionResources) -> FwhmSource {
+    pub(super) fn fwhm(self, resources: &mut DetectionResources) -> FwhmSource {
         let Self {
             frame,
             config,
@@ -79,19 +48,19 @@ impl BrightStars<'_> {
             min_area: 3,
             ..config.extraction.clone()
         };
-        let plane = frame.detection_plane(None, config, pool);
-        let regions = DetectResult::from_plane(
+        let plane = frame.detection_plane(None, config, resources);
+        let candidates = Candidates::detect(
             DetectionInput {
                 plane: &plane,
                 no_data: frame.no_data.as_deref(),
             },
             &first_pass_config,
-            pool,
-        )
-        .regions;
+            resources,
+        );
+        drop(plane);
         tracing::debug!(
             "FWHM estimation: first pass detected {} bright star candidates",
-            regions.len()
+            candidates.regions.len()
         );
 
         let estimator = Estimator {
@@ -99,18 +68,35 @@ impl BrightStars<'_> {
             filter: &config.filter,
             fallback,
         };
-        let mut at = |seed: f32| {
-            let stars = frame.measure_stars(&regions, &config.measurement, Some(seed));
-            estimator.estimate(&stars, &mut pool.values, &mut pool.deviations)
+        let at = |seed: f32, resources: &mut DetectionResources| {
+            let DetectionResources {
+                measured,
+                stars,
+                values,
+                deviations,
+                ..
+            } = resources;
+            frame.measure_stars(
+                MeasureRequest {
+                    regions: &candidates.regions,
+                    config: &config.measurement,
+                    expected_fwhm: Some(seed),
+                },
+                measured,
+                stars,
+            );
+            estimator.estimate(stars, values, deviations)
         };
-        let first = at(fallback);
-        let FwhmSource::Estimated { fwhm, .. } = first else {
-            return first;
-        };
-        match at(fwhm) {
-            second @ FwhmSource::Estimated { .. } => second,
+        let first = at(fallback, resources);
+        let estimate = match first {
+            FwhmSource::Estimated { fwhm, .. } => match at(fwhm, resources) {
+                second @ FwhmSource::Estimated { .. } => second,
+                FwhmSource::Configured(_) | FwhmSource::Disabled => first,
+            },
             FwhmSource::Configured(_) | FwhmSource::Disabled => first,
-        }
+        };
+        candidates.release(resources);
+        estimate
     }
 }
 
@@ -133,7 +119,8 @@ impl Estimator<'_> {
     /// 1. Keep the stars that pass the quality filter ([`FilterRejection::of`]) with a plausible
     ///    FWHM
     /// 2. Compute median FWHM from filtered stars
-    /// 3. Reject outliers using MAD-based threshold (keep within 3×MAD of median)
+    /// 3. Reject outliers past [`FWHM_OUTLIER_SIGMA`] σ of the median, σ from the MAD
+    ///    ([`FwhmSpread`])
     /// 4. Recompute median from remaining stars
     ///
     /// `fwhms` and `deviations` are scratch.
@@ -156,7 +143,7 @@ impl Estimator<'_> {
                 .iter()
                 .filter(|s| {
                     FilterRejection::of(s, filter_config).is_none()
-                        && (FWHM_MIN..FWHM_MAX).contains(&s.fwhm)
+                        && (MIN_FWHM..MAX_FWHM).contains(&s.fwhm)
                 })
                 .map(|s| s.fwhm),
         );
@@ -171,11 +158,8 @@ impl Estimator<'_> {
             return FwhmSource::Configured(fallback);
         }
 
-        let median = median_mut(fwhms);
-        let mad = mad_with_scratch(fwhms, median, deviations);
-
-        // The floor keeps a uniform set from a zero threshold.
-        let threshold = FWHM_MAD_MULTIPLIER * mad_floored(mad, median, FWHM_MAD_FLOOR_FRACTION);
+        let FwhmSpread { median, sigma } = FwhmSpread::of(fwhms, deviations);
+        let threshold = FWHM_OUTLIER_SIGMA * sigma;
         let count_before = fwhms.len();
         fwhms.retain(|&f| (f - median).abs() <= threshold);
 
@@ -192,7 +176,7 @@ impl Estimator<'_> {
             };
         }
 
-        let final_median = median_mut(fwhms);
+        let final_median = statistics::median_mut(fwhms);
         tracing::info!(
             "Estimated FWHM: {final_median:.2} pixels from {} stars",
             fwhms.len()

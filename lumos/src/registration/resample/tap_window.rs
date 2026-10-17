@@ -6,9 +6,9 @@
 //! on every CPU.
 
 use crate::math::size2us::Size2us;
-use crate::registration::resample::kernel::warp_kernel::TapAxis;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
+use crate::registration::resample::warp_kernel::TapAxis;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// Weight sums over the taps of a window that hold data, the weight of a tap being `L = wₓ·w_y`.
@@ -62,9 +62,9 @@ impl WindowWeights {
     }
 }
 
-/// One axis's weights summed by sign.
+/// One axis's weights summed by sign, and their squares.
 #[derive(Debug, Clone, Copy, Default)]
-struct AxisSums {
+pub(crate) struct AxisSums {
     positive: f32,
     negative: f32,
     square: f32,
@@ -82,6 +82,59 @@ impl AxisSums {
             sums.square += weight * weight;
         }
         sums
+    }
+
+    /// The sums of one vector of weights, its lanes past the taps cleared.
+    #[inline(always)]
+    pub(crate) fn of_lanes<S: Isa>(isa: S, weights: S::F32) -> Self {
+        let zero = isa.splat_f32(0.0);
+        Self {
+            positive: weights.max(zero).reduce_sum(),
+            negative: weights.min(zero).reduce_sum(),
+            square: (weights * weights).reduce_sum(),
+        }
+    }
+
+    /// The weight sums of the window whose taps weigh `L = wₓ·w_y` over these x sums and `y`'s:
+    /// products of the axes' own sums, since `L` takes the sign of the two factors together.
+    pub(crate) fn window(self, y: Self) -> WindowWeights {
+        WindowWeights {
+            positive: self.positive * y.positive + self.negative * y.negative,
+            negative: self.positive * y.negative + self.negative * y.positive,
+            square: self.square * y.square,
+        }
+    }
+}
+
+/// Products on one window row's taps, split by the sign of their x weight, or the window's sums of
+/// them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Lobes<V> {
+    pub(crate) positive: V,
+    pub(crate) negative: V,
+}
+
+impl<V: F32x8> Lobes<V> {
+    #[inline(always)]
+    pub(crate) fn zero<S: Isa<F32 = V>>(isa: S) -> Self {
+        Self {
+            positive: isa.splat_f32(0.0),
+            negative: isa.splat_f32(0.0),
+        }
+    }
+
+    /// `row` carried into these sums by its weight `wy`: a negative `wy` turns each split's sign,
+    /// so each goes to the other lobe.
+    #[inline(always)]
+    pub(crate) fn add_row<S: Isa<F32 = V>>(&mut self, isa: S, row: Self, wy: f32) {
+        let (to_positive, to_negative) = if wy > 0.0 {
+            (row.positive, row.negative)
+        } else {
+            (row.negative, row.positive)
+        };
+        let wy = isa.splat_f32(wy);
+        self.positive = to_positive.mul_add(wy, self.positive);
+        self.negative = to_negative.mul_add(wy, self.negative);
     }
 }
 
@@ -176,16 +229,9 @@ impl<'a> TapWindow<'a> {
         magnitude(self.whole_x) * magnitude(self.whole_y)
     }
 
-    /// The weight sums when every in-bounds tap holds data: products of the axes' own sums, since
-    /// `L = wₓ·w_y` takes the sign of the two factors together.
+    /// The weight sums when every in-bounds tap holds data ([`AxisSums::window`]).
     pub(crate) fn weights(&self) -> WindowWeights {
-        let x = AxisSums::of(self.wx);
-        let y = AxisSums::of(self.wy);
-        WindowWeights {
-            positive: x.positive * y.positive + x.negative * y.negative,
-            negative: x.positive * y.negative + x.negative * y.positive,
-            square: x.square * y.square,
-        }
+        AxisSums::of(self.wx).window(AxisSums::of(self.wy))
     }
 
     /// The weight sums over the taps `validity` marks with 1, the others 0: a source with nulls,
@@ -196,55 +242,59 @@ impl<'a> TapWindow<'a> {
         isa: S,
         validity: SourcePlane<'_>,
     ) -> WindowWeights {
-        let zero = isa.splat_f32(0.0);
-        let (mut positive, mut negative, mut square) = (zero, zero, zero);
+        let mut lobes = Lobes::zero(isa);
+        let mut square = isa.splat_f32(0.0);
         let head = self.head(isa);
         let first = head.weights;
         let first_square = first.all * first.all;
         for (j, &wy) in self.wy.iter().enumerate() {
             let row = self.row(validity, j);
             let valid = head.load(isa, validity.pixels, row);
-            let mut on_positive = valid * first.positive;
-            let mut on_negative = valid * first.negative;
+            let mut on_row = Lobes {
+                positive: valid * first.positive,
+                negative: valid * first.negative,
+            };
             let mut on_square = valid * first_square;
             for start in (F32_LANES..self.wx.len()).step_by(F32_LANES) {
                 let end = (start + F32_LANES).min(self.wx.len());
                 let lanes = SignedLanes::load(isa, &self.wx[start..end]);
                 let valid = isa.load_f32_partial(&validity.pixels[row + start..row + end]);
-                on_positive = valid.mul_add(lanes.positive, on_positive);
-                on_negative = valid.mul_add(lanes.negative, on_negative);
+                on_row.positive = valid.mul_add(lanes.positive, on_row.positive);
+                on_row.negative = valid.mul_add(lanes.negative, on_row.negative);
                 on_square = (valid * lanes.all).mul_add(lanes.all, on_square);
             }
-            let wy_lanes = isa.splat_f32(wy);
-            let (to_positive, to_negative) = if wy > 0.0 {
-                (on_positive, on_negative)
-            } else {
-                (on_negative, on_positive)
-            };
-            positive = to_positive.mul_add(wy_lanes, positive);
-            negative = to_negative.mul_add(wy_lanes, negative);
+            lobes.add_row(isa, on_row, wy);
             square = on_square.mul_add(isa.splat_f32(wy * wy), square);
         }
         WindowWeights {
-            positive: positive.reduce_sum(),
-            negative: negative.reduce_sum(),
+            positive: lobes.positive.reduce_sum(),
+            negative: lobes.negative.reduce_sum(),
             square: square.reduce_sum(),
         }
     }
 
-    /// `Σ L·f` over the window of `plane`.
+    /// `Σ L·f` over the window of `plane`, over the taps `validity` holds when it is given.
     #[inline(always)]
-    pub(crate) fn total<S: Isa>(&self, isa: S, plane: SourcePlane<'_>) -> f32 {
+    pub(crate) fn total<S: Isa>(
+        &self,
+        isa: S,
+        plane: SourcePlane<'_>,
+        validity: Option<SourcePlane<'_>>,
+    ) -> f32 {
         let head = self.head(isa);
         let first = head.weights.all;
         let mut sum = isa.splat_f32(0.0);
         for (j, &wy) in self.wy.iter().enumerate() {
             let row = self.row(plane, j);
-            let mut on_row = head.load(isa, plane.pixels, row) * first;
+            let values = head.load(isa, plane.pixels, row);
+            let mut on_row =
+                valid_only(isa, values, validity.map(|v| head.load(isa, v.pixels, row))) * first;
             for start in (F32_LANES..self.wx.len()).step_by(F32_LANES) {
                 let end = (start + F32_LANES).min(self.wx.len());
-                on_row = isa
-                    .load_f32_partial(&plane.pixels[row + start..row + end])
+                let values = isa.load_f32_partial(&plane.pixels[row + start..row + end]);
+                let valid =
+                    validity.map(|v| isa.load_f32_partial(&v.pixels[row + start..row + end]));
+                on_row = valid_only(isa, values, valid)
                     .mul_add(isa.load_f32_partial(&self.wx[start..end]), on_row);
             }
             sum = on_row.mul_add(isa.splat_f32(wy), sum);
@@ -252,42 +302,52 @@ impl<'a> TapWindow<'a> {
         sum.reduce_sum()
     }
 
-    /// The window of `plane` summed as [`LobeSums`] reads it.
+    /// The window of `plane` summed as [`LobeSums`] reads it, over the taps `validity` holds when
+    /// it is given.
     #[inline(always)]
-    pub(crate) fn lobe_sums<S: Isa>(&self, isa: S, plane: SourcePlane<'_>) -> LobeSums {
+    pub(crate) fn lobe_sums<S: Isa>(
+        &self,
+        isa: S,
+        plane: SourcePlane<'_>,
+        validity: Option<SourcePlane<'_>>,
+    ) -> LobeSums {
         let zero = isa.splat_f32(0.0);
-        let (mut positive, mut negative, mut below_zero) = (zero, zero, zero);
+        let mut lobes = Lobes::zero(isa);
+        let mut below_zero = zero;
         let head = self.head(isa);
         let first = head.weights;
         for (j, &wy) in self.wy.iter().enumerate() {
             let row = self.row(plane, j);
-            let values = head.load(isa, plane.pixels, row);
+            let values = valid_only(
+                isa,
+                head.load(isa, plane.pixels, row),
+                validity.map(|v| head.load(isa, v.pixels, row)),
+            );
             let light = values.max(zero);
-            let mut on_positive = light * first.positive;
-            let mut on_negative = light * first.negative;
+            let mut on_row = Lobes {
+                positive: light * first.positive,
+                negative: light * first.negative,
+            };
             let mut on_below = (values - light) * first.all;
             for start in (F32_LANES..self.wx.len()).step_by(F32_LANES) {
                 let end = (start + F32_LANES).min(self.wx.len());
                 let lanes = SignedLanes::load(isa, &self.wx[start..end]);
-                let values = isa.load_f32_partial(&plane.pixels[row + start..row + end]);
+                let values = valid_only(
+                    isa,
+                    isa.load_f32_partial(&plane.pixels[row + start..row + end]),
+                    validity.map(|v| isa.load_f32_partial(&v.pixels[row + start..row + end])),
+                );
                 let light = values.max(zero);
-                on_positive = light.mul_add(lanes.positive, on_positive);
-                on_negative = light.mul_add(lanes.negative, on_negative);
+                on_row.positive = light.mul_add(lanes.positive, on_row.positive);
+                on_row.negative = light.mul_add(lanes.negative, on_row.negative);
                 on_below = (values - light).mul_add(lanes.all, on_below);
             }
-            let wy_lanes = isa.splat_f32(wy);
-            let (to_positive, to_negative) = if wy > 0.0 {
-                (on_positive, on_negative)
-            } else {
-                (on_negative, on_positive)
-            };
-            positive = to_positive.mul_add(wy_lanes, positive);
-            negative = to_negative.mul_add(wy_lanes, negative);
-            below_zero = on_below.mul_add(wy_lanes, below_zero);
+            lobes.add_row(isa, on_row, wy);
+            below_zero = on_below.mul_add(isa.splat_f32(wy), below_zero);
         }
         LobeSums {
-            positive: positive.reduce_sum(),
-            negative: negative.reduce_sum(),
+            positive: lobes.positive.reduce_sum(),
+            negative: lobes.negative.reduce_sum(),
             below_zero: below_zero.reduce_sum(),
         }
     }
@@ -318,6 +378,16 @@ impl<'a> TapWindow<'a> {
     #[inline(always)]
     const fn row(&self, plane: SourcePlane<'_>, j: usize) -> usize {
         (self.y + j) * plane.width + self.x
+    }
+}
+
+/// `values` where `valid` holds data, zero elsewhere — selected, not multiplied, so a NaN under an
+/// excluded tap never reaches a sum — or `values` whole without a validity plane.
+#[inline(always)]
+fn valid_only<S: Isa>(isa: S, values: S::F32, valid: Option<S::F32>) -> S::F32 {
+    match valid {
+        Some(valid) => valid.lanes_gt(isa.splat_f32(0.0)).keep(values),
+        None => values,
     }
 }
 

@@ -6,20 +6,22 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::linear_image::LinearImage;
-use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
-use crate::noise::mrs_noise::MrsNoise;
+use crate::noise::mrs_noise::NoisePlane;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::MeasurePlanes;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec, Prefilter};
+use crate::star_detection::refined_background::RefinedBackground;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
 use crate::star_detection::star_detection_config::measurement_config::MeasurementConfig;
+use crate::star_detection::star_detector::detection_result::FwhmSource;
+use crate::star_detection::star_detector::stages::fwhm::BrightStars;
 
 /// The width a measurement assumes when no FWHM is known: zero, which `measure_grid::stamp_radius`
 /// and the moments window clamp up to their smallest stamp and narrowest window — the choice that
@@ -56,14 +58,13 @@ impl PreparedFrame {
     ) -> Self {
         let mut plane = resources.acquire_f32();
         combine_channels(image, &mut plane);
-        let prefilter = if image.metadata.is_demosaiced() {
+        let prefilter = if image.metadata.derived.is_demosaiced() {
             Prefilter::Median3x3
         } else {
             Prefilter::None
         };
         let no_data = image
-            .flags
-            .as_ref()
+            .flags()
             .filter(|flags| flags.contains(QualityFlags::NO_DATA))
             .map(|flags| {
                 let mut mask = resources.acquire_bit();
@@ -72,15 +73,7 @@ impl PreparedFrame {
             });
 
         // The sources are found at the FWHM the configuration starts from.
-        let refined = BackgroundEstimate::estimate(
-            MaskedPlane {
-                pixels: &plane,
-                mask: no_data.as_deref(),
-            },
-            &config.background,
-            resources,
-        )
-        .refine(
+        let refined = RefinedBackground::measure(
             &plane,
             PlaneSpec {
                 prefilter,
@@ -108,17 +101,36 @@ impl PreparedFrame {
         }
     }
 
-    /// The detection plane of this frame, matched-filtered at `fwhm` when one is given.
+    /// The FWHM the frame's matched filter runs at, and where it came from: none, the configured
+    /// one, or an estimate from the frame's bright stars ([`BrightStars`]). A
+    /// [`FwhmSource::Configured`] answer is one this frame did not measure — a fixed FWHM, or an
+    /// estimate's fallback when too few stars passed.
+    pub(crate) fn estimate_fwhm(
+        &self,
+        config: &StarDetectionConfig,
+        resources: &mut DetectionResources,
+    ) -> FwhmSource {
+        match config.fwhm.mode {
+            None => FwhmSource::Disabled,
+            Some(FwhmMode::Fixed(fwhm)) => FwhmSource::Configured(fwhm),
+            Some(FwhmMode::Auto { fallback }) => BrightStars {
+                frame: self,
+                config,
+                fallback,
+            }
+            .fwhm(resources),
+        }
+    }
+
+    /// A detection plane of this frame, matched-filtered at `fwhm` when one is given, its noise
+    /// measured around the sources the refined sky found.
     pub(crate) fn detection_plane(
         &self,
         fwhm: Option<f32>,
         config: &StarDetectionConfig,
         resources: &mut DetectionResources,
     ) -> DetectionPlane {
-        let mut residual = resources.acquire_f32();
-        residual.pixels_mut().copy_from_slice(self.measure.pixels());
-        DetectionPlane::from_residual(
-            residual,
+        self.plane(
             PlaneSpec {
                 prefilter: self.prefilter,
                 matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
@@ -129,15 +141,47 @@ impl PreparedFrame {
         )
     }
 
-    /// Measure the stars of `regions` on the measurement plane, in parallel: sub-pixel positions,
-    /// flux, FWHM and quality metrics, flagging those whose peak pixel is saturated.
-    /// `expected_fwhm` sizes every stamp; `None` measures at [`UNKNOWN_FWHM`].
+    /// The last detection plane of this frame, which takes the source mask with it: no plane after
+    /// it reads one, so the mask goes back to the pool once this plane's noise is measured.
+    pub(crate) fn final_plane(
+        &mut self,
+        fwhm: Option<f32>,
+        config: &StarDetectionConfig,
+        resources: &mut DetectionResources,
+    ) -> DetectionPlane {
+        let sources = self.sources.take();
+        self.plane(
+            PlaneSpec {
+                prefilter: self.prefilter,
+                matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
+                mask: sources.as_deref().or(self.no_data.as_deref()),
+                background: &config.background,
+            },
+            resources,
+        )
+    }
+
+    /// The measurement plane under `spec`.
+    fn plane(&self, spec: PlaneSpec<'_>, resources: &mut DetectionResources) -> DetectionPlane {
+        let mut residual = resources.acquire_f32();
+        residual.pixels_mut().copy_from_slice(self.measure.pixels());
+        DetectionPlane::from_residual(residual, spec, resources)
+    }
+
+    /// Measure the stars of `request.regions` on the measurement plane, in parallel, into `out`:
+    /// sub-pixel positions, flux, FWHM and quality metrics, flagging those whose peak pixel is
+    /// saturated. Each region's star, or none, goes to `measured` first, in the regions' order.
     pub(crate) fn measure_stars(
         &self,
-        regions: &[Region],
-        config: &MeasurementConfig,
-        expected_fwhm: Option<f32>,
-    ) -> Vec<Star> {
+        request: MeasureRequest<'_>,
+        measured: &mut Vec<Option<Star>>,
+        out: &mut Vec<Star>,
+    ) {
+        let MeasureRequest {
+            regions,
+            config,
+            expected_fwhm,
+        } = request;
         // One grid for the whole detection: `expected_fwhm` fixes the stamp, the window and the
         // annulus, so every candidate is measured over the same ones.
         let grid = MeasureGrid::new(expected_fwhm.unwrap_or(UNKNOWN_FWHM));
@@ -149,14 +193,20 @@ impl PreparedFrame {
         };
         regions
             .par_iter()
-            .filter_map(|region| planes.measure_star(region, config, &grid))
-            .collect()
+            .map(|region| planes.measure_star(region, config, &grid))
+            .collect_into_vec(measured);
+        out.clear();
+        out.extend(measured.drain(..).flatten());
     }
+}
 
-    /// Return the source mask once no detection plane is built any more: only their noise reads it.
-    pub(crate) fn drop_sources(&mut self) {
-        self.sources = None;
-    }
+/// What a measurement of a frame's stars reads: the regions, the measurement settings, and the
+/// FWHM every stamp is sized at — [`UNKNOWN_FWHM`] for `None`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MeasureRequest<'a> {
+    pub(crate) regions: &'a [Region],
+    pub(crate) config: &'a MeasurementConfig,
+    pub(crate) expected_fwhm: Option<f32>,
 }
 
 /// Reduce `image` to one plane in `output`: its only channel, or the inverse-variance combination
@@ -184,10 +234,15 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
 /// Each channel's white noise, by the multiresolution estimator over the pixels no flag names: the
 /// noise stacking weighs by, and not the MAD, which a red nebula inflates in red.
 fn channel_noise(image: &LinearImage) -> [f32; 3] {
-    let flags = image.flags.as_ref();
-    let excluded =
-        |index: usize| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default());
-    [0, 1, 2].map(|channel| MrsNoise::estimate(image.channel(channel), excluded))
+    let flags = image.flags();
+    let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
+    [0, 1, 2].map(|channel| {
+        NoisePlane {
+            samples: image.channel(channel),
+            excluded,
+        }
+        .sigma()
+    })
 }
 
 /// Inverse-variance weights for collapsing RGB into the detection plane, summing to 1.
@@ -223,8 +278,8 @@ fn inverse_variance_weights(sigmas: [f32; 3]) -> [f32; 3] {
 /// any input channel reaches its metadata's saturation level. Per channel, before the channels are
 /// combined: a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
 fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
-    if image.metadata.saturation_flagged {
-        match &image.flags {
+    if image.metadata.derived.saturation_flagged() {
+        match image.flags() {
             Some(flags) => {
                 mask.fill_from_predicate(|index| {
                     flags.at(index).intersects(QualityFlags::SATURATED)
@@ -234,7 +289,7 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
         }
         return;
     }
-    let level = image.metadata.saturation_level();
+    let level = image.metadata.header.saturation_level();
     let channels: ArrayVec<&[f32], 3> = (0..image.channels())
         .map(|channel| image.channel(channel).pixels())
         .collect();

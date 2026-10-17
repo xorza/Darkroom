@@ -13,9 +13,17 @@ fn triangle_ratios_roles_and_orientation() {
     let mirrored = THREE_FOUR_FIVE.map(|p| DVec2::new(-p.x, p.y));
     let moved = THREE_FOUR_FIVE.map(|p| p * 10.0 + DVec2::new(7.0, -2.0));
     for (positions, ratios, orientation) in [
-        (THREE_FOUR_FIVE, (0.6, 0.8), Orientation::Clockwise),
-        (moved, (0.6, 0.8), Orientation::Clockwise),
-        (mirrored, (0.6, 0.8), Orientation::CounterClockwise),
+        (
+            THREE_FOUR_FIVE,
+            DVec2::new(0.6, 0.8),
+            Orientation::Clockwise,
+        ),
+        (moved, DVec2::new(0.6, 0.8), Orientation::Clockwise),
+        (
+            mirrored,
+            DVec2::new(0.6, 0.8),
+            Orientation::CounterClockwise,
+        ),
     ] {
         let tri = Triangle::from_positions([10, 20, 30], positions, NOISE_SCALE).unwrap();
         assert_eq!(tri.ratios, ratios, "{positions:?}");
@@ -34,8 +42,8 @@ fn triangle_ratios_roles_and_orientation() {
         NOISE_SCALE,
     )
     .unwrap();
-    assert!((equilateral.ratios.0 - 1.0).abs() <= 4.0 * f64::EPSILON);
-    assert!((equilateral.ratios.1 - 1.0).abs() <= 4.0 * f64::EPSILON);
+    assert!((equilateral.ratios.x - 1.0).abs() <= 4.0 * f64::EPSILON);
+    assert!((equilateral.ratios.y - 1.0).abs() <= 4.0 * f64::EPSILON);
 }
 
 /// A triangle must stand at least the noise scale high over its longest side, or the noise can
@@ -102,15 +110,15 @@ fn similarity_is_strict_in_both_ratios() {
         ratios,
         orientation: Orientation::Clockwise,
     };
-    let a = tri((0.5, 0.75));
+    let a = tri(DVec2::new(0.5, 0.75));
     let step = 1.0 / 32.0;
-    let b = tri((0.5 + step, 0.75));
+    let b = tri(DVec2::new(0.5 + step, 0.75));
     assert!(!a.is_similar(&b, step));
     assert!(a.is_similar(&b, step.next_up()));
-    let c = tri((0.5, 0.75 + step));
+    let c = tri(DVec2::new(0.5, 0.75 + step));
     assert!(!a.is_similar(&c, step));
     assert!(a.is_similar(&c, step.next_up()));
-    let d = tri((0.5 + step / 2.0, 0.75 + step));
+    let d = tri(DVec2::new(0.5 + step / 2.0, 0.75 + step));
     assert!(
         !a.is_similar(&d, step),
         "the first ratio passes, the second does not"
@@ -151,7 +159,7 @@ fn the_invariant_tree_indexes_triangles_by_their_ratios() {
     let tree = reference.invariants();
     assert_eq!(tree.len(), triangles.len());
     for (i, tri) in triangles.iter().enumerate() {
-        assert_eq!(tree.get_point(i), DVec2::new(tri.ratios.0, tri.ratios.1));
+        assert_eq!(tree.points()[i], tri.ratios);
     }
 }
 
@@ -163,7 +171,7 @@ fn irregular_triangles_are_pairwise_dissimilar() {
     let triangles = triangles_of(&IRREGULAR, 4);
     assert_eq!(triangles.len(), 10);
     for (i, a) in triangles.iter().enumerate() {
-        let (r0, r1) = a.ratios;
+        let DVec2 { x: r0, y: r1 } = a.ratios;
         assert!(r1 - r0 >= 0.02 && 1.0 - r1 >= 0.02, "{:?}", a.ratios);
         for b in &triangles[i + 1..] {
             assert!(

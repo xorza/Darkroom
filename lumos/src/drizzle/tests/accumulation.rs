@@ -9,12 +9,18 @@ use common::{CancelToken, TempDir};
 use glam::DVec2;
 
 use super::*;
+use crate::combine::error::{StackConfigError, StackError};
+use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::decode_cache::DecodeCache;
+use crate::image::channel_layout::ChannelLayout;
 use crate::ingest::error::AdmissionError;
 use crate::internals::images::rgb_image;
+use crate::io::decoder::linear_decoder::LinearDecoder;
+use crate::io::writer;
 use crate::math::vec2us::Vec2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::distortion::sip::SipModel;
+use crate::registration::distortion::sip::sip_order::SipOrder;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -30,8 +36,9 @@ fn a_flat_frame_at_scale_2_covers_every_cell() {
     assert!(weight_plane(&product).pixels().iter().all(|&w| w == 0.25));
 }
 
-/// No frames is `NoFrames`, and an invalid config is refused before the first frame is decoded:
-/// the path here does not exist, so a decode would have reported `ImageLoad` instead.
+/// No frames is `NoFrames`, and an invalid config — its own, or a manual weight count that is not
+/// the frame count — is refused before the first frame is decoded: the path here does not exist,
+/// so a decode would have reported `ImageLoad` instead.
 #[test]
 fn drizzle_paths_refuses_before_decoding() {
     let result = DrizzleConfig {
@@ -43,7 +50,10 @@ fn drizzle_paths_refuses_before_decoding() {
         &IngestConfig::default(),
         ProgressMonitor::unattended(),
     );
-    assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+    assert!(matches!(
+        result.unwrap_err(),
+        DrizzleError::Stack(StackError::NoFrames)
+    ));
 
     let invalid = DrizzleConfig {
         pixfrac: 0.0,
@@ -62,6 +72,31 @@ fn drizzle_paths_refuses_before_decoding() {
         ProgressMonitor::unattended(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
+
+    let result = DrizzleConfig {
+        stack: StackConfig {
+            weighting: Weighting::Manual(vec![1.0, 2.0]),
+            ..plain_stack()
+        },
+        ..DrizzleConfig::default()
+    }
+    .drizzle_paths(
+        vec![DrizzleFrame::new(
+            PathBuf::from("does-not-exist.tiff"),
+            warp_of(Transform::identity()),
+        )],
+        &IngestConfig::default(),
+        ProgressMonitor::unattended(),
+    );
+    assert!(matches!(
+        result.unwrap_err(),
+        DrizzleError::Stack(StackError::Config(
+            StackConfigError::ManualWeightCountMismatch {
+                expected: 1,
+                actual: 2
+            }
+        ))
+    ));
 }
 
 /// From paths, a drizzle gives what the same frames give in memory once loaded, and with
@@ -78,13 +113,15 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     let paths: Vec<PathBuf> = (0..2)
         .map(|k| {
             let path = scratch.join(format!("frame{k}.tiff"));
-            gray_image(
-                size,
-                (0..size.pixel_count())
-                    .map(|i| ((i * 7 + k * 3) % 11) as f32 / 10.0)
-                    .collect(),
+            writer::raster(
+                &gray_image(
+                    size,
+                    (0..size.pixel_count())
+                        .map(|i| ((i * 7 + k * 3) % 11) as f32 / 10.0)
+                        .collect(),
+                ),
+                &path,
             )
-            .save(&path)
             .unwrap();
             path
         })
@@ -100,7 +137,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
 
     let loaded: Vec<LinearImage> = paths
         .iter()
-        .map(|path| LinearImage::from_file(path, &LoadContext::default()).unwrap())
+        .map(|path| LoadContext::default().linear(path).unwrap())
         .collect();
     let in_memory = config
         .drizzle_images(
@@ -108,8 +145,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
-        .unwrap()
-        .product;
+        .unwrap();
     let cancelled = CancelToken::new();
     cancelled.cancel();
     let from_paths = config
@@ -118,8 +154,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
-        .unwrap()
-        .product;
+        .unwrap();
     assert_eq!(
         from_paths.image.channel(0).pixels(),
         in_memory.image.channel(0).pixels()
@@ -135,7 +170,6 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
         config
             .drizzle_paths(frames(&paths), &kept, ProgressMonitor::unattended())
             .unwrap()
-            .product
     };
     assert_eq!(
         run_kept().image.channel(0).pixels(),
@@ -143,7 +177,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     );
     DecodeCache::open(&kept.cache_dir)
         .unwrap()
-        .edit_kept::<LinearImage>(&paths[1], &LoadContext::default(), |plane| {
+        .edit_kept::<LinearDecoder>(&paths[1], &LoadContext::default(), |plane| {
             for sample in plane.iter_mut() {
                 *sample += 0.125;
             }
@@ -161,7 +195,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
             &IngestConfig::default(),
             ProgressMonitor::unattended()
         ),
-        Err(DrizzleError::ImageLoad(_))
+        Err(DrizzleError::Stack(StackError::ImageLoad(_)))
     ));
     assert!(matches!(
         config.drizzle_paths(
@@ -169,7 +203,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
             &IngestConfig::default(),
             ProgressMonitor::new(ProgressCallback::default(), cancelled)
         ),
-        Err(DrizzleError::Cancelled)
+        Err(DrizzleError::Stack(StackError::Cancelled))
     ));
 }
 
@@ -184,7 +218,10 @@ fn drizzle_images_empty() {
         &IngestConfig::default(),
         ProgressMonitor::unattended(),
     );
-    assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+    assert!(matches!(
+        result.unwrap_err(),
+        DrizzleError::Stack(StackError::NoFrames)
+    ));
 }
 
 /// Every frame is admitted as the combine admits it, before its drops spread: a NaN at pixel 6 of
@@ -216,12 +253,12 @@ fn drizzle_admits_each_frame_before_it_deposits() {
     assert!(
         matches!(
             error,
-            DrizzleError::Admission(AdmissionError::NonFiniteImageSample {
+            DrizzleError::Stack(StackError::Admission(AdmissionError::NonFiniteImageSample {
                 index: 1,
                 channel: 0,
                 pixel: 6,
                 value,
-            }) if value.is_nan()
+            })) if value.is_nan()
         ),
         "{error:?}"
     );
@@ -252,7 +289,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
         ProgressMonitor::new(ProgressCallback::default(), cancel),
     );
     assert!(
-        matches!(result.unwrap_err(), DrizzleError::Cancelled),
+        result.unwrap_err().is_cancelled(),
         "a cancelled drizzle must report cancellation, not a partial product"
     );
 
@@ -294,7 +331,7 @@ fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2)
         .map(|&r| transform.apply(r + field(r - center)))
         .collect();
     let sip = SipModel {
-        order: 3,
+        order: SipOrder::Three,
         origin: center,
     }
     .fitted_under(&transform, &reference, &target);
@@ -329,12 +366,12 @@ fn a_sip_warp_drizzles_through_its_inverse() {
             ProgressMonitor::unattended(),
         )
         .unwrap();
-    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
+    let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), config);
     acc.add_frame(&DrizzleFrame::new(image, warp.clone()))
         .unwrap();
     assert_eq!(acc.unconverged_points(), 0);
     let from_accumulator = acc.finalize();
-    assert_eq!(from_images.unconverged_points, 0);
+    assert_eq!(from_images.report.unconverged_points, 0);
     let bits = |product: &StackProduct| -> Vec<u32> {
         product
             .image
@@ -343,13 +380,13 @@ fn a_sip_warp_drizzles_through_its_inverse() {
             .map(|v| v.to_bits())
             .collect()
     };
-    assert_eq!(bits(&from_images.product), bits(&from_accumulator));
+    assert_eq!(bits(&from_images), bits(&from_accumulator));
 
     let mut pixels = vec![0.0f32; size.pixel_count()];
     let t = Vec2us::new(20, 9);
     pixels[size.index_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
-    let mut acc = accumulator(ImageDimensions::new(size, 1), point);
+    let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), point);
     acc.add_frame(&DrizzleFrame::new(gray_image(size, pixels), warp.clone()))
         .unwrap();
     let out = acc.finalize();
@@ -387,7 +424,7 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
     );
 
     let mut acc = accumulator(
-        ImageDimensions::new(size, 1),
+        ImageDimensions::new(size, ChannelLayout::Mono),
         kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
     acc.add_frame_with_band_rows(&DrizzleFrame::new(constant_image(size, 1.0), warp), 4);
@@ -419,10 +456,9 @@ fn drizzle_images_dimension_mismatch() {
     );
     assert!(matches!(
         result.unwrap_err(),
-        DrizzleError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
-            index: 1,
-            ..
-        }))
+        DrizzleError::Stack(StackError::Admission(AdmissionError::DimensionMismatch(
+            FrameDimensionMismatch { index: 1, .. }
+        )))
     ));
 }
 
@@ -440,13 +476,12 @@ fn drizzle_rgb_gives_each_channel_its_variance() {
             vec![0.7; size.pixel_count()],
         ],
     );
-    image.metadata.quantization_sigma = Some(0.125);
+    image.metadata.derived.set_quantization_sigma(Some(0.125));
     let product = drizzle_plain(
         drizzle_frames(vec![image], &[Transform::identity()]),
         &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let weight = product.weight.as_ref().unwrap();
     let inverse_variance = product.inverse_variance.as_ref().unwrap();
     assert!(matches!(inverse_variance, QualityMap::PerChannel(_)));
@@ -479,7 +514,7 @@ fn weight_and_inverse_variance_maps() {
             .iter()
             .map(|_| {
                 let mut image = constant_image(size, 5.0);
-                image.metadata.quantization_sigma = Some(1.0);
+                image.metadata.derived.set_quantization_sigma(Some(1.0));
                 image
             })
             .collect();
@@ -496,8 +531,7 @@ fn weight_and_inverse_variance_maps() {
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
-        .unwrap()
-        .product;
+        .unwrap();
         assert_eq!(weight_plane(&product)[at], weight, "{frame_weights:?}");
         assert_eq!(
             product.inverse_variance.as_ref().unwrap().channel(0)[at],
@@ -537,7 +571,6 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
             ProgressMonitor::unattended(),
         )
         .unwrap()
-        .product
     };
 
     let all = product(QualityPlanes::ALL);
@@ -627,8 +660,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
         &IngestConfig::default(),
         ProgressMonitor::unattended(),
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let coverage = product
         .coverage
         .as_ref()
@@ -830,7 +862,7 @@ fn a_band_scan_covers_every_reaching_drop() {
 #[test]
 fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let config = DrizzleConfig::default();
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
+    let mut acc = accumulator(ImageDimensions::new((4, 4), ChannelLayout::Mono), config);
 
     let mut frame = DrizzleFrame::new(
         constant_image(Size2us::new(4, 4), 1.0),
@@ -840,13 +872,18 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
-        DrizzleError::PixelWeightDimensionMismatch {
+        DrizzleError::Stack(StackError::PlaneDimensionMismatch {
             index: 0,
-            expected_width: 4,
-            expected_height: 4,
-            actual_width: 3,
-            actual_height: 3,
-        }
+            plane: FramePlane::PixelWeight,
+            expected: Size2us {
+                width: 4,
+                height: 4
+            },
+            actual: Size2us {
+                width: 3,
+                height: 3
+            },
+        })
     ));
 
     // Every refusal left the accumulator as it was.
@@ -862,11 +899,14 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
-        DrizzleError::InvalidPixelWeight {
-            frame_index: 0,
-            pixel_index: 5,
-            value: -0.25,
-        }
+        DrizzleError::Stack(StackError::Admission(
+            AdmissionError::InvalidQualityPlaneValue {
+                index: 0,
+                plane: FramePlane::PixelWeight,
+                pixel: 5,
+                value: -0.25,
+            }
+        ))
     ));
 }
 
@@ -884,7 +924,7 @@ fn a_null_pixel_deposits_nothing() {
         nulls[y * size.width + 5] = f32::NAN;
     }
     let mut image = gray_image(size, pixels);
-    image.flags = PixelFlags::of_non_finite(size, &[&nulls]);
+    image.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
     let product = drizzle_one(
         kernel_config(DrizzleKernel::Square, 1.0, 1.0),
         &DrizzleFrame::new(image, warp_of(Transform::identity())),

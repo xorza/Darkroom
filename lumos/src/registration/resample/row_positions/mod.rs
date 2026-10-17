@@ -2,10 +2,11 @@
 
 use glam::DVec2;
 
+use crate::math::dmat3::DMat3;
 use crate::math::size2us::Size2us;
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::transform::TransformType;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// The source position of every pixel of one output row, evaluated once and read by every channel,
 /// the quality maps and the validity warp.
@@ -42,8 +43,8 @@ impl RowPositions {
             self.positions.extend((0..width).map(|x| {
                 let x = x as f64;
                 let w = m[6] * x + hy + m[8];
-                // `DMat3::transform_point`'s horizon: a point there maps to infinity, outside.
-                if w.abs() <= f64::EPSILON {
+                // `DMat3::transform_point`'s horizon: a point on or past it maps outside.
+                if !DMat3::maps_forward(w) {
                     return None;
                 }
                 let p = DVec2::new((m[0] * x + by + m[2]) / w, (m[3] * x + ey + m[5]) / w);

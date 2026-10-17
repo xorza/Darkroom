@@ -1,6 +1,6 @@
 //! The float widths [`crate::math::statistics`]' order statistics run at.
 
-use std::ops::{Add, Mul, Sub};
+use std::ops::Sub;
 
 /// What a median or a MAD needs of the type it is measuring.
 ///
@@ -10,19 +10,18 @@ use std::ops::{Add, Mul, Sub};
 /// widths are needed: the polynomial surface fit in `extract_background`
 /// works in `f64` throughout, so downcasting its residuals to run a
 /// single-precision path would lose precision inside a fitting loop.
-pub(crate) trait Float:
-    Copy + PartialOrd + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
-{
+pub(crate) trait Float: Copy + Sub<Output = Self> {
     /// The signed integer of the same width: the bits of a value with its sign bit clear order
     /// as `total_cmp` orders the values, and [`Self::map_keys`] makes them so for any value.
     type Key: Ord + Copy + Default;
 
-    /// What an empty input measures to.
-    const ZERO: Self;
-    /// Averages the two middle elements of an even-length slice.
-    const HALF: Self;
-
     fn abs(self) -> Self;
+
+    /// `(self + other) / 2`, rounded once, finite for any two finite values.
+    fn midpoint(self, other: Self) -> Self;
+
+    /// `self · factor`, multiplied in `f64` and rounded once to `Self`.
+    fn scaled(self, factor: f64) -> Self;
 
     /// Whether any of `values` has its sign bit set, by one OR over their bits.
     fn any_sign_bit(values: &[Self]) -> bool;
@@ -85,6 +84,19 @@ const fn total_order_32(bits: i32) -> i32 {
     bits ^ ((bits >> 31).cast_unsigned() >> 1).cast_signed()
 }
 
+/// The bits of `value` as a `u32` in [`f32::total_cmp`]'s order: [`total_order_32`] with the sign
+/// bit flipped, which puts the negatives below the positives.
+#[inline]
+pub(crate) const fn unsigned_key(value: f32) -> u32 {
+    total_order_32(value.to_bits().cast_signed()).cast_unsigned() ^ (1 << 31)
+}
+
+/// The value whose [`unsigned_key`] is `key`.
+#[inline]
+pub(crate) const fn from_unsigned_key(key: u32) -> f32 {
+    f32::from_bits(total_order_32((key ^ (1 << 31)).cast_signed()).cast_unsigned())
+}
+
 /// [`total_order_32`] for an `f64`.
 const fn total_order_64(bits: i64) -> i64 {
     bits ^ ((bits >> 63).cast_unsigned() >> 1).cast_signed()
@@ -92,8 +104,6 @@ const fn total_order_64(bits: i64) -> i64 {
 
 impl Float for f32 {
     type Key = i32;
-    const ZERO: Self = 0.0;
-    const HALF: Self = 0.5;
 
     #[inline]
     #[expect(
@@ -102,6 +112,20 @@ impl Float for f32 {
     )]
     fn abs(self) -> Self {
         f32::abs(self)
+    }
+
+    #[inline]
+    #[expect(
+        clippy::use_self,
+        reason = "names the inherent `midpoint`, which `Self::midpoint` here reads as this method recursing"
+    )]
+    fn midpoint(self, other: Self) -> Self {
+        f32::midpoint(self, other)
+    }
+
+    #[inline]
+    fn scaled(self, factor: f64) -> Self {
+        (f64::from(self) * factor) as Self
     }
 
     #[inline]
@@ -134,8 +158,6 @@ impl Float for f32 {
 
 impl Float for f64 {
     type Key = i64;
-    const ZERO: Self = 0.0;
-    const HALF: Self = 0.5;
 
     #[inline]
     #[expect(
@@ -144,6 +166,20 @@ impl Float for f64 {
     )]
     fn abs(self) -> Self {
         f64::abs(self)
+    }
+
+    #[inline]
+    #[expect(
+        clippy::use_self,
+        reason = "names the inherent `midpoint`, which `Self::midpoint` here reads as this method recursing"
+    )]
+    fn midpoint(self, other: Self) -> Self {
+        f64::midpoint(self, other)
+    }
+
+    #[inline]
+    fn scaled(self, factor: f64) -> Self {
+        self * factor
     }
 
     #[inline]
@@ -171,5 +207,42 @@ impl Float for f64 {
     #[inline]
     fn from_key(key: i64) -> Self {
         Self::from_bits(total_order_64(key).cast_unsigned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unsigned keys order as `total_cmp` orders the floats — negative and positive, zeros of both
+    /// signs, subnormals, the largest magnitudes and the infinities — and map back to the same
+    /// bits.
+    #[test]
+    fn unsigned_keys_follow_the_total_order() {
+        let ascending = [
+            f32::NEG_INFINITY,
+            f32::MIN,
+            -1.5,
+            -f32::MIN_POSITIVE,
+            -1e-45,
+            -0.0,
+            0.0,
+            1e-45,
+            f32::MIN_POSITIVE,
+            1.5,
+            f32::MAX,
+            f32::INFINITY,
+        ];
+        for pair in ascending.windows(2) {
+            assert!(unsigned_key(pair[0]) < unsigned_key(pair[1]), "{pair:?}");
+        }
+        for number in ascending {
+            assert_eq!(
+                from_unsigned_key(unsigned_key(number)).to_bits(),
+                number.to_bits()
+            );
+        }
+        assert_eq!(unsigned_key(-0.0), u32::MAX >> 1);
+        assert_eq!(unsigned_key(0.0), 1 << 31);
     }
 }

@@ -106,7 +106,7 @@ fn form_triangles_kdtree_too_few() {
 fn form_triangles_kdtree_single_triangle() {
     let triangles = triangles_of(&THREE_FOUR_FIVE, 3);
     assert_eq!(triangles.len(), 1);
-    assert_eq!(triangles[0].ratios, (0.6, 0.8));
+    assert_eq!(triangles[0].ratios, DVec2::new(0.6, 0.8));
 }
 
 #[test]
@@ -134,20 +134,20 @@ fn form_triangles_kdtree_ratios_in_valid_range() {
     // (sides are sorted, so ratio.0 = shortest/longest <= ratio.1 = middle/longest <= 1.0)
     for tri in &triangles {
         assert!(
-            tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0,
+            tri.ratios.x > 0.0 && tri.ratios.x <= 1.0,
             "ratio.0 = {} out of (0, 1] range",
-            tri.ratios.0
+            tri.ratios.x
         );
         assert!(
-            tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0,
+            tri.ratios.y > 0.0 && tri.ratios.y <= 1.0,
             "ratio.1 = {} out of (0, 1] range",
-            tri.ratios.1
+            tri.ratios.y
         );
         assert!(
-            tri.ratios.0 <= tri.ratios.1 + 1e-10,
+            tri.ratios.x <= tri.ratios.y + 1e-10,
             "ratio.0 ({}) > ratio.1 ({})",
-            tri.ratios.0,
-            tri.ratios.1
+            tri.ratios.x,
+            tri.ratios.y
         );
     }
 }

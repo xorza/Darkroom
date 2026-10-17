@@ -8,12 +8,14 @@ use glam::DVec2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::drizzle::accumulator::DrizzleAccumulator;
-use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::accumulator::Drizzler;
+use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::drizzle::drizzle_kernel::DrizzleKernel;
+use crate::drizzle::output_grid::OutputGrid;
 use crate::registration::bench::Pair;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// Each kernel and its pixfrac: the default 0.8, and the square kernel at 1 too, where its drops
 /// tile the output; Lanczos takes 1 alone.
@@ -86,20 +88,23 @@ pub(crate) fn atomic(c: &mut Criterion) {
         for geometry in GEOMETRIES {
             let id = format!("{kernel_name}/{}", geometry.name());
             group.bench_function(BenchmarkId::new(id, field.name()), |b| {
-                let config = DrizzleConfig {
-                    scale: if kernel == DrizzleKernel::Lanczos {
-                        1.0
-                    } else {
-                        2.0
-                    },
-                    pixfrac,
-                    kernel,
-                    ..DrizzleConfig::default()
+                let scale = if kernel == DrizzleKernel::Lanczos {
+                    1.0
+                } else {
+                    2.0
                 };
                 let frame = DrizzleFrame::new(field.render(FRAME).image, geometry.warp());
-                let mut accumulator = DrizzleAccumulator::new(&frame.source, config, 0)
-                    .expect("a valid drizzle configuration");
-                b.iter(|| accumulator.add_frame(&frame).expect("the frame drizzles"));
+                let mut drizzler = Drizzler::new(
+                    &frame.source,
+                    KernelPlan::new(kernel, pixfrac, scale),
+                    OutputGrid::new(scale, FRAME),
+                );
+                let mut sums = drizzler.sums();
+                b.iter(|| {
+                    drizzler
+                        .scatter(&frame, 0, &mut sums)
+                        .expect("the frame drizzles")
+                });
             });
         }
     }

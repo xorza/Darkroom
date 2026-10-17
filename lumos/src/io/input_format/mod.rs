@@ -1,14 +1,48 @@
-//! [`InputFormat`]: which decoder a file's extension routes it to.
+//! [`InputFormat`]: which decoder a file's extension routes it to, and the extensions each one
+//! reads.
 
 use std::path::Path;
 
-use imaginarium::FileFormat;
+use imaginarium::{FileFormat, SUPPORTED_EXTENSIONS};
 
 use crate::io::error::ImageError;
-use crate::io::raw::RAW_EXTENSIONS;
 
 /// The extensions of a FITS file.
-pub(crate) const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
+const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
+
+/// Camera-RAW extensions accepted by this decoder: the formats LibRaw decodes, as digiKam's
+/// libkdcraw lists them, with Canon's CR3 that later LibRaw added. `.hdr`, which LibRaw reads for
+/// Hasselblad, is left out: it names Radiance HDR images far more often. Sigma's X3F and GoPro's
+/// GPR are left out too: LibRaw decodes them only with the X3F tools and the GPR SDK, which this
+/// build does not include.
+pub const RAW_EXTENSIONS: &[&str] = &[
+    "3fr", "arw", "bay", "bmq", "cap", "cine", "cr2", "cr3", "crw", "cs1", "dc2", "dcr", "dng",
+    "drf", "dsc", "erf", "fff", "ia", "iiq", "k25", "kc2", "kdc", "mdc", "mef", "mos", "mrw",
+    "nef", "nrw", "orf", "pef", "ptx", "pxn", "qtk", "raf", "raw", "rdc", "rw2", "rwl", "rwz",
+    "sr2", "srf", "srw", "sti",
+];
+
+/// Every file extension [`LoadContext::preview`](crate::LoadContext::preview) accepts: FITS, camera
+/// RAW, then imaginarium's formats, in the order its loader tries them.
+pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &PREVIEW_EXTENSION_TABLE;
+
+const PREVIEW_EXTENSION_TABLE: [&str;
+    FITS_EXTENSIONS.len() + RAW_EXTENSIONS.len() + SUPPORTED_EXTENSIONS.len()] = {
+    let lists = [FITS_EXTENSIONS, RAW_EXTENSIONS, &SUPPORTED_EXTENSIONS];
+    let mut table = [""; FITS_EXTENSIONS.len() + RAW_EXTENSIONS.len() + SUPPORTED_EXTENSIONS.len()];
+    let mut next = 0;
+    let mut list = 0;
+    while list < lists.len() {
+        let mut index = 0;
+        while index < lists[list].len() {
+            table[next] = lists[list][index];
+            next += 1;
+            index += 1;
+        }
+        list += 1;
+    }
+    table
+};
 
 /// The container a file's extension names, which decides the decoder a load uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

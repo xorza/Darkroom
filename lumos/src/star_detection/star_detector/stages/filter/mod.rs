@@ -2,15 +2,11 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
-use crate::math::statistics::median_mad::MedianMad;
-use crate::math::statistics::{mad_floored, mad_to_sigma};
+use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detector::detection_result::QualityFilterDiagnostics;
-use crate::star_detection::star_detector::stages::FWHM_MAD_FLOOR_FRACTION;
-use crate::star_detection::star_detector::stages::filter::duplicate_scratch::DuplicateScratch;
-
-pub(crate) mod duplicate_scratch;
+use crate::star_detection::star_detector::stages::FwhmSpread;
 
 /// Result of the filter stage: the surviving stars plus rejection statistics.
 #[derive(Debug)]
@@ -52,25 +48,23 @@ impl FilterRejection {
     }
 }
 
-/// The scratch a filter pass sorts in: the values its medians take, and the grid duplicates are
-/// found on.
-#[derive(Debug)]
-pub(crate) struct FilterScratch<'a> {
-    pub(crate) values: &'a mut Vec<f32>,
-    pub(crate) duplicates: &'a mut DuplicateScratch,
-}
-
 impl FilterOutcome {
-    /// Filter stars by quality metrics, remove duplicates, and sort by flux, in `scratch`.
+    /// Filter stars by quality metrics, remove duplicates, and sort by flux, in the scratch of
+    /// `resources`.
     ///
     /// Returns the filtered stars and rejection statistics. Stars are returned
     /// sorted by flux (brightest first).
     pub(crate) fn from_stars(
         mut stars: Vec<Star>,
         config: &FilterConfig,
-        scratch: FilterScratch<'_>,
+        resources: &mut DetectionResources,
     ) -> Self {
-        let FilterScratch { values, duplicates } = scratch;
+        let DetectionResources {
+            values,
+            deviations,
+            duplicates,
+            ..
+        } = resources;
         let mut diagnostics = QualityFilterDiagnostics::default();
 
         stars.retain(|star| {
@@ -90,31 +84,40 @@ impl FilterOutcome {
         sort_by_flux(&mut stars);
 
         if let Some(max_deviation) = config.max_fwhm_deviation {
-            diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, max_deviation, values);
+            diagnostics.fwhm_outliers = filter_fwhm_outliers(
+                &mut stars,
+                max_deviation,
+                FwhmScratch { values, deviations },
+            );
         }
 
-        diagnostics.duplicates =
-            duplicates.remove_duplicates(&mut stars, config.duplicate_min_separation);
+        diagnostics.duplicates = duplicates.remove(&mut stars, config.duplicate_min_separation);
 
         Self { stars, diagnostics }
     }
 }
 
-/// Sort stars by flux, brightest first, with any NaN flux last.
-///
-/// A total order: a comparator that calls NaN equal to everything is not transitive, and the
-/// standard sorts may panic on one.
+/// Sort stars by flux, brightest first. A measurement keeps only stars of finite flux.
 fn sort_by_flux(stars: &mut [Star]) {
-    stars.sort_by(|a, b| {
-        a.flux
-            .is_nan()
-            .cmp(&b.flux.is_nan())
-            .then_with(|| b.flux.total_cmp(&a.flux))
-    });
+    debug_assert!(stars.iter().all(|star| star.flux.is_finite()));
+    stars.sort_by(|a, b| b.flux.total_cmp(&a.flux));
 }
 
-/// Filter stars by FWHM using MAD-based outlier detection, with `values` as scratch.
-fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32, values: &mut Vec<f32>) -> usize {
+/// The scratch an FWHM clip sorts in: the FWHMs, and their deviations.
+#[derive(Debug)]
+struct FwhmScratch<'a> {
+    values: &'a mut Vec<f32>,
+    deviations: &'a mut Vec<f32>,
+}
+
+/// Remove the stars whose FWHM lies over `max_deviation` σ above the brighter half's median, σ
+/// from their MAD ([`FwhmSpread`]).
+fn filter_fwhm_outliers(
+    stars: &mut Vec<Star>,
+    max_deviation: f32,
+    scratch: FwhmScratch<'_>,
+) -> usize {
+    let FwhmScratch { values, deviations } = scratch;
     debug_assert!(
         max_deviation > 0.0,
         "validated positive; `None` skips the call"
@@ -127,15 +130,8 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32, values: &mut 
     let reference_count = (stars.len() / 2).max(5);
     values.clear();
     values.extend(stars.iter().take(reference_count).map(|s| s.fwhm));
-    let reference = MedianMad::of_mut(values);
-
-    // In σ, as the option states: `1.4826·MAD` is a normal distribution's σ.
-    let sigma = mad_to_sigma(mad_floored(
-        reference.mad,
-        reference.median,
-        FWHM_MAD_FLOOR_FRACTION,
-    ));
-    let max_fwhm = reference.median + max_deviation * sigma;
+    let reference = FwhmSpread::of(values, deviations);
+    let max_fwhm = reference.median + max_deviation * reference.sigma;
 
     let before_count = stars.len();
     stars.retain(|s| s.fwhm <= max_fwhm);

@@ -61,9 +61,6 @@ image = { workspace = true }
 lumos = { workspace = true, features = ["internals"] }
 tracing-subscriber = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-libc = { workspace = true }
-
 [lib]
 bench = false
 

@@ -4,9 +4,9 @@
 //! - ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
 //!   [`crate::image_ops::extract_background`]'s surface fit) take their plane straight from the
 //!   image and need no adapter at all;
-//! - per-pixel ops read the planes in step through the image's own parallel maps: `map_samples`
-//!   for work that treats every sample alike, `map_rgb` for work that needs a whole pixel at once
-//!   (SCNR, the colour-preserving stretch), and `remap_intensity` for the display enhancers.
+//! - per-pixel ops reach the samples through the image's own mutators: `planes_mut` for work that
+//!   treats every sample alike, `map_rgb` for work that needs a whole pixel at once (SCNR, the
+//!   color-preserving stretch), and `remap_intensity` for the display enhancers.
 //!
 //! Every path to the samples goes through the image's mutators, which drop the metadata's
 //! quantization σ and mosaic noise: neither describes the samples an op leaves.
@@ -21,9 +21,10 @@
 //! node with its own deserialized config type, and would keep doing so. `NeutralizeBackground`
 //! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
 //!
-//! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) take the same `apply(&mut LinearImage)`
-//! shape but report `MlError`: their failures are a missing model or an image smaller
-//! than one tile, neither of which is a config range that `InvalidConfigField` describes.
+//! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) hold the `OnnxModel` their caller loaded,
+//! so they `apply` through `&mut self`, and report `MlError`: their failures are a model that does
+//! not run or an image smaller than one tile, neither of which is a config range that
+//! `InvalidConfigField` describes.
 
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;

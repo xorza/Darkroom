@@ -15,7 +15,6 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 use crate::registration::ransac::ransac_config::RansacConfig;
-use crate::registration::ransac::transforms::adaptive_iterations;
 
 /// The share of the pairs, by confidence, each guided phase samples from: the top quarter, then
 /// the top half.
@@ -51,7 +50,7 @@ impl Sampler {
         Self {
             rng: ChaCha8Rng::seed_from_u64(config.seed),
             sample_size,
-            phase_length: guided_phase_iterations(sample_size, config.confidence),
+            phase_length: guided_phase_iterations(sample_size, config),
             by_confidence,
             weights: confidences.iter().map(|&c| (c + 0.1).powi(2)).collect(),
             shuffle: Vec::new(),
@@ -94,9 +93,8 @@ impl Sampler {
         }
         self.keys.clear();
         self.keys.extend(pool.iter().map(|&index| {
-            let weight = self.weights[index].max(0.001);
             let u: f64 = self.rng.random();
-            (index, u.powf(1.0 / weight))
+            (index, u.powf(1.0 / self.weights[index]))
         }));
         self.keys
             .select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
@@ -128,10 +126,47 @@ impl Sampler {
     }
 }
 
-/// Iterations in each guided phase: enough to draw an all-inlier sample of `sample_size` with
-/// `confidence` from a pool at least half inliers — the pools a guided phase is worth its cost on.
-fn guided_phase_iterations(sample_size: usize, confidence: f64) -> usize {
-    adaptive_iterations(0.5, sample_size, confidence)
+/// Iterations in each guided phase: enough to draw an all-inlier sample of `sample_size` with the
+/// configured confidence from a pool at least half inliers — the pools a guided phase is worth its
+/// cost on — and at least one, so a phase always draws.
+fn guided_phase_iterations(sample_size: usize, config: &RansacConfig) -> usize {
+    adaptive_iterations(0.5, sample_size, config.confidence, config.max_iterations)
+}
+
+/// The iterations after which an all-inlier sample of `sample_size` has been drawn with
+/// `confidence`, at `inlier_ratio`: `N = ⌈ln(1 − confidence) / ln(1 − wⁿ)⌉`, within
+/// `[1, max_iterations]`. `confidence` lies in `(0, 1)`, where the count is finite and positive.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "both logarithms are negative, so their quotient is positive"
+)]
+pub(super) fn adaptive_iterations(
+    inlier_ratio: f64,
+    sample_size: usize,
+    confidence: f64,
+    max_iterations: usize,
+) -> usize {
+    debug_assert!(
+        confidence > 0.0 && confidence < 1.0,
+        "a validated confidence lies in (0, 1), not {confidence}"
+    );
+    debug_assert!(max_iterations >= 1);
+    if inlier_ratio <= 0.0 || inlier_ratio >= 1.0 {
+        return 1;
+    }
+
+    let w_n =
+        inlier_ratio.powi(i32::try_from(sample_size).expect("a minimal sample is a few points"));
+    if w_n >= 1.0 {
+        return 1;
+    }
+
+    // `w_n ∈ (0, 1)` is guaranteed by the guards above, so `1 - w_n ∈ (0, 1)` and
+    // `log_outlier < 0` — both logs are finite and negative, giving a positive count.
+    let log_conf = (1.0 - confidence).ln();
+    let log_outlier = (1.0 - w_n).ln();
+
+    ((log_conf / log_outlier).ceil() as usize).clamp(1, max_iterations)
 }
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ fn a_spilled_drizzle_stays_within_its_budget() {
                 .drizzle_paths(frames, &ingest, ProgressMonitor::unattended())
                 .unwrap()
         });
-        let report = &run.value.product.report;
+        let report = &run.value.report;
         assert_eq!(report.spilled_frames, FRAMES as u64);
         budget.assert_held("drizzle", run.peak_bytes, report);
     });

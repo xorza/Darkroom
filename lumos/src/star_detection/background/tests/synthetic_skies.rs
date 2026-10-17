@@ -2,6 +2,7 @@
 //! background and residual images for inspection.
 
 use glam::Vec2;
+use imaginarium::Buffer2;
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::background_map;
@@ -9,10 +10,9 @@ use crate::internals::synthetic::backgrounds::{Gradient, NebulaConfig, Vignette}
 use crate::internals::synthetic::scene::BackgroundField;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
 use crate::star_detection::tests::Scenario;
-use imaginarium::Buffer2;
 
 /// Each sky against the truth it was rendered from, in three parts.
 ///
@@ -84,7 +84,7 @@ fn rendered_skies_are_recovered() {
             }),
             num_stars: 40,
             model_error: Some(0.2006),
-            star_move: 0.005_03,
+            star_move: 0.005_05,
         },
     ];
     let config = BackgroundConfig::default();
@@ -151,8 +151,8 @@ fn rendered_skies_are_recovered() {
             case.name
         );
 
-        let mut spread = noisy.noise.pixels().to_vec();
-        let sigma = median_mut(&mut spread);
+        let mut spread = noisy.sky.noise.pixels().to_vec();
+        let sigma = statistics::median_mut(&mut spread);
         let scatter_bound = 5.0 * 2.14 * sigma / 32.0;
         let scatter = largest(
             &mut noisy

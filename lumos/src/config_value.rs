@@ -79,11 +79,21 @@ impl ConfigValue {
                 ..invalid
             })
     }
+
+    /// [`Self::must_be_against`] for a bound that is a count.
+    pub(crate) fn must_be_against_count(
+        self,
+        expected: &'static str,
+        bound: usize,
+        accepted: bool,
+    ) -> Result<(), InvalidConfigField> {
+        self.must_be_against(expected, exact(bound), accepted)
+    }
 }
 
 /// A config count as `f64`. A count a configuration states stays far below 2^53, past which `f64`
 /// skips integers, so the conversion is exact.
-pub(crate) fn exact(count: usize) -> f64 {
+fn exact(count: usize) -> f64 {
     debug_assert!(count <= 1 << 53, "a config count is exact in f64: {count}");
     count as f64
 }

@@ -1,13 +1,13 @@
 //! Tests for 2D Gaussian fitting.
+use std::f32::consts::FRAC_PI_4;
+use std::f64::consts::PI;
+
 use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::internals::synthetic::patterns;
-use crate::math::size2us::Size2us;
-use std::f32::consts::FRAC_PI_4;
-use std::f64::consts::PI;
-
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::*;
 use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
@@ -442,7 +442,8 @@ fn gaussian_fit_recovers_known_parameters() {
                 1.0 / f64::from(case.sigma.y).powi(2),
                 f64::from(case.background),
             ];
-            let order = Gaussian2D::new(case.fit_radius as f64, 1e-6).sufficient_order(&truth);
+            let order = Gaussian2D::new(ProfileBounds::of_stamp(case.fit_radius as f64), 1e-6)
+                .sufficient_order(&truth);
             assert_eq!(result.debug.order, order, "{}: quadrature order", case.name);
         } else {
             assert!(
@@ -619,7 +620,7 @@ fn gaussian_fit_rms_residual() {
 /// on and off the vector width — with a cross term in play.
 #[test]
 fn batch_normal_equations_match_reference() {
-    let mut model = Gaussian2D::new(10.0, 1e-6);
+    let mut model = Gaussian2D::new(ProfileBounds::of_stamp(10.0), 1e-6);
     model.integrate_at(3);
     let truth = [5.0, 5.0, 500.0, 0.25, -0.04, 0.16, 50.0];
     // Away from the truth, so the residuals are not zero.
@@ -634,7 +635,7 @@ fn batch_normal_equations_match_reference() {
 fn gaussian_evaluate_and_jacobian_consistency() {
     use crate::star_detection::centroid::profile_problem::LMModel;
 
-    let mut model = Gaussian2D::new(15.0, 1e-6);
+    let mut model = Gaussian2D::new(ProfileBounds::of_stamp(15.0), 1e-6);
     model.integrate_at(3);
     let params_list: &[[f64; 7]] = &[
         [10.0, 10.0, 1000.0, 0.25, 0.0, 0.25, 100.0],

@@ -3,9 +3,9 @@
 use thiserror::Error;
 
 use crate::error::Cancelled;
-use crate::error::FrameDimensionMismatch;
 use crate::frame::frame_plane::FramePlane;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_provenance::RowOrder;
 use crate::image::sample_domain::SampleDomain;
 
@@ -70,7 +70,7 @@ pub enum AdmissionError {
     },
 
     /// Two frames carry different mosaic patterns, or one is a mosaic and the other is not, so
-    /// the same pixel is a different colour in each.
+    /// the same pixel is a different color in each.
     #[error(
         "frame {index} has CFA pattern {actual:?}, but frame {reference_index} has {expected:?}"
     )]

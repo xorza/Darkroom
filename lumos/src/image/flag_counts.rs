@@ -12,6 +12,16 @@ use crate::image::quality_flags::QualityFlags;
 pub struct FlagCounts([u64; 8]);
 
 impl FlagCounts {
+    /// The counts of `per_bit`, entry `i` under the flag `1 << i`.
+    pub(crate) const fn from_per_bit(per_bit: [u64; 8]) -> Self {
+        Self(per_bit)
+    }
+
+    /// Each count, entry `i` under the flag `1 << i`.
+    pub(crate) const fn per_bit(&self) -> &[u64; 8] {
+        &self.0
+    }
+
     /// How many hold `flag`.
     ///
     /// # Panics

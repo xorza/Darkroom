@@ -9,19 +9,21 @@
 //! [`load_to_disk`]: crate::combine::frame_cache
 //! [`load_in_memory`]: crate::combine::frame_cache
 
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use common::TempDir;
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 
-use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
-use crate::image::linear_image::LinearImage;
+use crate::combine::normalization::Normalization;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::weighting::Weighting;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
-use common::TempDir;
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
 fn write_const_fits(path: &Path, size: Size2us, value: u16) {
@@ -100,7 +102,8 @@ fn disk_and_memory_tiers_produce_identical_masters() {
     let per_frame: Vec<f32> = paths
         .iter()
         .map(|p| {
-            LinearImage::from_file(p, &LoadContext::default())
+            LoadContext::default()
+                .linear(p)
                 .unwrap()
                 .channel(0)
                 .pixels()[0]

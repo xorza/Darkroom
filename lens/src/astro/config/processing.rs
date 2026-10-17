@@ -16,7 +16,9 @@
 //! *not* track that type field-for-field.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{BackgroundMode, ColorMode, ExtractBackground, Scnr, Stretch, StretchMethod};
+use lumos::{
+    BackgroundMode, ColorMode, ExtractBackground, Scnr, ScnrProtection, Stretch, StretchMethod,
+};
 
 use crate::astro::config::preset::Preset;
 
@@ -33,56 +35,15 @@ impl Preset for BackgroundMode {
     }
 }
 
-/// Which green-removal protection [`ScnrKnobs`] builds; the amount is its own
-/// field, which every protection reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
-pub(crate) enum ScnrMethodChoice {
-    AverageNeutral,
-    AdditiveMask,
-    MaximumNeutral,
-    MaximumMask,
-}
-
-impl Preset for ScnrMethodChoice {
-    type Knobs = ScnrKnobs;
+/// The pick is the protection; the strength keeps its default, full.
+impl Preset for ScnrProtection {
+    type Knobs = Scnr;
     type Config = Scnr;
 
     fn config(self) -> Scnr {
-        ScnrKnobs {
-            method: self,
+        Scnr {
+            protection: self,
             ..Default::default()
-        }
-        .into()
-    }
-}
-
-/// The editable knobs behind a [`Scnr`]: the protection, and the blend toward
-/// its full strength.
-#[derive(Debug, Clone, Introspect)]
-#[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056", name = "ScnrConfig")]
-pub(crate) struct ScnrKnobs {
-    method: ScnrMethodChoice,
-    amount: f32,
-}
-
-impl Default for ScnrKnobs {
-    /// Average-neutral at full strength, as [`Scnr::default`].
-    fn default() -> Self {
-        Self {
-            method: ScnrMethodChoice::AverageNeutral,
-            amount: 1.0,
-        }
-    }
-}
-
-impl From<ScnrKnobs> for Scnr {
-    fn from(knobs: ScnrKnobs) -> Self {
-        match knobs.method {
-            ScnrMethodChoice::AverageNeutral => Self::average_neutral(knobs.amount),
-            ScnrMethodChoice::AdditiveMask => Self::additive_mask(knobs.amount),
-            ScnrMethodChoice::MaximumNeutral => Self::maximum_neutral(knobs.amount),
-            ScnrMethodChoice::MaximumMask => Self::maximum_mask(knobs.amount),
         }
     }
 }

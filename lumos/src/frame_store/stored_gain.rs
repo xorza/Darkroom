@@ -1,68 +1,100 @@
 //! [`StoredGain`]: a frame's flat gain as the combine reads it.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::plane_store::PlaneStore;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
+use crate::math::size2us::Size2us;
 
-/// Each channel's node grid of a frame's [`FlatGain`], wherever the memory tier put it.
+/// Each channel's node grid of a frame's [`FlatGain`], wherever the memory tier put it: the image's
+/// own gain on the resident tier, node planes mapped from files on the spilled one.
 #[derive(Debug)]
-pub(crate) struct StoredGain {
-    grid: GainGrid,
-    planes: ArrayVec<StoredPlane, 3>,
+pub(crate) enum StoredGain {
+    Resident(Arc<FlatGain>),
+    Mapped {
+        size: Size2us,
+        planes: ArrayVec<StoredPlane, 3>,
+    },
 }
 
 impl StoredGain {
-    pub(crate) fn from_memory(gain: &FlatGain) -> Self {
-        let grid = GainGrid::of(gain.size());
-        Self {
-            grid,
+    /// Write each channel's nodes to `scratch` and memory-map them back.
+    pub(crate) fn spill(scratch: &RunScratch, gain: &FlatGain) -> Result<Self, FrameStoreError> {
+        Ok(Self::Mapped {
+            size: gain.size(),
             planes: gain
                 .planes()
-                .map(|nodes| {
-                    StoredPlane::Memory(Buffer2::new(grid.columns, grid.rows, nodes.to_vec()))
-                })
-                .collect(),
-        }
-    }
-
-    /// Write each channel's nodes to `store` and memory-map them back.
-    pub(crate) fn spill(store: &impl PlaneStore, gain: &FlatGain) -> Result<Self, FrameStoreError> {
-        Ok(Self {
-            grid: GainGrid::of(gain.size()),
-            planes: gain
-                .planes()
-                .enumerate()
-                .map(|(channel, nodes)| store.store_gain(channel, nodes))
+                .map(|nodes| scratch.store(nodes))
                 .collect::<Result<_, _>>()?,
         })
     }
 
-    pub(crate) const fn grid(&self) -> GainGrid {
-        self.grid
+    /// The image size the grid covers.
+    fn size(&self) -> Size2us {
+        match self {
+            Self::Resident(gain) => gain.size(),
+            Self::Mapped { size, .. } => *size,
+        }
     }
 
-    pub(crate) const fn channels(&self) -> usize {
-        self.planes.len()
+    pub(crate) fn grid(&self) -> GainGrid {
+        GainGrid::of(self.size())
+    }
+
+    pub(crate) fn channels(&self) -> usize {
+        match self {
+            Self::Resident(gain) => gain.channels(),
+            Self::Mapped { planes, .. } => planes.len(),
+        }
+    }
+
+    /// Each channel's nodes from `range` of its grid, row-major.
+    fn nodes(&self, range: Range<usize>) -> ArrayVec<&[f32], 3> {
+        match self {
+            Self::Resident(gain) => gain.planes().map(|nodes| &nodes[range.clone()]).collect(),
+            Self::Mapped { planes, .. } => planes
+                .iter()
+                .map(|plane| plane.chunk(range.clone()))
+                .collect(),
+        }
     }
 
     /// The node rows the pixel rows `rows` read.
     pub(crate) fn rows(&self, rows: Range<usize>) -> GainRows<'_> {
-        let nodes = self.grid.rows_for(rows);
-        let columns = self.grid.columns;
+        let grid = self.grid();
+        let nodes = grid.rows_for(rows);
         GainRows::new(
-            self.grid,
+            grid,
             nodes.start,
-            self.planes
-                .iter()
-                .map(|plane| plane.chunk(nodes.start * columns..nodes.end * columns))
-                .collect(),
+            self.nodes(nodes.start * grid.columns..nodes.end * grid.columns),
         )
+    }
+
+    /// The gain as a [`FlatGain`] in RAM: shared when it is one already, copied out of its maps
+    /// otherwise.
+    pub(crate) fn to_flat_gain(&self) -> Arc<FlatGain> {
+        match self {
+            Self::Resident(gain) => Arc::clone(gain),
+            Self::Mapped { size, planes } => {
+                let grid = GainGrid::of(*size);
+                let count = grid.columns * grid.rows;
+                Arc::new(FlatGain::from_nodes(
+                    *size,
+                    planes
+                        .iter()
+                        .map(|plane| {
+                            Buffer2::new(grid.columns, grid.rows, plane.chunk(0..count).to_vec())
+                        })
+                        .collect(),
+                ))
+            }
+        }
     }
 }
 
@@ -72,9 +104,13 @@ pub(crate) mod internals {
     use crate::frame_store::stored_plane::StoredPlane;
 
     impl StoredGain {
-        /// The gain's node planes, one per channel.
+        /// The gain's mapped node planes, one per channel; none for a resident gain.
         pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
-            self.planes.iter()
+            let planes = match self {
+                Self::Resident(_) => None,
+                Self::Mapped { planes, .. } => Some(planes),
+            };
+            planes.into_iter().flatten()
         }
     }
 }

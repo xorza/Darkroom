@@ -47,7 +47,7 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
 }
 
 /// Every port lifts through one rule, so an untyped port rests on its
-/// positional colour and hovers to the same emphasis a typed one would.
+/// positional color and hovers to the same emphasis a typed one would.
 #[test]
 fn null_falls_back_to_positional_port_color() {
     let t = Theme::default();
@@ -82,7 +82,7 @@ fn custom_types_keyed_by_type_id() {
 
 #[test]
 fn event_color_is_neutral_and_lifts_on_hover() {
-    // Events use the theme's event colour, distinct from any data hue, and
+    // Events use the theme's event color, distinct from any data hue, and
     // the hover variant differs from rest.
     let t = Theme::default();
     let rest = event(&t);

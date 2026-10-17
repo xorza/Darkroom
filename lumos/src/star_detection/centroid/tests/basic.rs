@@ -294,7 +294,13 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     ];
 
     for case in cases {
-        let centre = stamp_centre(case.position, case.size, radius);
+        let residual = Buffer2::new_filled(case.size.width, case.size.height, 0.0f32);
+        let centre = StampAt {
+            residual: &residual,
+            pos: case.position,
+            radius,
+        }
+        .centre();
         assert_eq!(centre.is_some(), case.expected, "{}: {case:?}", case.name);
         if let Some(centre) = centre {
             assert_eq!(

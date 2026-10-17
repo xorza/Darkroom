@@ -108,7 +108,7 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
             &background.sky_noise(),
             &config,
         );
-        (background.noise_floor, candidates)
+        (background.sky.floor, candidates)
     };
     let (native_floor, native) = detect(&pixels);
     let (scaled_floor, scaled) = detect(&scaled);

@@ -11,7 +11,7 @@
 //! 4. per direction, how many 3×3 neighbours vary least, summed over 5×5;
 //! 5. the mean of the directions within an eighth of the most homogeneous.
 //!
-//! Every pass uses YPbPr. librtprocess offers CIELab for three passes, through the camera's colour
+//! Every pass uses YPbPr. librtprocess offers CIELab for three passes, through the camera's color
 //! matrix, which a calibrated frame does not carry; the derivatives only choose a direction, and
 //! librtprocess calls the two nearly indistinguishable.
 //!
@@ -30,11 +30,12 @@ use common::CancelToken;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Cancelled;
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled;
-use crate::image::cfa::demosaic::tiled::{Mosaic, TileKernel, Tiling};
+use crate::image::cfa::demosaic::tiled::{TileKernel, Tiling};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{Tile, TileJob};
-use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
+use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
 
@@ -73,8 +74,8 @@ impl MarkesteijnPasses {
     }
 
     /// How far inside its edges a tile computes its pixels in full: the least at which none
-    /// reads a colour no stage computed, which a test finds at every phase of the pattern. Each
-    /// further pass computes green again from colours 2 to 4 pixels away.
+    /// reads a color no stage computed, which a test finds at every phase of the pattern. Each
+    /// further pass computes green again from colors 2 to 4 pixels away.
     const fn margin(self) -> usize {
         match self {
             Self::One => 9,
@@ -99,21 +100,16 @@ pub(crate) const fn footprint(size: Size2us, workers: usize) -> Footprint {
     tiled::footprint(size, Tile::bytes(8), workers)
 }
 
-/// Demosaic an X-Trans frame with `passes` passes, its colours balanced by its gains.
+/// Demosaic an X-Trans frame with `passes` passes, its colors balanced by its gains.
 ///
 /// Returns unclipped planar channels `[R, G, B]`, each `width * height`, in the frame's own
 /// balance.
 pub(crate) fn demosaic(
-    xtrans: &XTransImage<'_>,
+    xtrans: &MosaicView<'_, XTransPattern>,
     passes: MarkesteijnPasses,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let hex = HexTable::new(xtrans.pattern);
-    let mosaic = Mosaic {
-        data: xtrans.data,
-        size: xtrans.size,
-        color_at: |position| xtrans.pattern.color_at(position).index(),
-    };
+    let hex = HexTable::new(xtrans.pattern());
     let kernel = TileKernel {
         tiling: passes.tiling(),
         new_tile: || Tile::new(passes.directions()),
@@ -126,7 +122,7 @@ pub(crate) fn demosaic(
             tile.demosaic(job, place, out);
         },
     };
-    mosaic.demosaic(kernel, cancel)
+    xtrans.demosaic(kernel, cancel)
 }
 
 #[cfg(test)]

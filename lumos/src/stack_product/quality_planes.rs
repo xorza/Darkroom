@@ -1,8 +1,5 @@
 //! Which ancillary planes a combine is asked to produce.
 
-use crate::combine::stack_config::CombineMethod;
-use crate::image::image_dimensions::ImageDimensions;
-
 /// Which ancillary per-pixel planes a combine should produce.
 ///
 /// Each one is a full image-sized allocation — per channel for all but coverage — that the
@@ -19,7 +16,7 @@ pub struct QualityPlanes {
     /// it is not a linear combination — so requesting it is an upper bound, not a guarantee.
     pub inverse_variance: bool,
     /// Per-channel scatter of the surviving samples, the variance of their weighted mean as the
-    /// frames show it. A statistical mean combine produces it; a median or a drizzle does not.
+    /// frames show it. A mean combine produces it, a drizzle's included; a median does not.
     pub dispersion: bool,
 }
 
@@ -66,26 +63,6 @@ impl QualityPlanes {
     ) -> usize {
         (channels * self.resident_planes_per_channel() + coverage_planes) * size_of::<f32>()
             + flag_planes
-    }
-
-    /// The bytes a combine's output of `dimensions` holds before its frames are seen: one coverage
-    /// plane if asked for, and the flag plane. An upper bound for a run whose frames turn out to
-    /// carry no quality planes, whose coverage is a constant, or no flags, which leave the flag
-    /// plane out.
-    pub(crate) const fn heap_bytes(self, dimensions: ImageDimensions) -> usize {
-        self.pixel_bytes(dimensions.channels(), self.coverage as usize, 1)
-            * dimensions.pixel_count()
-    }
-
-    /// Drop the planes `method` cannot produce, so the request reaching the reducer is exactly
-    /// what it will write: inverse variance and dispersion belong to a weighted mean.
-    pub(crate) const fn resolve(self, method: CombineMethod) -> Self {
-        let weighted_mean = matches!(method, CombineMethod::Mean(_));
-        Self {
-            inverse_variance: self.inverse_variance && weighted_mean,
-            dispersion: self.dispersion && weighted_mean,
-            ..self
-        }
     }
 }
 

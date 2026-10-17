@@ -11,11 +11,46 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::math::lm_controller::LmFit;
-use crate::math::size2us::Size2us;
-use crate::star_detection::centroid;
-use crate::star_detection::centroid::MAX_STAMP_PIXELS;
+use crate::math::vec2us::Vec2us;
+use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
+use crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA;
 use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
+
+/// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
+pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
+
+/// Maximum stamp pixels (31×31 for `stamp_radius=15`).
+pub(super) const MAX_STAMP_PIXELS: usize = MAX_STAMP_SIZE.pow(2);
+
+/// The square of the residual of `radius` about `pos`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct StampAt<'a> {
+    pub(super) residual: &'a Buffer2<f32>,
+    pub(super) pos: DVec2,
+    pub(super) radius: usize,
+}
+
+impl StampAt<'_> {
+    /// The pixel nearest `pos`, when the stamp lies wholly inside the residual.
+    ///
+    /// Compared in f64, where `x + r < width` cannot underflow as `x < width − r` would in usize,
+    /// and a NaN fails every comparison.
+    #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "both coordinates are checked to be at least the radius before the cast"
+    )]
+    pub(super) fn centre(self) -> Option<Vec2us> {
+        let (x, y) = (self.pos.x.round(), self.pos.y.round());
+        let radius = self.radius as f64;
+        let inside = x >= radius
+            && y >= radius
+            && x + radius < self.residual.width() as f64
+            && y + radius < self.residual.height() as f64;
+        inside.then(|| Vec2us::new(x as usize, y as usize))
+    }
+}
 
 /// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
 ///
@@ -24,14 +59,14 @@ use crate::star_detection::centroid::star_noise::StarNoise;
 /// stamp-local coordinates and shifting the centre back afterwards is the same fit. The smaller
 /// magnitudes also condition the normal equations a little better than image coordinates do.
 #[derive(Debug)]
-pub(crate) struct StampGrid {
+pub(super) struct StampGrid {
     pub(super) x: ArrayVec<f64, MAX_STAMP_PIXELS>,
     pub(super) y: ArrayVec<f64, MAX_STAMP_PIXELS>,
-    pub(crate) radius: usize,
+    pub(super) radius: usize,
 }
 
 impl StampGrid {
-    pub(crate) fn new(radius: usize) -> Self {
+    pub(super) fn new(radius: usize) -> Self {
         let side = 2 * radius + 1;
         let mut x = ArrayVec::new();
         let mut y = ArrayVec::new();
@@ -85,10 +120,12 @@ pub(super) fn min_amplitude(seed: f64) -> f64 {
 /// its own `constrain` enforces — starting outside it just spends the first iteration being clamped
 /// back. Always at least
 /// [`MIN_STAMP_RADIUS`](crate::star_detection::centroid::measure_grid::MIN_STAMP_RADIUS), so the
-/// 0.5 floor cannot cross it.
-pub(super) fn sigma_from_moments(sum_r2: f64, sum_w: f64, max_sigma: f64) -> f32 {
+/// [`MIN_PROFILE_SIGMA`] floor cannot cross it.
+pub(super) fn sigma_from_moments(sum_r2: f64, sum_w: f64, max_sigma: f64) -> f64 {
     if sum_w > f64::EPSILON {
-        (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, max_sigma) as f32
+        (sum_r2 / sum_w / 2.0)
+            .sqrt()
+            .clamp(MIN_PROFILE_SIGMA, max_sigma)
     } else {
         2.0
     }
@@ -106,7 +143,7 @@ pub(super) struct StampFit {
     pub(super) local_pos: DVec2,
     pub(super) weights: Option<ArrayVec<f64, MAX_STAMP_PIXELS>>,
     /// Gaussian-equivalent width from the stamp's second moments, seeding the optimizer.
-    pub(super) sigma_est: f32,
+    pub(super) sigma_est: f64,
     /// The noise behind `weights`, kept to reweight from the fitted model.
     noise: Option<StarNoise>,
     /// The sky level the signal is measured from.
@@ -130,7 +167,12 @@ impl StampFit {
             noise,
         } = inputs;
         let radius = grid.radius;
-        let centre = centroid::stamp_centre(pos, Size2us::from(pixels), radius)?;
+        let centre = StampAt {
+            residual: pixels,
+            pos,
+            radius,
+        }
+        .centre()?;
         let stamp_size = 2 * radius + 1;
         if stamp_size * stamp_size <= N {
             return None;

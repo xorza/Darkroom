@@ -10,8 +10,8 @@ use crate::star_detection::star_detection_config::extraction_config::Connectivit
 /// A position finds its pixel by a search in its row, so the memory is in proportion to the
 /// component's pixels, not to its box: a satellite trail across the frame has a box of the whole
 /// frame and pixels along one line. Each pixel's first possible neighbour in the rows above and
-/// below is found once, when the pixels are filled, so a walk over neighbours, which a deblend
-/// repeats at every level, reads them without a search.
+/// below is found once, by [`Self::link`], so a walk over neighbours, which a deblend repeats at
+/// every level, reads them without a search.
 #[derive(Debug, Default)]
 pub(crate) struct ComponentPixels {
     pub(crate) pixels: Vec<Pixel>,
@@ -19,8 +19,8 @@ pub(crate) struct ComponentPixels {
     row_starts: Vec<u32>,
     /// The box's top row.
     top: usize,
-    /// Per pixel: the first pixel of the row above at or right of its left neighbour's column,
-    /// or that row's end.
+    /// Per pixel once [`Self::link`]ed: the first pixel of the row above at or right of its left
+    /// neighbour's column, or that row's end.
     above: Vec<u32>,
     /// The same in the row below.
     below: Vec<u32>,
@@ -46,11 +46,14 @@ impl ComponentPixels {
             }
         }
         self.row_starts.push(cursor as u32);
-        self.link_rows();
+        self.above.clear();
+        self.below.clear();
     }
 
-    /// Fill [`Self::above`] and [`Self::below`], walking each pair of rows together.
-    fn link_rows(&mut self) {
+    /// Link each pixel to its first possible neighbours in the rows above and below, walking each
+    /// pair of rows together: what [`Self::for_each_neighbour`] reads, which a tree's build walks
+    /// at every level.
+    pub(crate) fn link(&mut self) {
         let Self {
             pixels,
             row_starts,
@@ -127,6 +130,7 @@ impl ComponentPixels {
         connectivity: Connectivity,
         mut visit: impl FnMut(usize),
     ) {
+        debug_assert_eq!(self.above.len(), self.pixels.len(), "the rows are linked");
         let pos = self.pixels[index].pos;
         if index > 0 && self.pixels[index - 1].pos == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
             visit(index - 1);
@@ -207,6 +211,7 @@ mod tests {
         };
         let mut component = ComponentPixels::default();
         component.fill(&Component::new(&data, &pixels, &labels));
+        component.link();
         assert_eq!(component.row_starts.len(), 3 + 1);
         assert_eq!(component.index_of(Vec2us::new(7, 3)), None);
         let arm = component.index_of(Vec2us::new(5, 4)).unwrap();

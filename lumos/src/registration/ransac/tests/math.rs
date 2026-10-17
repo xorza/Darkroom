@@ -1,5 +1,5 @@
 use super::*;
-use crate::registration::ransac::transforms::adaptive_iterations;
+use crate::registration::ransac::sampling::adaptive_iterations;
 
 /// A sample is degenerate at a noise scale of 1 px when two of its points are under 1 px apart —
 /// exactly 1 px is not — or when any three of them form a triangle less than 1 px high over its
@@ -71,9 +71,11 @@ fn degenerate_samples() {
     }
 }
 
-/// `N = ⌈ln(1 − p) / ln(1 − wⁿ)⌉`, and 1 at `w` = 0 or 1, where it is undefined.
+/// `N = ⌈ln(1 − p) / ln(1 − wⁿ)⌉`, and 1 at `w` = 0 or 1, where it is undefined, within the cap:
+/// 1000 here, and 40 in the last row, where 688 would otherwise run.
 #[test]
 fn adaptive_iterations_hand_values() {
+    assert_eq!(adaptive_iterations(0.1, 2, 0.999, 40), 40, "capped");
     for (w, n, p, expected, derivation) in [
         (0.0, 2, 0.99, 1, "no inliers"),
         (1.0, 2, 0.99, 1, "all inliers"),
@@ -85,6 +87,6 @@ fn adaptive_iterations_hand_values() {
         (0.5, 3, 0.999, 52, "ln 0.001 / ln 0.875 = 51.73"),
         (0.5, 4, 0.999, 108, "ln 0.001 / ln 0.9375 = 107.03"),
     ] {
-        assert_eq!(adaptive_iterations(w, n, p), expected, "{derivation}");
+        assert_eq!(adaptive_iterations(w, n, p, 1000), expected, "{derivation}");
     }
 }

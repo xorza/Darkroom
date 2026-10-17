@@ -1,9 +1,9 @@
-//! [`Subtractor`]: a master in its role, and how subtracting it from a frame is done and recorded.
+//! [`Subtractor`]: a master in its role, and how its removal from a frame is recorded.
 
 use crate::calibration::dark_match::DarkMatch;
-use crate::calibration::error::CalibrationError;
+use crate::calibration::error::SubtractionFault;
 use crate::calibration::master_role::MasterRole;
-use crate::frame::unverified_conditions::UnverifiedConditions;
+use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::sample_domain::{DomainMap, SampleDomain};
 
@@ -16,49 +16,33 @@ pub(crate) struct Subtractor<'a> {
 }
 
 impl Subtractor<'_> {
+    /// What the master removes from a frame: its role's signal, less what it lost itself.
+    pub(crate) const fn removes(self) -> CalibrationState {
+        self.role
+            .signal()
+            .without(self.master.metadata.derived.calibration())
+    }
+
     /// The map that expresses the master's samples in `frame`, the domain a frame states.
     ///
     /// The identity when either declares no domain: a synthesized frame has none, and there is
-    /// nothing to convert between. An error when the two cannot be related exactly — a different
+    /// nothing to convert between. Refused when the two cannot be related exactly — a different
     /// stated unit, a span the decoder had to assume, or a known pedestal against an unknown one —
     /// because subtracting across such a gap is silently wrong.
     pub(crate) fn map_into(
         self,
         frame: Option<&SampleDomain>,
-    ) -> Result<DomainMap, CalibrationError> {
-        let (Some(frame), Some(master)) = (frame, &self.master.metadata.domain) else {
+    ) -> Result<DomainMap, SubtractionFault> {
+        let (Some(frame), Some(master)) = (frame, self.master.metadata.derived.domain()) else {
             return Ok(DomainMap::IDENTITY);
         };
         master
             .conversion_to(frame)
-            .ok_or_else(|| CalibrationError::SampleDomainMismatch {
-                component: self.role,
+            .ok_or_else(|| SubtractionFault::Domain {
+                role: self.role,
                 frame: frame.clone(),
                 master: master.clone(),
             })
-    }
-
-    /// [`Self::remove_from`] through the map from the master's domain to `frame`'s current one.
-    pub(crate) fn subtract_from(
-        self,
-        frame: &mut CfaImage,
-        matched: Option<DarkMatch>,
-    ) -> Result<(), CalibrationError> {
-        let map = self.map_into(frame.metadata.domain.as_ref())?;
-        self.remove_from(frame, map, matched);
-        Ok(())
-    }
-
-    /// Subtract the master from `frame` through `map`, its dark signal scaled as `matched` says,
-    /// and [record](Self::record_removal) it.
-    pub(crate) fn remove_from(
-        self,
-        frame: &mut CfaImage,
-        map: DomainMap,
-        matched: Option<DarkMatch>,
-    ) {
-        frame.subtract_scaled(self.master, map, matched.map_or(1.0, DarkMatch::factor));
-        self.record_removal(frame, matched);
     }
 
     /// Record in `frame` what the master held and what its match did not compare, once its
@@ -66,30 +50,22 @@ impl Subtractor<'_> {
     /// can be left behind.
     pub(crate) fn record_removal(self, frame: &mut CfaImage, matched: Option<DarkMatch>) {
         let role = self.role;
-        let removes = role.signal().without(self.master.metadata.calibration);
+        let removes = self.removes();
         debug_assert!(
-            !frame.metadata.calibration.overlaps(removes),
+            !frame.metadata.derived.calibration().overlaps(removes),
             "{role} would remove {removes:?} from a frame that lost {:?}",
-            frame.metadata.calibration
+            frame.metadata.derived.calibration()
         );
         debug_assert_eq!(
             matched.is_some(),
             removes.thermal,
             "{role}: a master is matched to the frame exactly when it holds dark signal"
         );
-        frame.metadata.calibration = frame.metadata.calibration.union(removes);
+        frame.metadata.derived.record_removal(removes);
         if let Some(matched) = matched {
-            // A temperature that differed is no more known to match than one never compared.
-            let differed = UnverifiedConditions {
-                exposure: false,
-                temperature: matched.temperature_difference.is_some(),
-            };
-            frame.metadata.unverified_dark = frame
-                .metadata
-                .unverified_dark
-                .union(matched.unverified)
-                .union(differed);
-            if let Some(difference) = matched.temperature_difference {
+            let comparison = matched.comparison;
+            frame.metadata.derived.record_dark_comparison(comparison);
+            if let Some(difference) = comparison.temperature_difference {
                 tracing::warn!(%role, %difference, "a dark of another temperature was subtracted");
             }
         }

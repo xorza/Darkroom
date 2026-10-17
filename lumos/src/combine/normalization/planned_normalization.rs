@@ -2,9 +2,9 @@
 
 use arrayvec::ArrayVec;
 
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
+use crate::combine::normalization::Normalization;
 use crate::combine::normalization::common_domain::CommonDomain;
-use crate::combine::stack_config::Normalization;
 use crate::frame_store::stratified_samples::StratifiedSamples;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::radix_median::RadixMedian;
@@ -38,7 +38,7 @@ impl PlannedNormalization {
     /// holds.
     ///
     /// Each slot is measured over at most [`SAMPLE_LIMIT`] of its pixels. Over the pixels the
-    /// frames share, the run holds the domain's mask, one more per colour of a mosaic, each slot's
+    /// frames share, the run holds the domain's mask, one more per color of a mosaic, each slot's
     /// sample indices and the reference's samples, and each job in work a median's histogram, a
     /// frame's samples and one transient copy of them — for its median, its seed's ratios, or a
     /// fit's residuals. A set every frame covers whole holds the same less the masks and the
@@ -72,7 +72,9 @@ impl PlannedNormalization {
         let workers = threads.min(frame_count * slots.count());
         let sample = size_of::<f32>();
         let histogram = RadixMedian::HISTOGRAM_BYTES;
-        let pair = mask + most * size_of::<usize>() + 2 * most * sample + histogram;
+        // A pair's domain, its sample indices and the median's histogram; a global fit adds the two
+        // frames' samples and the reference's copy its side keeps.
+        let pair = mask + most * size_of::<usize>() + histogram;
         match (normalization, coverage) {
             (Normalization::None, _) => 0,
             (Normalization::Multiplicative, SetCoverage::Common) => masks + workers * histogram,
@@ -80,7 +82,9 @@ impl PlannedNormalization {
                 masks + shared + workers * (histogram + 2 * most * sample)
             }
             (Normalization::Multiplicative, SetCoverage::PerChannel) => workers * pair,
-            (Normalization::Global, SetCoverage::PerChannel) => workers * (pair + most * sample),
+            (Normalization::Global, SetCoverage::PerChannel) => {
+                workers * (pair + 3 * most * sample)
+            }
         }
     }
 }

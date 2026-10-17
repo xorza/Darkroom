@@ -5,18 +5,21 @@ use std::path::Path;
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::combine::error::StackConfigError;
-use crate::combine::stack_config::{StackConfig, Weighting};
+use crate::combine::stack_config::StackConfig;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::calibration_notes::CalibrationNotes;
-use crate::pipeline::error::AlignStackError;
-use crate::pipeline::light_source::{LightFiles, LightSource, MosaicPreparation, Preparation};
+use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
+use crate::pipeline::light_files::{LightFiles, Preparation};
+use crate::pipeline::light_source::LightSource;
+use crate::pipeline::mosaic_preparation::MosaicPreparation;
 use crate::progress::progress_monitor::ProgressMonitor;
+use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
+use crate::registration::resample::warp_params::WarpParams;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 
 /// How the reference frame (the alignment anchor) is chosen.
@@ -38,8 +41,9 @@ pub(super) struct ReferenceCandidate {
 }
 
 impl Reference {
-    /// The index of the reference (alignment anchor) among `candidates`, which must have the
-    /// `required` stars registration needs.
+    /// The index of the reference (alignment anchor) among `candidates`, one per light, which must
+    /// have the `required` stars registration needs. An [`Self::Index`] is in range: the run
+    /// validated it against the lights.
     ///
     /// `Auto` takes the sharpest frame among those with `required` stars: the lowest median FWHM,
     /// as Siril chooses, ties to the lowest index. Every other frame is warped onto it, so its
@@ -52,12 +56,7 @@ impl Reference {
     ) -> Result<usize, AlignStackError> {
         let index = match self {
             Self::Index(index) => {
-                if index >= candidates.len() {
-                    return Err(AlignStackError::ReferenceOutOfRange {
-                        index,
-                        count: candidates.len(),
-                    });
-                }
+                debug_assert!(index < candidates.len());
                 index
             }
             Self::Auto => candidates
@@ -81,15 +80,23 @@ impl Reference {
                     |(i, _)| i,
                 ),
         };
-        let found = candidates[index].stars;
-        if found < required {
+        candidates[index].check(index, required)?;
+        Ok(index)
+    }
+}
+
+impl ReferenceCandidate {
+    /// This candidate, light `index`, as the reference: refused without the `required` stars
+    /// registration needs.
+    pub(super) const fn check(self, index: usize, required: usize) -> Result<(), AlignStackError> {
+        if self.stars < required {
             return Err(AlignStackError::ReferenceInsufficientStars {
                 index,
-                found,
+                found: self.stars,
                 required,
             });
         }
-        Ok(index)
+        Ok(())
     }
 }
 
@@ -98,6 +105,8 @@ impl Reference {
 pub struct AlignStackConfig {
     pub detection: StarDetectionConfig,
     pub registration: RegistrationConfig,
+    /// How a registered light is resampled onto the reference's grid.
+    pub warp: WarpParams,
     /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
@@ -113,6 +122,7 @@ impl Default for AlignStackConfig {
         Self {
             detection: StarDetectionConfig::default(),
             registration: RegistrationConfig::default(),
+            warp: WarpParams::default(),
             stack: StackConfig::light(),
             reference: Reference::default(),
             cosmic_ray: None,
@@ -144,7 +154,7 @@ impl AlignStackConfig {
     /// All frames are expected to share the same dimensions (same sensor). The reference frame is
     /// added to the stack unwarped; every other frame is aligned to it. Frames that fail to
     /// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
-    /// [`AlignmentSummary::dropped`](crate::AlignmentSummary::dropped); the stack proceeds with
+    /// [`AlignStackResult::dropped`]; the stack proceeds with
     /// whatever aligned. A single input frame is returned as its own "stack".
     ///
     /// Every light must share the first one's dimensions and hold only finite samples; each is
@@ -162,18 +172,14 @@ impl AlignStackConfig {
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
-        if lights.is_empty() {
-            return Err(AlignStackError::NoFrames);
-        }
-        self.validate_linear(lights.len())?;
-        let run = self.begin(ingest, monitor);
-        let detected = LightSource::<&Path>::Held(lights).detect(&run)?;
-        run.register_warp_and_stack(detected)
+        self.linear()?;
+        self.begin(lights.len(), ingest, monitor)?
+            .stack(LightSource::<&Path>::Held(lights))
     }
 
     /// Detect → register → warp → stack calibrated linear lights read from files: FITS or
-    /// floating-point TIFF, as [`LinearImage::from_file`] reads them — the output of Siril or
-    /// PixInsight, for one.
+    /// floating-point TIFF, as [`LoadContext::linear`](crate::LoadContext::linear) reads them — the
+    /// output of Siril or PixInsight, for one.
     ///
     /// [`Self::align_stack_images`] for frames on disk: each light is decoded on a worker, checked,
     /// and its stars detected, and when the set would not fit the memory it plans against, parked
@@ -186,12 +192,13 @@ impl AlignStackConfig {
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
-        if light_paths.is_empty() {
-            return Err(AlignStackError::NoFrames);
-        }
-        self.validate_linear(light_paths.len())?;
-        let run = self.begin(ingest, monitor);
-        LightFiles::new(light_paths, Preparation::Linear, &run.ingest)?.stack(&run)
+        self.linear()?;
+        let run = self.begin(light_paths.len(), ingest, monitor)?;
+        run.stack(LightSource::Files(LightFiles::new(
+            light_paths,
+            Preparation::Linear,
+            &run.ingest,
+        )?))
     }
 
     /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
@@ -199,7 +206,7 @@ impl AlignStackConfig {
     /// For each raw light: load it as a `CfaImage`, apply the masters (dark/flat/defect) in place,
     /// demosaic to a `LinearImage`, and detect its stars, then register, warp and combine. A frame
     /// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
-    /// dropped and reported in [`AlignmentSummary::dropped`](crate::AlignmentSummary::dropped).
+    /// dropped and reported in [`AlignStackResult::dropped`].
     ///
     /// With [`Reference::Index`] the reference is prepared first, and each other light then goes
     /// through its preparation, its registration and its warp in one pass, written once. With
@@ -224,86 +231,97 @@ impl AlignStackConfig {
             paths: light_paths,
             masters,
         } = lights;
-        if light_paths.is_empty() {
-            return Err(AlignStackError::NoFrames);
-        }
-        self.validate(light_paths.len())?;
-        let run = self.begin(ingest, monitor);
+        let run = self.begin(light_paths.len(), ingest, monitor)?;
         let notes = CalibrationNotes::default();
         let preparation = Preparation::Calibrate(MosaicPreparation {
             masters,
             cosmic_ray: self.cosmic_ray.as_ref(),
             notes: &notes,
         });
-        let mut result = LightFiles::new(light_paths, preparation, &run.ingest)?.stack(&run)?;
+        let mut result = run.stack(LightSource::Files(LightFiles::new(
+            light_paths,
+            preparation,
+            &run.ingest,
+        )?))?;
         notes.report_into(&mut result.product.report, masters);
         Ok(result)
     }
 
-    /// A registered stack under this configuration, taking its memory reading and decode policy
-    /// from `ingest`, and its progress and cancel token from `monitor`, now.
-    fn begin(&self, ingest: &IngestConfig, monitor: ProgressMonitor) -> AlignStackRun<'_> {
-        AlignStackRun {
-            config: self,
-            ingest: IngestRun::new(ingest, monitor),
+    /// A registered stack of `count` lights under this configuration, taking its memory reading
+    /// and decode policy from `ingest`, and its progress and cancel token from `monitor`, now.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignStackError::NoFrames`], or a configuration [`Self::validate`] refuses.
+    fn begin(
+        &self,
+        count: usize,
+        ingest: &IngestConfig,
+        monitor: ProgressMonitor,
+    ) -> Result<AlignStackRun<'_>, AlignStackError> {
+        if count == 0 {
+            return Err(AlignStackError::NoFrames);
         }
+        self.validate(count)?;
+        Ok(AlignStackRun {
+            config: self,
+            registrar: Registrar::new(&self.registration),
+            ingest: IngestRun::new(ingest, monitor),
+        })
     }
 
-    /// Validate every stage's configuration for a run over `frame_count` lights.
-    ///
-    /// Each stage validates its own config where it runs, but by then the run has paid for
-    /// everything upstream — and the registration stage cannot report a config problem at all,
-    /// because it returns the same error type for "this config is invalid" and "these two star
-    /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking every
-    /// stage here means a bad config is reported as one, before any frame is decoded. Manual
-    /// weights are given one per input light, so their count is checked against the lights too.
-    fn validate(&self, frame_count: usize) -> Result<(), AlignStackError> {
+    /// Validate every stage's configuration for a run over `frame_count` lights, where the run is
+    /// built: every stage after it takes the configuration as checked, so a failure past here is
+    /// the data's. Manual weights are given one per light, so their count is checked against the
+    /// lights too.
+    fn validate(&self, frame_count: usize) -> Result<(), AlignStackConfigError> {
         self.detection
             .validate()
-            .map_err(AlignStackError::DetectionConfig)?;
+            .map_err(AlignStackConfigError::Detection)?;
         self.registration
             .validate()
-            .map_err(AlignStackError::RegistrationConfig)?;
-        self.stack
-            .validate()
-            .map_err(|source| AlignStackError::Stack(source.into()))?;
-        if let Weighting::Manual(weights) = &self.stack.weighting
-            && weights.len() != frame_count
+            .map_err(AlignStackConfigError::Registration)?;
+        self.warp.validate().map_err(AlignStackConfigError::Warp)?;
+        self.stack.validate(frame_count)?;
+        if let Reference::Index(index) = self.reference
+            && index >= frame_count
         {
-            return Err(AlignStackError::Stack(
-                StackConfigError::ManualWeightCountMismatch {
-                    expected: frame_count,
-                    actual: weights.len(),
-                }
-                .into(),
-            ));
+            return Err(AlignStackConfigError::ReferenceOutOfRange {
+                index,
+                count: frame_count,
+            });
         }
         if let Some(cosmic_ray) = &self.cosmic_ray {
             cosmic_ray
                 .validate()
-                .map_err(AlignStackError::CosmicRayConfig)?;
+                .map_err(AlignStackConfigError::CosmicRay)?;
         }
         Ok(())
     }
 
-    /// [`Self::validate`] for lights already linear, which no cosmic-ray pass can run on.
-    fn validate_linear(&self, frame_count: usize) -> Result<(), AlignStackError> {
+    /// Refuse a cosmic-ray pass for lights already linear, which no such pass can run on.
+    const fn linear(&self) -> Result<(), AlignStackConfigError> {
         if self.cosmic_ray.is_some() {
-            return Err(AlignStackError::CosmicRayOnLinearLights);
+            return Err(AlignStackConfigError::CosmicRayOnLinearLights);
         }
-        self.validate(frame_count)
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::pipeline::align_stack_config::{Reference, ReferenceCandidate};
-    use crate::pipeline::error::AlignStackError;
+    use std::path::Path;
+
+    use crate::ingest::ingest_config::IngestConfig;
+    use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
+    use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
+    use crate::progress::progress_monitor::ProgressMonitor;
+    use crate::registration::resample::warp_params::WarpParams;
 
     /// `Auto` takes the lowest median FWHM among the frames with the stars registration needs:
     /// frame 2 at 2.5 of 2.5, 3.0 and 3.5; a tie goes to the lowest index; a frame below the gate
     /// is passed over however sharp, frame 1 at 2.0 with 30 of 40 stars; and when none clears the
-    /// gate, the one with the most stars is the one reported. An index must lie in the input.
+    /// gate, the one with the most stars is the one reported.
     #[test]
     fn auto_takes_the_sharpest_frame_with_enough_stars() {
         let candidates = |counts: &[usize], fwhms: &[f32]| -> Vec<ReferenceCandidate> {
@@ -330,9 +348,40 @@ mod tests {
                 required: 40
             })
         ));
+    }
+
+    /// A reference index must lie among the lights, and is checked before any light is decoded:
+    /// the path here does not exist, so a decode would have reported a load error instead.
+    #[test]
+    fn a_reference_index_past_the_lights_is_refused_before_decoding() {
+        let config = AlignStackConfig {
+            reference: Reference::Index(1),
+            ..AlignStackConfig::default()
+        };
+        let result = config.align_stack_paths(
+            &[Path::new("does-not-exist.fits")],
+            &IngestConfig::default(),
+            ProgressMonitor::unattended(),
+        );
         assert!(matches!(
-            Reference::Index(5).select(&candidates(&[50, 60], &[3.0, 3.0]), 40),
-            Err(AlignStackError::ReferenceOutOfRange { index: 5, count: 2 })
+            result,
+            Err(AlignStackError::Config(
+                AlignStackConfigError::ReferenceOutOfRange { index: 1, count: 1 }
+            ))
         ));
+        assert!(config.validate(2).is_ok());
+        let error = AlignStackConfig {
+            warp: WarpParams {
+                border_value: f32::NAN,
+                ..WarpParams::default()
+            },
+            ..AlignStackConfig::default()
+        }
+        .validate(2)
+        .unwrap_err();
+        assert!(
+            matches!(&error, AlignStackConfigError::Warp(invalid) if invalid.field == "warp border_value"),
+            "{error:?}"
+        );
     }
 }

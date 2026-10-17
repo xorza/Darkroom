@@ -1,18 +1,19 @@
 //! Tests for the dense solver.
 
 use crate::internals::assertions::assert_close;
-use crate::math::linear_system::solve_in_place;
+use crate::math::linear_system::Lu;
 
-/// The distortion solvers' threshold.
+/// A threshold for matrices of entries of order 1.
 const COARSE: f64 = 1e-12;
-/// The Levenberg-Marquardt step's threshold.
+/// A threshold that admits a pivot of 1e-13.
 const FINE: f64 = 1e-15;
 
 /// Solve a copy, so a case can be written as rows and read as a solution.
 fn solved<const N: usize>(a: [[f64; N]; N], b: [f64; N], singular_below: f64) -> Option<[f64; N]> {
     let mut matrix = a;
+    let mut pivots = [0; N];
     let mut rhs = b;
-    solve_in_place(matrix.as_flattened_mut(), &mut rhs, singular_below)?;
+    Lu::factor(matrix.as_flattened_mut(), &mut pivots, singular_below)?.solve(&mut rhs);
     Some(rhs)
 }
 
@@ -25,8 +26,8 @@ fn multiply<const N: usize>(a: &[[f64; N]; N], x: &[f64; N]) -> [f64; N] {
     out
 }
 
-/// Systems whose solution is known by construction, at both sizes the LM step uses and with the
-/// two structures elimination has to handle: a zero leading pivot, and a dense row.
+/// Systems whose solution is known by construction, at 5 × 5 and 6 × 6 and with the two
+/// structures elimination has to handle: a zero leading pivot, and a dense row.
 #[test]
 fn known_systems_are_solved_exactly() {
     let identity5 = [
@@ -63,7 +64,7 @@ fn known_systems_are_solved_exactly() {
 }
 
 /// A dense symmetric system at each size, checked by recovering the `x` its `b` was built from —
-/// the shape the LM step actually feeds in (a damped Hessian). By Gershgorin each matrix is
+/// a damped Hessian's shape. By Gershgorin each matrix is
 /// diagonally dominant with eigenvalues in [1.5, 13.9], [1.6, 11.2] and [2, 6], so condition
 /// numbers under 10; elimination with partial pivoting is backward stable to about `3n·ε`, so
 /// each `x` is good to `10 · 18ε · 6` ≈ 2.4e-13, and the residual `A·x − b` likewise: 1e-12.
@@ -137,8 +138,8 @@ fn singular_systems_return_none() {
     assert!(solved(nan_diagonal, b5, FINE).is_none(), "NaN pivot");
 }
 
-/// The threshold is the caller's to set, and it decides: a pivot of 1e-13 is a solvable system to
-/// the LM step and a singular one to the distortion fits.
+/// The threshold is the caller's to set, and it decides: a pivot of 1e-13 is a solvable system
+/// under one threshold and a singular one under the other.
 #[test]
 fn the_pivot_threshold_decides_which_systems_are_singular() {
     let nearly = [[1e-13, 0.0], [0.0, 1.0]];
@@ -148,21 +149,29 @@ fn the_pivot_threshold_decides_which_systems_are_singular() {
     assert!(solved(nearly, b, COARSE).is_none());
 }
 
-/// The solution lands in `b`, and `a` holds the elimination's upper triangle — the contract that
-/// lets the caller own the storage. `[1 2; 2 2]·x = [3, 4]` swaps its rows for the larger pivot,
-/// eliminates `[1 2] − ½·[2 2] = [·, 1]` with `3 − ½·4 = 1`, and so solves `x = [1, 1]`; the strict
-/// lower triangle keeps the 1 the swap moved there, never read again.
+/// The factors land in `a` and the row swaps in the pivots, and one factorization solves every
+/// right-hand side. `[1 2; 2 2]` swaps its rows for the larger pivot, stores the multiplier ½ below
+/// it and `2 − ½·2 = 1` beside it: `[2 2; ½ 1]`, the pivots `[1, 1]`. Then `[3, 4]` swaps to
+/// `[4, 3]`, goes forward to `3 − ½·4 = 1` and back to `x = [1, 1]`; `[2, 2]` swaps to `[2, 2]`,
+/// forward to `1` and back to `x = [0, 1]`.
 #[test]
-fn both_operands_are_consumed() {
+fn one_factorization_solves_every_right_hand_side() {
     let mut a = [1.0, 2.0, 2.0, 2.0];
+    let mut pivots = [0; 2];
+    let lu = Lu::factor(&mut a, &mut pivots, FINE).unwrap();
     let mut b = [3.0, 4.0];
-    solve_in_place(&mut a, &mut b, FINE).unwrap();
+    lu.solve(&mut b);
     assert_eq!(b, [1.0, 1.0]);
-    assert_eq!(a, [2.0, 2.0, 1.0, 1.0]);
+    let mut b = [2.0, 2.0];
+    lu.solve(&mut b);
+    assert_eq!(b, [0.0, 1.0]);
+    assert_eq!(a, [2.0, 2.0, 0.5, 1.0]);
+    assert_eq!(pivots, [1, 1]);
 
     // 1×1 is the degenerate case the loops have to survive: no elimination, one division.
     let mut a = [4.0];
+    let mut pivots = [0];
     let mut b = [10.0];
-    solve_in_place(&mut a, &mut b, FINE).unwrap();
+    Lu::factor(&mut a, &mut pivots, FINE).unwrap().solve(&mut b);
     assert_eq!(b, [2.5]);
 }

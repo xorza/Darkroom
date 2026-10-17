@@ -30,7 +30,7 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.colors.badge_impure, p.badge_impure);
     assert_eq!(theme.status.busy, p.status_busy);
     // Each of those is a distinct role, so a palette that collapsed them
-    // onto one colour would pass every assertion above.
+    // onto one color would pass every assertion above.
     assert_ne!(theme.canvas.bg, theme.card.header_fill);
     assert_ne!(theme.ports.input, theme.ports.output);
     // The palantir half is the same palette, not palantir's own default.
@@ -49,7 +49,7 @@ fn default_wiring_and_menu_tweak() {
 /// layer, and the two never share a surface. Two badges do, so this is
 /// the pair the roster cannot be allowed to collapse. Like
 /// [`chrome_surfaces_stack_darkest_first`], it is a rule a table of
-/// colours cannot state about itself.
+/// colors cannot state about itself.
 #[test]
 fn badges_are_told_apart_from_each_other() {
     let c = Theme::default().colors;
@@ -73,7 +73,7 @@ fn badges_are_told_apart_from_each_other() {
 /// it, an inactive tab, a node, a hovered control, a pressed one — so
 /// each must be lighter than the one under it. The palette's generator
 /// checks this before it writes the file; this is the half that would
-/// catch a hand-edited asset, and it is the one rule a table of colours
+/// catch a hand-edited asset, and it is the one rule a table of colors
 /// cannot state about itself.
 #[test]
 fn chrome_surfaces_stack_darkest_first() {
@@ -115,7 +115,7 @@ fn luminance(c: RgbaF32) -> f32 {
 }
 
 /// The broken-path look is palantir's text edit with every state's border in
-/// the error colour, at the width each state already had.
+/// the error color, at the width each state already had.
 #[test]
 fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
     let theme = Theme::default();

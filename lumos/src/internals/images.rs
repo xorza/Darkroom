@@ -5,10 +5,12 @@
 //! `Buffer2::new_filled` / `new` / `new_default`, which are already named constructors doing
 //! three different things — wrapping them here would add a name without removing a choice.
 
+use imaginarium::Buffer2;
+
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::math::size2us::Size2us;
-use imaginarium::Buffer2;
 
 /// Single-channel image from explicit pixel values, row-major.
 pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
@@ -17,5 +19,8 @@ pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
 
 /// Three-channel image from planar values, one `Vec` per channel: red, green and blue.
 pub(crate) fn rgb_image(size: Size2us, channels: [Vec<f32>; 3]) -> LinearImage {
-    LinearImage::from_planar_channels(ImageDimensions::new((size.width, size.height), 3), channels)
+    LinearImage::from_planar_channels(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
+        channels,
+    )
 }

@@ -5,56 +5,37 @@ mod synthetic;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::assertions::assert_close;
+use crate::io::decoder::Decoder;
+use crate::io::decoder::linear_decoder::LinearDecoder;
+use crate::io::writer;
 use crate::math::vec2us::Vec2us;
 use common::TempDir;
 use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
-use crate::io::PREVIEW_IMAGE_EXTENSIONS;
-use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use fits_well::image::SampleType;
 use imaginarium::Buffer2;
 
-use crate::frame::stackable_image::StackableImage;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
-use crate::image::preview_image::{PreviewImage, PreviewPixels};
+use crate::image::preview_image::PreviewPixels;
+use crate::image::quality_flags::QualityFlags;
 use crate::io::load_context::LoadContext;
-use crate::io::raw::RAW_EXTENSIONS;
-
-/// FITS first, then every camera-RAW extension, then imaginarium's rasters; no extension names
-/// two containers.
-#[test]
-fn preview_extensions_are_fits_then_raw_then_imaginarium() {
-    let raw = RAW_EXTENSIONS;
-    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[..2], ["fits", "fit"]);
-    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[2..2 + raw.len()], raw);
-    assert_eq!(
-        &PREVIEW_IMAGE_EXTENSIONS[2 + raw.len()..],
-        ["png", "jpg", "jpeg", "tiff", "tif"]
-    );
-    for extension in [
-        "orf", "rw2", "pef", "nrw", "srw", "iiq", "3fr", "erf", "mrw", "rwl",
-    ] {
-        assert!(raw.contains(&extension), "{extension}");
-    }
-    let mut unique = PREVIEW_IMAGE_EXTENSIONS.to_vec();
-    unique.sort_unstable();
-    unique.dedup();
-    assert_eq!(unique.len(), PREVIEW_IMAGE_EXTENSIONS.len());
-}
+use crate::io::null_policy::NullPolicy;
 
 #[test]
 fn metadata_default() {
     let meta = ImageMetadata::default();
-    assert!(meta.object.is_none());
-    assert!(meta.camera_white_balance.is_none());
-    assert!(meta.provenance.is_none());
+    assert!(meta.header.object.is_none());
+    assert!(meta.header.camera_white_balance.is_none());
+    assert!(meta.derived.provenance().is_none());
 }
 
 #[test]
 fn convert_to_imaginarium_image_grayscale() {
-    let astro = LinearImage::from_pixels(
-        ImageDimensions::new((3, 2), 1),
+    let astro = LinearImage::from_interleaved(
+        ImageDimensions::new((3, 2), ChannelLayout::Mono),
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
     );
 
@@ -74,8 +55,8 @@ fn convert_to_imaginarium_image_grayscale() {
 
 #[test]
 fn convert_to_imaginarium_image_rgb() {
-    let astro = LinearImage::from_pixels(
-        ImageDimensions::new((2, 2), 3),
+    let astro = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
         vec![
             1.0, 0.0, 0.0, // red
             0.0, 1.0, 0.0, // green
@@ -107,7 +88,7 @@ fn convert_fits_to_imaginarium_image() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let astro = LinearImage::from_file(path, &LoadContext::default()).unwrap();
+    let astro = LoadContext::default().linear(path).unwrap();
     let image: Image = astro.into();
 
     let desc = image.desc();
@@ -122,35 +103,29 @@ fn load_full_example_fits() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
+    let image = LoadContext::default().linear(path).unwrap();
 
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
     assert_eq!(image.channels(), 1);
     assert!(image.is_grayscale());
     assert_eq!(image.pixel_count(), 10000);
-    assert_eq!(image.metadata.sample_type, Some(SampleType::I32));
+    assert_eq!(image.metadata.header.sample_type, Some(SampleType::I32));
 
-    // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
-    // the domain carries that span back: the physical ADU value stays recoverable.
-    // The divisor is computed in f32, where 2³² − 1 rounds to 2³².
-    let physical_scale = image.metadata.domain.as_ref().unwrap().scale;
-    assert_eq!(physical_scale, 4_294_967_296.0);
-    let physical_scale = physical_scale as f32;
+    // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1,
+    // exact in f64, and the domain carries that span back: the physical ADU value stays
+    // recoverable. The sample is that quotient narrowed once.
+    let physical_scale = image.metadata.derived.domain().unwrap().scale;
+    assert_eq!(physical_scale, 4_294_967_295.0);
     let pixel = image.channel(0)[image.dimensions().size().index_of(Vec2us::new(5, 20))];
-    assert_close!(
-        pixel,
-        (152.0 / 4_294_967_295.0_f64) as f32,
-        1e-15,
-        "{pixel}"
-    );
-    assert_close!(pixel * physical_scale, 152.0, 1e-3, "{pixel}");
+    assert_eq!(pixel, (152.0 / 4_294_967_295.0_f64) as f32);
+    assert_close!(f64::from(pixel) * physical_scale, 152.0, 1e-5, "{pixel}");
 
     // New metadata fields are None for this simple test file
-    assert!(image.metadata.filter.is_none());
-    assert!(image.metadata.gain.is_none());
-    assert!(image.metadata.ccd_temp.is_none());
-    assert!(image.metadata.image_type.is_none());
+    assert!(image.metadata.header.filter.is_none());
+    assert!(image.metadata.header.gain.is_none());
+    assert!(image.metadata.header.ccd_temp.is_none());
+    assert!(image.metadata.header.image_type.is_none());
 }
 
 #[test]
@@ -168,26 +143,29 @@ fn from_image_no_stride_padding() {
     assert_eq!(linear.channel(0).pixels(), &*pixels);
 }
 
-/// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and colour.
+/// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and color.
 #[test]
 fn saved_tiff_round_trips_its_samples() {
     let dir = TempDir::new("lumos-save-tiff");
     for (name, image) in [
         (
             "gray.tiff",
-            LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]),
+            LinearImage::from_interleaved(
+                ImageDimensions::new((2, 2), ChannelLayout::Mono),
+                vec![0.1, 0.2, 0.3, 0.4],
+            ),
         ),
         (
             "rgb.tiff",
-            LinearImage::from_pixels(
-                ImageDimensions::new((2, 2), 3),
+            LinearImage::from_interleaved(
+                ImageDimensions::new((2, 2), ChannelLayout::Rgb),
                 vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.25],
             ),
         ),
     ] {
         let output_path = dir.join(name);
-        image.save(&output_path).unwrap();
-        let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
+        writer::raster(&image, &output_path).unwrap();
+        let loaded = LoadContext::default().linear(&output_path).unwrap();
         assert_eq!(loaded.dimensions(), image.dimensions(), "{name}");
         for channel in 0..image.channels() {
             assert_eq!(
@@ -197,6 +175,45 @@ fn saved_tiff_round_trips_its_samples() {
             );
         }
     }
+}
+
+/// A float TIFF's NaN is a null like a FITS one: the default policy fills it with the median of
+/// the finite samples (0.5) and flags it `NO_DATA`, and `Reject` refuses the load.
+#[test]
+fn a_float_tiffs_nulls_follow_the_load_policy() {
+    let dir = TempDir::new("lumos-tiff-nulls");
+    let path = dir.join("holes.tiff");
+    let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
+    Image::new_with_data(
+        ImageDesc::new(2, 2, ColorFormat::L_F32),
+        bytemuck::cast_slice(&samples).to_vec(),
+    )
+    .unwrap()
+    .save_file(&path)
+    .unwrap();
+
+    let masked = LoadContext::default().linear(&path).unwrap();
+    assert_eq!(masked.channel(0).pixels(), &[0.25, 0.5, 0.5, 0.75]);
+    let flags = masked.flags().unwrap();
+    assert_eq!(flags.at(1), QualityFlags::NO_DATA);
+    assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
+
+    let strict = LoadContext {
+        nulls: NullPolicy::Reject,
+        ..LoadContext::default()
+    };
+    let refused = strict.linear(&path).unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            ImageError::NullSamples {
+                count: 1,
+                first_index: 1,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
 }
 
 #[test]
@@ -211,16 +228,14 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .unwrap();
     float_image.save_file(&float_path).unwrap();
 
-    let scientific = LinearImage::from_file(&float_path, &LoadContext::default()).unwrap();
+    let scientific = LoadContext::default().linear(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
-    let preview = PreviewImage::from_file(&float_path, &LoadContext::default()).unwrap();
+    let preview = LoadContext::default().preview(&float_path).unwrap();
     assert!(
         matches!(preview.into_pixels(), PreviewPixels::Interleaved(_)),
         "a raster decode stays interleaved"
     );
-    let preview: Image = PreviewImage::from_file(&float_path, &LoadContext::default())
-        .unwrap()
-        .into();
+    let preview: Image = LoadContext::default().preview(&float_path).unwrap().into();
     assert_eq!(preview.desc().color_format, ColorFormat::L_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
@@ -252,15 +267,15 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     ] {
         integer_image.save_file(path).unwrap();
         for error in [
-            LinearImage::from_file(path, &LoadContext::default()).unwrap_err(),
-            <LinearImage as StackableImage>::load(path, &LoadContext::default()).unwrap_err(),
+            LoadContext::default().linear(path).unwrap_err(),
+            LinearDecoder::load(path, &LoadContext::default()).unwrap_err(),
         ] {
             assert!(
                 matches!(&error, ImageError::ScientificInputRejected { reason, .. } if *reason == refusal),
                 "{path:?}: {error:?}"
             );
         }
-        PreviewImage::from_file(path, &LoadContext::default()).unwrap();
+        LoadContext::default().preview(path).unwrap();
     }
 
     let alpha_path = dir.join("alpha.tiff");
@@ -273,15 +288,15 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .save_file(&alpha_path)
     .unwrap();
     assert!(matches!(
-        LinearImage::from_file(&alpha_path, &LoadContext::default()),
+        LoadContext::default().linear(&alpha_path),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::AlphaChannel,
             ..
         })
     ));
-    let alpha_preview = PreviewImage::from_file(&alpha_path, &LoadContext::default()).unwrap();
+    let alpha_preview = LoadContext::default().preview(&alpha_path).unwrap();
     assert!(matches!(
-        alpha_preview.metadata.provenance,
+        alpha_preview.metadata.derived.provenance(),
         Some(ImageProvenance {
             color: ColorProvenance::UnmanagedRaster {
                 alpha_dropped: true
@@ -292,7 +307,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(
-        LinearImage::from_file(&nonexistent_raw, &LoadContext::default()),
+        LoadContext::default().linear(&nonexistent_raw),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::CameraRaw,
             ..
@@ -303,17 +318,21 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 #[test]
 fn save_invalid_extension() {
     let dir = TempDir::new("lumos-io-image");
-    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        vec![0.1, 0.2, 0.3, 0.4],
+    );
     let output_path = dir.join("astro_save_invalid.xyz");
 
-    let result = image.save(&output_path);
-    assert!(result.is_err());
+    let result = writer::raster(&image, &output_path);
+    assert!(matches!(result, Err(WriteError::Raster(_))), "{result:?}");
+    assert!(!output_path.exists());
 }
 
 #[test]
 fn roundtrip_linear_to_image_to_linear() {
-    let gray = LinearImage::from_pixels(
-        ImageDimensions::new((3, 2), 1),
+    let gray = LinearImage::from_interleaved(
+        ImageDimensions::new((3, 2), ChannelLayout::Mono),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
     );
 
@@ -325,8 +344,8 @@ fn roundtrip_linear_to_image_to_linear() {
         assert_close!(*a, *b, 1e-6);
     }
 
-    let rgb = LinearImage::from_pixels(
-        ImageDimensions::new((2, 2), 3),
+    let rgb = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
     );
 
@@ -361,8 +380,8 @@ fn image_rgba_to_linear_drops_alpha() {
 
 #[test]
 fn rgb_image_creation_and_operations() {
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 2), 3),
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
         vec![
             10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
         ],
@@ -376,11 +395,11 @@ fn rgb_image_creation_and_operations() {
     assert_eq!(image.sample_count(), 12);
 }
 
-/// `from_pixels` takes interleaved samples and splits them into row-major planes.
+/// `from_interleaved` takes interleaved samples and splits them into row-major planes.
 #[test]
-fn from_pixels_splits_interleaved_samples_into_planes() {
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 2), 3),
+fn from_interleaved_splits_samples_into_planes() {
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
         vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
         ],
@@ -393,7 +412,10 @@ fn from_pixels_splits_interleaved_samples_into_planes() {
 #[test]
 fn from_planar_channels_grayscale() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
-    let image = LinearImage::from_planar_channels(ImageDimensions::new((2, 2), 1), channels);
+    let image = LinearImage::from_planar_channels(
+        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        channels,
+    );
 
     assert!(image.is_grayscale());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
@@ -401,7 +423,10 @@ fn from_planar_channels_grayscale() {
     let plane = Buffer2::new(2, 2, vec![5.0, 6.0, 7.0, 8.0]);
     let pixels = plane.pixels().as_ptr();
     let image = LinearImage::from(plane);
-    assert_eq!(image.dimensions(), ImageDimensions::new((2, 2), 1));
+    assert_eq!(
+        image.dimensions(),
+        ImageDimensions::new((2, 2), ChannelLayout::Mono)
+    );
     assert_eq!(image.channel(0).pixels(), &[5.0, 6.0, 7.0, 8.0]);
     assert_eq!(image.channel(0).pixels().as_ptr(), pixels);
 }
@@ -409,7 +434,7 @@ fn from_planar_channels_grayscale() {
 #[test]
 fn from_planar_channels_rgb() {
     let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), 3),
+        ImageDimensions::new((2, 1), ChannelLayout::Rgb),
         vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
     );
 
@@ -425,7 +450,10 @@ fn from_planar_channels_rgb() {
     ];
     let green_pixels = planes[1].pixels().as_ptr();
     let image = LinearImage::from(planes);
-    assert_eq!(image.dimensions(), ImageDimensions::new((2, 1), 3));
+    assert_eq!(
+        image.dimensions(),
+        ImageDimensions::new((2, 1), ChannelLayout::Rgb)
+    );
     assert_eq!(image.channel(0).pixels(), &[7.0, 8.0]);
     assert_eq!(image.channel(1).pixels(), &[9.0, 10.0]);
     assert_eq!(image.channel(2).pixels(), &[11.0, 12.0]);
@@ -446,13 +474,13 @@ fn rgb_planes_reject_mismatched_dimensions() {
 /// become a `LinearPixels`. Pinned because the check has no return value, so nothing else would
 /// notice it being dropped as dead code.
 #[test]
-#[should_panic(expected = "Width must be positive")]
+#[should_panic(expected = "width must be positive")]
 fn single_plane_rejects_an_empty_image() {
     let _image = LinearImage::from(Buffer2::<f32>::new(0, 4, vec![]));
 }
 
 #[test]
-#[should_panic(expected = "Height must be positive")]
+#[should_panic(expected = "height must be positive")]
 fn rgb_planes_reject_an_empty_image() {
     let _image = LinearImage::from([
         Buffer2::<f32>::new(4, 0, vec![]),
@@ -463,8 +491,10 @@ fn rgb_planes_reject_an_empty_image() {
 
 #[test]
 fn channel_mut_writes_through_to_the_plane() {
-    let mut image =
-        LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
+    let mut image = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        vec![1.0, 2.0, 3.0, 4.0],
+    );
 
     image.channel_mut(0)[0] = 10.0;
     image.channel_mut(0)[3] = 40.0;

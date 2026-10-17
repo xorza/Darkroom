@@ -39,7 +39,7 @@ pub(super) const fn stamp_radius(expected_fwhm: f32) -> usize {
 /// What one detection's stars are measured with, all from the FWHM it expects.
 #[derive(Debug)]
 pub(crate) struct MeasureGrid {
-    pub(crate) stamp: StampGrid,
+    pub(super) stamp: StampGrid,
     /// σ of the centroid's Gaussian window: the expected star's own, held to `[1, r/2]` so the
     /// window spans at least a pixel and the stamp at least two of its σ.
     pub(super) window_sigma: f64,
@@ -81,7 +81,7 @@ impl AnnulusRadii {
     fn enclosing(fwhm: f64, stamp_radius: usize) -> Self {
         let beta = ANNULUS_MOFFAT_BETA;
         let core = (1.0 - ANNULUS_ENCLOSED_FLUX).powf(1.0 / (1.0 - beta)) - 1.0;
-        let width = 2.0 * ((2.0f64).powf(1.0 / beta) - 1.0).sqrt();
+        let width = fwhm::per_alpha(beta);
         let radius = (fwhm * core.sqrt() / width).ceil() as usize;
         let inner = radius.max(stamp_radius + 1);
         Self {

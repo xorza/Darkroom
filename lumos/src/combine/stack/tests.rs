@@ -5,32 +5,38 @@ use common::{CancelToken, TempDir};
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::error::StackConfigError;
+use crate::combine::frame_cache::core::CacheCore;
+use crate::combine::frame_read::slots::Slots;
+use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
+use crate::combine::rejection::rejection_scale::RejectionScale;
+use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
-use crate::combine::stack::stack_frame::StackFrame;
 use crate::combine::stack::*;
-use crate::combine::stack_config::{Combine, Normalization, SmallN};
-use crate::error::FrameDimensionMismatch;
-use crate::frame::capture_conditions::CaptureConditions;
-use crate::frame::frame_facts::FrameFacts;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_frame::StackFrame;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::tier::{CombineBudget, Tier};
+use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::error::FrameDimensionMismatch;
 use crate::image::flat_gain::FlatGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RasterFormat, RasterTransfer, RowOrder,
+    SourceProvenance,
 };
 use crate::image::linear_image::LinearImage;
+use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::quality_map::QualityMap;
@@ -42,17 +48,17 @@ use crate::internals::assertions::{assert_close, bits};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
+use crate::io::writer;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::run_memory::RunMemory;
-use crate::noise::mosaic_noise::MosaicNoise;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
-use crate::stack_product::quality_planes::QualityPlanes;
+use crate::registration::warp_transform::WarpTransform;
+use crate::stack_product::weight_kind::WeightKind;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
@@ -62,8 +68,8 @@ fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct
 /// `frame` measured to have white noise `sigma` in every slot, so each of its samples has variance
 /// `sigma²` over its confidence.
 fn with_noise(mut frame: StackFrame, sigma: f32) -> StackFrame {
-    for noise in &mut frame.source_stats.noise {
-        *noise = sigma;
+    for background in &mut frame.admitted.stats.background {
+        *background = BackgroundSplit::of_sigma(sigma);
     }
     frame
 }
@@ -87,7 +93,7 @@ fn make_cfa_stack_cache(
         .map(|(pixels, &sigma)| {
             let mut image =
                 internals::cfa::make_cfa(Size2us::new(pixels.len(), 1), pixels, CfaType::Mono);
-            image.metadata.quantization_sigma = Some(sigma);
+            image.metadata.derived.set_quantization_sigma(Some(sigma));
             image
         })
         .collect();
@@ -105,8 +111,10 @@ fn make_cfa_stack_cache(
 fn a_master_states_the_largest_step_of_its_inputs() {
     let stated = |pixels: Vec<Vec<f32>>, sigmas: &[f32], config: StackConfig| {
         let cache = make_cfa_stack_cache(pixels, sigmas, config.normalization);
-        let product = run_stacking(&cache, &config).expect("this cache is never cancelled");
-        product.image.metadata.quantization_sigma
+        let product = config
+            .run_stacking(&cache)
+            .expect("this cache is never cancelled");
+        product.image.metadata.derived.quantization_sigma()
     };
     let mean = |rejection| Combine {
         method: CombineMethod::Mean(rejection),
@@ -163,7 +171,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     for channels in [1, 3] {
         for normalization in [Normalization::None, Normalization::Global] {
             let label = format!("{channels} channels, {normalization:?}");
-            let dims = ImageDimensions::new((w, h), channels);
+            let dims = ImageDimensions::new((w, h), ChannelLayout::try_from(channels).unwrap());
             let make_frame = |f: usize| -> StackFrame {
                 let mut rng = TestRng::new(f as u64);
                 let planes = (0..channels).map(|channel| {
@@ -179,7 +187,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 });
                 let mut image = LinearImage::from_planar_channels(dims, planes.collect::<Vec<_>>());
                 // Every third frame was divided by a vignetted flat, whose gain the noise model
-                // reads per sample: a mono flat for a mono frame, a mosaic's for a colour one.
+                // reads per sample: a mono flat for a mono frame, a mosaic's for a color one.
                 if f.is_multiple_of(3) {
                     let divisor = Buffer2::from_fn(w, h, |x, _| 1.0 - 0.4 * x as f32 / w as f32);
                     let cfa = if channels == 1 {
@@ -187,8 +195,11 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     } else {
                         CfaType::Bayer(CfaPattern::Rggb)
                     };
-                    image.metadata.flat_gain =
-                        Some(Arc::new(FlatGain::of_divisor(&divisor, &cfa, |_| false)));
+                    image.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(
+                        &divisor,
+                        &cfa,
+                        |_| false,
+                    ))));
                 }
                 // Every other frame gets a partial coverage map (warped-border emulation).
                 let quality = if f.is_multiple_of(2) {
@@ -221,26 +232,26 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                         SpillFrame {
                             image: &f.image,
                             quality: &f.quality,
-                            source_stats: f.source_stats,
+                            admitted: f.admitted,
                         }
                         .spill(&run_scratch)
                         .unwrap()
                     })
                     .collect();
-                stack_stored_frames(
-                    stored,
-                    CacheCore {
-                        tier: Tier::Spilled {
-                            scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
-                            combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
+                config
+                    .stack_stored_frames(
+                        stored,
+                        CacheCore {
+                            tier: Tier::Spilled {
+                                scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
+                                combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
+                            },
+                            dimensions: dims,
+                            metadata,
+                            monitor: ProgressMonitor::unattended(),
                         },
-                        dimensions: dims,
-                        metadata,
-                        monitor: ProgressMonitor::unattended(),
-                    },
-                    &config,
-                )
-                .unwrap()
+                    )
+                    .unwrap()
             };
             let disk = spilled(1 << 30);
             assert_eq!(disk.report.overcommit_bytes, 0, "{label}");
@@ -370,7 +381,7 @@ fn stack_rejects_invalid_config_before_loading() {
     ));
 
     let error = (StackConfig {
-        combine: Combine::sigma_clipped(-1.0),
+        combine: Combine::sigma_clip(-1.0),
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
@@ -384,18 +395,18 @@ fn stack_rejects_invalid_config_before_loading() {
     assert!(matches!(
         error,
         StackError::Config(StackConfigError::Field(invalid))
-            if invalid.field == "sigma_low" && invalid.value == -1.0
+            if invalid.field == "sigma.low" && invalid.value == -1.0
     ));
 }
 
 #[test]
 fn stack_images_in_memory_mean() {
     // In-memory stacking must match the documented mean: (10 + 20 + 30)/3 = 20.
-    let dims = ImageDimensions::new((4, 4), 1);
+    let dims = ImageDimensions::new((4, 4), ChannelLayout::Mono);
     let images = vec![
-        LinearImage::from_pixels(dims, vec![10.0; 16]),
-        LinearImage::from_pixels(dims, vec![20.0; 16]),
-        LinearImage::from_pixels(dims, vec![30.0; 16]),
+        LinearImage::from_interleaved(dims, vec![10.0; 16]),
+        LinearImage::from_interleaved(dims, vec![20.0; 16]),
+        LinearImage::from_interleaved(dims, vec![30.0; 16]),
     ];
     let config = StackConfig {
         combine: Combine::mean(),
@@ -414,13 +425,13 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     // Three 2x2 frames holding 1, 2 and 3 everywhere. Frame 0 declares pixel 1 null, so the mean
     // there is over frames 1 and 2 alone — (2 + 3) / 2 = 2.5 — while every other pixel averages all
     // three to (1 + 2 + 3) / 3 = 2. Normalization is off so the two figures are the plain means.
-    let dims = ImageDimensions::new((2, 2), 1);
+    let dims = ImageDimensions::new((2, 2), ChannelLayout::Mono);
     let frame = |value: f32, null_at: Option<usize>| {
-        let mut image = LinearImage::from_pixels(dims, vec![value; 4]);
+        let mut image = LinearImage::from_interleaved(dims, vec![value; 4]);
         if let Some(index) = null_at {
             let mut samples = vec![0.0f32; 4];
             samples[index] = f32::NAN;
-            image.flags = PixelFlags::of_non_finite(dims.size(), &[&samples]);
+            image.set_flags(PixelFlags::of_non_finite(dims.size(), &[&samples]));
         }
         StackFrame::from(image)
     };
@@ -450,7 +461,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
         .channel(0);
     assert_eq!(coverage.pixels(), &[1.0, 2.0 / 3.0, 1.0, 1.0]);
     // Some frame reached every pixel, so the stack flags none.
-    assert!(stacked.image.flags.is_none());
+    assert!(stacked.image.flags().is_none());
 
     // A pixel every frame declares null is reached by none: 0, with no coverage, and flagged.
     let stacked = combine(
@@ -471,7 +482,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
         .unwrap()
         .channel(0);
     assert_eq!(coverage.pixels(), &[1.0, 1.0, 1.0, 0.0]);
-    let flags = stacked.image.flags.as_ref().unwrap();
+    let flags = stacked.image.flags().unwrap();
     assert_eq!(
         (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
         [
@@ -484,8 +495,8 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
 
     // A frame null everywhere contributes nowhere, so the stack is the other two throughout —
     // (2 + 3) / 2 = 2.5 — rather than a division by a zero contributor count.
-    let mut all_null = LinearImage::from_pixels(dims, vec![1.0; 4]);
-    all_null.flags = PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 4]]);
+    let mut all_null = LinearImage::from_interleaved(dims, vec![1.0; 4]);
+    all_null.set_flags(PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 4]]));
     let stacked = combine(
         vec![
             StackFrame::from(all_null),
@@ -520,13 +531,17 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
     //
     // So an exact `[1, 2, 3, 4, 5, 6]` is the fit measured over the shared pixels, and nothing else
     // produces it: 3.5/35 rounds to the f32 0.1, and 30 … 60 times that round back to 3 … 6.
-    let dims = ImageDimensions::new((6, 1), 1);
-    let mut low = LinearImage::from_pixels(dims, vec![1.0, 2.0, 3.0, 4.0, 900.0, 900.0]);
-    low.flags =
-        PixelFlags::of_non_finite(dims.size(), &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN]]);
-    let mut high = LinearImage::from_pixels(dims, vec![900.0, 900.0, 30.0, 40.0, 50.0, 60.0]);
-    high.flags =
-        PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]]);
+    let dims = ImageDimensions::new((6, 1), ChannelLayout::Mono);
+    let mut low = LinearImage::from_interleaved(dims, vec![1.0, 2.0, 3.0, 4.0, 900.0, 900.0]);
+    low.set_flags(PixelFlags::of_non_finite(
+        dims.size(),
+        &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN]],
+    ));
+    let mut high = LinearImage::from_interleaved(dims, vec![900.0, 900.0, 30.0, 40.0, 50.0, 60.0]);
+    high.set_flags(PixelFlags::of_non_finite(
+        dims.size(),
+        &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]],
+    ));
     let config = StackConfig {
         combine: Combine::mean(),
         normalization: Normalization::Multiplicative,
@@ -542,13 +557,13 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
 
     // With no pixel that every frame reached there is nothing to fit on, which is named rather
     // than divided by: one frame null everywhere leaves the intersection empty.
-    let mut all_null = LinearImage::from_pixels(dims, vec![10.0; 6]);
-    all_null.flags = PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 6]]);
+    let mut all_null = LinearImage::from_interleaved(dims, vec![10.0; 6]);
+    all_null.set_flags(PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 6]]));
     assert!(matches!(
         combine(
             vec![
                 StackFrame::from(all_null),
-                StackFrame::from(LinearImage::from_pixels(dims, vec![20.0; 6])),
+                StackFrame::from(LinearImage::from_interleaved(dims, vec![20.0; 6])),
             ],
             &config
         )
@@ -563,18 +578,22 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     // of the same field are upside-down relative to each other. Averaging them is meaningless, and
     // registration cannot reconcile a mirrored field either — this names the cause where it can be
     // seen, instead of leaving it to surface as a registration failure with no stated reason.
-    let dims = ImageDimensions::new((2, 2), 1);
+    let dims = ImageDimensions::new((2, 2), ChannelLayout::Mono);
     let frame = |row_order: Option<RowOrder>| {
-        let mut image = LinearImage::from_pixels(dims, vec![1.0; 4]);
-        image.metadata.provenance = row_order.map(|row_order| ImageProvenance {
-            container: SourceContainer::Tiff,
-            decoder: DecoderProvenance::Imaginarium,
-            transfer: TransferProvenance::FloatRaster,
-            color: ColorProvenance::Monochrome,
-            clipped: false,
-            demosaic: DemosaicProvenance::None,
-            row_order,
-        });
+        let mut image = LinearImage::from_interleaved(dims, vec![1.0; 4]);
+        image
+            .metadata
+            .derived
+            .set_provenance(row_order.map(|row_order| ImageProvenance {
+                source: SourceProvenance::Raster {
+                    format: RasterFormat::Tiff,
+                    transfer: RasterTransfer::Float,
+                },
+                color: ColorProvenance::Monochrome,
+                clipped: false,
+                demosaic: DemosaicProvenance::None,
+                row_order,
+            }));
         StackFrame::from(image)
     };
     let stack = |orders: [Option<RowOrder>; 2]| {
@@ -628,8 +647,14 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
         unit: unit.map(str::to_owned),
     };
     let frame = |declared: Declared<'_>| {
-        let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-        image.metadata.domain = declared.map(|(scale, origin, unit)| domain(scale, origin, unit));
+        let mut image = LinearImage::from_interleaved(
+            ImageDimensions::new((2, 2), ChannelLayout::Mono),
+            vec![1.0; 4],
+        );
+        image
+            .metadata
+            .derived
+            .set_domain(declared.map(|(scale, origin, unit)| domain(scale, origin, unit)));
         image
     };
     let stack = |frames: [Declared<'_>; 2]| {
@@ -674,11 +699,14 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     // Known pedestals convert by an offset. Frame 0 keeps 0.5 on unit scale and frame 1 has none,
     // so frame 1's 1.0 is 1.0 + 0.5 = 1.5 in frame 0's domain and the mean is 1.25.
     let pedestal_frame = |pedestal| {
-        let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-        image.metadata.domain = Some(SampleDomain {
+        let mut image = LinearImage::from_interleaved(
+            ImageDimensions::new((2, 2), ChannelLayout::Mono),
+            vec![1.0; 4],
+        );
+        image.metadata.derived.set_domain(Some(SampleDomain {
             pedestal,
             ..domain(1.0, ScaleOrigin::Declared, None)
-        });
+        }));
         image
     };
     let offset = combine(
@@ -771,8 +799,14 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
 
 #[test]
 fn stack_images_dimension_errors() {
-    let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
-    let b = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
+    let a = LinearImage::from_interleaved(
+        ImageDimensions::new((4, 4), ChannelLayout::Mono),
+        vec![1.0; 16],
+    );
+    let b = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        vec![1.0; 4],
+    );
     let result = combine(
         vec![a.into(), b.into()],
         &StackConfig {
@@ -803,7 +837,10 @@ fn stack_images_dimension_errors() {
         ),
     ] {
         let frame = stack_frame(
-            LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            LinearImage::from_interleaved(
+                ImageDimensions::new((4, 4), ChannelLayout::Mono),
+                vec![1.0; 16],
+            ),
             FrameQuality::Planes {
                 coverage,
                 confidence,
@@ -821,13 +858,11 @@ fn stack_images_dimension_errors() {
         assert!(
             matches!(
                 error,
-                StackError::WarpPlaneDimensionMismatch {
+                StackError::PlaneDimensionMismatch {
                     index: 0,
                     plane,
-                    expected_width: 4,
-                    expected_height: 4,
-                    actual_width: 2,
-                    actual_height: 2,
+                    expected: Size2us { width: 4, height: 4 },
+                    actual: Size2us { width: 2, height: 2 },
                 } if plane == expected_plane
             ),
             "expected a {expected_plane} dimension error, got {error:?}"
@@ -837,7 +872,7 @@ fn stack_images_dimension_errors() {
 
 #[test]
 fn stack_images_rejects_invalid_warp_quality_values() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     // Each plane carries its own range — coverage a fraction, confidence any non-negative weight —
     // so the out-of-range value is paired with an in-range partner to isolate it.
     for (coverage, confidence, expected_plane, expected_value) in [
@@ -856,7 +891,7 @@ fn stack_images_rejects_invalid_warp_quality_values() {
     ] {
         let error = combine(
             vec![stack_frame(
-                LinearImage::from_pixels(dims, vec![1.0; 2]),
+                LinearImage::from_interleaved(dims, vec![1.0; 2]),
                 FrameQuality::Planes {
                     coverage,
                     confidence,
@@ -889,7 +924,7 @@ fn stack_images_rejects_invalid_warp_quality_values() {
 /// having data. Neither is a shape a warp produces, so both are rejected rather than combined.
 #[test]
 fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     for (coverage, confidence) in [
         (vec![1.0, 1.0], vec![1.0, 0.0]),
         (vec![1.0, 0.0], vec![1.0, 0.5]),
@@ -898,7 +933,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
         let expected_confidence = confidence[1];
         let error = combine(
             vec![stack_frame(
-                LinearImage::from_pixels(dims, vec![1.0; 2]),
+                LinearImage::from_interleaved(dims, vec![1.0; 2]),
                 FrameQuality::Planes {
                     coverage: Buffer2::new(2, 1, coverage),
                     confidence: Buffer2::new(2, 1, confidence),
@@ -929,7 +964,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
     // The matched pair the same planes describe still combines.
     let product = combine(
         vec![stack_frame(
-            LinearImage::from_pixels(dims, vec![1.0; 2]),
+            LinearImage::from_interleaved(dims, vec![1.0; 2]),
             FrameQuality::Planes {
                 coverage: Buffer2::new(2, 1, vec![1.0, 0.0]),
                 confidence: Buffer2::new(2, 1, vec![1.0, 0.0]),
@@ -948,7 +983,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
 
 #[test]
 fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
-    let dimensions = ImageDimensions::new((2, 2), 3);
+    let dimensions = ImageDimensions::new((2, 2), ChannelLayout::Rgb);
     let finite =
         LinearImage::from_planar_channels(dimensions, [vec![1.0; 4], vec![1.0; 4], vec![1.0; 4]]);
 
@@ -996,7 +1031,7 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
     // early one taken when no frame carries a quantization sigma, and the normal one.
     // The token is swapped in after the cache is built, so this exercises the combine itself
     // rather than the loader's own cancellation check.
-    let dimensions = ImageDimensions::new((2, 1), 1);
+    let dimensions = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let config = StackConfig {
         combine: Combine {
             method: CombineMethod::Mean(Rejection::None),
@@ -1009,8 +1044,8 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
 
     let without_sigmas = FrameCache::from_images(
         vec![
-            LinearImage::from_pixels(dimensions, vec![1.0; 2]),
-            LinearImage::from_pixels(dimensions, vec![3.0; 2]),
+            LinearImage::from_interleaved(dimensions, vec![1.0; 2]),
+            LinearImage::from_interleaved(dimensions, vec![3.0; 2]),
         ],
         Normalization::None,
     );
@@ -1023,13 +1058,15 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
     for mut cache in [without_sigmas, with_sigmas] {
         // Uncancelled, the same cache and config produce a product — so the error below is
         // the token talking, not a combine that could never have succeeded.
-        run_stacking(&cache, &config).expect("an uncancelled combine produces a product");
+        config
+            .run_stacking(&cache)
+            .expect("an uncancelled combine produces a product");
 
         let cancel = CancelToken::new();
         cancel.cancel();
         cache.core.monitor.cancel = cancel;
         assert!(matches!(
-            run_stacking(&cache, &config).unwrap_err(),
+            config.run_stacking(&cache).unwrap_err(),
             StackError::Cancelled
         ));
     }
@@ -1037,10 +1074,16 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
 
 #[test]
 fn cancelled_stack_returns_cancelled_error() {
-    let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
+    let a = LinearImage::from_interleaved(
+        ImageDimensions::new((4, 4), ChannelLayout::Mono),
+        vec![1.0; 16],
+    );
     let mut invalid_pixels = vec![2.0; 16];
     invalid_pixels[0] = f32::NAN;
-    let b = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), invalid_pixels);
+    let b = LinearImage::from_interleaved(
+        ImageDimensions::new((4, 4), ChannelLayout::Mono),
+        invalid_pixels,
+    );
     let cancel = CancelToken::new();
     cancel.cancel();
     let result = (StackConfig {
@@ -1063,7 +1106,7 @@ fn cancelled_stack_returns_cancelled_error() {
 /// B taken in at px1 would read 20 there. A pixel no frame covers is the warp border's 0.
 #[test]
 fn coverage_decides_which_frames_reach_each_pixel() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let config = StackConfig {
         combine: Combine::mean(),
         normalization: Normalization::None,
@@ -1073,7 +1116,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
     let covered = |value: f32, coverage: [f32; 2]| {
         with_noise(
             stack_frame(
-                LinearImage::from_pixels(dims, vec![value; 2]),
+                LinearImage::from_interleaved(dims, vec![value; 2]),
                 FrameQuality::from_coverage(Buffer2::new(2, 1, coverage.to_vec())),
             ),
             1.0,
@@ -1084,7 +1127,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
             covered(10.0, [1.0, 1.0]),
             covered(40.0, [1.0, 0.0]),
             with_noise(
-                StackFrame::from(LinearImage::from_pixels(dims, vec![10.0; 2])),
+                StackFrame::from(LinearImage::from_interleaved(dims, vec![10.0; 2])),
                 1.0,
             ),
         ],
@@ -1131,7 +1174,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
 /// uncovered pixels are 0. What those pixels hold — zeros, or ±1e20 — changes none of it.
 #[test]
 fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
-    let dims = ImageDimensions::new((6, 1), 1);
+    let dims = ImageDimensions::new((6, 1), ChannelLayout::Mono);
     let coverage = Buffer2::new(6, 1, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
     let make_cache = |fill: [f32; 4]| {
         let frames = [
@@ -1143,25 +1186,19 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         .zip([(12.0, 2.0), (24.0, 4.0), (31.0, 1.0)])
         .map(|(pixels, (median, mad))| {
             let mut frame = stack_frame(
-                LinearImage::from_pixels(dims, pixels.to_vec()),
+                LinearImage::from_interleaved(dims, pixels.to_vec()),
                 FrameQuality::from_coverage(coverage.clone()),
             );
-            frame.source_stats = FrameStats {
+            frame.admitted.stats = FrameStats {
                 medians: [median].into_iter().collect(),
-                noise: [mad_to_sigma(mad)].into_iter().collect(),
-                read_share: [0.0; 3].into_iter().collect(),
+                background: [statistics::internals::mad_to_sigma(mad)]
+                    .into_iter()
+                    .map(BackgroundSplit::of_sigma)
+                    .collect(),
                 sky: [median].into_iter().collect(),
                 spread: None,
                 quantization_sigma: None,
                 electrons_per_unit: None,
-                facts: FrameFacts {
-                    domain: None,
-                    row_order: None,
-                    cfa_type: None,
-                    saturation_flagged: false,
-                    conditions: CaptureConditions::default(),
-                    unverified_dark: UnverifiedConditions::NONE,
-                },
             };
             frame
         })
@@ -1213,8 +1250,12 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         normalization: Normalization::Multiplicative,
         ..StackConfig::light()
     };
-    let first = run_stacking(&caches[0], &config).expect("this cache is never cancelled");
-    let second = run_stacking(&caches[1], &config).expect("this cache is never cancelled");
+    let first = config
+        .run_stacking(&caches[0])
+        .expect("this cache is never cancelled");
+    let second = config
+        .run_stacking(&caches[1])
+        .expect("this cache is never cancelled");
     assert_eq!(
         first.image.channel(0).pixels(),
         second.image.channel(0).pixels()
@@ -1229,6 +1270,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         );
     }
     assert_eq!(first.image.channel(0).pixels()[4..6], [0.0, 0.0]);
+    assert_eq!(first.weight_kind, WeightKind::InverseVariance);
 }
 
 /// Two warped frames that share no pixel cannot be normalized, but combine without it: each
@@ -1236,15 +1278,15 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
 /// `NO_DATA` although neither frame carries a flag.
 #[test]
 fn only_normalization_requires_common_coverage() {
-    let dims = ImageDimensions::new((3, 1), 1);
+    let dims = ImageDimensions::new((3, 1), ChannelLayout::Mono);
     let frames = || {
         vec![
             stack_frame(
-                LinearImage::from_pixels(dims, vec![1.0, 2.0, 5.0]),
+                LinearImage::from_interleaved(dims, vec![1.0, 2.0, 5.0]),
                 FrameQuality::from_coverage(Buffer2::new(3, 1, vec![1.0, 0.0, 0.0])),
             ),
             stack_frame(
-                LinearImage::from_pixels(dims, vec![3.0, 4.0, 6.0]),
+                LinearImage::from_interleaved(dims, vec![3.0, 4.0, 6.0]),
                 FrameQuality::from_coverage(Buffer2::new(3, 1, vec![0.0, 1.0, 0.0])),
             ),
         ]
@@ -1270,7 +1312,7 @@ fn only_normalization_requires_common_coverage() {
     )
     .unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0, 0.0]);
-    let flags = product.image.flags.as_ref().unwrap();
+    let flags = product.image.flags().unwrap();
     assert_eq!(
         (0..3).map(|index| flags.at(index)).collect::<Vec<_>>(),
         [
@@ -1287,9 +1329,9 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
     // alone and doubles its sample's variance, 1/q = 2, so the inverse variance is
     // 2²/(1²·1 + 1²·2) = 4/3. At px1 B has no support at all, which is what does exclude a frame:
     // A alone, inverse variance 1, coverage 1/2. Every sum is exact; each figure rounds once.
-    let dims = ImageDimensions::new((2, 1), 1);
-    let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
-    let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
+    let a = LinearImage::from_interleaved(dims, vec![10.0, 10.0]);
+    let b = LinearImage::from_interleaved(dims, vec![20.0, 20.0]);
     let config = StackConfig {
         combine: Combine::mean(),
         normalization: Normalization::None,
@@ -1344,9 +1386,9 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
 /// (3e-8): under 2e-6 in the warped frame, half that in its mean with the unwarped one.
 #[test]
 fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
-    let dims = ImageDimensions::new((24, 20), 1);
+    let dims = ImageDimensions::new((24, 20), ChannelLayout::Mono);
     let expected = -0.7;
-    let source = LinearImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
+    let source = LinearImage::from_interleaved(dims, vec![expected; dims.pixel_count()]);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(-2.37, 1.43)));
     let config = StackConfig {
         combine: Combine::mean(),
@@ -1356,7 +1398,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     };
 
     for method in InterpolationMethod::ALL {
-        let warped = transform.warp(&source, WarpParams::with_method(method));
+        let warped = WarpParams::with_method(method).warp(&source, &transform);
         let frames = vec![
             StackFrame::from(source.clone()),
             StackFrame::registered(&source, warped),
@@ -1379,7 +1421,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
 #[test]
 fn registered_global_normalization_uses_paired_signal_samples() {
     let size = Size2us::new(128, 128);
-    let dims = ImageDimensions::new((size.width, size.height), 1);
+    let dims = ImageDimensions::new((size.width, size.height), ChannelLayout::Mono);
     let mut rng = TestRng::new(0x5ca1e);
     let stars: Vec<(Vec2, f32)> = (0..60)
         .map(|_| {
@@ -1414,15 +1456,17 @@ fn registered_global_normalization_uses_paired_signal_samples() {
         .map(|&value| value * gain)
         .collect();
         patterns::add_gaussian_noise(&mut pixels, noise, seed);
-        LinearImage::from_pixels(dims, pixels)
+        LinearImage::from_interleaved(dims, pixels)
     };
     let a = field(0.0, 1.0, 0.002, 1);
     let b = field(1.0, 0.8, 0.006, 2);
     let mads = [&a, &b]
         .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
     let params = WarpParams::with_method(InterpolationMethod::Bilinear);
-    let warped_b =
-        (WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0)))).warp(&b, params);
+    let warped_b = params.warp(
+        &b,
+        &WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0))),
+    );
     let cache = FrameCache::from_stack_frames(
         vec![StackFrame::from(a), StackFrame::registered(&b, warped_b)],
         Normalization::Global,
@@ -1462,21 +1506,24 @@ fn registered_global_normalization_uses_paired_signal_samples() {
 /// product's weight is `2w`, and its inverse variance `(2w)²/(w²·σ² + w²·σ²/4) = 1/(0.3125·σ²)`.
 #[test]
 fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
-    let dims = ImageDimensions::new((64, 48), 1);
+    let dims = ImageDimensions::new((64, 48), ChannelLayout::Mono);
     let mut rng = TestRng::new(0x1234_5678);
     let pixels = (0..dims.pixel_count())
         .map(|_| rng.next_f32() - 0.5)
         .collect();
-    let source = LinearImage::from_pixels(dims, pixels);
+    let source = LinearImage::from_interleaved(dims, pixels);
     let params = WarpParams::with_method(InterpolationMethod::Bilinear);
     let frames = vec![
         StackFrame::registered(
             &source,
-            WarpTransform::new(Transform::identity()).warp(&source, params),
+            params.warp(&source, &WarpTransform::new(Transform::identity())),
         ),
         StackFrame::registered(
             &source,
-            WarpTransform::new(Transform::translation(DVec2::splat(0.5))).warp(&source, params),
+            params.warp(
+                &source,
+                &WarpTransform::new(Transform::translation(DVec2::splat(0.5))),
+            ),
         ),
     ];
     let cache =
@@ -1512,20 +1559,19 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .next()
         .unwrap()
         .ccd_noise(0)
-        .background_at(1.0);
+        .at(1.0)
+        .background;
 
-    let product = run_stacking(
-        &cache,
-        &StackConfig {
-            combine: Combine {
-                method: CombineMethod::Mean(Rejection::None),
-                small_n: SmallN::none(),
-            },
-            weighting: Weighting::Noise,
-            normalization: Normalization::None,
-            ..StackConfig::light()
+    let product = StackConfig {
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::None),
+            small_n: SmallN::none(),
         },
-    )
+        weighting: Weighting::Noise,
+        normalization: Normalization::None,
+        ..StackConfig::light()
+    }
+    .run_stacking(&cache)
     .expect("this cache is never cancelled");
     assert_eq!(
         product.weight.as_ref().unwrap().channel(0)[pixel],
@@ -1547,10 +1593,10 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
 /// never clipped: both keep the uncorrected figure, 1/3 for 0, 1, 2.
 #[test]
 fn a_clipped_pixels_dispersion_reads_the_full_scatter() {
-    let dims = ImageDimensions::new((1, 1), 1);
+    let dims = ImageDimensions::new((1, 1), ChannelLayout::Mono);
     let dispersion = |count: usize, rejection: Rejection| {
         let frames = (0..count)
-            .map(|i| StackFrame::from(LinearImage::from_pixels(dims, vec![i as f32])))
+            .map(|i| StackFrame::from(LinearImage::from_interleaved(dims, vec![i as f32])))
             .collect();
         let stacked = combine(
             frames,
@@ -1580,10 +1626,15 @@ fn a_clipped_pixels_dispersion_reads_the_full_scatter() {
 fn requested_planes_decide_what_the_combine_allocates() {
     // Every ancillary plane is a full image-sized allocation the reducer writes per pixel, so
     // "not requested" has to mean "never built" rather than "built and dropped".
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let frames = || {
         (0..6)
-            .map(|i| StackFrame::from(LinearImage::from_pixels(dims, vec![i as f32, i as f32])))
+            .map(|i| {
+                StackFrame::from(LinearImage::from_interleaved(
+                    dims,
+                    vec![i as f32, i as f32],
+                ))
+            })
             .collect::<Vec<_>>()
     };
     let stack = |config: StackConfig| combine(frames(), &config).unwrap();
@@ -1611,19 +1662,21 @@ fn requested_planes_decide_what_the_combine_allocates() {
     assert!(standard.inverse_variance.is_some() && standard.dispersion.is_none());
 
     // A median is not a linear combination, so its variance plane is absent even though the
-    // request asked for it — and is never allocated, not allocated and cleared.
+    // request asked for it — and is never allocated, not allocated and cleared. It weighs no
+    // frame, whatever the weighting, so its weight is a count.
     let median = stack(StackConfig {
         combine: Combine {
             method: CombineMethod::Median,
             small_n: SmallN::none(),
         },
         quality: QualityPlanes::ALL,
-        weighting: Weighting::Equal,
+        weighting: Weighting::Noise,
         normalization: Normalization::None,
         ..StackConfig::light()
     });
     assert!(median.coverage.is_some());
     assert!(median.weight.is_some(), "a median still reports weight");
+    assert_eq!(median.weight_kind, WeightKind::Count);
     assert!(
         median.inverse_variance.is_none() && median.dispersion.is_none(),
         "a median has no linear-combine variance factor and no dispersion"
@@ -1653,13 +1706,13 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
     // (median 0) and reject the real 0.125 values → a dark edge. Coverage excludes the fills, so
     // only the 2 real frames combine: 0.125. Without coverage maps a plain mean takes the fills in:
     // 0.25/5.
-    let dims = ImageDimensions::new((1, 1), 1);
+    let dims = ImageDimensions::new((1, 1), ChannelLayout::Mono);
     let frames: Vec<StackFrame> = [0.125, 0.125, 0.0, 0.0, 0.0]
         .iter()
         .zip([1.0, 1.0, 0.0, 0.0, 0.0])
         .map(|(&v, c)| {
             stack_frame(
-                LinearImage::from_pixels(dims, vec![v]),
+                LinearImage::from_interleaved(dims, vec![v]),
                 FrameQuality::from_coverage(Buffer2::new(1, 1, vec![c])),
             )
         })
@@ -1678,7 +1731,7 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
 
     let uncovered: Vec<StackFrame> = [0.125, 0.125, 0.0, 0.0, 0.0]
         .iter()
-        .map(|&v| LinearImage::from_pixels(dims, vec![v]).into())
+        .map(|&v| LinearImage::from_interleaved(dims, vec![v]).into())
         .collect();
     let mean = StackConfig {
         combine: Combine::mean(),
@@ -1697,15 +1750,17 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
 /// made by the combine and carries no mosaic noise.
 #[test]
 fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
-    let dims = ImageDimensions::new((1, 1), 3);
+    let dims = ImageDimensions::new((1, 1), ChannelLayout::Rgb);
     let frame = |value: f32, sigma: Option<[f32; 3]>| {
-        let mut image = LinearImage::from_pixels(dims, vec![value; 3]);
-        image.metadata.mosaic_noise = sigma.map(|sigma| MosaicNoise {
-            sigma,
-            read_share: [0.0; 3],
-            sky: [value; 3],
-            quantization_sigma: None,
-        });
+        let mut image = LinearImage::from_interleaved(dims, vec![value; 3]);
+        image
+            .metadata
+            .derived
+            .set_mosaic_noise(sigma.map(|sigma| MosaicNoise {
+                background: sigma.map(BackgroundSplit::of_sigma),
+                sky: [value; 3],
+                quantization_sigma: None,
+            }));
         StackFrame::from(image)
     };
     let config = StackConfig {
@@ -1733,7 +1788,7 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
             "channel {channel}"
         );
     }
-    assert_eq!(product.image.metadata.mosaic_noise, None);
+    assert_eq!(product.image.metadata.derived.mosaic_noise(), None);
     assert!(matches!(
         combine(vec![frame(1.0, None), frame(3.0, None)], &config),
         Err(StackError::NoNoiseToWeigh { index: 0 })
@@ -1749,8 +1804,9 @@ fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
     // 1 and 2 lie −2/3 and 1/3 about 5/3, so (4/9 + 2/9) / 3 = 2/9; G's 2 and 3 lie −0.6 and 0.4
     // about 2.6, so (0.72 + 0.48) / 5 = 6/25; B's 1 and 3 lie −1.5 and 0.5 about 2.5, so (2.25 +
     // 0.75) / 4 = 3/4.
-    let dims = ImageDimensions::new((1, 1), 3);
-    let frame = |pixels: Vec<f32>| with_noise(LinearImage::from_pixels(dims, pixels).into(), 1.0);
+    let dims = ImageDimensions::new((1, 1), ChannelLayout::Rgb);
+    let frame =
+        |pixels: Vec<f32>| with_noise(LinearImage::from_interleaved(dims, pixels).into(), 1.0);
     let frames = vec![
         frame(vec![1.0, 100.0, 1.0]),
         frame(vec![2.0, 2.0, 100.0]),
@@ -1833,7 +1889,7 @@ fn rejection_emits_channel_shaped_survivor_weight_and_inverse_variance() {
 fn dispersion_agrees_with_the_variance_where_the_model_holds() {
     const SIDE: usize = 64;
     const SIGMAS: [f32; 8] = [0.01, 0.02, 0.01, 0.03, 0.015, 0.02, 0.025, 0.01];
-    let dims = ImageDimensions::new((SIDE, SIDE), 1);
+    let dims = ImageDimensions::new((SIDE, SIDE), ChannelLayout::Mono);
     let mut rng = TestRng::new(17);
     let pixels: Vec<Vec<f32>> = SIGMAS
         .iter()
@@ -1860,7 +1916,7 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
             .zip(SIGMAS)
             .map(|(pixels, sigma)| {
                 with_noise(
-                    LinearImage::from_pixels(dims, pixels.clone()).into(),
+                    LinearImage::from_interleaved(dims, pixels.clone()).into(),
                     sigma * model_scale,
                 )
             })
@@ -1889,14 +1945,14 @@ fn dispersion_agrees_with_the_variance_where_the_model_holds() {
 
 #[test]
 fn median_quality_uses_equal_weights_and_has_no_variance() {
-    let dims = ImageDimensions::new((8, 1), 1);
+    let dims = ImageDimensions::new((8, 1), ChannelLayout::Mono);
     let mk = |base: f32, spread: f32| -> Vec<f32> {
         (0..8).map(|i| base + i as f32 * spread / 7.0).collect()
     };
     let frames = || -> Vec<StackFrame> {
         [mk(100.0, 1.0), mk(100.0, 20.0), mk(100.0, 2.0)]
             .into_iter()
-            .map(|pixels| with_noise(LinearImage::from_pixels(dims, pixels).into(), 1.0))
+            .map(|pixels| with_noise(LinearImage::from_interleaved(dims, pixels).into(), 1.0))
             .collect()
     };
     let stack = |config: &StackConfig| combine(frames(), config).unwrap();
@@ -1935,7 +1991,7 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
         (
             "sigma",
             StackConfig {
-                combine: Combine::sigma_clipped(2.5),
+                combine: Combine::sigma_clip(2.5),
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
@@ -1970,16 +2026,41 @@ fn median_quality_uses_equal_weights_and_has_no_variance() {
             },
         ),
     ] {
+        // Three frames reach every pixel, below each floor: every pixel combines by its median, the
+        // middle frame's where nothing normalizes. Its inverse variance reads 0, no information,
+        // and its weight is the frames' Σw: 1 each under equal weights, 1, 2 and 3 under manual
+        // ones, and noise weights under the light preset's normalization.
         let downgraded = stack(&config);
-        assert!(
-            downgraded.inverse_variance.is_none(),
-            "{name} must expose no variance after its small-N median downgrade"
-        );
+        if config.normalization == Normalization::None {
+            assert_eq!(
+                downgraded.image.channel(0).pixels(),
+                mk(100.0, 2.0),
+                "{name}"
+            );
+        }
         assert_eq!(
-            downgraded.weight.as_ref().unwrap().channel(0).pixels(),
-            &[3.0; 8],
-            "{name} median fallback must count unit-confidence contributors"
+            downgraded
+                .inverse_variance
+                .as_ref()
+                .unwrap()
+                .channel(0)
+                .pixels(),
+            &[0.0; 8],
+            "{name} must measure no variance at a median fallback"
         );
+        let weight = match &config.weighting {
+            Weighting::Equal => Some(3.0),
+            Weighting::Manual(_) => Some(6.0),
+            Weighting::Noise => None,
+        };
+        if let Some(weight) = weight {
+            assert_eq!(
+                downgraded.weight.as_ref().unwrap().channel(0).pixels(),
+                &[weight; 8],
+                "{name} median fallback must count its contributors' weights"
+            );
+        }
+        assert_eq!(downgraded.report.small_n_fallback_pixels, 8, "{name}");
     }
 
     let linear_fallback = stack(&StackConfig {
@@ -2010,12 +2091,12 @@ fn disk_backed_stack_combines_via_mmap() {
     // memory-mapped `Plane`s: mean(10, 20, 30) = 20 at every pixel.
     let temp_dir = TempDir::new("lumos_disk_stack_combine_test");
 
-    let dims = ImageDimensions::new((4, 4), 1);
+    let dims = ImageDimensions::new((4, 4), ChannelLayout::Mono);
     let mut paths = Vec::new();
     for (i, &v) in [10.0f32, 20.0, 30.0].iter().enumerate() {
-        let image = LinearImage::from_pixels(dims, vec![v; 16]);
+        let image = LinearImage::from_interleaved(dims, vec![v; 16]);
         let path = temp_dir.join(format!("frame{i}.tiff"));
-        image.save(&path).unwrap();
+        writer::raster(&image, &path).unwrap();
         paths.push(path);
     }
 
@@ -2040,9 +2121,9 @@ fn disk_backed_stack_combines_via_mmap() {
 /// first such frame rather than falling back to equal weights.
 #[test]
 fn noise_weighting_refuses_a_frame_with_no_noise() {
-    let dims = ImageDimensions::new((16, 1), 1);
+    let dims = ImageDimensions::new((16, 1), ChannelLayout::Mono);
     let cache = FrameCache::from_images(
-        vec![LinearImage::from_pixels(dims, vec![0.5; 16]); 3],
+        vec![LinearImage::from_interleaved(dims, vec![0.5; 16]); 3],
         Normalization::None,
     );
     let config = StackConfig {
@@ -2052,7 +2133,7 @@ fn noise_weighting_refuses_a_frame_with_no_noise() {
         ..StackConfig::light()
     };
     assert!(matches!(
-        run_stacking(&cache, &config),
+        config.run_stacking(&cache),
         Err(StackError::NoNoiseToWeigh { index: 0 })
     ));
 }
@@ -2071,16 +2152,16 @@ fn noise_weights_survive_rejection() {
     };
     let mut hit = ramp(100.0, 1.0 / 32.0);
     hit[0] = 999.0;
-    let dims = ImageDimensions::new((16, 1), 1);
+    let dims = ImageDimensions::new((16, 1), ChannelLayout::Mono);
     let mut cache = FrameCache::from_images(
         [ramp(100.0, 1.0 / 64.0), ramp(90.0, 1.0), hit]
             .into_iter()
-            .map(|pixels| LinearImage::from_pixels(dims, pixels))
+            .map(|pixels| LinearImage::from_interleaved(dims, pixels))
             .collect(),
         Normalization::None,
     );
     for (frame, sigma) in cache.frames.iter_mut().zip([1.0 / 16.0, 4.0, 1.0]) {
-        frame.source_stats.noise[0] = sigma;
+        frame.source_stats.background[0] = BackgroundSplit::of_sigma(sigma);
     }
     let config = StackConfig {
         combine: Combine {
@@ -2092,7 +2173,9 @@ fn noise_weights_survive_rejection() {
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
+    let result = config
+        .run_stacking(&cache)
+        .expect("this cache is never cancelled");
     assert_close!(
         result.image.channel(0)[0],
         (4096.0 * 100.0 + 90.0) / 4097.0,
@@ -2110,7 +2193,7 @@ fn noise_weights_survive_rejection() {
 /// The report counts the 3 left out, and the 10 + 8 kept.
 #[test]
 fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
-    let dims = ImageDimensions::new((3, 1), 1);
+    let dims = ImageDimensions::new((3, 1), ChannelLayout::Mono);
     let frames: Vec<StackFrame> = (0..10)
         .map(|frame| {
             let saturated = [frame < 3, true, frame < 8];
@@ -2119,15 +2202,15 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
                 1.0,
                 if saturated[2] { 0.5 } else { 0.25 },
             ];
-            let mut image = LinearImage::from_pixels(dims, values.to_vec());
-            image.metadata.saturation_flagged = true;
-            image.flags = PixelFlags::from_fn(dims.size(), |index| {
+            let mut image = LinearImage::from_interleaved(dims, values.to_vec());
+            image.metadata.derived.set_saturation_flagged(true);
+            image.set_flags(PixelFlags::from_fn(dims.size(), |index| {
                 if saturated[index] {
                     QualityFlags::SATURATED
                 } else {
                     QualityFlags::default()
                 }
-            });
+            }));
             image.into()
         })
         .collect();
@@ -2143,8 +2226,8 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert_eq!(pixels[1], 1.0);
     assert_close!(pixels[2], 0.45, f32::EPSILON);
 
-    assert!(product.image.metadata.saturation_flagged);
-    let flags = product.image.flags.as_ref().unwrap();
+    assert!(product.image.metadata.derived.saturation_flagged());
+    let flags = product.image.flags().unwrap();
     let saturated: Vec<bool> = (0..3)
         .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
         .collect();
@@ -2181,11 +2264,11 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
 /// the core reads (1 + 1 + 1)/3 = 1, flagged, and the pixel beside it 0.25, unflagged.
 #[test]
 fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
-    let dims = ImageDimensions::new((8, 8), 1);
+    let dims = ImageDimensions::new((8, 8), ChannelLayout::Mono);
     let core = |x: usize, y: usize| (3..5).contains(&x) && (3..5).contains(&y);
     let field = |offset: usize| {
         let at = |index: usize| (index % 8 + offset, index / 8);
-        let mut image = LinearImage::from_pixels(
+        let mut image = LinearImage::from_interleaved(
             dims,
             (0..64)
                 .map(|index| {
@@ -2194,15 +2277,15 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
                 })
                 .collect(),
         );
-        image.metadata.saturation_flagged = true;
-        image.flags = PixelFlags::from_fn(dims.size(), |index| {
+        image.metadata.derived.set_saturation_flagged(true);
+        image.set_flags(PixelFlags::from_fn(dims.size(), |index| {
             let (x, y) = at(index);
             if core(x, y) {
                 QualityFlags::SATURATED
             } else {
                 QualityFlags::default()
             }
-        });
+        }));
         image
     };
     let params = WarpParams::with_method(InterpolationMethod::Lanczos3);
@@ -2211,16 +2294,18 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
     let frames = vec![
         stack_frame(
             reference.clone(),
-            FrameQuality::for_reference(reference.flags.as_ref()),
+            FrameQuality::for_reference(reference.flags()),
         ),
         StackFrame::registered(
             &reference,
-            WarpTransform::new(Transform::identity()).warp(&reference, params),
+            params.warp(&reference, &WarpTransform::new(Transform::identity())),
         ),
         StackFrame::registered(
             &shifted,
-            (WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))))
-                .warp(&shifted, params),
+            params.warp(
+                &shifted,
+                &WarpTransform::new(Transform::translation(DVec2::new(-1.0, 0.0))),
+            ),
         ),
     ];
     let config = StackConfig {
@@ -2231,7 +2316,7 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
     };
     let product = combine(frames, &config).unwrap();
     let pixels = product.image.channel(0).pixels();
-    let flags = product.image.flags.as_ref().unwrap();
+    let flags = product.image.flags().unwrap();
     assert_eq!(pixels[3 * 8 + 3], 1.0);
     assert_eq!(flags.at(3 * 8 + 3), QualityFlags::SATURATED);
     assert_eq!(pixels[3 * 8 + 5], 0.25);
@@ -2247,20 +2332,20 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
 /// `(12 − 10)·2/0.5` = 8, the flat's gain on the source term: 2²/(11 + 3) = 2/7.
 #[test]
 fn each_samples_noise_reads_the_gain_its_flat_applied() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let gain = Arc::new(FlatGain::of_divisor(
         &Buffer2::new(2, 1, vec![0.5; 2]),
         &CfaType::Mono,
         |_| false,
     ));
     let frame = |value: f32, read_share: f32, flat: bool, electrons: Option<f32>| {
-        let mut image = LinearImage::from_pixels(dims, vec![value; 2]);
+        let mut image = LinearImage::from_interleaved(dims, vec![value; 2]);
         if flat {
-            image.metadata.flat_gain = Some(Arc::clone(&gain));
+            image.set_flat_gain(Some(Arc::clone(&gain)));
         }
         let mut frame = with_noise(image.into(), 1.0);
-        frame.source_stats.read_share = [read_share].into_iter().collect();
-        frame.source_stats.electrons_per_unit = electrons;
+        frame.admitted.stats.background[0].read_share = read_share;
+        frame.admitted.stats.electrons_per_unit = electrons;
         frame
     };
     let config = StackConfig {
@@ -2304,10 +2389,13 @@ fn each_samples_noise_reads_the_gain_its_flat_applied() {
 /// the figure is the same here, but the report says the plane lacks a source term.
 #[test]
 fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let frame = |value: f32, electrons: Option<f32>| {
-        let mut frame = with_noise(LinearImage::from_pixels(dims, vec![value; 2]).into(), 1.0);
-        frame.source_stats.electrons_per_unit = electrons;
+        let mut frame = with_noise(
+            LinearImage::from_interleaved(dims, vec![value; 2]).into(),
+            1.0,
+        );
+        frame.admitted.stats.electrons_per_unit = electrons;
         frame
     };
     let config = StackConfig {
@@ -2339,4 +2427,78 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
         &[2.0 / 3.0; 2]
     );
     assert!(unknown.report.variance_background_only);
+
+    // CCD-model rejection holds each sample to its own model, whose photon term needs the gain:
+    // a set is refused before the combine, naming frame 1, the first that states none, and with
+    // every gain it combines.
+    let ccd = StackConfig {
+        combine: Combine {
+            method: CombineMethod::Mean(Rejection::SigmaClip(
+                SigmaClipConfig::default().with_scale(RejectionScale::CcdModel),
+            )),
+            small_n: SmallN::none(),
+        },
+        ..config
+    };
+    let refused = combine(
+        vec![frame(10.0, Some(0.5)), frame(14.0, None), frame(12.0, None)],
+        &ccd,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(refused, StackError::UnknownGain { index: 1 }),
+        "{refused:?}"
+    );
+    let known = combine(
+        vec![
+            frame(10.0, Some(0.5)),
+            frame(14.0, Some(0.5)),
+            frame(12.0, Some(0.5)),
+        ],
+        &ccd,
+    )
+    .unwrap();
+    assert_eq!(known.image.channel(0).pixels(), &[12.0; 2]);
+}
+
+/// The small-sample fallback is a pixel's, not the stack's: of 20 sigma-clipped frames of 2 × 1,
+/// all cover pixel 0 and only frames 0 to 3 pixel 1, so pixel 1 has 4 samples, below the preset's
+/// floor of 5, and combines by their median. [1, 2, 10, 4] has the median (2 + 4)/2 = 3, where a
+/// clip at 2.5σ keeps all four and averages 17/4. A median has no linear-combination variance, so
+/// its inverse variance reads 0, no information, and its dispersion NaN, and the report counts the
+/// one pixel. Pixel 0, at 1 in every frame, is the clipped mean, 1.
+#[test]
+fn a_pixel_too_few_frames_reached_combines_by_its_median() {
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
+    let edge = [1.0, 2.0, 10.0, 4.0];
+    let frames: Vec<StackFrame> = (0..20)
+        .map(|frame| {
+            let reached = frame < edge.len();
+            let image = LinearImage::from_interleaved(
+                dims,
+                vec![1.0, edge.get(frame).copied().unwrap_or(0.0)],
+            );
+            let coverage = Buffer2::new(2, 1, vec![1.0, f32::from(u8::from(reached))]);
+            stack_frame(
+                image,
+                FrameQuality::Planes {
+                    confidence: coverage.clone(),
+                    coverage,
+                },
+            )
+        })
+        .collect();
+    let config = StackConfig {
+        combine: Combine::sigma_clip(2.5),
+        weighting: Weighting::Equal,
+        normalization: Normalization::None,
+        quality: QualityPlanes::ALL,
+        ..StackConfig::light()
+    };
+    let product = combine(frames, &config).unwrap();
+    assert_eq!(product.image.channel(0).pixels(), &[1.0, 3.0]);
+    let plane = |map: &Option<QualityMap>| map.as_ref().unwrap().channel(0).pixels().to_vec();
+    assert_eq!(plane(&product.inverse_variance)[1], 0.0);
+    assert!(plane(&product.dispersion)[1].is_nan());
+    assert_eq!(product.report.small_n_fallback_pixels, 1);
 }

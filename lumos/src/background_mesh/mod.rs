@@ -1,42 +1,39 @@
 //! Shared tiled sky-background mesh estimator (SExtractor/SEP style). A [`BackgroundMesh`] divides
 //! the image into a grid of boxes and computes one robust sky value + noise per box — per-box
 //! ±σ-clip then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew),
-//! with a 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous
-//! interpolation.
+//! with a 3×3 grid median filter — and [`mesh_spline::MeshSpline`], the natural bicubic spline
+//! that carries a mesh's statistics to every pixel, C²-continuous.
 //!
 //! The canonical robust background estimate, reused by `star_detection::background` (full-res
-//! background+noise map for detection), `background_extraction` (tile-centre samples feeding the
-//! gradient surface fit), and per colour of a mosaic by [`colour_mesh`] for the hot-pixel and
-//! cosmic-ray scans.
+//! background+noise map for detection), `image_ops::extract_background` (tile-centre samples
+//! feeding the gradient surface fit), and per color of a mosaic by [`color_mesh`] for the
+//! hot-pixel and cosmic-ray scans.
 
-pub(crate) mod colour_mesh;
+pub(crate) mod color_mesh;
 pub(crate) mod mesh_axis;
+pub(crate) mod mesh_spline;
 pub(crate) mod mesh_workspace;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
 
-use crate::background_mesh::mesh_axis::MeshAxis;
-use crate::background_mesh::spline::natural_spline::NaturalSpline;
-use crate::background_mesh::tile_stats::{
-    TileComponent, TileD2y, TileInput, TileScratch, TileStats,
-};
-use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
-use crate::scratch_pool::ScratchPool;
-use imaginarium::Buffer2;
-use rayon::prelude::*;
 use std::mem;
 use std::ops::RangeInclusive;
 
-/// Tile grid with precomputed centers and spline coefficients for interpolation.
+use imaginarium::Buffer2;
+use rayon::prelude::*;
+
+use crate::background_mesh::mesh_axis::MeshAxis;
+use crate::background_mesh::tile_stats::{TileInput, TileScratch, TileStats};
+use crate::math::size2us::Size2us;
+use crate::math::statistics;
+use crate::math::urect::URect;
+use crate::math::vec2us::Vec2us;
+use crate::scratch_pool::ScratchPool;
+
+/// Tile grid with each tile's statistics and centre.
 #[derive(Debug)]
 pub(crate) struct BackgroundMesh {
     pub(crate) stats: Buffer2<TileStats>,
-    /// Second derivatives in Y for the natural cubic spline, both planes per tile.
-    /// Layout: `tiles_x` * `tiles_y`, row-major (same as stats).
-    d2y: Vec<TileD2y>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
@@ -71,7 +68,6 @@ impl BackgroundMesh {
         let centers_y = (0..tiles_y).map(|tile| rows.centre(tile)).collect();
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
-            d2y: vec![TileD2y::default(); n],
             centers_x,
             centers_y,
             tile_size,
@@ -82,12 +78,6 @@ impl BackgroundMesh {
 
     fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
         self.dimensions == dimensions && self.tile_size == clamped_tile_size(dimensions, tile_size)
-    }
-
-    /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.
-    #[inline]
-    pub(crate) fn d2y(&self, component: TileComponent, tile: Vec2us) -> f32 {
-        self.d2y[tile.y * self.stats.width() + tile.x].get(component)
     }
 
     /// The least and the greatest tile σ.
@@ -203,9 +193,9 @@ impl BackgroundMesh {
             }
             debug_assert!(!skies.is_empty(), "some tile is measured");
             self.stats[(tx, ty)] = TileStats {
-                sky: median_mut(&mut skies),
-                sigma: median_mut(&mut sigmas),
-                noise: median_mut(&mut noises),
+                sky: statistics::median_mut(&mut skies),
+                sigma: statistics::median_mut(&mut sigmas),
+                noise: statistics::median_mut(&mut noises),
             };
         }
     }
@@ -260,59 +250,13 @@ impl BackgroundMesh {
                 }
             }
 
-            out.sky = median_mut(&mut skies);
+            out.sky = statistics::median_mut(&mut skies);
             // A steep σ gradient can reflect below zero, which no noise level is.
-            out.sigma = median_mut(&mut sigmas).max(0.0);
-            out.noise = median_mut(&mut noises).max(0.0);
+            out.sigma = statistics::median_mut(&mut sigmas).max(0.0);
+            out.noise = statistics::median_mut(&mut noises).max(0.0);
         });
 
         mem::swap(&mut self.stats, scratch);
-    }
-
-    /// Precompute second derivatives in Y for natural cubic spline interpolation.
-    ///
-    /// For each tile column (tx), solves a tridiagonal system to find d²f/dy²
-    /// at each tile center. Natural boundary conditions: d²f=0 at endpoints.
-    fn compute_y_spline_derivatives(
-        &mut self,
-        spline_values: &mut [f32],
-        spline_d2: &mut [f32],
-        spline_scratch: &mut [f32],
-    ) {
-        let tiles_x = self.stats.width();
-        let tiles_y = self.stats.height();
-
-        if tiles_y < 2 {
-            // 0 or 1 tile rows: no spline needed, derivatives stay zero
-            return;
-        }
-
-        // Destructured so the two output buffers can be borrowed mutably alongside the shared
-        // `stats` read — the plane loop below needs all three at once.
-        let Self {
-            stats,
-            d2y,
-            centers_y,
-            ..
-        } = self;
-
-        for tx in 0..tiles_x {
-            // Both planes for this column before moving on, so the strided `stats` reads for one
-            // tile column happen together rather than the whole grid being walked twice.
-            for component in TileComponent::ALL {
-                for (ty, value) in spline_values.iter_mut().enumerate() {
-                    *value = stats[(tx, ty)].get(component);
-                }
-                NaturalSpline {
-                    values: spline_values,
-                    centers: centers_y,
-                }
-                .second_derivatives(spline_d2, spline_scratch);
-                for (ty, &d) in spline_d2.iter().enumerate() {
-                    *d2y[ty * tiles_x + tx].get_mut(component) = d;
-                }
-            }
-        }
     }
 }
 

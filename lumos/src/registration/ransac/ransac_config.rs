@@ -4,7 +4,7 @@ use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Configuration for robust transform estimation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RansacConfig {
     /// Maximum hypotheses to evaluate. Default: 2000.
     pub max_iterations: usize,
@@ -15,10 +15,9 @@ pub struct RansacConfig {
     /// The sampler's seed: the same seed on the same input gives the same transform, bit for bit.
     /// Default: 0.
     pub seed: u64,
-    /// Whether to refine promising hypotheses with LO-RANSAC. Default: true.
-    pub local_optimization: bool,
-    /// Maximum LO-RANSAC refinement iterations. Default: 10.
-    pub lo_iterations: usize,
+    /// The LO-RANSAC refinement iterations a new best hypothesis gets at most, 0 for none.
+    /// Default: 10.
+    pub local_max_iterations: usize,
     /// Maximum absolute rotation in radians, or `None` for any. Default: `None` — a meridian flip
     /// turns the field by 180°, and an alt-az mount turns it through a session.
     pub max_rotation: Option<f64>,
@@ -47,8 +46,7 @@ impl Default for RansacConfig {
             confidence: 0.995,
             min_inlier_ratio: 0.3,
             seed: 0,
-            local_optimization: true,
-            lo_iterations: 10,
+            local_max_iterations: 10,
             max_rotation: None,
             scale_range: Some(ScaleRange { min: 0.8, max: 1.2 }),
         }
@@ -59,12 +57,10 @@ impl RansacConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         ConfigValue::count("ransac max_iterations", self.max_iterations)
             .must_be("at least 1", self.max_iterations >= 1)?;
-        ConfigValue::count("ransac lo_iterations", self.lo_iterations).must_be(
-            "at least 1 when local_optimization is enabled",
-            !self.local_optimization || self.lo_iterations >= 1,
-        )?;
+        // Open at both ends: `ln(1 − p)` is 0 at 0, which asks for no iteration at all, and −∞ at
+        // 1, which asks for infinitely many.
         ConfigValue::new("ransac confidence", self.confidence)
-            .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
+            .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
         ConfigValue::new("ransac min_inlier_ratio", self.min_inlier_ratio)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
         if let Some(max_rotation) = self.max_rotation {

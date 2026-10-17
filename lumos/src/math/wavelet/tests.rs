@@ -1,7 +1,8 @@
 use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
-use crate::math::wavelet::{atrous_smooth, max_scales, reflect, white_noise_sigma};
+use crate::math::wavelet::{B3, SmoothRow, atrous_smooth, max_scales, reflect, white_noise_sigma};
+use crate::simd::tier::Tier;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     Buffer2::from_fn(size.width, size.height, |x, y| {
@@ -117,5 +118,54 @@ fn layer_sigmas_have_their_closed_form() {
             "scale {scale}: {}",
             white_noise_sigma(scale)
         );
+    }
+}
+
+/// Every tier's smooth is the scalar one bit for bit: each output the five products `w·v`, each
+/// rounded, added left to right. Widths from 1 to 70 cross the four-vector block, the single
+/// vector and the scalar tail, and the reflected borders; steps 1, 2 and 4 move the interior.
+#[test]
+fn every_tier_smooths_a_row_as_the_scalar_order_does() {
+    let reference = |row: &[f32], x: usize, step: usize| {
+        let (xi, s, wi) = (x as isize, step as isize, row.len() as isize);
+        B3[0] * row[reflect(xi - 2 * s, wi)]
+            + B3[1] * row[reflect(xi - s, wi)]
+            + B3[2] * row[x]
+            + B3[3] * row[reflect(xi + s, wi)]
+            + B3[4] * row[reflect(xi + 2 * s, wi)]
+    };
+    for width in 1..=70 {
+        let rows: Vec<Vec<f32>> = (0..5)
+            .map(|row| {
+                (0..width)
+                    .map(|x| 0.5 + 0.3 * ((x * 7 + row * 13) as f32 * 0.37).sin())
+                    .collect()
+            })
+            .collect();
+        let column: Vec<f32> = (0..width)
+            .map(|x| {
+                B3[0] * rows[0][x]
+                    + B3[1] * rows[1][x]
+                    + B3[2] * rows[2][x]
+                    + B3[3] * rows[3][x]
+                    + B3[4] * rows[4][x]
+            })
+            .collect();
+        for step in [1, 2, 4] {
+            let expected: Vec<u32> = (0..width)
+                .map(|x| reference(&column, x, step).to_bits())
+                .collect();
+            for tier in Tier::supported() {
+                let (mut scratch, mut out) = (vec![0.0; width], vec![0.0; width]);
+                tier.run(SmoothRow {
+                    rows: [&rows[0], &rows[1], &rows[2], &rows[3], &rows[4]],
+                    column: &mut scratch,
+                    out: &mut out,
+                    step,
+                });
+                let got: Vec<u32> = out.iter().map(|value| value.to_bits()).collect();
+                assert_eq!(got, expected, "{tier} width {width} step {step}");
+            }
+        }
     }
 }

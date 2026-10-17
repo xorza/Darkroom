@@ -18,7 +18,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let mut group = Kind::Atomic.group(c, "io/fits/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
-    // A mono camera's 16-bit light, a calibrated or stacked frame in 32-bit float, and a colour
+    // A mono camera's 16-bit light, a calibrated or stacked frame in 32-bit float, and a color
     // camera's 16-bit light, which loads as a CFA image.
     group.bench_function(BenchmarkId::new("decode/u16", field.name()), |b| {
         let file = FitsFile::write(Format::U16, field);

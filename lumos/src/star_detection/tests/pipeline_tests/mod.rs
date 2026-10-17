@@ -113,9 +113,9 @@ impl PipelineCase<'_> {
             )
             .collect();
         let background = background_map::estimate(pixels, &config.background);
-        let saturation = frame.image.metadata.saturation_level();
+        let saturation = frame.image.metadata.header.saturation_level();
         let k = config.extraction.sigma_threshold;
-        let sigma_at = |x: usize, y: usize| background.noise[(x, y)].max(background.noise_floor);
+        let sigma_at = |x: usize, y: usize| background.sky.noise[(x, y)].max(background.sky.floor);
         let residual_at =
             |x: usize, y: usize| frame.truth.clean[(x, y)] - background.background[(x, y)];
         // What the threshold is applied to: the residual itself, or its matched-filtered image,

@@ -5,9 +5,8 @@
 //! star's own width, and the 2×2 matrix that results is small enough to invert in closed form.
 
 use crate::math::fwhm;
-use crate::math::size2us::Size2us;
-use crate::star_detection::centroid;
-use crate::star_detection::centroid::{MAX_STAMP_SIZE, StampAt};
+use crate::star_detection::centroid::stamp::StampAt;
+use crate::star_detection::centroid::windowed_stamp::{Moments, WindowedStamp};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Cov2 {
@@ -84,86 +83,26 @@ impl Cov2 {
     /// Returns the source covariance, or `None` if it never reaches a valid
     /// positive-definite estimate (caller falls back to the plain moments).
     ///
-    /// `offset` is the stamp's local sky left in the residual, exactly as in `compute_star` — both
-    /// must subtract the same one or FWHM/eccentricity and flux/SNR would come from different sky
-    /// conventions.
+    /// `offset` is the stamp's local sky left in the residual.
     ///
     /// The whole stamp must lie inside the frame: a position nearer the edge than its radius is the
     /// caller's bug, and panics.
     pub(super) fn windowed(stamp: StampAt<'_>, offset: f32, seed_sigma_sq: f64) -> Option<Self> {
         const MAX_ITERS: usize = 4;
 
-        let StampAt {
-            residual,
-            pos,
-            radius: stamp_radius,
-        } = stamp;
-        // Caller's contract, not data validation: `compute_star` has already rejected edge positions.
-        let centre = centroid::stamp_centre(pos, Size2us::from(residual), stamp_radius)
-            .expect("Cov2::windowed needs the whole stamp in frame");
-        let (x0, y0) = (centre.x - stamp_radius, centre.y - stamp_radius);
-        let pos_x = pos.x;
-        let pos_y = pos.y;
-
         let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
         let mut best: Option<Self> = None;
-
-        let stamp_size = 2 * stamp_radius + 1;
-        // Column offsets survive every iteration; their exponentials do not, because `inv_two_sw`
-        // is re-derived from the matched window each pass.
-        let mut column_offsets = [0.0f64; MAX_STAMP_SIZE];
-        for (column, offset) in column_offsets[..stamp_size].iter_mut().enumerate() {
-            *offset = (x0 + column) as f64 - pos_x;
-        }
-
         for _ in 0..MAX_ITERS {
-            let inv_two_sw = 1.0 / (2.0 * sigma_w_sq);
-            let mut w_sum = 0.0f64;
-            let mut mxx = 0.0f64;
-            let mut myy = 0.0f64;
-            let mut mxy = 0.0f64;
-
-            // The window is circular, so `exp(-(fx² + fy²)·k)` factors per axis — `2(2r+1)`
-            // exponentials per iteration instead of `(2r+1)²`.
-            let mut column_weights = [0.0f64; MAX_STAMP_SIZE];
-            for (weight, &fx) in column_weights[..stamp_size]
-                .iter_mut()
-                .zip(&column_offsets[..stamp_size])
-            {
-                *weight = (-fx * fx * inv_two_sw).exp();
-            }
-
-            for y in y0..y0 + stamp_size {
-                let px_row = residual.row(y);
-
-                let fy = y as f64 - pos_y;
-                let row_weight = (-fy * fy * inv_two_sw).exp();
-
-                for (column, (&fx, &column_weight)) in column_offsets[..stamp_size]
-                    .iter()
-                    .zip(&column_weights[..stamp_size])
-                    .enumerate()
-                {
-                    let x = x0 + column;
-                    let wv = column_weight * row_weight * f64::from(px_row[x] - offset);
-                    w_sum += wv;
-                    mxx += wv * fx * fx;
-                    myy += wv * fy * fy;
-                    mxy += wv * fx * fy;
-                }
-            }
-
-            if w_sum < f64::EPSILON {
+            let window = WindowedStamp::new(stamp, sigma_w_sq)
+                .expect("Cov2::windowed needs the whole stamp in frame");
+            let Some(moments) = Moments::about(&window, offset) else {
                 break;
-            }
-            let obs = Self {
-                xx: mxx / w_sum,
-                yy: myy / w_sum,
-                xy: mxy / w_sum,
             };
 
             // Deconvolve the circular window: C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹
-            let Some(obs_inv) = obs.inverse() else { break };
+            let Some(obs_inv) = moments.about_centre().inverse() else {
+                break;
+            };
             let inv_sw = 1.0 / sigma_w_sq;
             let decon_inv = Self {
                 xx: obs_inv.xx - inv_sw,
@@ -192,5 +131,5 @@ impl Cov2 {
 const PIXEL_VARIANCE: f64 = 1.0 / 12.0;
 
 /// Window-scale bounds (px²): σ ∈ [0.5, 10] px.
-pub(super) const MIN_SIGMA_SQ: f64 = 0.25;
-pub(super) const MAX_SIGMA_SQ: f64 = 100.0;
+const MIN_SIGMA_SQ: f64 = 0.25;
+const MAX_SIGMA_SQ: f64 = 100.0;

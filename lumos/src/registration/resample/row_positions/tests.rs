@@ -2,10 +2,11 @@ use glam::DVec2;
 
 use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipModel;
+use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
 /// by `SourcePosition::within`, and positions past the footprint are `None`. A SIP row sums its
@@ -31,7 +32,7 @@ fn a_row_is_what_apply_gives_pixel_by_pixel() {
         })
         .collect();
     let sip = SipModel {
-        order: 3,
+        order: SipOrder::Three,
         origin: center,
     }
     .fitted_under(&affine, &reference, &target);

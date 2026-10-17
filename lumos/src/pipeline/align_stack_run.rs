@@ -1,27 +1,94 @@
-//! [`AlignStackRun`]: one registered stack under way, and the register-warp-combine body every
-//! entry ends in.
+//! [`AlignStackRun`]: one registered stack under way, and its two schedules — every light detected
+//! before any registers, or each light through all of it in one pass.
 
 use std::mem;
+use std::path::Path;
 
 use common::CancelToken;
 
 use crate::concurrency;
+use crate::frame_store::run_storage::RunStorage;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
-use crate::pipeline::align_stack_config::{AlignStackConfig, ReferenceCandidate};
+use crate::memory::run_plan::RunPlan;
+use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
 use crate::pipeline::align_stack_result::AlignStackResult;
-use crate::pipeline::error::AlignStackError;
+use crate::pipeline::detected_frame::{DetectedFrame, DetectedLight};
+use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
 use crate::pipeline::frame_parking::StagePlan;
-use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet};
-use crate::pipeline::light_source::DetectedLights;
+use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet, ParkedLight};
+use crate::pipeline::light_files::LightFiles;
+use crate::pipeline::light_shape::LightShape;
+use crate::pipeline::light_source::LightSource;
 use crate::pipeline::registered_set::RegisteredSet;
-use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
+use crate::progress::stacking_progress::StackingStage;
+use crate::progress::stage_counter::StageCounter;
+use crate::registration::registrar::Registrar;
+use crate::star_detection::star_detector::StarDetector;
+use crate::star_detection::star_detector::detection_result::DetectionResult;
 
 /// One registered stack under way: what it was asked to do, and the memory reading, decode policy,
 /// cancel token and progress it took at its entry.
 #[derive(Debug)]
 pub(super) struct AlignStackRun<'a> {
     pub(super) config: &'a AlignStackConfig,
+    /// The registration configuration, checked where the run was built.
+    pub(super) registrar: Registrar<'a>,
     pub(super) ingest: IngestRun,
+}
+
+/// The detected lights, and the memory decisions the register-warp stage reads.
+#[derive(Debug)]
+struct DetectedLights {
+    lights: Vec<DetectedLight>,
+    stage: StagePlan,
+}
+
+/// How each light is taken in: admitted to the set, then its stars detected.
+#[derive(Debug)]
+struct LightIntake<'a> {
+    intake: FrameIntake<'a>,
+    count: usize,
+}
+
+impl LightIntake<'_> {
+    /// Light `index`, `image`, admitted to the set, its stars detected by `detector`.
+    fn detect(
+        &self,
+        detector: &mut StarDetector,
+        index: usize,
+        image: LinearImage,
+    ) -> Result<DetectedLight<LinearImage>, AlignStackError> {
+        let admitted = self.intake.admit(index, &image)?;
+        let result = detector.detect(&image);
+        self.log(index, &result);
+        let DetectionResult { stars, diagnostics } = result;
+        Ok(DetectedLight {
+            frame: DetectedFrame {
+                image,
+                stars,
+                admitted,
+            },
+            diagnostics,
+        })
+    }
+
+    /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
+    /// light `index` resolved into usable stars.
+    fn log(&self, index: usize, result: &DetectionResult) {
+        let diagnostics = &result.diagnostics;
+        tracing::info!(
+            light = index,
+            total = self.count,
+            candidates = diagnostics.candidates_after_filtering,
+            deblended = diagnostics.deblended_components,
+            measured = diagnostics.stars_after_centroid,
+            stars = result.stars.len(),
+            "detected stars"
+        );
+    }
 }
 
 impl AlignStackRun<'_> {
@@ -29,48 +96,127 @@ impl AlignStackRun<'_> {
         &self.ingest.context.cancel
     }
 
-    /// Register every frame to the chosen reference, warp it, and combine the survivors.
+    /// Stack `lights`. Lights from files with [`Reference::Index`] go in one pass, each prepared,
+    /// detected, registered, warped and stored by one worker; otherwise every light is prepared
+    /// and detected first — the reference is the sharpest, or the lights are already in memory —
+    /// and parked until it registers.
+    pub(super) fn stack<P: AsRef<Path> + Sync>(
+        &self,
+        lights: LightSource<'_, P>,
+    ) -> Result<AlignStackResult, AlignStackError> {
+        match (self.config.reference, lights) {
+            (Reference::Index(reference), LightSource::Files(files)) => {
+                self.stack_in_one_pass(&files, reference)
+            }
+            (_, lights) => {
+                let detected = self.detect(lights)?;
+                self.register_warp_and_stack(detected)
+            }
+        }
+    }
+
+    /// Plan the run, then decode or take each light, check and measure it, detect its stars and
+    /// park it where the tier says, as many at once as the plan allows.
     ///
-    /// The single body behind every entry with [`Reference::Auto`](crate::Reference::Auto), and
-    /// behind the entry of frames already decoded. The entries differ only in how a frame becomes
-    /// a [`DetectedFrame`](crate::pipeline::detected_frame::DetectedFrame) — already decoded, or
-    /// decoded and calibrated from a path — and the stage plan decides whether a warped output
-    /// stays resident or goes to the frame store. Everything from reference selection onward is
-    /// the same work either way.
+    /// The statistics are measured before the warp correlates neighbouring pixels, and while the
+    /// frame is in hand: a spilled frame would otherwise be read back for them. A demosaiced
+    /// light's noise is the one its demosaic measured on the mosaic.
+    fn detect<P: AsRef<Path> + Sync>(
+        &self,
+        lights: LightSource<'_, P>,
+    ) -> Result<DetectedLights, AlignStackError> {
+        let Self { config, ingest, .. } = self;
+        let count = lights.len();
+        debug_assert!(count > 0, "each entry refuses an empty set");
+        let budget = ingest.budget;
+        let shape = lights.shape(ingest)?;
+        let plan = RunPlan::of(
+            count,
+            &shape.found_reference(config, budget.workers()),
+            budget,
+        );
+        let storage = match &lights {
+            LightSource::Held(_) => &RunStorage::holding(ingest),
+            LightSource::Files(files) => files.storage(),
+        };
+        let stage = shape.stage_plan(&plan, LightShape::WARP, storage)?;
+        let slots = plan.width(LightShape::PREPARE);
+        tracing::info!(
+            lights = count,
+            budget_mb = budget.usable() / (1024 * 1024),
+            concurrency = slots,
+            spilling = stage.parking.spills(),
+            "Preparing lights and detecting stars"
+        );
+
+        // Bounded by the plan, which charges each in-flight light its decode and the detector's
+        // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
+        // is also what a cancel has to drain.
+        let intake = self.intake(shape.dimensions, count, slots);
+        let mut detectors = self.detectors(slots)?;
+        let lights = match lights {
+            // A held light stays where the caller put it, whatever the tier.
+            LightSource::Held(frames) => {
+                intake
+                    .intake
+                    .map_owned(frames, &mut detectors, |detector, index, image| {
+                        let DetectedLight { frame, diagnostics } =
+                            intake.detect(detector, index, image)?;
+                        intake.intake.complete_one();
+                        Ok::<_, AlignStackError>(DetectedLight {
+                            frame: frame.resident(),
+                            diagnostics,
+                        })
+                    })?
+            }
+            LightSource::Files(files) => {
+                intake
+                    .intake
+                    .map(0..count, &mut detectors, |detector, index| {
+                        let image = files.prepare(index, intake.intake.context())?;
+                        let DetectedLight { frame, diagnostics } =
+                            intake.detect(detector, index, image)?;
+                        let frame = frame.parked(&stage.parking)?;
+                        intake.intake.complete_one();
+                        Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
+                    })?
+            }
+        };
+        Ok(DetectedLights { lights, stage })
+    }
+
+    /// Register every light to the chosen reference, warp it, and combine the survivors.
     ///
-    /// Every entry checked each frame's dimensions against the first before detection: `warp`
+    /// Every route checked each light's dimensions against the first before detection: `warp`
     /// reprojects into the *source* frame's grid, so a mismatch here would reach the combine as
     /// differently-sized planes.
-    pub(super) fn register_warp_and_stack(
+    fn register_warp_and_stack(
         &self,
         detected: DetectedLights,
     ) -> Result<AlignStackResult, AlignStackError> {
         let DetectedLights {
-            frames: mut detected,
+            lights,
             stage: StagePlan {
                 parking,
                 warp_width,
             },
         } = detected;
-        let total = detected.len();
+        let count = lights.len();
         if self.cancel().is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
         debug_assert!(
-            detected
+            lights
                 .iter()
-                .all(|frame| frame.image.dimensions() == detected[0].image.dimensions()),
+                .all(|light| light.frame.image.dimensions() == lights[0].frame.image.dimensions()),
             "every entry checks the dimensions before detection"
         );
+        let (mut frames, detection): (Vec<_>, Vec<_>) = lights
+            .into_iter()
+            .map(|light| (light.frame, light.diagnostics))
+            .unzip();
 
-        // Taken before the frames are consumed below, so the funnel survives into the result in
-        // input order — including for frames registration goes on to drop.
-        let detection: Vec<DetectionDiagnostics> = detected
-            .iter_mut()
-            .map(|frame| mem::take(&mut frame.diagnostics))
-            .collect();
-
-        let candidates: Vec<ReferenceCandidate> = detected
+        let candidates: Vec<ReferenceCandidate> = frames
             .iter()
             .zip(&detection)
             .map(|(frame, funnel)| ReferenceCandidate {
@@ -78,44 +224,184 @@ impl AlignStackRun<'_> {
                 median_fwhm: funnel.median_fwhm,
             })
             .collect();
-        let registration = &self.config.registration;
-        let reference = self.config.reference.select(
-            &candidates,
-            registration
-                .matching
-                .required_stars(registration.transform_type),
-        )?;
-        let metadata = detected[reference].image.metadata().clone();
-        let dimensions = detected[reference].image.dimensions();
+        let reference = self
+            .config
+            .reference
+            .select(&candidates, self.required_stars())?;
+        let metadata = frames[reference].image.metadata().clone();
+        let dimensions = frames[reference].image.dimensions();
         let registrar = FrameRegistrar::new(
             self,
             &parking,
             LightSet {
-                count: total,
+                count,
                 dimensions,
                 reference,
-                reference_stars: mem::take(&mut detected[reference].stars),
+                reference_stars: mem::take(&mut frames[reference].stars),
             },
         );
-        // Taking each detected record by value frees its input image as soon as the warped output
+        // Counted once a light is parked; the reference is not registered, so not among them.
+        let registering =
+            StageCounter::new(&self.ingest.progress, StackingStage::Registering, count - 1);
+        // Taking each detected light by value frees its input image as soon as the warped output
         // exists, so this stage never holds the complete input and warped sets simultaneously.
-        let outcomes = concurrency::try_par_map_bounded_owned(
-            detected,
+        let parked = concurrency::try_par_map_bounded_owned(
+            frames,
             &mut vec![(); warp_width],
-            |(), index, detected| registrar.park(index, detected),
+            |(), index, frame| {
+                let parked = registrar.park(index, frame)?;
+                if index != reference {
+                    registering.complete_one();
+                }
+                Ok::<_, AlignStackError>(parked)
+            },
         )?;
         // The registrar's warp sets are a warped frame's worth each, and the combine sizes its
         // chunks against the memory without them.
         drop(registrar);
 
         RegisteredSet {
-            outcomes,
+            lights: parked
+                .into_iter()
+                .zip(detection)
+                .map(|(parked, detection)| ParkedLight { parked, detection })
+                .collect(),
             reference,
             metadata,
             dimensions,
-            detection,
             parking,
         }
         .combine(self)
+    }
+
+    /// Stack `files` against the light at index `reference` in one pass: the reference is
+    /// prepared and detected first and alone, then each worker takes a light through its
+    /// preparation, its detection, its registration, its warp and its store, so a light is
+    /// written once and no prepared set is ever parked. The pass reports as one stage, a light
+    /// counted once it is parked.
+    fn stack_in_one_pass<P: AsRef<Path> + Sync>(
+        &self,
+        files: &LightFiles<'_, P>,
+        reference: usize,
+    ) -> Result<AlignStackResult, AlignStackError> {
+        let Self { config, ingest, .. } = self;
+        let count = files.len();
+        let budget = ingest.budget;
+        let shape = files.shape(ingest)?;
+        let plan = RunPlan::of(
+            count,
+            &shape.named_reference(config, budget.workers()),
+            budget,
+        );
+        let StagePlan {
+            parking,
+            warp_width: workers,
+        } = shape.stage_plan(&plan, LightShape::PASS, files.storage())?;
+        tracing::info!(
+            lights = count,
+            reference,
+            budget_mb = budget.usable() / (1024 * 1024),
+            concurrency = workers,
+            spilling = parking.spills(),
+            "Preparing, detecting and registering lights in one pass"
+        );
+        let slots = workers.min(count);
+        let intake = self.intake(shape.dimensions, count, slots);
+        let mut detectors = self.detectors(slots)?;
+
+        if self.cancel().is_cancelled() {
+            return Err(AlignStackError::Cancelled);
+        }
+        // The reference decodes alone, on every thread a decode may use.
+        let image = files.prepare(reference, &ingest.context)?;
+        let DetectedLight {
+            frame: mut first,
+            diagnostics,
+        } = intake.detect(&mut detectors[0], reference, image)?;
+        ReferenceCandidate {
+            stars: first.stars.len(),
+            median_fwhm: diagnostics.median_fwhm,
+        }
+        .check(reference, self.required_stars())?;
+        let metadata = first.image.metadata.clone();
+        let dimensions = first.image.dimensions();
+        let registrar = FrameRegistrar::new(
+            self,
+            &parking,
+            LightSet {
+                count,
+                dimensions,
+                reference,
+                reference_stars: mem::take(&mut first.stars),
+            },
+        );
+        let reference_light = ParkedLight {
+            parked: registrar.park(reference, first.resident())?,
+            detection: diagnostics,
+        };
+        intake.intake.complete_one();
+
+        let others: Vec<usize> = (0..count).filter(|&index| index != reference).collect();
+        let mut lights =
+            intake
+                .intake
+                .map_owned(others, &mut detectors, |detector, _, index| {
+                    let image = files.prepare(index, intake.intake.context())?;
+                    let DetectedLight { frame, diagnostics } =
+                        intake.detect(detector, index, image)?;
+                    let parked = registrar.park(index, frame.resident())?;
+                    intake.intake.complete_one();
+                    Ok::<_, AlignStackError>(ParkedLight {
+                        parked,
+                        detection: diagnostics,
+                    })
+                })?;
+        lights.insert(reference, reference_light);
+        // The registrar's warp sets are a warped frame's worth each, and a detector's pool the
+        // planes detection holds: the combine sizes its chunks against the memory without them.
+        drop(registrar);
+        drop(detectors);
+
+        RegisteredSet {
+            lights,
+            reference,
+            metadata,
+            dimensions,
+            parking,
+        }
+        .combine(self)
+    }
+
+    /// The intake of `count` lights of `dimensions`, `slots` of them decoded at once.
+    fn intake(&self, dimensions: ImageDimensions, count: usize, slots: usize) -> LightIntake<'_> {
+        LightIntake {
+            intake: FrameIntake::new(
+                IntakePlan {
+                    dimensions,
+                    frame_count: count,
+                    decode_slots: slots,
+                    stage: StackingStage::Preparing,
+                },
+                &self.ingest,
+            ),
+            count,
+        }
+    }
+
+    /// One detector for each of `slots` lights in flight, each carrying its warmed buffers from
+    /// one light to the next it picks up. Built up front, so an invalid configuration fails here
+    /// rather than from inside the parallel closure.
+    fn detectors(&self, slots: usize) -> Result<Vec<StarDetector>, AlignStackError> {
+        debug_assert!(slots > 0, "a run detects one light at a time at least");
+        (0..slots)
+            .map(|_| StarDetector::from_config(self.config.detection.clone()))
+            .collect::<Result<_, _>>()
+            .map_err(|invalid| AlignStackConfigError::Detection(invalid).into())
+    }
+
+    /// The stars a reference needs for the others to register to it.
+    fn required_stars(&self) -> usize {
+        let registration = &self.config.registration;
+        registration.matching.required_stars(registration.model)
     }
 }

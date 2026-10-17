@@ -1,6 +1,6 @@
-//! [`KernelPlan`]: what a drizzle kernel needs beyond the frame, resolved once per run.
+//! [`KernelPlan`]: what a drizzle kernel needs beyond the frame, resolved once for a run.
 
-use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
+use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lanczos::lanczos_lut::LanczosOrder;
 
@@ -13,13 +13,13 @@ const GAUSSIAN_RADIUS_SIGMAS: f64 = 3.0;
 /// The drizzle Lanczos kernel is `STScI`'s Lanczos-3: support radius 3, defined on [-3, 3].
 pub(super) const LANCZOS_ORDER: LanczosOrder = LanczosOrder::Three;
 
-/// Everything a kernel needs beyond the frame, resolved once per run.
+/// Everything a kernel needs beyond the frame, resolved once for a run.
 ///
-/// Every field is a function of [`DrizzleConfig`] alone, so resolving it here is what keeps a band
-/// from recomputing an `exp`'s σ, or a drop's area, on each of the thousands of frames × bands the
-/// scatter is split into.
+/// Every field is a function of the kernel, the pixfrac and the scale alone, so resolving it here
+/// is what keeps a band from recomputing an `exp`'s σ, or a drop's area, on each of the bands a
+/// frame's scatter is split into.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum KernelPlan {
+pub(crate) enum KernelPlan {
     /// Half the drop's side, in *input* pixels: the square kernel shrinks the input pixel and then
     /// maps its corners.
     Square {
@@ -41,14 +41,15 @@ pub(super) enum KernelPlan {
 }
 
 impl KernelPlan {
-    pub(super) fn new(config: &DrizzleConfig) -> Self {
+    /// The plan of `kernel` at `pixfrac`, onto a grid `scale` times finer.
+    pub(crate) fn new(kernel: DrizzleKernel, pixfrac: f32, scale: f32) -> Self {
         // Drop size in output pixels: pixfrac is the fraction of input pixel size, and each input
         // pixel maps to `scale` output pixels, so drop = pixfrac · scale. (STScI: pfo =
         // pixel_fraction / pscale_ratio / 2, where pscale_ratio = 1/scale.)
-        let drop_size = f64::from(config.pixfrac) * f64::from(config.scale);
-        match config.kernel {
+        let drop_size = f64::from(pixfrac) * f64::from(scale);
+        match kernel {
             DrizzleKernel::Square => Self::Square {
-                half_drop: 0.5 * f64::from(config.pixfrac),
+                half_drop: 0.5 * f64::from(pixfrac),
             },
             DrizzleKernel::Turbo => Self::Turbo {
                 half_drop: 0.5 * drop_size,

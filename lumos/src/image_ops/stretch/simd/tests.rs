@@ -1,11 +1,12 @@
 //! Every tier against the scalar curve.
 
+use std::f32::consts::LN_2;
+
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 use crate::simd::math::ASINH_LOG_FROM;
 use crate::simd::tier::Tier;
-use std::f32::consts::LN_2;
 
 /// Every tier over three planes drawn from each shape, after a black point of 0.02: the shapes put
 /// intensities below it (black on both paths), inside the curve, and above the highlight cap.
@@ -151,7 +152,7 @@ fn asinh_plane_matches_scalar() {
 }
 
 /// A NaN sample shows as black on every tier and on the scalar path: on the plane, and in any
-/// channel of a colour pixel, whose other channels go black with it because their intensity is
+/// channel of a color pixel, whose other channels go black with it because their intensity is
 /// NaN.
 #[test]
 fn a_nan_sample_is_black_on_every_path() {

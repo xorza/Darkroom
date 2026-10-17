@@ -1,5 +1,7 @@
 //! [`RingingClamp`]: PixInsight's limit on what a kernel's negative lobes may take from a sample.
 
+use crate::registration::resample::warp_params::ClampingThreshold;
+
 /// One channel's sums over a window, split as the clamp reads them.
 ///
 /// The clamp is defined on light, values at or above zero, so it reads `f⁺ = max(f, 0)` by the
@@ -40,12 +42,10 @@ pub(crate) struct RingingClamp {
 }
 
 impl RingingClamp {
-    pub(crate) fn new(threshold: f32) -> Self {
-        debug_assert!(
-            (0.0..=1.0).contains(&threshold),
-            "a clamping threshold lies in [0, 1], got {threshold}"
-        );
-        Self { threshold }
+    pub(crate) const fn new(threshold: ClampingThreshold) -> Self {
+        Self {
+            threshold: threshold.get(),
+        }
     }
 
     /// The clamped sample from a window's `sums`, the `total` weight of its taps that hold data,

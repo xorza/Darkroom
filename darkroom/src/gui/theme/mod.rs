@@ -1,7 +1,7 @@
 //! [`Theme`]: darkroom's visual palette and layout dimensions, plus the
 //! per-widget rosters hanging off it.
 //!
-//! Every colour comes from [`Palette`], read out of the generated
+//! Every color comes from [`Palette`], read out of the generated
 //! `assets/ayu-graphite.ron`. Each per-widget roster owns a file and fills
 //! itself from that palette through its own `from_palette`. The palantir-side
 //! half lives in [`palantir_bridge`].
@@ -81,7 +81,7 @@ pub(crate) struct Theme {
     /// error.
     pub(crate) status: StatusColors,
 
-    /// The colours belonging to no single widget.
+    /// The colors belonging to no single widget.
     pub(crate) colors: ChromeColors,
 
     /// Data-type → wire/port hue roster (see [`TypeColors`]).
@@ -109,7 +109,7 @@ pub(crate) struct Theme {
     pub(crate) inline_rename_title: InlineRenameTheme,
 
     /// The preferences path field's look while its committed path is broken:
-    /// palantir's text edit with every state's border in the error colour.
+    /// palantir's text edit with every state's border in the error color.
     /// Precomputed at construction like `const_value_editor_revealed`, so a
     /// broken path costs no theme clone per frame.
     pub(crate) path_field_error: TextEditTheme,
@@ -175,7 +175,7 @@ impl Theme {
 
     /// Assemble the full theme from `p` — the darkroom peer of
     /// `palantir::Theme::from_palette`. Dimensions are palette-independent;
-    /// every colour and every sub-recipe (the palantir widget theme, the
+    /// every color and every sub-recipe (the palantir widget theme, the
     /// static-value editor, inline rename) cascades from `p` rather than
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
@@ -206,7 +206,7 @@ impl Theme {
             .with_text(TextStyleOverrides::NONE.with_weight(FontWeight::BOLD));
         Self {
             // The three measurements that belong to no widget group; the
-            // rest are authored beside their colours in the groups below.
+            // rest are authored beside their colors in the groups below.
             stroke_width: 2.0,
             floating_widget_gap: 16.0,
             new_node_popup_max_height: 400.0,

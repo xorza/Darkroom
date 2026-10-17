@@ -9,10 +9,11 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
+use imaginarium::Buffer2;
+
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
-use imaginarium::Buffer2;
 
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///
@@ -70,22 +71,24 @@ impl<'a> Kernel2d<'a> {
     }
 }
 
-/// Mirror boundary handling for convolution.
-///
-/// Maps an index that may be out of bounds to a valid index using reflection.
-/// For index < 0: reflects at 0 (e.g., -1 -> 1, -2 -> 2)
-/// For index >= len: reflects at len-1 (e.g., len -> len-2, len+1 -> len-3)
-///
-/// For indices far out of bounds, clamps to valid range after reflection.
+/// Mirror boundary handling for convolution: the index `i` reflects at both ends without repeating
+/// the edge sample (`−1 → 1`, `len → len − 2`), as scipy's `mirror` mode does, and again at every
+/// further edge, with period `2(len − 1)`. So a kernel wider than the image is mirrored too, not
+/// clamped to an edge sample. A length of 1 maps every index to 0.
 #[inline]
 pub(super) fn mirror_index(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
-
-    match usize::try_from(i) {
-        Err(_) => i.unsigned_abs().min(len - 1),
-        Ok(i) if i >= len => (2 * len).saturating_sub(2).saturating_sub(i).min(len - 1),
-        Ok(i) => i,
+    if let Ok(index) = usize::try_from(i)
+        && index < len
+    {
+        return index;
     }
+    let period = 2 * (len - 1);
+    if period == 0 {
+        return 0;
+    }
+    let phase = i.rem_euclid(period.cast_signed()).cast_unsigned();
+    if phase < len { phase } else { period - phase }
 }
 
 /// The radius of an odd 1D kernel: its centre tap's index.

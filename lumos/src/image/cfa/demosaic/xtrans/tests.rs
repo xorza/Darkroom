@@ -1,6 +1,9 @@
-use crate::image::cfa::cfa_colour::CfaColour;
+use common::CancelToken;
+use imaginarium::Buffer2;
+
+use crate::image::cfa::cfa_color::CfaColor;
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{self, MarkesteijnPasses};
-use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::error::XTransPatternError;
 use crate::internals::assertions::assert_close;
@@ -8,17 +11,15 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use common::CancelToken;
-use imaginarium::Buffer2;
 
 #[test]
 fn xtrans_pattern_color_at() {
     let pattern = XTRANS_PATTERN;
     // Check corners
-    assert_eq!(pattern.color_at(Vec2us::new(0, 0)), CfaColour::Green);
-    assert_eq!(pattern.color_at(Vec2us::new(2, 0)), CfaColour::Red);
-    assert_eq!(pattern.color_at(Vec2us::new(5, 0)), CfaColour::Blue);
-    assert_eq!(pattern.color_at(Vec2us::new(0, 2)), CfaColour::Blue);
+    assert_eq!(pattern.color_at(Vec2us::new(0, 0)), CfaColor::Green);
+    assert_eq!(pattern.color_at(Vec2us::new(2, 0)), CfaColor::Red);
+    assert_eq!(pattern.color_at(Vec2us::new(5, 0)), CfaColor::Blue);
+    assert_eq!(pattern.color_at(Vec2us::new(0, 2)), CfaColor::Blue);
     // Check wrapping
     assert_eq!(
         pattern.color_at(Vec2us::new(0, 6)),
@@ -54,7 +55,7 @@ fn xtrans_pattern_invalid_metadata() {
         }
     );
 
-    let mut pattern = *XTRANS_PATTERN.rows();
+    let mut pattern = XTRANS_PATTERN.rows();
     pattern[0][2] = 1;
     assert_eq!(
         XTransPattern::new(pattern).unwrap_err(),
@@ -151,7 +152,7 @@ fn the_hexagons_are_dcraws() {
     for (row, cells) in expected.iter().enumerate() {
         for (column, cell) in cells.iter().enumerate() {
             let actual: Vec<(i8, i8)> = hexagons
-                .at(row + 3, column + 6)
+                .at(Vec2us::new(column + 6, row + 3))
                 .iter()
                 .map(|offset| (offset.dy, offset.dx))
                 .collect();
@@ -159,22 +160,6 @@ fn the_hexagons_are_dcraws() {
         }
     }
     assert_eq!(hexagons.solitary(), Vec2us::new(2, 2));
-}
-
-/// A frame takes its plane's size, which must not be empty.
-#[test]
-fn an_xtrans_image_holds_its_size_in_samples() {
-    let data = Buffer2::new_filled(6, 6, 0.5);
-    let image = XTransImage::new(&data, XTRANS_PATTERN);
-    assert_eq!(image.size, Size2us::new(6, 6));
-    assert_eq!(image.read(1, 2), 0.5);
-    for size in [Size2us::new(0, 4), Size2us::new(6, 0)] {
-        let data = Buffer2::new_default(size.width, size.height);
-        let refused = std::panic::catch_unwind(|| {
-            XTransImage::new(&data, XTRANS_PATTERN);
-        });
-        assert!(refused.is_err(), "{size:?}");
-    }
 }
 
 /// A uniform frame demosaics to itself, three planes of its size, at any level and either pass
@@ -186,7 +171,7 @@ fn a_uniform_frame_demosaics_to_itself() {
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         for level in [-1e-4f32, 0.0, 1e-5, 1e-4, 1e-2, 0.5] {
             let rgb = markesteijn::demosaic(
-                &XTransImage::new(
+                &MosaicView::new(
                     &Buffer2::new_filled(size.width, size.height, level),
                     XTRANS_PATTERN,
                 ),
@@ -207,7 +192,7 @@ fn a_uniform_frame_demosaics_to_itself() {
     }
 }
 
-/// Markesteijn is odd: its colour differences, gradients and homogeneity are odd or even in the
+/// Markesteijn is odd: its color differences, gradients and homogeneity are odd or even in the
 /// samples, and its green bounds, each the least and the greatest of a hexagon, swap under a
 /// negation. So the negated mosaic demosaics to the negated output, bit for bit. The field lies
 /// below zero throughout, as a dark-subtracted background can, in diagonal stripes whose edges
@@ -229,7 +214,7 @@ fn markesteijn_is_odd() {
     for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
         let demosaic = |data: &Buffer2<f32>| {
             markesteijn::demosaic(
-                &XTransImage::new(data, XTRANS_PATTERN),
+                &MosaicView::new(data, XTRANS_PATTERN),
                 passes,
                 &CancelToken::never(),
             )
@@ -257,7 +242,7 @@ fn f32_demosaic_preserves_signed_native_samples() {
         ((y * size.width + x) % 17) as f32 * 0.25 - 2.0
     });
     let rgb = markesteijn::demosaic(
-        &XTransImage::new(&data, pattern),
+        &MosaicView::new(&data, pattern),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )
@@ -295,7 +280,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     );
     let run = |data: &Buffer2<f32>| {
         markesteijn::demosaic(
-            &XTransImage::new(data, XTRANS_PATTERN),
+            &MosaicView::new(data, XTRANS_PATTERN),
             MarkesteijnPasses::One,
             &CancelToken::never(),
         )
@@ -325,7 +310,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
         }
     });
     let rgb = markesteijn::demosaic(
-        &XTransImage::new(&blocks, XTRANS_PATTERN),
+        &MosaicView::new(&blocks, XTRANS_PATTERN),
         MarkesteijnPasses::One,
         &CancelToken::never(),
     )

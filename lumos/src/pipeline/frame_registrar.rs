@@ -1,6 +1,4 @@
-//! [`FrameRegistrar`]: each frame's registration to the reference, its warp, and where it parks.
-
-use std::sync::atomic::{AtomicUsize, Ordering};
+//! [`FrameRegistrar`]: each light's registration to the reference, its warp, and where it parks.
 
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::image_dimensions::ImageDimensions;
@@ -8,50 +6,60 @@ use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::FrameParking;
-use crate::pipeline::frame_registration::FrameRegistration;
-use crate::progress::stacking_progress::StackingStage;
-use crate::progress::stage_counter::StageCounter;
 use crate::registration::error::RegistrationError;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::resample::{RowScratch, Warp, WarpBuffers};
+use crate::registration::resample::{Warp, WarpResult, WarpScratch};
+use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::ScratchPool;
 use crate::star_detection::star::Star;
+use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
-/// Registers each frame to the reference's stars, warps it, and parks the warped frame in the
+/// Registers each light to the reference's stars, warps it, and parks the warped frame in the
 /// tier. The reference parks unwarped.
 #[derive(Debug)]
-pub(crate) struct FrameRegistrar<'a> {
+pub(super) struct FrameRegistrar<'a> {
     reference: usize,
     reference_stars: Vec<Star>,
     run: &'a AlignStackRun<'a>,
     parking: &'a FrameParking,
-    /// The frames registered to the reference: every frame but the reference.
-    others: usize,
-    attempted: AtomicUsize,
-    /// Counted where the work ends: a dropped frame counts as much as a registered one, since the
-    /// bar tracks attempts resolved, not survivors.
-    resolved: StageCounter<'a>,
-    /// The sets the frames warp into, one per frame in flight at most.
-    warps: ScratchPool<WarpBuffers>,
-    /// The warp's row scratch, one per rayon job.
-    rows: ScratchPool<RowScratch>,
+    count: usize,
+    /// The sets the lights warp into, one per light in flight at most.
+    warps: ScratchPool<WarpResult>,
+    /// What each warp works in beside its result.
+    scratch: WarpScratch,
 }
 
 /// The lights a registrar parks: how many, the dimensions every one of them has, and the reference
 /// among them with the stars the others register to.
 #[derive(Debug)]
-pub(crate) struct LightSet {
-    pub(crate) count: usize,
-    pub(crate) dimensions: ImageDimensions,
-    pub(crate) reference: usize,
-    pub(crate) reference_stars: Vec<Star>,
+pub(super) struct LightSet {
+    pub(super) count: usize,
+    pub(super) dimensions: ImageDimensions,
+    pub(super) reference: usize,
+    pub(super) reference_stars: Vec<Star>,
 }
 
-/// One parked light: its stored frame when it registered, and how it registered.
+/// What became of one light at its registration.
 #[derive(Debug)]
-pub(crate) struct ParkedFrame {
-    pub(crate) stored: Option<StoredFrame>,
-    pub(crate) registration: FrameRegistration,
+pub(super) enum Parked {
+    /// The reference, parked unwarped.
+    Reference(StoredFrame),
+    /// Registered and warped: its warped frame, and the fit it was warped by.
+    Registered {
+        frame: StoredFrame,
+        warp: Box<WarpTransform>,
+        inliers: usize,
+        rms_error: f64,
+    },
+    /// Left out of the stack: why registration refused it.
+    Dropped(RegistrationError),
+}
+
+/// One parked light, and its detection funnel.
+#[derive(Debug)]
+pub(super) struct ParkedLight {
+    pub(super) parked: Parked,
+    pub(super) detection: DetectionDiagnostics,
 }
 
 impl<'a> FrameRegistrar<'a> {
@@ -67,103 +75,81 @@ impl<'a> FrameRegistrar<'a> {
             reference,
             reference_stars,
         } = lights;
-        let others = count - 1;
         tracing::info!(
             reference,
             ref_stars = reference_stars.len(),
-            frames = others,
-            "Registering frames to the reference"
+            lights = count,
+            "Registering lights to the reference"
         );
         Self {
             reference,
             reference_stars,
             run,
             parking,
-            others,
-            attempted: AtomicUsize::new(0),
-            resolved: StageCounter::new(&run.ingest.progress, StackingStage::Registering, others),
+            count,
             warps: ScratchPool::new(dimensions),
-            rows: ScratchPool::default(),
+            scratch: WarpScratch::default(),
         }
     }
 
-    /// Register light `index`, `frame`, warp it into a set leased from the registrar and park it,
-    /// with how it registered; `None` when the run was cancelled, which the caller turns into
-    /// `Cancelled` once every worker stops. See [`FrameParking::store`] for where the set goes.
-    pub(crate) fn park(
+    /// Register light `index`, `frame`, warp it into a set leased from the registrar and park it.
+    /// See [`FrameParking::store`] for where the set goes.
+    ///
+    /// # Errors
+    ///
+    /// [`AlignStackError::Cancelled`] when the run was cancelled, or the frame store.
+    pub(super) fn park(
         &self,
         index: usize,
         frame: DetectedFrame,
-    ) -> Result<Option<ParkedFrame>, AlignStackError> {
+    ) -> Result<Parked, AlignStackError> {
         if self.run.cancel().is_cancelled() {
-            return Ok(None);
+            return Err(AlignStackError::Cancelled);
         }
         let DetectedFrame {
             image,
             stars,
-            stats,
-            ..
+            admitted,
         } = frame;
         if index == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
-            return self.parking.store_reference(image, stats).map(|stored| {
-                Some(ParkedFrame {
-                    stored: Some(stored),
-                    registration: FrameRegistration::Reference,
-                })
-            });
+            return Ok(Parked::Reference(
+                self.parking.store_reference(image, admitted)?,
+            ));
         }
 
-        let n = self.attempted.fetch_add(1, Ordering::Relaxed) + 1;
-        let registration = match self
-            .run
-            .config
-            .registration
-            .register(&self.reference_stars, &stars)
-        {
+        let registration = match self.run.registrar.register(&self.reference_stars, &stars) {
             Ok(registration) => registration,
-            // A pair that did not match is a frame to drop. An invalid config is not: it fails
-            // identically for every pair, so dropping it would spend the whole run to report
-            // `AllFramesDropped` and blame the data.
-            Err(RegistrationError::InvalidConfig(invalid)) => {
-                return Err(AlignStackError::RegistrationConfig(invalid));
-            }
             Err(error) => {
-                tracing::info!(frame = n, total = self.others, %error, "registration failed");
-                self.resolved.complete_one();
-                return Ok(Some(ParkedFrame {
-                    stored: None,
-                    registration: FrameRegistration::Dropped(error),
-                }));
+                tracing::info!(light = index, total = self.count, %error, "registration failed");
+                return Ok(Parked::Dropped(error));
             }
         };
         tracing::info!(
-            frame = n,
-            total = self.others,
+            light = index,
+            total = self.count,
             inliers = registration.num_inliers(),
             rms = format!("{:.3}", registration.rms_error()),
             quality = format!("{:.3}", registration.quality_score()),
             transform = %registration.transform(),
             "registered"
         );
-        let warp = registration.warp_transform();
+        let inliers = registration.num_inliers();
+        let rms_error = registration.rms_error();
+        let warp = registration.into_warp();
         let mut warped = self.warps.acquire();
         let image = image.into_resident();
         let job = Warp {
             transform: &warp,
-            params: self.run.config.registration.warp,
+            params: self.run.config.warp,
         };
-        warped.warp_into(&SourceImage::of(&image), job, &self.rows);
+        warped.warp_into(&SourceImage::of(&image), job, &self.scratch);
         drop(image);
-        self.resolved.complete_one();
-        let stored = self.parking.store(warped, stats)?;
-        Ok(Some(ParkedFrame {
-            stored: Some(stored),
-            registration: FrameRegistration::Registered {
-                warp: Box::new(warp),
-                inliers: registration.num_inliers(),
-                rms_error: registration.rms_error(),
-            },
-        }))
+        Ok(Parked::Registered {
+            frame: self.parking.store(warped, admitted)?,
+            warp: Box::new(warp),
+            inliers,
+            rms_error,
+        })
     }
 }

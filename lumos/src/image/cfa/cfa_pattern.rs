@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::image::cfa::cfa_colour::CfaColour;
-use crate::io::raw;
+use crate::image::cfa::cfa_color::CfaColor;
+use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Bayer CFA (Color Filter Array) pattern.
@@ -18,6 +18,13 @@ pub enum CfaPattern {
     Grbg,
     /// GBRG: Green at (0,0), Blue at (0,1), Red at (1,0), Green at (1,1)
     Gbrg,
+}
+
+impl MosaicPattern for CfaPattern {
+    #[inline(always)]
+    fn color_at(&self, position: Vec2us) -> CfaColor {
+        self.color_at(position)
+    }
 }
 
 impl CfaPattern {
@@ -45,44 +52,6 @@ impl CfaPattern {
         Self::ALL
             .into_iter()
             .find(|pattern| s.eq_ignore_ascii_case(pattern.bayerpat()))
-    }
-
-    /// Parse from LibRaw's `filters` field, which holds the colour of each position of an 8 × 2
-    /// block (see [`raw::filter_color`]). Colour indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
-    ///
-    /// Returns `None` when the word is not a 2×2 Bayer phase repeated down all eight rows —
-    /// X-Trans, monochrome, and other exotic sensors all land here.
-    pub(crate) fn from_filters(filters: u32) -> Option<Self> {
-        // Each byte holds two rows; a 2-row period repeats the first byte through the word.
-        if filters != (filters & 0xff) * 0x0101_0101 {
-            return None;
-        }
-        let color_at = |row: usize, col: usize| raw::filter_color(filters, row, col);
-
-        let c00 = color_at(0, 0);
-        let c01 = color_at(0, 1);
-        let c10 = color_at(1, 0);
-        let c11 = color_at(1, 1);
-
-        let is_red = |c: usize| c == 0;
-        // Both green indices count as green.
-        let is_green = |c: usize| c == 1 || c == 3;
-        let is_blue = |c: usize| c == 2;
-
-        if is_red(c00) && is_green(c01) && is_green(c10) && is_blue(c11) {
-            return Some(Self::Rggb);
-        }
-        if is_blue(c00) && is_green(c01) && is_green(c10) && is_red(c11) {
-            return Some(Self::Bggr);
-        }
-        if is_green(c00) && is_red(c01) && is_blue(c10) && is_green(c11) {
-            return Some(Self::Grbg);
-        }
-        if is_green(c00) && is_blue(c01) && is_red(c10) && is_green(c11) {
-            return Some(Self::Gbrg);
-        }
-
-        None
     }
 
     /// Flip the pattern vertically (swap rows).
@@ -113,10 +82,10 @@ impl CfaPattern {
         }
     }
 
-    /// The colour of the photosite at `pos`.
+    /// The color of the photosite at `pos`.
     #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> CfaColour {
-        use CfaColour::{Blue, Green, Red};
+    pub const fn color_at(&self, pos: Vec2us) -> CfaColor {
+        use CfaColor::{Blue, Green, Red};
         let phase = ((pos.y & 1) << 1) | (pos.x & 1);
         match self {
             Self::Rggb => [Red, Green, Green, Blue][phase],

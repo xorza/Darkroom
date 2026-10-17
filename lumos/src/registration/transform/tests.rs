@@ -1,7 +1,7 @@
-use crate::internals::assertions::assert_close;
-use crate::registration::transform::warp_transform::WarpTransform;
-use crate::registration::transform::*;
 use std::f64::consts::PI;
+
+use crate::internals::assertions::assert_close;
+use crate::registration::transform::*;
 
 const EPSILON: f64 = 1e-10;
 
@@ -80,28 +80,6 @@ fn translation_components_return_the_offset_built_in() {
     assert_close!(tc.y, -3.0, EPSILON);
 }
 
-/// `rotation_angle` and `scale_factor` read a similarity's angle and scale at every scale and every
-/// angle: the scale enters the angle's `atan2` as a common factor and the angle the scale's
-/// `hypot` as `cos² + sin²` — dropping the `c` term would leave `|s·cos θ|`. A few ulps each.
-#[test]
-fn rotation_angle_and_scale_factor_at_every_scale_and_angle() {
-    for scale in [0.5, 1.0, 2.5] {
-        for angle in [-2.0, -0.3, 0.0, 0.5, 1.2, 2.5] {
-            let t = Transform::similarity(DVec2::new(3.0, -1.0), angle, scale);
-            assert!(
-                (t.rotation_angle() - angle).abs() <= 4.0 * f64::EPSILON * angle.abs().max(1.0),
-                "θ {angle} at s {scale}: {}",
-                t.rotation_angle()
-            );
-            assert!(
-                (t.scale_factor() - scale).abs() <= 4.0 * f64::EPSILON * scale,
-                "s {scale} at θ {angle}: {}",
-                t.scale_factor()
-            );
-        }
-    }
-}
-
 #[test]
 fn is_valid_rejects_degenerate_and_singular_matrices() {
     let valid = Transform::similarity(DVec2::new(1.0, 2.0), 0.5, 1.5);
@@ -128,101 +106,6 @@ fn homography_transform() {
     let p = t.apply(DVec2::new(2.0, 4.0));
     assert_close!(p.x, 7.0, EPSILON);
     assert_close!(p.y, 7.0, EPSILON);
-}
-
-#[test]
-fn warp_transform_new() {
-    let t = Transform::translation(DVec2::new(10.0, 5.0));
-    let wt = WarpTransform::new(t);
-    assert!(!wt.has_sip());
-
-    let p = wt.apply(DVec2::new(1.0, 2.0));
-    assert_close!(p.x, 11.0, EPSILON);
-    assert_close!(p.y, 7.0, EPSILON);
-}
-
-/// A warp with SIP maps `p` to `T(p + c(p))`, bit for bit. The field `k·d·|d|²` about (50, 50) is a
-/// cubic, which an order-3 SIP represents exactly, so the fit recovers it to its solve's rounding —
-/// well under 1e-9 px on 100 points this size — even at the corner, outside the fitted grid, where
-/// `d` = (−50, −50) and the correction is `1e-4·(−50)·5000` = −25 px on each axis.
-#[test]
-fn warp_transform_with_sip() {
-    use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
-    use crate::registration::distortion::sip::SipModel;
-
-    let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
-    let field = RadialField {
-        transform,
-        ..RadialField::new(DVec2::new(50.0, 50.0), 1e-4)
-    };
-    let RadialPairs { reference, target } = field.pairs(Grid {
-        start: 5,
-        step: 10,
-        extent: 95,
-    });
-    let sip = SipModel {
-        order: 3,
-        origin: field.centre,
-    }
-    .fitted_under(&transform, &reference, &target);
-
-    let wt = WarpTransform::with_sip(transform, sip.clone());
-    assert!(wt.has_sip());
-    for p in [
-        DVec2::ZERO,
-        DVec2::new(37.5, 81.25),
-        DVec2::new(120.0, -10.0),
-    ] {
-        assert_eq!(wt.apply(p), transform.apply(sip.correct(p)), "{p:?}");
-        let correction = sip.correct(p) - p;
-        assert!(
-            (correction - field.displacement(p)).length() < 1e-9,
-            "{p:?}: correction {correction:?}, field {:?}",
-            field.displacement(p)
-        );
-    }
-    assert_eq!(field.displacement(DVec2::ZERO), DVec2::new(-25.0, -25.0));
-}
-
-#[test]
-fn warp_transform_apply_no_sip_matches_transform() {
-    let t = Transform::similarity(DVec2::new(3.0, -2.0), 0.5, 1.1);
-    let wt = WarpTransform::new(t);
-
-    for &p in &[
-        DVec2::new(0.0, 0.0),
-        DVec2::new(100.0, 50.0),
-        DVec2::new(-10.0, 200.0),
-    ] {
-        let from_wt = wt.apply(p);
-        let from_t = t.apply(p);
-        assert_close!(from_wt.x, from_t.x, EPSILON);
-        assert_close!(from_wt.y, from_t.y, EPSILON);
-    }
-}
-
-#[test]
-fn auto_sizes_its_gates_against_the_most_general_model_it_fits() {
-    // `Auto` fits up to Homography, so every count it is measured by has to be Homography's —
-    // anything smaller would let a pair through that the most general model cannot fit.
-    assert_eq!(
-        TransformModel::Auto.most_general(),
-        TransformType::Homography
-    );
-    assert_eq!(TransformModel::Auto.most_general().min_points(), 4);
-    // A fixed choice is its own ceiling.
-    for transform_type in [
-        TransformType::Translation,
-        TransformType::Euclidean,
-        TransformType::Similarity,
-        TransformType::Affine,
-        TransformType::Homography,
-    ] {
-        assert_eq!(
-            TransformModel::Fixed(transform_type).most_general(),
-            transform_type
-        );
-    }
 }
 
 #[test]
@@ -397,7 +280,6 @@ fn display_translation() {
 fn display_euclidean() {
     let t = Transform::euclidean(DVec2::new(5.0, -2.0), 0.0);
     let s = format!("{t}");
-    // rotation_angle() = atan2(sin_a, cos_a) = atan2(0, 1) = 0
     assert_eq!(s, "Euclidean(dx=5.00, dy=-2.00, rot=0.000\u{b0})");
 }
 
@@ -411,19 +293,20 @@ fn display_similarity() {
     );
 }
 
-/// Similarity, Affine and Homography print the same four components, so they share one arm that
-/// names the model from its own `Debug`. Each has to come back under its own name.
+/// Affine and Homography print a stretch per principal axis, so they share one arm that names the
+/// model from its own `Debug`. Each has to come back under its own name, and a y-stretch the first
+/// column cannot see is printed: `[[1.5, 0], [0, 3]]` stretches 3 and 1.5.
 #[test]
-fn display_names_every_model_that_shares_the_four_component_form() {
-    let affine = Transform::affine([1.5, 0.0, 1.0, 0.0, 1.5, 2.0]);
+fn display_names_every_model_that_shares_the_stretch_form() {
+    let affine = Transform::affine([1.5, 0.0, 1.0, 0.0, 3.0, 2.0]);
     assert_eq!(
         format!("{affine}"),
-        "Affine(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"
+        "Affine(dx=1.00, dy=2.00, rot=0.000\u{b0}, stretch=3.0000/1.5000)"
     );
-    let homography = Transform::homography([1.5, 0.0, 1.0, 0.0, 1.5, 2.0, 0.0, 0.0]);
+    let homography = Transform::homography([1.5, 0.0, 1.0, 0.0, 3.0, 2.0, 0.0, 0.0]);
     assert_eq!(
         format!("{homography}"),
-        "Homography(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"
+        "Homography(dx=1.00, dy=2.00, rot=0.000\u{b0}, stretch=3.0000/1.5000)"
     );
 }
 

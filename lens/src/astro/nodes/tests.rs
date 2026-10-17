@@ -1,12 +1,11 @@
 //! The astro library's node shapes, its path types, and the builder
 //! nodes' invocation at the input boundary.
 
-use scenarium::internals::func_invoker::FuncInvoker;
-
 use lumos::{
-    DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast,
-    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
+    Denoise, ExtractBackground, Hdr, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
+    SigmaThreshold,
 };
+use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
 
 use crate::astro::masters::MASTERS_DATA_TYPE;
@@ -66,7 +65,7 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.inputs[4].data_type, DataType::Float);
     assert_eq!(
         f.inputs[4].default_value,
-        Some(ConstValue::Float(f64::from(DEFAULT_SIGMA_THRESHOLD))),
+        Some(ConstValue::Float(f64::from(SigmaThreshold::DEFAULT.get()))),
     );
     assert_eq!(f.inputs[5].name, "Cache");
     assert_eq!(f.inputs[5].data_type, DataType::Bool);
@@ -97,7 +96,7 @@ fn every_quick_knob_has_a_config_that_overrides_it() {
             "Config",
             "Build Background Config",
         ),
-        ("SCNR", 1, "Method", 2, "Config", "Build SCNR Config"),
+        ("SCNR", 1, "Protection", 2, "Config", "Build SCNR Config"),
         (
             "Denoise",
             1,

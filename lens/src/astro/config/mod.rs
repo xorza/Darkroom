@@ -8,11 +8,10 @@ pub(crate) mod stacking;
 use std::fmt;
 
 use common::Introspect;
-use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast};
-use scenarium::FuncId;
-use scenarium::Library;
+use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, Scnr};
+use scenarium::{FuncId, Library};
 
-use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
+use crate::astro::config::processing::StretchKnobs;
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
 use crate::config_node::ConfigValue;
 use crate::node_spec::NodeSpec;
@@ -99,7 +98,7 @@ pub(crate) fn register_builders(library: &mut Library) {
             description: "Builds a detailed display-stretch config",
         },
     );
-    add_builder::<ScnrKnobs>(
+    add_builder::<Scnr>(
         library,
         NodeSpec {
             id: BUILD_SCNR_CONFIG_FUNC_ID,

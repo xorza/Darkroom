@@ -1,6 +1,7 @@
 //! Trimming: drop a fixed share of the sorted samples from each end, and average the rest.
 
-use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
+use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
@@ -28,14 +29,17 @@ pub(crate) struct TrimCounts {
 
 impl Default for TrimConfig {
     fn default() -> Self {
-        Self {
-            low_percent: 10.0,
-            high_percent: 10.0,
-        }
+        Self::DEFAULT
     }
 }
 
 impl TrimConfig {
+    /// 10% from each end.
+    pub const DEFAULT: Self = Self {
+        low_percent: 10.0,
+        high_percent: 10.0,
+    };
+
     pub const fn new(low_percent: f32, high_percent: f32) -> Self {
         Self {
             low_percent,
@@ -84,12 +88,12 @@ impl TrimConfig {
 
     /// The trim, over the whole window: one pass. The two counts leave at least one sample, since
     /// validation holds their shares below 100% together; the driver raises that to its minimum.
-    pub(crate) fn narrow(self, pass: &Pass<'_>) -> Proposal {
+    pub(crate) fn narrow(self, pass: &Pass<'_>, _: &mut MethodScratch) -> Narrowing {
         let TrimCounts { low, high } = self.counts(pass.window.len());
         debug_assert!(low + high < pass.window.len());
-        Proposal {
+        Narrowing::Window(Proposal {
             window: pass.window.start + low..pass.window.end - high,
             centre: Spread::median_of_sorted(pass.samples()),
-        }
+        })
     }
 }

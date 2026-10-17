@@ -2,18 +2,21 @@
 //!
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::background::workspace::BackgroundWorkspace;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::deblend::region::Region;
+use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::labeling::labeler::Labeler;
-use crate::star_detection::star_detector::stages::filter::duplicate_scratch::DuplicateScratch;
-use imaginarium::Buffer2;
+use crate::star_detection::star::Star;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
-/// frame after the first allocates nothing.
+/// frame after the first allocates nothing but the stars it hands back.
 ///
 /// Every plane is leased at the frame's dimensions and goes back to its pool when the lease drops,
 /// so a stage keeps its planes in its own structs for as long as later stages read them. Contents
@@ -21,7 +24,7 @@ use imaginarium::Buffer2;
 #[derive(Debug, Default)]
 pub(crate) struct DetectionResources {
     /// Grayscale, scratch, background, noise — anything one f32 plane wide.
-    floats: ScratchPool<Buffer2<f32>>,
+    pub(crate) floats: ScratchPool<Buffer2<f32>>,
     /// Threshold masks, dilation scratch.
     bitmasks: ScratchPool<BitBuffer2>,
     pub(crate) labeler: Labeler,
@@ -32,11 +35,38 @@ pub(crate) struct DetectionResources {
     pub(crate) values: Vec<f32>,
     /// Their absolute deviations from the median, for a MAD that keeps the values.
     pub(crate) deviations: Vec<f32>,
-    pub(crate) duplicates: DuplicateScratch,
+    pub(crate) duplicates: Duplicates,
     pub(crate) kernels: FilterKernels,
+    /// The candidate regions of a detection.
+    pub(crate) regions: Vec<Region>,
+    /// Each region's measured star, or none, before the stars that measured are gathered.
+    pub(crate) measured: Vec<Option<Star>>,
+    /// The stars the FWHM estimate measures.
+    pub(crate) stars: Vec<Star>,
 }
 
+/// The f32 planes the pool holds at its high-water mark over every preset: the measurement plane,
+/// its sky noise, the detection plane and the filter's pass scratch, which the detection plane's
+/// noise takes over. `star_detection::tests::pool_working_set` pins it against the pool.
+pub(super) const PEAK_FLOATS: usize = 4;
+
+/// The bitmasks the pool holds at its high-water mark: saturation, threshold, the sources a
+/// refined sky was measured around, and the pixels with no data of a frame that has any.
+pub(super) const PEAK_BITMASKS: usize = 4;
+
+/// The f32 planes the labeling's runs are charged: a run is 16 bytes in its strip and 12 in the
+/// label map, so the runs hold under one f32 plane while fewer than one pixel in seven starts a
+/// run — a mask of sources a few σ above the sky starts far fewer.
+const LABEL_RUNS_PLANES: usize = 1;
+
 impl DetectionResources {
+    /// The bytes a detector's pool holds for frames of `size` at its high-water mark: its f32
+    /// planes and the labeling's runs, a plane each, and its bitmasks, a bit a pixel each.
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+        (PEAK_FLOATS + LABEL_RUNS_PLANES) * size.pixel_count() * size_of::<f32>()
+            + PEAK_BITMASKS * BitBuffer2::heap_bytes(size)
+    }
+
     /// The dimensions every plane is leased at.
     pub(crate) fn dimensions(&self) -> Size2us {
         self.floats.shape()
@@ -129,10 +159,10 @@ mod tests {
 
         let mask = resources.acquire_bit();
         assert_eq!(mask.size, Size2us::new(64, 32));
-        let address = mask.words.as_ptr();
+        let address = mask.words_ptr();
         drop(mask);
         assert_eq!(resources.buffer_counts(), counts(1, 1));
-        assert_eq!(resources.acquire_bit().words.as_ptr(), address);
+        assert_eq!(resources.acquire_bit().words_ptr(), address);
     }
 
     /// The same dimensions keep every plane; new ones drop them, and a plane leased before the

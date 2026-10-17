@@ -17,8 +17,9 @@ pub struct StackingProgress {
 /// stage and a stage change is a real change of work. Each stage reports once per unit it
 /// completes, in order, and a run emits only the stages its route uses — but which stages those are
 /// follows from the work asked for, not from which function was called: both front ends report
-/// `Preparing` and `Registering`, a statistical combine reports `Loading` and `Combining` where a
-/// drizzle reports `Drizzling`.
+/// `Preparing`, then `Registering` unless a named reference takes each light through all of it in
+/// one pass, and a statistical combine reports `Loading` and `Combining` where a drizzle reports
+/// `Drizzling`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StackingStage {
     /// Turning inputs into frames with detected stars: decoding, calibrating and demosaicing where
@@ -26,6 +27,8 @@ pub enum StackingStage {
     ///
     /// One stage rather than one per activity because it is one pass: the raw path detects while
     /// the decoded frame is still in hand, so a frame is reported once whichever route it took.
+    /// A frame counts once it is parked; in the one-pass schedule that is after its registration
+    /// and its warp, which report no stage of their own.
     Preparing,
     /// Registering each frame against the reference and warping it into place. Counted in
     /// frames, and the reference itself is not among them.

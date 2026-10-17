@@ -57,7 +57,7 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// of header is cheaper than being one glyph short of the common case.
 const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 
-/// The run-time label's style: label-tier mono, in the status colour.
+/// The run-time label's style: label-tier mono, in the status color.
 fn run_time_style(ui: &Ui, theme: &Theme, color: RgbaF32) -> TextStyle {
     TextStyle {
         color,
@@ -332,7 +332,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
 ///
 /// Quiet at rest: the chip inks muted grey until its state is *on*, when it
 /// takes `on_color`. So an idle node's controls stay monochrome and only an
-/// active setting carries color — the type-coloured ports and the status
+/// active setting carries color — the type-colored ports and the status
 /// glow keep the stage.
 #[derive(Debug)]
 struct PropertyChip {

@@ -27,12 +27,6 @@ fn sigma_clipped_degenerate_inputs() {
 
     let cases = [
         Case {
-            values: &[],
-            median: 0.0,
-            sigma: Some(0.0),
-            why: "nothing to summarise",
-        },
-        Case {
             values: &[5.0],
             median: 5.0,
             sigma: Some(0.0),
@@ -146,27 +140,62 @@ fn median_truth_table_holds_at_both_widths() {
     }
 }
 
-/// `MedianMad::of_mut` on [2, 4, 3] — median 3, deviations [1, 1, 0], MAD 1, σ the MAD rescaled —
-/// and on a flat run, where every deviation and so σ is 0.
+/// `MedianMad::of_mut` on [2, 4, 3] — median 3, deviations [1, 1, 0], MAD 1, σ the MAD rescaled
+/// for three samples, 1.4826·`b_3` = 1.4826·1.4869 — and on a flat run, where every deviation and
+/// so σ is 0. In f64, [1, 2, 3, 4, 100] has median 3 and deviations [2, 1, 0, 1, 97], so MAD 1 and
+/// σ is the factor for five samples itself, unrounded; doubling every deviation doubles it.
 #[test]
 fn median_and_mad_of_a_sample() {
     let stats = MedianMad::of_mut(&mut [2.0f32, 4.0, 3.0]);
-    assert_eq!((stats.median, stats.mad), (3.0, 1.0));
-    assert_eq!(stats.sigma(), mad_to_sigma(1.0));
+    assert_eq!((stats.median, stats.mad, stats.count), (3.0, 1.0, 3));
+    assert_eq!(stats.sigma(), (MAD_TO_SIGMA * 1.4869) as f32);
 
     let flat = MedianMad::of_mut(&mut [3.5f32; 5]);
     assert_eq!((flat.median, flat.mad, flat.sigma()), (3.5, 0.0, 0.0));
+
+    let narrow = MedianMad::of_mut(&mut [1.0f64, 2.0, 3.0, 4.0, 100.0]);
+    assert_eq!((narrow.median, narrow.mad), (3.0, 1.0));
+    assert_eq!(narrow.sigma(), MAD_TO_SIGMA * 1.2170);
+    let wide = MedianMad::of_mut(&mut [1.0f64, 3.0, 5.0, 7.0, 199.0]);
+    assert_eq!(wide.sigma(), 2.0 * narrow.sigma());
 }
 
-/// [`mad_with_scratch`] over the lengths that bound it: the ordinary odd case, both degenerate
-/// lengths, the empty answer, and an even case whose two middles differ.
+/// `b_n` comes from the table up to n = 20 and from `n / (n − 0.8)` above it; one sample's factor
+/// is 1, as its MAD is 0.
+#[test]
+fn the_small_sample_factor_spans_the_table_and_beyond() {
+    assert_eq!(mad_consistency(1), 1.0);
+    assert_eq!(mad_consistency(2), 1.1955);
+    assert_eq!(mad_consistency(20), 1.0425);
+    assert_eq!(mad_consistency(21), 21.0 / 20.2);
+    assert_eq!(
+        sigma_of_mad(3.0f32, 4),
+        (3.0 * (MAD_TO_SIGMA * 1.3604)) as f32
+    );
+}
+
+/// An empty input is a contract violation: every measure asserts it in debug builds.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "is_empty")]
+fn an_empty_sample_is_refused() {
+    ClippedStats::sigma_clipped(
+        &mut [],
+        &mut Vec::new(),
+        SigmaClip {
+            kappa: 3.0,
+            iterations: 3,
+        },
+    );
+}
+
+/// [`mad_with_scratch`] over the lengths that bound it: the ordinary odd case, the degenerate
+/// length, and an even case whose two middles differ.
 #[test]
 fn mad_with_scratch_over_every_length() {
-    let cases: [(&[f32], f32, f32); 5] = [
+    let cases: [(&[f32], f32, f32); 4] = [
         // |r - 3| over [2, 4, 3] = [1, 1, 0]; median of those = 1.
         (&[2.0, 4.0, 3.0], 3.0, 1.0),
-        // Nothing to deviate from.
-        (&[], 0.0, 0.0),
         // |r - 5| over [5] = [0].
         (&[5.0], 5.0, 0.0),
         // The shortest even input: |r - 5| over [2, 8] = [3, 3].
@@ -248,7 +277,7 @@ fn sorted_median(values: &[f32]) -> f32 {
 
 /// `ClippedStats::sigma_clipped` as its documentation states it, by sorting and filtering rather
 /// than by selecting and partitioning in place: up to `iterations` passes, each taking the median,
-/// the MAD about it and σ = `mad_to_sigma(MAD)`, stopping when σ is below one ulp of the median
+/// the MAD about it and σ = `sigma_of_mad(MAD, n)`, stopping when σ is below one ulp of the median
 /// (reported as no spread) or when nothing lies past κσ, and otherwise keeping only what does not;
 /// a pass needs three values. The mean is of the survivors, accumulated in f64.
 fn reference_clip(values: &[f32], kappa: f32, iterations: usize) -> Anchor {
@@ -261,7 +290,7 @@ fn reference_clip(values: &[f32], kappa: f32, iterations: usize) -> Anchor {
         let median = sorted_median(&active);
         let deviations: Vec<f32> = active.iter().map(|&v| (v - median).abs()).collect();
         let mad = sorted_median(&deviations);
-        let sigma = mad_to_sigma(mad);
+        let sigma = sigma_of_mad(mad, active.len());
         if sigma <= median.abs() * f32::EPSILON {
             converged = Some((median, 0.0));
             break;
@@ -285,7 +314,7 @@ fn reference_clip(values: &[f32], kappa: f32, iterations: usize) -> Anchor {
     let sum: f64 = active.iter().map(|&v| f64::from(v)).sum();
     Anchor {
         median,
-        sigma: mad_to_sigma(mad),
+        sigma: sigma_of_mad(mad, active.len()),
         mean: (sum / active.len() as f64) as f32,
     }
 }
@@ -332,15 +361,16 @@ fn sigma_clipped_over_every_sample_shape() {
             }),
             iterations: 3,
         },
-        // 100 is clipped in iteration 1 under any fast-median convention (threshold <= 13.3 while
-        // |100 - median| >= 96). Survivors [1, 2, 4]: median 2, mean 7/3, MAD 1 so sigma = 1.4826.
+        // Pass 1: median 3, deviations ranked [1, 1, 2, 97], MAD 1.5, σ = 1.5·1.4826·1.3604 = 3.03,
+        // so 100 is clipped. Survivors [1, 2, 4]: median 2, mean 7/3, MAD 1, so σ = 1.4826·1.4869
+        // and 3σ = 6.6 keeps them.
         ClipCase {
             name: "asymmetric survivors",
             values: vec![1.0, 2.0, 4.0, 100.0],
             kappa: 3.0,
             anchor: Some(Anchor {
                 median: 2.0,
-                sigma: MAD_TO_SIGMA as f32,
+                sigma: (MAD_TO_SIGMA * 1.4869) as f32,
                 mean: 7.0 / 3.0,
             }),
             iterations: 3,
@@ -551,17 +581,17 @@ fn sigma_clipped_stricter_kappa_clips_harder() {
     };
 
     // 0..39 plus one outlier at 60. Both runs start at median 20: the deviations |x − 20| are
-    // 0, then 1..19 twice, then 20 and 40, so rank 20 of the 41 is 10 and σ = 1.4826·10 = 14.83.
-    // κ = 1.5 gives 22.2, clipping the 60; the 40 survivors' deviations |x − 19.5| are 0.5..19.5
-    // twice, so ranks 19 and 20 are 9.5 and 10.5 and the MAD stays 10 — nothing more clips, and
-    // the median is 19.5. κ = 5 gives 74, keeping the 60: the median stays 20.
+    // 0, then 1..19 twice, then 20 and 40, so rank 20 of the 41 is 10 and σ = 1.4826·10·41/40.2 =
+    // 15.12. κ = 1.5 gives 22.7, clipping the 60; the 40 survivors' deviations |x − 19.5| are
+    // 0.5..19.5 twice, so ranks 19 and 20 are 9.5 and 10.5 and the MAD stays 10 — nothing more
+    // clips, and the median is 19.5. κ = 5 gives 75.6, keeping the 60: the median stays 20.
     let values: Vec<f32> = (0..40).map(|v| v as f32).chain([60.0]).collect();
     let strict = clip(&values, 1.5, &mut deviations);
     let loose = clip(&values, 5.0, &mut deviations);
     assert_eq!(strict.median, 19.5);
     assert_eq!(loose.median, 20.0);
-    assert_eq!(strict.sigma, mad_to_sigma(10.0f32));
-    assert_eq!(loose.sigma, mad_to_sigma(10.0f32));
+    assert_eq!(strict.sigma, sigma_of_mad(10.0f32, 40));
+    assert_eq!(loose.sigma, sigma_of_mad(10.0f32, 41));
 }
 
 #[derive(Debug)]
@@ -753,27 +783,6 @@ fn median_mut_equals_the_sorted_median() {
             "len = {len}"
         );
     }
-}
-
-#[test]
-fn robust_sigma_f64_scales_the_mad_and_leaves_its_input_alone() {
-    // median([1, 2, 3, 4, 100]) = 3; |r − 3| = [2, 1, 0, 1, 97]; median of those = 1.
-    // So sigma = 1.4826022 × 1.
-    let data = [1.0f64, 2.0, 3.0, 4.0, 100.0];
-    let mut scratch = Vec::new();
-    let sigma = robust_sigma_f64(&data, &mut scratch);
-    // Exactly the constant: the MAD is 1.0, and the factor is `f64` end to end.
-    assert_eq!(sigma, MAD_TO_SIGMA, "sigma = {sigma}");
-    assert_eq!(data, [1.0, 2.0, 3.0, 4.0, 100.0], "input must be intact");
-
-    // Doubling every deviation doubles sigma — proves the MAD is measured, not a constant.
-    let spread = [1.0f64, 3.0, 5.0, 7.0, 199.0];
-    let wide = robust_sigma_f64(&spread, &mut scratch);
-    assert_eq!(wide, 2.0 * sigma);
-
-    // A constant sample has zero spread, and an empty one has nothing to measure.
-    assert_eq!(robust_sigma_f64(&[7.0; 9], &mut scratch), 0.0);
-    assert_eq!(robust_sigma_f64(&[], &mut scratch), 0.0);
 }
 
 /// The χ² quantile is a distribution fact, not a tuning knob, so it is checked against the closed

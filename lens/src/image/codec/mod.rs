@@ -5,11 +5,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use imaginarium::{ChannelCount, ColorFormat, ImageDesc, SampleType};
-use lumos::{ImageDimensions, LinearImage};
-use scenarium::CodecError;
-use scenarium::CustomValue;
-use scenarium::CustomValueCodec;
-use scenarium::TypeEntry;
+use lumos::{ChannelLayout, ImageDimensions, LinearImage};
+use scenarium::{CodecError, CustomValue, CustomValueCodec, TypeEntry};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::image::{Image, Pixels};
@@ -135,18 +132,18 @@ impl CustomValueCodec for ImageCodec {
                 )
             }
             PLANAR => {
-                let channels = match color_format {
-                    ColorFormat::L_F32 => 1,
-                    ColorFormat::RGB_F32 => 3,
+                let layout = match color_format {
+                    ColorFormat::L_F32 => ChannelLayout::Mono,
+                    ColorFormat::RGB_F32 => ChannelLayout::Rgb,
                     _ => return Err(DecodeError::PlanarFormat(color_format).into()),
                 };
                 let mut chunk = vec![0_u8; PLANE_CHUNK];
-                let mut planes = Vec::with_capacity(channels);
-                for _ in 0..channels {
+                let mut planes = Vec::with_capacity(layout.count());
+                for _ in 0..layout.count() {
                     planes.push(read_plane(reader, width * height, &mut chunk).await?);
                 }
                 Image::from(LinearImage::from_planar_channels(
-                    ImageDimensions::new((width, height), channels),
+                    ImageDimensions::new((width, height), layout),
                     planes,
                 ))
             }

@@ -13,7 +13,7 @@ use nalgebra::{DMatrix, Dyn, QR, SVD};
 #[derive(Debug)]
 pub(crate) struct Lstsq {
     /// `A`'s Householder reflections, applied to a right-hand side before the SVD solves it; `None`
-    /// for a design wider than tall, factored whole.
+    /// for a design wider than tall, factored whole for its rank alone.
     qr: Option<QR<f64, Dyn, Dyn>>,
     svd: SVD<f64, Dyn, Dyn>,
     columns: usize,
@@ -45,20 +45,18 @@ impl Lstsq {
     }
 
     /// The least-squares solution for each column of `rhs`; `None` when the design is rank
-    /// deficient, so the solution is not unique.
+    /// deficient, so the solution is not unique — always for a design wider than tall, which has at
+    /// most its row count of independent columns.
     pub(crate) fn solve(&self, rhs: &DMatrix<f64>) -> Option<DMatrix<f64>> {
+        let qr = self.qr.as_ref()?;
         if self.rank() != self.columns {
             return None;
         }
-        let solution = match &self.qr {
-            Some(qr) => {
-                let mut reflected = rhs.clone();
-                qr.q_tr_mul(&mut reflected);
-                self.svd
-                    .solve(&reflected.rows(0, self.columns), self.tolerance)
-            }
-            None => self.svd.solve(rhs, self.tolerance),
-        };
+        let mut reflected = rhs.clone();
+        qr.q_tr_mul(&mut reflected);
+        let solution = self
+            .svd
+            .solve(&reflected.rows(0, self.columns), self.tolerance);
         Some(solution.expect("an SVD computed with both singular-vector sets can solve"))
     }
 }

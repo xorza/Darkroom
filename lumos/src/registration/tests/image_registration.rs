@@ -11,7 +11,8 @@ use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Sc
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, max_deviation};
-use crate::registration::transform::{Transform, TransformModel, TransformType};
+use crate::registration::transform::{Transform, TransformType};
+use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 
@@ -75,11 +76,13 @@ impl Rendered {
         let target_stars = detector.detect(&target.image).stars;
 
         let config = RegistrationConfig {
-            transform_type: TransformModel::Fixed(self.model),
+            model: TransformModel::Fixed(self.model),
             matching: helpers::matching_config(6, self.min_matches),
             ..Default::default()
         };
         let result = config
+            .registrar()
+            .unwrap()
             .register(&reference_stars, &target_stars)
             .unwrap_or_else(|error| panic!("{}: {error}", self.name));
 

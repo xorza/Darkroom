@@ -1,4 +1,4 @@
-//! [`Palette`]: darkroom's colour roster, read from the baked-in
+//! [`Palette`]: darkroom's color roster, read from the baked-in
 //! `assets/ayu-graphite.ron`.
 
 use palantir::RgbaF32;
@@ -10,13 +10,13 @@ use crate::gui::theme::type_colors::TypeColors;
 /// palette's semantic layer and copies the result here.
 const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 
-/// Every colour darkroom paints with, one field per role, as loaded from
-/// `assets/ayu-graphite.ron`. This is the theme's whole colour vocabulary:
+/// Every color darkroom paints with, one field per role, as loaded from
+/// `assets/ayu-graphite.ron`. This is the theme's whole color vocabulary:
 /// [`Theme::build`](crate::gui::theme::Theme::build) fills each
 /// roster from it, so a call site reads a named role instead of a hex
 /// literal and restyling is an edit to the palette rather than to the app.
 ///
-/// Every entry is a *resting* colour. A port lifts under the pointer by
+/// Every entry is a *resting* color. A port lifts under the pointer by
 /// blending toward white (see
 /// [`hover_lift`](crate::gui::theme::color::hover_lift)), because the
 /// palette's brightest tint has nothing above it to lift into.
@@ -27,13 +27,13 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 /// harmless, because a glyph on a node's head never meets a wire. Two
 /// badges do meet, on that same head, which is why
 /// `theme::tests::badges_are_told_apart_from_each_other` pins them
-/// pairwise. State the rule, not the hex: which colour a role holds is
+/// pairwise. State the rule, not the hex: which color a role holds is
 /// the asset's to change.
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct Palette {
     /// Ground fill behind the whole graph.
     pub(crate) canvas_bg: RgbaF32,
-    /// Backdrop grid dot colour.
+    /// Backdrop grid dot color.
     pub(crate) canvas_dot: RgbaF32,
     /// Top-chrome fill behind the menu bar and tab strip.
     pub(crate) chrome_fill: RgbaF32,
@@ -66,9 +66,9 @@ pub(crate) struct Palette {
     pub(crate) connection_broken: RgbaF32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
-    /// Positional colour for an untyped input port.
+    /// Positional color for an untyped input port.
     pub(crate) input_port: RgbaF32,
-    /// Positional colour for an untyped output port.
+    /// Positional color for an untyped output port.
     pub(crate) output_port: RgbaF32,
     /// Event emitters, subscription pins and event wires — the sink
     /// marker's red, so the trigger machinery reads as one family.

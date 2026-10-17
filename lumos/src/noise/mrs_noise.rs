@@ -1,4 +1,5 @@
-//! [`MrsNoise`]: the standard deviation of an image's white noise from its multiresolution support.
+//! [`NoisePlane`]: the standard deviation of an image's white noise from its multiresolution
+//! support.
 
 use std::mem;
 use std::ops::Range;
@@ -7,36 +8,14 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::image::background_split::BackgroundSplit;
+use crate::image::flat_gain::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
-use crate::noise::background_split::BackgroundSplit;
+use crate::noise::background_split;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
-use crate::noise::gain_bins::GainBins;
-
-/// The noise standard deviation of an image by Starck & Murtagh's multiresolution-support method
-/// (PASP 110, 1998), as PixInsight's `NoiseMRS` computes it.
-///
-/// An à trous (starlet) transform splits the image into detail layers `w_j` and a smooth residual
-/// `c_J`. A pixel belongs to the support when some layer is significant there, `|w_j| ≥ k·σ·σ_j`,
-/// with `σ_j` the layer's response to unit white noise. The noise is the standard deviation of
-/// `I − c_J` over the pixels outside the support, iterated from a k-σ clipped first layer until it
-/// changes by less than 10⁻⁴ of itself. Stars, nebulae and gradients are structure at some scale,
-/// so they leave the estimate, which whole-frame MAD does not do.
-///
-/// The reference reads white Gaussian noise 2.2% low: the support also removes the pixels where
-/// the noise itself passes `k·σ·σ_j`, and `c_J` keeps a little of the noise. That response is a
-/// fixed property of `k`, the layer count and the kernel, so it is divided out
-/// ([`WHITE_NOISE_RESPONSE`]) and a white noise reads its own σ: the variance plane needs the
-/// absolute figure, not only the relative one weights use.
-///
-/// It runs on a fixed grid of at most 16 tiles of 256², each with a margin wider than the transform
-/// reaches, so the memory is bounded whatever the frame size, and each tile's transform equals the
-/// whole frame's at its core. A million pixels give the standard deviation to a standard error of
-/// 0.07%, far below the method's own bias.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MrsNoise;
 
 /// Layers of the transform; PixInsight's default.
 const SCALES: usize = 4;
@@ -62,12 +41,6 @@ const START: Convergence = Convergence {
 /// PixInsight's noise evaluation requires 1%; below it, or with no convergence, the k-σ estimate
 /// stands instead.
 const MIN_NOISE_SHARE: usize = 100;
-/// The first detail layer's response to unit white noise, exactly: `√(1 − 2h₀ + Σh²)` for the 2-D
-/// B3 kernel, its centre tap `h₀ = (6/16)²` and `Σh² = (70/256)²`. It holds where the kernel lies
-/// inside the frame: within [`FIRST_LAYER_REACH`] of an edge the mirror boundary reads a sample
-/// twice. [`LAYER_SIGMA`] keeps the literature's three digits: the reference thresholds the support
-/// and seeds the iteration with them, and [`WHITE_NOISE_RESPONSE`] was measured with them.
-const FIRST_LAYER_RESPONSE: f64 = 0.890_796_310_278_758_4;
 /// What an iterated 3σ clip reads for a Gaussian of unit σ: the fixed point of
 /// `s = √(1 − 2cφ(c)/(2Φ(c) − 1))` at `c = 3s`, the variance of a normal truncated at `±c`,
 /// solved by fixed-point iteration.
@@ -203,61 +176,26 @@ impl Samples for Coefficients {
     }
 }
 
-impl MrsNoise {
-    /// The noise standard deviation of `plane` over the pixels `excluded` does not name; `0` when
-    /// no pixel remains or the image is constant.
-    pub(crate) fn estimate(plane: &Buffer2<f32>, excluded: impl Fn(usize) -> bool + Sync) -> f32 {
-        let size = Size2us::from(plane);
-        let plane = NoisePlane {
-            samples: plane,
-            excluded,
-        };
-        sigma(plane.coefficients().all(), size) as f32
-    }
-
-    /// The background of `plane` under the flat `gains` names: the noise measured over each of
-    /// its bins on its own — the support thresholds against the bin's own σ — and fitted by
-    /// [`BackgroundSplit::fit`].
-    pub(crate) fn estimate_split(
-        plane: &Buffer2<f32>,
-        excluded: impl Fn(usize) -> bool + Sync,
-        gains: PixelGains<'_, impl Fn(usize) -> f32 + Sync>,
-    ) -> BackgroundSplit {
-        let size = Size2us::from(plane);
-        let plane = NoisePlane {
-            samples: plane,
-            excluded,
-        };
-        let PixelGains { gain, bins } = gains;
-        let binned = BinnedSamples::of(plane.coefficients(), bins, |coefficients, position| {
-            gain(coefficients.index[position])
-        });
-        BackgroundSplit::fit(&binned.measure(|run| sigma(run, size).powi(2)))
-    }
-
-    /// The most bytes an estimate over a `size` image holds at once, with `threads` workers to
-    /// share its tiles: [`Self::estimate_split`]'s coefficients, each with its gain bin, the
-    /// five planes of every tile in work, the largest first, the row each worker smooths through,
-    /// as wide as the widest region, and the tile list beside them. [`Self::estimate`] holds no
-    /// bins and so a byte a coefficient less.
-    pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
-        let tiles = tiles(size);
-        let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
-        let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
-            tiles.iter().map(|tile| tile.region.area()).collect();
-        regions.sort_unstable_by(|a, b| b.cmp(a));
-        let in_work: usize = regions.iter().take(threads.max(1)).sum();
-        let widest = tiles
-            .iter()
-            .map(|tile| tile.region.width())
-            .max()
-            .unwrap_or(0);
-        BinnedSamples::<Coefficients>::heap_bytes(analysed)
-            + in_work * TILE_BYTES_PER_PIXEL
-            + threads.max(1) * widest * size_of::<f32>()
-            + tiles.len()
-                * (size_of::<Tile>() + size_of::<CoefficientShare<'_>>() + size_of::<usize>())
-    }
+/// The most bytes an estimate over a `size` image holds at once, with `threads` workers to share
+/// its tiles: a split's coefficients, each with its gain bin, the five planes of every tile in
+/// work, the largest first, the row each worker smooths through, as wide as the widest region, and
+/// the tile list beside them. An estimate of σ holds no bins and so a byte a coefficient less.
+pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
+    let tiles = tiles(size);
+    let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
+    let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
+        tiles.iter().map(|tile| tile.region.area()).collect();
+    regions.sort_unstable_by(|a, b| b.cmp(a));
+    let in_work: usize = regions.iter().take(threads.max(1)).sum();
+    let widest = tiles
+        .iter()
+        .map(|tile| tile.region.width())
+        .max()
+        .unwrap_or(0);
+    BinnedSamples::<Coefficients>::heap_bytes(analysed)
+        + in_work * TILE_BYTES_PER_PIXEL
+        + threads.max(1) * widest * size_of::<f32>()
+        + tiles.len() * (size_of::<Tile>() + size_of::<CoefficientShare<'_>>() + size_of::<usize>())
 }
 
 /// The gain a flat applied to a plane: `gain(index)` at the pixel of row-major `index`, and the
@@ -268,14 +206,57 @@ pub(crate) struct PixelGains<'a, G> {
     pub(crate) bins: &'a GainBins,
 }
 
-/// A plane whose noise is estimated: its samples, less the pixels `excluded` names.
+/// A plane whose white noise is estimated, its samples less the pixels `excluded` names, by Starck
+/// & Murtagh's multiresolution-support method (PASP 110, 1998), as PixInsight's `NoiseMRS` computes
+/// it.
+///
+/// An à trous (starlet) transform splits the image into detail layers `w_j` and a smooth residual
+/// `c_J`. A pixel belongs to the support when some layer is significant there, `|w_j| ≥ k·σ·σ_j`,
+/// with `σ_j` the layer's response to unit white noise. The noise is the standard deviation of
+/// `I − c_J` over the pixels outside the support, iterated from a k-σ clipped first layer until it
+/// changes by less than 10⁻⁴ of itself. Stars, nebulae and gradients are structure at some scale,
+/// so they leave the estimate, which whole-frame MAD does not do.
+///
+/// The reference reads white Gaussian noise 2.2% low: the support also removes the pixels where
+/// the noise itself passes `k·σ·σ_j`, and `c_J` keeps a little of the noise. That response is a
+/// fixed property of `k`, the layer count and the kernel, so it is divided out
+/// ([`WHITE_NOISE_RESPONSE`]) and a white noise reads its own σ: the variance plane needs the
+/// absolute figure, not only the relative one weights use.
+///
+/// It runs on a fixed grid of at most 16 tiles of 256², each with a margin wider than the transform
+/// reaches, so the memory is bounded whatever the frame size, and each tile's transform equals the
+/// whole frame's at its core. A million pixels give the standard deviation to a standard error of
+/// 0.07%, far below the method's own bias.
 #[derive(Debug)]
-struct NoisePlane<'a, E> {
-    samples: &'a Buffer2<f32>,
-    excluded: E,
+pub(crate) struct NoisePlane<'a, E> {
+    pub(crate) samples: &'a Buffer2<f32>,
+    pub(crate) excluded: E,
 }
 
 impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
+    /// The noise standard deviation over the pixels `excluded` does not name; `0` when no pixel
+    /// remains or the image is constant.
+    pub(crate) fn sigma(&self) -> f32 {
+        sigma(self.coefficients().all(), Size2us::from(self.samples)) as f32
+    }
+
+    /// The background under the flat `gains` names: the noise measured over each of its bins on
+    /// its own — the support thresholds against the bin's own σ — and fitted by
+    /// [`background_split::fit`]; unflattened, of [`Self::sigma`], for a plane no flat divided.
+    pub(crate) fn background(
+        &self,
+        gains: Option<PixelGains<'_, impl Fn(usize) -> f32 + Sync>>,
+    ) -> BackgroundSplit {
+        let Some(PixelGains { gain, bins }) = gains else {
+            return BackgroundSplit::of_sigma(self.sigma());
+        };
+        let size = Size2us::from(self.samples);
+        let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, position| {
+            gain(coefficients.index[position])
+        });
+        background_split::fit(&binned.measure(|run| sigma(run, size).powi(2)))
+    }
+
     /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
     /// and row-major within a tile: each tile writes its core into its own share of columns sized
     /// for every core pixel, and the shares close up over the pixels excluded.
@@ -398,7 +379,11 @@ fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
         interior = (0..count).filter(|&position| interior(position)).count(),
         "the multiresolution support leaves too few noise pixels; using the k-σ estimate"
     );
-    k_sigma(coefficients, &interior, CONVERGENCE) / FIRST_LAYER_RESPONSE / K_SIGMA_RESPONSE
+    // The first layer's exact response to unit white noise, where the kernel lies inside the frame:
+    // within `FIRST_LAYER_REACH` of an edge the mirror boundary reads a sample twice, and
+    // `interior` keeps those pixels out. `LAYER_SIGMA` keeps the literature's three digits, which
+    // the support's threshold and `WHITE_NOISE_RESPONSE` were measured with.
+    k_sigma(coefficients, &interior, CONVERGENCE) / wavelet::white_noise_sigma(0) / K_SIGMA_RESPONSE
 }
 
 /// The support iteration's σ over `coefficients`, uncorrected; `None` when an iteration leaves
@@ -653,10 +638,13 @@ impl Sums {
 mod tests {
     use statrs::distribution::{ContinuousCDF, Normal};
 
-    use crate::noise::mrs_noise::{FIRST_LAYER_RESPONSE, K, K_SIGMA_RESPONSE};
+    use crate::math::wavelet;
+    use crate::noise::mrs_noise::{K, K_SIGMA_RESPONSE};
 
     /// The first layer's response, `δ − h` for the 2-D B3 kernel `h = b bᵀ` with
-    /// `b = [1, 4, 6, 4, 1]/16`, summed in squares tap by tap rather than by the closed form.
+    /// `b = [1, 4, 6, 4, 1]/16`, summed in squares tap by tap rather than by the separable form
+    /// `white_noise_sigma` takes, which is `√(1 − 2h₀ + Σh²)` with `h₀ = (6/16)²` and
+    /// `Σh² = (70/256)²` here.
     #[test]
     fn the_first_layer_response_is_the_kernels() {
         let b = [1.0, 4.0, 6.0, 4.0, 1.0].map(|tap: f64| tap / 16.0);
@@ -667,7 +655,7 @@ mod tests {
                 energy += (delta - row * column).powi(2);
             }
         }
-        assert!((energy.sqrt() - FIRST_LAYER_RESPONSE).abs() < 1e-15);
+        assert!((energy.sqrt() - wavelet::white_noise_sigma(0)).abs() < 1e-15);
     }
 
     /// The clip's response, against the clip itself run on 200 001 evenly spaced quantiles of a

@@ -4,7 +4,7 @@
 /// `[0, 1]`.
 ///
 /// The one place the "does this frame contribute here?" rule for a coverage plane lives, which
-/// [`FrameGate`](crate::combine::frame_cache::frame_gate::FrameGate) reads for the combine, its
+/// [`FrameGate`](crate::combine::frame_read::frame_gate::FrameGate) reads for the combine, its
 /// coverage plane and normalization's common domain alike.
 ///
 /// Confidence is not part of the rule. A warp emits support and interpolation confidence together

@@ -1,34 +1,21 @@
-use crate::io::error::{FitsRefusal, ImageError};
+use fits_well::io::Hdu;
 
+use crate::image::fits_transfer_provenance::FitsHduProvenance;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::ExtensionClaims;
 use crate::io::fits::fits_load_options::FitsHduSelector;
-use crate::io::fits::fits_transfer_provenance::FitsHduProvenance;
-use crate::io::fits::hdu_list::HduList;
 use crate::io::fits::metadata;
 
-pub(super) fn selected_hdu(
-    file: HduList<'_>,
-    index: usize,
-) -> Result<FitsHduProvenance, ImageError> {
-    let HduList { path, hdus } = file;
+pub(super) fn selected_hdu(hdus: &[Hdu], index: usize) -> Result<FitsHduProvenance, FitsLoadError> {
     let hdu = hdus.get(index).ok_or_else(|| {
-        ImageError::fits_unsupported(
-            path,
-            FitsRefusal::HduOutOfRange {
-                index,
-                hdus: hdus.len(),
-            },
-        )
+        FitsLoadError::from(FitsRefusal::HduOutOfRange {
+            index,
+            hdus: hdus.len(),
+        })
     })?;
-    let extname = metadata::read_text(&hdu.header, "EXTNAME")
-        .map_err(|source| ImageError::fits(path, source))?;
+    let extname = metadata::read_text(&hdu.header, "EXTNAME")?;
     let extver = if extname.is_some() {
-        Some(
-            hdu.header
-                .get_integer("EXTVER")
-                .map_err(|source| ImageError::fits(path, source))?
-                .unwrap_or(1),
-        )
+        Some(hdu.header.get_integer("EXTVER")?.unwrap_or(1))
     } else {
         None
     };
@@ -40,29 +27,24 @@ pub(super) fn selected_hdu(
 }
 
 pub(super) fn select_image_hdu(
-    file: HduList<'_>,
+    hdus: &[Hdu],
     selector: &FitsHduSelector,
-) -> Result<FitsHduProvenance, ImageError> {
-    let HduList { path, hdus } = file;
+) -> Result<FitsHduProvenance, FitsLoadError> {
     let selected = match selector {
         FitsHduSelector::Auto => {
-            // A flags or gain extension describes another image, so it is no candidate of its own.
             let mut images = Vec::new();
             for (index, hdu) in hdus.iter().enumerate() {
-                if hdu.is_image() && !ExtensionClaims::describes_another(path, hdu)? {
+                if ExtensionClaims::holds_image(hdu)? {
                     images.push(index);
                 }
             }
             match images.as_slice() {
-                [] => return Err(ImageError::fits_unsupported(path, FitsRefusal::NoImageHdu)),
+                [] => return Err(FitsLoadError::from(FitsRefusal::NoImageHdu)),
                 [index] => *index,
                 _ => {
-                    return Err(ImageError::fits_unsupported(
-                        path,
-                        FitsRefusal::SeveralImageHdus {
-                            images: images.len(),
-                        },
-                    ));
+                    return Err(FitsLoadError::from(FitsRefusal::SeveralImageHdus {
+                        images: images.len(),
+                    }));
                 }
             }
         }
@@ -70,45 +52,33 @@ pub(super) fn select_image_hdu(
         FitsHduSelector::Name { extname, extver } => {
             let mut matches = Vec::new();
             for (index, hdu) in hdus.iter().enumerate() {
-                if hdu
-                    .matches_extension(extname, *extver, None)
-                    .map_err(|source| ImageError::fits(path, source))?
-                {
+                if hdu.matches_extension(extname, *extver, None)? {
                     matches.push(index);
                 }
             }
             match matches.as_slice() {
                 [] => {
-                    return Err(ImageError::fits_unsupported(
-                        path,
-                        FitsRefusal::NoMatchingHdu {
-                            extname: extname.clone(),
-                            extver: *extver,
-                        },
-                    ));
+                    return Err(FitsLoadError::from(FitsRefusal::NoMatchingHdu {
+                        extname: extname.clone(),
+                        extver: *extver,
+                    }));
                 }
                 [index] => *index,
                 _ => {
-                    return Err(ImageError::fits_unsupported(
-                        path,
-                        FitsRefusal::SeveralMatchingHdus {
-                            extname: extname.clone(),
-                            extver: *extver,
-                            matches: matches.len(),
-                        },
-                    ));
+                    return Err(FitsLoadError::from(FitsRefusal::SeveralMatchingHdus {
+                        extname: extname.clone(),
+                        extver: *extver,
+                        matches: matches.len(),
+                    }));
                 }
             }
         }
     };
-    let selected = selected_hdu(file, selected)?;
+    let selected = selected_hdu(hdus, selected)?;
     if !hdus[selected.index].is_image() {
-        return Err(ImageError::fits_unsupported(
-            path,
-            FitsRefusal::NotAnImage {
-                hdu: selected.index,
-            },
-        ));
+        return Err(FitsLoadError::from(FitsRefusal::NotAnImage {
+            hdu: selected.index,
+        }));
     }
     Ok(selected)
 }

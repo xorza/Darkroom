@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use lumos::{
-    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterBuild, NoMasterCache,
-    ProgressMonitor, RunReport, StackConfig,
+    CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor, RunReport,
+    SigmaThreshold, StackConfig,
 };
 
 use crate::alone::alone;
@@ -71,11 +71,11 @@ fn a_master_stays_within_its_budget() {
                         bias: none,
                         flat_dark: none,
                     },
-                    sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+                    sigma_threshold: SigmaThreshold::DEFAULT,
                     cache: &NoMasterCache,
                 },
                 &ingest,
-                &ProgressMonitor::unattended(),
+                ProgressMonitor::unattended(),
             )
             .unwrap()
         });

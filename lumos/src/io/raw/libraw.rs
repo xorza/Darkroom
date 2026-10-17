@@ -1,16 +1,16 @@
 //! [`Libraw`]: one open LibRaw instance, the file it parses in place, and what its callbacks
 //! report.
 
-use std::cell::Cell;
 use std::ffi::{CStr, c_char, c_int, c_void};
-use std::fmt;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::slice;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{fmt, slice};
 
 use common::CancelToken;
 use libraw_sys as sys;
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::raw::error::{LibrawCode, RawError};
 use crate::io::raw::raw_decoder::{CodecFacts, CrxCoding, RawDecoder};
@@ -30,7 +30,8 @@ pub(super) struct Libraw {
     hooks: Box<Hooks>,
 }
 
-/// The state LibRaw's callbacks reach through their user data.
+/// The state LibRaw's callbacks reach through their user data. LibRaw calls them from its decoder's
+/// OpenMP threads as well as from the calling one, so the state is shared across threads.
 #[derive(Debug)]
 struct Hooks {
     /// Polled at each stage LibRaw reports, which stops the decode with
@@ -38,7 +39,7 @@ struct Hooks {
     cancel: CancelToken,
     /// Whether LibRaw met a value its format cannot hold and decoded on past it. LibRaw reports the
     /// first such value of a file alone.
-    corrupt: Cell<bool>,
+    corrupt: AtomicBool,
 }
 
 /// An image LibRaw's own processing made, freed when dropped. It borrows the [`Libraw`] that made
@@ -48,7 +49,7 @@ pub(super) struct ProcessedImage<'a> {
     _libraw: PhantomData<&'a mut Libraw>,
 }
 
-/// A [`ProcessedImage`]'s samples, interleaved by colour, and the shape they fill.
+/// A [`ProcessedImage`]'s samples, interleaved by color, and the shape they fill.
 #[derive(Debug)]
 pub(super) struct ProcessedSamples<'a> {
     pub(super) samples: &'a [u16],
@@ -80,7 +81,7 @@ impl Libraw {
         let handle = NonNull::new(unsafe { sys::libraw_init(0) }).ok_or(RawError::Init)?;
         let hooks = Box::new(Hooks {
             cancel: cancel.clone(),
-            corrupt: Cell::new(false),
+            corrupt: AtomicBool::new(false),
         });
         let user_data = (&raw const *hooks).cast_mut().cast::<c_void>();
         unsafe {
@@ -174,7 +175,7 @@ impl Libraw {
         if let Some(code) = LibrawCode::of(code) {
             return Err(RawError::Unpack(code));
         }
-        if self.hooks.corrupt.get() {
+        if self.hooks.corrupt.load(Ordering::Relaxed) {
             return Err(RawError::CorruptData);
         }
         Ok(())
@@ -232,7 +233,7 @@ impl fmt::Debug for Libraw {
 
 impl ProcessedImage<'_> {
     /// The samples, checked against the shape LibRaw states and the bytes it allocated: one or
-    /// three colours of 16 bits, as the processing was asked for.
+    /// three colors of 16 bits, as the processing was asked for.
     ///
     /// # Errors
     ///
@@ -248,7 +249,10 @@ impl ProcessedImage<'_> {
             colors,
             bits,
         };
-        if width == 0 || height == 0 || !matches!(colors, 1 | 3) || bits != 16 {
+        let Ok(layout) = ChannelLayout::try_from(colors) else {
+            return Err(shape);
+        };
+        if width == 0 || height == 0 || bits != 16 {
             return Err(shape);
         }
         let len = width
@@ -271,7 +275,7 @@ impl ProcessedImage<'_> {
         let samples = unsafe { slice::from_raw_parts(data, len) };
         Ok(ProcessedSamples {
             samples,
-            dimensions: ImageDimensions::new(Size2us::new(width, height), colors),
+            dimensions: ImageDimensions::new(Size2us::new(width, height), layout),
         })
     }
 }
@@ -292,7 +296,7 @@ impl fmt::Debug for ProcessedImage<'_> {
 /// writes nothing to stderr, as LibRaw's default callback does.
 unsafe extern "C" fn record_data_error(user_data: *mut c_void, _file: *const c_char, _offset: i64) {
     let hooks = unsafe { &*user_data.cast::<Hooks>() };
-    hooks.corrupt.set(true);
+    hooks.corrupt.store(true, Ordering::Relaxed);
 }
 
 /// LibRaw's progress callback: a nonzero answer stops the decode with `LIBRAW_CANCELLED_BY_CALLBACK`.
@@ -376,5 +380,37 @@ pub(crate) mod internals {
             }
             Ok(libraw)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::c_void;
+    use std::ptr;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+
+    use common::CancelToken;
+
+    use crate::io::raw::libraw::{Hooks, record_data_error};
+
+    /// LibRaw's compressed-Fuji decoder reports a data error from each of its OpenMP threads, so
+    /// the callback runs on several threads at once against one `Hooks`.
+    #[test]
+    fn data_errors_from_several_threads_are_recorded() {
+        let hooks = Hooks {
+            cancel: CancelToken::new(),
+            corrupt: AtomicBool::new(false),
+        };
+        let shared = &hooks;
+        thread::scope(|scope| {
+            for offset in 0..4 {
+                scope.spawn(move || {
+                    let user_data = (&raw const *shared).cast_mut().cast::<c_void>();
+                    unsafe { record_data_error(user_data, ptr::null(), offset) };
+                });
+            }
+        });
+        assert!(hooks.corrupt.load(Ordering::Relaxed));
     }
 }

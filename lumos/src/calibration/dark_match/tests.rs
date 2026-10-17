@@ -21,9 +21,11 @@ fn a_bias_free_dark_of_another_exposure_scales_by_the_ratio() {
         matched,
         DarkMatch {
             scale: Some(2.5),
-            unverified: UnverifiedConditions::NONE,
-            temperature: Some(TemperatureSource::Sensor),
-            temperature_difference: None,
+            comparison: DarkComparison {
+                exposure_compared: true,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: None,
+            },
         }
     );
     assert_eq!(matched.factor(), 2.5);
@@ -54,12 +56,11 @@ fn agreeing_or_unstated_conditions_leave_the_dark_unscaled() {
         agreeing,
         DarkMatch {
             scale: None,
-            unverified: UnverifiedConditions {
-                exposure: false,
-                temperature: true,
+            comparison: DarkComparison {
+                exposure_compared: true,
+                temperature: None,
+                temperature_difference: None,
             },
-            temperature: None,
-            temperature_difference: None,
         }
     );
     assert_eq!(agreeing.factor(), 1.0);
@@ -73,12 +74,11 @@ fn agreeing_or_unstated_conditions_leave_the_dark_unscaled() {
         silent,
         DarkMatch {
             scale: None,
-            unverified: UnverifiedConditions {
-                exposure: true,
-                temperature: false,
+            comparison: DarkComparison {
+                exposure_compared: false,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: None,
             },
-            temperature: Some(TemperatureSource::Sensor),
-            temperature_difference: None,
         }
     );
 }
@@ -97,13 +97,15 @@ fn a_dark_of_another_temperature_is_recorded_not_refused() {
         matched,
         DarkMatch {
             scale: Some(2.5),
-            unverified: UnverifiedConditions::NONE,
-            temperature: Some(TemperatureSource::Sensor),
-            temperature_difference: Some(TemperatureDifference {
-                reading: TemperatureSource::Sensor,
-                frame: -7.0,
-                dark: -10.0,
-            }),
+            comparison: DarkComparison {
+                exposure_compared: true,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: Some(TemperatureDifference {
+                    reading: TemperatureSource::Sensor,
+                    frame: -7.0,
+                    dark: -10.0,
+                }),
+            },
         }
     );
     let within = DarkMatch::new(
@@ -112,7 +114,7 @@ fn a_dark_of_another_temperature_is_recorded_not_refused() {
         DarkBias::Held,
     )
     .unwrap();
-    assert_eq!(within.temperature_difference, None);
+    assert_eq!(within.comparison.temperature_difference, None);
 }
 
 /// The camera body's temperature stands in only where the two do not both state the sensor's:
@@ -129,12 +131,14 @@ fn the_camera_temperature_matches_only_where_the_sensors_do_not() {
     assert_eq!(
         matched(with_body(None, Some(21.0)), with_body(None, Some(21.5)))
             .unwrap()
+            .comparison
             .temperature,
         Some(TemperatureSource::Camera)
     );
     assert_eq!(
         matched(with_body(None, Some(21.0)), with_body(None, Some(23.0)))
             .unwrap()
+            .comparison
             .temperature_difference,
         Some(TemperatureDifference {
             reading: TemperatureSource::Camera,
@@ -147,12 +151,18 @@ fn the_camera_temperature_matches_only_where_the_sensors_do_not() {
         with_body(Some(-10.5), Some(25.0)),
     )
     .unwrap();
-    assert_eq!(sensors.temperature, Some(TemperatureSource::Sensor));
-    assert!(!sensors.unverified.temperature);
+    assert_eq!(
+        sensors.comparison.temperature,
+        Some(TemperatureSource::Sensor)
+    );
+    assert!(!sensors.comparison.unverified().temperature);
     let one_sensor = matched(
         with_body(Some(-10.0), Some(21.0)),
         with_body(None, Some(21.5)),
     )
     .unwrap();
-    assert_eq!(one_sensor.temperature, Some(TemperatureSource::Camera));
+    assert_eq!(
+        one_sensor.comparison.temperature,
+        Some(TemperatureSource::Camera)
+    );
 }

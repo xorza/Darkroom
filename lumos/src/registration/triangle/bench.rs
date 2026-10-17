@@ -19,9 +19,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let count = config.matching.max_stars;
         group.throughput(Throughput::Elements(count as u64));
         group.bench_function(BenchmarkId::new("match", count), |b| {
-            let pair = pair.get_or_init(Pair::typical);
-            let trees = pair.trees(count);
-            b.iter(|| pair.matches(&trees, &config));
+            let prepared = pair.get_or_init(Pair::typical).prepared(&config);
+            b.iter(|| prepared.matches());
         });
     }
 }

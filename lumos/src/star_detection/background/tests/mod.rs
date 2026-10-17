@@ -10,9 +10,10 @@ use imaginarium::Buffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::background_map;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::mad_to_sigma;
+use crate::math::statistics;
 use crate::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
+use crate::star_detection::refined_background::RefinedBackground;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::background_config::{
     BackgroundConfig, BackgroundRefinement, IterativeRefinement,
@@ -54,7 +55,7 @@ fn constant_skies_come_back_exactly() {
             "{case}: background off {value}"
         );
         assert!(
-            background.noise.pixels().iter().all(|&v| v == 0.0),
+            background.sky.noise.pixels().iter().all(|&v| v == 0.0),
             "{case}: noise off 0"
         );
     }
@@ -142,8 +143,8 @@ impl<'a> ReferenceSpline<'a> {
 
 /// Along one axis, five tiles of 32 px hold a checkerboard `vᵢ ± aᵢ`, the same across the other
 /// axis: each tile's median and mean are `vᵢ`, its MAD `aᵢ`, so its sky is `vᵢ` and its σ
-/// `mad_to_sigma(aᵢ)`, exactly (dyadic values, exact sums). Both sequences rise, which the 3×3
-/// median keeps. The maps along that axis are then the natural cubic splines through those tile
+/// `sigma_of_mad(aᵢ, 1024)`, exactly (dyadic values, exact sums). Both sequences rise, which the
+/// 3×3 median keeps. The maps along that axis are then the natural cubic splines through those tile
 /// values at the tile centres 15.5 + 32i — checked against an independent f64 spline at every
 /// pixel, the end intervals' extrapolation included, and constant across. The noise map is that
 /// spline clipped to the tile σ's range, which its extrapolation leaves at both ends. The f32
@@ -161,7 +162,10 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
     ];
     let centres: Vec<f64> = (0..5).map(|i| 15.5 + 32.0 * f64::from(i)).collect();
     let skies: Vec<f64> = SKY.iter().map(|&v| f64::from(v)).collect();
-    let sigmas: Vec<f64> = SPREAD.iter().map(|&a| f64::from(mad_to_sigma(a))).collect();
+    let sigmas: Vec<f64> = SPREAD
+        .iter()
+        .map(|&a| f64::from(statistics::sigma_of_mad(a, 32 * 32)))
+        .collect();
     let (sky_spline, sigma_spline) = (
         ReferenceSpline::through(&centres, &skies),
         ReferenceSpline::through(&centres, &sigmas),
@@ -184,7 +188,7 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
                 let axis = if along_x { "x" } else { "y" };
                 let (got_sky, got_sigma) = (
                     f64::from(background.background[(x, y)]),
-                    f64::from(background.noise[(x, y)]),
+                    f64::from(background.sky.noise[(x, y)]),
                 );
                 assert!(
                     (got_sky - sky).abs() <= bound,
@@ -225,7 +229,7 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
 /// sky with it. A disk of 2 leaves 3 pixels at each corner of the halo, at √5 and √8 from the core,
 /// and the sky with them. A disk of 3 covers the 8×8 halo and the 4 sky pixels straight out from
 /// each side of the core at distance 3, 2 of each checker value, leaving 472 of each: the sky is v
-/// and σ is `mad_to_sigma(a)`, exactly, and a second pass, whose mask is the same, keeps them.
+/// and σ is `sigma_of_mad(a, 944)`, exactly, and a second pass, whose mask is the same, keeps them.
 #[test]
 fn refine_masks_the_stars_and_their_halos_out() {
     const SKY: f32 = 0.25;
@@ -254,18 +258,17 @@ fn refine_masks_the_stars_and_their_halos_out() {
             }),
             ..config.clone()
         };
-        BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources)
-            .refine(
-                &pixels,
-                PlaneSpec {
-                    prefilter: Prefilter::None,
-                    matched: None,
-                    mask: None,
-                    background: &config,
-                },
-                &mut resources,
-            )
-            .estimate
+        RefinedBackground::measure(
+            &pixels,
+            PlaneSpec {
+                prefilter: Prefilter::None,
+                matched: None,
+                mask: None,
+                background: &config,
+            },
+            &mut resources,
+        )
+        .estimate
     };
 
     let unrefined = estimate(&pixels, 32);
@@ -278,17 +281,16 @@ fn refine_masks_the_stars_and_their_halos_out() {
     );
     // A configuration that refines nothing hands the estimate back as it came, with no sources.
     let mut resources = DetectionResources::new(size);
-    let untouched =
-        BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources).refine(
-            &pixels,
-            PlaneSpec {
-                prefilter: Prefilter::None,
-                matched: None,
-                mask: None,
-                background: &config,
-            },
-            &mut resources,
-        );
+    let untouched = RefinedBackground::measure(
+        &pixels,
+        PlaneSpec {
+            prefilter: Prefilter::None,
+            matched: None,
+            mask: None,
+            background: &config,
+        },
+        &mut resources,
+    );
     assert!(untouched.sources.is_none());
     assert_eq!(
         untouched.estimate.background.pixels(),
@@ -313,10 +315,11 @@ fn refine_masks_the_stars_and_their_halos_out() {
         );
         assert!(
             clean
+                .sky
                 .noise
                 .pixels()
                 .iter()
-                .all(|&v| v == mad_to_sigma(SPREAD)),
+                .all(|&v| v == statistics::sigma_of_mad(SPREAD, 2 * 472)),
             "{iterations} passes"
         );
     }
@@ -331,20 +334,34 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     };
     let mut resources = DetectionResources::new(Size2us::new(96, 64));
 
-    let first = BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources);
+    let first = BackgroundEstimate::estimate(
+        MaskedPlane::from(&pixels),
+        &config,
+        &resources.floats,
+        &mut resources.background,
+    );
     let expected_background = first.background.pixels().to_vec();
-    let expected_noise = first.noise.pixels().to_vec();
+    let expected_noise = first.sky.noise.pixels().to_vec();
     drop(first);
 
-    let second = BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources);
+    let second = BackgroundEstimate::estimate(
+        MaskedPlane::from(&pixels),
+        &config,
+        &resources.floats,
+        &mut resources.background,
+    );
     assert_eq!(second.background.pixels(), expected_background);
-    assert_eq!(second.noise.pixels(), expected_noise);
+    assert_eq!(second.sky.noise.pixels(), expected_noise);
     drop(second);
 
     resources.reshape(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
-    let resized =
-        BackgroundEstimate::estimate(MaskedPlane::from(&resized_pixels), &config, &mut resources);
+    let resized = BackgroundEstimate::estimate(
+        MaskedPlane::from(&resized_pixels),
+        &config,
+        &resources.floats,
+        &mut resources.background,
+    );
     assert_eq!(resized.background.width(), 48);
     assert_eq!(resized.background.height(), 32);
     assert!(
@@ -354,7 +371,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
             .iter()
             .all(|&value| value == 0.25)
     );
-    assert!(resized.noise.pixels().iter().all(|&value| value == 0.0));
+    assert!(resized.sky.noise.pixels().iter().all(|&value| value == 0.0));
 }
 
 #[test]

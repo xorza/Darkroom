@@ -4,12 +4,12 @@ use std::path::Path;
 
 use imaginarium::Buffer2;
 
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
-use crate::frame::stackable_image::StackableImage;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
+use crate::image::stackable_image::StackableImage;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
 
@@ -50,17 +50,14 @@ impl CombineBudget {
 
 impl Tier {
     /// Resident when `plan` keeps the run in memory; spilled to a scratch under `cache_dir`
-    /// otherwise, its combine budgeted against the plan's budget, when the disk there holds the
-    /// `spill_bytes` the run will write.
+    /// otherwise, its combine budgeted against the plan's budget. The disk is checked by
+    /// [`RunStorage::tier`](crate::frame_store::run_storage::RunStorage::tier), which knows
+    /// everything else the run writes there.
     ///
     /// # Errors
     ///
-    /// The scratch cannot be made, or [`FrameStoreError::InsufficientSpace`].
-    pub(crate) fn for_plan(
-        plan: &RunPlan,
-        spill_bytes: u64,
-        cache_dir: &Path,
-    ) -> Result<Self, FrameStoreError> {
+    /// The scratch cannot be made.
+    pub(crate) fn for_plan(plan: &RunPlan, cache_dir: &Path) -> Result<Self, FrameStoreError> {
         if plan.resident {
             return Ok(Self::Resident);
         }
@@ -71,15 +68,21 @@ impl Tier {
                 "the smallest step of a stage does not fit the memory budget"
             );
         }
-        let scratch = RunScratch::create(cache_dir)?;
-        scratch.ensure_space(spill_bytes)?;
         Ok(Self::Spilled {
-            scratch,
+            scratch: RunScratch::create(cache_dir)?,
             combine: CombineBudget {
                 prior_overcommit,
                 ..CombineBudget::new(plan.budget)
             },
         })
+    }
+
+    /// The scratch a spilled tier writes to.
+    pub(crate) const fn scratch(&self) -> Option<&RunScratch> {
+        match self {
+            Self::Resident => None,
+            Self::Spilled { scratch, .. } => Some(scratch),
+        }
     }
 
     pub(crate) const fn spills(&self) -> bool {
@@ -109,14 +112,14 @@ impl Tier {
         &self,
         image: impl StackableImage,
         quality: FrameQuality<Buffer2<f32>>,
-        source_stats: FrameStats,
+        admitted: Admitted,
     ) -> Result<StoredFrame, FrameStoreError> {
         match self {
-            Self::Resident => Ok(StoredFrame::from_memory(image, quality, source_stats)),
+            Self::Resident => Ok(StoredFrame::from_memory(image, quality, admitted)),
             Self::Spilled { scratch, .. } => SpillFrame {
                 image: &image,
                 quality: &quality,
-                source_stats,
+                admitted,
             }
             .spill(scratch),
         }

@@ -11,8 +11,8 @@ use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{scalar, sum_f32, weighted_sums};
 use crate::simd::tier::Tier;
 
-/// The 6/10/12/24 rungs make [`SUM_F32_CROSSOVER`](crate::math::sum::SUM_F32_CROSSOVER)
-/// reproducible: steps of 4, 8, 16 jump clean over the range the gate sits in.
+/// The 6/10/12/24 rungs measure the range about the one-vector gate: steps of 4, 8, 16 jump clean
+/// over it.
 const LENGTHS: [usize; 13] = [1, 4, 6, 8, 10, 12, 16, 24, 32, 64, 256, 1_024, 10_000];
 
 pub(crate) fn atomic(c: &mut Criterion) {

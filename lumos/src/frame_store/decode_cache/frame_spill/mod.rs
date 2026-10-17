@@ -9,35 +9,36 @@ use std::fmt::Display;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::SerdeFormat;
-use common::file_utils;
-use imaginarium::Buffer2;
+use bytemuck::Pod;
+use common::{SerdeFormat, file_utils};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::frame::frame_plane::FramePlane;
+use crate::decode::fnv1a;
+use crate::frame::admitted::Admitted;
+use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
-use crate::frame_store::decode_cache::fnv1a;
+use crate::frame_store::decode_cache::kept_frame::KeptPlanes;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::plane_store::PlaneStore;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::math::size2us::Size2us;
 
-/// The sidecar layout pin: the digest of a fixed [`Commit`] and [`FrameStats`] as bitcode, which
+/// The commit layout pin: the digest of a fixed [`Commit`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
-/// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-const SIDECAR_PIN: &str = "55dc39978396bae9";
+/// from this pin, so the change that moves the layout also changes the tag every commit carries.
+const SIDECAR_PIN: &str = "52be17bb48c4c692";
 
-/// The tag every sidecar carries.
+/// The tag every commit carries.
 const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN]);
 
-/// The files one kept frame occupies in the decode cache: one plane per channel, the optional
-/// frame-quality planes, the optional null mask, its statistics and its [`Commit`] — under the key
-/// of the decode it holds.
+/// The files one kept frame occupies in the decode cache: one plane per channel, its flags, its
+/// stratified samples and its flat gain's node planes when it has them, and its [`Commit`] —
+/// under a name of the whole decode it holds.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameSpill<'a> {
     directory: &'a Path,
@@ -50,13 +51,17 @@ pub(crate) struct FrameSpill<'a> {
 
 impl<'a> FrameSpill<'a> {
     /// The files a kept cache holds for `canonical_source` decoded under `key`: named by an FNV-1a
-    /// hash of the source and the key's decoder, so the same pair always finds its own. Two pairs
-    /// that share a name are told apart by the commit, which records the source's path and the
-    /// [`CacheKey`] and is checked before a byte is reused: a clash rebuilds the frame, it never
-    /// reads another's.
+    /// hash of the source and the whole key — its file identity, decoder, decode version and
+    /// options — so two decodes that would give other planes never share a name, and runs that
+    /// write one name write the same planes. A clash of the hash is told apart by the commit,
+    /// which records the source's path and the key and is checked before a byte is reused: a clash
+    /// rebuilds the frame, it never reads another's.
     pub(crate) fn cached(directory: &'a Path, canonical_source: &'a Path, key: CacheKey) -> Self {
+        let key_bytes = SerdeFormat::Bitcode
+            .serialize(&key)
+            .expect("a cache key of plain data always serializes");
         let hash = fnv1a::hash(fnv1a::OFFSET, b"lumos-frame-cache\0");
-        let hash = fnv1a::hash(hash, &[key.decoder.tag()]);
+        let hash = fnv1a::hash(hash, &key_bytes);
         let hash = fnv1a::hash(hash, canonical_source.as_os_str().as_encoded_bytes());
         Self {
             directory,
@@ -70,90 +75,91 @@ impl<'a> FrameSpill<'a> {
         self.file(format_args!("_c{channel}.bin"))
     }
 
-    /// Path of the null mask's bit plane.
+    /// Path of the flags plane.
     pub(crate) fn flags_path(&self) -> PathBuf {
         self.file("_flags.bin")
     }
 
-    /// Path of the [`Commit`] sidecar.
-    fn commit_path(&self) -> PathBuf {
-        self.file(".commit")
+    /// Path of one slot's stratified samples.
+    pub(crate) fn samples_path(&self, slot: usize) -> PathBuf {
+        self.file(format_args!("_s{slot}.bin"))
     }
 
-    fn stats_path(&self) -> PathBuf {
-        self.file(".stats")
+    /// Path of one channel's flat gain nodes.
+    pub(crate) fn gain_path(&self, channel: usize) -> PathBuf {
+        self.file(format_args!("_g{channel}.bin"))
+    }
+
+    /// Path of the [`Commit`].
+    fn commit_path(&self) -> PathBuf {
+        self.file(".commit")
     }
 
     fn file(&self, suffix: impl Display) -> PathBuf {
         self.directory.join(format!("{}{suffix}", self.stem))
     }
 
-    /// Whether every channel plane is on disk at the size `dimensions` implies.
-    pub(crate) fn channels_on_disk(&self, dimensions: ImageDimensions) -> bool {
-        (0..dimensions.channels())
-            .all(|channel| plane_on_disk(&self.channel_path(channel), dimensions))
+    /// The plane at `path` mapped; `None` when it cannot be, which a reuse reads as a frame to
+    /// rebuild.
+    pub(crate) fn map<T: Pod>(path: &Path) -> Option<StoredPlane<T>> {
+        StoredPlane::map(path).ok()
     }
 
-    /// Whether the flag plane is on disk at the size `dimensions` implies: one byte per pixel.
-    pub(crate) fn flags_on_disk(&self, dimensions: ImageDimensions) -> bool {
-        let expected = dimensions.pixel_count() as u64;
-        fs::metadata(self.flags_path()).is_ok_and(|metadata| metadata.len() == expected)
-    }
-
-    /// Record a kept frame whose planes are all written, decoded into `decoded`, with the digests
-    /// of the planes as written and its statistics. The commit record goes last, so a run killed
-    /// before it leaves a cache the next run rebuilds.
+    /// Record a kept frame whose planes are all written: decoded into `decoded`, with the digests
+    /// of the planes as written and what its admission found, in one record. It goes last, so a run
+    /// killed before it leaves a cache the next run rebuilds.
     pub(crate) fn commit(
         &self,
-        decoded: Decoded,
+        decoded: &Decoded,
         digests: PlaneDigests,
-        stats: &FrameStats,
+        admitted: &Admitted,
     ) -> Result<(), FrameStoreError> {
-        write_sidecar(&self.stats_path(), stats)?;
-        let Decoded {
-            dimensions,
-            carries,
-            metadata,
-        } = decoded;
         write_sidecar(
             &self.commit_path(),
             &Commit {
                 key: self.key,
                 source: self.source.as_os_str().as_encoded_bytes().to_vec(),
-                width: dimensions.width(),
-                height: dimensions.height(),
-                channels: dimensions.channels(),
-                carries,
+                width: decoded.dimensions.width(),
+                height: decoded.dimensions.height(),
+                channels: decoded.dimensions.channels(),
+                carries: decoded.carries,
+                gain_channels: decoded.gain_channels,
                 digests,
-                metadata,
+                metadata: decoded.metadata.clone(),
+                stats: admitted.stats.clone(),
+                facts: admitted.facts.clone(),
             },
         )
     }
 
     /// What the frame committed here for this source under this key recorded; `None` for no commit
-    /// record, one of another source or under another key, or statistics that do not decode or are
-    /// not valid.
+    /// record, one of another source or under another key, or statistics that are not valid.
     pub(crate) fn committed(&self) -> Option<Committed> {
         let commit: Commit = read_sidecar(&self.commit_path())?;
         if commit.key != self.key || commit.source != self.source.as_os_str().as_encoded_bytes() {
             return None;
         }
-        let stats: FrameStats = read_sidecar(&self.stats_path())?;
-        // A file can decode cleanly and still hold a sigma that would poison every weight derived
+        // A record can decode cleanly and still hold a sigma that would poison every weight derived
         // from it, so the value is checked rather than just the layout.
-        if stats
+        if commit
+            .stats
             .quantization_sigma
             .is_some_and(|sigma| !sigma.is_finite() || sigma <= 0.0)
         {
             return None;
         }
+        let layout = ChannelLayout::try_from(commit.channels).ok()?;
         let dimensions =
-            ImageDimensions::checked(Size2us::new(commit.width, commit.height), commit.channels)?;
+            ImageDimensions::checked(Size2us::new(commit.width, commit.height), layout).ok()?;
         Some(Committed {
-            stats,
+            admitted: Admitted {
+                stats: commit.stats,
+                facts: commit.facts,
+            },
             decoded: Decoded {
                 dimensions,
                 carries: commit.carries,
+                gain_channels: commit.gain_channels,
                 metadata: commit.metadata,
             },
             digests: commit.digests,
@@ -161,56 +167,16 @@ impl<'a> FrameSpill<'a> {
     }
 }
 
-impl PlaneStore for FrameSpill<'_> {
-    fn store_channel(
-        &self,
-        channel: usize,
-        pixels: &[f32],
-    ) -> Result<StoredPlane, FrameStoreError> {
-        let path = self.channel_path(channel);
-        StoredPlane::write(&path, pixels)?;
-        StoredPlane::map(&path)
-    }
-
-    fn store_quality(
-        &self,
-        _plane: FramePlane,
-        _pixels: &[f32],
-    ) -> Result<StoredPlane, FrameStoreError> {
-        unreachable!("a kept frame is unwarped, and so carries no quality planes")
-    }
-
-    fn store_flags(&self, bytes: &[u8]) -> Result<StoredPlane<u8>, FrameStoreError> {
-        let path = self.flags_path();
-        StoredPlane::write(&path, bytes)?;
-        StoredPlane::map(&path)
-    }
-
-    fn store_samples(&self, slot: usize, samples: &[f32]) -> Result<StoredPlane, FrameStoreError> {
-        let path = self.file(format_args!("_s{slot}.bin"));
-        StoredPlane::write(&path, samples)?;
-        StoredPlane::map(&path)
-    }
-
-    /// Held in memory: a kept frame's flat gain travels whole in its commit's metadata, a sixteenth
-    /// of a plane per channel, and is read back from there.
-    fn store_gain(&self, _channel: usize, nodes: &[f32]) -> Result<StoredPlane, FrameStoreError> {
-        Ok(StoredPlane::Memory(Buffer2::new(
-            nodes.len(),
-            1,
-            nodes.to_vec(),
-        )))
-    }
-}
-
 /// The record that commits a kept frame: the key its planes were decoded under, the source they
 /// are of, the frame's shape, which planes it wrote beside its channels, what those planes held,
-/// and the decode's metadata, which a later run takes the frame back with.
+/// the decode's metadata, which a later run takes the frame back with, and what its admission found
+/// of it: its statistics and its facts.
 ///
 /// The carried planes are what make a frame whose flags are gone a cache to rebuild rather than a
 /// frame with no nulls: reusing its channels without them would put the fill under every null, or
 /// a saturated value, into the stack as data. The digests are what make a plane changed under its
-/// name, or one a power loss left zeroed behind its commit, a cache to rebuild too.
+/// name, or one a power loss left zeroed behind its commit, a cache to rebuild too. The metadata
+/// holds no flat gain: its nodes are planes of their own, mapped on reuse.
 #[derive(Debug, Serialize, Deserialize)]
 struct Commit {
     key: CacheKey,
@@ -220,36 +186,46 @@ struct Commit {
     height: usize,
     channels: usize,
     carries: Carries,
+    gain_channels: usize,
     digests: PlaneDigests,
     metadata: ImageMetadata,
+    stats: FrameStats,
+    facts: FrameFacts,
 }
 
 /// What a decode left beside its planes, which a commit records: the frame's shape, the planes it
-/// wrote beside its channels, and its metadata.
+/// wrote beside its channels, the channels of its flat gain, none for a frame no flat divided, and
+/// its metadata with no flat gain.
 #[derive(Debug, Clone)]
 pub(crate) struct Decoded {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) carries: Carries,
+    pub(crate) gain_channels: usize,
     pub(crate) metadata: ImageMetadata,
 }
 
-/// The blake3 digest of each plane a reuse reads: every channel, and the flags plane when the
-/// frame carries one.
+/// The blake3 digest of each plane a reuse reads: every channel, the flags plane when the frame
+/// carries one, each slot's samples, and each channel's gain nodes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PlaneDigests {
     pub(crate) channels: Vec<[u8; 32]>,
     pub(crate) flags: Option<[u8; 32]>,
+    pub(crate) samples: Vec<[u8; 32]>,
+    pub(crate) gain: Vec<[u8; 32]>,
 }
 
 impl PlaneDigests {
-    /// The digests of `channels` and `flags` as they hold now.
-    pub(crate) fn of(channels: &[StoredPlane], flags: Option<&StoredPlane<u8>>) -> Self {
+    /// The digests of `planes` as they hold now.
+    pub(crate) fn of(planes: &KeptPlanes) -> Self {
+        let digest = |plane: &StoredPlane| -> [u8; 32] { blake3::hash(plane.bytes()).into() };
         Self {
-            channels: channels
-                .iter()
-                .map(|plane| blake3::hash(plane.bytes()).into())
-                .collect(),
-            flags: flags.map(|plane| blake3::hash(plane.bytes()).into()),
+            channels: planes.channels.iter().map(digest).collect(),
+            flags: planes
+                .flags
+                .as_ref()
+                .map(|plane| blake3::hash(plane.bytes()).into()),
+            samples: planes.samples.iter().flatten().map(digest).collect(),
+            gain: planes.gain.iter().map(digest).collect(),
         }
     }
 }
@@ -275,22 +251,12 @@ impl Carries {
 /// What [`FrameSpill::committed`] read back.
 #[derive(Debug)]
 pub(crate) struct Committed {
-    pub(crate) stats: FrameStats,
+    pub(crate) admitted: Admitted,
     pub(crate) decoded: Decoded,
     pub(crate) digests: PlaneDigests,
 }
 
-/// Whether a spilled plane is on disk holding exactly one image's worth of `f32`.
-///
-/// A plane of any other length is a stale cache from different geometry, not a reusable one — the
-/// same rule for a channel and for a quality plane, since both are written one image-sized plane at
-/// a time.
-fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
-    let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
-    fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
-}
-
-/// The bytes before a sidecar's payload: its layout tag, little-endian, and the blake3 digest of the
+/// The bytes before a commit's payload: its layout tag, little-endian, and the blake3 digest of the
 /// payload. The digest makes a file damaged anywhere — a bit flipped, a power loss that left it
 /// short or zeroed — read as absent, where bitcode alone would decode the damage into plausible
 /// values: a commit carries a frame's whole metadata, which no single check could vet.
@@ -345,10 +311,8 @@ pub(crate) mod internals {
 
     use crate::frame_store::decode_cache::cache_key::CacheKey;
     use crate::frame_store::decode_cache::frame_spill::{
-        Commit, Decoded, FrameSpill, PlaneDigests, read_sidecar,
+        Commit, FrameSpill, read_sidecar, write_sidecar,
     };
-    use crate::image::image_dimensions::ImageDimensions;
-    use crate::math::size2us::Size2us;
 
     impl<'a> FrameSpill<'a> {
         /// A kept frame's files under `stem` in `directory`, of a source with no path, decoded
@@ -362,28 +326,13 @@ pub(crate) mod internals {
             }
         }
 
-        /// Commit the frame again with the digests of its planes as they are on disk now: a test
-        /// that edits a plane on purpose, to see it read back, keeps it reusable.
-        pub(crate) fn reseal(&self, channels: usize) {
-            let commit: Commit = read_sidecar(&self.commit_path()).unwrap();
-            let digest = |path: &Path| blake3::hash(&fs::read(path).unwrap()).into();
-            let digests = PlaneDigests {
-                channels: (0..channels)
-                    .map(|channel| digest(&self.channel_path(channel)))
-                    .collect(),
-                flags: commit.carries.flags().then(|| digest(&self.flags_path())),
-            };
-            let stats = read_sidecar(&self.stats_path()).unwrap();
-            let decoded = Decoded {
-                dimensions: ImageDimensions::checked(
-                    Size2us::new(commit.width, commit.height),
-                    commit.channels,
-                )
-                .unwrap(),
-                carries: commit.carries,
-                metadata: commit.metadata,
-            };
-            self.commit(decoded, digests, &stats).unwrap();
+        /// Commit the frame again with the digest of channel 0 as it is on disk now: a test that
+        /// edits that plane on purpose, to see it read back, keeps it reusable.
+        pub(crate) fn reseal(&self) {
+            let mut commit: Commit = read_sidecar(&self.commit_path()).unwrap();
+            commit.digests.channels[0] =
+                blake3::hash(&fs::read(self.channel_path(0)).unwrap()).into();
+            write_sidecar(&self.commit_path(), &commit).unwrap();
         }
     }
 }

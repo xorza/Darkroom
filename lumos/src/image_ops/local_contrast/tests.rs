@@ -28,10 +28,10 @@ fn clahe_strength_zero_is_identity() {
     );
 }
 
-/// On colour the enhancement stays in display range on its own — the remap divides by a channel
+/// On color the enhancement stays in display range on its own — the remap divides by a channel
 /// past white rather than clipping it — on a field whose red runs twice its intensity.
 #[test]
-fn clahe_keeps_colour_in_range() {
+fn clahe_keeps_color_in_range() {
     let size = Size2us::new(96, 96);
     let i: Vec<f32> = (0..size.pixel_count())
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))

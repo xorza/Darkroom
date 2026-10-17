@@ -4,34 +4,27 @@ use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
+use crate::combine::stack_config::combine::{MIN_FRAMES_FOR_GESD, MIN_FRAMES_FOR_REJECTION};
 use crate::combine::stack_config::*;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::cfa::cfa_type::CfaType;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::pipeline::align_stack_config::AlignStackConfig;
 
+/// A pixel of fewer samples than the floor falls back; at and above it, the configured method
+/// runs. `none()` never falls back, even at 2, and a method that already equals the fallback is
+/// none to fall back from. The flat preset's stricter floor of 8 is honoured.
 #[test]
-fn small_n_resolve_downgrades_below_min_frames() {
+fn small_n_falls_back_below_min_frames() {
     let sigma = CombineMethod::Mean(Rejection::sigma_clip(2.5));
     let floor5 = SmallN::median_below(5);
-    // Below the floor → fallback (median); at/above → the configured method.
-    assert_eq!(floor5.resolve(sigma, 4), CombineMethod::Median);
-    assert_eq!(floor5.resolve(sigma, 5), sigma);
-    assert_eq!(floor5.resolve(sigma, 50), sigma);
-    // `none()` never downgrades, even at N=2.
+    assert!(floor5.falls_back(sigma, 4));
+    assert!(!floor5.falls_back(sigma, 5));
+    assert!(!floor5.falls_back(sigma, 50));
     let win = CombineMethod::Mean(Rejection::winsorized(3.0));
-    assert_eq!(SmallN::none().resolve(win, 2), win);
-    // A method that already equals the fallback is returned unchanged (no spurious downgrade).
-    assert_eq!(
-        floor5.resolve(CombineMethod::Median, 1),
-        CombineMethod::Median
-    );
-    // The flat preset's stricter floor of 8 is honoured.
-    assert_eq!(
-        StackConfig::flat().combine.small_n.resolve(sigma, 7),
-        CombineMethod::Median
-    );
-    assert_eq!(StackConfig::flat().combine.small_n.resolve(sigma, 8), sigma);
+    assert!(!SmallN::none().falls_back(win, 2));
+    assert!(!floor5.falls_back(CombineMethod::Median, 1));
+    assert!(!floor5.falls_back(CombineMethod::Mean(Rejection::None), 1));
+    let flat = StackConfig::flat().combine.small_n;
+    assert!(flat.falls_back(sigma, 7));
+    assert!(!flat.falls_back(sigma, 8));
 }
 
 /// Manual weights follow their frames past a drop: inputs 1 and 3 gone from five leave the
@@ -72,7 +65,7 @@ fn method_presets_set_the_method_alone() {
     for (name, combine, method, small_n) in [
         (
             "sigma clipped",
-            Combine::sigma_clipped(2.0),
+            Combine::sigma_clip(2.0),
             mean(Rejection::sigma_clip(2.0)),
             floor,
         ),
@@ -127,7 +120,7 @@ fn role_presets_set_the_policy_of_their_frames() {
         (
             "light",
             StackConfig::light(),
-            Combine::sigma_clipped(2.5),
+            Combine::sigma_clip(2.5),
             Weighting::Noise,
             Normalization::Global,
         ),
@@ -162,12 +155,12 @@ fn role_presets_set_the_policy_of_their_frames() {
 #[test]
 fn validate_valid_config() {
     let config = StackConfig {
-        combine: Combine::sigma_clipped(2.5),
+        combine: Combine::sigma_clip(2.5),
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    assert_eq!(config.validate(), Ok(()));
+    assert_eq!(config.validate(3), Ok(()));
 }
 
 #[test]
@@ -176,12 +169,12 @@ fn validate_invalid_config_returns_exact_errors() {
     let range_checks = [
         (
             StackConfig {
-                combine: Combine::sigma_clipped(-1.0),
+                combine: Combine::sigma_clip(-1.0),
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "sigma_low",
+            "sigma.low",
             -1.0,
         ),
         (
@@ -207,7 +200,7 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "sigma_high",
+            "sigma.high",
             f64::INFINITY,
         ),
         (
@@ -223,7 +216,7 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "max_passes",
+            "max_iterations",
             0.0,
         ),
         (
@@ -238,7 +231,7 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "sigma_low",
+            "sigma.low",
             0.0,
         ),
         (
@@ -254,8 +247,25 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            "sigma_high",
+            "sigma.high",
             0.0,
+        ),
+        // One pass is the median clip alone: the line is never fitted.
+        (
+            StackConfig {
+                combine: Combine {
+                    method: CombineMethod::Mean(Rejection::LinearFit(LinearFitClipConfig::new(
+                        SigmaBounds::symmetric(3.0),
+                        1,
+                    ))),
+                    small_n: SmallN::median_below(5),
+                },
+                weighting: Weighting::Equal,
+                normalization: Normalization::None,
+                ..StackConfig::light()
+            },
+            "max_iterations",
+            1.0,
         ),
         (
             StackConfig {
@@ -334,7 +344,7 @@ fn validate_invalid_config_returns_exact_errors() {
         ),
     ];
     for (config, field, value) in range_checks {
-        let StackConfigError::Field(invalid) = config.validate().unwrap_err() else {
+        let StackConfigError::Field(invalid) = config.validate(2).unwrap_err() else {
             panic!("{field} should be reported as an out-of-range field")
         };
         assert_eq!((invalid.field, invalid.value), (field, value));
@@ -379,7 +389,7 @@ fn validate_invalid_config_returns_exact_errors() {
                         min_frames: 5,
                         fallback: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
                     },
-                    ..Combine::sigma_clipped(2.5)
+                    ..Combine::sigma_clip(2.5)
                 },
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
@@ -389,50 +399,20 @@ fn validate_invalid_config_returns_exact_errors() {
         ),
     ];
     for (config, expected) in structural {
-        assert_eq!(config.validate(), Err(expected));
+        assert_eq!(config.validate(2), Err(expected));
     }
-}
 
-/// Three 100 × 100 RGGB mosaics stacked to the image alone, with no normalization. A frame
-/// resides as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a
-/// row over 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and
-/// holds 49 000 more in work; the normalization holds nothing; the combine holds the image and its
-/// flag byte, 5 B a pixel, 50 000 B, and a row reads three frames of 5 B a pixel over 100 pixels,
-/// 1500 B.
-#[test]
-fn stages_charge_the_decode_the_normalization_and_the_combine() {
-    let peek = FramePeek {
-        dimensions: ImageDimensions::new((100, 100), 1),
-        decoder_bytes: 0,
-        mosaic: Some(CfaType::Bayer(CfaPattern::Rggb)),
-    };
-    let config = StackConfig {
-        normalization: Normalization::None,
-        quality: QualityPlanes::IMAGE_ONLY,
+    // One manual weight per frame: two weights validate for two frames and for no other count.
+    let weighted = StackConfig {
+        weighting: Weighting::Manual(vec![1.0, 2.0]),
         ..StackConfig::light()
     };
-    let kept = 50_000;
+    assert_eq!(weighted.validate(2), Ok(()));
     assert_eq!(
-        config.stages(peek, 3, 1),
-        [
-            Stage {
-                kept,
-                held: 0,
-                in_flight: 49_000,
-                units: Units::Frames,
-            },
-            Stage {
-                kept,
-                held: 0,
-                in_flight: 0,
-                units: Units::Whole,
-            },
-            Stage {
-                kept,
-                held: 50_000,
-                in_flight: 1500,
-                units: Units::Rows(100),
-            },
-        ]
+        weighted.validate(3),
+        Err(StackConfigError::ManualWeightCountMismatch {
+            expected: 3,
+            actual: 2
+        })
     );
 }

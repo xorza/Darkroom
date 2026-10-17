@@ -11,8 +11,10 @@
 //! carry.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
-use lumos::{FwhmMode, StarDetectionConfig};
+use lumos::{
+    Combine, FwhmMode, Normalization, RegistrationConfig, SipConfig, StackConfig,
+    StarDetectionConfig, TransformModel, Weighting,
+};
 
 use crate::astro::config::preset::Preset;
 
@@ -119,8 +121,8 @@ impl From<DetectionKnobs> for StarDetectionConfig {
     }
 }
 
-/// The registration knobs the editor offers. `sip_enabled` stands in for
-/// [`RegistrationConfig::sip`]'s whole `Option<SipConfig>`: on means the
+/// The registration knobs the editor offers. `sip_enabled` stands in for the
+/// `sip` of [`TransformModel::Auto`], the model the editor fits: on means the
 /// default SIP fit, off means none.
 #[derive(Debug, Clone, Introspect)]
 #[config(
@@ -150,7 +152,7 @@ impl From<RegistrationConfig> for RegistrationKnobs {
             ratio_tolerance: config.matching.triangle.ratio_tolerance,
             ransac_iterations: config.ransac.max_iterations,
             max_rms_error: config.max_rms_error,
-            sip_enabled: config.sip.is_some(),
+            sip_enabled: config.model.sip().is_some(),
         }
     }
 }
@@ -163,7 +165,9 @@ impl From<RegistrationKnobs> for RegistrationConfig {
         config.matching.triangle.ratio_tolerance = knobs.ratio_tolerance;
         config.ransac.max_iterations = knobs.ransac_iterations;
         config.max_rms_error = knobs.max_rms_error;
-        config.sip = knobs.sip_enabled.then(SipConfig::default);
+        config.model = TransformModel::Auto {
+            sip: knobs.sip_enabled.then(SipConfig::default),
+        };
         config
     }
 }
@@ -262,7 +266,7 @@ impl Default for CombineKnobs {
 impl From<CombineKnobs> for StackConfig {
     fn from(knobs: CombineKnobs) -> Self {
         let combine = match knobs.method {
-            CombineMethodChoice::SigmaClipped => Combine::sigma_clipped(knobs.sigma),
+            CombineMethodChoice::SigmaClipped => Combine::sigma_clip(knobs.sigma),
             CombineMethodChoice::Winsorized => Combine::winsorized(knobs.sigma),
             CombineMethodChoice::Median => Combine::median(),
             CombineMethodChoice::Mean => Combine::mean(),
@@ -278,7 +282,10 @@ impl From<CombineKnobs> for StackConfig {
 
 #[cfg(test)]
 mod tests {
-    use lumos::{Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, Weighting};
+    use lumos::{
+        Combine, Normalization, RegistrationConfig, SipConfig, StackConfig, TransformModel,
+        Weighting,
+    };
     use lumos::{FwhmMode, StarDetectionConfig};
 
     use crate::astro::config::stacking::{
@@ -331,18 +338,20 @@ mod tests {
     #[test]
     fn registration_sip_flag_stands_for_the_whole_sub_config() {
         let without = RegistrationConfig {
-            sip: None,
+            model: TransformModel::Auto { sip: None },
             ..RegistrationConfig::default()
         };
         let off: RegistrationConfig = RegistrationKnobs::from(without).into();
-        assert!(off.sip.is_none());
+        assert!(off.model.sip().is_none());
 
         let with = RegistrationConfig {
-            sip: Some(SipConfig::default()),
+            model: TransformModel::Auto {
+                sip: Some(SipConfig::default()),
+            },
             ..RegistrationConfig::default()
         };
         let on: RegistrationConfig = RegistrationKnobs::from(with).into();
-        assert!(on.sip.is_some());
+        assert!(on.model.sip().is_some());
     }
 
     /// Each choice builds the combination it names, `sigma` reaches the two
@@ -356,10 +365,7 @@ mod tests {
             ..CombineKnobs::default()
         };
         for (method, combine) in [
-            (
-                CombineMethodChoice::SigmaClipped,
-                Combine::sigma_clipped(2.5),
-            ),
+            (CombineMethodChoice::SigmaClipped, Combine::sigma_clip(2.5)),
             (CombineMethodChoice::Winsorized, Combine::winsorized(2.5)),
             (CombineMethodChoice::Median, Combine::median()),
             (CombineMethodChoice::Mean, Combine::mean()),
@@ -375,7 +381,7 @@ mod tests {
         }
         assert_ne!(
             StackConfig::from(knobs(CombineMethodChoice::SigmaClipped)).combine,
-            Combine::sigma_clipped(3.5),
+            Combine::sigma_clip(3.5),
             "sigma has to reach the rejecting methods"
         );
 

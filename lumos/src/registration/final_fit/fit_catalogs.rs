@@ -3,14 +3,15 @@
 
 use glam::DVec2;
 
-use crate::math::statistics::{CHI2_99_2DOF, median_mut};
+use crate::math::statistics;
+use crate::math::statistics::CHI2_99_2DOF;
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitModel};
 use crate::registration::kd_tree::KdTree;
-use crate::registration::registration_result::StarMatch;
+use crate::registration::match_indices::MatchIndices;
+use crate::registration::registration_result::{self, StarMatch};
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
-use crate::registration::triangle::voting::MatchIndices;
+use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 
 /// The median of a Rayleigh distribution of unit σ, `√(2 ln 2)`: what the median of 2-D residual
@@ -63,8 +64,8 @@ struct Candidate {
 }
 
 impl FitCatalogs {
-    /// `None` when no target star is unsaturated.
-    pub(crate) fn new(reference: &[Star], target: &[Star]) -> Option<Self> {
+    /// The catalogs of `reference` and `target`, the target holding at least one unsaturated star.
+    pub(crate) fn new(reference: &[Star], target: &[Star]) -> Self {
         let variance = |star: &Star| star.position_sigma * star.position_sigma;
         let (target_points, target_index): (Vec<DVec2>, Vec<usize>) = target
             .iter()
@@ -72,24 +73,33 @@ impl FitCatalogs {
             .filter(|(_, star)| !star.saturated)
             .map(|(index, star)| (star.pos, index))
             .unzip();
-        Some(Self {
+        Self {
             reference: reference.iter().map(|star| star.pos).collect(),
             reference_variance: reference.iter().map(variance).collect(),
             reference_usable: reference.iter().map(|star| !star.saturated).collect(),
             target: target.iter().map(|star| star.pos).collect(),
             target_variance: target.iter().map(variance).collect(),
-            target_tree: KdTree::build(target_points)?,
+            target_tree: KdTree::build(target_points)
+                .expect("registration gates the unsaturated targets before the fit"),
             target_index,
-        })
+        }
     }
 
     /// The residual of `pair` under `warp`, over the pair's σ.
     pub(crate) fn normalized_residual(&self, warp: &WarpTransform, pair: MatchIndices) -> f64 {
         let position = self.reference[pair.reference];
-        let variance = warp.jacobian(position).determinant().abs()
+        (warp.apply(position) - self.target[pair.target]).length()
+            / self.pair_variance(warp, pair).sqrt()
+    }
+
+    /// The variance of `pair`'s residual under `warp`, in target pixels: the reference star's
+    /// position variance carried through the warp's local area scale, and the target's own.
+    fn pair_variance(&self, warp: &WarpTransform, pair: MatchIndices) -> f64 {
+        warp.jacobian(self.reference[pair.reference])
+            .determinant()
+            .abs()
             * self.reference_variance[pair.reference]
-            + self.target_variance[pair.target];
-        (warp.apply(position) - self.target[pair.target]).length() / variance.sqrt()
+            + self.target_variance[pair.target]
     }
 
     /// Every usable reference star's nearest usable target under `warp`, that `gate` admits, each
@@ -104,18 +114,23 @@ impl FitCatalogs {
             let Some(nearest) = self.target_tree.nearest_one(predicted) else {
                 continue;
             };
-            let target = self.target_index[nearest.index];
-            let variance = warp.jacobian(position).determinant().abs()
-                * self.reference_variance[reference]
-                + self.target_variance[target];
+            let indices = MatchIndices {
+                reference,
+                target: self.target_index[nearest.index],
+            };
+            let variance = self.pair_variance(warp, indices);
             let normalized = nearest.dist_sq.sqrt() / variance.sqrt();
             let admitted = match gate {
                 Gate::Radius(radius) => nearest.dist_sq <= radius * radius,
                 Gate::Scale(scale) => normalized <= CHI2_99_2DOF.sqrt() * scale,
             };
-            if admitted && normalized.is_finite() {
+            debug_assert!(
+                normalized.is_finite(),
+                "a positive position σ leaves every residual finite"
+            );
+            if admitted {
                 out.push(Candidate {
-                    indices: MatchIndices { reference, target },
+                    indices,
                     normalized,
                     variance,
                 });
@@ -157,10 +172,10 @@ impl FitCatalogs {
         for _ in 0..MAX_PASSES {
             self.candidates(&warp, gate, &mut candidates);
             let found = candidates.len();
-            if found < model.transform.min_points() {
+            if found < model.transform_type().min_points() {
                 return Err(FinalFitFailure::TooFewPairs {
                     found,
-                    required: model.transform.min_points(),
+                    required: model.transform_type().min_points(),
                 });
             }
             if found < model.required_pairs() {
@@ -171,7 +186,7 @@ impl FitCatalogs {
             }
             normalized.clear();
             normalized.extend(candidates.iter().map(|candidate| candidate.normalized));
-            scale = (median_mut(&mut normalized) / RAYLEIGH_MEDIAN).max(1.0);
+            scale = (statistics::median_mut(&mut normalized) / RAYLEIGH_MEDIAN).max(1.0);
 
             pairs.clear();
             for candidate in &candidates {
@@ -202,7 +217,7 @@ impl FitCatalogs {
             gate = Gate::Scale(scale);
         }
 
-        let matches = candidates
+        let matches: Vec<StarMatch> = candidates
             .iter()
             .map(|candidate| StarMatch {
                 indices: candidate.indices,
@@ -213,6 +228,7 @@ impl FitCatalogs {
             .collect();
         Ok(FinalFit {
             warp,
+            rms_error: registration_result::rms_error(&matches),
             matches,
             scale,
         })

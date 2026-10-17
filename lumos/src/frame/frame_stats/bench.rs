@@ -1,5 +1,5 @@
 //! The statistics every light is measured by as it enters a stack: each slot's level and white
-//! noise, on a mono frame by multiresolution support, on a mosaic per colour, and on a mosaic a
+//! noise, on a mono frame by multiresolution support, on a mosaic per color, and on a mosaic a
 //! flat divided, with the share of its noise the flat amplified.
 
 use common::CancelToken;
@@ -7,7 +7,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -29,7 +30,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("measure_split/rggb", field.name()), |b| {
         let masters = CalibrationMasters::from_images(
             scene::masters(FRAME, rggb),
-            DEFAULT_SIGMA_THRESHOLD,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never(),
         )
         .unwrap();

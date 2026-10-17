@@ -58,7 +58,7 @@ fn fits_report_their_own_widths() {
                 beta: 2.5,
             },
             method: CentroidMethod::MoffatFit { beta: 2.5 },
-            fwhm: fwhm::from_alpha_beta(3.0, 2.5),
+            fwhm: fwhm::from_alpha_beta(3.0, 2.5) as f32,
             eccentricity: None,
             moments_biased: true,
         },

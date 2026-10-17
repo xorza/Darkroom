@@ -42,7 +42,8 @@ impl SetFacts {
     }
 
     /// Check frame `index` against the facts stated before it, then record the ones it states
-    /// first. Frames are admitted in index order, which is what makes the reference the first.
+    /// first. The caller admits frames in index order, so the frame each fact is held to is the
+    /// lowest index that states it.
     pub(crate) fn admit(&mut self, index: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
         self.check(index, facts)?;
         self.record(index, facts);

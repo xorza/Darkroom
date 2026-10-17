@@ -1,33 +1,42 @@
 //! What a decoder decided, recorded alongside the samples it produced.
 //!
 //! [`ImageProvenance`] is the record; the enums below are its fields, each naming one axis of the
-//! decision — which container, which decoder, what transfer function, what colour interpretation,
-//! which demosaic.
+//! decision — which source and how it became samples, what color interpretation, which demosaic.
 
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use imaginarium::FileFormat;
 use serde::{Deserialize, Serialize};
 
-use crate::io::fits::fits_transfer_provenance::FitsTransferProvenance;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::fits_transfer_provenance::FitsTransferProvenance;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SourceContainer {
-    Fits,
+/// The source the samples came from, and how its decoder made samples of what it stored. Each
+/// container has one decoder, so a pairing no load makes cannot be stated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SourceProvenance {
+    /// A FITS file read by fits-well, its samples divided into the pipeline's `[0, 1]` domain. The
+    /// physical values the file declared are recoverable through the image's
+    /// [`SampleDomain`](crate::SampleDomain).
+    Fits(FitsTransferProvenance),
+    /// A camera RAW read by LibRaw, its sensor samples above black divided into the same domain by
+    /// `maximum − black`.
     CameraRaw,
-    Tiff,
-    Png,
-    Jpeg,
+    /// A raster read by imaginarium.
+    Raster {
+        format: RasterFormat,
+        transfer: RasterTransfer,
+    },
 }
 
-impl From<FileFormat> for SourceContainer {
-    fn from(format: FileFormat) -> Self {
-        match format {
-            FileFormat::Png => Self::Png,
-            FileFormat::Jpeg => Self::Jpeg,
-            FileFormat::Tiff => Self::Tiff,
+impl SourceProvenance {
+    /// The decoder that read the source.
+    pub const fn decoder(&self) -> DecoderProvenance {
+        match self {
+            Self::Fits(_) => DecoderProvenance::FitsWell,
+            Self::CameraRaw => DecoderProvenance::LibRaw,
+            Self::Raster { .. } => DecoderProvenance::Imaginarium,
         }
     }
 }
@@ -39,18 +48,32 @@ pub enum DecoderProvenance {
     Imaginarium,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum TransferProvenance {
-    /// FITS samples divided into the pipeline's `[0, 1]` domain. The physical values the file
-    /// declared are recoverable through the image's [`SampleDomain`](crate::SampleDomain).
-    FitsNormalized(FitsTransferProvenance),
-    /// Sensor samples above black, divided into the same domain by `maximum − black`.
-    RawNormalized,
-    /// A floating-point raster, taken as linear: no TIFF tag lumos reads states a transfer
+/// The container of a raster source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RasterFormat {
+    Tiff,
+    Png,
+    Jpeg,
+}
+
+impl From<FileFormat> for RasterFormat {
+    fn from(format: FileFormat) -> Self {
+        match format {
+            FileFormat::Png => Self::Png,
+            FileFormat::Jpeg => Self::Jpeg,
+            FileFormat::Tiff => Self::Tiff,
+        }
+    }
+}
+
+/// How a raster's samples relate to light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RasterTransfer {
+    /// Floating-point samples, taken as linear: no TIFF tag lumos reads states a transfer
     /// function, and float samples are how linear data is stored.
-    FloatRaster,
-    /// A raster decoded for display only, whose transfer function is not read.
-    UnspecifiedRaster,
+    Float,
+    /// Samples decoded for display only, whose transfer function is not read.
+    Unspecified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,10 +93,10 @@ pub enum DemosaicProvenance {
         passes: MarkesteijnPasses,
     },
     LibRaw,
-    /// No demosaic: a CFA drizzle put each photosite into the channel of its colour alone.
+    /// No demosaic: a CFA drizzle put each photosite into the channel of its color alone.
     CfaDrizzle,
     /// No demosaic: the green photosites as they are, the others filled from their green
-    /// neighbours — a plane to register on, not a colour image.
+    /// neighbours — a plane to register on, not a color image.
     GreenProxy,
 }
 
@@ -119,9 +142,7 @@ impl Display for RowOrder {
 /// Decoder decisions that affect the meaning of the returned samples.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImageProvenance {
-    pub container: SourceContainer,
-    pub decoder: DecoderProvenance,
-    pub transfer: TransferProvenance,
+    pub source: SourceProvenance,
     pub color: ColorProvenance,
     /// Whether this load path itself clipped samples.
     pub clipped: bool,

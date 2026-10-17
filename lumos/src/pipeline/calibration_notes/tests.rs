@@ -1,40 +1,56 @@
 use super::*;
 use crate::calibration::dark_scale::DarkScale;
-use crate::calibration::temperature_difference::TemperatureDifference;
-use crate::frame::unverified_conditions::UnverifiedConditions;
+use crate::image::dark_comparison::DarkComparison;
+use crate::image::temperature_difference::TemperatureDifference;
+
+/// A dark compared on the exposure as `exposure_compared` says, on the `temperature` reading, and
+/// found apart by `difference`.
+fn compared(
+    exposure_compared: bool,
+    temperature: Option<TemperatureSource>,
+    difference: Option<TemperatureDifference>,
+) -> DarkComparison {
+    DarkComparison {
+        exposure_compared,
+        temperature,
+        temperature_difference: difference,
+    }
+}
 
 /// Five lights: one unverified in exposure, one in temperature and scaled by its exposure, one
 /// matched on its camera's temperature, one matched on its sensor's 3 °C off and scaled by a
 /// fit, and one whose dark was scaled by 1, which is no scaling. The report counts each fact
-/// once per light that met it, and carries the bundle's floored flat pixels and unverified
-/// flat-dark, here none.
+/// once per light that met it, and carries the bundle's floored flat pixels and flat-dark
+/// comparison, here none.
 #[test]
 fn the_notes_count_what_calibration_could_not_check() {
+    let sensor = Some(TemperatureSource::Sensor);
     let notes = CalibrationNotes::default();
     notes.record(CalibrationOutcome {
-        unverified: UnverifiedConditions {
-            exposure: true,
-            temperature: false,
-        },
+        dark: Some(compared(false, sensor, None)),
         ..CalibrationOutcome::default()
     });
     notes.record(CalibrationOutcome {
-        unverified: UnverifiedConditions {
-            exposure: false,
-            temperature: true,
-        },
+        dark: Some(compared(true, None, None)),
         dark_scale: Some(DarkScale {
             factor: 2.5,
             source: DarkScaleSource::Exposure { fit_pixels: 40 },
         }),
-        dark_temperature: None,
-        dark_temperature_difference: None,
     });
     notes.record(CalibrationOutcome {
-        dark_temperature: Some(TemperatureSource::Camera),
+        dark: Some(compared(true, Some(TemperatureSource::Camera), None)),
         ..CalibrationOutcome::default()
     });
     notes.record(CalibrationOutcome {
+        dark: Some(compared(
+            true,
+            sensor,
+            Some(TemperatureDifference {
+                reading: TemperatureSource::Sensor,
+                frame: -7.0,
+                dark: -10.0,
+            }),
+        )),
         dark_scale: Some(DarkScale {
             factor: 1.31,
             source: DarkScaleSource::Fitted {
@@ -42,20 +58,13 @@ fn the_notes_count_what_calibration_could_not_check() {
                 standard_error: 0.002,
             },
         }),
-        dark_temperature: Some(TemperatureSource::Sensor),
-        dark_temperature_difference: Some(TemperatureDifference {
-            reading: TemperatureSource::Sensor,
-            frame: -7.0,
-            dark: -10.0,
-        }),
-        ..CalibrationOutcome::default()
     });
     notes.record(CalibrationOutcome {
+        dark: Some(compared(true, sensor, None)),
         dark_scale: Some(DarkScale {
             factor: 1.0,
             source: DarkScaleSource::Exposure { fit_pixels: 0 },
         }),
-        ..CalibrationOutcome::default()
     });
     let mut report = RunReport::default();
     notes.report_into(&mut report, &CalibrationMasters::default());
@@ -68,8 +77,8 @@ fn the_notes_count_what_calibration_could_not_check() {
             report.fitted_dark_scales,
             report.camera_temperature_darks,
             report.floored_flat_pixels,
-            report.unverified_flat_dark
+            report.flat_dark
         ),
-        (1, 1, 1, 1, 1, 1, 0, UnverifiedConditions::NONE)
+        (1, 1, 1, 1, 1, 1, 0, None)
     );
 }

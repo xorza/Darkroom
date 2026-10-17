@@ -8,11 +8,10 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::detection_plane::DetectionPlane;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
-use crate::star_detection::star_detector::stages::fwhm;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 use crate::star_detection::star_detector::stages::{detect, filter};
 use crate::star_detection::{
-    background, centroid, convolution, labeling, median_filter, threshold_mask,
+    background, centroid, convolution, labeling, median_filter, star_detector, threshold_mask,
 };
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -25,6 +24,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
     detect::bench::atomic(c);
     centroid::bench::atomic(c);
     filter::bench::atomic(c);
+}
+
+pub(crate) fn integration(c: &mut Criterion) {
+    star_detector::bench::integration(c);
 }
 
 /// A field at the standard frame taken through the detector's first stages as
@@ -46,9 +49,9 @@ impl Stages {
         let config = config(field);
         let image = field.render(FRAME).image;
         let mut resources = DetectionResources::new(FRAME);
-        let frame = PreparedFrame::new(&image, &config, &mut resources);
-        let fwhm = fwhm::estimate(&frame, &config, &mut resources).value();
-        let plane = frame.detection_plane(fwhm, &config, &mut resources);
+        let mut frame = PreparedFrame::new(&image, &config, &mut resources);
+        let fwhm = frame.estimate_fwhm(&config, &mut resources).value();
+        let plane = frame.final_plane(fwhm, &config, &mut resources);
         let mut mask = BitBuffer2::new_default(FRAME);
         plane.threshold(config.extraction.sigma_threshold, &mut mask);
         Self {

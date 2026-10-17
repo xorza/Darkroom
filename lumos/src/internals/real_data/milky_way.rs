@@ -5,16 +5,14 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
-use crate::internals::visual;
-use crate::math::statistics::median_mut;
+use crate::internals::{init_tracing, real_data, visual};
+use crate::math::statistics;
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
 };
 
 fn median(image: &LinearImage) -> f32 {
-    median_mut(&mut image.intensity_plane().into_vec())
+    statistics::median_mut(&mut image.intensity_plane().into_vec())
 }
 
 fn assert_displayable(image: &LinearImage, label: &str) {

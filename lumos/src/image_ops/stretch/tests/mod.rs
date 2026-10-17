@@ -186,16 +186,20 @@ fn auto_stretches_report_an_unreachable_background() {
             "asinh: median {median}, sigma {sigma}"
         );
         for (name, curve) in [
-            ("STF", Background { median, sigma }.stf_curve(1.5, 0.2)),
-            ("asinh", asinh),
+            (
+                AutoStretch::Stf,
+                Background { median, sigma }.stf_curve(1.5, 0.2),
+            ),
+            (AutoStretch::Asinh, asinh),
         ]
         .into_iter()
-        .filter(|(name, _)| *name == "STF" || asinh_fails)
+        .filter(|(name, _)| *name == AutoStretch::Stf || asinh_fails)
         {
             assert!(
                 matches!(
                     curve,
-                    Err(OpError::UnreachableBackground { median: reported, .. }) if reported == median
+                    Err(OpError::UnreachableBackground { method, median: reported, .. })
+                        if reported == median && method == name
                 ),
                 "{name}: median {median}, sigma {sigma}"
             );
@@ -283,7 +287,8 @@ fn ghs_endpoints_and_monotonic_across_b_family() {
                 sp: 0.3,
                 lp: 0.0,
                 hp: 1.0,
-            });
+            })
+            .unwrap();
             assert_eq!(c.eval(0.0), 0.0, "f(0)=0 (b={b}, d={d})");
             assert!(
                 (c.eval(1.0) - 1.0).abs() <= GHS_EVAL_BOUND,
@@ -371,7 +376,7 @@ fn ghs_matches_an_f64_reference_through_both_limits() {
         for d in [0.5f32, 5.0, 12.0] {
             for (sp, lp, hp) in [(0.3f32, 0.0f32, 1.0f32), (0.4, 0.15, 0.85)] {
                 let shape = GhsShape { d, b, sp, lp, hp };
-                let curve = GhsCurve::new(shape);
+                let curve = GhsCurve::new(shape).unwrap();
                 for i in 0..=400 {
                     let x = i as f32 / 400.0;
                     let expected = ghs_reference(shape, f64::from(x));
@@ -433,17 +438,37 @@ fn ghs_slope_is_the_derivative_of_the_base() {
     }
 }
 
+/// `d = 0` is no curve at all: the stretch takes the identity tone, which keeps every sample in
+/// `[0, 1]` and clamps the rest.
 #[test]
 fn ghs_identity_when_d_zero() {
-    let c = GhsCurve::new(GhsShape {
+    let shape = GhsShape {
         d: 0.0,
         b: 1.0,
         sp: 0.3,
         lp: 0.1,
         hp: 0.9,
-    });
-    for &x in &[0.0f32, 0.05, 0.3, 0.5, 0.9, 1.0] {
-        assert_eq!(c.eval(x), x, "d=0 is the identity at {x}");
+    };
+    assert!(GhsCurve::new(shape).is_none());
+    let curve = explicit_curve(StretchMethod::Ghs {
+        black_point: 0.0,
+        d: 0.0,
+        b: 1.0,
+        sp: 0.3,
+        lp: 0.1,
+        hp: 0.9,
+    })
+    .unwrap();
+    assert!(matches!(curve.tone, Tone::Identity));
+    for (x, expected) in [
+        (-0.5f32, 0.0),
+        (0.0, 0.0),
+        (0.05, 0.05),
+        (0.3, 0.3),
+        (1.0, 1.0),
+        (1.5, 1.0),
+    ] {
+        assert_eq!(curve.eval(x), expected, "d=0 is the identity at {x}");
     }
 }
 
@@ -463,7 +488,7 @@ fn ghs_exponential_b0_hand_computed() {
         lp: 0.0,
         hp: 1.0,
     };
-    let c = GhsCurve::new(shape);
+    let c = GhsCurve::new(shape).unwrap();
     for (x, hand) in [(0.5f32, 0.731_059), (0.25, 0.455_054)] {
         let closed = (1.0 - (-2.0 * f64::from(x)).exp()) / (1.0 - (-2.0f64).exp());
         assert!((closed - hand).abs() < 1e-6, "{closed} vs {hand}");
@@ -490,7 +515,8 @@ fn ghs_protection_tails_are_linear() {
         sp: 0.5,
         lp: 0.2,
         hp: 0.8,
-    });
+    })
+    .unwrap();
     assert_eq!(c.eval(0.0), 0.0);
     assert_eq!(c.eval(1.0), 1.0);
     assert!(
@@ -510,7 +536,7 @@ fn ghs_protection_tails_are_linear() {
 #[test]
 fn ghs_continuous_at_breakpoints() {
     let (d, b, sp, lp, hp) = (2.5, -1.4, 0.4, 0.15, 0.85);
-    let c = GhsCurve::new(GhsShape { d, b, sp, lp, hp });
+    let c = GhsCurve::new(GhsShape { d, b, sp, lp, hp }).unwrap();
     for bp in [lp, sp, hp] {
         let below = bp.next_down();
         let slope = c.shape.base_slope((bp - sp).abs()) * c.inv_range;
@@ -528,7 +554,8 @@ fn ghs_clamps_out_of_range_input() {
         sp: 0.3,
         lp: 0.0,
         hp: 0.9,
-    });
+    })
+    .unwrap();
     assert_eq!(
         c.eval(5.0),
         1.0,
@@ -548,6 +575,7 @@ fn ghs_d_controls_strength() {
         lp: 0.0,
         hp: 1.0,
     })
+    .unwrap()
     .eval(0.2);
     let strong = GhsCurve::new(GhsShape {
         d: 6.0,
@@ -556,6 +584,7 @@ fn ghs_d_controls_strength() {
         lp: 0.0,
         hp: 1.0,
     })
+    .unwrap()
     .eval(0.2);
     assert!(
         strong > weak,
@@ -744,7 +773,7 @@ fn faint_h_alpha_keeps_its_hue() {
 /// meets `(0.055 − black) / (0.05 − black)` to the roundings of the rescale (2ε per channel) and
 /// the one gain (ε each): 6ε.
 #[test]
-fn the_auto_black_point_keeps_a_faint_colour() {
+fn the_auto_black_point_keeps_a_faint_color() {
     let size = Size2us::new(16, 16);
     let sky: Vec<f32> = (0..size.pixel_count())
         .map(|index| [0.049, 0.05, 0.051][index % 3])
@@ -772,7 +801,7 @@ fn the_auto_black_point_keeps_a_faint_colour() {
         "{} vs {expected}",
         out_r / out_g
     );
-    assert!(expected > 1.5, "the excess is a real colour: {expected}");
+    assert!(expected > 1.5, "the excess is a real color: {expected}");
 }
 
 /// A NaN sample is black on every scalar curve, as on the vector paths.
@@ -788,20 +817,11 @@ fn a_nan_sample_is_black_on_every_curve() {
             lp: 0.2,
             hp: 0.8
         })
+        .unwrap()
         .eval(f32::NAN),
         0.0
     );
-    assert_eq!(
-        GhsCurve::new(GhsShape {
-            d: 0.0,
-            b: 1.0,
-            sp: 0.5,
-            lp: 0.2,
-            hp: 0.8
-        })
-        .eval(f32::NAN),
-        0.0
-    );
+    assert_eq!(IdentityCurve.eval(f32::NAN), 0.0);
     let mut image = rgb_image(Size2us::new(1, 1), [vec![f32::NAN], vec![0.2], vec![0.2]]);
     Stretch {
         method: StretchMethod::Ghs {

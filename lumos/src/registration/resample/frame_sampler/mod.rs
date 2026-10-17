@@ -26,13 +26,13 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::interior_window::InteriorWindow;
-use crate::registration::resample::kernel::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::{SourceAt, SourcePosition};
 use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
+use crate::registration::resample::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::resample::warp_params::WarpParams;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 use crate::simd::{Isa, Kernel};
 
 /// How a frame's pixels are sampled.
@@ -67,15 +67,17 @@ impl SampleMethod {
         }
     }
 
-    /// The source pixels around a sample's cell any of its windows reads. Nearest reads the cell or
-    /// the next.
-    pub(crate) const fn reach(self) -> Reach {
+    /// Whether a sample mixes source samples: every method but the nearest pixel.
+    pub(crate) const fn interpolates(self) -> bool {
+        matches!(self, Self::Filter(_))
+    }
+
+    /// The source pixels around a sample's cell a filter's windows read; `None` for the nearest
+    /// pixel, which reads its own flags.
+    pub(crate) const fn window_reach(self) -> Option<Reach> {
         match self {
-            Self::Nearest => Reach {
-                before: 0,
-                after: 1,
-            },
-            Self::Filter(filter) => filter.kernel.window_reach(),
+            Self::Nearest => None,
+            Self::Filter(filter) => Some(filter.kernel.window_reach()),
         }
     }
 }
@@ -84,8 +86,6 @@ impl SampleMethod {
 #[derive(Debug)]
 pub(crate) struct FrameSampler<'a> {
     method: SampleMethod,
-    /// The channels as the windows read them: with excluded pixels at zero for a frame that has
-    /// any.
     sources: ArrayVec<SourcePlane<'a>, 3>,
     flagged: Option<&'a FlaggedSources<'a>>,
     border: f32,
@@ -124,13 +124,9 @@ impl<'a> FrameSampler<'a> {
         image: &SourceImage<'a>,
         flagged: Option<&'a FlaggedSources<'a>>,
     ) -> Self {
-        let sources = match flagged.and_then(FlaggedSources::zeroed_planes) {
-            Some(zeroed) => zeroed.collect(),
-            None => image.planes.clone(),
-        };
         Self {
             method: rule.method,
-            sources,
+            sources: image.planes.clone(),
             flagged,
             border: rule.border,
             size: image.size(),
@@ -211,11 +207,12 @@ struct PixelOut<'c, 'r> {
     x: usize,
 }
 
-/// A window's taps summed into a sample: the window, the weights that normalize it, and the clamp
-/// that holds its ringing.
+/// A window's taps summed into a sample: the window, the validity plane its sums are masked by
+/// near an excluded pixel, the weights that normalize it, and the clamp that holds its ringing.
 #[derive(Debug, Clone, Copy)]
 struct WindowSum<'w> {
     window: &'w TapWindow<'w>,
+    validity: Option<SourcePlane<'w>>,
     weights: WindowWeights,
     clamp: Option<RingingClamp>,
 }
@@ -264,18 +261,19 @@ impl<S: Isa> RowSampler<'_, '_, S> {
                 },
             )
         {
-            let total = window.total_weight();
+            let weights = window.weights();
+            let total = weights.total();
             for (row, source) in out.channels.iter_mut().zip(&sampler.sources) {
                 row[out.x] = match clamp {
                     Some(clamp) => {
-                        clamp.sample(window.lobe_sums(isa, *source), total, || window.lobes(isa))
+                        clamp.sample(window.lobe_sums(isa, *source), total, || weights.lobes())
                     }
                     None => window.total(isa, *source) / total,
                 };
             }
             return PixelQuality {
                 coverage: 1.0,
-                confidence: window.confidence(),
+                confidence: weights.confidence(),
                 flags: QualityFlags::default(),
             };
         }
@@ -301,6 +299,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         };
         let sum = WindowSum {
             window: &window,
+            validity,
             weights,
             clamp,
         };
@@ -339,6 +338,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         }
         let sum = WindowSum {
             window: &window,
+            validity,
             weights,
             clamp: None,
         };
@@ -355,18 +355,19 @@ impl<S: Isa> RowSampler<'_, '_, S> {
     fn write(&self, sum: WindowSum<'_>, out: &mut PixelOut<'_, '_>) {
         let WindowSum {
             window,
+            validity,
             weights,
             clamp,
         } = sum;
         let isa = self.isa;
         for (row, source) in out.channels.iter_mut().zip(&self.sampler.sources) {
             row[out.x] = match clamp {
-                Some(clamp) => {
-                    clamp.sample(window.lobe_sums(isa, *source), weights.total(), || {
-                        weights.lobes()
-                    })
-                }
-                None => window.total(isa, *source) / weights.total(),
+                Some(clamp) => clamp.sample(
+                    window.lobe_sums(isa, *source, validity),
+                    weights.total(),
+                    || weights.lobes(),
+                ),
+                None => window.total(isa, *source, validity) / weights.total(),
             };
         }
     }

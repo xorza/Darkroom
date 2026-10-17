@@ -24,7 +24,7 @@ pub enum Coverage {
         size: Size2us,
     },
     /// Coverage measured per pixel: one plane every channel shares, or one per channel for a
-    /// mosaic drizzled into the channels of its colours, which reach each channel at other pixels.
+    /// mosaic drizzled into the channels of its colors, which reach each channel at other pixels.
     PerPixel(QualityMap),
 }
 

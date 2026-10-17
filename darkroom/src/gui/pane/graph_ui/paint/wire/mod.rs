@@ -149,7 +149,7 @@ impl Wire {
     }
 }
 
-/// What one wire paints with: its stroke colour, and the ramp that colour
+/// What one wire paints with: its stroke color, and the ramp that color
 /// multiplies along the curve when the two ends differ.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct WirePaint {
@@ -158,7 +158,7 @@ pub(crate) struct WirePaint {
 }
 
 impl From<RgbaF32> for WirePaint {
-    /// One colour for the whole curve.
+    /// One color for the whole curve.
     fn from(color: RgbaF32) -> Self {
         Self { color, ramp: None }
     }

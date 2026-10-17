@@ -4,53 +4,58 @@
 //! real `decode::load_linear` path — exercising sample-type selection, the unsigned-via-BZERO
 //! convention, the division of integer samples into the `[0, 1]` domain (and the float path's
 //! exemption from it), and both halves of the null convention. The demosaic path is exercised by
-//! building mosaics from known colours and demosaicing them back.
+//! building mosaics from known colors and demosaicing them back.
 
-use crate::combine::stack_config::{Normalization, StackConfig, Weighting};
-use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::image_dimensions::ImageDimensions;
-use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
-use crate::ingest::error::AdmissionError;
-use crate::internals::assertions::assert_close;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use std::convert::Infallible;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use crate::combine::error::StackError;
-use crate::drizzle::drizzle_config::DrizzleConfig;
-use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::error::DrizzleError;
-use crate::frame::frame_peek::FramePeek;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::sample_domain::{DomainMap, ScaleOrigin};
-use crate::ingest::frame_step::{NoStep, SteppedPaths};
-use crate::ingest::ingest_config::IngestConfig;
-use crate::ingest::ingest_run::IngestRun;
-use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
-use crate::io::fits::decode;
-use crate::io::fits::fits_load_options::{
-    FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions, FitsNullPolicy,
-};
-use crate::io::load_context::LoadContext;
-use crate::memory::run_memory::RunMemory;
-use crate::progress::progress_monitor::ProgressMonitor;
-use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
-
-use crate::frame::stackable_image::StackableImage;
-use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::fits::{fits_refusal, write_fits};
-use crate::{
-    CalibrationMasters, CalibrationSet, CfaImage, CfaType, ColorProvenance, PreviewImage,
-    PreviewPixels,
-};
 use common::{CancelToken, TempDir};
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
+
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
+use crate::combine::error::StackError;
+use crate::combine::frame_cache::frame_step::SteppedPaths;
+use crate::combine::normalization::Normalization;
+use crate::combine::stack::planned_combine::PlannedCombine;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::drizzle::error::DrizzleError;
+use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::image_dimensions::ImageDimensions;
+use crate::image::linear_image::LinearImage;
+use crate::image::quality_flags::QualityFlags;
+use crate::image::sample_domain::{DomainMap, ScaleOrigin};
+use crate::ingest::error::AdmissionError;
+use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
+use crate::internals::assertions::assert_close;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::fits::{fits_refusal, write_fits};
+use crate::io::decoder::Decoder;
+use crate::io::decoder::cfa_decoder::CfaDecoder;
+use crate::io::error::{ImageError, OverBudget, ScientificRefusal};
+use crate::io::fits::decode;
+use crate::io::fits::error::{FitsAllocation, FitsRefusal};
+use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions};
+use crate::io::frame_info::FrameInfo;
+use crate::io::load_context::LoadContext;
+use crate::io::null_policy::NullPolicy;
+use crate::io::writer;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::memory::run_memory::RunMemory;
+use crate::progress::progress_monitor::ProgressMonitor;
+use crate::registration::transform::Transform;
+use crate::registration::warp_transform::WarpTransform;
+use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewPixels};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
@@ -95,8 +100,8 @@ fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
     mistyped.set("DATAMAX", "not a real").unwrap();
     mistyped.set("ISOSPEED", -1).unwrap();
     let image = write_header_and_load("mistyped_metadata", &mistyped).unwrap();
-    assert_eq!(image.metadata.data_max, None);
-    assert_eq!(image.metadata.iso, None);
+    assert_eq!(image.metadata.header.data_max, None);
+    assert_eq!(image.metadata.header.iso, None);
 
     // A float image's DATAMAX is how its scale is decided, so there it fails the load.
     let mut mistyped_float_scale = one_pixel_header();
@@ -187,7 +192,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 
     let loaded = write_and_load("uint16", &image).unwrap();
     // |BSCALE| × (2¹⁶ − 1) = 65535, recorded so a later stage can ask what one sample is worth.
-    assert_eq!(loaded.metadata.domain.as_ref().unwrap().scale, 65_535.0);
+    assert_eq!(loaded.metadata.derived.domain().unwrap().scale, 65_535.0);
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
@@ -237,7 +242,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         declared.channel(0).pixels(),
         &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
     );
-    assert_eq!(declared.metadata.domain.as_ref().unwrap().scale, 65_535.0);
+    assert_eq!(declared.metadata.derived.domain().unwrap().scale, 65_535.0);
 
     // `Normalized` refuses the header's evidence, for a DATAMAX that describes the sensor rather
     // than the samples.
@@ -279,7 +284,8 @@ fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
         decode::load_cfa(&path, &LoadContext::default())
             .unwrap()
             .metadata
-            .quantization_sigma
+            .derived
+            .quantization_sigma()
             .unwrap()
     };
     // Full 16-bit data: 32767 is odd, so no trailing zero is shared and the step is one ADU. The
@@ -342,7 +348,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     );
     let normalized = decode::load_linear(&normalized_path, &LoadContext::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
-    assert_eq!(normalized.metadata.data_max, Some(1.0));
+    assert_eq!(normalized.metadata.header.data_max, Some(1.0));
 
     // DATAMAX = 65535: a saturation level far above unity, so the samples are ADU and divide by
     // the 16-bit full scale. -5/65535 = -7.629511e-5, 0.5/65535 = 7.629511e-6, 65535/65535 = 1.
@@ -357,13 +363,13 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     assert_eq!(decoded[3], 1.0);
     // DATAMAX follows the samples, so the round-trip is stable: saving and reloading this frame
     // sees DATAMAX = 1 and leaves it alone rather than dividing a second time.
-    assert_eq!(adu.metadata.data_max, Some(1.0));
+    assert_eq!(adu.metadata.header.data_max, Some(1.0));
 
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable
     // — both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
-    let bare_domain = bare.metadata.domain.unwrap();
-    let adu_domain = adu.metadata.domain.clone().unwrap();
+    let bare_domain = bare.metadata.derived.domain().unwrap();
+    let adu_domain = adu.metadata.derived.domain().cloned().unwrap();
     assert_eq!(bare_domain.scale, 1.0);
     assert_eq!(adu_domain.scale, 65_535.0);
     assert_eq!(bare_domain.origin, ScaleOrigin::Assumed);
@@ -404,7 +410,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::combine::error::StackError;
     use crate::combine::frame_cache::FrameCache;
-    use crate::combine::stack_config::Normalization;
+    use crate::combine::normalization::Normalization;
     use crate::ingest::ingest_config::IngestConfig;
 
     let dir = TempDir::new("lumos-frame-set");
@@ -419,9 +425,11 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     };
     let mosaic = |name: &str, pattern: CfaPattern| {
         let path = dir.join(format!("{name}.fits"));
-        make_cfa(Size2us::new(4, 2), vec![0.5; 8], CfaType::Bayer(pattern))
-            .save_fits(&path)
-            .unwrap();
+        writer::cfa_fits(
+            &make_cfa(Size2us::new(4, 2), vec![0.5; 8], CfaType::Bayer(pattern)),
+            &path,
+        )
+        .unwrap();
         path
     };
     let reference = linear("reference", &[], 1.0);
@@ -447,7 +455,10 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             single_thread.install(|| {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
-                    &config,
+                    PlannedCombine {
+                        normalization: config.normalization,
+                        quality: config.quality,
+                    },
                     IngestRun::planned(memory, &ingest),
                 )
             })
@@ -485,9 +496,12 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             FrameCache::from_cfa_paths(
                 SteppedPaths {
                     paths: &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
-                    step: &NoStep,
+                    step: &None::<Infallible>,
                 },
-                &config,
+                PlannedCombine {
+                    normalization: config.normalization,
+                    quality: config.quality,
+                },
                 IngestRun::planned(memory, &ingest),
             )
         });
@@ -531,7 +545,9 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
         decode::load_linear(&path, &LoadContext::default())
             .unwrap()
             .metadata
-            .domain
+            .derived
+            .domain()
+            .cloned()
             .unwrap()
     };
 
@@ -601,8 +617,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
 
     for (name, image) in [("float", &float), ("integer", &integer)] {
         let nulls = image
-            .flags
-            .as_ref()
+            .flags()
             .unwrap_or_else(|| panic!("{name} frame must carry a mask"));
         assert_eq!(nulls.count(QualityFlags::NO_DATA), 1, "{name}");
         for index in 0..6 {
@@ -632,23 +647,20 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
 
     // And the policy that refuses them still does, naming how many and where the first one is.
     let strict = LoadContext {
-        fits: FitsLoadOptions {
-            nulls: FitsNullPolicy::Reject,
-            ..float_context.fits.clone()
-        },
-        ..LoadContext::default()
+        nulls: NullPolicy::Reject,
+        ..float_context.clone()
     };
-    let reason = fits_refusal(decode::load_linear(&float_path, &strict).unwrap_err());
-    assert_eq!(
-        reason,
-        FitsRefusal::NullSamples {
-            count: 1,
-            first_index: 2
-        }
-    );
-    assert_eq!(
-        reason.to_string(),
-        "image contains 1 null/non-finite samples; first at linear index 2"
+    let refused = decode::load_linear(&float_path, &strict).unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            ImageError::NullSamples {
+                count: 1,
+                first_index: 2,
+                ..
+            }
+        ),
+        "{refused:?}"
     );
 
     // Every entry that reads files takes its FITS policy from its config: the strict one refuses
@@ -659,25 +671,24 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let ingest = |fits: &FitsLoadOptions| IngestConfig {
-        fits: fits.clone(),
+    let ingest = |context: &LoadContext| IngestConfig {
+        fits: context.fits.clone(),
+        nulls: context.nulls,
         ..IngestConfig::with_cache_dir(dir.join("cache"))
     };
     let stacked = config.stack_paths(
         &paths,
-        &ingest(&float_context.fits),
+        &ingest(&float_context),
         ProgressMonitor::unattended(),
     );
     assert!(stacked.is_ok(), "{stacked:?}");
-    let refused = config.stack_paths(&paths, &ingest(&strict.fits), ProgressMonitor::unattended());
+    let refused = config.stack_paths(&paths, &ingest(&strict), ProgressMonitor::unattended());
     assert!(
         matches!(
             refused,
-            Err(StackError::ImageLoad(ImageError::FitsUnsupported {
-                reason: FitsRefusal::NullSamples {
-                    count: 1,
-                    first_index: 2
-                },
+            Err(StackError::ImageLoad(ImageError::NullSamples {
+                count: 1,
+                first_index: 2,
                 ..
             }))
         ),
@@ -688,19 +699,19 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             float_path,
             WarpTransform::new(Transform::identity()),
         )],
-        &ingest(&strict.fits),
+        &ingest(&strict),
         ProgressMonitor::unattended(),
     );
     assert!(
         matches!(
             refused,
-            Err(DrizzleError::ImageLoad(ImageError::FitsUnsupported {
-                reason: FitsRefusal::NullSamples {
+            Err(DrizzleError::Stack(StackError::ImageLoad(
+                ImageError::NullSamples {
                     count: 1,
-                    first_index: 2
-                },
-                ..
-            }))
+                    first_index: 2,
+                    ..
+                }
+            )))
         ),
         "{refused:?}"
     );
@@ -716,7 +727,7 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
-    let nulls = loaded.flags.as_ref().unwrap();
+    let nulls = loaded.flags().unwrap();
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 4);
     assert!((0..4).all(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index)));
 }
@@ -748,9 +759,9 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     }
 
     // 100 / 65535 = 1.5259e-3; 65535 / 65535 = 1 exactly.
-    let low_max = low.metadata.data_max.unwrap();
+    let low_max = low.metadata.header.data_max.unwrap();
     assert_close!(low_max, 1.525_902_2e-3, 1e-9, "{low_max}");
-    assert_eq!(high.metadata.data_max, Some(1.0));
+    assert_eq!(high.metadata.header.data_max, Some(1.0));
 }
 
 /// A mono sensor frame (`CFATYPE = 'MONO'`, which this crate writes) has no mosaic, so it loads as
@@ -763,10 +774,10 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     mono_header.set("CFATYPE", "MONO").unwrap();
     let mono = Image::new(vec![2, 2], vec![0.125f32, 0.25, 0.375, 0.5]).unwrap();
     let path = write_with_header(dir.join("mono_sensor.fits"), &mono, &mono_header);
-    let loaded = LinearImage::from_file(&path, &LoadContext::default()).unwrap();
+    let loaded = LoadContext::default().linear(&path).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.125, 0.25, 0.375, 0.5]);
     assert_eq!(
-        loaded.metadata.provenance.unwrap().color,
+        loaded.metadata.derived.provenance().unwrap().color,
         ColorProvenance::Monochrome
     );
 
@@ -782,7 +793,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
         },
         ..LoadContext::default()
     };
-    let loaded = LinearImage::from_file(&path, &context).unwrap();
+    let loaded = context.linear(&path).unwrap();
     for channel in 0..3 {
         assert_eq!(
             loaded.channel(channel).pixels(),
@@ -799,7 +810,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let dark_value = 0.1f32;
     let pixels: Vec<f32> = (0..size.height)
         .flat_map(|y| {
-            (0..size.width).map(move |x| target[pattern.color_at(Vec2us::new(x, y))] + dark_value)
+            (0..size.width).map(move |x| target[pattern.slot_at(Vec2us::new(x, y))] + dark_value)
         })
         .collect();
     let image = Image::new(vec![size.width, size.height], pixels.clone()).unwrap();
@@ -809,32 +820,32 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let path = write_with_header(dir.join("bayer_cfa.fits"), &image, &header);
 
     assert!(matches!(
-        LinearImage::from_file(&path, &LoadContext::default()),
+        LoadContext::default().linear(&path),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::MosaicFits,
             ..
         })
     ));
-    let mut loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.data.pixels(), pixels);
-    assert_eq!(loaded.cfa_type, pattern);
-    let cache_loaded = <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
-    assert_eq!(cache_loaded.data, loaded.data);
-    assert_eq!(cache_loaded.cfa_type, loaded.cfa_type);
+    let mut loaded = LoadContext::default().cfa(&path).unwrap();
+    assert_eq!(loaded.data().pixels(), pixels);
+    assert_eq!(loaded.cfa_type(), pattern);
+    let cache_loaded = CfaDecoder::load(&path, &LoadContext::default()).unwrap();
+    assert_eq!(cache_loaded.data(), loaded.data());
+    assert_eq!(cache_loaded.cfa_type(), loaded.cfa_type());
     // The reader holds the whole frame as one chunk beside it: 1024 samples of 4 bytes as
     // stored, and as many swapped into words.
     assert_eq!(
-        <CfaImage as StackableImage>::peek(&path, &LoadContext::default()),
-        Some(FramePeek {
-            dimensions: ImageDimensions::new((size.width, size.height), 1),
+        CfaDecoder::peek(&path, &LoadContext::default()),
+        Some(FrameInfo {
+            dimensions: ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+            cfa_type: pattern,
             decoder_bytes: 8192,
-            mosaic: Some(pattern),
         })
     );
 
-    let preview = PreviewImage::from_file(&path, &LoadContext::default()).unwrap();
+    let preview = LoadContext::default().preview(&path).unwrap();
     assert!(matches!(
-        &preview.metadata.provenance,
+        &preview.metadata.derived.provenance(),
         Some(crate::ImageProvenance {
             color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
@@ -843,19 +854,42 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     assert!(
         matches!(
-            PreviewImage::from_file(&path, &LoadContext::default())
-                .unwrap()
-                .into_pixels(),
+            LoadContext::default().preview(&path).unwrap().into_pixels(),
             PreviewPixels::Planes(_)
         ),
         "a demosaiced decode hands back its planes"
+    );
+    // The preview is admitted with its demosaic, from the header: refused one byte short of the
+    // way's peak, past what the decode alone holds.
+    let info = CfaDecoder::peek(&path, &LoadContext::default()).unwrap();
+    let way = u64::try_from(
+        info.demosaiced(
+            info.decoded(),
+            MarkesteijnPasses::default(),
+            rayon::current_num_threads(),
+        )
+        .peak,
+    )
+    .unwrap();
+    assert!(way > u64::try_from(info.decoded().peak).unwrap(), "{way}");
+    let limited = |limit| LoadContext::new(CancelToken::never(), limit);
+    limited(way).preview(&path).unwrap();
+    assert_eq!(
+        fits_refusal(limited(way - 1).preview(&path).unwrap_err()),
+        FitsRefusal::OverBudget {
+            allocation: FitsAllocation::Demosaic,
+            budget: OverBudget {
+                required: way,
+                limit: way - 1,
+            },
+        }
     );
     let preview: imaginarium::Image = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.color_at(Vec2us::new(x, y));
+            let channel = pattern.slot_at(Vec2us::new(x, y));
             assert_eq!(
                 preview_pixels[(size.index_of(Vec2us::new(x, y))) * 3 + channel],
                 target[channel] + dark_value
@@ -871,21 +905,17 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             bias: None,
             flat_dark: None,
         },
-        5.0,
+        SigmaThreshold::new(5.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
     let mut equivalent = make_cfa(size, pixels, pattern);
     masters.calibrate(&mut loaded).unwrap();
     masters.calibrate(&mut equivalent).unwrap();
-    assert_eq!(loaded.data, equivalent.data);
+    assert_eq!(loaded.data(), equivalent.data());
 
-    let demosaiced = loaded
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
-    let equivalent_demosaiced = equivalent
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+    let demosaiced = loaded.demosaic_measured(MarkesteijnPasses::One);
+    let equivalent_demosaiced = equivalent.demosaic_measured(MarkesteijnPasses::One);
     for channel in 0..3 {
         assert_eq!(
             demosaiced.channel(channel),
@@ -893,10 +923,9 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         );
     }
     assert!(matches!(
-        demosaiced.metadata.provenance,
+        demosaiced.metadata.derived.provenance(),
         Some(crate::ImageProvenance {
-            container: crate::SourceContainer::Fits,
-            transfer: crate::TransferProvenance::FitsNormalized(crate::FitsTransferProvenance {
+            source: crate::SourceProvenance::Fits(crate::FitsTransferProvenance {
                 bscale: 1.0,
                 bzero: 0.0,
                 ..
@@ -909,10 +938,10 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     // A float FITS carries no declared full scale, so it is taken as already normalized and its
     // samples pass through undivided.
-    assert_eq!(demosaiced.metadata.domain.as_ref().unwrap().scale, 1.0);
+    assert_eq!(demosaiced.metadata.derived.domain().unwrap().scale, 1.0);
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
-            let channel = pattern.color_at(Vec2us::new(x, y));
+            let channel = pattern.slot_at(Vec2us::new(x, y));
             let expected = (target[channel] + dark_value) - dark_value;
             assert_eq!(
                 demosaiced.channel(channel)[size.index_of(Vec2us::new(x, y))],
@@ -936,7 +965,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     let path = write_with_header(dir.join("nan_inf.fits"), &image, &Header::new());
 
     let masked = decode::load_linear(&path, &LoadContext::default()).unwrap();
-    let nulls = masked.flags.as_ref().unwrap();
+    let nulls = masked.flags().unwrap();
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 3);
     for index in 0..size.pixel_count() {
         assert_eq!(
@@ -951,25 +980,23 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
 }
 
 #[test]
-fn demosaic_uniform_bayer_recovers_colour() {
+fn demosaic_uniform_bayer_recovers_color() {
     let size = Size2us::new(32usize, 32usize);
     let rgb = [0.8f32, 0.5, 0.2]; // R, G, B
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
 
-    // Sample each Bayer site from the (uniform) true colour.
+    // Sample each Bayer site from the (uniform) true color.
     let mut mosaic = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            mosaic[size.index_of(Vec2us::new(x, y))] = rgb[cfa.color_at(Vec2us::new(x, y))];
+            mosaic[size.index_of(Vec2us::new(x, y))] = rgb[cfa.slot_at(Vec2us::new(x, y))];
         }
     }
-    let image = make_cfa(size, mosaic, cfa)
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
+    let image = make_cfa(size, mosaic, cfa).demosaic_measured(MarkesteijnPasses::One);
 
-    // A uniform colour must demosaic back to that colour. RCD is gradient-based, so a perfectly
+    // A uniform color must demosaic back to that color. RCD is gradient-based, so a perfectly
     // flat field is a degenerate (zero-gradient) input with a few ratio artifacts — but recovery
-    // must be *unbiased*: the interior mean of every channel matches the true colour, and the
+    // must be *unbiased*: the interior mean of every channel matches the true color, and the
     // typical pixel is close (median deviation small).
     let channels = [
         image.channel(0).pixels(),
@@ -993,7 +1020,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
             mean,
             true_c,
             0.01,
-            "interior mean {mean} should recover channel colour {true_c}"
+            "interior mean {mean} should recover channel color {true_c}"
         );
         assert!(
             median_dev < 0.01,
@@ -1012,8 +1039,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
     ] {
         for expected in [-0.25f32, 1.25] {
             let image = make_cfa(size, vec![expected; size.pixel_count()], cfa)
-                .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-                .unwrap();
+                .demosaic_measured(MarkesteijnPasses::One);
 
             for channel in 0..3 {
                 let pixels = image.channel(channel).pixels();
@@ -1046,8 +1072,8 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     header.set("DATAMAX", 4000.0).unwrap();
     let path = write_with_header(dir.join("uint16_datamax.fits"), &image, &header);
     let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
-    assert!(loaded.metadata.saturation_flagged);
-    let flags = loaded.flags.as_ref().unwrap();
+    assert!(loaded.metadata.derived.saturation_flagged());
+    let flags = loaded.flags().unwrap();
     let saturated: Vec<bool> = (0..4)
         .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
         .collect();
@@ -1055,6 +1081,6 @@ fn a_fits_datamax_flags_saturation_at_decode() {
 
     let path = write_with_header(dir.join("uint16_bare.fits"), &image, &Header::new());
     let bare = decode::load_linear(&path, &LoadContext::default()).unwrap();
-    assert!(!bare.metadata.saturation_flagged);
-    assert!(bare.flags.is_none());
+    assert!(!bare.metadata.derived.saturation_flagged());
+    assert!(bare.flags().is_none());
 }

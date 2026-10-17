@@ -19,7 +19,7 @@ fn build_stores_every_point_by_its_index() {
     assert_eq!(tree.len(), 5);
     assert_eq!(tree.points(), &points);
     for (i, &p) in points.iter().enumerate() {
-        assert_eq!(tree.get_point(i), p);
+        assert_eq!(tree.points()[i], p);
     }
 }
 

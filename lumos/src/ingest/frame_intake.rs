@@ -5,10 +5,10 @@ use std::ops::Range;
 
 use crate::concurrency;
 use crate::error::Cancelled;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
-use crate::frame::frame_stats::FrameStats;
-use crate::frame::stackable_image::StackableImage;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
@@ -73,7 +73,7 @@ impl<'a> FrameIntake<'a> {
         &self,
         index: usize,
         image: &impl StackableImage,
-    ) -> Result<FrameStats, AdmissionError> {
+    ) -> Result<Admitted, AdmissionError> {
         self.admission.admit(index, image)
     }
 

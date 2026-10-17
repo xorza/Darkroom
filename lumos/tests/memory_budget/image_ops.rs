@@ -6,6 +6,7 @@ use lumos::{Denoise, ExtractBackground, ImageDimensions, LinearImage, Stretch};
 use crate::alone::alone;
 use crate::session::Session;
 use crate::star_field::StarField;
+use lumos::ChannelLayout;
 
 const SIDE: usize = 256;
 
@@ -18,13 +19,21 @@ fn each_operation_gives_back_its_working_set() {
         let session = Session::on_workers("lumos_budget_image_ops", 1);
         let field = StarField::new(SIDE, 40, 0x0B5);
         let channels = (0..3).map(|index| field.frame(index).channel(0).to_vec());
-        let mut master =
-            LinearImage::from_planar_channels(ImageDimensions::new((SIDE, SIDE), 3), channels);
+        let mut master = LinearImage::from_planar_channels(
+            ImageDimensions::new((SIDE, SIDE), ChannelLayout::Rgb),
+            channels,
+        );
         let mut apply = |label: &str, op: fn(&mut LinearImage)| {
             assert_eq!(session.measure(|| op(&mut master)).kept_bytes, 0, "{label}");
         };
+        // Tiles of 64 give 4 × 4 samples, enough for the default quadratic's 6 terms.
         apply("background extraction", |master| {
-            ExtractBackground::default().apply(master).unwrap();
+            ExtractBackground {
+                tile_size: 64,
+                ..Default::default()
+            }
+            .apply(master)
+            .unwrap();
         });
         apply("denoising", |master| {
             Denoise::default().apply(master).unwrap();

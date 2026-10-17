@@ -4,8 +4,8 @@
 pub(crate) mod decode_cache;
 pub(crate) mod disk_root;
 pub(crate) mod error;
-pub(crate) mod plane_store;
 pub(crate) mod run_scratch;
+pub(crate) mod run_storage;
 pub(crate) mod stored_frame;
 pub(crate) mod stored_gain;
 pub(crate) mod stored_image;

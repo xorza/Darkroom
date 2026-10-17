@@ -3,8 +3,8 @@
 
 use std::ops::Range;
 
-use crate::combine::rejection::pass::{Pass, Proposal};
-use crate::combine::rejection::scratch_buffers::GesdScratch;
+use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
+use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
@@ -26,14 +26,17 @@ pub struct GesdConfig {
 
 impl Default for GesdConfig {
     fn default() -> Self {
-        Self {
-            alpha: 0.05,
-            max_outliers: None,
-        }
+        Self::DEFAULT
     }
 }
 
 impl GesdConfig {
+    /// A significance of 5%, and up to 30% of the samples tested.
+    pub const DEFAULT: Self = Self {
+        alpha: 0.05,
+        max_outliers: None,
+    };
+
     pub const fn new(alpha: f32, max_outliers: Option<usize>) -> Self {
         Self {
             alpha,
@@ -42,7 +45,7 @@ impl GesdConfig {
     }
 
     /// Validate the significance level and the outlier cap: either at its bound disables the test.
-    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         ConfigValue::new("alpha", self.alpha)
             .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
         match self.max_outliers {
@@ -53,7 +56,7 @@ impl GesdConfig {
     }
 
     /// The configured maximum, or `⌊0.3·n⌋`.
-    pub const fn max_outliers_for_size(&self, n: usize) -> usize {
+    pub(crate) const fn max_outliers_for_size(self, n: usize) -> usize {
         match self.max_outliers {
             Some(max_outliers) => max_outliers,
             None => 3 * n / 10,
@@ -62,11 +65,12 @@ impl GesdConfig {
 
     /// The test, over the whole window: one pass. The outliers are the removals up to the last
     /// one whose statistic passes its critical value.
-    pub(crate) fn narrow(&self, pass: &Pass<'_>, gesd: &mut GesdScratch) -> Option<Proposal> {
+    pub(crate) fn narrow(self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
         let tests = self.tests(pass);
         if tests == 0 {
-            return None;
+            return Narrowing::Settled;
         }
+        let gesd = &mut scratch.gesd;
         gesd.prepare(self.alpha);
         let mut kept = pass.window.clone();
         let centre = self.removals(pass, tests, |removal| {
@@ -74,7 +78,7 @@ impl GesdConfig {
                 kept = removal.window;
             }
         });
-        Some(Proposal {
+        Narrowing::Window(Proposal {
             window: kept,
             centre,
         })
@@ -82,7 +86,7 @@ impl GesdConfig {
 
     /// How many removals the test makes: the cap, and at most `n − min_survivors` and `n − 2`,
     /// since the critical value of a removal from `L` samples has `L − 2` degrees of freedom.
-    fn tests(&self, pass: &Pass<'_>) -> usize {
+    fn tests(self, pass: &Pass<'_>) -> usize {
         let n = pass.window.len();
         self.max_outliers_for_size(n)
             .min(n - pass.min_survivors)
@@ -95,7 +99,7 @@ impl GesdConfig {
     /// The sample farthest from the mean of a sorted window is one of its ends, so each removal
     /// narrows the window. The sample deviation is floored by [`Spread::floored`], so a window of
     /// tied integers is not read as one with no spread.
-    fn removals(&self, pass: &Pass<'_>, tests: usize, mut visit: impl FnMut(Removal)) -> f32 {
+    fn removals(self, pass: &Pass<'_>, tests: usize, mut visit: impl FnMut(Removal)) -> f32 {
         let n = pass.window.len();
         let mut mean = 0.0f64;
         let mut squared_deviations = 0.0f64;

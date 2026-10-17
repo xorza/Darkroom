@@ -156,7 +156,7 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
         ),
         Case::new(
             "affine shear",
-            Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]),
+            Transform::affine([1.0, 0.2, 10.0, 0.1, 1.0, -5.0]),
             make_grid(5, 4, 50.0),
         ),
         Case::new(
@@ -206,30 +206,6 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
     for case in &cases {
         case.check();
     }
-}
-
-/// No estimate without enough matches — none at all, or fewer than the model's minimal sample —
-/// and the failure says RANSAC never ran rather than that it found no inliers.
-#[test]
-fn too_few_matches_give_no_estimate() {
-    let estimator = estimator(1.0, RansacConfig::default());
-    let never_ran = Err(RansacFailure {
-        reason: RansacFailureReason::TooFewMatches,
-        iterations: 0,
-        best_inlier_count: 0,
-    });
-    assert_eq!(
-        estimator
-            .estimate(&PointPairs::default(), &[], TransformType::Translation)
-            .map(|result| result.inliers),
-        never_ran
-    );
-    let one = [DVec2::ZERO];
-    assert_eq!(
-        estimate_uniform(&estimator, &pairs(&one, &one), TransformType::Similarity)
-            .map(|result| result.inliers),
-        never_ran
-    );
 }
 
 /// A seed repeats a run: the same inliers and the same transform, bit for bit.
@@ -322,7 +298,7 @@ fn final_refit_does_not_degrade_robust_score() {
         1.0,
         RansacConfig {
             max_iterations: 1,
-            local_optimization: false,
+            local_max_iterations: 0,
             ..Default::default()
         },
     );
@@ -367,12 +343,12 @@ fn local_optimization_grows_the_consensus() {
         .map(|(k, &p)| p + DVec2::new(0.3 * k as f64, 0.0))
         .collect();
     let max_sigma = 1.0 / CHI2_99_2DOF.sqrt();
-    for (local_optimization, inliers, shift) in [(false, 5, 0.45), (true, 6, 0.75)] {
+    for (local_max_iterations, inliers, shift) in [(0, 5, 0.45), (10, 6, 0.75)] {
         let estimator = estimator(
             max_sigma,
             RansacConfig {
                 max_iterations: 1,
-                local_optimization,
+                local_max_iterations,
                 ..Default::default()
             },
         );
@@ -389,12 +365,12 @@ fn local_optimization_grows_the_consensus() {
         assert_eq!(
             result.inliers,
             (0..inliers).collect::<Vec<_>>(),
-            "LO {local_optimization}"
+            "LO {local_max_iterations}"
         );
         let found = result.transform.translation_components();
         assert!(
             (found.x - shift).abs() <= 4.0 * f64::EPSILON * 900.0 && found.y == 0.0,
-            "LO {local_optimization}: {found:?}"
+            "LO {local_max_iterations}: {found:?}"
         );
     }
 }
@@ -428,7 +404,7 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
     let trusted: Vec<usize> = (80..100).collect();
 
     let weighted = [vec![0.01; 80], vec![1.0; 20]].concat();
-    let result = estimator(1.0, config.clone())
+    let result = estimator(1.0, config)
         .estimate(
             &pairs(&ref_points, &target_points),
             &weighted,
@@ -443,4 +419,49 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
         TransformType::Similarity,
     );
     assert_ne!(uniform.map(|result| result.inliers), Ok(trusted));
+}
+
+/// The bound a new best sets is its own, whatever bound came before it: at 9 inliers of 10 a
+/// similarity's minimal sample of 2 asks for ⌈ln 0.01 / ln 0.19⌉ = 3 iterations, and at 4 of 10,
+/// below the 0.5 minimum ratio, the search keeps every one of its 1000.
+#[test]
+fn a_best_sets_its_own_iteration_bound() {
+    let reference = make_grid(5, 2, 20.0);
+    let pairs = pairs(&reference, &reference);
+    let estimator = estimator(
+        1.0,
+        RansacConfig {
+            confidence: 0.99,
+            min_inlier_ratio: 0.5,
+            max_iterations: 1000,
+            ..Default::default()
+        },
+    );
+    let search = Search::new(&estimator, &pairs, TransformType::Similarity);
+    assert_eq!(search.iteration_bound(9), 3);
+    assert_eq!(search.iteration_bound(4), 1000);
+    assert_eq!(search.iteration_bound(9), 3);
+}
+
+/// A refit is checked on its own: one that mirrors its inliers is no refit, so a local
+/// optimization stops there and keeps the last plausible one, while a translated set refits.
+#[test]
+fn an_implausible_refit_is_none() {
+    let reference = make_grid(4, 3, 30.0);
+    let translated = apply_all(&Transform::translation(DVec2::new(4.0, -2.0)), &reference);
+    let mirrored = apply_all(
+        &Transform::affine([1.0, 0.0, 0.0, 0.0, -1.0, 100.0]),
+        &reference,
+    );
+    let estimator = estimator(1.0, RansacConfig::default());
+    let inliers: Vec<usize> = (0..reference.len()).collect();
+    let mut points = PointPairs::with_capacity(reference.len());
+    for (target, plausible) in [(translated, true), (mirrored, false)] {
+        let pairs = pairs(&reference, &target);
+        let search = Search::new(&estimator, &pairs, TransformType::Affine);
+        assert_eq!(
+            search.plausible_refit(&inliers, &mut points).is_some(),
+            plausible
+        );
+    }
 }

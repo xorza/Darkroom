@@ -2,18 +2,22 @@
 
 use std::time::Instant;
 
-use crate::registration::distortion::sip::SipModel;
+use arrayvec::ArrayVec;
+use glam::DVec2;
+
+use crate::registration::distortion::sip::{SipConfig, SipModel};
 use crate::registration::error::{FailedModel, RegistrationError};
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitModel};
+use crate::registration::match_indices::MatchIndices;
 use crate::registration::point_pairs::PointPairs;
-use crate::registration::ransac::RansacEstimator;
-use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::transform::{TransformModel, TransformType};
-use crate::registration::triangle::voting::MatchIndices;
-use crate::registration::tuning;
+use crate::registration::ransac::{RansacEstimator, RansacResult};
+use crate::registration::transform::TransformType;
+use crate::registration::transform::linear_model::LinearModel;
+use crate::registration::transform_model::TransformModel;
 
-/// The models `Auto` chooses among, from the fewest degrees of freedom to the most.
+/// The models `Auto` chooses among with no SIP correction, from the fewest degrees of freedom to
+/// the most; under one, [`LinearModel::AUTO`].
 const AUTO_MODELS: [TransformType; 4] = [
     TransformType::Euclidean,
     TransformType::Similarity,
@@ -21,8 +25,9 @@ const AUTO_MODELS: [TransformType; 4] = [
     TransformType::Homography,
 ];
 
-/// What every model a registration tries is fitted from: RANSAC's matched positions and their
-/// confidences, and the full catalogs the final fit reads.
+/// What every model a registration tries is fitted from — RANSAC's matched positions and their
+/// confidences, and the full catalogs the final fit reads — by what: the RANSAC estimator, the
+/// radius the final fit recovers pairs within, and the gates every fit is held to.
 #[derive(Debug)]
 pub(super) struct ModelSearch<'a> {
     /// The triangle matches' positions, among each catalog's brightest stars.
@@ -30,22 +35,33 @@ pub(super) struct ModelSearch<'a> {
     /// Each match's confidence, by index into `pairs`.
     pub(super) confidences: Vec<f64>,
     pub(super) catalogs: &'a FitCatalogs,
-    /// The noise scale RANSAC scores at.
-    pub(super) max_sigma: f64,
-    pub(super) config: &'a RegistrationConfig,
+    pub(super) ransac: RansacEstimator,
+    pub(super) recovery_radius: f64,
+    /// The matcher's floor of pairs, which a fit is held to as well.
+    pub(super) min_matches: usize,
+    /// The caller's RMS gate, which `Auto` prefers a model inside of.
+    pub(super) max_rms_error: f64,
 }
 
 impl ModelSearch<'_> {
-    /// The fit of `model`, or of the model `Auto` chooses, with `sip` when one is asked for.
+    /// The fit of `model`, or of the model `Auto` chooses, its SIP correction taken about its own
+    /// reference point or else `origin`.
     pub(super) fn fit(
         &self,
         model: TransformModel,
-        sip: Option<SipModel>,
+        origin: DVec2,
     ) -> Result<FinalFit, RegistrationError> {
+        let sip = |config: SipConfig| SipModel {
+            order: config.order,
+            origin: config.reference_point.unwrap_or(origin),
+        };
         match model {
-            TransformModel::Auto => self.select_by_gric(sip),
+            TransformModel::Auto { sip: config } => self.select_by_gric(config.map(sip)),
             TransformModel::Fixed(transform) => {
-                self.estimate_and_refine(FitModel { transform, sip })
+                self.estimate_and_refine(FitModel::Plain(transform))
+            }
+            TransformModel::FixedWithSip(linear, config) => {
+                self.estimate_and_refine(FitModel::WithSip(linear, sip(config)))
             }
         }
     }
@@ -74,24 +90,20 @@ impl ModelSearch<'_> {
     fn select_by_gric(&self, sip: Option<SipModel>) -> Result<FinalFit, RegistrationError> {
         let mut fitted: Vec<(FitModel, FinalFit)> = Vec::new();
         let mut failures: Vec<FailedModel> = Vec::new();
-        // A homography has no SIP fit: its perspective terms are the correction's quadratic ones.
-        let candidates = AUTO_MODELS
-            .into_iter()
-            .filter(|&transform| sip.is_none() || transform != TransformType::Homography);
-        for transform in candidates {
-            let model = FitModel { transform, sip };
+        let candidates: ArrayVec<FitModel, 4> = match sip {
+            None => AUTO_MODELS.into_iter().map(FitModel::Plain).collect(),
+            Some(sip) => LinearModel::AUTO
+                .into_iter()
+                .map(|linear| FitModel::WithSip(linear, sip))
+                .collect(),
+        };
+        for model in candidates {
             match self.estimate_and_refine(model) {
                 Ok(fit) => fitted.push((model, fit)),
-                // An invalid config fails identically on every model and is the run's own fault
-                // rather than the pair's — `AlignStackConfig::align_stack_images` keys a whole-run
-                // abort on that distinction, so it must not be buried in a per-model report.
-                // `register` validates first, so this guards the ordering rather than a reachable
-                // path.
-                Err(error @ RegistrationError::InvalidConfig(_)) => return Err(error),
                 Err(error) => {
-                    tracing::debug!(model = ?transform, %error, "Auto candidate failed");
+                    tracing::debug!(model = ?model.transform_type(), %error, "Auto candidate failed");
                     failures.push(FailedModel {
-                        model: transform,
+                        model: model.transform_type(),
                         error: Box::new(error),
                     });
                 }
@@ -118,20 +130,12 @@ impl ModelSearch<'_> {
                 .sum::<f64>()
                 + per_parameter * model.parameter_count() as f64
         };
-        let rms = |fit: &FinalFit| {
-            (fit.matches
-                .iter()
-                .map(|star_match| star_match.residual * star_match.residual)
-                .sum::<f64>()
-                / fit.matches.len() as f64)
-                .sqrt()
-        };
-        let max_rms_error = self.config.max_rms_error;
-        let any_accurate = fitted.iter().any(|(_, fit)| rms(fit) <= max_rms_error);
+        let max_rms_error = self.max_rms_error;
+        let any_accurate = fitted.iter().any(|(_, fit)| fit.rms_error <= max_rms_error);
         let scores: Vec<f64> = fitted
             .iter()
             .map(|candidate| {
-                if any_accurate && rms(&candidate.1) > max_rms_error {
+                if any_accurate && candidate.1.rms_error > max_rms_error {
                     f64::INFINITY
                 } else {
                     gric(candidate)
@@ -142,8 +146,19 @@ impl ModelSearch<'_> {
             0,
             |best, (i, &score)| if score < scores[best] { i } else { best },
         );
-        tracing::debug!(?scores, chosen = ?fitted[best].0.transform, "Auto chose by GRIC");
+        tracing::debug!(?scores, chosen = ?fitted[best].0.transform_type(), "Auto chose by GRIC");
         Ok(fitted.swap_remove(best).1)
+    }
+
+    /// RANSAC's estimate of a `transform_type` over the matches: the hypothesis the final fit
+    /// starts from.
+    pub(super) fn hypothesis(
+        &self,
+        transform_type: TransformType,
+    ) -> Result<RansacResult, RegistrationError> {
+        self.ransac
+            .estimate(&self.pairs, &self.confidences, transform_type)
+            .map_err(RegistrationError::from)
     }
 
     /// RANSAC's estimate of `model`'s transform, then the final fit of `model` over the full
@@ -153,40 +168,29 @@ impl ModelSearch<'_> {
         model: FitModel,
     ) -> Result<FinalFit, RegistrationError> {
         let t0 = Instant::now();
-        let ransac = RansacEstimator::new(self.config.ransac.clone(), self.max_sigma);
-        let ransac_result = ransac
-            .estimate(&self.pairs, &self.confidences, model.transform)
-            .map_err(|failure| RegistrationError::RansacFailed {
-                reason: failure.reason,
-                iterations: failure.iterations,
-                best_inlier_count: failure.best_inlier_count,
-            })?;
+        let ransac_result = self.hypothesis(model.transform_type())?;
         let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let t0 = Instant::now();
         let fit = self
             .catalogs
-            .fit(
-                ransac_result.transform,
-                model,
-                tuning::recovery_radius(self.max_sigma),
-            )
+            .fit(ransac_result.transform, model, self.recovery_radius)
             .map_err(|failure| match failure {
                 FinalFitFailure::TooFewPairs { found, required } => {
                     RegistrationError::TooFewInliers { found, required }
                 }
                 FinalFitFailure::TooFewSipPairs { found, required } => {
-                    RegistrationError::InsufficientSipPoints { found, required }
+                    RegistrationError::TooFewSipPoints { found, required }
                 }
                 FinalFitFailure::Degenerate => RegistrationError::DegenerateFit {
-                    model: model.transform,
+                    model: model.transform_type(),
                 },
             })?;
         let fit_ms = t0.elapsed().as_secs_f64() * 1000.0;
         // The floor the matcher was held to holds for the fit too: a transform supported by a
         // minimal sample has a near-zero RMS by construction, so the accuracy gate alone would
         // pass it.
-        let min_matches = self.config.matching.min_matches;
+        let min_matches = self.min_matches;
         if fit.matches.len() < min_matches {
             return Err(RegistrationError::TooFewInliers {
                 found: fit.matches.len(),

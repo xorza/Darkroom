@@ -3,9 +3,10 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::frame_store::decode_cache::decode_options::DecodeOptions;
+use crate::decode::decode_options::DecodeOptions;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::fits::fits_load_options::FitsLoadOptions;
+use crate::io::null_policy::NullPolicy;
 use crate::platform::UserCache;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
@@ -35,6 +36,8 @@ pub struct IngestConfig {
     pub memory_override: Option<u64>,
     /// How FITS frames are read; ignored for every other format.
     pub fits: FitsLoadOptions,
+    /// What a null sample does to a linear decode.
+    pub nulls: NullPolicy,
     /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
     pub xtrans_passes: MarkesteijnPasses,
 }
@@ -46,6 +49,7 @@ impl Default for IngestConfig {
             keep_cache: false,
             memory_override: None,
             fits: FitsLoadOptions::default(),
+            nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
         }
     }
@@ -56,6 +60,7 @@ impl IngestConfig {
     pub(crate) const fn decode_options(&self) -> DecodeOptions<'_> {
         DecodeOptions {
             fits: &self.fits,
+            nulls: self.nulls,
             xtrans_passes: self.xtrans_passes,
         }
     }

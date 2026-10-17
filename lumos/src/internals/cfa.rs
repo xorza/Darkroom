@@ -8,7 +8,7 @@ use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::image_metadata::ImageMetadata;
 use crate::math::size2us::Size2us;
 
-/// A Fujifilm X-Trans colour layout: 8 red, 20 green and 8 blue, every green with as many red as
+/// A Fujifilm X-Trans color layout: 8 red, 20 green and 8 blue, every green with as many red as
 /// blue neighbours.
 ///
 /// The one X-Trans fixture, shared by the demosaic, defect-map and cosmic-ray tests and benches.
@@ -32,12 +32,7 @@ pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> Cf
 /// Wrap an already-built plane. The plane carries its own dimensions, so unlike [`make_cfa`] this
 /// needs no `size` and copies nothing.
 pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage {
-    CfaImage {
-        data,
-        cfa_type,
-        metadata: ImageMetadata::default(),
-        flags: None,
-    }
+    CfaImage::from_plane(data, cfa_type, ImageMetadata::default())
 }
 
 /// Create a `CfaImage` filled with a constant value.

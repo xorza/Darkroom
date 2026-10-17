@@ -2,6 +2,16 @@
 
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
+use crate::star_detection::convolution::filter_kernels::KernelShape;
+
+/// The narrowest FWHM a star is taken to have, in px: anything narrower is a cosmic ray or a hot
+/// pixel.
+pub(crate) const MIN_FWHM: f32 = 0.5;
+
+/// The widest FWHM a star is taken to have, in px: anything broader is a galaxy, a nebula or an
+/// artifact. It bounds a configured matched filter as it bounds an estimated one, whose kernel
+/// reaches 3σ.
+pub(crate) const MAX_FWHM: f32 = 20.0;
 
 /// Where the matched filter's FWHM comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -80,7 +90,9 @@ impl FwhmConfig {
                 },
                 mode.seed(),
             )
-            .finite_and("finite and positive", |value| value > 0.0)?;
+            .finite_and("finite, positive and at most 20 px", |value| {
+                value > 0.0 && value <= f64::from(MAX_FWHM)
+            })?;
         }
         ConfigValue::count("fwhm min_stars", self.min_stars)
             .must_be("at least 5", self.min_stars >= 5)?;
@@ -89,6 +101,22 @@ impl FwhmConfig {
         ConfigValue::new("psf_axis_ratio", self.psf_axis_ratio)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
         ConfigValue::new("psf_angle", self.psf_angle).finite()?;
+        // The narrowest filter this config can build: the fixed FWHM, or, estimated, the narrowest
+        // star the estimate keeps or its fallback.
+        let narrowest = match self.mode {
+            None => None,
+            Some(FwhmMode::Fixed(fwhm)) => Some(fwhm),
+            Some(FwhmMode::Auto { fallback }) => Some(fallback.min(MIN_FWHM)),
+        };
+        if let Some(fwhm) = narrowest
+            && let KernelShape::Elliptical(ellipse) = KernelShape::of(self.filter_at(fwhm))
+        {
+            ConfigValue::new("psf_axis_ratio", self.psf_axis_ratio).must_be(
+                "wide enough off the pixel axes, at the narrowest FWHM, for a star: the matched \
+                 filter's pixel means resolve σ down to 0.01 px across them",
+                ellipse.pixel_rule().is_some(),
+            )?;
+        }
         Ok(())
     }
 }

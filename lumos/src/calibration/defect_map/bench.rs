@@ -1,5 +1,5 @@
 //! The defect map of a session's masters: hot pixels from the dark, dead ones from the flat, and
-//! the sample of one colour that the dark's statistics are taken on.
+//! the sample of one color that the dark's statistics are taken on.
 
 use std::hint::black_box;
 
@@ -8,12 +8,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME};
-use crate::calibration::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::calibration::calibration_set::CalibrationSet;
-use crate::calibration::defect_map::DefectMap;
-use crate::calibration::defect_map::sampling;
-use crate::calibration::master_role::MasterRole;
-use crate::calibration::subtractor::Subtractor;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
+use crate::calibration::defect_map::{DefectMap, sampling};
+use crate::calibration::subtraction::internals::subtract_bias;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 
@@ -28,15 +26,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
             bias, dark, flat, ..
         } = scene::masters(FRAME, cfa_type);
         let (bias, dark, mut flat) = (bias.unwrap(), dark.unwrap(), flat.unwrap());
-        Subtractor {
-            role: MasterRole::Bias,
-            master: &bias,
-        }
-        .subtract_from(&mut flat, None)
-        .unwrap();
+        subtract_bias(&mut flat, &bias);
         b.iter_with_large_drop(|| {
             DefectMap::new(FRAME)
-                .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+                .detect_hot(&dark, SigmaThreshold::DEFAULT, &CancelToken::never())
                 .unwrap()
                 .detect_cold(&flat, &CancelToken::never())
                 .unwrap()

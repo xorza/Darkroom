@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use common::FileIdentity;
 
-use crate::frame_store::decode_cache::cache_key::{CacheKey, DecoderKind};
+use crate::decode::decoder_kind::DecoderKind;
+use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::io::load_context::LoadContext;
 

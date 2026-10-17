@@ -7,6 +7,10 @@
 //! the bias and the read noise like any other at readout. A noiseless [`Camera::ideal`] collapses
 //! this to the clean image, so the *same* code path produces both the stimulus and its truth.
 
+use glam::DVec2;
+use imaginarium::Buffer2;
+
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
@@ -15,8 +19,6 @@ use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
-use glam::DVec2;
-use imaginarium::Buffer2;
 
 /// Geometry + exposure parameters for one frame.
 #[derive(Debug, Clone)]
@@ -153,10 +155,10 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         *p = p.clamp(0.0, camera.saturation);
     }
 
-    let dims = ImageDimensions::new((width, height), 1);
+    let dims = ImageDimensions::new((width, height), ChannelLayout::Mono);
     let mut image = LinearImage::from_planar_channels(dims, [raw]);
-    image.metadata.image_type = Some("Light".to_string());
-    image.metadata.exposure_time = Some(f64::from(obs.exposure_s));
+    image.metadata.header.image_type = Some("Light".to_string());
+    image.metadata.header.exposure_time = Some(f64::from(obs.exposure_s));
 
     SimFrame {
         image,

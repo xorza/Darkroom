@@ -1,18 +1,19 @@
 use crate::calibration::error::DarkMismatch;
 use crate::calibration::master_subtraction::*;
-use crate::frame::unverified_conditions::UnverifiedConditions;
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::dark_comparison::DarkComparison;
 use crate::internals::cfa::constant_cfa;
 use crate::math::size2us::Size2us;
 
 fn frame(value: f32, exposure: f64) -> CfaImage {
     let mut frame = constant_cfa(Size2us::new(2, 2), value, CfaType::Mono);
-    frame.metadata.exposure_time = Some(exposure);
+    frame.metadata.header.exposure_time = Some(exposure);
     frame
 }
 
 fn lost(mut frame: CfaImage, calibration: CalibrationState) -> CfaImage {
-    frame.metadata.calibration = calibration;
+    frame.metadata.derived.set_calibration(calibration);
     frame
 }
 
@@ -27,14 +28,14 @@ fn each_frame_loses_what_the_subtractor_holds() {
     let bias = frame(0.031_25, 0.0);
     let thermal = lost(frame(0.015_625, 1.0), CalibrationState::BIAS);
     let raw = frame(0.031_25 + 0.015_625, 1.0);
-    for (subtractor, removed, unverified) in [
+    for (subtractor, removed, compared) in [
         (
             Subtractor {
                 role: MasterRole::Bias,
                 master: &bias,
             },
             CalibrationState::BIAS,
-            UnverifiedConditions::NONE,
+            None,
         ),
         (
             Subtractor {
@@ -42,29 +43,37 @@ fn each_frame_loses_what_the_subtractor_holds() {
                 master: &thermal,
             },
             CalibrationState::THERMAL,
-            UnverifiedConditions {
-                exposure: false,
-                temperature: true,
-            },
+            Some(DarkComparison {
+                exposure_compared: true,
+                temperature: None,
+                temperature_difference: None,
+            }),
         ),
     ] {
         let mut flat = frame(0.5, 2.0);
-        MasterSubtraction::new(MasterRole::Flat, subtractor)
+        MasterSubtraction::new(MasterRole::Flat, &[subtractor])
+            .unwrap()
             .unwrap()
             .apply(3, &mut flat)
             .unwrap();
-        assert_eq!(flat.data.pixels(), &[0.468_75; 4], "{:?}", subtractor.role);
-        assert_eq!(flat.metadata.calibration, removed);
-        assert_eq!(flat.metadata.unverified_dark, unverified);
+        assert_eq!(
+            flat.data().pixels(),
+            &[0.468_75; 4],
+            "{:?}",
+            subtractor.role
+        );
+        assert_eq!(flat.metadata.derived.calibration(), removed);
+        assert_eq!(flat.metadata.derived.dark_comparison(), compared);
     }
 
     let unscalable = MasterSubtraction::new(
         MasterRole::Flat,
-        Subtractor {
+        &[Subtractor {
             role: MasterRole::FlatDark,
             master: &raw,
-        },
+        }],
     )
+    .unwrap()
     .unwrap();
     assert!(matches!(
         unscalable.apply(3, &mut frame(0.5, 2.0)),
@@ -80,11 +89,12 @@ fn each_frame_loses_what_the_subtractor_holds() {
     let mut bias_free = lost(frame(0.5, 2.0), CalibrationState::BIAS);
     let error = MasterSubtraction::new(
         MasterRole::Flat,
-        Subtractor {
+        &[Subtractor {
             role: MasterRole::Bias,
             master: &bias,
-        },
+        }],
     )
+    .unwrap()
     .unwrap()
     .apply(3, &mut bias_free)
     .unwrap_err();
@@ -95,7 +105,37 @@ fn each_frame_loses_what_the_subtractor_holds() {
             subtractor: MasterRole::Bias
         }
     ));
-    assert_eq!(bias_free.data.pixels(), &[0.5; 4]);
+    assert_eq!(bias_free.data().pixels(), &[0.5; 4]);
+
+    // A frame of another pattern, then of another size, than the subtractor's, each named apart.
+    let subtraction = MasterSubtraction::new(
+        MasterRole::Flat,
+        &[Subtractor {
+            role: MasterRole::Bias,
+            master: &bias,
+        }],
+    )
+    .unwrap()
+    .unwrap();
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let mut mosaic = constant_cfa(Size2us::new(2, 2), 0.5, rggb);
+    assert!(matches!(
+        subtraction.apply(4, &mut mosaic),
+        Err(SubtractionError::SubtractorPattern {
+            index: 4,
+            frame,
+            subtractor: CfaType::Mono,
+        }) if frame == rggb
+    ));
+    let mut wide = constant_cfa(Size2us::new(4, 2), 0.5, CfaType::Mono);
+    assert!(matches!(
+        subtraction.apply(5, &mut wide),
+        Err(SubtractionError::SubtractorShape {
+            index: 5,
+            frame,
+            subtractor,
+        }) if frame == Size2us::new(4, 2) && subtractor == Size2us::new(2, 2)
+    ));
 }
 
 /// A subtractor that lost what it holds, a flat, and one that holds more than the stacked
@@ -123,7 +163,7 @@ fn a_subtractor_that_does_not_fit_the_role_is_refused() {
         (MasterRole::Bias, (MasterRole::Bias, &bias), false),
     ] {
         let (role, master) = subtractor;
-        let error = MasterSubtraction::new(target, Subtractor { role, master }).unwrap_err();
+        let error = MasterSubtraction::new(target, &[Subtractor { role, master }]).unwrap_err();
         if over_calibrated {
             assert!(
                 matches!(error, SubtractionError::OverCalibratedSubtractor { subtractor } if subtractor == role),
@@ -144,10 +184,10 @@ fn a_subtractor_that_does_not_fit_the_role_is_refused() {
     assert!(
         MasterSubtraction::new(
             MasterRole::Dark,
-            Subtractor {
+            &[Subtractor {
                 role: MasterRole::Bias,
                 master: &bias,
-            },
+            }],
         )
         .is_ok()
     );

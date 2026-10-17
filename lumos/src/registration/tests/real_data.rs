@@ -5,12 +5,16 @@
 
 use std::time::Instant;
 
+use glam::DVec2;
+
 use crate::internals::real_data::{LightPair, first_and_last_lights};
 use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipModel;
+use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::point_normalization::centroid;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::transform::TransformModel;
+use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 
@@ -57,12 +61,13 @@ fn register_two_lights() {
 
     // Register image 2 to image 1 WITHOUT SIP first (baseline).
     let reg_config = RegistrationConfig {
-        transform_type: TransformModel::Auto,
-        sip: None,
+        model: TransformModel::Auto { sip: None },
         ..RegistrationConfig::default()
     };
 
     let result = reg_config
+        .registrar()
+        .unwrap()
         .register(&result1.stars, &result2.stars)
         .expect("Registration should succeed");
 
@@ -71,36 +76,42 @@ fn register_two_lights() {
     println!("Registration result:");
     println!("  Matched stars: {}", result.num_inliers());
     println!("  RMS error:     {baseline_rms:.4} pixels");
-    println!("  Elapsed:       {:.1} ms", result.elapsed_ms());
 
     let t = result.transform().translation_components();
     println!("  Translation:   ({:.2}, {:.2})", t.x, t.y);
     println!(
         "  Rotation:      {:.4} rad ({:.2} deg)",
-        result.transform().rotation_angle(),
-        result.transform().rotation_angle().to_degrees()
+        result.transform().local_geometry(DVec2::ZERO).rotation,
+        result
+            .transform()
+            .local_geometry(DVec2::ZERO)
+            .rotation
+            .to_degrees()
     );
-    println!("  Scale:         {:.6}", result.transform().scale_factor());
+    println!(
+        "  Stretch:       {:?}",
+        result.transform().local_geometry(DVec2::ZERO).stretch
+    );
 
     // Now fit SIP on the SAME inliers from the SAME RANSAC run for fair comparison. A match
     // indexes the star slices `register` was handed.
-    let inlier_ref: Vec<glam::DVec2> = result
+    let inlier_ref: Vec<DVec2> = result
         .matched_stars()
         .iter()
         .map(|star_match| result1.stars[star_match.indices.reference].pos)
         .collect();
-    let inlier_target: Vec<glam::DVec2> = result
+    let inlier_target: Vec<DVec2> = result
         .matched_stars()
         .iter()
         .map(|star_match| result2.stars[star_match.indices.target].pos)
         .collect();
 
     let origin = centroid(&inlier_ref);
-    let sip = SipModel { order: 4, origin }.fitted_under(
-        &result.transform(),
-        &inlier_ref,
-        &inlier_target,
-    );
+    let sip = SipModel {
+        order: SipOrder::Four,
+        origin,
+    }
+    .fitted_under(&result.transform(), &inlier_ref, &inlier_target);
 
     let corrected_residuals =
         sip.corrected_residuals(&inlier_ref, &inlier_target, &result.transform());
@@ -137,7 +148,9 @@ fn register_two_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
-    let warped = result.warp_transform().warp(&img2, reg_config.warp).image;
+    let warped = WarpParams::default()
+        .warp(&img2, result.warp_transform())
+        .image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(

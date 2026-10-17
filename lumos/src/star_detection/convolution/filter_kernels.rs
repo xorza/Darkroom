@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::math::fwhm;
-use crate::math::pixel_quadrature::PixelQuadrature;
+use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::Kernel2d;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
@@ -16,10 +16,21 @@ use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 /// (circular) kernel path instead of full 2D elliptical convolution.
 const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
 
-/// The Gauss–Legendre order of an elliptical kernel's pixel means. The error falls geometrically
-/// with the order: order 8 errs by 2e-12 of the peak at σ 0.5, and 16 is under f64 rounding. The
-/// kernel is built once per frame, so the order costs nothing that matters.
-const ELLIPTICAL_KERNEL_ORDER: usize = 16;
+/// How closely an elliptical kernel's weights are each its profile's mean over a pixel, relative to
+/// the peak: half an ulp of the f32 weights.
+const KERNEL_MEAN_TOLERANCE: f64 = 1.0 / (1u64 << 25) as f64;
+
+/// The most cells a pixel is divided into along each axis for its mean: 16 lets the 16-point rule
+/// resolve a profile of σ 0.01 px across the pixel axes, far thinner than a star.
+const MAX_PIXEL_SUBDIVISION: usize = 16;
+
+/// How an elliptical kernel takes each pixel's mean: over `subdivision × subdivision` cells, each
+/// by the Gauss–Legendre rule of `order`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PixelRule {
+    pub(crate) subdivision: usize,
+    pub(crate) order: usize,
+}
 
 /// The matched filter's kernel weights, kept from frame to frame: the row and column kernels of
 /// a separable filter, or the 2D kernel in `rows`.
@@ -32,10 +43,50 @@ pub(crate) struct FilterKernels {
 /// An elliptical Gaussian: σ along its major axis, the minor-to-major ratio, and the major axis's
 /// angle to the x axis, in radians.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct EllipticalGaussian {
+pub(crate) struct EllipticalGaussian {
     pub(super) sigma: f32,
     pub(super) axis_ratio: f32,
     pub(super) angle: f32,
+}
+
+/// What the matched filter convolves with: a Gaussian of `[σx, σy]` along the pixel axes, filtered
+/// in a row pass and a column pass, or an ellipse at another angle, filtered with a 2D kernel.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum KernelShape {
+    Separable([f32; 2]),
+    Elliptical(EllipticalGaussian),
+}
+
+impl KernelShape {
+    /// The shape `filter` convolves with. An ellipse along the pixel axes is a product of two 1D
+    /// profiles, and takes them exactly; at any other angle an axis ratio this close to 1 takes the
+    /// separable circular kernel.
+    pub(crate) fn of(filter: MatchedFilter) -> Self {
+        let MatchedFilter {
+            fwhm,
+            axis_ratio,
+            angle,
+        } = filter;
+        let sigma = fwhm::to_sigma(fwhm);
+        match convolution::quarter_turns(angle) {
+            Some(turns) => {
+                let minor = sigma * axis_ratio;
+                Self::Separable(if turns % 2 == 0 {
+                    [sigma, minor]
+                } else {
+                    [minor, sigma]
+                })
+            }
+            None if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD => {
+                Self::Separable([sigma, sigma])
+            }
+            None => Self::Elliptical(EllipticalGaussian {
+                sigma,
+                axis_ratio,
+                angle,
+            }),
+        }
+    }
 }
 
 impl FilterKernels {
@@ -68,42 +119,19 @@ impl FilterKernels {
     ) {
         debug_assert_eq!(values.width(), temp.width());
         debug_assert_eq!(values.height(), temp.height());
-        let MatchedFilter {
-            fwhm,
-            axis_ratio,
-            angle,
-        } = filter;
         debug_assert!(
-            axis_ratio > 0.0 && axis_ratio <= 1.0,
+            filter.axis_ratio > 0.0 && filter.axis_ratio <= 1.0,
             "Axis ratio must be in (0, 1]"
         );
 
-        let sigma = fwhm::to_sigma(fwhm);
-
-        // sqrt(sum(K²)) of the kernel the convolution used; an axis ratio this close to 1 takes
-        // the separable circular kernel.
-        let noise_norm = if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
-            self.separable(values, [sigma, sigma], temp)
-        } else if let Some(turns) = convolution::quarter_turns(angle) {
-            let minor = sigma * axis_ratio;
-            let sigmas = if turns % 2 == 0 {
-                [sigma, minor]
-            } else {
-                [minor, sigma]
-            };
-            self.separable(values, sigmas, temp)
-        } else {
-            let norm = self.elliptical(
-                values,
-                EllipticalGaussian {
-                    sigma,
-                    axis_ratio,
-                    angle,
-                },
-                temp,
-            );
-            mem::swap(values, temp);
-            norm
+        // sqrt(sum(K²)) of the kernel the convolution used.
+        let noise_norm = match KernelShape::of(filter) {
+            KernelShape::Separable(sigmas) => self.separable(values, sigmas, temp),
+            KernelShape::Elliptical(ellipse) => {
+                let norm = self.elliptical(values, ellipse, temp);
+                mem::swap(values, temp);
+                norm
+            }
         };
 
         // After convolution the noise is the map's times sqrt(sum(K²)); dividing it out puts the
@@ -166,8 +194,39 @@ impl FilterKernels {
 }
 
 impl EllipticalGaussian {
+    /// The narrowest σ the ellipse has along either pixel axis at a fixed offset along the other:
+    /// `1/√P` for the larger diagonal entry `P` of its inverse covariance. Near `σ·axis_ratio` for
+    /// a thin ellipse off the axes, it is what the pixel quadrature has to resolve.
+    fn axis_sigma(self) -> f64 {
+        let major = f64::from(self.sigma);
+        let minor = major * f64::from(self.axis_ratio);
+        let (sin, cos) = f64::from(self.angle).sin_cos();
+        let (major_precision, minor_precision) = (1.0 / (major * major), 1.0 / (minor * minor));
+        let along_x = cos * cos * major_precision + sin * sin * minor_precision;
+        let along_y = sin * sin * major_precision + cos * cos * minor_precision;
+        1.0 / along_x.max(along_y).sqrt()
+    }
+
+    /// The fewest cells per pixel, and the order for them, whose pixel means are within
+    /// [`KERNEL_MEAN_TOLERANCE`]: a cell of width `1/s` sees the profile `s` times wider, so the
+    /// rule that reaches `s·σ` integrates it. `None` past [`MAX_PIXEL_SUBDIVISION`]: an ellipse too
+    /// thin across the pixel axes to be any star's.
+    pub(crate) fn pixel_rule(self) -> Option<PixelRule> {
+        let sigma = self.axis_sigma();
+        (1..=MAX_PIXEL_SUBDIVISION).find_map(|subdivision| {
+            PixelQuadrature::sufficient_order(
+                AnalyticProfile::Gaussian {
+                    sigma: sigma * subdivision as f64,
+                },
+                KERNEL_MEAN_TOLERANCE,
+            )
+            .map(|order| PixelRule { subdivision, order })
+        })
+    }
+
     /// Into `weights`, row by row, the 2D kernel out to `3σ` of the major axis, each weight the
-    /// profile's mean over its pixel, normalized to sum to 1; returns its side.
+    /// profile's mean over its pixel by [`Self::pixel_rule`], normalized to sum to 1; returns its
+    /// side.
     pub(super) fn fill_kernel(self, weights: &mut Vec<f32>) -> usize {
         let Self {
             sigma,
@@ -194,11 +253,25 @@ impl EllipticalGaussian {
             (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp()
         };
 
-        let rule = PixelQuadrature::gauss_legendre(ELLIPTICAL_KERNEL_ORDER);
+        let PixelRule { subdivision, order } = self
+            .pixel_rule()
+            .expect("validation keeps the matched filter's ellipse within the pixel rules");
+        let rule = PixelQuadrature::gauss_legendre(order);
+        let cell = 1.0 / subdivision as f64;
         let mean = |index: usize| {
             let x = (index % size) as f64 - radius as f64;
             let y = (index / size) as f64 - radius as f64;
-            rule.integrate(x, y, profile)
+            let mut sum = 0.0;
+            for row in 0..subdivision {
+                let cell_y = y - 0.5 + (row as f64 + 0.5) * cell;
+                for column in 0..subdivision {
+                    let cell_x = x - 0.5 + (column as f64 + 0.5) * cell;
+                    sum += rule.integrate(0.0, 0.0, |u, v| {
+                        profile(cell_x + u * cell, cell_y + v * cell)
+                    });
+                }
+            }
+            sum * cell * cell
         };
         let sum: f64 = (0..size * size).map(mean).sum();
         weights.clear();

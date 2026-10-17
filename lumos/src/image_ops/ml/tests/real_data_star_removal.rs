@@ -1,8 +1,7 @@
+use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::remove_stars::RemoveStars;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
 use crate::internals::real_data::ml_support::onnx_weights;
-use crate::internals::visual;
+use crate::internals::{init_tracing, real_data, visual};
 
 fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
@@ -27,10 +26,10 @@ fn starnet_removes_stars() {
     // buffer for its `stars` output rather than allocating a fresh one).
     let input = img.intensity_plane();
 
-    let remove = RemoveStars::new(weights);
+    let mut remove = RemoveStars::new(OnnxModel::load(weights).expect("the StarNet model loads"));
     // The starless-only path (used when a caller doesn't need the `stars` layer) must
     // reproduce `split`'s `starless` output exactly — it's the same underlying
-    // `TiledOnnxConfig::run` inference either way. `apply` overwrites in place, so it gets its
+    // `OnnxModel` inference either way. `apply` overwrites in place, so it gets its
     // own copy.
     let mut starless_only = img.clone();
     remove

@@ -1,7 +1,7 @@
 use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
 use crate::registration::distortion::sip::*;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 
 /// How far an exact fit may miss: a field in the polynomial's span is recovered but for rounding.
 /// Hartley-normalized monomials of a 1000 px grid keep the design's condition number in the
@@ -22,7 +22,7 @@ fn rms(residuals: &[f64]) -> f64 {
 
 /// An order-`order` fit of `field` sampled on `grid`, under its own transform, about its own
 /// centre, every pair weighed alike.
-fn fit_field(field: &RadialField, grid: Grid, order: usize) -> SipPolynomial {
+fn fit_field(field: &RadialField, grid: Grid, order: SipOrder) -> SipPolynomial {
     let RadialPairs { reference, target } = field.pairs(grid);
     SipModel {
         order,

@@ -1,7 +1,8 @@
 //! Winsorized sigma clipping: a Huber estimate of the centre and σ of every sample, then one clip
 //! about them.
 
-use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::pass::{Narrowing, Pass};
+use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
@@ -42,13 +43,16 @@ const MAX_CLAMP_STEPS: u32 = 50;
 
 impl Default for WinsorizedClipConfig {
     fn default() -> Self {
-        Self {
-            sigma: SigmaBounds::symmetric(2.5),
-        }
+        Self::DEFAULT
     }
 }
 
 impl WinsorizedClipConfig {
+    /// 2.5σ either side.
+    pub const DEFAULT: Self = Self {
+        sigma: SigmaBounds::symmetric(2.5),
+    };
+
     /// One clip to `sigma` about the winsorized centre.
     pub const fn new(sigma: SigmaBounds) -> Self {
         Self { sigma }
@@ -59,9 +63,13 @@ impl WinsorizedClipConfig {
         self.sigma.validate()
     }
 
-    pub(crate) fn narrow(self, pass: &Pass<'_>, clamped: &mut Vec<f32>) -> Proposal {
-        let estimate = Self::estimate(pass.samples(), |centre| pass.model_sigma(centre), clamped);
-        pass.keep(self.sigma, estimate.centre, estimate.sigma)
+    pub(crate) fn narrow(self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
+        let estimate = Self::estimate(
+            pass.samples(),
+            |centre| pass.model_sigma(centre),
+            &mut scratch.clamped,
+        );
+        Narrowing::Window(pass.keep(self.sigma, estimate.centre, estimate.sigma))
     }
 
     /// The Huber estimate of an ascending window, in `clamped`'s working copy, with σ floored by

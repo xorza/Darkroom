@@ -9,28 +9,30 @@ mod synthetic;
 
 use imaginarium::Buffer2;
 
+use crate::combine::normalization::Normalization;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::drizzle::accumulator::frame_source::internals::band_scan;
+use crate::drizzle::accumulator::internals::DrizzleAccumulator;
+use crate::drizzle::accumulator::kernel_plan::DropReach;
+use crate::drizzle::drizzle_config::DrizzleConfig;
+use crate::drizzle::drizzle_frame::DrizzleFrame;
+use crate::drizzle::drizzle_kernel::DrizzleKernel;
+use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
+use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_map::QualityMap;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::images::gray_image;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::math::size2us::Size2us;
-
-use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
-use crate::drizzle::accumulator::DrizzleAccumulator;
-use crate::drizzle::accumulator::frame_source::internals::band_scan;
-use crate::drizzle::accumulator::kernel_plan::DropReach;
-use crate::drizzle::drizzle_config::{DrizzleConfig, DrizzleKernel};
-use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_result::DrizzleResult;
-use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::error::FrameDimensionMismatch;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_map::QualityMap;
 use crate::io::load_context::LoadContext;
+use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -67,7 +69,7 @@ fn plain_stack() -> StackConfig {
 fn drizzle_plain(
     frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
-) -> Result<DrizzleResult, DrizzleError> {
+) -> Result<StackProduct, DrizzleError> {
     DrizzleConfig {
         stack: plain_stack(),
         ..config.clone()

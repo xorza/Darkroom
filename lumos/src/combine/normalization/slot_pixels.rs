@@ -11,17 +11,17 @@ use crate::frame_store::stratified_samples::StratifiedSamples;
 /// The pixels one slot is measured over.
 #[derive(Debug)]
 pub(super) enum SlotPixels<'a> {
-    /// Every pixel of the slot — a channel's, or a colour's photosites — each frame covering all of
+    /// Every pixel of the slot — a channel's, or a color's photosites — each frame covering all of
     /// them, sampled the way a frame on disk sampled itself.
     Everywhere(StratifiedSamples),
     /// The pixels every frame covers.
     Common(&'a CommonDomain),
-    /// The photosites of one colour among the pixels every frame covers.
-    CommonColour(CommonDomain),
+    /// The photosites of one color among the pixels every frame covers.
+    CommonColor(CommonDomain),
 }
 
 impl<'a> SlotPixels<'a> {
-    /// Each slot of `planes`' pixels: its channel's, or its colour's photosites, among the pixels
+    /// Each slot of `planes`' pixels: its channel's, or its color's photosites, among the pixels
     /// every frame covers when `domain` holds them.
     ///
     /// # Errors
@@ -42,9 +42,9 @@ impl<'a> SlotPixels<'a> {
                     Ok(Self::Everywhere(samples))
                 }
                 (Some(domain), None) => Ok(Self::Common(domain)),
-                (Some(domain), Some(cfa_type)) => Ok(Self::CommonColour(domain.restricted(
+                (Some(domain), Some(cfa_type)) => Ok(Self::CommonColor(domain.restricted(
                     size,
-                    |position| cfa_type.color_at(position) == slot,
+                    |position| cfa_type.slot_at(position) == slot,
                     planes.cancel,
                 )?)),
             })
@@ -56,7 +56,7 @@ impl<'a> SlotPixels<'a> {
     pub(super) const fn shared(&self) -> Option<&CommonDomain> {
         match self {
             Self::Everywhere(_) => None,
-            Self::CommonColour(domain) => Some(domain),
+            Self::CommonColor(domain) => Some(domain),
             Self::Common(domain) => Some(domain),
         }
     }
@@ -66,7 +66,7 @@ impl<'a> SlotPixels<'a> {
         match self {
             Self::Everywhere(samples) => Ok(samples.indices().collect()),
             Self::Common(domain) => domain.stratified_indices(cancel),
-            Self::CommonColour(domain) => domain.stratified_indices(cancel),
+            Self::CommonColor(domain) => domain.stratified_indices(cancel),
         }
     }
 }

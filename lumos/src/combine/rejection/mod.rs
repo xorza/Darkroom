@@ -8,7 +8,6 @@
 
 pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
-pub(crate) mod mean_combine;
 pub(crate) mod normal_scores;
 pub(crate) mod pass;
 pub(crate) mod rejection_scale;
@@ -21,22 +20,17 @@ pub(crate) mod winsorized_clip_config;
 
 use std::ops::Range;
 
-use crate::combine::frame_cache::sample_noise::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseColumns;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
+use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
-use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
-
-/// An iteration cap must leave at least one pass to run. Shared by the methods that iterate.
-fn validate_max_passes(max_passes: u32) -> Result<(), InvalidConfigField> {
-    ConfigValue::new("max_passes", max_passes).must_be("at least 1", max_passes >= 1)
-}
 
 /// Pixel rejection algorithm applied before combining.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,7 +58,10 @@ impl Default for Rejection {
 impl Rejection {
     /// Sigma clipping to `sigma` either side, for at most 3 passes.
     pub const fn sigma_clip(sigma: f32) -> Self {
-        Self::SigmaClip(SigmaClipConfig::new(SigmaBounds::symmetric(sigma), 3))
+        Self::SigmaClip(SigmaClipConfig {
+            sigma: SigmaBounds::symmetric(sigma),
+            ..SigmaClipConfig::DEFAULT
+        })
     }
 
     /// Winsorized sigma clipping to `sigma` either side.
@@ -74,7 +71,10 @@ impl Rejection {
 
     /// Linear fit clipping to `sigma` either side, for at most 4 passes.
     pub const fn linear_fit(sigma: f32) -> Self {
-        Self::LinearFit(LinearFitClipConfig::new(SigmaBounds::symmetric(sigma), 4))
+        Self::LinearFit(LinearFitClipConfig {
+            sigma: SigmaBounds::symmetric(sigma),
+            ..LinearFitClipConfig::DEFAULT
+        })
     }
 
     /// Create a trim of the same share from each end.
@@ -82,9 +82,9 @@ impl Rejection {
         Self::Trim(TrimConfig::new(percent, percent))
     }
 
-    /// Create GESD with default alpha.
-    pub fn gesd() -> Self {
-        Self::Gesd(GesdConfig::default())
+    /// GESD at its default significance and test count.
+    pub const fn gesd() -> Self {
+        Self::Gesd(GesdConfig::DEFAULT)
     }
 
     /// Validate the held configuration, if any.
@@ -97,6 +97,17 @@ impl Rejection {
             Self::Trim(config) => config.validate(),
             Self::Gesd(config) => config.validate(),
         }
+    }
+
+    /// Whether the rejection holds each sample to its own CCD noise model.
+    pub(crate) const fn uses_ccd_model(&self) -> bool {
+        matches!(
+            self,
+            Self::SigmaClip(SigmaClipConfig {
+                scale: RejectionScale::CcdModel,
+                ..
+            })
+        )
     }
 
     /// What a clipped pixel's dispersion is multiplied by to read the frames' full scatter: the
@@ -121,8 +132,8 @@ impl Rejection {
     const fn passes(&self) -> usize {
         match self {
             Self::None => 0,
-            Self::SigmaClip(config) => config.max_passes as usize,
-            Self::LinearFit(config) => config.max_passes as usize,
+            Self::SigmaClip(config) => config.max_iterations as usize,
+            Self::LinearFit(config) => config.max_iterations as usize,
             Self::Winsorized(_) | Self::Trim(_) | Self::Gesd(_) => 1,
         }
     }
@@ -134,17 +145,15 @@ impl Rejection {
         !matches!(self, Self::LinearFit(_)) || index > 0
     }
 
-    fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Option<Narrowing> {
-        Some(match self {
-            Self::None => return None,
-            Self::SigmaClip(config) => config.narrow(pass, &mut scratch.scores),
-            Self::Winsorized(config) => {
-                Narrowing::Window(config.narrow(pass, &mut scratch.clamped))
-            }
-            Self::LinearFit(config) => Narrowing::Window(config.narrow(pass, &mut scratch.scores)),
-            Self::Trim(config) => Narrowing::Window(config.narrow(pass)),
-            Self::Gesd(config) => Narrowing::Window(config.narrow(pass, &mut scratch.gesd)?),
-        })
+    fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
+        match *self {
+            Self::None => Narrowing::Settled,
+            Self::SigmaClip(config) => config.narrow(pass, scratch),
+            Self::Winsorized(config) => config.narrow(pass, scratch),
+            Self::LinearFit(config) => config.narrow(pass, scratch),
+            Self::Trim(config) => config.narrow(pass, scratch),
+            Self::Gesd(config) => config.narrow(pass, scratch),
+        }
     }
 
     /// The window of `scratch`'s sorted samples that survives. The floor under every measured σ is
@@ -180,18 +189,18 @@ impl Rejection {
                 noise,
             };
             let proposal = match self.narrow(&pass, methods) {
-                None => break,
-                Some(Narrowing::Window(proposal)) => proposal,
-                Some(Narrowing::PerSample(band)) => {
+                Narrowing::Settled => break,
+                Narrowing::Window(proposal) => proposal,
+                Narrowing::PerSample(band) => {
                     let noise = noise.expect("a per-sample band reads the noise models");
                     let keep =
                         |value: f32, position: u32| band.keeps(&noise, position as usize, value);
-                    if sorted.count_kept(window.clone(), keep) < min_survivors {
+                    if sorted.classify(window.clone(), keep) < min_survivors {
                         window = sorted.nearest(window, band.centre, min_survivors);
                         break;
                     }
                     Proposal {
-                        window: sorted.partition(window.clone(), band.centre, keep),
+                        window: sorted.partition(window.clone(), band.centre),
                         centre: band.centre,
                     }
                 }

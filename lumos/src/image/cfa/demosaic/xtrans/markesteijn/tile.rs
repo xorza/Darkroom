@@ -2,12 +2,13 @@
 
 use std::ops::Range;
 
-use crate::math::vec2us::Vec2us;
-
-use crate::image::cfa::demosaic::tiled::{NativePixel, OutputPlanes, TilePlace};
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
+use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, MarkesteijnPasses, READ_REACH, TILE};
-use crate::image::cfa::demosaic::xtrans::xtrans_image::XTransImage;
+use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::math::vec2us::Vec2us;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// Half the tile, the width of the green bounds, which hold one entry per pair of columns.
 const HALF_TILE: usize = TILE / 2;
@@ -38,7 +39,7 @@ pub(super) struct Tile {
     /// Each row's homogeneity summed over five columns, for one direction at a time: at most 45.
     row_sums: Vec<u8>,
     green_bounds: Vec<[f32; 2]>,
-    /// The colour differences of a solitary green pixel, by colour and direction.
+    /// The color differences of a solitary green pixel, by color and direction.
     dcolor: [[f32; 6]; 3],
 }
 
@@ -53,7 +54,7 @@ struct OwnedPart {
 /// What a tile demosaics with: the frame, its pattern's hexagons, and the passes to make.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TileJob<'a> {
-    pub(super) xtrans: &'a XTransImage<'a>,
+    pub(super) xtrans: &'a MosaicView<'a, XTransPattern>,
     pub(super) hex: &'a HexTable,
     pub(super) passes: MarkesteijnPasses,
 }
@@ -116,16 +117,24 @@ impl Tile {
             rows: margin..mrow - top - margin,
             cols: margin..mcol - left - margin,
         };
-        self.derivatives(mrow - top, mcol - left);
-        self.homogeneity(mrow - top, mcol - left);
+        PlaneStages {
+            tile: self,
+            rows: mrow - top,
+            cols: mcol - left,
+        }
+        .dispatch();
         self.homogeneity_sums(&own);
         unsafe { self.blend(xtrans, &own, out) };
     }
 
     /// Copy the tile's region and [`READ_REACH`] around it out of `xtrans`, each sample balanced
-    /// by its colour's gain. The frame holds all of it: a tile ends [`READ_REACH`] short of the
+    /// by its color's gain. The frame holds all of it: a tile ends [`READ_REACH`] short of the
     /// frame's edges.
-    fn read_input(&mut self, xtrans: &XTransImage<'_>, TilePlace { top, left, size }: TilePlace) {
+    fn read_input(
+        &mut self,
+        xtrans: &MosaicView<'_, XTransPattern>,
+        TilePlace { top, left, size }: TilePlace,
+    ) {
         let (first_row, first_col) = (top - READ_REACH, left - READ_REACH);
         let rows = size.height + 2 * READ_REACH;
         let cols = size.width + 2 * READ_REACH;
@@ -139,9 +148,7 @@ impl Tile {
         {
             let y = first_row + row;
             for (col, balanced) in line[..cols].iter_mut().enumerate() {
-                let x = first_col + col;
-                let colour = xtrans.pattern.color_at(Vec2us::new(x, y)).index();
-                *balanced = xtrans.read(y, x) * xtrans.gains[colour];
+                *balanced = xtrans.balanced(Vec2us::new(first_col + col, y));
             }
         }
     }
@@ -152,7 +159,7 @@ impl Tile {
         (row + READ_REACH - place.top) * CROP + col + READ_REACH - place.left
     }
 
-    /// Each direction's colours from the seeded samples: green, then `passes` passes of red and
+    /// Each direction's colors from the seeded samples: green, then `passes` passes of red and
     /// blue.
     fn interpolate(&mut self, hex: &HexTable, place: TilePlace, passes: usize) {
         self.green_bounds(hex, place);
@@ -165,9 +172,9 @@ impl Tile {
             if pass > 0 {
                 self.refine_green(hex, place, base);
             }
-            self.solitary_green_colours(hex, place, base);
-            self.opposite_colours(hex, place, base);
-            self.green_block_colours(hex, place, base);
+            self.solitary_green_colors(hex, place, base);
+            self.opposite_colors(hex, place, base);
+            self.green_block_colors(hex, place, base);
         }
     }
 
@@ -200,7 +207,7 @@ impl Tile {
             let coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + (hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.color(row, leftstart + 1) & 1)
             };
             let entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
@@ -230,7 +237,7 @@ impl Tile {
         }
     }
 
-    /// The tile's samples, each in its own colour, in the first four directions.
+    /// The tile's samples, each in its own color, in the first four directions.
     fn seed(&mut self, hex: &HexTable, place: TilePlace) {
         let TilePlace { top, left, .. } = place;
         let (mrow, mcol) = (place.bottom(), place.right());
@@ -238,8 +245,8 @@ impl Tile {
         self.rgb[..plane].fill([0.0; 3]);
         for row in top..mrow {
             for col in left..mcol {
-                let colour = hex.colour(row, col);
-                self.rgb[Self::at(0, row - top, col - left)][colour] =
+                let color = hex.color(row, col);
+                self.rgb[Self::at(0, row - top, col - left)][color] =
                     self.input[Self::input_at(place, row, col)];
             }
         }
@@ -254,7 +261,7 @@ impl Tile {
         let TilePlace { top, left, .. } = place;
         let (mrow, mcol) = (place.bottom(), place.right());
         let input = &self.input;
-        let colours = |row: usize, col: usize, h: &[isize; 8]| {
+        let colors = |row: usize, col: usize, h: &[isize; 8]| {
             let pix = Self::input_at(place, row, col);
             let p = |offset: isize| input[pix.wrapping_add_signed(offset)];
             let mut color = [0.0f32; 4];
@@ -276,14 +283,14 @@ impl Tile {
             let mut coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + (hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.color(row, leftstart + 1) & 1)
             };
             let bounds_entry = |col: usize| (row - top) * HALF_TILE + ((col - left) >> 1);
             if coloffset == 3 {
                 let h = hex.input(row, leftstart);
                 let mut col = leftstart;
                 while col < mcol {
-                    let color = colours(row, col, h);
+                    let color = colors(row, col, h);
                     let [lo, hi] = self.green_bounds[bounds_entry(col)];
                     for (c, &value) in color.iter().enumerate() {
                         self.rgb[Self::at(c, row - top, col - left)][1] = lim(value, lo, hi);
@@ -297,7 +304,7 @@ impl Tile {
                 ];
                 let (mut col, mut hexindex) = (leftstart, 0);
                 while col < mcol {
-                    let color = colours(row, col, hexmod[hexindex]);
+                    let color = colors(row, col, hexmod[hexindex]);
                     let [lo, hi] = self.green_bounds[bounds_entry(col)];
                     for (c, &value) in color.iter().enumerate() {
                         self.rgb[Self::at(c ^ 1, row - top, col - left)][1] = lim(value, lo, hi);
@@ -333,9 +340,9 @@ impl Tile {
             let mut coloffset = if hex.right_shift(row) {
                 3
             } else {
-                1 + (hex.colour(row, leftstart + 1) & 1)
+                1 + (hex.color(row, leftstart + 1) & 1)
             };
-            let mut f = hex.colour(row, leftstart);
+            let mut f = hex.color(row, leftstart);
             if coloffset == 3 {
                 let h = hex.tile(row, leftstart);
                 let mut col = leftstart;
@@ -365,8 +372,8 @@ impl Tile {
         }
     }
 
-    /// Red and blue at each solitary green pixel, from the colour differences across it.
-    fn solitary_green_colours(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
+    /// Red and blue at each solitary green pixel, from the color differences across it.
+    fn solitary_green_colors(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
         let TilePlace { top, left, .. } = place;
         let (mrow, mcol) = (place.bottom(), place.right());
         let (sgrow, sgcol) = (hex.sgrow(), hex.sgcol());
@@ -375,7 +382,7 @@ impl Tile {
         let ts = TILE as isize;
         while row < mrow - 2 {
             let mut col = sgstartcol;
-            let mut h = hex.colour(row, col + 1);
+            let mut h = hex.color(row, col + 1);
             while col < mcol - 2 {
                 let mut rix = Self::at(base, row - top, col - left);
                 let mut diff = [0.0f32; 6];
@@ -415,7 +422,7 @@ impl Tile {
     }
 
     /// Red at blue pixels and blue at red ones, along whichever axis the green varies less.
-    fn opposite_colours(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
+    fn opposite_colors(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
         let TilePlace { top, left, .. } = place;
         let (mrow, mcol) = (place.bottom(), place.right());
         let ts = TILE as isize;
@@ -451,7 +458,7 @@ impl Tile {
                 ts
             };
             let h = 3 * (c ^ ts ^ 1);
-            let mut f = 2 - hex.colour(row, leftstart);
+            let mut f = 2 - hex.color(row, leftstart);
             if hex.right_shift(row) {
                 let mut col = leftstart;
                 while col < mcol - 3 {
@@ -460,7 +467,7 @@ impl Tile {
                     f ^= 2;
                 }
             } else {
-                let mut coloffset = if hex.colour(row, leftstart + 1) == 1 {
+                let mut coloffset = if hex.color(row, leftstart + 1) == 1 {
                     2
                 } else {
                     1
@@ -478,7 +485,7 @@ impl Tile {
 
     /// Red and blue for each 2×2 block of green, from the hexagon's neighbours, in each of the
     /// pass's four directions.
-    fn green_block_colours(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
+    fn green_block_colors(&mut self, hex: &HexTable, place: TilePlace, base: usize) {
         let TilePlace { top, left, .. } = place;
         let (mrow, mcol) = (place.bottom(), place.right());
         let (sgrow, sgcol) = (hex.sgrow(), hex.sgcol());
@@ -488,7 +495,7 @@ impl Tile {
         let leftstart = (left + 2..mcol - 2)
             .find(|&col| (col - sgcol) % 3 != 0)
             .unwrap_or(mcol - 2);
-        let coloffsetstart = 2 - (hex.colour(topstart, leftstart + 1) & 1);
+        let coloffsetstart = 2 - (hex.color(topstart, leftstart + 1) & 1);
         for row in topstart..mrow - 2 {
             if (row - sgrow) % 3 == 0 {
                 continue;
@@ -530,10 +537,12 @@ impl Tile {
 
     /// Every direction's ITU-R BT.2020 YPbPr, and the squared second difference of each along its
     /// own direction.
-    fn derivatives(&mut self, mrow: usize, mcol: usize) {
+    #[inline(always)]
+    fn derivatives<S: Isa>(&mut self, isa: S, mrow: usize, mcol: usize) {
         /// Each direction's step, as rows and columns.
         const DIRECTION_STEPS: [[isize; 2]; 4] = [[0, 1], [1, 0], [1, 1], [1, -1]];
         let plane = YUV_SIDE * YUV_SIDE;
+        let two = isa.splat_f32(2.0);
         for d in 0..self.directions {
             let (y_plane, rest) = self.yuv.split_at_mut(plane);
             let (pb_plane, pr_plane) = rest.split_at_mut(plane);
@@ -571,18 +580,35 @@ impl Tile {
                 .into_iter()
                 .enumerate()
                 {
-                    let lines = values[centre..centre + count]
-                        .iter()
-                        .zip(&values[next..next + count])
-                        .zip(&values[prev..prev + count]);
-                    for (drv, ((&v, &forward), &back)) in out.iter_mut().zip(lines) {
-                        let s = 2.0 * v - forward - back;
-                        if channel == 0 {
-                            *drv = s * s;
+                    let lines = [centre, next, prev].map(|from| &values[from..from + count]);
+                    let [
+                        (here, here_tail),
+                        (forward, forward_tail),
+                        (back, back_tail),
+                    ] = lines.map(<[f32]>::as_chunks::<F32_LANES>);
+                    let (body, tail) = out.as_chunks_mut::<F32_LANES>();
+                    let accumulate = channel != 0;
+                    for (((out, here), forward), back) in
+                        body.iter_mut().zip(here).zip(forward).zip(back)
+                    {
+                        let s =
+                            two * isa.load_f32(here) - isa.load_f32(forward) - isa.load_f32(back);
+                        let squared = if accumulate {
+                            isa.load_f32(out) + s * s
                         } else {
-                            *drv += s * s;
-                        }
+                            s * s
+                        };
+                        squared.store(out);
                     }
+                    let s = two * isa.load_f32_partial(here_tail)
+                        - isa.load_f32_partial(forward_tail)
+                        - isa.load_f32_partial(back_tail);
+                    let squared = if accumulate {
+                        isa.load_f32_partial(tail) + s * s
+                    } else {
+                        s * s
+                    };
+                    squared.store_partial(tail);
                 }
             }
         }
@@ -590,6 +616,7 @@ impl Tile {
 
     /// How many of each pixel's 3×3 neighbours vary least, at most eight times the least, in each
     /// direction.
+    #[inline(always)]
     fn homogeneity(&mut self, mrow: usize, mcol: usize) {
         let count = mcol - 12;
         let mut threshold = [0.0f32; TILE];
@@ -676,9 +703,13 @@ impl Tile {
     /// # Safety
     ///
     /// As [`Self::demosaic`].
-    unsafe fn blend(&self, xtrans: &XTransImage<'_>, own: &OwnedPart, out: OutputPlanes) {
+    unsafe fn blend(
+        &self,
+        xtrans: &MosaicView<'_, XTransPattern>,
+        own: &OwnedPart,
+        out: OutputPlanes,
+    ) {
         let TilePlace { top, left, .. } = own.place;
-        let width = xtrans.size.width;
         for row in own.rows.clone() {
             for col in own.cols.clone() {
                 let mut hm = [0u8; 8];
@@ -703,16 +734,32 @@ impl Tile {
                         avg[3] += 1.0;
                     }
                 }
-                let (y, x) = (row + top, col + left);
-                let pixel = NativePixel {
-                    index: y * width + x,
-                    native: xtrans.pattern.color_at(Vec2us::new(x, y)).index(),
-                    sample: xtrans.read(y, x),
-                };
+                let pixel = xtrans.native(Vec2us::new(col + left, row + top));
                 let values = [0, 1, 2].map(|channel| avg[channel] / avg[3]);
-                unsafe { out.write_pixel(pixel, values, xtrans.gains) };
+                unsafe { out.write_pixel(pixel, values) };
             }
         }
+    }
+}
+
+/// The tile's plane stages, the directions' derivatives and their homogeneity, over `rows` and
+/// `cols` of it, on the widest Isa the CPU has. The homogeneity counts in bytes, which no Isa op
+/// holds: its loops are written plainly, and compiled with the Isa's features, as the kernel is.
+#[derive(Debug)]
+struct PlaneStages<'a> {
+    tile: &'a mut Tile,
+    rows: usize,
+    cols: usize,
+}
+
+impl Kernel for PlaneStages<'_> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let Self { tile, rows, cols } = self;
+        tile.derivatives(isa, rows, cols);
+        tile.homogeneity(rows, cols);
     }
 }
 
@@ -728,7 +775,7 @@ pub(crate) mod internals {
     use super::*;
 
     impl Tile {
-        /// The tile's colours in every direction after `passes`, from samples seeded as
+        /// The tile's colors in every direction after `passes`, from samples seeded as
         /// [`Tile::demosaic`] seeds them, but with every channel no sample gives set to `poison`:
         /// a cell that no stage computes keeps or spreads it.
         pub(crate) fn interpolate_poisoned(
@@ -747,11 +794,11 @@ pub(crate) mod internals {
             for d in 0..4 {
                 for row in 0..TILE {
                     for col in 0..TILE {
-                        let colour = hex.colour(place.top + row, place.left + col);
+                        let color = hex.color(place.top + row, place.left + col);
                         for (channel, value) in
                             self.rgb[Self::at(d, row, col)].iter_mut().enumerate()
                         {
-                            if channel != colour {
+                            if channel != color {
                                 *value = poison;
                             }
                         }
@@ -760,6 +807,50 @@ pub(crate) mod internals {
             }
             self.interpolate(hex, place, passes.count());
             &self.rgb
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::image::cfa::demosaic::xtrans::markesteijn::TILE;
+    use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{PlaneStages, Tile};
+    use crate::internals::test_rng::TestRng;
+    use crate::simd::tier::Tier;
+
+    /// The plane stages compute the same derivatives and homogeneity, bit for bit, on every Isa
+    /// the CPU has, over every direction of a full tile and of one cut short on both axes, whose
+    /// spans end in a partial vector.
+    #[test]
+    fn the_plane_stages_agree_on_every_isa() {
+        for (directions, rows, cols) in [(8, TILE, TILE), (4, TILE - 21, TILE - 13)] {
+            let mut rng = TestRng::new(7);
+            let mut seeded = Tile::new(directions);
+            for rgb in &mut seeded.rgb {
+                *rgb = [rng.next_f32(), rng.next_f32(), rng.next_f32()];
+            }
+            let run = |tier: Tier| {
+                let mut tile = Tile::new(directions);
+                tile.rgb.clone_from(&seeded.rgb);
+                tier.run(PlaneStages {
+                    tile: &mut tile,
+                    rows,
+                    cols,
+                });
+                (tile.drv, tile.homo)
+            };
+            let portable = run(Tier::portable());
+            assert!(portable.1.iter().any(|&hits| hits != 0 && hits != 9));
+            for tier in Tier::supported() {
+                let (drv, homo) = run(tier);
+                assert!(
+                    drv.iter()
+                        .zip(&portable.0)
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{tier}: derivatives"
+                );
+                assert_eq!(homo, portable.1, "{tier}: homogeneity");
+            }
         }
     }
 }

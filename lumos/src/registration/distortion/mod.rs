@@ -29,6 +29,3 @@
 
 pub(crate) mod sip;
 mod tps;
-
-/// Pivot magnitude below which a matrix is considered singular in LU/Cholesky solvers.
-const SINGULAR_THRESHOLD: f64 = 1e-12;

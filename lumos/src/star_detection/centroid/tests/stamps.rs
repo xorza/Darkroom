@@ -38,7 +38,7 @@ fn sigma_seed_is_the_truncated_second_moment() {
         let second: f64 = arms.map(|i| f64::from(i * i) * g(i)).sum();
         let expected = (second / sum).sqrt();
         let rounding = 441.0 * f64::from(f32::EPSILON) * 100.0 / sum.powi(2) / (2.0 * expected);
-        let seed = f64::from(fit.sigma_est);
+        let seed = fit.sigma_est;
         assert!(
             (seed - expected).abs() <= rounding,
             "σ {sigma}: seed {seed}, expected {expected} ± {rounding}"

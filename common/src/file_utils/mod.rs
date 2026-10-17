@@ -78,6 +78,7 @@ impl SyncAtomicFile {
         loop {
             let temporary = temporary_path(destination)?;
             match OpenOptions::new()
+                .read(true)
                 .write(true)
                 .create_new(true)
                 .open(&temporary)
@@ -205,7 +206,8 @@ pub fn publish_bytes(path: &Path, bytes: &[u8], mode: PublicationMode) -> io::Re
 /// Durable publication synchronizes the file before replacement and the
 /// directory entry after replacement. Cache publication skips those durability
 /// barriers because a lost cache entry can be rebuilt. `write` fails with its own
-/// error type, which carries this function's I/O failures too.
+/// error type, which carries this function's I/O failures too. Its handle reads
+/// as well, so it can map what it wrote before the file takes its name.
 pub fn publish<E: From<io::Error>>(
     path: &Path,
     mode: PublicationMode,

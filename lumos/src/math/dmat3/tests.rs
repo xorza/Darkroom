@@ -162,13 +162,17 @@ fn transform_point_hand_computed() {
     );
 }
 
+/// Bottom row [−0.2, 0, 1] gives w = 1 − 0.2·x: x = 0 maps as itself, x = 5 lies on the horizon
+/// (w = 0), and x = 10 past it (w = −1), where dividing would give the mirrored (−10, 0). Both
+/// map to INFINITY (not NaN) so a warp's bounds check rejects them → border.
 #[test]
-fn transform_point_at_infinity_returns_infinity() {
-    // Bottom row [1, 0, -5] gives w = x - 5; at x = 5, w = 0 (point at infinity).
-    // Maps to INFINITY (not NaN) so a warp's bounds check rejects it → border.
-    let m = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -5.0]);
-    let p = m.transform_point(DVec2::new(5.0, 0.0));
-    assert!(p.x.is_infinite() && p.y.is_infinite());
-    // inf saturates to i32::MAX (out of bounds), unlike NaN which casts to 0.
-    assert_eq!(p.x as i32, i32::MAX);
+fn transform_point_on_or_past_the_horizon_returns_infinity() {
+    let m = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.2, 0.0, 1.0]);
+    assert_eq!(m.transform_point(DVec2::ZERO), DVec2::ZERO);
+    for x in [5.0, 10.0] {
+        let p = m.transform_point(DVec2::new(x, 0.0));
+        assert!(p.x.is_infinite() && p.y.is_infinite(), "{x}: {p}");
+        // inf saturates to i32::MAX (out of bounds), unlike NaN which casts to 0.
+        assert_eq!(p.x as i32, i32::MAX);
+    }
 }

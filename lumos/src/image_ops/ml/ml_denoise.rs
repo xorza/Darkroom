@@ -5,32 +5,32 @@
 //! stretched data, so feed the stretched `[0,1]` image — mirroring how `NoiseXTerminator` /
 //! GraXpert AI denoise are applied (after the stretch / channel combination).
 
-use std::path::PathBuf;
-
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
-use crate::image_ops::ml::backend::TiledOnnxConfig;
+use crate::image_ops::ml::backend::OnnxModel;
 
 /// Denoise a *stretched* (display-domain, `[0, 1]`) image with a caller-supplied ONNX denoiser.
 ///
 /// The learned counterpart to the wavelet [`Denoise`](crate::image_ops::denoise::Denoise).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MlDenoise {
-    /// Backend settings: which model to run and at what tile stride.
-    pub onnx: TiledOnnxConfig,
+    /// The model the filter runs.
+    pub model: OnnxModel,
+    /// Tile stride in px (overlap = 512 − stride), in `1..=384`: a wider stride would leave bands
+    /// that only the feathered edges of tiles cover.
+    pub stride: usize,
 }
 
 impl MlDenoise {
-    /// Denoise with the ONNX model at `weights`.
-    pub fn new(weights: impl Into<PathBuf>) -> Self {
+    /// Denoise with `model`, at [`OnnxModel::DEFAULT_STRIDE`].
+    pub const fn new(model: OnnxModel) -> Self {
         Self {
-            onnx: TiledOnnxConfig::new(weights),
+            model,
+            stride: OnnxModel::DEFAULT_STRIDE,
         }
     }
 
-    pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {
-        let denoised = self.onnx.run(image)?;
-        *image = denoised;
-        Ok(())
+    pub fn apply(&mut self, image: &mut LinearImage) -> Result<(), MlError> {
+        self.model.run(image, self.stride)
     }
 }

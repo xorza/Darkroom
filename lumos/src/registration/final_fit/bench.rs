@@ -9,6 +9,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::Field;
 use crate::registration::bench::{Correction, Pair};
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
+use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
 use crate::registration::tuning;
 
@@ -24,9 +25,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, count), |b| {
             let pair: &Pair = pair.get_or_init(Pair::typical);
             let model = pair.model(TransformType::Similarity, correction);
-            let catalogs = FitCatalogs::new(&pair.reference, &pair.target).expect("a catalogue");
+            let catalogs = FitCatalogs::new(&pair.reference, &pair.target);
             let hypothesis = pair.hypothesis(TransformType::Similarity);
-            let radius = tuning::recovery_radius(pair.max_sigma());
+            let radius =
+                tuning::recovery_radius(pair.prepared(&RegistrationConfig::default()).max_sigma());
             b.iter(|| {
                 catalogs
                     .fit(hypothesis, model, radius)

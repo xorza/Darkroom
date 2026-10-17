@@ -11,7 +11,7 @@ use crate::image::linear_image::LinearImage;
 /// the pipeline body downstream is identical, because the warp reads either from RAM — a spilled
 /// frame read back whole first ([`Self::into_resident`]).
 #[derive(Debug)]
-pub(crate) enum PipelineFrame {
+pub(super) enum PipelineFrame {
     Resident(LinearImage),
     Spilled(StoredImage),
 }
@@ -21,21 +21,21 @@ impl PipelineFrame {
     /// to back over each of its planes: the warp then reads in whatever order its transform asks —
     /// a column per output row for a quarter turn — from memory the plan already charges for its
     /// source, not by faulting pages of a map the plan does not count.
-    pub(crate) fn into_resident(self) -> LinearImage {
+    pub(super) fn into_resident(self) -> LinearImage {
         match self {
             Self::Resident(image) => image,
-            Self::Spilled(stored) => stored.load(),
+            Self::Spilled(stored) => stored.into_image(None),
         }
     }
 
-    pub(crate) const fn metadata(&self) -> &ImageMetadata {
+    pub(super) const fn metadata(&self) -> &ImageMetadata {
         match self {
             Self::Resident(image) => &image.metadata,
             Self::Spilled(stored) => &stored.metadata,
         }
     }
 
-    pub(crate) fn dimensions(&self) -> ImageDimensions {
+    pub(super) fn dimensions(&self) -> ImageDimensions {
         match self {
             Self::Resident(image) => image.dimensions(),
             Self::Spilled(stored) => stored.dimensions,

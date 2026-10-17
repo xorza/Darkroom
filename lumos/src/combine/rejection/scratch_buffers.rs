@@ -1,7 +1,5 @@
 //! Per-thread working buffers the rejection methods refill for every pixel.
 
-use std::ops::Range;
-
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
 use crate::combine::rejection::normal_scores::NormalScores;
@@ -72,9 +70,6 @@ pub(crate) struct ScratchBuffers {
     pub(crate) sorted: SortedSamples,
     /// The survivors' weights, in sorted order, for the weighted mean.
     pub(crate) weights: Vec<f32>,
-    /// The last pixel's survivors as a window of `sorted`, or `None` when every sample survived
-    /// without a sort.
-    pub(crate) survivors: Option<Range<usize>>,
     pub(crate) methods: MethodScratch,
 }
 
@@ -86,20 +81,5 @@ impl ScratchBuffers {
         self.methods.clamped.reserve(frame_count);
         self.methods.scores.reserve(frame_count);
         self.methods.gesd.reserve(frame_count);
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-
-    impl ScratchBuffers {
-        /// The gather positions of the last pixel's survivors, or `None` when all of its samples
-        /// survived.
-        pub(crate) fn survivor_positions(&self) -> Option<&[u32]> {
-            self.survivors
-                .clone()
-                .map(|window| &self.sorted.positions()[window])
-        }
     }
 }

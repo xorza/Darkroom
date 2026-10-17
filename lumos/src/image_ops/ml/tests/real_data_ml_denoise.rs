@@ -1,9 +1,8 @@
 use crate::image::linear_image::LinearImage;
+use crate::image_ops::ml::backend::OnnxModel;
 use crate::image_ops::ml::ml_denoise::MlDenoise;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
 use crate::internals::real_data::ml_support::onnx_weights;
-use crate::internals::visual;
+use crate::internals::{init_tracing, real_data, visual};
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
@@ -38,7 +37,7 @@ fn deepsnr_denoises() {
 
     // `apply` denoises in place; the comparison below still needs the noisy original.
     let mut denoised = img.clone();
-    MlDenoise::new(weights)
+    MlDenoise::new(OnnxModel::load(weights).expect("the DeepSNR model loads"))
         .apply(&mut denoised)
         .expect("denoise succeeds");
     visual::save_linear(&denoised, "ml_denoise/denoised");

@@ -10,8 +10,12 @@ mod tier_equivalence;
 
 use imaginarium::Buffer2;
 
-use crate::combine::stack::stack_frame::StackFrame;
-use crate::combine::stack_config::{Combine, Normalization, StackConfig, Weighting};
+use crate::combine::normalization::Normalization;
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::combine::stack_frame::StackFrame;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
@@ -75,7 +79,8 @@ fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
 fn inject_spike(sim: &mut SimFrame, pos: Vec2us, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
     px[Size2us::new(W, H).index_of(pos)] = value;
-    sim.image = LinearImage::from_planar_channels(ImageDimensions::new((W, H), 1), [px]);
+    sim.image =
+        LinearImage::from_planar_channels(ImageDimensions::new((W, H), ChannelLayout::Mono), [px]);
 }
 
 /// A background pixel's noise in one frame of `Camera::realistic`: shot noise on the 0.1 sky over a
@@ -146,7 +151,7 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
     let clipped = stack_frames(
         &sims,
         &StackConfig {
-            combine: Combine::sigma_clipped(2.5),
+            combine: Combine::sigma_clip(2.5),
             weighting: Weighting::Equal,
             normalization: Normalization::None,
             ..StackConfig::light()
@@ -194,7 +199,7 @@ fn all_rejection_methods_remove_outliers() {
         (
             "sigma_clip",
             StackConfig {
-                combine: Combine::sigma_clipped(2.5),
+                combine: Combine::sigma_clip(2.5),
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()
@@ -247,9 +252,8 @@ fn all_rejection_methods_remove_outliers() {
         ),
     ];
     for (name, config) in configs {
-        assert_eq!(
-            config.combine.small_n.resolve(config.combine.method, n),
-            config.combine.method,
+        assert!(
+            !config.combine.small_n.falls_back(config.combine.method, n),
             "{name} must run as configured"
         );
         let stacked = stack_frames(&sims, &config);
@@ -357,7 +361,7 @@ fn rejection_methods_preserve_clean_frames() {
         (
             "sigma_clip",
             StackConfig {
-                combine: Combine::sigma_clipped(2.5),
+                combine: Combine::sigma_clip(2.5),
                 weighting: Weighting::Equal,
                 normalization: Normalization::None,
                 ..StackConfig::light()

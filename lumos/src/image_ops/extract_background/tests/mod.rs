@@ -7,6 +7,7 @@ use crate::internals::assertions::assert_close;
 use crate::internals::images::gray_image;
 use crate::internals::images::rgb_image;
 use crate::internals::test_rng::TestRng;
+use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
@@ -44,16 +45,6 @@ fn monomials_take_every_term_to_the_degree() {
     // total 2 adds (0,2),(1,1),(2,0) → 6 terms = (2+1)(2+2)/2.
     assert_eq!(Monomial::up_to(2).len(), 6);
     assert_eq!(Monomial::up_to(4).len(), 15);
-}
-
-#[test]
-fn effective_degree_fits_within_samples() {
-    // term counts: d1=3, d2=6, d3=10. Need terms ≤ n.
-    assert_eq!(effective_degree(10, 3), 3);
-    assert_eq!(effective_degree(6, 3), 2); // 10 > 6, 6 ≤ 6
-    assert_eq!(effective_degree(3, 3), 1); // 10,6 > 3, 3 ≤ 3
-    assert_eq!(effective_degree(2, 3), 0); // even 3 > 2
-    assert_eq!(effective_degree(100, 4), 4); // capped at 4
 }
 
 /// `0.5 + x/1024 + y/2048`: every value, every symmetric pair's sum and the tile sums are exact
@@ -354,7 +345,6 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
         matches!(
             &err,
             OpError::RankDeficient {
-                operation: "background surface fit",
                 rank: 2,
                 required_rank: 3,
             }
@@ -366,6 +356,28 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
         before,
         "a failed fit must not partially rewrite its channel"
     );
+
+    // The same grid's 8 tiles cannot determine a cubic's 10 terms: refused, not lowered to a
+    // quadratic, and the image unchanged.
+    let err = ExtractBackground {
+        degree: 3,
+        tile_size: 8,
+        iterations: 0,
+        ..Default::default()
+    }
+    .apply(&mut img)
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            OpError::TooFewSamples {
+                samples: 8,
+                degree: 3
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(img.channel(0).pixels(), before);
 }
 
 /// The standard chain: remove the gradient, then auto-stretch. Each auto stretch must put the
@@ -373,7 +385,8 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
 /// stretch whose target depends on the median onto a degenerate branch.
 ///
 /// 129×129 is an odd count, so the median is one pixel and a monotone curve maps it exactly;
-/// 1e-4 is the asinh solver's own acceptance, and STF's closed form is tighter.
+/// 1e-4 is the asinh solver's own acceptance, and STF's closed form is tighter. Tiles of 32 give
+/// 4 × 4 = 16 samples, enough for the default quadratic's 6 terms.
 #[test]
 fn auto_stretches_hit_their_target_after_gradient_removal() {
     let size = Size2us::new(129, 129);
@@ -391,7 +404,12 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
     .collect();
     for stretch in [Stretch::auto_asinh(), Stretch::auto_stf()] {
         let mut img = gray_image(size, sky.clone());
-        ExtractBackground::default().apply(&mut img).unwrap();
+        ExtractBackground {
+            tile_size: 32,
+            ..Default::default()
+        }
+        .apply(&mut img)
+        .unwrap();
         stretch.apply(&mut img).unwrap();
         let mut px = img.channel(0).pixels().to_vec();
         let median = statistics::median_mut(&mut px);

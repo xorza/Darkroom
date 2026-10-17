@@ -11,8 +11,7 @@ use crate::combine::normalization::photometric_gain::{
 };
 use crate::combine::normalization::slot_pixels::SlotPixels;
 use crate::combine::normalization::slot_planes::{PlaneMeasurement, PlaneSampling, SlotPlanes};
-use crate::combine::normalization::{FrameNorm, SlotNorm};
-use crate::combine::stack_config::Normalization;
+use crate::combine::normalization::{FrameNorm, Normalization, SlotNorm};
 use crate::frame::frame_stats::SlotSpread;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::math::statistics::median_mad::MedianMad;
@@ -24,8 +23,26 @@ use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct NormFit<'a> {
     pub(super) planes: SlotPlanes<'a>,
-    pub(super) normalization: Normalization,
+    pub(super) normalization: Fitted,
     pub(super) reference: usize,
+}
+
+/// A normalization that fits each frame: an affine gain and offset, or a ratio of medians.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Fitted {
+    Global,
+    Multiplicative,
+}
+
+impl Fitted {
+    /// `normalization` as one that fits; `None` for [`Normalization::None`], which fits nothing.
+    pub(super) const fn of(normalization: Normalization) -> Option<Self> {
+        match normalization {
+            Normalization::None => None,
+            Normalization::Global => Some(Self::Global),
+            Normalization::Multiplicative => Some(Self::Multiplicative),
+        }
+    }
 }
 
 /// Which estimator gave a set's fitted norms.
@@ -74,8 +91,8 @@ impl NormFit<'_> {
                 .transpose()?;
             let pixels = SlotPixels::of_slots(planes, domain.as_ref())?;
             match self.normalization {
-                Normalization::Global => self.global(&pixels)?,
-                Normalization::Multiplicative => {
+                Fitted::Global => self.global(&pixels)?,
+                Fitted::Multiplicative => {
                     let medians = match domain {
                         Some(_) => planes.slot_medians(&pixels)?,
                         None => frames
@@ -85,7 +102,6 @@ impl NormFit<'_> {
                     };
                     multiplicative_norms(&medians, self.reference)?
                 }
-                Normalization::None => unreachable!("handled by the caller"),
             }
         };
         tracing::info!(
@@ -101,11 +117,11 @@ impl NormFit<'_> {
     }
 
     /// The norms of frames gathered in each channel by its own rule — a mosaic drizzled into the
-    /// channels of its colours — measured pair by pair: each frame against the reference over the
+    /// channels of its colors — measured pair by pair: each frame against the reference over the
     /// pixels both reached in the slot's channel, by the same fit [`Self::global`] makes and the
     /// same ratio [`multiplicative_norms`] takes.
     ///
-    /// The pixels every frame reached are no domain for these: each frame's drops reach a colour at
+    /// The pixels every frame reached are no domain for these: each frame's drops reach a color at
     /// only part of the grid — at scale 2 and pixfrac 1, a Bayer red at 9 output pixels of 16 — so
     /// their intersection thins out with every frame added. A pair keeps as many as two frames
     /// share, and a pair is all either fit compares. Above scale 1 a pair can still share none: two
@@ -146,25 +162,25 @@ impl NormFit<'_> {
                     domain: Some(&domain),
                     indices: &indices,
                 };
-                let [ours, theirs] = [frame_index, reference]
-                    .map(|index| sampling.measure(planes.values(index, slot), median, cancel));
-                let (ours, theirs) = (ours?, theirs?);
-                let measured_median = |measured: &PlaneMeasurement| {
-                    measured
-                        .median
-                        .expect("a pair's medians are measured over its domain")
+                let mut measured_median = |index: usize| -> Result<f32, StackError> {
+                    Ok(sampling
+                        .median(planes.values(index, slot), median, cancel)?
+                        .expect("a pair's medians are measured over its domain"))
                 };
                 let (frame_median, reference_median) =
-                    (measured_median(&ours), measured_median(&theirs));
+                    (measured_median(frame_index)?, measured_median(reference)?);
                 let (frame_variance, reference_variance) = (
                     planes.noise_variance(frame_index, slot, &indices)?,
                     planes.noise_variance(reference, slot, &indices)?,
                 );
                 match self.normalization {
-                    Normalization::Global => {
+                    Fitted::Global => {
+                        let [ours, theirs] = [frame_index, reference]
+                            .map(|index| sampling.samples(planes.values(index, slot), cancel));
+                        let (ours, theirs) = (ours?, theirs?);
                         let pair = SamplePair {
-                            frame: PairSide::new(&ours.samples, frame_variance, cancel)?,
-                            reference: PairSide::new(&theirs.samples, reference_variance, cancel)?,
+                            frame: PairSide::new(&ours, frame_variance, cancel)?,
+                            reference: PairSide::new(&theirs, reference_variance, cancel)?,
                         };
                         let paired = pair.photometric_gain(cancel)?;
                         Ok(Some(SlotEstimate {
@@ -175,7 +191,7 @@ impl NormFit<'_> {
                             relative_error: paired.relative_error,
                         }))
                     }
-                    Normalization::Multiplicative => {
+                    Fitted::Multiplicative => {
                         let norm = SlotNorm::median_ratio(
                             (frame_index, frame_median),
                             (reference, reference_median),
@@ -192,7 +208,6 @@ impl NormFit<'_> {
                                 / (indices.len() as f64).sqrt(),
                         }))
                     }
-                    Normalization::None => unreachable!("handled by the caller"),
                 }
             })
             .collect::<Result<Vec<_>, StackError>>()?;
@@ -279,7 +294,7 @@ impl NormFit<'_> {
                             return Ok(SlotEstimate::EXACT_IDENTITY);
                         }
                         match self.normalization {
-                            Normalization::Global => {
+                            Fitted::Global => {
                                 let (ours, theirs) = (scale(index, slot)?, scale(reference, slot)?);
                                 let gain = (theirs.scale / ours.scale) as f32;
                                 Ok(SlotEstimate {
@@ -293,7 +308,7 @@ impl NormFit<'_> {
                                         .hypot(theirs.relative_error),
                                 })
                             }
-                            Normalization::Multiplicative => Ok(SlotEstimate {
+                            Fitted::Multiplicative => Ok(SlotEstimate {
                                 norm: SlotNorm::median_ratio(
                                     (index, medians[index][slot]),
                                     (reference, medians[reference][slot]),
@@ -302,7 +317,6 @@ impl NormFit<'_> {
                                 relative_error: median_error(index, slot)
                                     .hypot(median_error(reference, slot)),
                             }),
-                            Normalization::None => unreachable!("handled by the caller"),
                         }
                     })
                     .collect()
@@ -441,7 +455,7 @@ const SIGNAL_SIGNIFICANCE: f64 = 3.0;
 /// `1.4826·MAD` estimate of σ, whose variance is `σ²/(2n)` over its 36.75% efficiency against the
 /// standard deviation, `1.3605·σ²/n`, so `5.442·σ⁴/n` for its square. The spread takes `n` from its
 /// own count; the white noise from pairs of photosites on rows thinned to
-/// [`MAX_STATISTIC_SAMPLES`] per colour, taken here as the smaller of that and the spread's count.
+/// [`MAX_STATISTIC_SAMPLES`] per color, taken here as the smaller of that and the spread's count.
 fn spread_variance_error(spread: SlotSpread, noise: f32) -> f64 {
     squared_spreads_error(noise, spread, noise)
 }

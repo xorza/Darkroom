@@ -3,10 +3,10 @@
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::cfa::bayer_phase::BayerPhase;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::math::statistics::radix_median::RadixMedian;
 use crate::math::vec2us::Vec2us;
 
@@ -64,20 +64,11 @@ impl KeptOut {
         }
     }
 
-    /// Into `plane`, the same over the pixels of `plane_size` that `at` places in the frame: a
-    /// Bayer phase. Fills `plane`'s allocations, which grow only for a larger plane.
-    pub(crate) fn sample_into(
-        &self,
-        plane: &mut Self,
-        plane_size: Size2us,
-        at: impl Fn(Vec2us) -> Vec2us,
-    ) {
-        let sample = |mask: &BitBuffer2, into: &mut BitBuffer2| {
-            into.clear_to(plane_size);
-            into.fill_from_predicate(|index| mask.get_at(at(plane_size.point_of(index))));
-        };
-        sample(&self.never_flagged, &mut plane.never_flagged);
-        sample(&self.unread, &mut plane.unread);
+    /// Into `plane`, the same over the photosites of `phase`. Fills `plane`'s allocations, which
+    /// grow only for a larger plane.
+    pub(crate) fn sample_into(&self, plane: &mut Self, phase: BayerPhase) {
+        phase.deinterleave_mask(&self.never_flagged, &mut plane.never_flagged);
+        phase.deinterleave_mask(&self.unread, &mut plane.unread);
     }
 }
 
@@ -133,7 +124,7 @@ fn star_cores(data: &Buffer2<f32>, saturated: &BitBuffer2) -> BitBuffer2 {
                 window.push(data[size.index_of(Vec2us::new(x, y))]);
             }
         }
-        if median_mut(&mut window) > threshold {
+        if statistics::median_mut(&mut window) > threshold {
             cores.set_at(position, true);
         }
     });

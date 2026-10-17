@@ -10,7 +10,6 @@
 //! homogeneity-based selection.
 
 pub(crate) mod markesteijn;
-pub(crate) mod xtrans_image;
 
 #[cfg(test)]
 mod tests;

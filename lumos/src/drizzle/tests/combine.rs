@@ -1,6 +1,7 @@
 use glam::DVec2;
 
 use super::*;
+use crate::image::channel_layout::ChannelLayout;
 use crate::math::vec2us::Vec2us;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
@@ -47,14 +48,15 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
             fill_value: -1.0,
             ..usual_config(kernel)
         };
-        let mut acc = accumulator(ImageDimensions::new(size, 1), config.clone());
+        let mut acc = accumulator(
+            ImageDimensions::new(size, ChannelLayout::Mono),
+            config.clone(),
+        );
         for (image, transform) in images.iter().zip(&transforms) {
             acc.add_image(image.clone(), transform, None);
         }
         let single = acc.finalize();
-        let combined = drizzle_plain(drizzle_frames(images.clone(), &transforms), &config)
-            .unwrap()
-            .product;
+        let combined = drizzle_plain(drizzle_frames(images.clone(), &transforms), &config).unwrap();
         let lobes = if kernel == DrizzleKernel::Lanczos {
             LOBE_EXCESS
         } else {
@@ -97,8 +99,7 @@ fn a_sliver_frame_weighs_in_by_its_sliver() {
         ),
         &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     )
-    .unwrap()
-    .product;
+    .unwrap();
     let out = product.image.channel(0);
     let bound = 4.0 * 3.0 * f32::EPSILON;
     for y in 0..8 {
@@ -165,11 +166,8 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
             &IngestConfig::default(),
             ProgressMonitor::unattended(),
         )
-        .unwrap()
-        .product;
-    let plain = drizzle_plain(drizzle_frames(images, &transforms), &config)
-        .unwrap()
-        .product;
+        .unwrap();
+    let plain = drizzle_plain(drizzle_frames(images, &transforms), &config).unwrap();
     for (index, &value) in rejected.image.channel(0).pixels().iter().enumerate() {
         assert!(
             value == -1.0 || (value - 1.0).abs() <= 0.005,

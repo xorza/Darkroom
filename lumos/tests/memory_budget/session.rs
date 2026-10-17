@@ -12,6 +12,7 @@ use lumos::{
 use crate::HEAP;
 use crate::alone;
 use crate::budget::Budget;
+use lumos::ChannelLayout;
 
 /// The workers a run plans for and works on: few, so that the floors of a stage's smallest step,
 /// which grow with the workers, fit below a budget the frames do not, and the same on every
@@ -79,10 +80,14 @@ impl Session {
             Some(0),
             "a session runs on the thread that built the pool"
         );
-        let image =
-            LinearImage::from_planar_channels(ImageDimensions::new((8, 8), 1), [vec![0.0; 64]]);
-        WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)))
-            .warp(&image, WarpParams::default());
+        let image = LinearImage::from_planar_channels(
+            ImageDimensions::new((8, 8), ChannelLayout::Mono),
+            [vec![0.0; 64]],
+        );
+        WarpParams::default().warp(
+            &image,
+            &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
+        );
         Self {
             scratch: TempDir::new(tag),
         }

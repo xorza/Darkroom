@@ -1,12 +1,18 @@
 use glam::DVec2;
 
-use crate::error::InvalidConfigField;
 use crate::registration::error::{
-    RansacFailureReason, RegistrationCatalog, RegistrationError, StarField,
+    RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
-use crate::registration::registration_result::{RegistrationResult, StarMatch};
+use crate::registration::match_indices::MatchIndices;
+use crate::registration::registration_result::{RegistrationResult, StarMatch, rms_error};
 use crate::registration::transform::Transform;
-use crate::registration::triangle::voting::MatchIndices;
+use crate::registration::warp_transform::WarpTransform;
+
+/// The result of `transform` fitted to `matches`.
+fn result(transform: Transform, matches: Vec<StarMatch>) -> RegistrationResult {
+    let rms = rms_error(&matches);
+    RegistrationResult::new(WarpTransform::new(transform), matches, rms)
+}
 
 fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
     residuals
@@ -49,7 +55,7 @@ fn result_keeps_matches_and_derives_diagnostics() {
         },
     ];
 
-    let result = RegistrationResult::new(transform, None, matches.clone());
+    let result = result(transform, matches.clone());
 
     assert_eq!(result.transform().matrix(), transform.matrix());
     assert!(result.sip().is_none());
@@ -67,23 +73,9 @@ fn result_keeps_matches_and_derives_diagnostics() {
 }
 
 #[test]
-fn empty_result_has_zero_diagnostics() {
-    let result = RegistrationResult::new(Transform::identity(), None, Vec::new());
-
-    assert!(result.matched_stars().is_empty());
-    assert_eq!(result.num_inliers(), 0);
-    assert_eq!(result.rms_error(), 0.0);
-    assert_eq!(result.quality_score(), 0.0);
-}
-
-#[test]
 fn quality_score_uses_error_and_saturating_inlier_factors() {
     let four_residuals = [0.1, 0.2, 0.15, 0.05];
-    let four = RegistrationResult::new(
-        Transform::identity(),
-        None,
-        identity_matches(&four_residuals),
-    );
+    let four = result(Transform::identity(), identity_matches(&four_residuals));
 
     // RMS = sqrt((0.01 + 0.04 + 0.0225 + 0.0025) / 4).
     let expected_rms = (0.075_f64 / 4.0).sqrt();
@@ -91,28 +83,22 @@ fn quality_score_uses_error_and_saturating_inlier_factors() {
     assert!((four.rms_error() - expected_rms).abs() < f64::EPSILON);
     assert!((four.quality_score() - expected_quality).abs() < f64::EPSILON);
 
-    let twenty_five =
-        RegistrationResult::new(Transform::identity(), None, identity_matches(&[0.1; 25]));
+    let twenty_five = result(Transform::identity(), identity_matches(&[0.1; 25]));
     // The inlier factor saturates at 20, so quality = exp(-0.1 / 2).
     let saturated_quality = (-0.05_f64).exp();
     assert!((twenty_five.rms_error() - 0.1).abs() < f64::EPSILON);
     assert!((twenty_five.quality_score() - saturated_quality).abs() < f64::EPSILON);
 }
 
+/// The result hands out the warp it was built from, borrowed or taken whole.
 #[test]
-fn elapsed_time_and_warp_transform_preserve_result_state() {
+fn the_result_hands_out_its_warp() {
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
-    let result = RegistrationResult::new(
-        transform,
-        None,
-        identity_matches(&[0.1, 0.2, 0.15, 0.05, 0.12]),
-    )
-    .with_elapsed(42.5);
-
-    assert_eq!(result.elapsed_ms(), 42.5);
-
+    let result = result(transform, identity_matches(&[0.1, 0.2, 0.15, 0.05, 0.12]));
     let warp = result.warp_transform();
     assert!(!warp.has_sip());
+    assert_eq!(warp.apply(DVec2::new(10.0, 20.0)), DVec2::new(15.0, 17.0));
+    let warp = result.into_warp();
     assert_eq!(warp.apply(DVec2::new(10.0, 20.0)), DVec2::new(15.0, 17.0));
 }
 
@@ -120,48 +106,36 @@ fn elapsed_time_and_warp_transform_preserve_result_state() {
 fn registration_error_messages_include_context() {
     let cases = [
         (
-            RegistrationError::InsufficientStars {
+            RegistrationError::TooFewStars {
                 found: 5,
                 required: 10,
             },
-            "Insufficient stars detected: found 5, need 10",
+            "too few stars detected: found 5, need 10",
         ),
         (
             RegistrationError::NoMatchingPatterns,
-            "No matching star patterns found between images",
+            "no matching star patterns found between images",
         ),
         (
-            RegistrationError::RansacFailed {
-                reason: RansacFailureReason::NoInliersFound,
+            RegistrationError::RansacFailed(RansacFailure {
                 iterations: 1000,
                 best_inlier_count: 0,
-            },
-            "RANSAC failed: no inliers found (iterations: 1000, best inlier count: 0)",
+            }),
+            "RANSAC found no inliers (iterations: 1000, best inlier count: 0)",
         ),
         (
             RegistrationError::AccuracyTooLow {
                 rms_error: 5.123,
                 max_allowed: 2.0,
             },
-            "Registration accuracy too low: 5.123 pixels (max: 2.000)",
+            "registration accuracy too low: 5.123 pixels (max: 2.000)",
         ),
         (
-            RegistrationError::SipPointCountMismatch {
-                reference: 12,
-                target: 10,
-            },
-            "SIP point count mismatch: 12 reference points, 10 target points",
-        ),
-        (
-            RegistrationError::InsufficientSipPoints {
+            RegistrationError::TooFewSipPoints {
                 found: 8,
                 required: 9,
             },
-            "Insufficient points for SIP fit: found 8, need 9",
-        ),
-        (
-            RegistrationError::SingularSipSystem,
-            "SIP fit failed: singular polynomial system",
+            "too few points for a SIP fit: found 8, need 9",
         ),
         // The two that interpolate a field's *fields* rather than the field itself, and so are
         // the ones a reformatting of this enum is most likely to get wrong.
@@ -182,27 +156,9 @@ fn registration_error_messages_include_context() {
             },
             "target star 7 FWHM must be finite, got inf",
         ),
-        (
-            RegistrationError::InvalidConfig(InvalidConfigField {
-                field: "max_stars",
-                expected: "at least 3 for triangle matching",
-                value: 2.0,
-                bound: None,
-            }),
-            "Invalid configuration: max_stars must be at least 3 for triangle matching, got 2",
-        ),
     ];
 
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
-    }
-}
-
-#[test]
-fn ransac_failure_reason_messages_are_specific() {
-    let cases = [(RansacFailureReason::NoInliersFound, "no inliers found")];
-
-    for (reason, expected) in cases {
-        assert_eq!(reason.to_string(), expected);
     }
 }

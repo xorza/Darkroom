@@ -2,24 +2,24 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::tier::Tier;
 use crate::image::linear_image::LinearImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
-use crate::registration::resample::WarpBuffers;
+use crate::registration::resample::WarpResult;
 use crate::scratch_pool::Pooled;
 
 /// The memory decisions the register-warp stage reads, both taken from one
 /// [`RunPlan`](crate::memory::run_plan::RunPlan): where a frame parks, and how many frames are
 /// warped at once.
 #[derive(Debug)]
-pub(crate) struct StagePlan {
-    pub(crate) parking: FrameParking,
-    pub(crate) warp_width: usize,
+pub(super) struct StagePlan {
+    pub(super) parking: FrameParking,
+    pub(super) warp_width: usize,
 }
 
 /// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the
@@ -27,25 +27,25 @@ pub(crate) struct StagePlan {
 /// otherwise identical either way, and how many calibrated lights it parked on disk before their
 /// registration, for the run's report.
 #[derive(Debug)]
-pub(crate) struct FrameParking {
+pub(super) struct FrameParking {
     tier: Tier,
     parked: AtomicU64,
 }
 
 impl FrameParking {
-    pub(crate) const fn new(tier: Tier) -> Self {
+    pub(super) const fn new(tier: Tier) -> Self {
         Self {
             tier,
             parked: AtomicU64::new(0),
         }
     }
 
-    pub(crate) const fn spills(&self) -> bool {
+    pub(super) const fn spills(&self) -> bool {
         self.tier.spills()
     }
 
     /// Park a calibrated frame between detection and registration.
-    pub(crate) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
+    pub(super) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
         match &self.tier {
             Tier::Resident => Ok(PipelineFrame::Resident(image)),
             Tier::Spilled { scratch, .. } => {
@@ -57,7 +57,7 @@ impl FrameParking {
     }
 
     /// The calibrated lights [`Self::hold`] wrote to disk.
-    pub(crate) fn parked_lights(&self) -> u64 {
+    pub(super) fn parked_lights(&self) -> u64 {
         self.parked.load(Ordering::Relaxed)
     }
 
@@ -67,14 +67,14 @@ impl FrameParking {
     /// the next frame builds its own, which it must anyway. The spill tier writes them to disk and
     /// memory-maps the files, and the set goes back to its pool when its lease drops: the next
     /// frame warps straight into pages already faulted in rather than into a fresh set.
-    pub(crate) fn store(
+    pub(super) fn store(
         &self,
-        warped: Pooled<WarpBuffers>,
-        source_stats: FrameStats,
+        warped: Pooled<WarpResult>,
+        admitted: Admitted,
     ) -> Result<StoredFrame, AlignStackError> {
         match &self.tier {
             Tier::Resident => {
-                let WarpBuffers {
+                let WarpResult {
                     image,
                     coverage,
                     confidence,
@@ -83,7 +83,7 @@ impl FrameParking {
                     coverage,
                     confidence,
                 };
-                Ok(StoredFrame::from_memory(image, quality, source_stats))
+                Ok(StoredFrame::from_memory(image, quality, admitted))
             }
             Tier::Spilled { scratch, .. } => {
                 let quality = FrameQuality::Planes {
@@ -93,7 +93,7 @@ impl FrameParking {
                 Ok(SpillFrame {
                     image: &warped.image,
                     quality: &quality,
-                    source_stats,
+                    admitted,
                 }
                 .spill(scratch)?)
             }
@@ -104,20 +104,20 @@ impl FrameParking {
     /// source flagged pixels the warp leaves out of every other frame, and its flags only for that
     /// mask or a flag the warp carries — see [`FrameQuality::for_reference`]. One already parked on
     /// disk keeps its planes there.
-    pub(crate) fn store_reference(
+    pub(super) fn store_reference(
         &self,
         frame: PipelineFrame,
-        source_stats: FrameStats,
+        admitted: Admitted,
     ) -> Result<StoredFrame, AlignStackError> {
         match (&self.tier, frame) {
             (_, PipelineFrame::Resident(image)) => {
-                let quality = FrameQuality::for_reference(image.flags.as_ref());
+                let quality = FrameQuality::for_reference(image.flags());
                 self.tier
-                    .store(image, quality, source_stats)
+                    .store(image, quality, admitted)
                     .map_err(AlignStackError::from)
             }
             (Tier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
-                .into_reference_frame(scratch, source_stats)
+                .into_reference_frame(scratch, admitted)
                 .map_err(AlignStackError::from),
             (Tier::Resident, PipelineFrame::Spilled(_)) => {
                 unreachable!("the resident tier parks no frame on disk")
@@ -126,7 +126,7 @@ impl FrameParking {
     }
 
     /// The tier the combine reads the stored frames through.
-    pub(crate) fn into_tier(self) -> Tier {
+    pub(super) fn into_tier(self) -> Tier {
         self.tier
     }
 }
@@ -137,10 +137,11 @@ mod tests {
     use crate::memory::run_memory::RunMemory;
     use common::TempDir;
 
-    use crate::combine::frame_cache::frame_gate::FrameGate;
-    use crate::frame::frame_stats::FrameStats;
+    use crate::combine::frame_read::frame_gate::FrameGate;
+    use crate::frame::admitted::Admitted;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::tier::Tier;
+    use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
@@ -161,14 +162,14 @@ mod tests {
                 combine: CombineBudget::new(RunMemory::new(1 << 20, None).budget(1)),
             })
         };
-        let dims = ImageDimensions::new((4, 1), 1);
+        let dims = ImageDimensions::new((4, 1), ChannelLayout::Mono);
         for saturated in [false, true] {
-            let mut image = LinearImage::from_pixels(dims, vec![0.5, 0.25, 0.75, 1.0]);
-            image.flags = PixelFlags::from_fn(dims.size(), |index| match index {
+            let mut image = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
+            image.set_flags(PixelFlags::from_fn(dims.size(), |index| match index {
                 0 if saturated => QualityFlags::SATURATED,
                 1 => QualityFlags::COSMIC_RAY,
                 _ => QualityFlags::default(),
-            });
+            }));
             for (label, tier, parked) in [
                 ("ram", FrameParking::new(Tier::Resident), false),
                 ("spill", spill(), false),
@@ -180,7 +181,7 @@ mod tests {
                     PipelineFrame::Resident(image.clone())
                 };
                 let stored = tier
-                    .store_reference(frame, FrameStats::measure(&image))
+                    .store_reference(frame, Admitted::measure(&image))
                     .unwrap();
                 let gate = FrameGate::of(&stored, 0, 0..4);
                 assert_eq!(

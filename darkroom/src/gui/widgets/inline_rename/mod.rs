@@ -57,7 +57,7 @@ impl<'a> InlineRename<'a> {
     /// A rename label for `name` in the look `style`, identified by its call
     /// site.
     ///
-    /// Font, colour and leading ride along inside the bundle's per-state
+    /// Font, color and leading ride along inside the bundle's per-state
     /// `text` slots, as they do for every palantir widget — to bold a title,
     /// hand over a bundle built with [`InlineRenameTheme::with_text`]. An
     /// axis a slot leaves unset inherits ambient `palantir::Theme::text`.

@@ -13,33 +13,45 @@ pub(crate) mod fit_catalogs;
 mod homography_refinement;
 mod weighted_pairs;
 
-use crate::registration::distortion::sip::{SipModel, SipPolynomial};
+use crate::registration::distortion::sip::SipModel;
 use crate::registration::registration_result::StarMatch;
 use crate::registration::transform::TransformType;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::transform::linear_model::LinearModel;
+use crate::registration::warp_transform::WarpTransform;
 
-/// What the final fit fits: a transform, and optionally a SIP correction applied before it.
+/// What the final fit fits: a transform alone, or one up to affine under a SIP correction applied
+/// before it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct FitModel {
-    pub(crate) transform: TransformType,
-    pub(crate) sip: Option<SipModel>,
+pub(crate) enum FitModel {
+    Plain(TransformType),
+    WithSip(LinearModel, SipModel),
 }
 
 impl FitModel {
+    /// The transform's model.
+    pub(crate) fn transform_type(self) -> TransformType {
+        match self {
+            Self::Plain(transform_type) => transform_type,
+            Self::WithSip(linear, _) => linear.into(),
+        }
+    }
+
     /// The model's free parameters: the transform's, and the SIP correction's two per term.
     pub(crate) fn parameter_count(self) -> usize {
-        self.transform.parameter_count()
-            + self
-                .sip
-                .map_or(0, |sip| 2 * SipPolynomial::term_count(sip.order))
+        self.transform_type().parameter_count()
+            + match self {
+                Self::Plain(_) => 0,
+                Self::WithSip(_, sip) => 2 * sip.order.term_count(),
+            }
     }
 
     /// The pairs the model needs: the transform's minimal sample, or the SIP fit's floor.
     fn required_pairs(self) -> usize {
-        self.sip.map_or_else(
-            || self.transform.min_points(),
-            |sip| SipPolynomial::required_points(sip.order).max(self.transform.min_points()),
-        )
+        let minimal = self.transform_type().min_points();
+        match self {
+            Self::Plain(_) => minimal,
+            Self::WithSip(_, sip) => sip.order.required_points().max(minimal),
+        }
     }
 }
 
@@ -52,6 +64,8 @@ pub(crate) struct FinalFit {
     /// The robust scale of the normalized residuals, at least 1: how far the residuals spread
     /// beyond what the stars' position σ claims.
     pub(crate) scale: f64,
+    /// The RMS of the matches' residuals, in target pixels.
+    pub(crate) rms_error: f64,
 }
 
 /// Why a final fit produced no transform.

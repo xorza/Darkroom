@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use imaginarium::Buffer2;
 
-use crate::image::cfa::cfa_colour::CfaColour;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
@@ -77,9 +77,9 @@ pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, patter
     for y in 0..height {
         for x in 0..width {
             let factor = match pattern.color_at(Vec2us::new(x, y)) {
-                CfaColour::Red => r_factor,
-                CfaColour::Blue => b_factor,
-                CfaColour::Green => 1.0,
+                CfaColor::Red => r_factor,
+                CfaColor::Blue => b_factor,
+                CfaColor::Green => 1.0,
             };
 
             let idx = y * width + x;

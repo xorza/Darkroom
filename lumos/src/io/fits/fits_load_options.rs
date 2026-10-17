@@ -1,12 +1,10 @@
-use std::path::Path;
-
 use fits_well::io::{ChecksumReport, ChecksumStatus};
 use serde::Serialize;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::sample_domain::Pedestal;
-use crate::io::error::{FitsRefusal, ImageError};
-use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 
 /// Selects the image HDU decoded from a FITS container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -58,21 +56,6 @@ pub enum FitsFloatScale {
     FullScale(f32),
 }
 
-/// What a FITS image's null pixels do to the load.
-///
-/// A null is not corruption: FITS 4.0 §6.3 and the NOST floating-point agreement make IEEE NaN the
-/// undefined-value flag for a floating-point `BITPIX`, and the `BLANK` keyword's value the flag for
-/// an integer one. A conforming file with a mosaic edge, a coverage gap, or a masked bad pixel
-/// carries them by design, and cfitsio, astropy and Siril all read it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum FitsNullPolicy {
-    /// Carry them: the samples are replaced with a finite fill and their positions recorded, so the
-    /// file opens and the missing pixels stay identifiable.
-    Mask,
-    /// Fail the load, naming how many there are and where the first one is.
-    Reject,
-}
-
 /// Controls checksum validation for the selected FITS HDU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FitsChecksumPolicy {
@@ -92,28 +75,27 @@ impl FitsChecksumPolicy {
         self,
         report: ChecksumReport,
         index: usize,
-        path: &Path,
-    ) -> Result<FitsChecksumProvenance, ImageError> {
+    ) -> Result<FitsChecksumProvenance, FitsLoadError> {
         match self {
             Self::Ignore => unreachable!("ignore policy returned before verification"),
             Self::VerifyIfPresent => {
                 if report.datasum == ChecksumStatus::Invalid
                     || report.checksum == ChecksumStatus::Invalid
                 {
-                    return Err(ImageError::fits_unsupported(
-                        path,
-                        FitsRefusal::InvalidChecksum { hdu: index, report },
-                    ));
+                    return Err(FitsLoadError::from(FitsRefusal::InvalidChecksum {
+                        hdu: index,
+                        report,
+                    }));
                 }
             }
             Self::RequireValid => {
                 if report.datasum != ChecksumStatus::Valid
                     || report.checksum != ChecksumStatus::Valid
                 {
-                    return Err(ImageError::fits_unsupported(
-                        path,
-                        FitsRefusal::ChecksumRequired { hdu: index, report },
-                    ));
+                    return Err(FitsLoadError::from(FitsRefusal::ChecksumRequired {
+                        hdu: index,
+                        report,
+                    }));
                 }
             }
         }
@@ -152,8 +134,6 @@ pub struct FitsLoadOptions {
     pub checksum: FitsChecksumPolicy,
     /// How a floating-point HDU's sample scale is decided.
     pub float_scale: FitsFloatScale,
-    /// What null pixels do to the load.
-    pub nulls: FitsNullPolicy,
     /// The Bayer phase of a frame whose `BAYERPAT` says only `'TRUE'` — mosaiced, phase unstated —
     /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
     /// four.
@@ -172,11 +152,6 @@ impl Default for FitsLoadOptions {
             cube: FitsCubeInterpretation::Reject,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
-            // Reading a file that conforms to the standard is not opt-in behaviour. The other
-            // defaults here refuse *ambiguity* — a cube whose colour semantics nothing establishes,
-            // a float scale no header settles; a null is unambiguous, and refusing it refuses data
-            // the standard defines.
-            nulls: FitsNullPolicy::Mask,
             unstated_bayer_pattern: None,
             pedestal: Pedestal::Unknown,
         }

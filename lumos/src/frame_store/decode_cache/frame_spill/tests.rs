@@ -1,43 +1,49 @@
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 use common::{FileId, FileIdentity, SerdeFormat, TempDir};
 use fits_well::image::SampleType;
-use imaginarium::Buffer2;
 
+use crate::decode::decoder_kind::DecoderKind;
+use crate::frame::admitted::Admitted;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
-use crate::frame::unverified_conditions::UnverifiedConditions;
-use crate::frame_store::decode_cache::cache_key::{CacheKey, DecoderKind};
+use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::decode_cache::frame_spill::{
-    Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN, encode_sidecar,
+    Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
+use crate::image::background_split::BackgroundSplit;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::flat_gain::{FlatGain, GainGrid};
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::dark_comparison::DarkComparison;
+use crate::image::derived_facts::DerivedFacts;
+use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
+use crate::image::mosaic_noise::MosaicNoise;
+use crate::image::observation_header::ObservationHeader;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::fits::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
-use crate::io::fits::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
-use crate::math::size2us::Size2us;
-use crate::math::statistics::mad_to_sigma;
-use crate::noise::mosaic_noise::MosaicNoise;
+use crate::image::temperature_difference::TemperatureDifference;
+use crate::image::temperature_source::TemperatureSource;
+use crate::math::statistics;
 
-fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {
-    FrameStats {
+fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
+    let stats = FrameStats {
         medians: channels.iter().map(|&(median, _)| median).collect(),
-        noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
-        read_share: [0.0; 3].into_iter().collect(),
+        background: channels
+            .iter()
+            .map(|&(_, mad)| statistics::internals::mad_to_sigma(mad))
+            .map(BackgroundSplit::of_sigma)
+            .collect(),
         sky: channels.iter().map(|&(median, _)| median).collect(),
         spread: Some(
             channels
@@ -50,129 +56,143 @@ fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats
         ),
         quantization_sigma,
         electrons_per_unit: Some(2.5),
-        facts: FrameFacts {
-            domain: Some(SampleDomain {
-                scale: 65535.0,
-                origin: ScaleOrigin::Declared,
-                pedestal: Pedestal::Kept(2048.0),
-                unit: Some("ADU".to_owned()),
-            }),
-            row_order: Some(RowOrder::BottomUp),
-            cfa_type: Some(CfaType::Bayer(CfaPattern::Gbrg)),
-            saturation_flagged: true,
-            conditions: CaptureConditions {
-                exposure_time: Some(300.0),
-                ccd_temp: Some(-10.0),
-                camera_temp: Some(21.5),
-            },
-            unverified_dark: UnverifiedConditions {
-                exposure: false,
-                temperature: true,
-            },
-        },
-    }
-}
-
-fn digests() -> PlaneDigests {
-    PlaneDigests {
-        channels: vec![[1; 32]],
-        flags: None,
-    }
-}
-
-/// Metadata with every field set, its flat gain and every part of its provenance among them.
-fn metadata() -> ImageMetadata {
-    let size = Size2us::new(9, 5);
-    let grid = GainGrid::of(size);
-    let nodes = (0..3)
-        .map(|channel| {
-            Buffer2::from_fn(grid.columns, grid.rows, |x, y| {
-                1.0 + 0.125 * (y * grid.columns + x + channel) as f32
-            })
-        })
-        .collect();
-    ImageMetadata {
-        object: Some("M 42".to_owned()),
-        instrument: Some("ZWO ASI2600MC".to_owned()),
-        telescope: Some("RedCat 51".to_owned()),
-        date_obs: Some("2026-01-02T03:04:05".to_owned()),
-        date_local: Some("2026-01-02T04:04:05".to_owned()),
-        exposure_time: Some(300.0),
-        iso: Some(800),
-        sample_type: Some(SampleType::U16),
-        camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
-        filter: Some("L-eXtreme".to_owned()),
-        gain: Some(100.0),
-        egain: Some(0.25),
-        ccd_temp: Some(-10.0),
-        camera_temp: Some(21.5),
-        image_type: Some("LIGHT".to_owned()),
-        xbinning: Some(1),
-        ybinning: Some(2),
-        set_temp: Some(-10.0),
-        offset: Some(50),
-        focal_length: Some(250.0),
-        airmass: Some(1.25),
-        ra_deg: Some(83.82),
-        dec_deg: Some(-5.39),
-        pixel_size_x: Some(3.76),
-        pixel_size_y: Some(3.76),
-        data_max: Some(65535.0),
-        provenance: Some(ImageProvenance {
-            container: SourceContainer::Fits,
-            decoder: DecoderProvenance::FitsWell,
-            transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
-                bscale: 1.0,
-                bzero: 32768.0,
-                hdu: FitsHduProvenance {
-                    index: 1,
-                    extname: Some("SCI".to_owned()),
-                    extver: Some(2),
-                },
-                checksum: FitsChecksumProvenance {
-                    datasum: FitsChecksumState::Valid,
-                    checksum: FitsChecksumState::Absent,
-                },
-            }),
-            color: ColorProvenance::SensorCfa,
-            clipped: true,
-            demosaic: DemosaicProvenance::LumosMarkesteijn {
-                passes: MarkesteijnPasses::Three,
-            },
-            row_order: RowOrder::BottomUp,
-        }),
+    };
+    let facts = FrameFacts {
         domain: Some(SampleDomain {
             scale: 65535.0,
             origin: ScaleOrigin::Declared,
             pedestal: Pedestal::Kept(2048.0),
             unit: Some("ADU".to_owned()),
         }),
-        quantization_sigma: Some(4.4e-6),
-        mosaic_noise: Some(MosaicNoise {
-            sigma: [0.01, 0.02, 0.03],
-            read_share: [0.25, 0.5, 0.75],
-            sky: [0.1, 0.2, 0.3],
-            quantization_sigma: Some(4.4e-6),
-        }),
-        flat_gain: Some(Arc::new(FlatGain::from_nodes(size, nodes))),
+        row_order: Some(RowOrder::BottomUp),
+        cfa_type: Some(CfaType::Bayer(CfaPattern::Gbrg)),
         saturation_flagged: true,
-        calibration: CalibrationState {
-            bias: true,
-            thermal: true,
-            flat: false,
+        conditions: CaptureConditions {
+            exposure_time: Some(300.0),
+            ccd_temp: Some(-10.0),
+            camera_temp: Some(21.5),
         },
-        unverified_dark: UnverifiedConditions {
-            exposure: true,
-            temperature: false,
+        dark_comparison: Some(DarkComparison {
+            exposure_compared: true,
+            temperature: Some(TemperatureSource::Camera),
+            temperature_difference: Some(TemperatureDifference {
+                reading: TemperatureSource::Camera,
+                frame: 21.5,
+                dark: 23.0,
+            }),
+        }),
+    };
+    Admitted { stats, facts }
+}
+
+fn digests() -> PlaneDigests {
+    PlaneDigests {
+        channels: vec![[1; 32]],
+        flags: None,
+        samples: vec![[2; 32]],
+        gain: Vec::new(),
+    }
+}
+
+/// Metadata with every field set, every part of its provenance among them.
+fn metadata() -> ImageMetadata {
+    ImageMetadata {
+        header: ObservationHeader {
+            object: Some("M 42".to_owned()),
+            instrument: Some("ZWO ASI2600MC".to_owned()),
+            telescope: Some("RedCat 51".to_owned()),
+            date_obs: Some("2026-01-02T03:04:05".to_owned()),
+            date_local: Some("2026-01-02T04:04:05".to_owned()),
+            exposure_time: Some(300.0),
+            iso: Some(800),
+            sample_type: Some(SampleType::U16),
+            camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            filter: Some("L-eXtreme".to_owned()),
+            gain: Some(100.0),
+            egain: Some(0.25),
+            ccd_temp: Some(-10.0),
+            camera_temp: Some(21.5),
+            image_type: Some("LIGHT".to_owned()),
+            xbinning: Some(1),
+            ybinning: Some(2),
+            set_temp: Some(-10.0),
+            offset: Some(50),
+            focal_length: Some(250.0),
+            airmass: Some(1.25),
+            ra_deg: Some(83.82),
+            dec_deg: Some(-5.39),
+            pixel_size_x: Some(3.76),
+            pixel_size_y: Some(3.76),
+            data_max: Some(65535.0),
         },
+        derived: DerivedFacts::builder()
+            .provenance(ImageProvenance {
+                source: SourceProvenance::Fits(FitsTransferProvenance {
+                    bscale: 1.0,
+                    bzero: 32768.0,
+                    hdu: FitsHduProvenance {
+                        index: 1,
+                        extname: Some("SCI".to_owned()),
+                        extver: Some(2),
+                    },
+                    checksum: FitsChecksumProvenance {
+                        datasum: FitsChecksumState::Valid,
+                        checksum: FitsChecksumState::Absent,
+                    },
+                }),
+                color: ColorProvenance::SensorCfa,
+                clipped: true,
+                demosaic: DemosaicProvenance::LumosMarkesteijn {
+                    passes: MarkesteijnPasses::Three,
+                },
+                row_order: RowOrder::BottomUp,
+            })
+            .domain(SampleDomain {
+                scale: 65535.0,
+                origin: ScaleOrigin::Declared,
+                pedestal: Pedestal::Kept(2048.0),
+                unit: Some("ADU".to_owned()),
+            })
+            .quantization_sigma(Some(4.4e-6))
+            .mosaic_noise(Some(MosaicNoise {
+                background: [
+                    BackgroundSplit {
+                        variance: 1e-4,
+                        read_share: 0.25,
+                    },
+                    BackgroundSplit {
+                        variance: 4e-4,
+                        read_share: 0.5,
+                    },
+                    BackgroundSplit {
+                        variance: 9e-4,
+                        read_share: 0.75,
+                    },
+                ],
+                sky: [0.1, 0.2, 0.3],
+                quantization_sigma: Some(4.4e-6),
+            }))
+            .saturation_flagged(true)
+            .calibration(CalibrationState {
+                bias: true,
+                thermal: true,
+                flat: false,
+            })
+            .dark_comparison(Some(DarkComparison {
+                exposure_compared: false,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: None,
+            }))
+            .build(),
     }
 }
 
 /// What a decode of 4 × 3 mono left, carrying `carries`, with [`metadata`].
 fn decoded(carries: Carries) -> Decoded {
     Decoded {
-        dimensions: ImageDimensions::new((4, 3), 1),
+        dimensions: ImageDimensions::new((4, 3), ChannelLayout::Mono),
         carries,
+        gain_channels: 0,
         metadata: metadata(),
     }
 }
@@ -202,6 +222,7 @@ const fn key(decode_version: u64) -> CacheKey {
 #[test]
 fn sidecar_layout_is_pinned() {
     let mut bytes = Vec::new();
+    let admitted = stats(&[(0.5, 0.25), (0.75, 0.125)], Some(2e-5));
     let commit = Commit {
         key: key(7),
         source: b"/data/lights/light_0001.cr2".to_vec(),
@@ -209,18 +230,19 @@ fn sidecar_layout_is_pinned() {
         height: 4022,
         channels: 1,
         carries: Carries::NullMask,
+        gain_channels: 3,
         digests: PlaneDigests {
             channels: vec![[3; 32], [5; 32]],
             flags: Some([7; 32]),
+            samples: vec![[9; 32]],
+            gain: vec![[11; 32], [13; 32], [15; 32]],
         },
         metadata: metadata(),
+        stats: admitted.stats,
+        facts: admitted.facts,
     };
     SerdeFormat::Bitcode
         .serialize_into(&commit, &mut bytes)
-        .unwrap();
-    let stats = stats(&[(0.5, 0.25), (0.75, 0.125)], Some(2e-5));
-    SerdeFormat::Bitcode
-        .serialize_into(&stats, &mut bytes)
         .unwrap();
     assert_eq!(
         &blake3::hash(&bytes).to_hex()[..16],
@@ -244,21 +266,24 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
             Carries::Flags,
         ),
     ] {
-        spill.commit(decoded(carries), digests(), &stats).unwrap();
+        spill.commit(&decoded(carries), digests(), &stats).unwrap();
         let committed = spill.committed().unwrap();
         assert_eq!(committed.decoded.carries, carries);
         assert_eq!(
             committed.decoded.dimensions,
-            ImageDimensions::new((4, 3), 1)
+            ImageDimensions::new((4, 3), ChannelLayout::Mono)
         );
         assert_eq!(
             format!("{:?}", committed.decoded.metadata),
             format!("{:?}", metadata()),
             "every field of the metadata, its flat gain among them, reads back"
         );
-        assert_eq!(committed.stats.medians, stats.medians);
-        assert_eq!(committed.stats.quantization_sigma, stats.quantization_sigma);
-        assert_eq!(committed.stats.facts, stats.facts);
+        assert_eq!(committed.admitted.stats.medians, stats.stats.medians);
+        assert_eq!(
+            committed.admitted.stats.quantization_sigma,
+            stats.stats.quantization_sigma
+        );
+        assert_eq!(committed.admitted.facts, stats.facts);
     }
     let other_key = FrameSpill {
         key: key(8),
@@ -278,7 +303,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     for sigma in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
         spill
             .commit(
-                decoded(Carries::Channels),
+                &decoded(Carries::Channels),
                 digests(),
                 &stats(&[(42.5, 3.25)], Some(sigma)),
             )
@@ -287,20 +312,23 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     }
 
     spill
-        .commit(decoded(Carries::Channels), digests(), &valid)
+        .commit(&decoded(Carries::Channels), digests(), &valid)
         .unwrap();
-    fs::write(spill.stats_path(), b"bad").unwrap();
-    assert!(spill.committed().is_none(), "corrupt statistics");
+    let commit = fs::read(spill.commit_path()).unwrap();
+    fs::write(spill.commit_path(), b"bad").unwrap();
+    assert!(spill.committed().is_none(), "a corrupt record");
 
-    let mut stale = encode_sidecar(&valid);
+    let mut stale = commit.clone();
     stale[0] ^= 1;
-    fs::write(spill.stats_path(), &stale).unwrap();
+    fs::write(spill.commit_path(), &stale).unwrap();
     assert!(spill.committed().is_none(), "another layout tag");
+    fs::write(spill.commit_path(), &commit).unwrap();
+    assert!(spill.committed().is_some(), "the record as written");
 
     // A damaged commit that would still decode reads as absent: one byte of its payload
     // flipped, and the file cut short.
     spill
-        .commit(decoded(Carries::Channels), digests(), &valid)
+        .commit(&decoded(Carries::Channels), digests(), &valid)
         .unwrap();
     let commit = fs::read(spill.commit_path()).unwrap();
     let mut flipped = commit.clone();
@@ -313,7 +341,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     assert!(spill.committed().is_some(), "the commit as written");
 
     spill
-        .commit(decoded(Carries::Channels), digests(), &valid)
+        .commit(&decoded(Carries::Channels), digests(), &valid)
         .unwrap();
     fs::remove_file(spill.commit_path()).unwrap();
     assert!(spill.committed().is_none(), "no commit record");
@@ -321,9 +349,9 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     let blocker = directory.join("not_a_directory");
     fs::write(&blocker, b"file").unwrap();
     let error = FrameSpill::named(&blocker, "frame", key(7))
-        .commit(decoded(Carries::Channels), digests(), &valid)
+        .commit(&decoded(Carries::Channels), digests(), &valid)
         .unwrap_err();
-    let expected = blocker.join("frame.stats");
+    let expected = blocker.join("frame.commit");
     assert!(matches!(
         error,
         FrameStoreError::WriteFile { path, .. } if path == expected

@@ -42,7 +42,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 }
             });
             let buffers = ScratchPool::default();
+            let mut regions = Vec::new();
             b.iter(|| {
+                regions.clear();
                 extract_candidates(
                     LabelledPlane {
                         plane: &stages.plane,
@@ -50,6 +52,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     },
                     &config,
                     &buffers,
+                    &mut regions,
                 )
             });
         });

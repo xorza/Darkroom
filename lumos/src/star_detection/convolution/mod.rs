@@ -1,10 +1,9 @@
-//! Gaussian convolution for matched filtering in star detection.
+//! Gaussian convolution for matched filtering in star detection: the key technique DAOFIND and
+//! SExtractor use to lift faint stars above the noise.
 //!
-//! Implements separable Gaussian convolution which is O(n×k) instead of O(n×k²)
-//! where k is the kernel size. This is the key technique used by DAOFIND and
-//! SExtractor to boost SNR for faint star detection.
-//!
-//! Uses SIMD acceleration when available (AVX2/SSE on `x86_64`, NEON on aarch64).
+//! A Gaussian along the pixel axes is separable, a row pass and a column pass at O(n×k) for a
+//! kernel of k taps rather than O(n×k²); an ellipse at another angle convolves with a 2D kernel.
+//! Every pass runs as a vector kernel on the crate's tiers: AVX2 with FMA, NEON, and portable.
 
 pub(crate) mod filter_kernels;
 pub(super) mod simd;

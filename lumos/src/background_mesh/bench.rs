@@ -23,8 +23,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let input = TileInput {
                 pixels: &pixels,
                 mask: None,
-                eligible: None,
-                sigma_clip_iterations: config.sigma_clip_iterations,
+                color: None,
+                sigma_clip_max_iterations: config.sigma_clip_max_iterations,
             };
             let mut scratch = TileScratch::default();
             b.iter(|| TileStats::compute(&input, tile, &mut scratch));

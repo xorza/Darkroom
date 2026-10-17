@@ -19,7 +19,12 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let config = bench::config(field).background;
             let mut resources = DetectionResources::new(FRAME);
             b.iter(|| {
-                BackgroundEstimate::estimate(MaskedPlane::from(&pixels), &config, &mut resources)
+                BackgroundEstimate::estimate(
+                    MaskedPlane::from(&pixels),
+                    &config,
+                    &resources.floats,
+                    &mut resources.background,
+                )
             });
         });
     }

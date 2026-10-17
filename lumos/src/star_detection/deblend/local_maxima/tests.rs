@@ -21,10 +21,12 @@ fn default_separation() -> usize {
     ExtractionConfig::default().deblend_min_separation
 }
 
-/// The default config's prominence.
-fn default_prominence() -> f32 {
+/// The default config's relative height.
+fn default_relative_height() -> f32 {
     match ExtractionConfig::default().deblend {
-        Deblend::LocalMaxima { min_prominence } => min_prominence,
+        Deblend::LocalMaxima {
+            min_relative_height,
+        } => min_relative_height,
         Deblend::MultiThreshold { .. } => unreachable!("the default deblends by local maxima"),
     }
 }
@@ -41,17 +43,20 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
 }
 
 /// `LocalMaximaParams::find_local_maxima` into a fresh list.
-fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Pixel> {
+fn maxima(
+    component: &Component<'_>,
+    min_separation: usize,
+    min_relative_height: f32,
+) -> Vec<Pixel> {
     let mut peaks = Vec::new();
     let mut pixels = ComponentPixels::default();
-    pixels.fill(component);
     LocalMaximaParams {
         min_separation,
-        min_prominence,
+        min_relative_height,
     }
     .find_local_maxima(
         component,
-        &pixels,
+        &mut pixels,
         Kept {
             maxima: &mut Vec::new(),
             peaks: &mut peaks,
@@ -61,12 +66,36 @@ fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32)
     peaks
 }
 
+/// How many pixels `LocalMaximaParams::find_local_maxima` indexes for `component`: none when it
+/// keeps its one candidate with no map.
+fn indexed(component: &Component<'_>) -> usize {
+    let mut pixels = ComponentPixels::default();
+    LocalMaximaParams {
+        min_separation: default_separation(),
+        min_relative_height: default_relative_height(),
+    }
+    .find_local_maxima(
+        component,
+        &mut pixels,
+        Kept {
+            maxima: &mut Vec::new(),
+            peaks: &mut Vec::new(),
+            occupied: &mut Vec::new(),
+        },
+    );
+    pixels.pixels.len()
+}
+
 /// `LocalMaximaParams::deblend` into a fresh list.
-fn deblended(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Region> {
+fn deblended(
+    component: &Component<'_>,
+    min_separation: usize,
+    min_relative_height: f32,
+) -> Vec<Region> {
     let mut regions = Vec::new();
     LocalMaximaParams {
         min_separation,
-        min_prominence,
+        min_relative_height,
     }
     .deblend(component, &mut DeblendBuffers::default(), &mut regions);
     regions
@@ -82,11 +111,14 @@ fn single_star_is_one_whole_region() {
     let fixture = stars(Size2us::new(100, 100), 3.0, &[(50.0, 50.0, 1.0)]);
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = maxima(&component, default_separation(), default_prominence());
+    let peaks = maxima(&component, default_separation(), default_relative_height());
     assert_eq!(positions(&peaks), [(50, 50)]);
     assert_eq!(peaks[0].value, fixture.pixels[(50, 50)]);
 
-    let regions = deblended(&component, default_separation(), default_prominence());
+    // One candidate needs no map of the component to be kept.
+    assert_eq!(indexed(&component), 0);
+
+    let regions = deblended(&component, default_separation(), default_relative_height());
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].bbox, fixture.data.bbox);
     assert_eq!(regions[0].area, fixture.data.area);
@@ -104,14 +136,16 @@ fn two_separated_stars() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = maxima(&component, default_separation(), default_prominence());
+    let peaks = maxima(&component, default_separation(), default_relative_height());
     assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
+    // Two candidates map every pixel of the component to check one against the other.
+    assert_eq!(indexed(&component), fixture.data.area);
     assert_eq!(
         (peaks[0].value, peaks[1].value),
         (fixture.pixels[(30, 50)], fixture.pixels[(70, 50)])
     );
 
-    let regions = deblended(&component, default_separation(), default_prominence());
+    let regions = deblended(&component, default_separation(), default_relative_height());
     let blob_area = |left: bool| {
         component
             .pixels()
@@ -150,8 +184,8 @@ fn euclidean_separation() {
 }
 
 #[test]
-fn prominence_filter() {
-    // The faint star peaks at 0.2 of the bright one: out at prominence 0.5, in at 0.1.
+fn relative_height_filter() {
+    // The faint star peaks at 0.2 of the bright one: out at relative height 0.5, in at 0.1.
     let fixture = stars(
         Size2us::new(100, 100),
         2.5,
@@ -210,7 +244,7 @@ fn peaks_sorted_by_brightness() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = maxima(&component, default_separation(), default_prominence());
+    let peaks = maxima(&component, default_separation(), default_relative_height());
     assert_eq!(positions(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
@@ -278,8 +312,9 @@ fn suppressed_peak_does_not_suppress_dimmer_ones() {
 
 #[test]
 fn is_local_maximum_cases() {
-    // Strictly above all eight neighbours that exist: a corner and an edge have fewer, a diagonal
-    // ring counts as much as an orthogonal one, and an equal neighbour (a plateau) disqualifies.
+    // At least as high as all eight neighbours that exist, strictly above those before it in
+    // raster order: a corner and an edge have fewer, a diagonal ring counts as much as an
+    // orthogonal one, and of a plateau the first pixel in raster order qualifies, the next not.
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     pixels[(0, 0)] = 1.0;
     pixels[(1, 1)] = 0.5;
@@ -302,7 +337,12 @@ fn is_local_maximum_cases() {
         ((5, 0), true, "top edge"),
         ((5, 5), true, "diagonal neighbours only, all lower"),
         ((4, 4), false, "below its diagonal neighbour"),
-        ((2, 8), false, "plateau: an equal neighbour"),
+        (
+            (2, 8),
+            true,
+            "plateau: the first pixel, its equal neighbour after it",
+        ),
+        ((3, 8), false, "plateau: an equal neighbour before it"),
         ((7, 2), false, "a brighter orthogonal neighbour"),
         ((8, 2), true, "above every neighbour"),
     ];
@@ -316,7 +356,7 @@ fn is_local_maximum_cases() {
 }
 
 #[test]
-fn plateau_no_local_max() {
+fn plateau_has_its_first_pixel_as_maximum() {
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
 
@@ -336,9 +376,13 @@ fn plateau_no_local_max() {
     let component = Component::new(&data, &pixels, &labels);
 
     let peaks = maxima(&component, 1, 0.0);
-    assert!(peaks.is_empty(), "a plateau has no strict local maximum");
+    assert_eq!(
+        positions(&peaks),
+        [(3, 3)],
+        "a plateau's first pixel is its maximum"
+    );
 
-    // With no maximum the component stays whole, peaked at its first brightest pixel.
+    // With one maximum the component stays whole, peaked at its first brightest pixel.
     let regions = deblended(&component, 1, 0.0);
     assert_eq!(regions.len(), 1);
     assert_eq!((regions[0].peak, regions[0].area), (Vec2us::new(3, 3), 16));
@@ -361,7 +405,7 @@ fn single_pixel_is_local_max() {
     let peaks = maxima(
         &Component::new(&data, &pixels, &labels),
         default_separation(),
-        default_prominence(),
+        default_relative_height(),
     );
     assert_eq!(positions(&peaks), [(5, 5)]);
 }
@@ -440,7 +484,7 @@ fn noise_component(size: Size2us, seed: u64) -> TestComponent {
 /// under the grid's crossover, to hundreds.
 #[test]
 fn fast_paths_match_the_definitions() {
-    for (seed, separation, prominence) in [
+    for (seed, separation, relative_height) in [
         (1, 0, 0.9),
         (2, 1, 0.5),
         (3, 3, 0.1),
@@ -457,7 +501,7 @@ fn fast_paths_match_the_definitions() {
         let mut candidates: Vec<Pixel> = component
             .pixels()
             .filter(|&p| {
-                p.value >= component.peak().value * prominence && is_local_maximum(p, &pixels)
+                p.value >= component.peak().value * relative_height && is_local_maximum(p, &pixels)
             })
             .collect();
         candidates.sort_unstable_by(Pixel::brighter_first);
@@ -471,7 +515,7 @@ fn fast_paths_match_the_definitions() {
                 expected.push(candidate);
             }
         }
-        let peaks = maxima(&component, separation, prominence);
+        let peaks = maxima(&component, separation, relative_height);
         assert_eq!(
             positions(&peaks),
             positions(&expected),
@@ -514,4 +558,47 @@ fn fast_paths_match_the_definitions() {
             peaks.len()
         );
     }
+}
+
+/// A flat-topped source between two fainter strict maxima keeps its own region. The component is
+/// a band of 0.2 over x 2..22, y 9..14, with a 2×2 top of 1.0 at x 10..12, y 10..12 and single
+/// peaks of 0.8 at (4, 11) and (18, 11). A strict test found only the two fainter peaks and split
+/// the band between them, so the brightest source's pixels went to its neighbours; the top's
+/// first pixel, (10, 10), is now a peak and its region holds the whole top.
+#[test]
+fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
+    let mut pixels = Buffer2::new_filled(24, 16, 0.0f32);
+    let mut labels_buf = Buffer2::new_filled(24, 16, 0u32);
+    for y in 9..14 {
+        for x in 2..22 {
+            pixels[(x, y)] = 0.2;
+            labels_buf[(x, y)] = 1;
+        }
+    }
+    for y in 10..12 {
+        for x in 10..12 {
+            pixels[(x, y)] = 1.0;
+        }
+    }
+    pixels[(4, 11)] = 0.8;
+    pixels[(18, 11)] = 0.8;
+    let labels = LabelMap::from_raw(&labels_buf, 1);
+    let data = ComponentData {
+        bbox: URect::new(Vec2us::new(2, 9), Vec2us::new(22, 14)),
+        label: 1,
+        area: 100,
+    };
+    let component = Component::new(&data, &pixels, &labels);
+
+    assert_eq!(
+        positions(&maxima(&component, 3, 0.5)),
+        [(10, 10), (4, 11), (18, 11)]
+    );
+    let regions = deblended(&component, 3, 0.5);
+    assert_eq!(regions.len(), 3);
+    let top = regions
+        .iter()
+        .find(|region| region.peak == Vec2us::new(10, 10))
+        .expect("the flat top is a region of its own");
+    assert!(top.area >= 4, "{}", top.area);
 }

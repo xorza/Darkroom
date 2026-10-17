@@ -2,22 +2,24 @@ use std::io::{Error, ErrorKind};
 
 use common::CancelToken;
 use imaginarium::Buffer2;
+use lumos::ChannelLayout;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, BackgroundConfig, CalibrationComponent,
-    CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern, Combine, CombineMethod,
-    Coverage, DefectSummary, DetectionDiagnostics, DomainMap, DrizzleConfig, DrizzleConfigError,
-    DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig, FitsChecksumPolicy,
-    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
-    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
+    AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BackgroundConfig,
+    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern,
+    Combine, CombineMethod, Coverage, DefectSummary, DerivedFacts, DetectionDiagnostics, DomainMap,
+    DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig,
+    FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
+    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsTransferProvenance,
     FlagCounts, FrameRegistration, FrameStoreError, FwhmConfig, GesdConfig, ImageDimensions,
-    ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
-    LinearImage, LoadContext, MarkesteijnPasses, MasterRole, MatchIndices, MeasurementConfig,
-    Normalization, Pedestal, QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig,
+    ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField, LightOutcome,
+    LinearFitClipConfig, LinearImage, LinearModel, LoadContext, MarkesteijnPasses, MasterRole,
+    MatchIndices, MeasurementConfig, Normalization, NullPolicy, ObservationHeader, Pedestal,
+    ProgressMonitor, QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig,
     RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
-    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig, StarDetector,
-    StarField, StarMatch, TransferProvenance, Transform, TransformModel, TransformType,
-    TriangleConfig, TrimConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SipOrder, SmallN,
+    SourceProvenance, StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
+    StarDetector, StarField, StarMatch, Transform, TransformModel, TransformType, TriangleConfig,
+    TrimConfig, WarpParams, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -33,18 +35,18 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::RequireValid,
             float_scale: FitsFloatScale::FullScale(65_535.0),
-            nulls: FitsNullPolicy::Reject,
             unstated_bayer_pattern: Some(CfaPattern::Grbg),
             pedestal: Pedestal::Unknown,
         },
+        nulls: NullPolicy::Reject,
         xtrans_passes: MarkesteijnPasses::Three,
         decode_threads: 4,
     };
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.
-    assert_eq!(FitsLoadOptions::default().nulls, FitsNullPolicy::Mask);
+    assert_eq!(NullPolicy::default(), NullPolicy::Mask);
 
-    let _ = TransferProvenance::FitsNormalized(FitsTransferProvenance {
+    let _ = SourceProvenance::Fits(FitsTransferProvenance {
         bscale: 1.0,
         bzero: 0.0,
         hdu: FitsHduProvenance {
@@ -118,7 +120,13 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     );
 
     let registration = RegistrationConfig {
-        transform_type: TransformModel::Fixed(TransformType::Similarity),
+        model: TransformModel::FixedWithSip(
+            LinearModel::Similarity,
+            SipConfig {
+                order: SipOrder::Two,
+                ..Default::default()
+            },
+        ),
         matching: RegistrationMatchingConfig {
             max_stars: 50,
             min_stars: Some(10),
@@ -134,10 +142,11 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             seed: 42,
             ..Default::default()
         },
-        sip: Some(SipConfig {
-            order: 2,
-            ..Default::default()
-        }),
+        ..Default::default()
+    };
+    registration.registrar().unwrap();
+    let align = AlignStackConfig {
+        registration,
         warp: WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: -1.0,
@@ -145,14 +154,9 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         },
         ..Default::default()
     };
-    registration.validate().unwrap();
+    let registration = &align.registration;
     // `min_stars` overrides the transform's own floor.
-    assert_eq!(
-        registration
-            .matching
-            .required_stars(registration.transform_type),
-        10
-    );
+    assert_eq!(registration.matching.required_stars(registration.model), 10);
 
     let detection = StarDetectionConfig {
         background: BackgroundConfig::default(),
@@ -161,7 +165,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         measurement: MeasurementConfig::default(),
         filter: FilterConfig::default(),
     };
-    detection.validate().unwrap();
+    StarDetector::from_config(detection).unwrap();
 
     // A drizzle frame has no per-pixel weights by default; its weight is the combine's.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
@@ -171,11 +175,14 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
 #[test]
 fn invariant_types_expose_validated_state_from_the_crate_root() {
     let _: ImageMetadata = ImageMetadata {
-        camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
-        ..Default::default()
+        header: ObservationHeader {
+            camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            ..Default::default()
+        },
+        derived: DerivedFacts::default(),
     };
 
-    let dimensions = ImageDimensions::new((12, 8), 3);
+    let dimensions = ImageDimensions::new((12, 8), ChannelLayout::Rgb);
     assert_eq!(dimensions.pixel_count(), 96);
     assert_eq!(dimensions.sample_count(), 288);
 
@@ -186,27 +193,34 @@ fn invariant_types_expose_validated_state_from_the_crate_root() {
 
 #[test]
 fn stacking_configuration_errors_are_available_from_the_crate_root() {
-    let stack_error = StackConfig {
-        combine: Combine::sigma_clipped(0.0),
+    let frame = LinearImage::from_interleaved(
+        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        vec![0.5; 4],
+    );
+    let operation_error = StackConfig {
+        combine: Combine::sigma_clip(0.0),
         weighting: Weighting::Equal,
         normalization: Normalization::None,
         ..StackConfig::light()
     }
-    .validate()
+    .stack_images(vec![frame.into()], ProgressMonitor::unattended())
     .unwrap_err();
-    assert_eq!(
-        stack_error,
-        StackConfigError::Field(InvalidConfigField {
-            field: "sigma_low",
-            expected: "finite and positive",
-            value: 0.0,
-            bound: None,
-        })
+    assert!(
+        matches!(
+            &operation_error,
+            StackError::Config(StackConfigError::Field(invalid))
+                if *invalid == InvalidConfigField {
+                    field: "sigma.low",
+                    expected: "finite and positive",
+                    value: 0.0,
+                    bound: None,
+                }
+        ),
+        "{operation_error:?}"
     );
-    let operation_error: StackError = stack_error.into();
     assert_eq!(
         operation_error.to_string(),
-        "sigma_low must be finite and positive, got 0"
+        "sigma.low must be finite and positive, got 0"
     );
 
     let storage_error = FrameStoreError::CreateDirectory {
@@ -219,22 +233,33 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "failed to create frame-store directory '.tmp/unwritable': denied"
     );
 
-    let drizzle_error = DrizzleConfig {
+    // Refused before the frame is read: the file need not exist.
+    let operation_error = DrizzleConfig {
         scale: 0.0,
         ..Default::default()
     }
-    .validate()
+    .drizzle_paths(
+        vec![DrizzleFrame::new(
+            "light.fits",
+            WarpTransform::new(Transform::identity()),
+        )],
+        &IngestConfig::default(),
+        ProgressMonitor::unattended(),
+    )
     .unwrap_err();
-    assert_eq!(
-        drizzle_error,
-        DrizzleConfigError::Field(InvalidConfigField {
-            field: "scale",
-            expected: "finite and positive",
-            value: 0.0,
-            bound: None,
-        })
+    assert!(
+        matches!(
+            &operation_error,
+            DrizzleError::Config(DrizzleConfigError::Field(invalid))
+                if *invalid == InvalidConfigField {
+                    field: "scale",
+                    expected: "finite and positive",
+                    value: 0.0,
+                    bound: None,
+                }
+        ),
+        "{operation_error:?}"
     );
-    let operation_error: DrizzleError = drizzle_error.into();
     assert_eq!(
         operation_error.to_string(),
         "scale must be finite and positive, got 0"
@@ -257,10 +282,10 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
             bound: None,
         }
     );
-    let pipeline_error = AlignStackError::DetectionConfig(detection_error);
+    let pipeline_error = AlignStackError::Config(AlignStackConfigError::Detection(detection_error));
     assert_eq!(
         pipeline_error.to_string(),
-        "invalid star-detection configuration: sigma_threshold must be finite and positive, got 0"
+        "invalid configuration: star detection: sigma_threshold must be finite and positive, got 0"
     );
 
     let pipeline_error = AlignStackError::Calibration {
@@ -323,13 +348,17 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 #[test]
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
-        image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
+        image: LinearImage::from_interleaved(
+            ImageDimensions::new((2, 1), ChannelLayout::Mono),
+            vec![0.25, 0.75],
+        ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
             2,
             1,
             vec![1.0, 0.5],
         )))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
+        weight_kind: WeightKind::InverseVariance,
         inverse_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
         cfa_type: None,
@@ -342,20 +371,23 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     };
     let _: AlignStackResult = AlignStackResult {
         product,
-        alignment: AlignmentSummary {
-            reference: 1,
-            frames: vec![
-                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
-                FrameRegistration::Reference,
-                FrameRegistration::Registered {
-                    warp: Box::new(WarpTransform::new(Transform::identity())),
-                    inliers: 40,
-                    rms_error: 0.1,
-                },
-                FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
-            ],
-        },
-        detection: vec![DetectionDiagnostics::default(); 4],
+        reference: 1,
+        lights: [
+            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+            FrameRegistration::Reference,
+            FrameRegistration::Registered {
+                warp: Box::new(WarpTransform::new(Transform::identity())),
+                inliers: 40,
+                rms_error: 0.1,
+            },
+            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+        ]
+        .into_iter()
+        .map(|registration| LightOutcome {
+            detection: DetectionDiagnostics::default(),
+            registration,
+        })
+        .collect(),
     };
 
     // A uniform coverage is one number until a plane is asked for.
@@ -369,7 +401,10 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     let shared_plane = Buffer2::new(2, 1, vec![3.0, 4.0]);
     let shared_pixels = shared_plane.pixels().as_ptr();
     let shared_image = LinearImage::from(QualityMap::Shared(shared_plane));
-    assert_eq!(shared_image.dimensions(), ImageDimensions::new((2, 1), 1));
+    assert_eq!(
+        shared_image.dimensions(),
+        ImageDimensions::new((2, 1), ChannelLayout::Mono)
+    );
     assert_eq!(shared_image.channel(0).pixels(), &[3.0, 4.0]);
     assert_eq!(shared_image.channel(0).pixels().as_ptr(), shared_pixels);
 
@@ -383,7 +418,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     let per_channel_image = LinearImage::from(per_channel_map);
     assert_eq!(
         per_channel_image.dimensions(),
-        ImageDimensions::new((1, 1), 3)
+        ImageDimensions::new((1, 1), ChannelLayout::Rgb)
     );
     assert_eq!(per_channel_image.channel(0).pixels(), &[5.0]);
     assert_eq!(per_channel_image.channel(1).pixels(), &[6.0]);

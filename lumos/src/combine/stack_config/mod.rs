@@ -1,195 +1,33 @@
 //! Stacking configuration: how the samples at a pixel combine ([`Combine`]), and the policy a
 //! frame set's role asks for around it ([`StackConfig`]).
 
+pub(crate) mod combine;
+pub(crate) mod combine_method;
+pub(crate) mod small_n;
+pub(crate) mod weighting;
+
 use std::path::Path;
 
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::frame_cache::FrameCache;
-use crate::combine::frame_cache::slots::Slots;
-use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
+use crate::combine::frame_cache::core::CacheCore;
+use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
 use crate::combine::stack;
-use crate::combine::stack::stack_frame::StackFrame;
-use crate::combine::stack::{FrameSet, FrameSource};
+use crate::combine::stack::planned_combine::PlannedCombine;
+use crate::combine::stack::{CombinePlan, FrameSet, FrameSource};
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::combine_method::CombineMethod;
+use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::combine::stack_frame::StackFrame;
 use crate::config_value::ConfigValue;
-use crate::frame::frame_peek::FramePeek;
-use crate::frame_store::stored_layout::StoredLayout;
+use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
-use crate::memory::stage::{Stage, Units};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 use crate::stack_product::quality_planes::QualityPlanes;
-
-/// Method for combining pixel values across frames.
-///
-/// Rejection is only available with `Mean` — median is already robust to outliers.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CombineMethod {
-    /// Mean value with optional rejection. If weights are provided, computes weighted mean.
-    Mean(Rejection),
-    /// Median value (implicit outlier rejection, no explicit rejection needed).
-    Median,
-}
-
-/// Default frames below which sigma-clip and linear-fit rejection are too unreliable to trust and
-/// the combine falls back to the median. GESD has its own stricter floor. Winsorized clips once,
-/// about an estimate of every sample, and trim measures no spread, so neither has one.
-const MIN_FRAMES_FOR_REJECTION: usize = 5;
-const MIN_FRAMES_FOR_GESD: usize = 15;
-
-/// Small-stack fallback policy for [`Combine`]. When a stack has fewer than `min_frames` frames
-/// the configured [`Combine::method`]'s rejection statistics are unreliable, so the combine
-/// uses `fallback` instead. This makes the fallback an explicit, inspectable part of the config
-/// rather than a runtime transformation. `fallback` must be rejection-free (`Median` or
-/// `Mean(None)`) so it never needs a fallback of its own.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SmallN {
-    /// Frames below which `fallback` replaces the configured method.
-    pub min_frames: usize,
-    /// The combine method used below `min_frames`.
-    pub fallback: CombineMethod,
-}
-
-impl SmallN {
-    /// No fallback — the method is reliable at any frame count (Winsorized, Trim, Median, plain
-    /// mean).
-    pub const fn none() -> Self {
-        Self {
-            min_frames: 0,
-            fallback: CombineMethod::Median,
-        }
-    }
-
-    /// Fall back to the median below `min_frames` frames.
-    pub const fn median_below(min_frames: usize) -> Self {
-        Self {
-            min_frames,
-            fallback: CombineMethod::Median,
-        }
-    }
-
-    /// The combine method to use for `frame_count` frames: `fallback` when there are too few for
-    /// the configured `method`, else `method`. Warns on a real downgrade.
-    pub(crate) fn resolve(&self, method: CombineMethod, frame_count: usize) -> CombineMethod {
-        // A plain mean (no rejection) has nothing to fall back *from* — only a `Mean` with an
-        // actual rejection method is downgraded. (An explicit `Median` is excluded by `!=
-        // self.fallback`.) This keeps a method override inherited with a default `min_frames` from
-        // spuriously turning a plain mean into a median at small N.
-        let does_rejection = !matches!(method, CombineMethod::Mean(Rejection::None));
-        if does_rejection && frame_count < self.min_frames && method != self.fallback {
-            tracing::warn!(
-                frame_count,
-                min_frames = self.min_frames,
-                "too few frames for the configured rejection; combining with the fallback instead",
-            );
-            return self.fallback;
-        }
-        method
-    }
-}
-
-/// Frame weighting strategy.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Weighting {
-    /// Equal weights for all frames.
-    Equal,
-    /// Each frame's inverse noise variance per channel, `w = 1/(gain·σ)²`: σ is the white noise
-    /// measured on the frame (by the multiresolution estimator, or per colour on a mosaic) and
-    /// `gain` its normalization. Not normalized, so the weight plane is an inverse variance. A
-    /// frame with no measured noise is an error.
-    Noise,
-    /// Explicit per-frame weights provided by the user.
-    Manual(Vec<f32>),
-}
-
-/// Frame normalization method applied before stacking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Normalization {
-    /// No normalization.
-    None,
-    /// Match global median and scale across frames (additive + scaling).
-    /// Best for light frames.
-    Global,
-    /// Scale by ratio of medians (no additive offset).
-    /// Best for flat frames where exposure varies.
-    Multiplicative,
-}
-
-/// How the samples at one pixel become one value: the method, with its rejection, and the method
-/// it falls back to below the frame count that rejection needs.
-///
-/// The constructors are the method presets. They set the method alone; the normalization and the
-/// weighting belong to the role of the frames, which [`StackConfig`]'s presets carry.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Combine {
-    /// How to combine pixel values across frames. For `Mean`, includes the rejection algorithm.
-    pub method: CombineMethod,
-    /// Combine method used when there are too few frames for `method`'s rejection (see [`SmallN`]).
-    pub small_n: SmallN,
-}
-
-impl Combine {
-    /// Sigma-clipped mean, with the median below the frames sigma statistics need.
-    pub const fn sigma_clipped(sigma: f32) -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::sigma_clip(sigma)),
-            small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
-        }
-    }
-
-    /// Median (implicit outlier rejection).
-    pub const fn median() -> Self {
-        Self {
-            method: CombineMethod::Median,
-            small_n: SmallN::none(),
-        }
-    }
-
-    /// Plain mean without rejection.
-    pub const fn mean() -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::None),
-            small_n: SmallN::none(),
-        }
-    }
-
-    /// Winsorized sigma clipping, with no median fallback: it clips once, about a Huber estimate of
-    /// every sample. On ten clean samples at k = 3 it rejects 0.12% under the frames' noise floor
-    /// and 1.5% with none, against the Gaussian tail share of 0.27%.
-    pub const fn winsorized(sigma: f32) -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::winsorized(sigma)),
-            small_n: SmallN::none(),
-        }
-    }
-
-    /// Linear fit clipping (good for sky gradients).
-    pub const fn linear_fit(sigma: f32) -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::linear_fit(sigma)),
-            small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
-        }
-    }
-
-    /// A trimmed mean, dropping `percent` of the samples from each end. A trim measures no spread,
-    /// so a small stack needs no median fallback.
-    pub const fn trim(percent: f32) -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::trim(percent)),
-            small_n: SmallN::none(),
-        }
-    }
-
-    /// Validation-constrained automatic GESD with a median fallback below its supported sample
-    /// size.
-    pub fn gesd() -> Self {
-        Self {
-            method: CombineMethod::Mean(Rejection::gesd()),
-            small_n: SmallN::median_below(MIN_FRAMES_FOR_GESD),
-        }
-    }
-}
 
 /// Configuration for stacking a set of frames: how each pixel combines, and the normalization,
 /// weighting and output planes the set's role asks for.
@@ -271,7 +109,7 @@ impl StackConfig {
     /// their noise, as Siril, PixInsight and DSS do by default.
     pub const fn light() -> Self {
         Self {
-            combine: Combine::sigma_clipped(2.5),
+            combine: Combine::sigma_clip(2.5),
             weighting: Weighting::Noise,
             normalization: Normalization::Global,
             quality: QualityPlanes::STANDARD,
@@ -311,49 +149,9 @@ impl StackConfig {
         }
     }
 
-    /// The stages of a run that decodes `frame_count` frames such as `peek` straight into a combine
-    /// under this configuration, on `workers`: each frame decoded and measured; the normalization;
-    /// the combine, whose rows read every frame as it decoded. A frame may carry a mask its decode
-    /// alone reveals, so the normalization is charged as over a set that shares only some pixels,
-    /// which holds more than one every frame covers.
-    pub(crate) fn stages(&self, peek: FramePeek, frame_count: usize, workers: usize) -> [Stage; 3] {
-        let dimensions = peek.dimensions;
-        let decoded = peek.footprint(workers);
-        let kept = decoded.kept;
-        [
-            Stage {
-                kept,
-                held: 0,
-                in_flight: decoded.transient(),
-                units: Units::Frames,
-            },
-            Stage {
-                kept,
-                held: PlannedNormalization {
-                    frame_count,
-                    dimensions,
-                    slots: Slots::new(peek.mosaic, dimensions.channels()),
-                    normalization: self.normalization,
-                    coverage: SetCoverage::Common,
-                    threads: workers,
-                }
-                .heap_bytes(),
-                in_flight: 0,
-                units: Units::Whole,
-            },
-            Stage {
-                kept,
-                held: self.quality.heap_bytes(dimensions),
-                in_flight: frame_count
-                    * StoredLayout::decoded(dimensions).pixel_bytes()
-                    * dimensions.width(),
-                units: Units::Rows(dimensions.height()),
-            },
-        ]
-    }
-
-    /// Validate configuration parameters.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
+    /// Validate the configuration for a run over `frame_count` frames: every parameter, and one
+    /// manual weight per frame.
+    pub(crate) fn validate(&self, frame_count: usize) -> Result<(), StackConfigError> {
         ConfigValue::count("min_survivors", self.min_survivors)
             .must_be("at least 1", self.min_survivors >= 1)?;
         if let CombineMethod::Mean(rejection) = &self.combine.method {
@@ -381,6 +179,12 @@ impl StackConfig {
             let sum: f32 = weights.iter().sum();
             if !sum.is_finite() || sum <= 0.0 {
                 return Err(StackConfigError::InvalidManualWeightSum);
+            }
+            if weights.len() != frame_count {
+                return Err(StackConfigError::ManualWeightCountMismatch {
+                    expected: frame_count,
+                    actual: weights.len(),
+                });
             }
         }
 
@@ -453,8 +257,15 @@ impl StackConfig {
         };
         // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
         // The cancel token rides on the cache from construction, so the load loop polls it too.
-        stack::combine_cached(self, set, || {
-            FrameCache::from_paths(&paths, self, IngestRun::new(ingest, monitor))
+        self.combine_cached(set, || {
+            FrameCache::from_paths(
+                &paths,
+                PlannedCombine {
+                    normalization: self.normalization,
+                    quality: self.quality,
+                },
+                IngestRun::new(ingest, monitor),
+            )
         })
     }
 
@@ -484,9 +295,85 @@ impl StackConfig {
             source: FrameSource::Memory,
             count: frames.len(),
         };
-        stack::combine_cached(self, set, || {
+        self.combine_cached(set, || {
             FrameCache::from_stack_frames(frames, self.normalization, monitor)
         })
+    }
+
+    /// Combine `frames`, which the shared frame store produced, over `core`.
+    pub(crate) fn stack_stored_frames(
+        &self,
+        frames: Vec<StoredFrame>,
+        core: CacheCore,
+    ) -> Result<StackProduct, StackError> {
+        let set = FrameSet {
+            source: FrameSource::FrameStore,
+            count: frames.len(),
+        };
+        self.combine_cached(set, || {
+            FrameCache::from_stored_frames(frames, core, self.normalization)
+        })
+    }
+
+    /// The single gate every combine passes through: reject an empty frame set, validate the
+    /// configuration against the frame count, build the cache, log what the run turned out to be,
+    /// reduce, and decide whether the result is real.
+    ///
+    /// Every entry point routes here — including `MasterStack`, which builds a CFA cache of its
+    /// own — so config validation happens in exactly one place rather than being a convention each
+    /// entry point has to remember.
+    ///
+    /// `build` is deferred rather than taken as a built cache so that validation runs before a
+    /// potentially long load, and so the cache — whose spilled planes hold their disk space —
+    /// drops at the end of this scope on every path.
+    pub(crate) fn combine_cached<E: From<StackError>>(
+        &self,
+        set: FrameSet,
+        build: impl FnOnce() -> Result<FrameCache, E>,
+    ) -> Result<StackProduct, E> {
+        let FrameSet {
+            source,
+            count: frame_count,
+        } = set;
+        if frame_count == 0 {
+            return Err(StackError::NoFrames.into());
+        }
+        self.validate(frame_count).map_err(StackError::from)?;
+
+        let cache = build()?;
+        // Logged after the load so the tier and quality facts come from the cache itself rather
+        // than being restated at each entry point.
+        tracing::info!(
+            ?source,
+            frame_count,
+            method = ?self.combine.method,
+            weighting = ?self.weighting,
+            normalization = ?self.normalization,
+            disk_tier = cache.core.tier.spills(),
+            // Not "warped": a frame carries these when a warp produced them *or* when its source
+            // declared pixels with no measurement.
+            frame_quality = cache
+                .frames
+                .iter()
+                .any(|frame| !frame.quality.is_none()),
+            "Combining frames"
+        );
+
+        Ok(self.run_stacking(&cache)?)
+    }
+
+    /// Combine the cached frames into one stacked product under this configuration — see
+    /// [`stack::combine`].
+    pub(crate) fn run_stacking(&self, cache: &FrameCache) -> Result<StackProduct, StackError> {
+        stack::combine(
+            cache,
+            CombinePlan {
+                combine: self.combine,
+                weighting: &self.weighting,
+                quality: self.quality,
+                min_survivors: self.min_survivors,
+            },
+        )
     }
 }
 

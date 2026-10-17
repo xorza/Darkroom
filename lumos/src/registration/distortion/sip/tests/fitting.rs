@@ -6,48 +6,35 @@ const STEP_50: Grid = Grid {
     ..Grid::DEFAULT
 };
 use crate::math::size2us::Size2us;
-use crate::registration::ransac::transforms::estimate_transform;
+use crate::registration::estimate::Pairs;
+use crate::registration::transform::TransformType;
 use std::f64::consts::PI;
 
 /// A fit needs three pairs per term against overfitting: orders 2 to 5 have 3, 7, 12 and 18 terms,
 /// so 9, 21, 36 and 54 pairs.
 #[test]
 fn required_points_scale_with_order() {
-    for (order, terms) in [(2, 3), (3, 7), (4, 12), (5, 18)] {
-        assert_eq!(
-            SipPolynomial::required_points(order),
-            3 * terms,
-            "order {order}"
-        );
+    for (order, terms) in [
+        (SipOrder::Two, 3),
+        (SipOrder::Three, 7),
+        (SipOrder::Four, 12),
+        (SipOrder::Five, 18),
+    ] {
+        assert_eq!(order.required_points(), 3 * terms, "{order:?}");
     }
 }
 
-/// The order must be 2 to 5 and the origin finite; each refusal names its field.
+/// The origin must be finite; each refusal names its field.
 #[test]
 fn invalid_config_returns_error() {
-    for (config, field) in [
-        (
-            SipConfig {
-                order: 1,
-                ..Default::default()
-            },
-            "SIP order",
-        ),
-        (
-            SipConfig {
-                order: 6,
-                ..Default::default()
-            },
-            "SIP order",
-        ),
-        (
-            SipConfig {
-                reference_point: Some(DVec2::new(f64::NAN, 0.0)),
-                ..Default::default()
-            },
-            "SIP reference_point x",
-        ),
+    for (reference_point, field) in [
+        (DVec2::new(f64::NAN, 0.0), "SIP reference_point x"),
+        (DVec2::new(0.0, f64::INFINITY), "SIP reference_point y"),
     ] {
+        let config = SipConfig {
+            reference_point: Some(reference_point),
+            ..Default::default()
+        };
         let invalid: InvalidConfigField = config.validate().unwrap_err();
         assert_eq!(invalid.field, field);
     }
@@ -69,7 +56,7 @@ fn coincident_points_fit_nothing() {
             &Transform::identity(),
             pairs,
             SipModel {
-                order: 2,
+                order: SipOrder::Two,
                 origin: DVec2::ZERO
             }
         )
@@ -77,10 +64,10 @@ fn coincident_points_fit_nothing() {
     );
     assert!(
         SipPolynomial::fit_with(
-            TransformType::Affine,
+            LinearModel::Affine,
             pairs,
             SipModel {
-                order: 2,
+                order: SipOrder::Two,
                 origin: DVec2::ZERO
             }
         )
@@ -95,10 +82,14 @@ fn coincident_points_fit_nothing() {
 #[test]
 fn max_correction_is_the_corner_correction() {
     let size = Size2us::new(1000, 1000);
-    let distorted = fit_field(&barrel(), Grid::DEFAULT, 3);
+    let distorted = fit_field(&barrel(), Grid::DEFAULT, SipOrder::Three);
     let corner = 25.0 * 2f64.sqrt();
     assert!((distorted.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
-    let flat = fit_field(&RadialField { k: 0.0, ..barrel() }, Grid::DEFAULT, 2);
+    let flat = fit_field(
+        &RadialField { k: 0.0, ..barrel() },
+        Grid::DEFAULT,
+        SipOrder::Two,
+    );
     assert_eq!(flat.max_grid_correction(size, 50.0), 0.0);
     assert!(
         flat.coeffs_u
@@ -143,7 +134,7 @@ fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
             ..barrel()
         };
         let RadialPairs { reference, target } = field.pairs(STEP_50);
-        let warp = WarpTransform::with_sip(transform, fit_field(&field, STEP_50, 3));
+        let warp = WarpTransform::with_sip(transform, fit_field(&field, STEP_50, SipOrder::Three));
         let worst = reference
             .iter()
             .zip(&target)
@@ -162,19 +153,19 @@ fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
 fn each_linear_part_and_its_correction_fit_together() {
     let cases = [
         (
-            TransformType::Translation,
+            LinearModel::Translation,
             Transform::translation(DVec2::new(12.0, -7.0)),
         ),
         (
-            TransformType::Euclidean,
+            LinearModel::Euclidean,
             Transform::euclidean(DVec2::new(30.0, -20.0), 10f64.to_radians()),
         ),
         (
-            TransformType::Similarity,
+            LinearModel::Similarity,
             Transform::similarity(DVec2::new(-5.0, 9.0), -0.3, 1.02),
         ),
         (
-            TransformType::Affine,
+            LinearModel::Affine,
             Transform::affine([1.01, 0.03, 12.0, -0.02, 0.98, -7.0]),
         ),
     ];
@@ -194,7 +185,7 @@ fn each_linear_part_and_its_correction_fit_together() {
             model,
             pairs,
             SipModel {
-                order: 3,
+                order: SipOrder::Three,
                 origin: field.centre,
             },
         )
@@ -217,7 +208,9 @@ fn each_linear_part_and_its_correction_fit_together() {
         ..barrel()
     }
     .pairs(STEP_50);
-    let first = estimate_transform(&reference, &target, TransformType::Affine).unwrap();
+    let first = Pairs::unit(&reference, &target)
+        .estimate(TransformType::Affine)
+        .unwrap();
     let off = (first.apply(DVec2::ZERO) - cases[3].1.apply(DVec2::ZERO)).length();
     assert!(
         off > 1.0,

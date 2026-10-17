@@ -1,11 +1,12 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use std::mem;
 use std::panic::catch_unwind;
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;
-use imaginarium::Buffer2;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {
@@ -98,9 +99,8 @@ fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
 }
 
 #[test]
-fn fill_count_clone_and_swap_ignore_padding() {
+fn fill_count_clone_and_swap() {
     let mut first = BitBuffer2::new_default(Size2us::new(7, 2));
-    first.words[0] |= 1 << 7;
     assert_eq!(first.count_ones(), 0);
     assert!(iter_bits(&first).iter().all(|&value| !value));
 
@@ -156,7 +156,7 @@ const RAGGED: Size2us = Size2us {
 };
 
 /// A mask filled from `predicate`, the way a caller with nothing to recycle builds one.
-fn from_predicate(size: Size2us, predicate: impl Fn(usize) -> bool) -> BitBuffer2 {
+fn from_predicate(size: Size2us, predicate: impl Fn(usize) -> bool + Sync) -> BitBuffer2 {
     let mut buffer = BitBuffer2::new_default(size);
     buffer.fill_from_predicate(predicate);
     buffer
@@ -187,95 +187,50 @@ fn fill_from_predicate_handles_exact_word_and_empty_sizes() {
     assert_eq!(empty.size.pixel_count(), 0);
 }
 
+/// Every way of setting pixels leaves the row padding clear, on every row shape: all three
+/// strides are 128 bits, so 128 wide has no padding, 100 wide pads 28 bits inside the second word,
+/// and 60 wide pads 4 bits of the first word and the whole second one. A full fill is the buffer
+/// that setting every pixel builds, so whole-word counts and smears read 3 rows of 100 as 300
+/// pixels: a dilation of a full buffer is the full buffer. The last word's mask is the width's
+/// bits within it: 36 at 100, 60 at 60, all 64 at 128.
 #[test]
-fn padding_bits_never_reach_the_count() {
-    // `new_filled(_, true)` sets whole words, so 3 rows of 100 bits are stored as 384 set bits.
-    let mut mask = BitBuffer2::new_filled(RAGGED, true);
-    assert_eq!(mask.count_ones(), 300, "300 real bits, not the 384 stored");
-    assert!(
-        mask.words.iter().map(|w| w.count_ones()).sum::<u32>() > 300,
-        "the padding really is set"
-    );
-
-    assert!(
-        !mask.padding_is_clear(),
-        "a filled buffer has dirty padding"
-    );
-
-    for i in 0..mask.size.pixel_count() {
-        mask.set(i, false);
-    }
-    assert_eq!(mask.count_ones(), 0);
-    assert!(
-        mask.words.iter().any(|&w| w != 0),
-        "padding survives untouched"
-    );
-    assert!(
-        !mask.padding_is_clear(),
-        "clearing every real bit does not clear padding"
-    );
-}
-
-/// Every row shape `padding_is_clear` and `clear_padding` branch on. All three strides are 128
-/// bits: 128 wide has no padding at all; 100 wide pads 28 bits inside the second word; 60 wide pads
-/// 4 bits of the first word *and* the whole second one, the only case that reaches the tail scan.
-#[test]
-fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
-    for width in [128, 100, 60] {
+fn the_padding_stays_clear_whatever_sets_the_pixels() {
+    for (width, last_bits) in [(128, 64), (100, 36), (60, 60)] {
         let size = Size2us::new(width, 3);
-        let has_padding = width != 128;
-
         assert!(BitBuffer2::new_default(size).padding_is_clear(), "{width}");
-
-        // The two ways of setting every real bit both have to leave padding alone.
         let built = from_predicate(size, |_| true);
         assert_eq!(built.count_ones(), width * 3, "{width}");
-        assert!(
-            built.padding_is_clear(),
-            "fill_from_predicate dirtied {width}"
-        );
+        assert!(built.padding_is_clear(), "{width}");
 
         let mut poked = BitBuffer2::new_default(size);
         for i in 0..poked.size.pixel_count() {
             poked.set(i, true);
         }
-        assert_eq!(poked.words, built.words, "{width}");
-        assert!(poked.padding_is_clear(), "set() dirtied {width}");
-
-        // Word-wise fills cannot: they have no notion of where a row ends.
         let mut filled = BitBuffer2::new_default(size);
         filled.fill(true);
-        assert_eq!(filled.padding_is_clear(), !has_padding, "fill at {width}");
+        assert_eq!(poked, built, "set at {width}");
+        assert_eq!(filled, built, "fill at {width}");
         assert_eq!(
-            BitBuffer2::new_filled(size, true).padding_is_clear(),
-            !has_padding,
+            BitBuffer2::new_filled(size, true),
+            built,
             "new_filled at {width}"
         );
 
-        // Clearing the padding of a full fill leaves exactly what setting every pixel builds.
-        let mut cleared = BitBuffer2::new_filled(size, true);
-        cleared.clear_padding();
-        assert_eq!(cleared.words, built.words, "clear_padding at {width}");
+        let mut dilated = filled.clone();
+        dilated.dilate(5, &mut BitBuffer2::new_default(size));
+        assert_eq!(dilated, built, "dilate at {width}");
 
-        // Reuse has to reach the padding a `fill` dirtied, or a mask rebuilt into a recycled
-        // buffer would count padding bits as pixels. At 60 wide that means the whole trailing
-        // word, which the row loop never reaches through `width` alone.
         filled.fill_from_predicate(|i| i.is_multiple_of(3));
-        let fresh = from_predicate(size, |i| i.is_multiple_of(3));
-        assert_eq!(filled.words, fresh.words, "reuse differs at {width}");
-        assert!(filled.padding_is_clear(), "reuse dirtied {width}");
-    }
+        assert_eq!(
+            filled,
+            from_predicate(size, |i| i.is_multiple_of(3)),
+            "reuse at {width}"
+        );
 
-    // The one input that separates the two clauses: at 60 wide the trailing word is pure padding,
-    // so dirtying it leaves the partial word's own 4 padding bits clean. Only the tail scan sees
-    // it.
-    let mut tail_only = BitBuffer2::new_default(Size2us::new(60, 3));
-    tail_only.words[1] = !0;
-    assert!(
-        !tail_only.padding_is_clear(),
-        "a dirty trailing word counts"
-    );
-    assert_eq!(tail_only.count_ones(), 0, "and still never reaches a count");
+        let mask = built.last_word_mask();
+        assert_eq!(mask.count_ones(), last_bits, "{width}");
+        assert_eq!(built.row_words(2)[(width - 1) / 64], mask, "{width}");
+    }
 }
 
 /// A square finds a set bit inside it and only there, across word boundaries and clipped at the
