@@ -1,4 +1,4 @@
-//! The criterion benches, which `benches/lumos.rs` runs: `./x.py bench`.
+//! The criterion benches, which `benches/lumos.rs` runs: `cargo drive bench`.
 //!
 //! Two kinds, and every bench is one: `atomic`, one operation on the unit production gives it (a
 //! tile, a stamp, a row, a pixel's stack of frames, or the frame an operation takes whole);

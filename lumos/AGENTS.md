@@ -24,9 +24,9 @@ source extraction, error bars.
 
 ## Verification
 
-`./x.py gate -p lumos`, from the darkroom root (its Verification section says
-what it runs). The test set is `--features ml`, in `Cargo.toml`'s
-`[package.metadata.x]`: tests leave out `real-data`.
+`cargo drive check`, from the darkroom root (its Verification section says
+what it runs). Tests leave out `real-data`, as darkroom's
+`[workspace.metadata.drive]` says.
 
 `real-data` runs the tests that read the gitignored ~7.4 GB dataset in
 `test_data/lumos_data/`, only when asked. Its ML tests skip without ONNX
@@ -50,5 +50,5 @@ dispatch, and every kernel correct and fast without it.
 
 Criterion benches live in `bench.rs` beside the code they measure and run
 from the one target `benches/lumos.rs` through `bench::run`:
-`./x.py bench -p lumos -- <filter>`, `--smoke` to run each once.
+`cargo drive bench <filter>`, `--test` to run each once.
 `src/bench/mod.rs` states their shape.

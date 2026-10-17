@@ -5,10 +5,6 @@ edition.workspace = true
 description = "Astronomical image-processing pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, and drizzle."
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
-# `real-data` reads a gitignored dataset, so tests run without it.
-[package.metadata.x]
-test = ["--features ml"]
-
 [lints]
 workspace = true
 
