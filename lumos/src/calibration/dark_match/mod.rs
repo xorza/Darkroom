@@ -1,12 +1,12 @@
 //! [`DarkMatch`]: how a master holding dark signal is taken from a frame.
 
 use crate::calibration::error::DarkMismatch;
-use crate::calibration::temperature_difference::TemperatureDifference;
-use crate::calibration::temperature_source::TemperatureSource;
 use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::capture_conditions::CaptureConditions;
-use crate::frame::unverified_conditions::UnverifiedConditions;
 use crate::image::calibration_state::CalibrationState;
+use crate::image::dark_comparison::DarkComparison;
+use crate::image::temperature_difference::TemperatureDifference;
+use crate::image::temperature_source::TemperatureSource;
 
 /// How a master holding dark signal is taken from a frame — a dark from a light, a flat-dark from
 /// a flat: the factor on its signal, and what could not be compared.
@@ -20,11 +20,7 @@ use crate::image::calibration_state::CalibrationState;
 pub(crate) struct DarkMatch {
     /// The frame's exposure over the dark's, when the two differ and the dark could be scaled.
     pub(crate) scale: Option<f64>,
-    pub(crate) unverified: UnverifiedConditions,
-    /// The temperature the two were compared on; `None` when they share none.
-    pub(crate) temperature: Option<TemperatureSource>,
-    /// The two temperatures, when they differ past the tolerance.
-    pub(crate) temperature_difference: Option<TemperatureDifference>,
+    pub(crate) comparison: DarkComparison,
 }
 
 /// Whether a master holding dark signal still holds the bias, which does not grow with exposure,
@@ -81,12 +77,11 @@ impl DarkMatch {
         let (Some(frame), Some(dark)) = (frame.exposure_time, dark.exposure_time) else {
             return Ok(Self {
                 scale: None,
-                unverified: UnverifiedConditions {
-                    exposure: true,
-                    temperature: temperature.is_none(),
+                comparison: DarkComparison {
+                    exposure_compared: false,
+                    temperature,
+                    temperature_difference,
                 },
-                temperature,
-                temperature_difference,
             });
         };
         let scale = if CaptureCondition::Exposure.agree(frame.min(dark), frame.max(dark)) {
@@ -99,12 +94,11 @@ impl DarkMatch {
         };
         Ok(Self {
             scale,
-            unverified: UnverifiedConditions {
-                exposure: false,
-                temperature: temperature.is_none(),
+            comparison: DarkComparison {
+                exposure_compared: true,
+                temperature,
+                temperature_difference,
             },
-            temperature,
-            temperature_difference,
         })
     }
 

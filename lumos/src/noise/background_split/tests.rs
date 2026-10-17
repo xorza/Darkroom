@@ -1,4 +1,5 @@
-use crate::noise::background_split::BackgroundSplit;
+use crate::image::background_split::BackgroundSplit;
+use crate::noise::background_split;
 use crate::noise::binned_samples::GainBin;
 
 fn bins(points: &[(f64, f64)]) -> Vec<GainBin> {
@@ -18,7 +19,7 @@ fn bins(points: &[(f64, f64)]) -> Vec<GainBin> {
 /// noise would read 3, all sky 3/2.
 #[test]
 fn bins_on_the_two_terms_give_them_back() {
-    let split = BackgroundSplit::fit(&bins(&[
+    let split = background_split::fit(&bins(&[
         (1.0, 0.75),
         (1.5, 1.3125),
         (2.0, 2.0),
@@ -43,15 +44,18 @@ fn bins_on_the_two_terms_give_them_back() {
 /// 2 is `S` = 3/2. No bin reads 0.
 #[test]
 fn a_negative_term_falls_back_to_the_better_one_term_fit() {
-    let split = BackgroundSplit::fit(&bins(&[(1.0, 2.0), (3.0, 4.5)]));
+    let split = background_split::fit(&bins(&[(1.0, 2.0), (3.0, 4.5)]));
     assert_eq!(split.read_share, 0.0);
     assert!((split.variance - 1.68).abs() <= 2e-7, "{split:?}");
     assert_eq!(
-        BackgroundSplit::fit(&bins(&[(2.0, 3.0)])),
+        background_split::fit(&bins(&[(2.0, 3.0)])),
         BackgroundSplit {
             variance: 1.5,
             read_share: 0.0,
         }
     );
-    assert_eq!(BackgroundSplit::fit(&[]), BackgroundSplit::unflattened(0.0));
+    assert_eq!(
+        background_split::fit(&[]),
+        BackgroundSplit::unflattened(0.0)
+    );
 }

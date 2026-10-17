@@ -14,10 +14,11 @@ mod tile;
 use common::CancelToken;
 
 use crate::error::Cancelled;
-use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled;
-use crate::image::cfa::demosaic::tiled::{Mosaic, TileKernel, Tiling};
+use crate::image::cfa::demosaic::tiled::{TileKernel, Tiling};
 use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
 use crate::simd::{F32x8, Isa, Mask8};
@@ -31,7 +32,7 @@ const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
 /// The band the border fill takes from neighbours (see [`tiled`]). RCD's stages chain stencils —
-/// the direction maps and low-pass filter reach 4 pixels, and the colour steps read values earlier
+/// the direction maps and low-pass filter reach 4 pixels, and the color steps read values earlier
 /// steps computed up to 3 pixels further out — so a pixel nearer an edge than this reads values no
 /// stage computed. A test pins the reach: from this distance in, a frame demosaics bit for bit as
 /// it does inside a larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same
@@ -55,7 +56,7 @@ fn intp<V: F32x8>(a: V, b: V, c: V) -> V {
     b + a * (c - b)
 }
 
-/// One neighbour a green estimate reads: its green, and its same-colour low-pass filter.
+/// One neighbour a green estimate reads: its green, and its same-color low-pass filter.
 #[derive(Debug, Clone, Copy)]
 struct Neighbour<V> {
     green: V,
@@ -63,10 +64,10 @@ struct Neighbour<V> {
 }
 
 /// The green at red or blue sites from a neighbouring green `g`, as RCD's ratio `g·2c/(c + s)`
-/// of each site's low-pass value `c` and its same-colour neighbour's `s`.
+/// of each site's low-pass value `c` and its same-color neighbour's `s`.
 ///
 /// The ratio is level-free: librtprocess's `eps` in the denominator would bias faint signal by
-/// `eps/(c + s)`, a colour cast in a dark-subtracted background. Where `c + s` nears cancellation
+/// `eps/(c + s)`, a color cast in a dark-subtracted background. Where `c + s` nears cancellation
 /// against `|c| + |s|`, only possible on signed data, it blends into the additive midpoint
 /// estimate, which it equals at `c = s = 0`.
 ///
@@ -137,7 +138,7 @@ fn pq_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
 /// RCD demosaic implementation.
 ///
 /// Input: a Bayer frame, whose calibrated samples may be outside `[0, 1]`, and the gains that
-/// balance its colours.
+/// balance its colors.
 /// Output: planar RGB f32 channels of its size, in the frame's own balance.
 ///
 /// The frame is demosaiced in tiles of [`TILE`], each run as a frame of its own: from
@@ -145,24 +146,19 @@ fn pq_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
 /// writes that part of itself, and the tiles overlap by twice the border. The pixels nearest the
 /// frame's edge come from their neighbours.
 pub(crate) fn demosaic(
-    bayer: &BayerImage<'_>,
+    bayer: &MosaicView<'_, CfaPattern>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let mosaic = Mosaic {
-        data: bayer.data,
-        size: bayer.size,
-        color_at: |position| bayer.pattern.color_at(position).index(),
-    };
     let kernel = TileKernel {
         tiling: Tiling {
             tile: TILE,
             inset: 0,
             margin: INTERPOLATED_BORDER,
         },
-        new_tile: || Tile::new(bayer.pattern),
+        new_tile: || Tile::new(bayer.pattern()),
         run: |tile: &mut Tile, place, out| unsafe { tile.demosaic(bayer, place, out) },
     };
-    mosaic.demosaic(kernel, cancel)
+    bayer.demosaic(kernel, cancel)
 }
 
 #[cfg(test)]

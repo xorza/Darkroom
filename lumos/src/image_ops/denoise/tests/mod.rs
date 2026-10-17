@@ -3,6 +3,7 @@ mod real_data;
 
 use imaginarium::Buffer2;
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
@@ -229,7 +230,7 @@ fn denoise_preserves_bright_feature() {
     );
 }
 
-/// Colour is denoised channel by channel, through one shared scratch: each channel comes out
+/// Color is denoised channel by channel, through one shared scratch: each channel comes out
 /// exactly as that plane alone would, nothing carried over from the one before.
 #[test]
 fn denoise_is_per_channel_on_rgb() {
@@ -303,7 +304,10 @@ fn a_zero_variance_plane_leaves_the_image() {
         },
     );
     for threshold in [Threshold::Hard, Threshold::Soft] {
-        let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels.clone());
+        let mut image = LinearImage::from_interleaved(
+            ImageDimensions::new(size, ChannelLayout::Mono),
+            pixels.clone(),
+        );
         let variance = QualityMap::Shared(Buffer2::new_default(size.width, size.height));
         Denoise {
             threshold,
@@ -334,8 +338,8 @@ fn the_variance_threshold_scales_with_the_data() {
         ..Denoise::default()
     };
     let run = |scale: f32| {
-        let mut image = LinearImage::from_pixels(
-            ImageDimensions::new(size, 1),
+        let mut image = LinearImage::from_interleaved(
+            ImageDimensions::new(size, ChannelLayout::Mono),
             pixels.iter().map(|&value| value * scale).collect(),
         );
         let variance = QualityMap::Shared(Buffer2::new_filled(
@@ -370,7 +374,10 @@ fn structure_filling_the_frame_survives() {
             0.5 + 0.05 * (phase * x).sin() * (phase * y).sin() + 0.001 * rng.next_gaussian_f32()
         })
         .collect();
-    let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels.clone());
+    let mut image = LinearImage::from_interleaved(
+        ImageDimensions::new(size, ChannelLayout::Mono),
+        pixels.clone(),
+    );
     Denoise {
         scales: 4,
         k: 3.0,

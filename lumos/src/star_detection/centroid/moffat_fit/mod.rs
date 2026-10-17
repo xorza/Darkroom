@@ -13,19 +13,21 @@
 
 mod simd;
 
+use std::ops::RangeInclusive;
+
+use glam::DVec2;
+
 use crate::math::fwhm;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
-use crate::star_detection::centroid;
 use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
-use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
+use crate::star_detection::centroid::profile_bounds::ProfileBounds;
+use crate::star_detection::centroid::profile_problem::{FitData, LMModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp;
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
-use crate::star_detection::centroid::{MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE};
-use glam::DVec2;
+use crate::star_detection::centroid::{profile_problem, stamp};
 
 /// A converged 2D Moffat profile fitted to one star stamp: where its centre landed and
 /// the FWHM that follows from its alpha and beta. Build one with [`MoffatFit::new`].
@@ -114,27 +116,23 @@ fn select_pow_strategy(beta: f64) -> PowStrategy {
 /// Parameters: [x0, y0, amplitude, alpha, background]
 #[derive(Debug)]
 struct MoffatFixedBeta {
-    stamp_radius: f64,
     beta: f64,
     pow_strategy: PowStrategy,
     /// The smallest amplitude the fit may take; see `stamp::min_amplitude`.
     min_amplitude: f64,
-    /// The narrowest α the fit may take, in px: the profile of the FWHM a Gaussian of
-    /// [`MIN_PROFILE_SIGMA`] has. The widest is the stamp radius.
-    min_alpha: f64,
+    /// The α the fit may take, in px: the stamp's [`ProfileBounds`] at this β.
+    alpha: RangeInclusive<f64>,
     /// The midpoint until [`StampFit::fit`] sets the order the profile needs.
     quadrature: PixelQuadrature,
 }
 
 impl MoffatFixedBeta {
     fn new(stamp_radius: f64, beta: f64, min_amplitude: f64) -> Self {
-        let min_fwhm = FWHM_PER_SIGMA * MIN_PROFILE_SIGMA;
         Self {
-            stamp_radius,
             beta,
             pow_strategy: select_pow_strategy(beta),
             min_amplitude,
-            min_alpha: min_fwhm / (2.0 * (2f64.powf(1.0 / beta) - 1.0).sqrt()),
+            alpha: ProfileBounds::of_stamp(stamp_radius).alpha(beta),
             quadrature: PixelQuadrature::gauss_legendre(1),
         }
     }
@@ -170,7 +168,7 @@ impl LMModel<5> for MoffatFixedBeta {
     #[inline]
     fn constrain(&self, params: &mut [f64; 5]) {
         params[2] = params[2].max(self.min_amplitude);
-        params[3] = params[3].clamp(self.min_alpha, self.stamp_radius);
+        params[3] = params[3].clamp(*self.alpha.start(), *self.alpha.end());
     }
 
     fn batch_build_normal_equations(
@@ -204,7 +202,7 @@ impl MoffatFit {
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
     /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
-    /// ([`centroid::fit_is_plausible`]), or an amplitude or α pinned at one of
+    /// ([`profile_problem::fit_is_plausible`]), or an amplitude or α pinned at one of
     /// [`MoffatFixedBeta::constrain`]'s bounds.
     pub(super) fn new(inputs: FitInputs<'_>, beta: f32) -> Option<Self> {
         let FitInputs {
@@ -223,9 +221,8 @@ impl MoffatFit {
         );
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
-        let fwhm_est = fwhm::from_sigma(fit.sigma_est);
-        let initial_alpha =
-            f64::from(fwhm::to_alpha(fwhm_est, beta)).clamp(model.min_alpha, model.stamp_radius);
+        let initial_alpha = fwhm::to_alpha(fit.sigma_est * FWHM_PER_SIGMA, f64::from(beta))
+            .clamp(*model.alpha.start(), *model.alpha.end());
 
         let initial_params: [f64; 5] = [
             fit.local_pos.x,
@@ -241,16 +238,16 @@ impl MoffatFit {
         let result_pos = fit.to_image(x0, y0);
 
         let shape_free = amplitude > model.min_amplitude
-            && alpha > model.min_alpha
-            && alpha < model.stamp_radius;
-        if !shape_free || !centroid::fit_is_plausible(result_pos, pos, grid.radius) {
+            && alpha > *model.alpha.start()
+            && alpha < *model.alpha.end();
+        if !shape_free || !profile_problem::fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
 
         Some(Self {
             pos: result_pos,
-            position_sigma: centroid::position_sigma(&result, fit.stamp.z.len())?,
-            fwhm: fwhm::from_alpha_beta(alpha as f32, beta),
+            position_sigma: profile_problem::position_sigma(&result, fit.stamp.z.len())?,
+            fwhm: fwhm::from_alpha_beta(alpha, f64::from(beta)) as f32,
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result, model.quadrature.nodes().len()),
         })

@@ -1,7 +1,6 @@
 use crate::background_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::background_mesh::*;
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::statistics::mad_to_sigma;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -10,7 +9,7 @@ const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 const fn params(tile_size: usize) -> MeshParams {
     MeshParams {
         tile_size,
-        sigma_clip_iterations: TEST_SIGMA_CLIP_ITERATIONS,
+        sigma_clip_max_iterations: TEST_SIGMA_CLIP_ITERATIONS,
         median_filter: MedianFilter::Apply,
     }
 }
@@ -127,13 +126,16 @@ fn masked_pixels_never_reach_the_statistics() {
 }
 
 /// The tile statistics of 1..9 in one 3 × 3 tile: median 5, mean 5, so the Pearson mode is 5
-/// too; the deviations 4, 3, 2, 1, 0, 1, 2, 3, 4 have the median 2, so σ is the MAD 2 rescaled,
-/// and no value lies past 3σ ≈ 8.9.
+/// too; the deviations 4, 3, 2, 1, 0, 1, 2, 3, 4 have the median 2, so σ is the MAD 2 rescaled
+/// for nine samples, 2·1.4826·1.1011, and no value lies past 3σ ≈ 9.8.
 #[test]
 fn median_computation_correctness() {
     let pixels = Buffer2::new(3, 3, (1..=9).map(|x| x as f32).collect());
     let stats = make_grid(&pixels, 3).stats[(0, 0)];
-    assert_eq!((stats.sky, stats.sigma), (5.0, mad_to_sigma(2.0f32)));
+    assert_eq!(
+        (stats.sky, stats.sigma),
+        (5.0, statistics::sigma_of_mad(2.0f32, 9))
+    );
 }
 
 #[test]
@@ -148,10 +150,10 @@ fn mad_sigma_known_value() {
 
     // Ten copies of 0..9: the median is (4 + 5)/2 = 4.5, equal to the mean, so the Pearson mode
     // gives sky = 2.5·4.5 − 1.5·4.5 = 4.5. The deviations |x − 4.5| are 0.5..4.5, twenty of
-    // each, so ranks 49 and 50 of the hundred are both 2.5: σ = 1.4826·2.5. No value lies past
-    // 3σ = 11.1 from the median, so the clip keeps all of them.
+    // each, so ranks 49 and 50 of the hundred are both 2.5: σ = 1.4826·2.5·100/99.2. No value lies
+    // past 3σ = 11.2 from the median, so the clip keeps all of them.
     assert_eq!(stats.sky, 4.5);
-    assert_eq!(stats.sigma, mad_to_sigma(2.5f32));
+    assert_eq!(stats.sigma, statistics::sigma_of_mad(2.5f32, 100));
 }
 
 /// Clipping removes bright outliers from a sky with spread, and then reads the sky alone. One
@@ -161,9 +163,10 @@ fn mad_sigma_known_value() {
 ///
 /// The first pass ranks all 1024: ranks 511 and 512 are both 105, and of the deviations from it
 /// (100 at 0, then 200 each at 1..4, 100 at 5, and the outliers) ranks 511 and 512 are 3, so
-/// σ = 1.4826·3 and 3σ ≈ 13.3 keeps the sky and drops the outliers. The second pass over the 1000
-/// left: the median averages 104 and 105 to 104.5, the deviations 0.5..4.5 two hundred each put
-/// ranks 499 and 500 at 2.5, and 3σ ≈ 11.1 keeps every value, so the clip converges. The mean is
+/// σ = 1.4826·3·1024/1023.2 and 3σ ≈ 13.4 keeps the sky and drops the outliers. The second pass
+/// over the 1000 left: the median averages 104 and 105 to 104.5, the deviations 0.5..4.5 two
+/// hundred each put ranks 499 and 500 at 2.5, and 3σ ≈ 11.1 keeps every value, so the clip
+/// converges. The mean is
 /// 104.5 as well, so the Pearson mode is 2.5·104.5 − 1.5·104.5 = 104.5, every step exact in f32.
 ///
 /// With no clip passes the outliers stay: the median of all 1024 is 105, the mean 338.4 is far
@@ -183,13 +186,16 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
     });
 
     let clipped = make_grid(&pixels, 32).stats[(0, 0)];
-    assert_eq!((clipped.sky, clipped.sigma), (104.5, mad_to_sigma(2.5f32)));
+    assert_eq!(
+        (clipped.sky, clipped.sigma),
+        (104.5, statistics::sigma_of_mad(2.5f32, 1000))
+    );
 
     let unclipped = BackgroundMesh::computed(
         &pixels,
         None,
         MeshParams {
-            sigma_clip_iterations: 0,
+            sigma_clip_max_iterations: 0,
             ..params(32)
         },
     )
@@ -360,36 +366,6 @@ fn a_grid_under_three_tiles_is_not_filtered() {
     for (ty, row) in skies.iter().enumerate() {
         for (tx, &sky) in row.iter().enumerate() {
             assert_eq!(grid.stats[(tx, ty)].sky, sky, "tile ({tx}, {ty})");
-        }
-    }
-}
-
-/// The y spline's second derivatives through the mesh: four tile rows of skies `k²·c` (c = 1/64)
-/// at a uniform 32 px solve, as `solve_d2_quadratic_data` does on unit spacing, to `d″ = [0, 2.4,
-/// 2.4, 0] · c/32²`, in every tile column; the flat σ plane has none. The 3×3 median keeps the
-/// rows: each window, reflected at the ends, is centred on its own value.
-#[test]
-fn y_spline_derivatives_through_the_mesh() {
-    const C: f32 = 1.0 / 64.0;
-    let pixels = Buffer2::from_fn(96, 128, |_, y| {
-        let k = (y / 32) as f32;
-        k * k * C
-    });
-    let grid = make_grid(&pixels, 32);
-    let interior = 2.4 * C / 1024.0;
-    for tx in 0..3 {
-        for (ty, expected) in [0.0, interior, interior, 0.0].into_iter().enumerate() {
-            let tile = Vec2us::new(tx, ty);
-            let d2 = grid.d2y(TileComponent::Sky, tile);
-            assert!(
-                (d2 - expected).abs() <= 4.0 * f32::EPSILON * interior,
-                "sky d″ at ({tx}, {ty}): {d2} vs {expected}"
-            );
-            assert_eq!(
-                grid.d2y(TileComponent::Sigma, tile),
-                0.0,
-                "σ d″ at ({tx}, {ty})"
-            );
         }
     }
 }

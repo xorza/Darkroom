@@ -6,11 +6,14 @@
 //! of the log intensity is attenuated toward its mean, and the detail layers are left. In the log
 //! domain the result is a smooth factor on each pixel, so a pixel stays positive and keeps its
 //! ratio to its neighbours: a linear base compressed by subtraction instead takes a faint halo
-//! below black and turns near-black noise into colour speckle. A **display-domain** (post-stretch)
+//! below black and turns near-black noise into color speckle. A **display-domain** (post-stretch)
 //! operation, streaming [`crate::math::wavelet::atrous_smooth`] — see [`Hdr::compress`] for why
 //! the layer pyramid is never materialized.
 
+use std::mem;
+
 use common::Introspect;
+use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
@@ -19,10 +22,7 @@ use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
-use crate::math::sum;
-use crate::math::wavelet;
-use imaginarium::Buffer2;
-use std::mem;
+use crate::math::{sum, wavelet};
 
 /// The least intensity the log base reads: one 16-bit display step. A pixel below it is black on
 /// any display, and the floor bounds the factor a pixel takes by `65536^amount`.
@@ -57,7 +57,7 @@ impl Hdr {
     /// Compress the dynamic range of `image` in place.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         if self.amount == 0.0 {

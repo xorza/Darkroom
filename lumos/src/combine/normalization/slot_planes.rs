@@ -6,9 +6,10 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::common_domain::CommonDomain;
 use crate::combine::normalization::slot_pixels::SlotPixels;
+use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::image_dimensions::ImageDimensions;
@@ -45,12 +46,12 @@ impl<'a> SlotPlanes<'a> {
                     domain: pixels[slot].shared(),
                     indices: &[],
                 };
-                let measured = sampling.measure(
+                let measured = sampling.median(
                     self.values(pair_index / slot_count, slot),
                     median,
                     self.cancel,
                 )?;
-                Ok(measured.median.expect("the frames share only some pixels"))
+                Ok(measured.expect("the frames share only some pixels"))
             })
             .collect::<Result<Vec<_>, StackError>>()?;
         Ok(medians
@@ -75,7 +76,7 @@ impl<'a> SlotPlanes<'a> {
         };
         let values = confidence.chunk(0..self.dimensions.pixel_count());
         let mut inverse_confidence = 0.0;
-        for chunk in indices.chunks(Cancelled::POLL_CHUNK) {
+        for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
             Cancelled::check(self.cancel)?;
             for &index in chunk {
                 let value = f64::from(values[index]);
@@ -110,37 +111,56 @@ pub(super) struct PlaneMeasurement {
 
 impl PlaneSampling<'_> {
     /// `values`' median over the domain when there is one, and its values at the indices.
-    ///
-    /// The median is exact and holds no copy of the plane: `median`'s histogram, which the caller
-    /// reuses across planes, ranks the domain's values in two walks over it. A copy for every plane
-    /// measured at once would be a plane per worker, which no memory plan charges.
     pub(super) fn measure(
         &self,
         values: &[f32],
         median: &mut RadixMedian,
         cancel: &CancelToken,
     ) -> Result<PlaneMeasurement, StackError> {
+        Ok(PlaneMeasurement {
+            median: self.median(values, median, cancel)?,
+            samples: self.samples(values, cancel)?,
+        })
+    }
+
+    /// `values` at the indices.
+    pub(super) fn samples(
+        &self,
+        values: &[f32],
+        cancel: &CancelToken,
+    ) -> Result<Vec<f32>, StackError> {
         debug_assert!(self.indices.is_sorted(), "the sample indices ascend");
         let mut samples = Vec::with_capacity(self.indices.len());
-        for chunk in self.indices.chunks(Cancelled::POLL_CHUNK) {
+        for chunk in self.indices.chunks(CANCEL_POLL_CHUNK) {
             Cancelled::check(cancel)?;
             samples.extend(chunk.iter().map(|&index| values[index]));
         }
-        let median = match self.domain {
-            Some(domain) => {
-                let mut high = median.high_pass();
-                domain.for_each_in(values, cancel, |run| high.add_all(run))?;
-                debug_assert_eq!(
-                    high.len(),
-                    domain.sample_count,
-                    "the walk visits the domain"
-                );
-                let mut low = high.finish();
-                domain.for_each_in(values, cancel, |run| low.add_all(run))?;
-                Some(low.median())
-            }
-            None => None,
+        Ok(samples)
+    }
+
+    /// `values`' median over the domain; `None` without one.
+    ///
+    /// The median is exact and holds no copy of the plane: `median`'s histogram, which the caller
+    /// reuses across planes, ranks the domain's values in two walks over it. A copy for every plane
+    /// measured at once would be a plane per worker, which no memory plan charges.
+    pub(super) fn median(
+        &self,
+        values: &[f32],
+        median: &mut RadixMedian,
+        cancel: &CancelToken,
+    ) -> Result<Option<f32>, StackError> {
+        let Some(domain) = self.domain else {
+            return Ok(None);
         };
-        Ok(PlaneMeasurement { median, samples })
+        let mut high = median.high_pass();
+        domain.for_each_in(values, cancel, |run| high.add_all(run))?;
+        debug_assert_eq!(
+            high.len(),
+            domain.sample_count,
+            "the walk visits the domain"
+        );
+        let mut low = high.finish();
+        domain.for_each_in(values, cancel, |run| low.add_all(run))?;
+        Ok(Some(low.median()))
     }
 }

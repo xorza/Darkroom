@@ -16,8 +16,11 @@ fn a_radial_field_is_exact_only_about_its_centre() {
     }
     let target: Vec<DVec2> = reference.iter().map(|&p| field.image(p)).collect();
     let rms_about = |origin| {
-        let sip =
-            SipModel { order: 3, origin }.fitted_under(&Transform::identity(), &reference, &target);
+        let sip = SipModel {
+            order: SipOrder::Three,
+            origin,
+        }
+        .fitted_under(&Transform::identity(), &reference, &target);
         rms(&sip.corrected_residuals(&reference, &target, &Transform::identity()))
     };
     let centred = rms_about(field.centre);
@@ -46,7 +49,7 @@ fn a_narrow_strip_is_fitted_to_rounding() {
 
     let transform = Transform::identity();
     let sip = SipModel {
-        order: 5,
+        order: SipOrder::Five,
         origin: center,
     }
     .fitted_under(&transform, &ref_points, &target_points);
@@ -82,7 +85,7 @@ fn a_rank_deficient_layout_is_refused() {
             &Transform::identity(),
             pairs,
             SipModel {
-                order: 3,
+                order: SipOrder::Three,
                 origin: center
             }
         )
@@ -90,10 +93,10 @@ fn a_rank_deficient_layout_is_refused() {
     );
     assert!(
         SipPolynomial::fit_with(
-            TransformType::Affine,
+            LinearModel::Affine,
             pairs,
             SipModel {
-                order: 3,
+                order: SipOrder::Three,
                 origin: center
             }
         )

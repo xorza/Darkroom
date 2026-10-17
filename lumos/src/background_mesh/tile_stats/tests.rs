@@ -176,7 +176,12 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
             .collect();
 
         let mut samples = TileSamples::default();
-        samples.collect_unmasked(&pixels, &mask, case.tile);
+        samples.collect_unmasked(
+            &pixels,
+            &mask,
+            case.tile,
+            count_unmasked_pixels(&mask, case.tile),
+        );
         let TileSamples {
             values: actual,
             offsets,
@@ -232,8 +237,8 @@ fn a_tile_reads_its_sky_about_its_own_plane() {
             let input = TileInput {
                 pixels,
                 mask,
-                eligible: None,
-                sigma_clip_iterations: 3,
+                color: None,
+                sigma_clip_max_iterations: 3,
             };
             TileStats::compute(&input, tile, &mut scratch).unwrap()
         };

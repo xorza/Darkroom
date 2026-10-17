@@ -4,46 +4,57 @@ mod dark_scale;
 mod real_data;
 mod synthetic;
 
-use crate::calibration::calibration_masters::{DEFAULT_SIGMA_THRESHOLD, MasterBuild};
+use crate::calibration::calibration_masters::MasterBuild;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::defect_map::{DefectMap, HotPixels};
+use crate::calibration::error::MasterStackError;
 use crate::calibration::error::{CalibrationError, DarkMismatch, MasterBuildError};
 use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs};
 use crate::calibration::master_stack::MasterStack;
 use crate::calibration::prepared_flat::PreparedFlat;
+use crate::calibration::subtraction::internals::subtract_bias;
 use crate::calibration::subtractor::Subtractor;
-use crate::calibration::temperature_difference::TemperatureDifference;
-use crate::calibration::temperature_source::TemperatureSource;
 use crate::combine::error::{StackConfigError, StackError};
 use crate::combine::rejection::Rejection;
-use crate::combine::stack_config::{Combine, CombineMethod, SmallN, StackConfig, Weighting};
+use crate::combine::stack_config::StackConfig;
+use crate::combine::stack_config::combine::Combine;
+use crate::combine::stack_config::combine_method::CombineMethod;
+use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::capture_condition::CaptureCondition;
-use crate::frame::unverified_conditions::UnverifiedConditions;
-use crate::frame_store::error::ConditionMismatch;
+use crate::frame::error::ConditionMismatch;
 use crate::image::calibration_state::CalibrationState;
-use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::linear_image::LinearImage;
+use crate::image::dark_comparison::DarkComparison;
+use crate::image::derived_facts::DerivedFacts;
+use crate::image::observation_header::ObservationHeader;
 use crate::image::pixel_flags::PixelFlags;
-use crate::image::preview_image::PreviewImage;
 use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::temperature_difference::TemperatureDifference;
+use crate::image::temperature_source::TemperatureSource;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::assertions::{assert_close, bits};
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane, constant_cfa, make_cfa};
 use crate::internals::fits::rewrite_fits;
+use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::load_context::LoadContext;
+use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{
-    BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColourDefects,
-    DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata, MasterRole,
+    BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColorDefects,
+    ColorShares, DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata,
+    MasterRole,
 };
 use common::{CancelToken, TempDir};
 use fits_well::FitsReader;
@@ -58,7 +69,7 @@ use std::sync::Mutex;
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {
-    CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never()).unwrap()
+    CalibrationMasters::from_images(images, SigmaThreshold::DEFAULT, &CancelToken::never()).unwrap()
 }
 
 #[test]
@@ -69,27 +80,40 @@ fn calibrating_a_calibrated_light_is_refused() {
     let mut images = CalibrationSet::default();
     *images.get_mut(MasterRole::Dark) =
         Some(constant_cfa(Size2us::new(4, 4), 0.125, CfaType::Mono));
-    let masters = CalibrationMasters::from_images(images, 5.0, &CancelToken::never()).unwrap();
+    let masters = CalibrationMasters::from_images(
+        images,
+        SigmaThreshold::new(5.0).unwrap(),
+        &CancelToken::never(),
+    )
+    .unwrap();
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     // The dark still holds the bias, so the light lost both additive parts.
-    assert_eq!(light.metadata.calibration, CalibrationState::ADDITIVE);
-    assert_eq!(light.data.pixels(), &[0.375; 16]);
+    assert_eq!(
+        light.metadata.derived.calibration(),
+        CalibrationState::ADDITIVE
+    );
+    assert_eq!(light.data().pixels(), &[0.375; 16]);
     assert_eq!(
         masters.calibrate(&mut light),
         Err(CalibrationError::AlreadyCalibrated)
     );
-    assert_eq!(light.data.pixels(), &[0.375; 16]);
+    assert_eq!(light.data().pixels(), &[0.375; 16]);
 }
 
 /// A flat whose subtracted mean is not positive — a dark given as the flat, or a subtractor above
-/// the flat's level — is refused when the set is built, per colour for a CFA flat.
+/// the flat's level — is refused when the set is built, per color for a CFA flat.
 #[test]
 fn a_flat_with_no_positive_mean_is_refused() {
-    for (cfa_type, flat, subtractor, channel) in [
+    for (cfa_type, flat, subtractor, color) in [
         (CfaType::Mono, 0.0f32, None, None),
         (CfaType::Mono, 0.25, Some(0.5f32), None),
-        (CfaType::Bayer(CfaPattern::Rggb), 0.25, Some(0.5), Some(0)),
+        (
+            CfaType::Bayer(CfaPattern::Rggb),
+            0.25,
+            Some(0.5),
+            Some(CfaColor::Red),
+        ),
     ] {
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Flat) = Some(constant_cfa(Size2us::new(4, 4), flat, cfa_type));
@@ -97,8 +121,8 @@ fn a_flat_with_no_positive_mean_is_refused() {
             subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type));
         assert!(
             matches!(
-                CalibrationMasters::from_images(images, 5.0, &CancelToken::never()),
-                Err(CalibrationError::NonPositiveFlat { channel: c }) if c == channel
+                CalibrationMasters::from_images(images, SigmaThreshold::new(5.0).unwrap(), &CancelToken::never()),
+                Err(CalibrationError::NonPositiveFlat { color: c }) if c == color
             ),
             "{cfa_type:?} flat {flat} minus {subtractor:?}"
         );
@@ -123,7 +147,7 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         ..CalibrationSet::default()
     };
     assert!(matches!(
-        CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never()),
+        CalibrationMasters::from_images(images, SigmaThreshold::DEFAULT, &CancelToken::never()),
         Err(CalibrationError::CfaPatternMismatch {
             component: MasterRole::FlatDark,
             expected: CfaType::Bayer(CfaPattern::Rggb),
@@ -159,7 +183,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
 
     // The same layout one row down is a different X-Trans phase.
     let xtrans_a = CfaType::XTrans(XTRANS_PATTERN);
-    let mut shifted = *XTRANS_PATTERN.rows();
+    let mut shifted = XTRANS_PATTERN.rows();
     shifted.rotate_left(1);
     let xtrans_b = CfaType::XTrans(XTransPattern::new(shifted).unwrap());
     let cases = [
@@ -208,21 +232,21 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     for case in cases {
         let masters = masters_with_component(case.role, case.master);
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, case.light);
-        let original_data = light.data.to_vec();
+        let original_data = light.data().to_vec();
 
         assert_eq!(masters.calibrate(&mut light), Err(case.expected));
-        assert_eq!(light.data.pixels(), original_data);
-        assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+        assert_eq!(light.data().pixels(), original_data);
+        assert_eq!(light.metadata.derived.calibration(), CalibrationState::NONE);
     }
 
-    // A master whose pattern matches but whose extent does not is bad input too — unchecked, it
-    // would reach `CfaImage::subtract`'s assert, which is not a report a caller can act on. Every
+    // A master whose pattern matches but whose extent does not is bad input too — unchecked, the
+    // pass would index past it, which is not a report a caller can act on. Every
     // role a bundle keeps is covered because each is applied by a different operation; the
     // flat-dark is spent on the flat, so a bundle never holds one to check.
     for component in [MasterRole::Dark, MasterRole::Flat, MasterRole::Bias] {
         let masters = masters_with_sized_component(component, CfaType::Mono, Size2us::new(4, 4));
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        let original_data = light.data.to_vec();
+        let original_data = light.data().to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
@@ -232,15 +256,15 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
                 master: Size2us::new(4, 4),
             })
         );
-        assert_eq!(light.data.pixels(), original_data);
-        assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+        assert_eq!(light.data().pixels(), original_data);
+        assert_eq!(light.metadata.derived.calibration(), CalibrationState::NONE);
     }
 
     // A master of another camera is refused when both name theirs, and calibrates when they name
     // the same one or either names none.
     let named = |instrument: Option<&str>| {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.1, CfaType::Mono);
-        master.metadata.instrument = instrument.map(str::to_owned);
+        master.metadata.header.instrument = instrument.map(str::to_owned);
         bundle(CalibrationSet {
             bias: Some(master),
             ..CalibrationSet::default()
@@ -248,7 +272,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     };
     let light = |instrument: Option<&str>| {
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.instrument = instrument.map(str::to_owned);
+        light.metadata.header.instrument = instrument.map(str::to_owned);
         light
     };
     let mut other = light(Some("Canon EOS 600D"));
@@ -260,7 +284,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
             master: "Canon EOS 6D".to_owned(),
         })
     );
-    assert_eq!(other.metadata.calibration, CalibrationState::NONE);
+    assert_eq!(other.metadata.derived.calibration(), CalibrationState::NONE);
     for (master, frame) in [
         (Some("Canon EOS 6D"), Some("Canon EOS 6D")),
         (None, Some("Canon EOS 6D")),
@@ -283,19 +307,25 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (MasterRole::FlatDark, 0.5),
     ] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.25, CfaType::Mono);
-        master.metadata.domain = Some(raw_domain(65_532.0));
+        master
+            .metadata
+            .derived
+            .set_domain(Some(raw_domain(65_532.0)));
         let mut images = CalibrationSet::default();
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = Some(raw_domain(16_383.0));
+        light
+            .metadata
+            .derived
+            .set_domain(Some(raw_domain(16_383.0)));
         assert_eq!(
             masters.calibrate(&mut light).map(drop),
             Ok(()),
             "{component:?}"
         );
-        assert_eq!(light.data.pixels(), &[expected; 4], "{component:?}");
+        assert_eq!(light.data().pixels(), &[expected; 4], "{component:?}");
     }
 
     // A span the decoder had to assume cannot be converted: subtracting a `[0, 1]` master from a
@@ -303,14 +333,20 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // Refused for the master the light subtracts, before the light is touched.
     for component in [MasterRole::Dark, MasterRole::Bias] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.domain = Some(fits_domain(1.0, None, ScaleOrigin::Assumed));
+        master
+            .metadata
+            .derived
+            .set_domain(Some(fits_domain(1.0, None, ScaleOrigin::Assumed)));
         let mut images = CalibrationSet::default();
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = Some(raw_domain(16_383.0));
-        let original_data = light.data.to_vec();
+        light
+            .metadata
+            .derived
+            .set_domain(Some(raw_domain(16_383.0)));
+        let original_data = light.data().to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
@@ -320,22 +356,30 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
                 master: fits_domain(1.0, None, ScaleOrigin::Assumed),
             })
         );
-        assert_eq!(light.data.pixels(), original_data);
-        assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+        assert_eq!(light.data().pixels(), original_data);
+        assert_eq!(light.metadata.derived.calibration(), CalibrationState::NONE);
     }
 
     // The same failure with no span to give it away: a master and a light on one span whose BUNIT
     // names different quantities. The subtraction would run and report success.
     {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.domain = Some(fits_domain(1.0, Some("count/s"), ScaleOrigin::Declared));
+        master.metadata.derived.set_domain(Some(fits_domain(
+            1.0,
+            Some("count/s"),
+            ScaleOrigin::Declared,
+        )));
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = Some(fits_domain(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
-        let original_data = light.data.to_vec();
+        light.metadata.derived.set_domain(Some(fits_domain(
+            1.0,
+            Some("Jy/beam"),
+            ScaleOrigin::Declared,
+        )));
+        let original_data = light.data().to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
@@ -345,19 +389,26 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
                 master: fits_domain(1.0, Some("count/s"), ScaleOrigin::Declared),
             })
         );
-        assert_eq!(light.data.pixels(), original_data);
-        assert_eq!(light.metadata.calibration, CalibrationState::NONE);
+        assert_eq!(light.data().pixels(), original_data);
+        assert_eq!(light.metadata.derived.calibration(), CalibrationState::NONE);
 
         // A master that states no unit is "cannot tell", not a disagreement, so the same pair
         // calibrates once the master stops naming a quantity — the unit is the axis, not its
         // presence.
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.domain = Some(fits_domain(1.0, None, ScaleOrigin::Declared));
+        master
+            .metadata
+            .derived
+            .set_domain(Some(fits_domain(1.0, None, ScaleOrigin::Declared)));
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = Some(fits_domain(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
+        light.metadata.derived.set_domain(Some(fits_domain(
+            1.0,
+            Some("Jy/beam"),
+            ScaleOrigin::Declared,
+        )));
         assert_eq!(masters.calibrate(&mut light).map(drop), Ok(()));
     }
 
@@ -378,13 +429,19 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (None, None),
     ] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.domain = master_span.map(raw_domain);
+        master
+            .metadata
+            .derived
+            .set_domain(master_span.map(raw_domain));
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = light_span.map(raw_domain);
+        light
+            .metadata
+            .derived
+            .set_domain(light_span.map(raw_domain));
         assert_eq!(
             masters.calibrate(&mut light).map(drop),
             Ok(()),
@@ -415,12 +472,15 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
     };
     let calibrate = |pedestal| {
         let mut dark = constant_cfa(Size2us::new(2, 2), 0.031_25, CfaType::Mono);
-        dark.metadata.domain = Some(SampleDomain {
+        dark.metadata.derived.set_domain(Some(SampleDomain {
             pedestal,
             ..kept.clone()
-        });
+        }));
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.domain = Some(raw_domain(16_384.0));
+        light
+            .metadata
+            .derived
+            .set_domain(Some(raw_domain(16_384.0)));
         bundle(CalibrationSet {
             dark: Some(dark),
             ..Default::default()
@@ -430,8 +490,11 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
     };
 
     let light = calibrate(Pedestal::Kept(2048.0)).unwrap();
-    assert_eq!(light.data.pixels(), &[0.5; 4]);
-    assert_eq!(light.metadata.domain.unwrap().pedestal, Pedestal::Removed);
+    assert_eq!(light.data().pixels(), &[0.5; 4]);
+    assert_eq!(
+        light.metadata.derived.domain().unwrap().pedestal,
+        Pedestal::Removed
+    );
     assert!(matches!(
         calibrate(Pedestal::Unknown),
         Err(CalibrationError::SampleDomainMismatch { .. })
@@ -439,7 +502,7 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
 
     let kept_frame = |value| {
         let mut frame = constant_cfa(Size2us::new(2, 2), value, CfaType::Mono);
-        frame.metadata.domain = Some(kept.clone());
+        frame.metadata.derived.set_domain(Some(kept.clone()));
         frame
     };
     let masters = bundle(CalibrationSet {
@@ -449,9 +512,15 @@ fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
     });
     let mut light = kept_frame(0.343_75);
     masters.calibrate(&mut light).unwrap();
-    assert_eq!(light.data.pixels(), &[0.25; 4]);
-    assert_eq!(light.metadata.domain.unwrap().pedestal, Pedestal::Removed);
-    assert_eq!(light.metadata.calibration, CalibrationState::ADDITIVE);
+    assert_eq!(light.data().pixels(), &[0.25; 4]);
+    assert_eq!(
+        light.metadata.derived.domain().unwrap().pedestal,
+        Pedestal::Removed
+    );
+    assert_eq!(
+        light.metadata.derived.calibration(),
+        CalibrationState::ADDITIVE
+    );
 }
 
 /// A RAW decode's domain over a span of `scale`, for pairing frames that differ only in domain.
@@ -486,7 +555,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
         flat_dark: None,
     };
     assert_eq!(
-        CalibrationMasters::from_images(mismatched, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+        CalibrationMasters::from_images(mismatched, SigmaThreshold::DEFAULT, &CancelToken::never())
             .unwrap_err()
             .to_string(),
         // Dark is seen first, so it sets the expectation the bias then fails.
@@ -504,7 +573,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
     assert_eq!(
         CalibrationMasters::from_images(
             mismatched_flat,
-            DEFAULT_SIGMA_THRESHOLD,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never()
         )
         .unwrap_err()
@@ -520,7 +589,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
         flat_dark: None,
     };
     let masters =
-        CalibrationMasters::from_images(coherent, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+        CalibrationMasters::from_images(coherent, SigmaThreshold::DEFAULT, &CancelToken::never())
             .expect("a coherent set builds");
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
@@ -567,7 +636,7 @@ fn empty_roles_yield_no_masters() {
             role,
             config: role.stack_config(),
             ingest: &IngestConfig::default(),
-            subtract: None,
+            subtract: &[],
         }
         .run(ProgressMonitor::unattended())
         .unwrap();
@@ -662,12 +731,12 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
         assert_eq!(defects.cold_indices(), [dead], "{kind:?}");
 
         let prepared = masters.flat.as_ref().unwrap().divisor();
-        assert_eq!(prepared.data[dead], 0.1, "{kind:?}");
+        assert_eq!(prepared.data()[dead], 0.1, "{kind:?}");
         let expected_normal = 49.0 / 48.0;
         assert!(
-            (prepared.data[0] - expected_normal).abs() < 1e-6,
+            (prepared.data()[0] - expected_normal).abs() < 1e-6,
             "{kind:?}: {} != {expected_normal}",
-            prepared.data[0]
+            prepared.data()[0]
         );
     }
 }
@@ -682,7 +751,7 @@ fn from_images_rejects_cancelled_operation() {
             dark: Some(constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono)),
             ..Default::default()
         },
-        DEFAULT_SIGMA_THRESHOLD,
+        SigmaThreshold::DEFAULT,
         &cancel,
     );
 
@@ -739,22 +808,22 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
         let mut light = constant_cfa(size, 0.5, CfaType::Mono);
         masters.calibrate(&mut light).unwrap();
         assert!(
-            light.data.iter().all(|&v| v == expected),
+            light.data().iter().all(|&v| v == expected),
             "dark {dark:?}, bias {bias:?}: {:?}",
-            light.data.pixels()
+            light.data().pixels()
         );
-        assert!(light.flags.is_none());
+        assert!(light.flags().is_none());
     }
 
     let flagged = |value, index, flag| {
         let mut master = constant_cfa(size, value, CfaType::Mono);
-        master.flags = PixelFlags::from_fn(size, |at| {
+        master.set_flags(PixelFlags::from_fn(size, |at| {
             if at == index {
                 flag
             } else {
                 QualityFlags::default()
             }
-        });
+        }));
         master
     };
     let masters = bundle(CalibrationSet {
@@ -765,7 +834,7 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     // Where a master held no measurement the light holds none either, and calibration repairs it.
-    let flags = light.flags.as_ref().unwrap();
+    let flags = light.flags().unwrap();
     assert_eq!(flags.count(QualityFlags::NO_DATA), 2);
     assert_eq!(flags.count(QualityFlags::REPAIRED), 2);
     let null = QualityFlags::NO_DATA.union(QualityFlags::REPAIRED);
@@ -773,14 +842,14 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
     assert_eq!(flags.at(9), null);
 
     let mut bias = flagged(0.0625, 9, QualityFlags::NO_DATA);
-    bias.data[9] = 0.5;
+    bias.data_mut()[9] = 0.5;
     let masters = bundle(CalibrationSet {
         bias: Some(bias),
         ..Default::default()
     });
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
-    assert_eq!(light.data.pixels(), &[0.4375; 16]);
+    assert_eq!(light.data().pixels(), &[0.4375; 16]);
 }
 
 /// The flat divides out the vignetting `v` and leaves `signal · mean(v)`, whichever masters are
@@ -864,7 +933,7 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
             (0..2).map(|i| k * vignetting[i] + flat_sub).collect(),
             CfaType::Mono,
         );
-        flat.metadata.calibration = flat_lost;
+        flat.metadata.derived.set_calibration(flat_lost);
         let masters = bundle(CalibrationSet {
             dark: has_dark.then(|| level(dark)),
             flat: Some(flat),
@@ -872,7 +941,10 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
             flat_dark: has_flat_dark.then(|| {
                 let mut flat_dark = level(flat_dark);
                 if thermal_flat_dark {
-                    flat_dark.metadata.calibration = CalibrationState::BIAS;
+                    flat_dark
+                        .metadata
+                        .derived
+                        .set_calibration(CalibrationState::BIAS);
                 }
                 flat_dark
             }),
@@ -882,7 +954,7 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
         for (i, &signal) in signal.iter().enumerate() {
             let expected = signal * mean_v;
             assert_close!(
-                light.data[i],
+                light.data()[i],
                 expected,
                 f32::EPSILON * expected,
                 "{name}, pixel {i}"
@@ -891,7 +963,9 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
     }
 
     let mut flat = level(0.5);
-    flat.metadata.calibration = CalibrationState::BIAS;
+    flat.metadata
+        .derived
+        .set_calibration(CalibrationState::BIAS);
     assert_eq!(
         CalibrationMasters::from_images(
             CalibrationSet {
@@ -899,7 +973,7 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
                 flat_dark: Some(level(flat_dark)),
                 ..Default::default()
             },
-            DEFAULT_SIGMA_THRESHOLD,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never(),
         )
         .unwrap_err(),
@@ -928,7 +1002,7 @@ fn sigma_threshold_affects_detection() {
             dark: Some(dark_strict),
             ..Default::default()
         },
-        3.0,
+        SigmaThreshold::new(3.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
@@ -937,7 +1011,7 @@ fn sigma_threshold_affects_detection() {
             dark: Some(dark_loose),
             ..Default::default()
         },
-        40.0,
+        SigmaThreshold::new(40.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
@@ -960,25 +1034,30 @@ fn defect_detection_zero_median_no_false_positives() {
     // Add one genuine hot pixel
     data[50] = 0.5;
 
-    let dark = CfaImage {
-        data: Buffer2::new(10, 10, data),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata {
-            quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
-            ..ImageMetadata::default()
+    let dark = CfaImage::from_plane(
+        Buffer2::new(10, 10, data),
+        CfaType::Mono,
+        ImageMetadata {
+            header: ObservationHeader::default(),
+            derived: DerivedFacts::builder()
+                .quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0))
+                .build(),
         },
-        flags: None,
-    };
+    );
 
     let defect_map = DefectMap::new(dark.size())
-        .detect_hot(&dark, 5.0, &CancelToken::never())
+        .detect_hot(
+            &dark,
+            SigmaThreshold::new(5.0).unwrap(),
+            &CancelToken::never(),
+        )
         .unwrap();
 
     // The tiny values one ADC step up are not flagged; the genuine outlier at 0.5 is, alone.
     assert_eq!(defect_map.hot().indices, [50]);
 }
 
-/// A hot pixel is repaired from its own colour. The light's red, green and blue sit at 0.5, 0.3 and
+/// A hot pixel is repaired from its own color. The light's red, green and blue sit at 0.5, 0.3 and
 /// 0.2 over a dark of 0.0625, so after subtraction the hot red at (2, 2) can only come back as
 /// 0.5 − 0.0625 = 0.4375 if every neighbour it took the median of was red — a green or blue one
 /// would pull it toward 0.2375 or 0.1375. The hot light pixel reads 0.9, under the saturation level,
@@ -1009,21 +1088,24 @@ fn calibrate_hot_pixel_correction() {
         (1, 0, 1)
     );
     assert_eq!(summary.percentage(), 100.0 / (w * h) as f32);
-    assert_eq!(summary.colours[0].percentage(), 100.0 / 9.0);
+    assert_eq!(
+        summary.colors.of(CfaColor::Red).unwrap().percentage(),
+        100.0 / 9.0
+    );
 
     let baseline = [0.5f32, 0.3, 0.2];
     let mut light_pixels = Buffer2::new_default(w, h);
     for y in 0..h {
         for x in 0..w {
-            light_pixels[(x, y)] = baseline[pattern.color_at(Vec2us::new(x, y))];
+            light_pixels[(x, y)] = baseline[pattern.slot_at(Vec2us::new(x, y))];
         }
     }
     light_pixels[(2, 2)] = 0.9;
     let mut light = cfa_from_plane(light_pixels.clone(), pattern);
     masters.calibrate(&mut light).unwrap();
-    assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
+    assert_eq!(light.data()[2 * w + 2], 0.5 - 0.0625);
     // The repaired pixel says so, and no other does.
-    let flags = light.flags.as_ref().unwrap();
+    let flags = light.flags().unwrap();
     assert_eq!(flags.count(QualityFlags::REPAIRED), 1);
     assert_eq!(
         flags.at_pos(Vec2us::new(2, 2)),
@@ -1035,25 +1117,25 @@ fn calibrate_hot_pixel_correction() {
         light_pixels.pixels_mut()[index] = 0.9;
     }
     let mut light = cfa_from_plane(light_pixels, pattern);
-    light.flags = PixelFlags::from_fn(Size2us::new(w, h), |index| {
+    light.set_flags(PixelFlags::from_fn(Size2us::new(w, h), |index| {
         if nulls.contains(&index) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
         }
-    });
+    }));
     masters.calibrate(&mut light).unwrap();
-    assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
+    assert_eq!(light.data()[2 * w + 2], 0.5 - 0.0625);
     for index in nulls {
-        assert_eq!(light.data[index], 0.5 - 0.0625, "null at {index}");
+        assert_eq!(light.data()[index], 0.5 - 0.0625, "null at {index}");
     }
 }
 
 #[test]
 fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
-    let flat = CfaImage {
-        data: Buffer2::new(
+    let flat = CfaImage::from_plane(
+        Buffer2::new(
             4,
             4,
             vec![
@@ -1061,16 +1143,16 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             ],
         ),
         cfa_type,
-        metadata: ImageMetadata {
-            camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
-            unverified_dark: UnverifiedConditions {
-                exposure: false,
-                temperature: true,
+        ImageMetadata {
+            header: ObservationHeader {
+                camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+                ..Default::default()
             },
-            ..Default::default()
+            derived: DerivedFacts::builder()
+                .dark_comparison(Some(UNSHARED_TEMPERATURE))
+                .build(),
         },
-        flags: None,
-    };
+    );
     let mut masters = bundle(CalibrationSet {
         dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type)),
         flat: Some(flat),
@@ -1078,13 +1160,13 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         flat_dark: None,
     });
     let dark = masters.dark.as_mut().unwrap();
-    dark.metadata.quantization_sigma = Some(0.000_02);
+    dark.metadata.derived.set_quantization_sigma(Some(0.000_02));
     // Pixel 5 is saturated and a defect: 2 + 4 = 6. The dark's flags go in its own `LUMFLAGS`
     // extension, right after it.
     let dark_flags = PixelFlags::from_fn(Size2us::new(4, 4), |index| {
         QualityFlags::from_byte(if index == 5 { 6 } else { 0 })
     });
-    dark.flags = dark_flags.clone();
+    dark.set_flags(dark_flags.clone());
     // Two hot pixels with excesses f32 rounds, and pixel 10 cold as well.
     masters.defect_map = Some(
         DefectMap::from_lists(
@@ -1097,34 +1179,34 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         )
         .unwrap(),
     );
-    let prepared_bits = bits(masters.flat.as_ref().unwrap().divisor().data.pixels());
+    let prepared_bits = bits(masters.flat.as_ref().unwrap().divisor().data().pixels());
 
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     masters.calibrate(&mut expected).unwrap();
 
     let directory = TempDir::new("lumos-calibration-roundtrip");
     let path = directory.join("masters.fits");
-    masters.save(&path).unwrap();
+    writer::calibration_bundle(&masters, &path).unwrap();
     // A bundle is no single image, whichever loader is pointed at it.
     let refused = |result: Result<(), ImageError>| {
         matches!(
             result,
             Err(ImageError::FitsUnsupported {
-                reason: FitsRefusal::NotStandaloneCfa { format },
+                reason: FitsRefusal::NotStandaloneImage { format },
                 ..
             }) if format == "CALMASTR"
         )
     };
     let context = LoadContext::default();
-    assert!(refused(CfaImage::from_file(&path, &context).map(drop)));
-    assert!(refused(LinearImage::from_file(&path, &context).map(drop)));
-    assert!(refused(PreviewImage::from_file(&path, &context).map(drop)));
+    assert!(refused(context.cfa(&path).map(drop)));
+    assert!(refused(context.linear(&path).map(drop)));
+    assert!(refused(context.preview(&path).map(drop)));
     let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 6);
     assert_eq!(reader.hdus()[0].header.naxis().unwrap(), 0);
     assert_eq!(
-        reader.hdus()[0].header.get_text("LUMOSFMT").unwrap(),
+        reader.hdus()[0].header.get_text(FORMAT_KEYWORD).unwrap(),
         Some("CALMASTR")
     );
     let extension_names = reader
@@ -1158,15 +1240,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         assert_eq!(report.datasum, ChecksumStatus::Valid);
         assert_eq!(report.checksum, ChecksumStatus::Valid);
     }
-    let loaded = CalibrationMasters::load(&path, &LoadContext::default()).unwrap();
+    let loaded = LoadContext::default().calibration_masters(&path).unwrap();
     // The flat's stack left its flat-dark's temperature uncompared, and the bundle keeps saying so.
-    assert_eq!(
-        loaded.unverified_flat_dark(),
-        UnverifiedConditions {
-            exposure: false,
-            temperature: true,
-        }
-    );
+    assert_eq!(loaded.flat_dark(), Some(UNSHARED_TEMPERATURE));
     assert_eq!(
         loaded.dark.as_ref().unwrap().flags().unwrap().bytes(),
         dark_flags.as_ref().unwrap().bytes()
@@ -1176,7 +1252,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let orphan = directory.join("orphan.fits");
     fs::write(&orphan, &cache_bytes).unwrap();
     rewrite_fits(&orphan, |index, _, _| index != 1);
-    let error = CalibrationMasters::load(&orphan, &LoadContext::default()).unwrap_err();
+    let error = LoadContext::default()
+        .calibration_masters(&orphan)
+        .unwrap_err();
     assert!(matches!(error, BundleError::Flags(_)), "{error:?}");
     assert!(
         error
@@ -1188,14 +1266,14 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cancel = CancelToken::new();
     cancel.cancel();
     assert!(matches!(
-        CalibrationMasters::load(&path, &LoadContext::new(cancel, u64::MAX)),
+        LoadContext::new(cancel, u64::MAX).calibration_masters(&path),
         Err(BundleError::Cancelled)
     ));
 
     let mut invalid_version = cache_bytes.clone();
     let version_card = invalid_version
         .windows(8)
-        .position(|window| window == b"LUMOSVER")
+        .position(|window| window == VERSION_KEYWORD.as_bytes())
         .unwrap();
     let version_digit = invalid_version[version_card..version_card + 80]
         .iter()
@@ -1204,8 +1282,11 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     invalid_version[version_card + version_digit] = b'4';
     fs::write(&path, invalid_version).unwrap();
     assert!(matches!(
-        CalibrationMasters::load(&path, &LoadContext::default()),
-        Err(BundleError::Version { found: 4 })
+        LoadContext::default().calibration_masters(&path),
+        Err(BundleError::Version {
+            found: 4,
+            expected: 6
+        })
     ));
 
     // The bias is stored as it is, 0.1 at every pixel; the dark beside it holds its thermal signal
@@ -1227,14 +1308,16 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .unwrap();
     invalid_data[pixel_offset] ^= 0x01;
     fs::write(&path, invalid_data).unwrap();
-    let error = CalibrationMasters::load(&path, &LoadContext::default()).unwrap_err();
+    let error = LoadContext::default()
+        .calibration_masters(&path)
+        .unwrap_err();
     assert!(
         matches!(error, BundleError::Checksum { hdu: 4 }),
         "{error:?}"
     );
 
     assert_eq!(
-        bits(loaded.flat.as_ref().unwrap().divisor().data.pixels()),
+        bits(loaded.flat.as_ref().unwrap().divisor().data().pixels()),
         prepared_bits
     );
     assert_eq!(
@@ -1244,19 +1327,26 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             .unwrap()
             .divisor()
             .metadata
+            .header
             .camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        loaded.dark.as_ref().unwrap().metadata.quantization_sigma,
+        loaded
+            .dark
+            .as_ref()
+            .unwrap()
+            .metadata
+            .derived
+            .quantization_sigma(),
         Some(0.000_02)
     );
     assert_eq!(
-        loaded.dark.as_ref().unwrap().metadata.calibration,
+        loaded.dark.as_ref().unwrap().metadata.derived.calibration(),
         CalibrationState::BIAS
     );
     assert_eq!(
-        loaded.bias.as_ref().unwrap().metadata.calibration,
+        loaded.bias.as_ref().unwrap().metadata.derived.calibration(),
         CalibrationState::NONE
     );
     assert_eq!(
@@ -1279,7 +1369,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let refused = |edit: &mut dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool| {
         fs::write(&malformed, &cache_bytes).unwrap();
         rewrite_fits(&malformed, edit);
-        CalibrationMasters::load(&malformed, &LoadContext::default()).unwrap_err()
+        LoadContext::default()
+            .calibration_masters(&malformed)
+            .unwrap_err()
     };
     let set = |hdu: usize, key: &'static str, value: &'static str| {
         refused(&mut |index, header, _| {
@@ -1290,7 +1382,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         })
     };
     assert!(matches!(
-        set(0, "LUMOSFMT", "OTHER"),
+        set(0, FORMAT_KEYWORD, "OTHER"),
         BundleError::NotABundle
     ));
     assert!(matches!(
@@ -1336,14 +1428,14 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
     let mut actual = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     loaded.calibrate(&mut actual).unwrap();
-    assert_eq!(bits(actual.data.pixels()), bits(expected.data.pixels()));
+    assert_eq!(bits(actual.data().pixels()), bits(expected.data().pixels()));
 }
 
 #[test]
 fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     let dir = TempDir::new("lumos-empty-masters");
     let path = dir.join("masters.fits");
-    CalibrationMasters::default().save(&path).unwrap();
+    writer::calibration_bundle(&CalibrationMasters::default(), &path).unwrap();
 
     let bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
@@ -1352,7 +1444,7 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     assert_eq!(report.datasum, ChecksumStatus::Valid);
     assert_eq!(report.checksum, ChecksumStatus::Valid);
 
-    let loaded = CalibrationMasters::load(&path, &LoadContext::default()).unwrap();
+    let loaded = LoadContext::default().calibration_masters(&path).unwrap();
     assert_eq!(loaded.components().collect::<Vec<_>>(), []);
 }
 
@@ -1405,12 +1497,12 @@ fn ram_bytes_sums_present_frames_and_defects() {
             cold_pixels: 1,
             defective_pixels: 3,
             pixels: 80,
-            colours: vec![ColourDefects {
+            colors: ColorShares::Mono(ColorDefects {
                 hot: 2,
                 cold: 1,
                 defective: 3,
                 photosites: 80,
-            }],
+            }),
         }
     );
     assert_eq!(summary.percentage(), 3.75);
@@ -1440,14 +1532,14 @@ fn a_master_stack_rejects_an_invalid_config_before_reading_anything() {
             role: MasterRole::Dark,
             config,
             ingest: &IngestConfig::default(),
-            subtract: None,
+            subtract: &[],
         }
         .run(ProgressMonitor::unattended())
         .unwrap_err();
         assert!(
             matches!(
                 error,
-                StackError::Config(StackConfigError::Field(invalid)) if invalid.field == "sigma_low"
+                MasterStackError::Stack(StackError::Config(StackConfigError::Field(invalid))) if invalid.field == "sigma.low"
             ),
             "expected the config to be rejected, got {error:?}"
         );
@@ -1463,17 +1555,19 @@ fn a_master_stack_rejects_an_invalid_config_before_reading_anything() {
             ..StackConfig::bias_or_dark()
         },
         ingest: &IngestConfig::default(),
-        subtract: None,
+        subtract: &[],
     }
     .run(ProgressMonitor::unattended())
     .unwrap_err();
     assert!(
         matches!(
             error,
-            StackError::Config(StackConfigError::ManualWeightCountMismatch {
-                expected: 1,
-                actual: 2
-            })
+            MasterStackError::Stack(StackError::Config(
+                StackConfigError::ManualWeightCountMismatch {
+                    expected: 1,
+                    actual: 2
+                }
+            ))
         ),
         "expected the weight count to be checked against the frame count, got {error:?}"
     );
@@ -1485,22 +1579,22 @@ fn a_master_stack_rejects_an_invalid_config_before_reading_anything() {
         role: MasterRole::Dark,
         config: StackConfig::bias_or_dark(),
         ingest: &IngestConfig::default(),
-        subtract: None,
+        subtract: &[],
     }
     .run(ProgressMonitor::unattended())
     .unwrap_err();
     assert!(
-        !matches!(error, StackError::Config(_)),
+        !matches!(error, MasterStackError::Stack(StackError::Config(_))),
         "a valid config must get past validation and fail on the missing file, got {error:?}"
     );
 }
 
 /// A frame on a 4096 span whose pedestal is `pedestal`.
 fn with_pedestal(mut frame: CfaImage, pedestal: Pedestal) -> CfaImage {
-    frame.metadata.domain = Some(SampleDomain {
+    frame.metadata.derived.set_domain(Some(SampleDomain {
         pedestal,
         ..raw_domain(4096.0)
-    });
+    }));
     frame
 }
 
@@ -1523,7 +1617,7 @@ fn an_offset_is_never_divided_by_the_flat() {
                     flat: Some(flat(pedestal)),
                     ..Default::default()
                 },
-                DEFAULT_SIGMA_THRESHOLD,
+                SigmaThreshold::DEFAULT,
                 &CancelToken::never(),
             )
             .unwrap_err(),
@@ -1543,9 +1637,12 @@ fn an_offset_is_never_divided_by_the_flat() {
         masters.calibrate(&mut kept),
         Err(CalibrationError::LightWithoutSubtractor)
     );
-    assert_eq!(kept.metadata.calibration, CalibrationState::NONE);
+    assert_eq!(kept.metadata.derived.calibration(), CalibrationState::NONE);
     let mut thermal = constant_cfa(size, 0.0625, CfaType::Mono);
-    thermal.metadata.calibration = CalibrationState::BIAS;
+    thermal
+        .metadata
+        .derived
+        .set_calibration(CalibrationState::BIAS);
     let with_thermal_dark = bundle(CalibrationSet {
         flat: Some(flat(Pedestal::Removed)),
         dark: Some(thermal),
@@ -1577,7 +1674,7 @@ fn an_offset_is_never_divided_by_the_flat() {
         ),
     ] {
         let mut subtractor = constant_cfa(size, 0.125, CfaType::Mono);
-        subtractor.metadata.calibration = lost;
+        subtractor.metadata.derived.set_calibration(lost);
         let mut set = CalibrationSet {
             flat: Some(flat(Pedestal::Kept(256.0))),
             ..Default::default()
@@ -1587,7 +1684,7 @@ fn an_offset_is_never_divided_by_the_flat() {
             _ => set.flat_dark = Some(subtractor),
         }
         assert_eq!(
-            CalibrationMasters::from_images(set, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+            CalibrationMasters::from_images(set, SigmaThreshold::DEFAULT, &CancelToken::never())
                 .unwrap_err(),
             expected,
             "{role:?} that lost {lost:?}"
@@ -1598,7 +1695,7 @@ fn an_offset_is_never_divided_by_the_flat() {
         masters.calibrate(&mut removed),
         Ok(CalibrationOutcome::default())
     );
-    assert_eq!(removed.data.pixels(), &[0.5; 16]);
+    assert_eq!(removed.data().pixels(), &[0.5; 16]);
 }
 
 /// Calibration flags saturation before it moves the samples, so no level is applied after it. A
@@ -1616,8 +1713,7 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
         (0..4)
             .filter(|&index| {
                 light
-                    .flags
-                    .as_ref()
+                    .flags()
                     .is_some_and(|flags| flags.at(index).intersects(QualityFlags::SATURATED))
             })
             .collect::<Vec<_>>()
@@ -1628,18 +1724,18 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
         ..Default::default()
     });
     let mut light = make_cfa(size, vec![1.0, 0.5, 0.5, 0.5], CfaType::Mono);
-    light.metadata.data_max = Some(1.0);
+    light.metadata.header.data_max = Some(1.0);
     dark.calibrate(&mut light).unwrap();
-    assert_eq!(light.data.pixels()[0], 0.875);
+    assert_eq!(light.data().pixels()[0], 0.875);
     assert_eq!(saturated(&light), [0]);
-    assert!(light.metadata.saturation_flagged);
-    assert_eq!(light.metadata.data_max, None);
+    assert!(light.metadata.derived.saturation_flagged());
+    assert_eq!(light.metadata.header.data_max, None);
 
     let directory = TempDir::new("lumos-calibrated-saturation");
     let path = directory.path().join("light.fits");
-    light.save_fits(&path).unwrap();
-    let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    assert!(loaded.metadata.saturation_flagged);
+    writer::cfa_fits(&light, &path).unwrap();
+    let loaded = LoadContext::default().cfa(&path).unwrap();
+    assert!(loaded.metadata.derived.saturation_flagged());
     assert_eq!(saturated(&loaded), [0]);
 
     let flat = bundle(CalibrationSet {
@@ -1648,14 +1744,29 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
     });
     let mut light = make_cfa(size, vec![0.5, 0.92, 0.5, 0.5], CfaType::Mono);
     flat.calibrate(&mut light).unwrap();
-    assert_eq!(light.data.pixels()[1], 0.92f32 / 0.9);
+    assert_eq!(light.data().pixels()[1], 0.92f32 / 0.9);
     assert_eq!(saturated(&light), Vec::<usize>::new());
-    assert!(light.metadata.saturation_flagged);
+    assert!(light.metadata.derived.saturation_flagged());
 
     let mut decoded = make_cfa(size, vec![0.5, 0.5, 0.97, 0.5], CfaType::Mono);
-    decoded.metadata.saturation_flagged = true;
+    decoded.metadata.derived.set_saturation_flagged(true);
     dark.calibrate(&mut decoded).unwrap();
     assert_eq!(saturated(&decoded), Vec::<usize>::new());
+}
+/// A dark compared on the exposure, and on no temperature: the two share none.
+const UNSHARED_TEMPERATURE: DarkComparison = DarkComparison {
+    exposure_compared: true,
+    temperature: None,
+    temperature_difference: None,
+};
+
+/// A dark compared on the sensor's temperature and the exposure, found apart by `difference`.
+fn sensor_compared(difference: Option<TemperatureDifference>) -> DarkComparison {
+    DarkComparison {
+        exposure_compared: true,
+        temperature: Some(TemperatureSource::Sensor),
+        temperature_difference: difference,
+    }
 }
 
 /// A dark is matched to the light. Lights of 300 s at 0.5, a bias of 0.125 and a dark
@@ -1675,14 +1786,14 @@ fn a_dark_is_matched_to_the_light() {
     let size = Size2us::new(4, 4);
     let dark = |exposure: Option<f64>, temperature: Option<f64>| {
         let mut dark = constant_cfa(size, 0.1875, CfaType::Mono);
-        dark.metadata.exposure_time = exposure;
-        dark.metadata.ccd_temp = temperature;
+        dark.metadata.header.exposure_time = exposure;
+        dark.metadata.header.ccd_temp = temperature;
         dark
     };
     let light = |exposure: Option<f64>, temperature: Option<f64>| {
         let mut light = constant_cfa(size, 0.5, CfaType::Mono);
-        light.metadata.exposure_time = exposure;
-        light.metadata.ccd_temp = temperature;
+        light.metadata.header.exposure_time = exposure;
+        light.metadata.header.ccd_temp = temperature;
         light
     };
     let bias = || constant_cfa(size, 0.125, CfaType::Mono);
@@ -1719,11 +1830,10 @@ fn a_dark_is_matched_to_the_light() {
         separated.calibrate(&mut scaled),
         Ok(CalibrationOutcome {
             dark_scale: ratio(2.5),
-            dark_temperature: Some(TemperatureSource::Sensor),
-            ..CalibrationOutcome::default()
+            dark: Some(sensor_compared(None)),
         })
     );
-    assert_eq!(scaled.data.pixels(), &[0.218_75; 16]);
+    assert_eq!(scaled.data().pixels(), &[0.218_75; 16]);
 
     for exposure in [120.0, 121.0] {
         let mut matched = light(Some(exposure), Some(-10.0));
@@ -1731,73 +1841,72 @@ fn a_dark_is_matched_to_the_light() {
             separated.calibrate(&mut matched),
             Ok(CalibrationOutcome {
                 dark_scale: ratio(1.0),
-                dark_temperature: Some(TemperatureSource::Sensor),
-                ..CalibrationOutcome::default()
+                dark: Some(sensor_compared(None)),
             })
         );
-        assert_eq!(matched.data.pixels(), &[0.3125; 16], "{exposure} s");
+        assert_eq!(matched.data().pixels(), &[0.3125; 16], "{exposure} s");
     }
     let mut warmer = light(Some(120.0), Some(-7.0));
     assert_eq!(
         separated.calibrate(&mut warmer),
         Ok(CalibrationOutcome {
             dark_scale: ratio(1.0),
-            dark_temperature: Some(TemperatureSource::Sensor),
-            dark_temperature_difference: Some(TemperatureDifference {
+            dark: Some(sensor_compared(Some(TemperatureDifference {
                 reading: TemperatureSource::Sensor,
                 frame: -7.0,
                 dark: -10.0,
-            }),
-            ..CalibrationOutcome::default()
+            }))),
         })
     );
-    assert_eq!(warmer.data.pixels(), &[0.3125; 16]);
+    assert_eq!(warmer.data().pixels(), &[0.3125; 16]);
+    // The light keeps the record its outcome reports.
     assert_eq!(
-        warmer.metadata.unverified_dark,
-        UnverifiedConditions {
-            exposure: false,
-            temperature: true,
-        }
+        warmer.metadata.derived.dark_comparison(),
+        Some(sensor_compared(Some(TemperatureDifference {
+            reading: TemperatureSource::Sensor,
+            frame: -7.0,
+            dark: -10.0,
+        })))
     );
     // A condition one side does not state is reported, and recorded on the light.
-    for (exposure, temperature, unverified, dark_temperature) in [
+    for (exposure, temperature, compared) in [
         (
             None,
             Some(-10.0),
-            UnverifiedConditions {
-                exposure: true,
-                temperature: false,
+            DarkComparison {
+                exposure_compared: false,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: None,
             },
-            Some(TemperatureSource::Sensor),
         ),
         (
             Some(120.0),
             None,
-            UnverifiedConditions {
-                exposure: false,
-                temperature: true,
+            DarkComparison {
+                exposure_compared: true,
+                temperature: None,
+                temperature_difference: None,
             },
-            None,
         ),
     ] {
         let mut silent = light(exposure, temperature);
         assert_eq!(
             separated.calibrate(&mut silent),
             Ok(CalibrationOutcome {
-                unverified,
+                dark: Some(compared),
                 dark_scale: ratio(1.0),
-                dark_temperature,
-                ..CalibrationOutcome::default()
             })
         );
-        assert_eq!(silent.metadata.unverified_dark, unverified);
+        assert_eq!(silent.metadata.derived.dark_comparison(), Some(compared));
     }
 
     let thermal = || {
         let mut dark = constant_cfa(size, 0.0625, CfaType::Mono);
-        dark.metadata.exposure_time = Some(120.0);
-        dark.metadata.ccd_temp = Some(-10.0);
-        dark.metadata.calibration = CalibrationState::BIAS;
+        dark.metadata.header.exposure_time = Some(120.0);
+        dark.metadata.header.ccd_temp = Some(-10.0);
+        dark.metadata
+            .derived
+            .set_calibration(CalibrationState::BIAS);
         dark
     };
     for (bias, expected) in [(Some(bias()), 0.218_75), (None, 0.343_75)] {
@@ -1811,11 +1920,10 @@ fn a_dark_is_matched_to_the_light() {
             stacked_calibrated.calibrate(&mut scaled),
             Ok(CalibrationOutcome {
                 dark_scale: ratio(2.5),
-                dark_temperature: Some(TemperatureSource::Sensor),
-                ..CalibrationOutcome::default()
+                dark: Some(sensor_compared(None)),
             })
         );
-        assert_eq!(scaled.data.pixels(), &[expected; 16]);
+        assert_eq!(scaled.data().pixels(), &[expected; 16]);
     }
 }
 
@@ -1837,8 +1945,8 @@ fn a_flat_dark_is_matched_to_the_flat() {
     let (signal, vignetting) = ([0.25f32, 0.5], [0.75f32, 1.0]);
     let (bias, thermal) = (0.031_25f32, 0.015_625f32);
     let conditions = |mut frame: CfaImage, exposure: f64, temperature: f64| {
-        frame.metadata.exposure_time = Some(exposure);
-        frame.metadata.ccd_temp = Some(temperature);
+        frame.metadata.header.exposure_time = Some(exposure);
+        frame.metadata.header.ccd_temp = Some(temperature);
         frame
     };
     let flat = || {
@@ -1877,7 +1985,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
     for (i, &signal) in signal.iter().enumerate() {
         let expected = signal * mean_v;
         assert_close!(
-            light.data[i],
+            light.data()[i],
             expected,
             f32::EPSILON * expected,
             "pixel {i}"
@@ -1895,33 +2003,35 @@ fn a_flat_dark_is_matched_to_the_flat() {
         CfaType::Mono,
     );
     unscaled.calibrate(&mut light).unwrap();
-    assert_close!(light.data[0], 0.2175, 2.0 * f32::EPSILON * 0.2175);
+    assert_close!(light.data()[0], 0.2175, 2.0 * f32::EPSILON * 0.2175);
 
-    // What the match did not compare is kept on the prepared flat: a flat that states no
-    // temperature leaves it unverified here, and one whose frames each took a flat-dark of no
-    // stated exposure keeps that beside it.
-    assert_eq!(masters.unverified_flat_dark(), UnverifiedConditions::NONE);
+    // What the match compared is kept on the prepared flat: a flat that states no temperature
+    // leaves it uncompared here, and one whose frames each took a flat-dark of no stated exposure
+    // keeps that record.
+    assert_eq!(masters.flat_dark(), Some(sensor_compared(None)));
     let mut silent = flat();
-    silent.metadata.ccd_temp = None;
+    silent.metadata.header.ccd_temp = None;
     let mut stacked = flat();
-    stacked.metadata.calibration = CalibrationState::THERMAL;
-    stacked.metadata.unverified_dark = UnverifiedConditions {
-        exposure: true,
-        temperature: false,
-    };
-    for (flat, unverified) in [
-        (
-            silent,
-            UnverifiedConditions {
-                exposure: false,
-                temperature: true,
-            },
-        ),
+    stacked
+        .metadata
+        .derived
+        .set_calibration(CalibrationState::THERMAL);
+    stacked
+        .metadata
+        .derived
+        .set_dark_comparison(Some(DarkComparison {
+            exposure_compared: false,
+            temperature: Some(TemperatureSource::Sensor),
+            temperature_difference: None,
+        }));
+    for (flat, compared) in [
+        (silent, UNSHARED_TEMPERATURE),
         (
             stacked,
-            UnverifiedConditions {
-                exposure: true,
-                temperature: false,
+            DarkComparison {
+                exposure_compared: false,
+                temperature: Some(TemperatureSource::Sensor),
+                temperature_difference: None,
             },
         ),
     ] {
@@ -1931,7 +2041,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
             flat_dark: Some(flat_dark(-10.0)),
             ..Default::default()
         });
-        assert_eq!(masters.unverified_flat_dark(), unverified);
+        assert_eq!(masters.flat_dark(), Some(compared));
     }
 
     assert_eq!(
@@ -1941,7 +2051,7 @@ fn a_flat_dark_is_matched_to_the_flat() {
                 flat_dark: Some(flat_dark(-10.0)),
                 ..Default::default()
             },
-            DEFAULT_SIGMA_THRESHOLD,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never(),
         )
         .unwrap_err(),
@@ -1959,12 +2069,14 @@ fn a_flat_dark_is_matched_to_the_flat() {
         flat_dark: Some(flat_dark(-8.5)),
         ..Default::default()
     });
+    // A flat-dark 1.5 °C warmer than the flat, past the tolerance, is reported as a dark is.
     assert_eq!(
-        warmer.unverified_flat_dark(),
-        UnverifiedConditions {
-            exposure: false,
-            temperature: true,
-        }
+        warmer.flat_dark(),
+        Some(sensor_compared(Some(TemperatureDifference {
+            reading: TemperatureSource::Sensor,
+            frame: -10.0,
+            dark: -8.5,
+        })))
     );
 }
 
@@ -2004,17 +2116,17 @@ fn flats_are_calibrated_before_they_are_combined() {
                 CfaType::Mono,
             );
             let path = directory.join(format!("flat_{index}.fits"));
-            flat.save_fits(&path).unwrap();
+            writer::cfa_fits(&flat, &path).unwrap();
             path
         })
         .collect();
     let bias = constant_cfa(size, offset, CfaType::Mono);
-    let corner_over_centre = |master: &CfaImage| master.data[(0, 0)] / master.data[(3, 3)];
+    let corner_over_centre = |master: &CfaImage| master.data()[(0, 0)] / master.data()[(3, 3)];
     for memory_override in [None, Some(1)] {
         let config = StackConfig {
             combine: Combine {
                 small_n: SmallN::none(),
-                ..Combine::sigma_clipped(2.5)
+                ..Combine::sigma_clip(2.5)
             },
             ..StackConfig::flat()
         };
@@ -2028,15 +2140,18 @@ fn flats_are_calibrated_before_they_are_combined() {
             role: MasterRole::Flat,
             config: config.clone(),
             ingest: &ingest,
-            subtract: Some(Subtractor {
+            subtract: &[Subtractor {
                 role: MasterRole::Bias,
                 master: &bias,
-            }),
+            }],
         }
         .run(ProgressMonitor::unattended())
         .unwrap()
         .unwrap();
-        assert_eq!(calibrated.metadata.calibration, CalibrationState::BIAS);
+        assert_eq!(
+            calibrated.metadata.derived.calibration(),
+            CalibrationState::BIAS
+        );
         assert_eq!(corner_over_centre(&calibrated), 0.5, "{memory_override:?}");
 
         let mut late = MasterStack {
@@ -2044,12 +2159,12 @@ fn flats_are_calibrated_before_they_are_combined() {
             role: MasterRole::Flat,
             config,
             ingest: &ingest,
-            subtract: None,
+            subtract: &[],
         }
         .run(ProgressMonitor::unattended())
         .unwrap()
         .unwrap();
-        late.subtract(&bias, DomainMap::IDENTITY);
+        subtract_bias(&mut late, &bias);
         let ratio = corner_over_centre(&late);
         assert!(
             (ratio - 0.4853).abs() < 1e-4,
@@ -2058,21 +2173,27 @@ fn flats_are_calibrated_before_they_are_combined() {
     }
 }
 
-/// The builder stacks each role under its preset and takes the bias from every flat when no
-/// flat-dark is given, as `flats_are_calibrated_before_they_are_combined` does by hand: the flat
-/// master's corner reads 0.5 of its centre. Its cache is read before each role is stacked and
-/// written once it is, under the key its read gave: it stores the bias with nothing subtracted and
-/// the flats with the bias's frames, and a dark it already holds is not stacked — its frames name
-/// no file, and the build still succeeds with the held dark.
+/// The builder stacks each role under its preset and takes the additive parts from every flat
+/// before the combine, as `flats_are_calibrated_before_they_are_combined` does by hand: the bias,
+/// then the flat-dark's dark signal scaled to the flat. The flat-darks are 1 s of the bias 1/32
+/// plus 1/64 of dark signal; the flats are 2 s of the bias, twice that dark signal, and their
+/// light. Taken from each flat, the bias leaves the dark signal, which scales by 2, so the flat
+/// master's corner reads exactly 0.5 of its centre. Before, the flat-dark went to the flats with
+/// its bias in, and a dark holding its bias cannot scale, so the 2 s flats were refused.
+///
+/// Its cache is read before each role is stacked and written once it is, under the key its read
+/// gave: it stores the bias and the flat-dark with nothing subtracted and the flats with both
+/// masters' frames, and a dark it already holds is not stacked — its frames name no file, and the
+/// build still succeeds with the held dark.
 #[test]
 fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     /// One master the cache was asked to keep: its role, its frame count, and the role and frame
-    /// count of the master taken from each of its frames.
+    /// count of each master taken from its frames.
     #[derive(Debug, PartialEq)]
     struct Kept {
         role: MasterRole,
         frames: usize,
-        subtracted: Option<(MasterRole, usize)>,
+        subtracted: Vec<(MasterRole, usize)>,
     }
     #[derive(Debug, Default)]
     struct Recorder {
@@ -2094,7 +2215,9 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
                     frames: inputs.frames.len(),
                     subtracted: inputs
                         .subtracted
-                        .map(|subtracted| (subtracted.role, subtracted.frames.len())),
+                        .iter()
+                        .map(|subtracted| (subtracted.role, subtracted.frames.len()))
+                        .collect(),
                 }),
             })
         }
@@ -2108,14 +2231,15 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     let size = Size2us::new(8, 8);
     let offset = 1.0 / 32.0;
     let directory = TempDir::new("lumos-master-builder");
-    let write = |name: &str, value: &dyn Fn(usize) -> f32| -> PathBuf {
-        let frame = make_cfa(
+    let write = |name: &str, exposure: f64, value: &dyn Fn(usize) -> f32| -> PathBuf {
+        let mut frame = make_cfa(
             size,
             (0..size.pixel_count()).map(value).collect(),
             CfaType::Mono,
         );
+        frame.metadata.header.exposure_time = Some(exposure);
         let path = directory.join(name);
-        frame.save_fits(&path).unwrap();
+        writer::cfa_fits(&frame, &path).unwrap();
         path
     };
     let vignette = |i: usize| {
@@ -2126,21 +2250,32 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
             1.0
         }
     };
+    let dark_per_second = 1.0 / 64.0;
     let bias: Vec<PathBuf> = (0..2)
-        .map(|index| write(&format!("bias_{index}.fits"), &|_| offset))
+        .map(|index| write(&format!("bias_{index}.fits"), 0.0, &|_| offset))
+        .collect();
+    let flat_darks: Vec<PathBuf> = (0..2)
+        .map(|index| {
+            write(&format!("flat_dark_{index}.fits"), 1.0, &|_| {
+                offset + dark_per_second
+            })
+        })
         .collect();
     let flats: Vec<PathBuf> = [0.5f32, 0.25]
         .into_iter()
         .enumerate()
         .map(|(index, level)| {
-            write(&format!("flat_{index}.fits"), &|i| {
-                offset + level * vignette(i)
+            write(&format!("flat_{index}.fits"), 2.0, &|i| {
+                offset + 2.0 * dark_per_second + level * vignette(i)
             })
         })
         .collect();
     let darks = vec![directory.join("absent_dark.fits")];
     let mut held_dark = constant_cfa(size, 0.01, CfaType::Mono);
-    held_dark.metadata.calibration = CalibrationState::BIAS;
+    held_dark
+        .metadata
+        .derived
+        .set_calibration(CalibrationState::BIAS);
     let cache = Recorder {
         held_dark: Some(held_dark),
         ..Recorder::default()
@@ -2151,17 +2286,17 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
                 dark: darks.as_slice(),
                 flat: flats.as_slice(),
                 bias: bias.as_slice(),
-                flat_dark: &[],
+                flat_dark: flat_darks.as_slice(),
             },
-            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            sigma_threshold: SigmaThreshold::DEFAULT,
             cache: &cache,
         },
         &IngestConfig::with_cache_dir(directory.join("cache")),
-        &ProgressMonitor::unattended(),
+        ProgressMonitor::unattended(),
     )
     .unwrap();
     let flat = masters.flat.as_ref().unwrap().divisor();
-    assert_eq!(flat.data[(0, 0)] / flat.data[(3, 3)], 0.5);
+    assert_eq!(flat.data()[(0, 0)] / flat.data()[(3, 3)], 0.5);
     assert!(masters.dark.is_some(), "the held dark is in the set");
     assert_eq!(
         *cache.stored.lock().unwrap(),
@@ -2169,12 +2304,17 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
             Kept {
                 role: MasterRole::Bias,
                 frames: 2,
-                subtracted: None,
+                subtracted: vec![],
+            },
+            Kept {
+                role: MasterRole::FlatDark,
+                frames: 2,
+                subtracted: vec![],
             },
             Kept {
                 role: MasterRole::Flat,
                 frames: 2,
-                subtracted: Some((MasterRole::Bias, 2)),
+                subtracted: vec![(MasterRole::Bias, 2), (MasterRole::FlatDark, 2)],
             },
         ]
     );
@@ -2205,9 +2345,11 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
     let bias: Vec<PathBuf> = (0..2)
         .map(|index| {
             let path = directory.join(format!("bias_{index}.fits"));
-            constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono)
-                .save_fits(&path)
-                .unwrap();
+            writer::cfa_fits(
+                &constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono),
+                &path,
+            )
+            .unwrap();
             path
         })
         .collect();
@@ -2220,11 +2362,11 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
                 bias: bias.as_slice(),
                 flat_dark: &[],
             },
-            sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+            sigma_threshold: SigmaThreshold::DEFAULT,
             cache: &Cancelling(cancel.clone()),
         },
         &IngestConfig::with_cache_dir(directory.join("cache")),
-        &ProgressMonitor::new(ProgressCallback::default(), cancel),
+        ProgressMonitor::new(ProgressCallback::default(), cancel),
     )
     .unwrap_err();
     assert!(matches!(error, MasterBuildError::Cancelled), "{error:?}");
@@ -2249,15 +2391,15 @@ fn dark_frames_share_one_exposure() {
             .enumerate()
             .map(|(index, &(exposure, temperature))| {
                 let mut frame = constant_cfa(Size2us::new(4, 4), 0.25, CfaType::Mono);
-                frame.metadata.exposure_time = Some(exposure);
-                frame.metadata.ccd_temp = temperature;
+                frame.metadata.header.exposure_time = Some(exposure);
+                frame.metadata.header.ccd_temp = temperature;
                 let path = directory.join(format!("{name}_{index}.fits"));
-                frame.save_fits(&path).unwrap();
+                writer::cfa_fits(&frame, &path).unwrap();
                 path
             })
             .collect()
     };
-    let stack = |paths: &[PathBuf], role: MasterRole, subtract: Option<Subtractor<'_>>| {
+    let stack = |paths: &[PathBuf], role: MasterRole, subtract: &[Subtractor<'_>]| {
         MasterStack {
             paths,
             role,
@@ -2276,11 +2418,11 @@ fn dark_frames_share_one_exposure() {
             (300.0, Some(-10.0)),
         ],
     );
-    let error = stack(&mixed, MasterRole::Dark, None).unwrap_err();
+    let error = stack(&mixed, MasterRole::Dark, &[]).unwrap_err();
     assert!(
         matches!(
             error,
-            StackError::MasterConditions {
+            MasterStackError::Conditions {
                 role: MasterRole::Dark,
                 source: ConditionMismatch {
                     condition: CaptureCondition::Exposure,
@@ -2295,43 +2437,48 @@ fn dark_frames_share_one_exposure() {
     );
 
     let agreeing = write("agreeing", &[(300.0, Some(-10.0)), (301.0, Some(-10.5))]);
-    let master = stack(&agreeing, MasterRole::Dark, None).unwrap().unwrap();
-    assert_eq!(master.metadata.exposure_time, Some(300.5));
-    assert_eq!(master.metadata.ccd_temp, Some(-10.25));
+    let master = stack(&agreeing, MasterRole::Dark, &[]).unwrap().unwrap();
+    assert_eq!(master.metadata.header.exposure_time, Some(300.5));
+    assert_eq!(master.metadata.header.ccd_temp, Some(-10.25));
 
     let drifting = write("drifting", &[(300.0, Some(-10.0)), (300.0, Some(-7.0))]);
-    let master = stack(&drifting, MasterRole::Dark, None).unwrap().unwrap();
-    assert_eq!(master.metadata.exposure_time, Some(300.0));
-    assert_eq!(master.metadata.ccd_temp, None);
+    let master = stack(&drifting, MasterRole::Dark, &[]).unwrap().unwrap();
+    assert_eq!(master.metadata.header.exposure_time, Some(300.0));
+    assert_eq!(master.metadata.header.ccd_temp, None);
 
     let flats = write("flats", &[(1.0, Some(-10.0)), (2.0, Some(-10.0))]);
-    let master = stack(&flats, MasterRole::Flat, None).unwrap().unwrap();
-    assert_eq!(master.metadata.exposure_time, None);
-    assert_eq!(master.metadata.ccd_temp, Some(-10.0));
-    assert_eq!(master.metadata.unverified_dark, UnverifiedConditions::NONE);
+    let master = stack(&flats, MasterRole::Flat, &[]).unwrap().unwrap();
+    assert_eq!(master.metadata.header.exposure_time, None);
+    assert_eq!(master.metadata.header.ccd_temp, Some(-10.0));
+    assert_eq!(master.metadata.derived.dark_comparison(), None);
 
     let mut flat_dark = constant_cfa(Size2us::new(4, 4), 0.031_25, CfaType::Mono);
-    flat_dark.metadata.exposure_time = Some(1.0);
-    flat_dark.metadata.ccd_temp = Some(-10.0);
-    flat_dark.metadata.calibration = CalibrationState::BIAS;
+    flat_dark.metadata.header.exposure_time = Some(1.0);
+    flat_dark.metadata.header.ccd_temp = Some(-10.0);
+    flat_dark
+        .metadata
+        .derived
+        .set_calibration(CalibrationState::BIAS);
     let silent = write("silent", &[(1.0, Some(-10.0)), (2.0, None)]);
     let master = stack(
         &silent,
         MasterRole::Flat,
-        Some(Subtractor {
+        &[Subtractor {
             role: MasterRole::FlatDark,
             master: &flat_dark,
-        }),
+        }],
     )
     .unwrap()
     .unwrap();
-    assert_eq!(master.metadata.calibration, CalibrationState::THERMAL);
     assert_eq!(
-        master.metadata.unverified_dark,
-        UnverifiedConditions {
-            exposure: false,
-            temperature: true,
-        }
+        master.metadata.derived.calibration(),
+        CalibrationState::THERMAL
+    );
+    // The second frame shares no temperature with the flat-dark: the stack's record is the
+    // union of the frames', its temperature uncompared.
+    assert_eq!(
+        master.metadata.derived.dark_comparison(),
+        Some(UNSHARED_TEMPERATURE)
     );
 }
 
@@ -2345,17 +2492,17 @@ fn calibration_counts_its_flags_as_it_sets_them() {
     let size = Size2us::new(16, 16);
     let at = |x: usize, y: usize| y * size.width + x;
     let mut bias = constant_cfa(size, 0.0625, CfaType::Mono);
-    bias.flags = PixelFlags::from_fn(size, |index| {
+    bias.set_flags(PixelFlags::from_fn(size, |index| {
         if index == at(4, 4) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
         }
-    });
+    }));
     let mut dark = constant_cfa(size, 0.125, CfaType::Mono);
-    dark.data[at(8, 8)] = 0.9;
+    dark.data_mut()[at(8, 8)] = 0.9;
     let mut flat = constant_cfa(size, 0.5, CfaType::Mono);
-    flat.data[at(12, 3)] = 0.01;
+    flat.data_mut()[at(12, 3)] = 0.01;
     let masters = bundle(CalibrationSet {
         dark: Some(dark),
         flat: Some(flat),
@@ -2363,17 +2510,17 @@ fn calibration_counts_its_flags_as_it_sets_them() {
         flat_dark: None,
     });
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
-    light.data[at(2, 10)] = 0.99;
-    light.flags = PixelFlags::from_fn(size, |index| {
+    light.data_mut()[at(2, 10)] = 0.99;
+    light.set_flags(PixelFlags::from_fn(size, |index| {
         if index == at(10, 12) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
         }
-    });
+    }));
     masters.calibrate(&mut light).unwrap();
 
-    let flags = light.flags.as_ref().unwrap();
+    let flags = light.flags().unwrap();
     let bytes = flags.bytes();
     for flag in [
         QualityFlags::NO_DATA,

@@ -3,13 +3,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::io::raw::RAW_EXTENSIONS;
+use crate::io::input_format::InputFormat;
 use crate::io::raw::error::RawScanError;
 
-/// The files in `dir` with a [`RAW_EXTENSIONS`] extension in any case, sorted by path.
-/// Subdirectories are not entered. An entry is examined only when its name is a RAW file's, so
-/// nothing else in the directory, a dangling link included, can fail the scan; a link so named is
-/// followed, and kept when it leads to a file.
+/// The files in `dir` with a [`RAW_EXTENSIONS`](crate::RAW_EXTENSIONS) extension in any case,
+/// sorted by path. Subdirectories are not entered. An entry is examined only when its name is a RAW
+/// file's, so nothing else in the directory, a dangling link included, can fail the scan; a link so
+/// named is followed, and kept when it leads to a file.
 ///
 /// # Errors
 ///
@@ -26,15 +26,7 @@ pub fn raw_files(dir: &Path) -> Result<Vec<PathBuf>, RawScanError> {
             source,
         })?;
         let path = entry.path();
-        let is_raw = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                RAW_EXTENSIONS
-                    .iter()
-                    .any(|raw| extension.eq_ignore_ascii_case(raw))
-            });
-        if !is_raw {
+        if !matches!(InputFormat::of(&path), Ok(InputFormat::CameraRaw)) {
             continue;
         }
         #[expect(

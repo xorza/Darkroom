@@ -1,7 +1,10 @@
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn;
+use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::memory;
@@ -191,10 +194,7 @@ fn a_decoded_stack_charges_its_frames_scratch_and_output() {
 #[test]
 fn a_warped_run_charges_the_combine_output() {
     let plane_bytes = plane(10);
-    let output = QualityPlanes::STANDARD.heap_bytes(ImageDimensions::new(
-        ((10 * MIB) as usize / size_of::<f32>(), 1),
-        3,
-    ));
+    let output = QualityPlanes::STANDARD.pixel_bytes(3, 1, 1) * plane_bytes / size_of::<f32>();
     assert_eq!(output, 10 * plane_bytes + plane_bytes / 4);
     let resident = |output_bytes, usable| {
         RunPlan::of(
@@ -377,7 +377,7 @@ fn demosaic_costs_in_planes() {
         );
     }
     // A warped frame is its output, two quality planes and a quarter-plane of flags: 3¼P mono,
-    // 5¼P colour, 13 and 21 quarter planes.
+    // 5¼P color, 13 and 21 quarter planes.
     let quarter = plane_bytes / 4;
     assert_eq!(warped(plane_bytes, plane_bytes), 13 * quarter);
     assert_eq!(warped(plane_bytes, 3 * plane_bytes), 21 * quarter);
@@ -590,8 +590,8 @@ fn plane(mib: u64) -> usize {
 /// What each demosaic holds for a frame whose planes are `plane_bytes`, from the demosaics' own
 /// accounting, on a one-row frame and four workers.
 fn demosaic(cfa_type: CfaType, plane_bytes: usize) -> Footprint {
-    cfa_type.demosaic_footprint(
-        ImageDimensions::new((plane_bytes / size_of::<f32>(), 1), 1),
+    Demosaic::of(cfa_type, MarkesteijnPasses::One).footprint(
+        ImageDimensions::new((plane_bytes / size_of::<f32>(), 1), ChannelLayout::Mono),
         4,
     )
 }

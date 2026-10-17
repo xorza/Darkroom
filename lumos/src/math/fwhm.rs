@@ -30,14 +30,19 @@ pub(crate) fn equal_area(det: f64) -> f32 {
     from_sigma(det.max(0.0).sqrt().sqrt() as f32)
 }
 
-/// The FWHM of a Moffat profile, `2α·√(2^(1/β) − 1)`.
-pub(crate) fn from_alpha_beta(alpha: f32, beta: f32) -> f32 {
-    2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
+/// The FWHM of a Moffat profile of `beta` per unit of its α: `2·√(2^(1/β) − 1)`.
+pub(crate) fn per_alpha(beta: f64) -> f64 {
+    2.0 * (2f64.powf(1.0 / beta) - 1.0).sqrt()
+}
+
+/// The FWHM of a Moffat profile, `α·`[`per_alpha`]`(β)`.
+pub(crate) fn from_alpha_beta(alpha: f64, beta: f64) -> f64 {
+    alpha * per_alpha(beta)
 }
 
 /// The Moffat α of a profile with this FWHM and `beta`: the inverse of [`from_alpha_beta`].
-pub(crate) fn to_alpha(fwhm: f32, beta: f32) -> f32 {
-    fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
+pub(crate) fn to_alpha(fwhm: f64, beta: f64) -> f64 {
+    fwhm / per_alpha(beta)
 }
 
 #[cfg(test)]
@@ -72,23 +77,24 @@ mod tests {
         assert!((back - 4.5).abs() <= 4.5 * f32::EPSILON, "{back}");
     }
 
-    /// FWHM = 2α·√(2^(1/β) − 1), and its inverse, to the few f32 roundings each takes: α 2, β 2.5
-    /// gives 4·√(2^0.4 − 1) = 2.2610.
+    /// FWHM = 2α·√(2^(1/β) − 1), and its inverse, in f64 to a few ulps: α 2, β 2.5 gives
+    /// 4·√(2^0.4 − 1) = 2.2610. At β = 1 the factor is 2, the Lorentzian's.
     #[test]
     fn alpha_beta_fwhm_conversion() {
-        for (alpha, beta) in [(2.0f32, 2.5f32), (1.0, 1.5), (3.0, 4.0), (6.0, 6.0)] {
-            let exact = 2.0 * f64::from(alpha) * (2f64.powf(1.0 / f64::from(beta)) - 1.0).sqrt();
+        assert_eq!(fwhm::per_alpha(1.0), 2.0);
+        for (alpha, beta) in [(2.0, 2.5), (1.0, 1.5), (3.0, 4.0), (6.0, 6.0)] {
+            let exact = 2.0 * alpha * (2f64.powf(1.0 / beta) - 1.0).sqrt();
             let fwhm = fwhm::from_alpha_beta(alpha, beta);
             assert!(
-                (f64::from(fwhm) - exact).abs() <= 8.0 * f64::from(f32::EPSILON) * exact,
+                (fwhm - exact).abs() <= 4.0 * f64::EPSILON * exact,
                 "α {alpha} β {beta}: {fwhm} vs {exact}"
             );
             let back = fwhm::to_alpha(fwhm, beta);
             assert!(
-                (back - alpha).abs() <= 16.0 * f32::EPSILON * alpha,
+                (back - alpha).abs() <= 4.0 * f64::EPSILON * alpha,
                 "α {alpha} β {beta}: back to {back}"
             );
         }
-        assert!((f64::from(fwhm::from_alpha_beta(2.0, 2.5)) - 2.2610).abs() < 1e-4);
+        assert!((fwhm::from_alpha_beta(2.0, 2.5) - 2.2610).abs() < 1e-4);
     }
 }

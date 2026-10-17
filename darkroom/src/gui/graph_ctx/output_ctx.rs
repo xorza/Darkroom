@@ -65,7 +65,7 @@ impl<'a> OutputCtx<'a> {
     /// the table was resolved against a different graph or library than the
     /// scope carries, since a port only reaches here off a func the same
     /// `Node::func` lookup resolved, at an index that func declares. Degrading
-    /// to `Any` would paint a stale port a plausible colour and let a scope
+    /// to `Any` would paint a stale port a plausible color and let a scope
     /// composed without a refresh go unnoticed.
     pub(crate) fn ty(self) -> &'a DataType {
         self.node

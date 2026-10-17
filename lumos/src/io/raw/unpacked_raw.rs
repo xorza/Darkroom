@@ -1,28 +1,23 @@
 //! [`UnpackedRaw`]: a camera RAW file LibRaw unpacked, and what lumos reads of it.
 
-use std::array;
-use std::ffi;
-use std::path::{Path, PathBuf};
 use std::time::Instant;
+use std::{array, ffi, mem};
 
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::error::Cancelled;
-use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
 use crate::image::linear_image::LinearImage;
+use crate::image::observation_header::ObservationHeader;
 use crate::image::quality_flags::SATURATION_FRACTION;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::error::ImageError;
 use crate::io::load_context::LoadContext;
-use crate::io::raw;
 use crate::io::raw::black_level::{
     BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
 };
@@ -30,14 +25,16 @@ use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
+use crate::io::{null_policy, raw};
 use crate::math::vec2us::Vec2us;
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
+use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 /// A camera RAW file LibRaw unpacked, with what lumos reads of it, ready for sensor-specific
 /// processing.
 #[derive(Debug)]
 pub(super) struct UnpackedRaw {
     pub(super) libraw: Libraw,
-    path: PathBuf,
     pub(super) layout: SensorLayout,
     pub(super) black_level: BlackLevel,
     /// The span LibRaw's own processing scales by: `maximum` less its integer black.
@@ -63,7 +60,7 @@ pub(super) struct UnpackedRaw {
     /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
     /// and some cameras its size table identifies.
     zero_is_bad: bool,
-    /// The raw value at which each LibRaw colour channel saturates, black included — see
+    /// The raw value at which each LibRaw color channel saturates, black included — see
     /// [`saturation_level`].
     saturation: [f64; 4],
     /// Whether LibRaw's linearization curve is the identity up to `maximum`. A compressed format
@@ -77,7 +74,7 @@ pub(super) struct UnpackedRaw {
 
 /// The two ways a RAW frame leaves LibRaw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RawPath {
+pub(super) enum RawPath {
     /// The sensor's mosaic as it was read, normalized and not clipped.
     Mosaic,
     /// LibRaw's demosaiced output: its 16-bit samples divided by their integer maximum, which
@@ -85,19 +82,40 @@ enum RawPath {
     Processed,
 }
 
+impl RawPath {
+    /// The path [`UnpackedRaw::into_linear_image`] takes for the open `libraw`, read before
+    /// `unpack`: a decoder that settles the mosaic only as it decodes counts as LibRaw's
+    /// processing, the path that holds more.
+    pub(super) fn preview(libraw: &Libraw) -> Result<Self, RawError> {
+        let mosaic = raw::identified(libraw)? != RawDecoder::FiltersAtDecode
+            && raw::sensor_cfa_type(libraw.data())?.is_some();
+        Ok(if mosaic {
+            Self::Mosaic
+        } else {
+            Self::Processed
+        })
+    }
+
+    /// The bytes a visible pixel holds on this path beside the decoder's own: the mosaic's
+    /// normalized sample, or LibRaw's four 16-bit channels, the 16-bit RGB bitmap it processes
+    /// them into, and the three planes read out of that.
+    pub(super) const fn pixel_bytes(self) -> usize {
+        match self {
+            Self::Mosaic => size_of::<f32>(),
+            Self::Processed => 4 * size_of::<u16>() + 3 * size_of::<u16>() + 3 * size_of::<f32>(),
+        }
+    }
+}
+
 impl UnpackedRaw {
-    /// Unpack the file `libraw` opened from `path` on up to `threads` threads, and read what lumos
+    /// Unpack the file `libraw` opened on up to `threads` threads, and read what lumos
     /// needs of it.
     ///
     /// # Errors
     ///
     /// A [`RawError`] when LibRaw cannot unpack the file or met corrupt data in it, or when what it
     /// reports — the geometry, the sensor layout, the black level — is unusable.
-    pub(super) fn unpack(
-        mut libraw: Libraw,
-        path: &Path,
-        threads: usize,
-    ) -> Result<Self, RawError> {
+    pub(super) fn unpack(mut libraw: Libraw, threads: usize) -> Result<Self, RawError> {
         let decoder = raw::identified(&libraw)?;
         libraw.unpack(threads)?;
         let data = libraw.data();
@@ -168,7 +186,6 @@ impl UnpackedRaw {
 
         Ok(Self {
             libraw,
-            path: path.to_path_buf(),
             layout,
             black_level,
             processed_span,
@@ -213,26 +230,28 @@ impl UnpackedRaw {
             ),
         };
         ImageMetadata {
-            domain: Some(domain),
-            iso: self.iso,
-            exposure_time: self.exposure_time,
-            ccd_temp: self.ccd_temp,
-            camera_temp: self.camera_temp,
-            instrument: self.instrument.clone(),
-            date_local: self.date_local.clone(),
-            focal_length: self.focal_length,
-            camera_white_balance: self.camera_white_balance,
-            provenance: Some(ImageProvenance {
-                container: SourceContainer::CameraRaw,
-                decoder: DecoderProvenance::LibRaw,
-                transfer: TransferProvenance::RawNormalized,
-                color,
-                clipped,
-                demosaic,
+            header: ObservationHeader {
+                iso: self.iso,
+                exposure_time: self.exposure_time,
+                ccd_temp: self.ccd_temp,
+                camera_temp: self.camera_temp,
+                instrument: self.instrument.clone(),
+                date_local: self.date_local.clone(),
+                focal_length: self.focal_length,
+                camera_white_balance: self.camera_white_balance,
+                ..Default::default()
+            },
+            derived: DerivedFacts::builder()
+                .domain(domain)
                 // LibRaw hands back the visible area top-down; no RAW format stores it otherwise.
-                row_order: RowOrder::TopDown,
-            }),
-            ..Default::default()
+                .provenance(ImageProvenance {
+                    source: SourceProvenance::CameraRaw,
+                    color,
+                    clipped,
+                    demosaic,
+                    row_order: RowOrder::TopDown,
+                })
+                .build(),
         }
     }
 
@@ -243,8 +262,8 @@ impl UnpackedRaw {
     ///
     /// Saturation is decided here, on the raw value before black is subtracted, because after a
     /// dark subtraction and a flat division the level differs at every pixel. LibRaw's own
-    /// processing replaces `zero_is_bad` zeros with a same-colour mean (`remove_zeroes`); lumos reads
-    /// the raw buffer itself, so without the flag a dead photosite would normalize to
+    /// processing replaces `zero_is_bad` zeros with a same-color mean (`remove_zeroes`); lumos
+    /// reads the raw buffer itself, so without the flag a dead photosite would normalize to
     /// `−black / span` and enter every stage as a measurement.
     pub(super) fn decode(&self, raw: &[u16]) -> DecodedRaw {
         self.black_level.decode(
@@ -273,7 +292,7 @@ impl UnpackedRaw {
             .then(|| (f64::from(QUANTIZATION_SIGMA_PER_STEP) / self.black_level.span()) as f32)
     }
 
-    /// Each visible pixel's LibRaw colour channel: the X-Trans pattern's colour, the Bayer
+    /// Each visible pixel's LibRaw color channel: the X-Trans pattern's color, the Bayer
     /// `filters` word's (green on the second row as channel 3), or 0 for a monochrome sensor.
     /// Copied out of `self`, so the map can run on rayon workers while `self` holds libraw.
     fn channel_map(&self) -> impl Fn(usize, usize) -> usize + Sync + use<> {
@@ -297,50 +316,44 @@ impl UnpackedRaw {
     pub(super) fn into_cfa_image(self) -> Result<CfaImage, RawError> {
         let cfa_type = self.cfa_type.ok_or(RawError::NotACfaFrame)?;
         let raw = self.libraw.raw_image().ok_or(RawError::NoRawImage)?;
-        let DecodedRaw { pixels, flags } = self.decode(raw);
-        let metadata = ImageMetadata {
-            quantization_sigma: self.quantization_sigma(),
-            saturation_flagged: true,
-            ..self.metadata(
-                Self::sample_domain(self.black_level.span()),
-                RawPath::Mosaic,
-            )
-        };
-        Ok(CfaImage {
-            data: Buffer2::new(self.layout.active.width, self.layout.active.height, pixels),
+        let DecodedRaw { mut pixels, flags } = self.decode(raw);
+        // A photosite read as no measurement holds the frame's median, as a FITS null does.
+        if let Some(flags) = &flags {
+            null_policy::fill_flagged(&mut pixels, flags);
+        }
+        let mut metadata = self.metadata(
+            Self::sample_domain(self.black_level.span()),
+            RawPath::Mosaic,
+        );
+        metadata.derived = mem::take(&mut metadata.derived)
+            .rebuild()
+            .quantization_sigma(self.quantization_sigma())
+            .saturation_flagged(true)
+            .build();
+        let mut image = CfaImage::from_plane(
+            Buffer2::new(self.layout.active.width, self.layout.active.height, pixels),
             cfa_type,
             metadata,
-            flags,
-        })
+        );
+        image.set_flags(flags);
+        Ok(image)
     }
 
-    /// [`raw::load`] past the open: the CFA path and a clamp, or LibRaw's own processing.
-    pub(super) fn into_linear_image(
-        self,
-        context: &LoadContext,
-    ) -> Result<LinearImage, ImageError> {
+    /// [`raw::load_preview`] past the open: the CFA path and a clamp, or LibRaw's own processing.
+    pub(super) fn into_linear_image(self, context: &LoadContext) -> Result<LinearImage, RawError> {
         if self.cfa_type.is_none() {
             let idata = &self.libraw.data().idata;
             if idata.colors == 4 {
-                let colours =
-                    String::from_utf8_lossy(&raw::colour_description(idata.cdesc)).into_owned();
-                return Err(ImageError::raw(
-                    &self.path,
-                    RawError::FourColourSensor { colours },
-                ));
+                let colors =
+                    String::from_utf8_lossy(&raw::color_description(idata.cdesc)).into_owned();
+                return Err(RawError::FourColorSensor { colors });
             }
             tracing::info!("no mosaic lumos demosaics; LibRaw processes the image");
-            let path = self.path.clone();
-            return self
-                .processed_by_libraw()
-                .map_err(|source| ImageError::raw(&path, source));
+            return self.processed_by_libraw();
         }
-        let path = self.path.clone();
-        let mut image = self
-            .into_cfa_image()
-            .map_err(|source| ImageError::raw(&path, source))?
-            .demosaic(context.xtrans_passes, &context.cancel)
-            .map_err(|Cancelled| ImageError::cancelled(&path))?;
+        let cfa = self.into_cfa_image()?;
+        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
+        let mut image = cfa.demosaic(context.xtrans_passes, noise, &context.cancel)?;
         // The demosaic's own reach leaves the range, ~1.06 out of RCD and ~1.16 out of
         // Markesteijn at a step edge, and the frame arrives with its noise below black: the
         // preview clamps both, after the demosaic, so the interpolation sees the samples as
@@ -352,7 +365,7 @@ impl UnpackedRaw {
                 .par_iter_mut()
                 .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
         }
-        if let Some(provenance) = &mut image.metadata.provenance {
+        if let Some(provenance) = image.metadata.derived.provenance_mut() {
             provenance.clipped = true;
         }
         Ok(image)
@@ -379,7 +392,7 @@ impl UnpackedRaw {
         params.use_auto_wb = 0;
         params.use_camera_wb = 0;
         params.output_bps = 16;
-        // The sensor's own colours: no conversion, which would also fold a four-colour sensor to
+        // The sensor's own colors: no conversion, which would also fold a four-color sensor to
         // RGB.
         params.output_color = 0;
         // Scale by `maximum` as LibRaw read it, the span the domain records, not by a frame's own
@@ -457,7 +470,7 @@ fn iso(speed: f32) -> Option<u32> {
     (speed > 0.0).then(|| speed.round() as u32)
 }
 
-/// `samples`' interleaved colours as one plane each, over 65535.
+/// `samples`' interleaved colors as one plane each, over 65535.
 fn planes(samples: &ProcessedSamples<'_>) -> Vec<Vec<f32>> {
     let colors = samples.dimensions.channels();
     let mut planes = vec![vec![0.0f32; samples.dimensions.pixel_count()]; colors];

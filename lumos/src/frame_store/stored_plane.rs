@@ -4,6 +4,8 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
+use std::fs::File;
+use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::path::Path;
@@ -26,21 +28,31 @@ pub(crate) enum StoredPlane<T = f32> {
 }
 
 impl<T: Pod> StoredPlane<T> {
-    /// Write `pixels` to `path` as the plane file [`Self::map`] reads back, published whole: a
-    /// reader finds the old file or the new one, never a part.
-    pub(crate) fn write(path: &Path, pixels: &[T]) -> Result<(), FrameStoreError> {
-        file_utils::publish_bytes(
+    /// Write `pixels` to `path` as the plane file [`Self::map`] reads back, published whole — a
+    /// reader finds the old file or the new one, never a part — and mapped from the handle that
+    /// wrote it: another run that publishes the same name after it is never read in its place.
+    pub(crate) fn publish(path: &Path, pixels: &[T]) -> Result<Self, FrameStoreError> {
+        let mut mapped = None;
+        file_utils::publish(
             path,
-            bytemuck::cast_slice(pixels),
             file_utils::PublicationMode::Cache,
+            |file: &mut File| -> io::Result<()> {
+                file.write_all(bytemuck::cast_slice(pixels))?;
+                // A published file is replaced only by a rename, never written in place.
+                mapped = Some(unsafe { MappedFile::of_file(file) }?);
+                Ok(())
+            },
         )
         .map_err(|source| FrameStoreError::WriteFile {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+        Ok(Self::mapped(
+            mapped.expect("a published plane was mapped as it was written"),
+        ))
     }
 
-    /// Memory-map a plane file [`Self::write`] wrote.
+    /// Memory-map a plane file [`Self::publish`] wrote.
     pub(crate) fn map(path: &Path) -> Result<Self, FrameStoreError> {
         let file =
             unsafe { MappedFile::open(path) }.map_err(|source| FrameStoreError::MemoryMap {

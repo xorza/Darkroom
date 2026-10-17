@@ -3,12 +3,13 @@
 //! Thresholds the detection plane, labels its connected components and deblends them into the
 //! regions measurement reads.
 
+use std::mem;
+
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
-
-use crate::bit_buffer2::BitBuffer2;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
@@ -19,9 +20,12 @@ use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 
-/// Result of detection stage with diagnostic statistics.
+/// The candidate regions a detection plane holds, and what detecting them counted.
+///
+/// The regions' buffer is the detector's, taken for the detection and handed back with
+/// [`Self::release`], so a frame after the first allocates none.
 #[derive(Debug)]
-pub(crate) struct DetectResult {
+pub(crate) struct Candidates {
     /// Detected regions after filtering.
     pub(crate) regions: Vec<Region>,
     /// Number of pixels above the detection threshold.
@@ -30,13 +34,6 @@ pub(crate) struct DetectResult {
     pub(crate) connected_components: usize,
     /// Number of components that were deblended into multiple regions.
     pub(crate) deblended_components: usize,
-}
-
-/// Result of candidate extraction (internal).
-#[derive(Debug, Default)]
-struct ExtractionResult {
-    regions: Vec<Region>,
-    deblended_components: usize,
 }
 
 /// The plane a detection runs on, and its pixels with no data, which join no component.
@@ -53,17 +50,17 @@ struct LabelledPlane<'a> {
     labels: &'a LabelMap,
 }
 
-impl DetectResult {
+impl Candidates {
     /// Detect star candidate regions on `plane`: threshold it against its own noise, leaving out
     /// the pixels with no data, label the connected components, deblend them, and keep the regions
     /// whose size and place the configuration allows.
-    pub(crate) fn from_plane(
+    pub(crate) fn detect(
         input: DetectionInput<'_>,
         config: &ExtractionConfig,
-        pool: &mut DetectionResources,
+        resources: &mut DetectionResources,
     ) -> Self {
         let DetectionInput { plane, no_data } = input;
-        let mut mask = pool.acquire_bit();
+        let mut mask = resources.acquire_bit();
         plane.threshold(config.sigma_threshold, &mut mask);
         // A pixel with no data holds a fill, not a measurement, and must not join a component.
         if let Some(no_data) = no_data {
@@ -71,30 +68,40 @@ impl DetectResult {
         }
         let pixels_above_threshold = mask.count_ones();
 
-        let label_map = pool.labeler.label(&mask, config.connectivity);
+        let mut regions = mem::take(&mut resources.regions);
+        regions.clear();
+        let label_map = resources.labeler.label(&mask, config.connectivity);
         let connected_components = label_map.num_labels();
         let labelled = LabelledPlane {
             plane,
             labels: label_map,
         };
-        let extraction = extract_candidates(labelled, config, &pool.deblend);
+        let deblended_components =
+            extract_candidates(labelled, config, &resources.deblend, &mut regions);
 
         Self {
-            regions: extraction.regions,
+            regions,
             pixels_above_threshold,
             connected_components,
-            deblended_components: extraction.deblended_components,
+            deblended_components,
         }
+    }
+
+    /// Hand the regions' buffer back to `resources` for the next detection.
+    pub(crate) fn release(self, resources: &mut DetectionResources) {
+        resources.regions = self.regions;
     }
 }
 
-/// Deblend every labelled component on `plane`, then keep the regions within the configured area
-/// and clear of the edge margin.
+/// Deblend every labelled component on `plane` into `regions`, then keep the regions within the
+/// configured area and clear of the edge margin; the count of components split into more than
+/// one.
 fn extract_candidates(
     labelled: LabelledPlane<'_>,
     config: &ExtractionConfig,
     deblend_buffers: &ScratchPool<DeblendBuffers>,
-) -> ExtractionResult {
+    regions: &mut Vec<Region>,
+) -> usize {
     let LabelledPlane {
         plane,
         labels: label_map,
@@ -117,7 +124,7 @@ fn extract_candidates(
         );
     }
     if label_map.num_labels() == 0 {
-        return ExtractionResult::default();
+        return 0;
     }
 
     tracing::debug!(
@@ -128,17 +135,20 @@ fn extract_candidates(
     );
 
     // One deblend buffer set per fold split, leased from the detector's pool so a frame after the
-    // first reuses the last one's.
-    let mut result = label_map
+    // first reuses the last one's, each split's regions gathered in its set: the reduce appends a
+    // later set's to an earlier one's, which keeps the components' order.
+    let (deblended_components, mut gathered) = label_map
         .components()
         .par_iter()
         // A component smaller than `min_area` holds no region that large. One larger than
         // `max_area` is still deblended: a crowded group splits into regions within it.
-        .filter(|data| data.area >= config.min_area.max(1))
+        .filter(|data| data.area >= config.min_area)
         .fold(
-            || (ExtractionResult::default(), deblend_buffers.acquire()),
-            |(mut acc, mut buffers), data| {
+            || (0, deblend_buffers.acquire()),
+            |(mut deblended, mut buffers), data| {
                 let component = Component::new(data, values, label_map);
+                let DeblendBuffers { regions: found, .. } = &mut *buffers;
+                let mut split = mem::take(found);
                 let pushed = match config.deblend {
                     Deblend::MultiThreshold {
                         n_thresholds,
@@ -149,42 +159,50 @@ fn extract_candidates(
                         min_separation: config.deblend_min_separation,
                         min_area: config.min_area,
                         connectivity: config.connectivity,
-                        floor: plane
-                            .noise
-                            .threshold_at(component.peak().pos, config.sigma_threshold),
+                        floor: {
+                            let peak = component.peak().pos;
+                            plane
+                                .threshold_params(config.sigma_threshold)
+                                .level(plane.noise.noise[(peak.x, peak.y)])
+                        },
                     }
-                    .deblend(&component, &mut buffers, &mut acc.regions),
-                    Deblend::LocalMaxima { min_prominence } => LocalMaximaParams {
+                    .deblend(&component, &mut buffers, &mut split),
+                    Deblend::LocalMaxima {
+                        min_relative_height,
+                    } => LocalMaximaParams {
                         min_separation: config.deblend_min_separation,
-                        min_prominence,
+                        min_relative_height,
                     }
-                    .deblend(&component, &mut buffers, &mut acc.regions),
+                    .deblend(&component, &mut buffers, &mut split),
                 };
-                acc.deblended_components += usize::from(pushed > 1);
-                (acc, buffers)
+                buffers.regions = split;
+                deblended += usize::from(pushed > 1);
+                (deblended, buffers)
             },
         )
-        .map(|(acc, _)| acc)
-        .reduce(ExtractionResult::default, |mut a, b| {
-            a.regions.extend(b.regions);
-            a.deblended_components += b.deblended_components;
-            a
-        });
+        .reduce(
+            || (0, deblend_buffers.acquire()),
+            |(a, mut first), (b, mut second)| {
+                first.regions.append(&mut second.regions);
+                (a + b, first)
+            },
+        );
+    regions.append(&mut gathered.regions);
 
     tracing::debug!(
-        regions = result.regions.len(),
-        deblended = result.deblended_components,
+        regions = regions.len(),
+        deblended = deblended_components,
         "Candidate extraction complete"
     );
 
-    result.regions.retain(|c| {
+    regions.retain(|c| {
         (config.min_area..=config.max_area).contains(&c.area)
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
             && c.bbox.max.x <= size.width.saturating_sub(config.edge_margin)
             && c.bbox.max.y <= size.height.saturating_sub(config.edge_margin)
     });
-    result
+    deblended_components
 }
 
 /// Test and bench helpers that reach into this stage.
@@ -197,7 +215,7 @@ pub(crate) mod internals {
     use crate::star_detection::detection_plane::DetectionPlane;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
-    use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
+    use crate::star_detection::star_detector::stages::detect::{Candidates, DetectionInput};
     use imaginarium::Buffer2;
 
     /// Detect stars in `residual` taken as the detection plane, its noise `sky`, with a throwaway
@@ -216,9 +234,9 @@ pub(crate) mod internals {
         residual: &Buffer2<f32>,
         sky: &SkyNoise,
         config: &ExtractionConfig,
-    ) -> DetectResult {
+    ) -> Candidates {
         let size = Size2us::new(residual.width(), residual.height());
-        let mut pool = DetectionResources::new(size);
+        let mut resources = DetectionResources::new(size);
         let plane = DetectionPlane {
             values: Pooled::loose(residual.clone(), size),
             noise: SkyNoise {
@@ -226,13 +244,13 @@ pub(crate) mod internals {
                 floor: sky.floor,
             },
         };
-        DetectResult::from_plane(
+        Candidates::detect(
             DetectionInput {
                 plane: &plane,
                 no_data: None,
             },
             config,
-            &mut pool,
+            &mut resources,
         )
     }
 }

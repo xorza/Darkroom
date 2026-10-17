@@ -1,10 +1,11 @@
 //! Tests for morphological dilation.
 
+use imaginarium::Buffer2;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::bit_buffer2::dilation::dilate_mask;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
 fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
@@ -211,6 +212,12 @@ fn dilation_matches_the_brute_force_reference() {
             size: Size2us::new(200, 5),
             seed: Seed::Pixels(&[(0, 0), (99, 2), (199, 4)]),
             radii: &[1, 3, 5],
+        },
+        Case {
+            name: "smears of every doubling remainder across word edges",
+            size: Size2us::new(200, 7),
+            seed: Seed::Pixels(&[(62, 3), (65, 0), (127, 6), (128, 3), (191, 1)]),
+            radii: &[4, 5, 6, 7, 8, 31, 32, 33, 50],
         },
         Case {
             name: "max radius 63",

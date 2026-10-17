@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
-use lumos::{ImageDimensions, LinearImage};
+use lumos::{ChannelLayout, ImageDimensions, LinearImage};
 use scenarium::{CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
@@ -79,7 +79,10 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
 #[tokio::test]
 async fn a_planar_image_round_trips_as_planes() {
     let planes = [vec![0.125_f32, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]];
-    let planar = LinearImage::from_planar_channels(ImageDimensions::new((2, 1), 3), planes.clone());
+    let planar = LinearImage::from_planar_channels(
+        ImageDimensions::new((2, 1), ChannelLayout::Rgb),
+        planes.clone(),
+    );
     let bytes = encoded(Image::from(planar)).await;
     assert_eq!(&bytes[..3], &[1, 3, 2], "planar, three channels, f32");
     let body: Vec<f32> = bytes[header_len()..]
@@ -98,7 +101,10 @@ async fn a_planar_image_round_trips_as_planes() {
         assert_eq!(planar.channel(channel).pixels(), plane);
     }
 
-    let gray = LinearImage::from_planar_channels(ImageDimensions::new((2, 1), 1), [vec![0.5, 1.0]]);
+    let gray = LinearImage::from_planar_channels(
+        ImageDimensions::new((2, 1), ChannelLayout::Mono),
+        [vec![0.5, 1.0]],
+    );
     let Pixels::PlanarCpu(gray) = &decoded(encoded(Image::from(gray)).await).await.pixels else {
         panic!("the plane came back interleaved");
     };

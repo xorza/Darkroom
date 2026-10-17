@@ -2,9 +2,9 @@
 //! gather fills from it.
 
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
 use crate::frame::frame_stats::FrameStats;
-use crate::noise::background_split::BackgroundSplit;
+use crate::image::background_split::BackgroundSplit;
 use crate::noise::ccd_noise::CcdNoise;
 
 /// Each frame's [`CcdNoise`] per slot, carried through its normalization into the units the frames
@@ -14,8 +14,8 @@ pub(crate) struct SampleNoise {
     slots: Slots,
     /// Frame-major, `slots.count()` per frame.
     models: Vec<CcdNoise>,
-    /// Whether every frame states its gain, so that every model has its source term.
-    every_gain_known: bool,
+    /// The first frame that states no gain, whose model has no source term.
+    first_without_gain: Option<usize>,
 }
 
 impl SampleNoise {
@@ -29,10 +29,12 @@ impl SampleNoise {
             slots,
         } = frames;
         let mut models = Vec::new();
-        let mut every_gain_known = true;
+        let mut first_without_gain = None;
         for (frame, stats) in stats.into_iter().enumerate() {
-            debug_assert_eq!(stats.noise.len(), slots.count());
-            every_gain_known &= stats.electrons_per_unit.is_some();
+            debug_assert_eq!(stats.background.len(), slots.count());
+            if stats.electrons_per_unit.is_none() {
+                first_without_gain.get_or_insert(frame);
+            }
             models.extend((0..slots.count()).map(|slot| {
                 let model = stats.ccd_noise(slot);
                 match frame_norms {
@@ -47,7 +49,7 @@ impl SampleNoise {
         Self {
             slots,
             models,
-            every_gain_known,
+            first_without_gain,
         }
     }
 
@@ -75,27 +77,9 @@ impl SampleNoise {
         self.models[frame * self.slots.count() + slot]
     }
 
-    pub(crate) const fn every_gain_known(&self) -> bool {
-        self.every_gain_known
-    }
-}
-
-/// The gathered samples' noise models, one column per term, at each sample's flat gain `g` and over
-/// a warp's confidence `q`: the background is the model's at `g` over `q`, and a unit above the sky
-/// carries `g/(electrons·q)`, since the flat multiplied the sample and an interpolated sample
-/// averaged `q` source pixels' worth of white noise.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NoiseColumns<'a> {
-    pub(crate) background: &'a [f32],
-    pub(crate) sky: &'a [f32],
-    /// `1 / electrons_per_unit`, and 0 where the gain is unknown.
-    pub(crate) inverse_electrons: &'a [f32],
-}
-
-impl NoiseColumns<'_> {
-    /// The variance of sample `index` at value `x`.
-    pub(crate) fn variance_at(&self, index: usize, x: f32) -> f32 {
-        self.background[index] + (x - self.sky[index]).max(0.0) * self.inverse_electrons[index]
+    /// The first frame that states no gain; `None` when every frame states one.
+    pub(crate) const fn first_without_gain(&self) -> Option<usize> {
+        self.first_without_gain
     }
 }
 

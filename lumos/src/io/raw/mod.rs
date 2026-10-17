@@ -1,39 +1,33 @@
 mod black_level;
 pub(crate) mod error;
 mod libraw;
+pub(crate) mod libraw_filters;
 mod raw_decoder;
 pub(crate) mod raw_files;
 mod sensor_layout;
 mod unpacked_raw;
 
-use libraw_sys as sys;
+use std::ffi;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
-use std::{ffi, fs};
 
-use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
+use libraw_sys as sys;
+
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_type::{CfaType, LibrawFilters};
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, OverBudget};
+use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::Libraw;
+use crate::io::raw::libraw_filters::LibrawFilters;
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
-use crate::io::raw::unpacked_raw::UnpackedRaw;
-
-/// Camera-RAW extensions accepted by this decoder: the formats LibRaw decodes, as digiKam's
-/// libkdcraw lists them, with Canon's CR3 that later LibRaw added. `.hdr`, which LibRaw reads for
-/// Hasselblad, is left out: it names Radiance HDR images far more often. Sigma's X3F and GoPro's
-/// GPR are left out too: LibRaw decodes them only with the X3F tools and the GPR SDK, which this
-/// build does not include.
-pub const RAW_EXTENSIONS: &[&str] = &[
-    "3fr", "arw", "bay", "bmq", "cap", "cine", "cr2", "cr3", "crw", "cs1", "dc2", "dcr", "dng",
-    "drf", "dsc", "erf", "fff", "ia", "iiq", "k25", "kc2", "kdc", "mdc", "mef", "mos", "mrw",
-    "nef", "nrw", "orf", "pef", "ptx", "pxn", "qtk", "raf", "raw", "rdc", "rw2", "rwl", "rwz",
-    "sr2", "srf", "srw", "sti",
-];
+use crate::io::raw::unpacked_raw::{RawPath, UnpackedRaw};
 
 /// The balance left to apply to a file's samples, normalized so its smallest multiplier is 1:
 /// none for a monochrome sensor; unity where LibRaw reports the as-shot balance already in the
@@ -70,7 +64,7 @@ fn camera_white_balance(
     Some(multipliers)
 }
 
-/// LibRaw's `FC` macro: the colour index at (row, col) of a `filters` word, which holds two bits
+/// LibRaw's `FC` macro: the color index at (row, col) of a `filters` word, which holds two bits
 /// for each of the 8 × 2 positions of its repeating block.
 #[inline(always)]
 pub(crate) const fn filter_color(filters: u32, row: usize, col: usize) -> usize {
@@ -82,40 +76,75 @@ fn xtrans_pattern_from_libraw(pattern: [[ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
     pattern.map(|row| row.map(|color| u8::from_ne_bytes(color.to_ne_bytes())))
 }
 
-/// The colours LibRaw's `cdesc` names, one letter each, its terminator left off.
-fn colour_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
+/// The colors LibRaw's `cdesc` names, one letter each, its terminator left off.
+fn color_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
     let [a, b, c, d, _] = cdesc.map(|letter| u8::from_ne_bytes(letter.to_ne_bytes()));
     [a, b, c, d]
 }
 
-/// The mosaic LibRaw's state `data` describes — see [`CfaType::from_libraw`].
+/// The mosaic LibRaw's state `data` describes — see [`LibrawFilters::cfa_type`].
 fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawError> {
     let idata = &data.idata;
-    Ok(CfaType::from_libraw(&LibrawFilters {
+    Ok(LibrawFilters {
         filters: idata.filters,
         colors: idata.colors,
-        cdesc: colour_description(idata.cdesc),
+        cdesc: color_description(idata.cdesc),
         xtrans: xtrans_pattern_from_libraw(idata.xtrans),
-    })?)
+    }
+    .cfa_type()?)
 }
 
 /// Read `path` whole and open it in LibRaw, which then parses the bytes in place, polling the
 /// cancel token of `context`. One input path on every system: LibRaw's memory datastream is its
 /// simplest, and a path never meets a narrow or wide file API.
+/// A file longer than the context's memory limit is refused before it is read.
 fn open(path: &Path, context: &LoadContext) -> Result<Libraw, ImageError> {
     context.check_cancelled(path)?;
-    let file = fs::read(path).map_err(|source| ImageError::Io {
+    let io_error = |source| ImageError::Io {
         path: path.to_path_buf(),
         source,
-    })?;
-    Libraw::open(file, &context.cancel).map_err(|source| ImageError::raw(path, source))
+    };
+    let file = File::open(path).map_err(io_error)?;
+    let len = file.metadata().map_err(io_error)?.len();
+    OverBudget::check(len, context.memory_limit_bytes)
+        .map_err(|budget| ImageError::raw(path, budget.into()))?;
+    let mut bytes = Vec::with_capacity(usize::try_from(len).expect("a file within the limit"));
+    // The length admitted, not what the file grew to since.
+    file.take(len).read_to_end(&mut bytes).map_err(io_error)?;
+    Libraw::open(bytes, &context.cancel).map_err(|source| ImageError::raw(path, source))
 }
 
-/// Open and unpack `path`.
-fn open_raw(path: &Path, context: &LoadContext) -> Result<UnpackedRaw, ImageError> {
+/// Open and unpack `path`, once the decode along the path `route` names is admitted under the
+/// context's memory limit.
+fn open_raw(
+    path: &Path,
+    context: &LoadContext,
+    route: impl FnOnce(&Libraw) -> Result<RawPath, RawError>,
+) -> Result<UnpackedRaw, ImageError> {
     let libraw = open(path, context)?;
-    UnpackedRaw::unpack(libraw, path, context.decode_threads)
+    route(&libraw)
+        .and_then(|route| admit(&libraw, route, context.memory_limit_bytes))
+        .and_then(|()| UnpackedRaw::unpack(libraw, context.decode_threads))
         .map_err(|source| ImageError::raw(path, source))
+}
+
+/// What the decoder of the open `libraw` holds beside the frame it makes: the file LibRaw parses in
+/// place, and the raw buffer it unpacks into.
+const fn decoder_bytes(libraw: &Libraw, layout: &SensorLayout) -> usize {
+    libraw.file_len() + layout.raw.pixel_count() * size_of::<u16>()
+}
+
+/// Refuse a decode of the open `libraw` along `route` past `limit` bytes, from its header before
+/// `unpack`: what it holds at its peak, its decoder and the frame `route` makes.
+fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
+    let layout = SensorLayout::of(&libraw.data().sizes)?;
+    let required =
+        decoder_bytes(libraw, &layout) + layout.active.pixel_count() * route.pixel_bytes();
+    OverBudget::check(
+        u64::try_from(required).expect("a byte count fits u64"),
+        limit,
+    )?;
+    Ok(())
 }
 
 /// Load a raw file as a linear image within `[0, 1]`: the light-frame preview.
@@ -123,19 +152,27 @@ fn open_raw(path: &Path, context: &LoadContext) -> Result<UnpackedRaw, ImageErro
 /// A sensor lumos demosaics goes the science path — [`load_cfa`]'s frame, its demosaic over
 /// the visible area alone, then a clamp — so the preview and a calibrated frame cannot disagree
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
-/// three-colour CFA — is LibRaw's own processing.
-pub(crate) fn load(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-    let raw = open_raw(path, context)?;
+/// three-color CFA — is LibRaw's own processing.
+pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+    let raw = open_raw(path, context, |libraw| preview_route(libraw, context))?;
     context.check_cancelled(path)?;
     raw.into_linear_image(context)
+        .map_err(|source| ImageError::raw(path, source))
+}
+
+/// The path a preview of the open `libraw` takes ([`RawPath::preview`]), once a mosaic's demosaic
+/// is admitted under `context` beside its decode ([`FrameInfo::admit_demosaic`]).
+fn preview_route(libraw: &Libraw, context: &LoadContext) -> Result<RawPath, RawError> {
+    let route = RawPath::preview(libraw)?;
+    if route == RawPath::Mosaic {
+        frame_info(libraw)?.admit_demosaic(context)?;
+    }
+    Ok(route)
 }
 
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`: the file is
 /// read whole, as every load reads it, but its sensor data is not decoded.
-pub(crate) fn cfa_frame_info(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<CfaFrameInfo, ImageError> {
+pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
     frame_info(&open(path, context)?).map_err(|source| ImageError::raw(path, source))
 }
 
@@ -160,18 +197,16 @@ fn identified(libraw: &Libraw) -> Result<RawDecoder, RawError> {
 ///
 /// [`identified`]'s refusals, and [`RawError::MosaicSetAtDecode`] for a decoder that settles the
 /// mosaic only as it decodes: the header's pattern is not the frame's.
-fn frame_info(libraw: &Libraw) -> Result<CfaFrameInfo, RawError> {
+fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     if identified(libraw)? == RawDecoder::FiltersAtDecode {
         return Err(RawError::MosaicSetAtDecode);
     }
     let layout = SensorLayout::of(&libraw.data().sizes)?;
     let cfa_type = sensor_cfa_type(libraw.data())?.ok_or(RawError::NotACfaFrame)?;
-    Ok(CfaFrameInfo {
-        dimensions: ImageDimensions::new(layout.active, 1),
+    Ok(FrameInfo {
+        dimensions: ImageDimensions::new(layout.active, ChannelLayout::Mono),
         cfa_type,
-        // The file LibRaw parses in place, and the raw buffer it unpacks into, both held while
-        // the frame is normalized out of them.
-        decoder_bytes: libraw.file_len() + layout.raw.pixel_count() * size_of::<u16>(),
+        decoder_bytes: decoder_bytes(libraw, &layout),
     })
 }
 
@@ -179,7 +214,7 @@ fn frame_info(libraw: &Libraw) -> Result<CfaFrameInfo, RawError> {
 /// path, where defects are repaired before any demosaic and a master's noise below its pedestal
 /// stays in.
 pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    let raw = open_raw(path, context)?;
+    let raw = open_raw(path, context, |_| Ok(RawPath::Mosaic))?;
     context.check_cancelled(path)?;
     raw.into_cfa_image()
         .map_err(|source| ImageError::raw(path, source))
@@ -193,6 +228,7 @@ pub(crate) mod internals {
     use crate::io::error::ImageError;
     use crate::io::load_context::LoadContext;
     use crate::io::raw::open_raw;
+    use crate::io::raw::unpacked_raw::RawPath;
 
     /// Load a raw file through libraw's own demosaic at quality `user_qual`, the reference ours is
     /// compared with.
@@ -200,7 +236,7 @@ pub(crate) mod internals {
         path: &Path,
         user_qual: i32,
     ) -> Result<LinearImage, ImageError> {
-        let mut raw = open_raw(path, &LoadContext::default())?;
+        let mut raw = open_raw(path, &LoadContext::default(), |_| Ok(RawPath::Processed))?;
         raw.libraw.params_mut().user_qual = user_qual;
         raw.processed_by_libraw()
             .map_err(|source| ImageError::raw(path, source))

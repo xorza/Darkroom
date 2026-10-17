@@ -5,6 +5,7 @@ use common::CancelToken;
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
@@ -52,16 +53,18 @@ fn dark(count: usize, saturated: usize) -> HotDark {
         pixels[index] -= 0.002;
     }
     let mut dark = make_cfa(SIZE, pixels, CfaType::Mono);
-    dark.flags = PixelFlags::from_fn(SIZE, |index| {
+    dark.set_flags(PixelFlags::from_fn(SIZE, |index| {
         if clipped.contains(&index) {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
         }
-    });
-    dark.metadata.exposure_time = Some(300.0);
-    dark.metadata.ccd_temp = Some(-10.0);
-    dark.metadata.calibration = CalibrationState::BIAS;
+    }));
+    dark.metadata.header.exposure_time = Some(300.0);
+    dark.metadata.header.ccd_temp = Some(-10.0);
+    dark.metadata
+        .derived
+        .set_calibration(CalibrationState::BIAS);
     HotDark { dark, hot }
 }
 
@@ -108,8 +111,8 @@ impl Light {
             }
         }
         let mut light = make_cfa(SIZE, pixels, CfaType::Mono);
-        light.metadata.exposure_time = Some(exposure);
-        light.metadata.ccd_temp = Some(temperature);
+        light.metadata.header.exposure_time = Some(exposure);
+        light.metadata.header.ccd_temp = Some(temperature);
         light
     }
 }
@@ -121,7 +124,7 @@ fn masters(dark: CfaImage) -> CalibrationMasters {
             bias: Some(constant_cfa(SIZE, BIAS, CfaType::Mono)),
             ..CalibrationSet::default()
         },
-        5.0,
+        SigmaThreshold::new(5.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap()
@@ -182,7 +185,10 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
             "{standard_error} against {derived}"
         );
         assert_eq!(
-            outcome.dark_temperature_difference.is_some(),
+            outcome
+                .dark
+                .and_then(|dark| dark.temperature_difference)
+                .is_some(),
             temperature != -10.0
         );
     }

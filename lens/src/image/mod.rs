@@ -9,11 +9,10 @@ pub(crate) mod nodes;
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use lumos::{ImageDimensions, LinearImage};
+use lumos::{ChannelLayout, ImageDimensions, LinearImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -69,7 +68,9 @@ impl Image {
         planes: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
         let planes: Vec<Vec<f32>> = planes.into_iter().collect();
-        let dimensions = ImageDimensions::new((width, height), planes.len());
+        let layout =
+            ChannelLayout::try_from(planes.len()).expect("an image has one plane or three");
+        let dimensions = ImageDimensions::new((width, height), layout);
         Self::from(LinearImage::from_planar_channels(dimensions, planes))
     }
 

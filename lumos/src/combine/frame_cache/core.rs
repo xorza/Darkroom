@@ -6,10 +6,9 @@
 //! many as the budget dictates, each copied out of the planes' maps by reader threads while the
 //! chunk before it is reduced.
 
-use std::mem;
-use std::thread;
+use std::{mem, thread};
 
-use crate::combine::frame_cache::frame_chunk::{ChunkCopy, FrameChunk};
+use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::tier::Tier;
 use crate::image::image_dimensions::ImageDimensions;

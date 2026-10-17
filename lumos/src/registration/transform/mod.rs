@@ -1,14 +1,15 @@
 //! Transformation matrix for image registration.
 
-pub(crate) mod inverse_warp;
-pub(crate) mod warp_transform;
+pub(crate) mod linear_model;
+pub(crate) mod local_geometry;
+
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 use glam::{DMat2, DVec2};
 
 use crate::math::dmat3::DMat3;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use crate::registration::transform::local_geometry::LocalGeometry;
 
 /// The unit roundoff of f64: half the gap between 1 and the next float.
 const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
@@ -31,12 +32,12 @@ const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZAT
 
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
-/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two.
-/// Every variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a
-/// model to be *chosen* is [`TransformModel::Auto`], which is a different question and a
-/// different type.
-/// No `Default`: nothing asks for "the" model, and picking one here would be an answer invented
-/// to satisfy the derive. A caller with nothing to go on wants [`TransformModel::Auto`].
+/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two. Every
+/// variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a model
+/// to be *chosen* is [`TransformModel::Auto`](crate::TransformModel::Auto), which is a different
+/// question and a different type. No `Default`: nothing asks for "the" model, and picking one here
+/// would be an answer invented to satisfy the derive. A caller with nothing to go on wants
+/// [`TransformModel::Auto`](crate::TransformModel::Auto).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
@@ -54,7 +55,7 @@ pub enum TransformType {
 impl TransformType {
     /// The transform's free parameters: 2 for a translation, 3 with a rotation, 4 with a scale, 6
     /// for an affine map and 8 for a homography.
-    pub(crate) const fn parameter_count(self) -> usize {
+    pub const fn parameter_count(self) -> usize {
         match self {
             Self::Translation => 2,
             Self::Euclidean => 3,
@@ -64,43 +65,10 @@ impl TransformType {
         }
     }
 
-    /// Minimum number of point correspondences required to estimate this transform.
-    pub const fn min_points(&self) -> usize {
-        match self {
-            Self::Translation => 1,
-            Self::Euclidean | Self::Similarity => 2,
-            Self::Affine => 3,
-            Self::Homography => 4,
-        }
-    }
-}
-
-/// Which model a registration should fit: a specific one, or a request to choose.
-///
-/// Kept apart from [`TransformType`] so that "pick a model for me" cannot reach the places that
-/// can only act on a chosen one — RANSAC, transform estimation, and [`Transform`] itself, each of
-/// which would otherwise need its own arm rejecting it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TransformModel {
-    /// Fit exactly this model.
-    Fixed(TransformType),
-    /// Fit every model from Euclidean to Homography and take the one of lowest geometric robust
-    /// information criterion (Torr 1998): the one whose residuals, over every pair any model
-    /// matched, best repay its degrees of freedom.
-    #[default]
-    Auto,
-}
-
-impl TransformModel {
-    /// The most general model this could resolve to — `Auto`'s ceiling, or the fixed choice.
-    ///
-    /// What the star-count and match-count gates size against, since a run that may climb to
-    /// homography has to arrive with enough points to fit one.
-    pub const fn most_general(self) -> TransformType {
-        match self {
-            Self::Fixed(transform_type) => transform_type,
-            Self::Auto => TransformType::Homography,
-        }
+    /// Minimum number of point correspondences required to estimate this transform: each pair
+    /// gives two equations, one per coordinate, so half the parameters, rounded up.
+    pub const fn min_points(self) -> usize {
+        self.parameter_count().div_ceil(2)
     }
 }
 
@@ -127,11 +95,14 @@ impl Default for Transform {
 impl Display for Transform {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let t = self.translation_components();
-        let rotation_deg = self.rotation_angle().to_degrees();
-        let scale = self.scale_factor();
+        // At the origin, where a homography's own matrix entries act; every other model is the
+        // same everywhere.
+        let geometry = self.local_geometry(DVec2::ZERO);
+        let rotation_deg = geometry.rotation.to_degrees();
+        let [major, minor] = geometry.stretch;
 
         // Each model shows only the components it actually constrains: translation has no angle,
-        // Euclidean no scale. The three above it print the same four, differing only in the name.
+        // Euclidean no scale, a similarity one scale, and the two above it a stretch per axis.
         match self.transform_type {
             TransformType::Translation => {
                 write!(f, "Translation(dx={:.2}, dy={:.2})", t.x, t.y)
@@ -143,10 +114,15 @@ impl Display for Transform {
                     t.x, t.y, rotation_deg
                 )
             }
+            TransformType::Similarity => write!(
+                f,
+                "Similarity(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
+                t.x, t.y, rotation_deg, major
+            ),
             model => write!(
                 f,
-                "{model:?}(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                t.x, t.y, rotation_deg, scale
+                "{model:?}(dx={:.2}, dy={:.2}, rot={:.3}°, stretch={:.4}/{:.4})",
+                t.x, t.y, rotation_deg, major, minor
             ),
         }
     }
@@ -280,7 +256,7 @@ impl Transform {
 
     /// Apply transform to map a point from REFERENCE coordinates to TARGET coordinates.
     ///
-    /// Given a transform T estimated from `register_stars(ref_stars, target_stars)`:
+    /// Given a transform T a registration of `ref_stars` to `target_stars` found:
     /// - `T.apply(ref_point)` gives the corresponding target point
     /// - `T.inverse().apply(target_point)` gives the corresponding reference point
     ///
@@ -291,7 +267,7 @@ impl Transform {
     /// mapped from reference coordinates. This means using `apply()` to find
     /// where each reference pixel maps to in the target, then sampling there.
     ///
-    /// [`WarpTransform::warp`](crate::WarpTransform::warp) handles this automatically.
+    /// [`WarpParams::warp`](crate::WarpParams::warp) handles this automatically.
     ///
     /// # Example
     ///
@@ -300,8 +276,8 @@ impl Transform {
     /// use lumos::{RegistrationConfig, Star};
     ///
     /// # fn example(ref_stars: &[Star], target_stars: &[Star], ref_pos: DVec2)
-    /// # -> Result<(), lumos::RegistrationError> {
-    /// let result = RegistrationConfig::default().register(ref_stars, target_stars)?;
+    /// # -> Result<(), Box<dyn std::error::Error>> {
+    /// let result = RegistrationConfig::default().registrar()?.register(ref_stars, target_stars)?;
     /// let transform = result.transform();
     ///
     /// // Map a reference point to its corresponding target location
@@ -349,7 +325,7 @@ impl Transform {
     /// [`Self::compose`], or `None` when the product cannot be normalized — a fit from a
     /// near-degenerate sample can carry entries so large that its homogeneous scale vanishes
     /// beside them.
-    pub(crate) fn try_compose(&self, other: &Self) -> Option<Self> {
+    pub fn try_compose(&self, other: &Self) -> Option<Self> {
         let transform_type = self.transform_type.max(other.transform_type);
         Self::from_matrix(self.matrix.mul_mat(&other.matrix), transform_type)
     }
@@ -375,16 +351,16 @@ impl Transform {
         DVec2::new(self.matrix[2], self.matrix[5])
     }
 
-    /// Extract rotation angle in radians (valid for Euclidean/Similarity transforms).
-    pub fn rotation_angle(&self) -> f64 {
-        self.matrix[3].atan2(self.matrix[0])
+    /// What the transform does to a small neighbourhood of `p`: the rotation and the stretch of
+    /// its Jacobian there, one value everywhere for every model below a homography.
+    pub fn local_geometry(&self, p: DVec2) -> LocalGeometry {
+        LocalGeometry::of(self.jacobian(p))
     }
 
-    /// Extract scale factor (valid for Similarity transforms).
-    pub fn scale_factor(&self) -> f64 {
-        let a = self.matrix[0];
-        let c = self.matrix[3];
-        a.hypot(c)
+    /// Whether `p` maps to a real image: on the side of a homography's horizon the origin is on
+    /// ([`DMat3::maps_forward`]). Every model below a homography maps every point.
+    pub(crate) const fn maps_forward(&self, p: DVec2) -> bool {
+        DMat3::maps_forward(self.matrix.weight_at(p))
     }
 
     /// Whether this is a usable transformation: every entry finite, and an inverse that

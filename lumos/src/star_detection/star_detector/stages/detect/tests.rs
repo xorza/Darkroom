@@ -12,13 +12,31 @@ use crate::star_detection::star_detector::stages::detect::*;
 fn local_maxima_config() -> ExtractionConfig {
     ExtractionConfig {
         deblend: Deblend::LocalMaxima {
-            min_prominence: 0.3,
+            min_relative_height: 0.3,
         },
         deblend_min_separation: 3,
         min_area: 1,
         max_area: usize::MAX,
         edge_margin: 0,
         ..Default::default()
+    }
+}
+
+/// What [`extract_candidates`] gathered: the regions, and how many components split.
+#[derive(Debug)]
+struct Extracted {
+    regions: Vec<Region>,
+    deblended_components: usize,
+}
+
+/// [`extract_candidates`] of `labelled` under `config`, into a fresh list.
+fn extracted(labelled: LabelledPlane<'_>, config: &ExtractionConfig) -> Extracted {
+    let mut regions = Vec::new();
+    let deblended_components =
+        extract_candidates(labelled, config, &ScratchPool::default(), &mut regions);
+    Extracted {
+        regions,
+        deblended_components,
     }
 }
 
@@ -54,13 +72,12 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         ],
     );
 
-    let result = extract_candidates(
+    let result = extracted(
         LabelledPlane {
             plane: &flat_plane(&pixels),
             labels: &label_map,
         },
         &local_maxima_config(),
-        &ScratchPool::default(),
     );
 
     assert_eq!(
@@ -90,13 +107,12 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         )],
     );
 
-    let result = extract_candidates(
+    let result = extracted(
         LabelledPlane {
             plane: &flat_plane(&pixels),
             labels: &label_map,
         },
         &local_maxima_config(),
-        &ScratchPool::default(),
     );
 
     assert_eq!(result.regions.len(), 1);
@@ -129,13 +145,12 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             ..local_maxima_config()
         };
 
-        let result = extract_candidates(
+        let result = extracted(
             LabelledPlane {
                 plane: &flat_plane(&pixels),
                 labels: &label_map,
             },
             &config,
-            &ScratchPool::default(),
         );
 
         assert!(
@@ -264,13 +279,12 @@ fn region_filter_bounds() {
         ],
     );
 
-    let result = extract_candidates(
+    let result = extracted(
         LabelledPlane {
             plane: &flat_plane(&residual),
             labels: &label_map,
         },
         &config,
-        &ScratchPool::default(),
     );
     let mut kept: Vec<(usize, usize)> = result
         .regions

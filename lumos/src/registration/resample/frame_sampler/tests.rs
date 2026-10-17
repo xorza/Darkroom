@@ -1,24 +1,27 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::flagged_sources::FlaggedSources;
+use crate::registration::resample::flagged_sources::{FlagScratch, FlaggedSources};
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, SampleRule, WindowAxes,
 };
-use crate::registration::resample::kernel::internals::bicubic_kernel;
-use crate::registration::resample::kernel::warp_kernel::{Filter, WarpKernel};
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
+use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
+use crate::registration::resample::warp_params::{
+    ClampingThreshold, InterpolationMethod, WarpParams,
+};
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
+use crate::registration::warp_transform::WarpTransform;
 use crate::simd::tier::Tier;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
@@ -408,7 +411,9 @@ fn methods() -> Vec<Case> {
                         kernel,
                         clamp: clamp
                             .filter(|_| filter.has_negative_lobes())
-                            .map(RingingClamp::new),
+                            .map(|threshold| {
+                                RingingClamp::new(ClampingThreshold::new(threshold).unwrap())
+                            }),
                     }),
                     filter: Some(Stretched { filter, stretch }),
                     clamp,
@@ -458,7 +463,7 @@ fn every_pixel_follows_the_rules() {
     {
         for flagged in [false, true] {
             let rgb = LinearImage::from_planar_channels(
-                ImageDimensions::new((size.width, size.height), 3),
+                ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
                 [
                     planes[0].pixels().to_vec(),
                     planes[1].pixels().to_vec(),
@@ -466,7 +471,8 @@ fn every_pixel_follows_the_rules() {
                 ],
             );
             let source = SourceImage::of(&rgb);
-            let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
+            let mut scratch = FlagScratch::default();
+            let sources = flagged.then(|| scratch.prepare(&flags, method.window_reach()));
             let sampler = FrameSampler::new(
                 SampleRule {
                     method,
@@ -534,7 +540,7 @@ fn every_pixel_follows_the_rules() {
 fn every_tier_samples_to_portables_bits() {
     let size = Size2us::new(24, 20);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new((size.width, size.height), 3),
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
         [
             fixture(size, 0).pixels().to_vec(),
             fixture(size, 3).pixels().to_vec(),
@@ -551,7 +557,8 @@ fn every_tier_samples_to_portables_bits() {
     for Case { method, .. } in methods() {
         for flagged in [false, true] {
             let source = SourceImage::of(&rgb);
-            let sources = flagged.then(|| FlaggedSources::new(&source, &flags, method.reach()));
+            let mut scratch = FlagScratch::default();
+            let sources = flagged.then(|| scratch.prepare(&flags, method.window_reach()));
             let sampler = FrameSampler::new(
                 SampleRule {
                     method,
@@ -595,10 +602,14 @@ fn clamped_sample(bright: f32, background: f32, threshold: Option<f32>) -> f32 {
     let mut pixels = vec![background; size.pixel_count()];
     pixels[4 * size.width + 7] = bright;
     let position = DVec2::new(8.5, 4.0);
-    let image = LinearImage::from_pixels(ImageDimensions::new((size.width, 9), 1), pixels);
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, 9), ChannelLayout::Mono),
+        pixels,
+    );
     let method = SampleMethod::Filter(FilterSampling {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
-        clamp: threshold.map(RingingClamp::new),
+        clamp: threshold
+            .map(|threshold| RingingClamp::new(ClampingThreshold::new(threshold).unwrap())),
     });
     let source = SourceImage::of(&image);
     let sampler = FrameSampler::new(
@@ -693,14 +704,16 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
     let mut nulls = vec![0.0f32; size.pixel_count()];
     nulls[8 * 18 + 8] = f32::NAN;
     nulls[8 * 18 + 9] = f32::NAN;
-    let mut image = LinearImage::from_pixels(ImageDimensions::new((18, 18), 1), ramp);
-    image.flags = PixelFlags::of_non_finite(size, &[&nulls]);
+    let mut image =
+        LinearImage::from_interleaved(ImageDimensions::new((18, 18), ChannelLayout::Mono), ramp);
+    image.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
     let method = SampleMethod::Filter(FilterSampling {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
-        clamp: Some(RingingClamp::new(0.3)),
+        clamp: Some(RingingClamp::new(ClampingThreshold::new(0.3).unwrap())),
     });
     let source = SourceImage::of(&image);
-    let sources = FlaggedSources::new(&source, image.flags.as_ref().unwrap(), method.reach());
+    let mut scratch = FlagScratch::default();
+    let sources = scratch.prepare(image.flags().unwrap(), method.window_reach());
     let sampler = FrameSampler::new(
         SampleRule {
             method,
@@ -736,8 +749,8 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
 #[test]
 fn coverage_and_confidence_vanish_together() {
     let size = Size2us::new(24, 20);
-    let rgb = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
+    let rgb = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
         fixture(size, 1).pixels().to_vec(),
     );
     let positions = positions(size);
@@ -785,12 +798,10 @@ fn a_halved_nyquist_grating_does_not_alias() {
     let grating: Vec<f32> = (0..size.pixel_count())
         .map(|i| if (i % 64).is_multiple_of(2) { 2.0 } else { 0.0 })
         .collect();
-    let image = LinearImage::from_pixels(ImageDimensions::new((64, 64), 1), grating);
+    let image =
+        LinearImage::from_interleaved(ImageDimensions::new((64, 64), ChannelLayout::Mono), grating);
     let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
-    let warped = halving.warp(
-        &image,
-        WarpParams::with_method(InterpolationMethod::Lanczos3),
-    );
+    let warped = WarpParams::with_method(InterpolationMethod::Lanczos3).warp(&image, &halving);
 
     let lut = LanczosOrder::Three.lut();
     let entry = |distance: f32| f64::from(lut.at(distance * LANCZOS_LUT_RESOLUTION as f32));
@@ -815,7 +826,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
 
     let unstretched = SampleMethod::Filter(FilterSampling {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
-        clamp: Some(RingingClamp::new(0.3)),
+        clamp: Some(RingingClamp::new(ClampingThreshold::new(0.3).unwrap())),
     });
     let source = SourceImage::of(&image);
     let sampler = FrameSampler::new(
@@ -849,8 +860,8 @@ fn filters_reproduce_their_polynomials() {
     let quadratic =
         |x: f64, y: f64| 0.02 * x * x - 0.03 * x * y + 0.05 * y * y + 0.1 * x - 0.2 * y + 1.0;
     let image = |field: &dyn Fn(f64, f64) -> f64| {
-        LinearImage::from_pixels(
-            ImageDimensions::new((size.width, size.height), 1),
+        LinearImage::from_interleaved(
+            ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
             (0..size.pixel_count())
                 .map(|i| field((i % size.width) as f64, (i / size.width) as f64) as f32)
                 .collect(),

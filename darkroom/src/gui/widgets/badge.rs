@@ -4,7 +4,7 @@
 //!
 //! **Controls** are bordered, hover-lifting chips you act on; **markers** are
 //! flat tinted pills that only describe what something *is*. Domain-agnostic
-//! like the rest of `widgets` — a caller supplies the glyph, colour, id, and
+//! like the rest of `widgets` — a caller supplies the glyph, color, id, and
 //! tooltip, and maps the returned click onto its own intent.
 
 use palantir::prelude::*;

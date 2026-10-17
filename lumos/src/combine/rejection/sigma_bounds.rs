@@ -50,12 +50,12 @@ impl SigmaBounds {
     /// Both thresholds must be finite and positive: they scale a spread estimate, so a non-positive
     /// one inverts the keep-band and a non-finite one empties it.
     ///
-    /// Reports under the field names a caller sets, `sigma_low` and `sigma_high`, rather than this
-    /// type's own — the error names what the user wrote, not how it is stored.
+    /// Reports under the path a caller sets, `sigma.low` and `sigma.high`: every rejection config
+    /// holds its bounds in a field named `sigma`.
     pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("sigma_low", self.low)
+        ConfigValue::new("sigma.low", self.low)
             .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::new("sigma_high", self.high)
+        ConfigValue::new("sigma.high", self.high)
             .finite_and("finite and positive", |value| value > 0.0)
     }
 }

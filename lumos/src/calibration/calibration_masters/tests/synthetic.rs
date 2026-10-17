@@ -9,6 +9,7 @@
 use common::CancelToken;
 
 use crate::calibration::defect_map::DefectMap;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::synthetic::backgrounds::Vignette;
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, SensorDefects};
@@ -53,7 +54,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
             bias: Some(constant_cfa(size, bias, CfaType::Mono)),
             flat_dark: None,
         },
-        5.0,
+        SigmaThreshold::new(5.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
@@ -62,7 +63,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
 
     let expected = f64::from(sky) * pixel_stats(&flat).mean;
     let bound = 6.0 * f64::from(f32::EPSILON) * expected;
-    for (i, &v) in light.data.pixels().iter().enumerate() {
+    for (i, &v) in light.data().pixels().iter().enumerate() {
         assert!(
             (f64::from(v) - expected).abs() <= bound,
             "pixel {i}: {v} vs sky·mean(flat) {expected}"
@@ -107,14 +108,14 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
             bias: Some(constant_cfa(size, bias, CfaType::Mono)),
             flat_dark: None,
         },
-        5.0,
+        SigmaThreshold::new(5.0).unwrap(),
         &CancelToken::never(),
     )
     .unwrap();
     let mut light = make_cfa(size, frame.image.channel(0).to_vec(), CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
-    let err = rms_diff(light.data.pixels(), signal);
+    let err = rms_diff(light.data().pixels(), signal);
     assert!(
         (0.0012..0.005).contains(&err),
         "calibrated residual {err:.5} should sit at the single-frame noise floor"
@@ -163,7 +164,11 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
 
     let dark = expose(0.0, 1);
     let map = DefectMap::new(dark.size())
-        .detect_hot(&dark, 5.0, &CancelToken::never())
+        .detect_hot(
+            &dark,
+            SigmaThreshold::new(5.0).unwrap(),
+            &CancelToken::never(),
+        )
         .unwrap();
     assert_eq!(map.hot().indices, hot);
 
@@ -199,11 +204,47 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
             .indices
             .clone()
     };
-    assert_eq!(hot_at(8.0), extreme);
-    let lenient = hot_at(3.0);
+    assert_eq!(hot_at(SigmaThreshold::new(8.0).unwrap()), extreme);
+    let lenient = hot_at(SigmaThreshold::new(3.0).unwrap());
     for i in moderate.iter().chain(&extreme) {
         assert!(lenient.contains(i), "σ 3 keeps {i}: {lenient:?}");
     }
+}
+
+/// Hot pixels are measured on the dark without its bias. The bias is 0.02 with σ 0.005 noise and
+/// one pixel (1300) 0.1 high, which the dark holds too, as a dark is bias plus dark signal; the
+/// dark signal is 0.08 with σ 0.005 noise and two hot pixels (800, 1800) 0.1 high. On the dark as
+/// stacked, 1300 stands 20σ above its neighbours and was flagged hot; less the bias, only the two
+/// dark-signal pixels are.
+#[test]
+fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
+    let size = Size2us::new(64, 64);
+    let mut bias = vec![0.02f32; size.pixel_count()];
+    patterns::add_gaussian_noise(&mut bias, 0.005, 7);
+    bias[1300] += 0.1;
+    let mut dark = vec![0.08f32; size.pixel_count()];
+    patterns::add_gaussian_noise(&mut dark, 0.005, 8);
+    for index in [800, 1800] {
+        dark[index] += 0.1;
+    }
+    for (dark, bias) in dark.iter_mut().zip(&bias) {
+        *dark += bias;
+    }
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark: Some(make_cfa(size, dark, CfaType::Mono)),
+            flat: None,
+            bias: Some(make_cfa(size, bias, CfaType::Mono)),
+            flat_dark: None,
+        },
+        SigmaThreshold::new(8.0).unwrap(),
+        &CancelToken::never(),
+    )
+    .unwrap();
+    assert_eq!(
+        masters.defect_map.as_ref().unwrap().hot().indices,
+        [800, 1800]
+    );
 }
 
 #[test]
@@ -220,7 +261,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     let map = DefectMap::new(size)
         .detect_hot(
             &make_cfa(size, dark, CfaType::Mono),
-            5.0,
+            SigmaThreshold::new(5.0).unwrap(),
             &CancelToken::never(),
         )
         .unwrap();
@@ -233,5 +274,5 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     map.correct(&mut img);
 
     // Each hot pixel takes its uniform neighbourhood's value; no other pixel changes.
-    assert!(img.data.pixels().iter().all(|&v| v == background));
+    assert!(img.data().pixels().iter().all(|&v| v == background));
 }

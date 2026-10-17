@@ -15,6 +15,9 @@ mod dilation;
 
 use std::ops::Index;
 
+use rayon::prelude::*;
+use rayon::slice::ChunksExactMut;
+
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Scratch;
@@ -33,7 +36,7 @@ struct BitLayout {
 }
 
 impl BitLayout {
-    fn of(size: Size2us) -> Self {
+    const fn of(size: Size2us) -> Self {
         if size.width == 0 || size.height == 0 {
             return Self {
                 stride: 0,
@@ -52,7 +55,7 @@ impl BitLayout {
         let total_bits = stride
             .checked_mul(size.height)
             .expect("BitBuffer2 storage size overflow");
-        debug_assert_eq!(total_bits % BITS_PER_WORD, 0);
+        debug_assert!(total_bits.is_multiple_of(BITS_PER_WORD));
         Self {
             stride,
             num_words: total_bits / BITS_PER_WORD,
@@ -62,17 +65,15 @@ impl BitLayout {
 
 /// A 2D buffer storing boolean values packed as bits: `u64` words, rows padded to 128 bits.
 ///
-/// **Padding invariant — readers mask, writers need not.** The bits between `width` and `stride`
-/// in each row carry no data and are held at no particular value: [`Self::new_filled`] and
-/// [`Self::fill`] set them along with everything else. Position-based access is therefore always
-/// safe, and [`Self::count_ones`] masks them off per row. Code that reaches into [`Self::words`]
-/// directly owns that masking itself — or must establish that its buffers have padding clear,
-/// which [`Self::padding_is_clear`] states as a checkable precondition.
-#[derive(Debug, Clone)]
+/// **Padding invariant — the bits past each row's width are always clear.** Every constructor and
+/// method keeps them so, which lets a word-wise reader count, compare, smear and visit whole words
+/// with no mask. A writer through [`Self::row_words_mut`] or [`Self::par_rows_mut`] keeps them
+/// clear too: the bits of a row's last pixel word outside [`Self::last_word_mask`], and the words
+/// after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BitBuffer2 {
-    /// Packed bit storage, 64 values per word. Padding bits past each row's `width` are
-    /// unspecified — see the type's invariant before reading these word-wise.
-    pub(crate) words: Vec<u64>,
+    /// Packed bit storage, 64 values per word, each row's padding clear.
+    words: Vec<u64>,
     pub(crate) size: Size2us,
     /// Bits per row including padding: the width rounded up to 128.
     stride: usize,
@@ -99,17 +100,19 @@ impl BitBuffer2 {
     #[inline]
     pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
         let layout = BitLayout::of(size);
-        let fill = if value { !0u64 } else { 0u64 };
-        let words = vec![fill; layout.num_words];
-        Self {
-            words,
+        let mut buffer = Self {
+            words: vec![0; layout.num_words],
             size,
             stride: layout.stride,
+        };
+        if value {
+            buffer.fill(true);
         }
+        buffer
     }
 
     /// The bytes a buffer of `size` allocates, rows padded and all.
-    pub(crate) fn heap_bytes(size: Size2us) -> usize {
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
         BitLayout::of(size).num_words * size_of::<u64>()
     }
 
@@ -140,6 +143,37 @@ impl BitBuffer2 {
     #[inline]
     pub(crate) const fn words_per_row(&self) -> usize {
         self.stride / BITS_PER_WORD
+    }
+
+    /// The words of row `y`, padding words included, which are 0.
+    #[inline]
+    pub(crate) fn row_words(&self, y: usize) -> &[u64] {
+        let words_per_row = self.words_per_row();
+        &self.words[y * words_per_row..(y + 1) * words_per_row]
+    }
+
+    /// The words of row `y`, for a writer that keeps the padding clear (see the type).
+    #[inline]
+    pub(crate) fn row_words_mut(&mut self, y: usize) -> &mut [u64] {
+        let words_per_row = self.words_per_row();
+        &mut self.words[y * words_per_row..(y + 1) * words_per_row]
+    }
+
+    /// Every row's words, row by row in parallel, for writers that keep the padding clear (see the
+    /// type).
+    pub(crate) fn par_rows_mut(&mut self) -> ChunksExactMut<'_, u64> {
+        let words_per_row = self.words_per_row().max(1);
+        self.words.par_chunks_exact_mut(words_per_row)
+    }
+
+    /// The bits of a row's last pixel word that hold pixels: all 64 when the width is a multiple
+    /// of 64.
+    #[inline]
+    pub(crate) const fn last_word_mask(&self) -> u64 {
+        match self.size.width % BITS_PER_WORD {
+            0 => u64::MAX,
+            bits => (1u64 << bits) - 1,
+        }
     }
 
     /// Get a bit value at the given linear index (row-major, no padding).
@@ -178,109 +212,57 @@ impl BitBuffer2 {
         }
     }
 
-    /// Every bit, padding included, set to `value`.
+    /// Every pixel set to `value`, the padding left clear.
     #[inline]
     pub(crate) fn fill(&mut self, value: bool) {
-        let fill = if value { !0u64 } else { 0u64 };
-        self.words.fill(fill);
-    }
-
-    /// Count the number of set bits (true values, excluding padding).
-    #[inline]
-    pub(crate) fn count_ones(&self) -> usize {
-        if self.size.width == 0 || self.size.height == 0 {
-            return 0;
-        }
-
-        let words_per_row = self.words_per_row();
-        let bits_in_last_word = self.size.width % BITS_PER_WORD;
-        let full_words_per_row = self.size.width / BITS_PER_WORD;
-
-        let mut count = 0usize;
-
-        for y in 0..self.size.height {
-            let row_start = y * words_per_row;
-
-            for w in 0..full_words_per_row {
-                count += self.words[row_start + w].count_ones() as usize;
-            }
-
-            if bits_in_last_word != 0 {
-                let last_word = self.words[row_start + full_words_per_row];
-                let mask = (1u64 << bits_in_last_word) - 1;
-                count += (last_word & mask).count_ones() as usize;
-            }
-        }
-
-        count
-    }
-
-    /// Whether every row's padding bits are zero.
-    ///
-    /// Word-wise code that counts bits without masking — `(a & !b).count_ones()` — is correct only
-    /// on buffers where this holds. `new_default` and `fill_from_predicate` produce them, and
-    /// position-based writes preserve them; `fill(true)` and `new_filled(_, true)` do not. This
-    /// scans the whole buffer, so it belongs in a `debug_assert!` and never on a release path.
-    pub(crate) fn padding_is_clear(&self) -> bool {
-        if self.size.width == 0 || self.size.height == 0 {
-            return true;
-        }
-        let words_per_row = self.words_per_row();
-        let full_words_per_row = self.size.width / BITS_PER_WORD;
-        let bits_in_last_word = self.size.width % BITS_PER_WORD;
-        (0..self.size.height).all(|y| {
-            let row = &self.words[y * words_per_row..(y + 1) * words_per_row];
-            let partial_is_clear =
-                bits_in_last_word == 0 || row[full_words_per_row] >> bits_in_last_word == 0;
-            let whole_padding_words = full_words_per_row + usize::from(bits_in_last_word != 0);
-            partial_is_clear && row[whole_padding_words..].iter().all(|&word| word == 0)
-        })
-    }
-
-    /// Zero every row's padding bits, which [`Self::fill`] and [`Self::new_filled`] set with the
-    /// rest: what makes [`Self::padding_is_clear`] hold for a reader that scans the words whole.
-    pub(crate) fn clear_padding(&mut self) {
-        if self.size.width == 0 {
+        if !value || self.words.is_empty() {
+            self.words.fill(0);
             return;
         }
-        let words_per_row = self.words_per_row();
-        let full_words_per_row = self.size.width / BITS_PER_WORD;
-        let bits_in_last_word = self.size.width % BITS_PER_WORD;
-        for row in self.words.chunks_exact_mut(words_per_row) {
-            let mut padding_words = full_words_per_row;
-            if bits_in_last_word != 0 {
-                row[full_words_per_row] &= (1u64 << bits_in_last_word) - 1;
-                padding_words += 1;
-            }
-            row[padding_words..].fill(0);
+        let pixel_words = self.size.width.div_ceil(BITS_PER_WORD);
+        let last = self.last_word_mask();
+        for row in self.words.chunks_exact_mut(self.stride / BITS_PER_WORD) {
+            row[..pixel_words].fill(u64::MAX);
+            row[pixel_words - 1] = last;
+            row[pixel_words..].fill(0);
         }
     }
 
-    /// Fill the mask by testing every pixel, accumulating a whole word before storing it.
+    /// Count the number of set bits: whole words, as the padding holds none.
+    #[inline]
+    pub(crate) fn count_ones(&self) -> usize {
+        self.words
+            .iter()
+            .map(|word| word.count_ones() as usize)
+            .sum()
+    }
+
+    /// Fill the mask by testing every pixel, row by row in parallel, accumulating a whole word
+    /// before storing it.
     ///
     /// `predicate` takes the linear pixel index, the same one [`Self::get`] takes. This exists so
     /// callers converting a `Vec<bool>` do not fall into `set()` per pixel, which is a
     /// read-modify-write on a word and slower than the byte store it replaces — and so a caller
-    /// rebuilding the same mask every iteration can hand back the buffer it already has.
+    /// rebuilding the same mask every iteration can hand back the buffer it already has. A mask
+    /// made from another mask is word-wise instead: [`Self::get`] divides the index back into a
+    /// position.
     ///
-    /// Every word is stored, padding included, so whatever the previous holder left — including a
-    /// [`Self::fill`]'s dirty padding — is gone and the padding-clear invariant holds afterwards.
-    pub(crate) fn fill_from_predicate(&mut self, predicate: impl Fn(usize) -> bool) {
-        let words_per_row = self.words_per_row();
-        for y in 0..self.size.height {
-            let row_start = y * words_per_row;
-            let row_base = y * self.size.width;
-            for w in 0..words_per_row {
+    /// Every word is stored, padding included, so nothing the previous holder left remains.
+    pub(crate) fn fill_from_predicate(&mut self, predicate: impl Fn(usize) -> bool + Sync) {
+        let width = self.size.width;
+        self.par_rows_mut().enumerate().for_each(|(y, row)| {
+            let row_base = y * width;
+            for (w, word) in row.iter_mut().enumerate() {
                 let x0 = w * BITS_PER_WORD;
-                let mut word = 0u64;
-                for bit in 0..BITS_PER_WORD.min(self.size.width.saturating_sub(x0)) {
+                let mut bits = 0u64;
+                for bit in 0..BITS_PER_WORD.min(width.saturating_sub(x0)) {
                     if predicate(row_base + x0 + bit) {
-                        word |= 1u64 << bit;
+                        bits |= 1u64 << bit;
                     }
                 }
-                self.words[row_start + w] = word;
+                *word = bits;
             }
-        }
+        });
     }
 
     /// Set every bit `other` has set: `self |= other`, a word at a time.
@@ -333,23 +315,12 @@ impl BitBuffer2 {
     }
 
     /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
-    /// — a sparse mask costs a pass over its words, not over its pixels. Row padding is masked
-    /// off, whatever it holds.
+    /// — a sparse mask costs a pass over its words, not over its pixels.
     pub(crate) fn for_each_set(&self, mut visit: impl FnMut(Vec2us)) {
-        let words_per_row = self.words_per_row();
         for y in 0..self.size.height {
-            let row = &self.words[y * words_per_row..(y + 1) * words_per_row];
-            for (word_in_row, &word) in row.iter().enumerate() {
+            for (word_in_row, &word) in self.row_words(y).iter().enumerate() {
                 let base = word_in_row * BITS_PER_WORD;
-                if base >= self.size.width {
-                    break;
-                }
-                let valid = self.size.width - base;
-                let mut bits = if valid < BITS_PER_WORD {
-                    word & ((1u64 << valid) - 1)
-                } else {
-                    word
-                };
+                let mut bits = word;
                 while bits != 0 {
                     visit(Vec2us::new(base + bits.trailing_zeros() as usize, y));
                     bits &= bits - 1;
@@ -400,6 +371,25 @@ mod internals {
             let mut buffer = Self::new_default(Size2us::from(data));
             buffer.fill_from_predicate(|index| data[index]);
             buffer
+        }
+
+        /// Where the words are allocated, for a test that a buffer was reused.
+        pub(crate) fn words_ptr(&self) -> *const u64 {
+            self.words.as_ptr()
+        }
+
+        /// Whether every row's padding bits are zero, as the type holds them.
+        pub(crate) fn padding_is_clear(&self) -> bool {
+            if self.size.width == 0 {
+                return true;
+            }
+            let pixel_words = self.size.width.div_ceil(64);
+            let mask = self.last_word_mask();
+            (0..self.size.height).all(|y| {
+                let row = self.row_words(y);
+                row[pixel_words - 1] & !mask == 0
+                    && row[pixel_words..].iter().all(|&word| word == 0)
+            })
         }
     }
 }

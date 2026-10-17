@@ -1,28 +1,27 @@
-//! [`XTransPattern`]: a checked 6×6 X-Trans colour layout.
+//! [`XTransPattern`]: a checked 6×6 X-Trans color layout.
 
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-use crate::image::cfa::cfa_colour::CfaColour;
+use crate::image::cfa::cfa_color::CfaColor;
+use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
 use crate::image::error::XTransPatternError;
 use crate::math::vec2us::Vec2us;
 
-/// A Fujifilm X-Trans colour filter layout: 6×6 colour indices (0 = red, 1 = green, 2 = blue),
-/// indexed `[row % 6][column % 6]`.
+/// A Fujifilm X-Trans color filter layout: 6×6 color indices (0 = red, 1 = green, 2 = blue),
+/// the color at `(x, y)` the index at row `y % 6` and column `x % 6`.
 ///
-/// Only a layout the demosaic can work on exists: every value is a colour, the counts are the
+/// Only a layout the demosaic can work on exists: every value is a color, the counts are the
 /// X-Trans 8 red, 20 green and 8 blue, every green has as many red as blue neighbours, the greens
 /// repeat every three rows and columns, and their 3×3 cell holds the solitary green Markesteijn's
 /// hexagons are built around. Deserializing checks the same, so a stored pattern cannot bring
 /// an invalid one back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XTransPattern {
-    rows: [[u8; 6]; 6],
+    colors: [[CfaColor; 6]; 6],
 }
 
 /// Markesteijn's hexagons over a pattern's 3×3 cell of greens, as dcraw's `xtrans_interpolate`
-/// builds them (`allhex`, `sgrow`, `sgcol`): for each `(row % 3, column % 3)`, the eight
+/// builds them (`allhex`, `sgrow`, `sgcol`): for each `(x % 3, y % 3)`, the eight
 /// `(dy, dx)` offsets its interpolation reads, and the cell's solitary green, the one whose four
 /// neighbours are none of them green.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,10 +38,10 @@ pub(crate) struct HexOffset {
 }
 
 impl Hexagons {
-    /// The eight offsets of the hexagon at `(row, column)`.
+    /// The eight offsets of the hexagon at `pos`.
     #[inline(always)]
-    pub(crate) const fn at(&self, row: usize, column: usize) -> &[HexOffset; 8] {
-        &self.offsets[row % 3][column % 3]
+    pub(crate) const fn at(&self, pos: Vec2us) -> &[HexOffset; 8] {
+        &self.offsets[pos.y % 3][pos.x % 3]
     }
 
     /// Where the cell's solitary green lies, within the first 3×3 cell.
@@ -62,6 +61,13 @@ const PATT: [[i8; 16]; 2] = [
     [0, 1, 0, -1, 2, 0, -1, 0, 1, 1, 1, -1, 0, 0, 0, 0],
     [0, 1, 0, -2, 1, 0, -2, 0, 1, 1, -2, -2, 1, -1, -1, 1],
 ];
+
+impl MosaicPattern for XTransPattern {
+    #[inline(always)]
+    fn color_at(&self, position: Vec2us) -> CfaColor {
+        self.color_at(position)
+    }
+}
 
 impl XTransPattern {
     /// Check `rows` as an X-Trans layout.
@@ -120,30 +126,50 @@ impl XTransPattern {
             }
             row += 1;
         }
-        match hexagons(&rows) {
-            Some(_) => Ok(Self { rows }),
-            None => Err(XTransPatternError::Hexagons),
+        if hexagons(&rows).is_none() {
+            return Err(XTransPatternError::Hexagons);
         }
+        let mut colors = [[CfaColor::Green; 6]; 6];
+        let mut row = 0;
+        while row < 6 {
+            let mut column = 0;
+            while column < 6 {
+                colors[row][column] = match CfaColor::from_index(rows[row][column] as usize) {
+                    Some(color) => color,
+                    None => unreachable!(),
+                };
+                column += 1;
+            }
+            row += 1;
+        }
+        Ok(Self { colors })
     }
 
     /// Markesteijn's hexagons over the layout, built by the function [`Self::new`] checks them
     /// with.
     pub(crate) const fn hexagons(&self) -> Hexagons {
-        hexagons(&self.rows).expect("a pattern's hexagons were checked when it was made")
+        hexagons(&self.rows()).expect("a pattern's hexagons were checked when it was made")
     }
 
-    /// The colour indices, `[row][column]` over one 6×6 period.
-    pub const fn rows(&self) -> &[[u8; 6]; 6] {
-        &self.rows
-    }
-
-    /// The colour at `pos`.
-    #[inline(always)]
-    pub const fn color_at(&self, pos: Vec2us) -> CfaColour {
-        match CfaColour::from_index(self.rows[pos.y % 6][pos.x % 6] as usize) {
-            Some(colour) => colour,
-            None => panic!("a pattern's values were checked when it was made"),
+    /// The color indices, `[row][column]` over one 6×6 period.
+    pub const fn rows(&self) -> [[u8; 6]; 6] {
+        let mut rows = [[0; 6]; 6];
+        let mut row = 0;
+        while row < 6 {
+            let mut column = 0;
+            while column < 6 {
+                rows[row][column] = self.colors[row][column].index() as u8;
+                column += 1;
+            }
+            row += 1;
         }
+        rows
+    }
+
+    /// The color at `pos`.
+    #[inline(always)]
+    pub const fn color_at(&self, pos: Vec2us) -> CfaColor {
+        self.colors[pos.y % 6][pos.x % 6]
     }
 }
 
@@ -165,7 +191,7 @@ const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
             let mut run = 0;
             let mut d = 0;
             while d < 10 {
-                // From `row + 6`, a unit step back stays in range and reads the same colour.
+                // From `row + 6`, a unit step back stays in range and reads the same color.
                 let neighbour_row = (row + 6).wrapping_add_signed(ORTH[d] as isize);
                 let neighbour_column = (column + 6).wrapping_add_signed(ORTH[d + 2] as isize);
                 if rows[neighbour_row % 6][neighbour_column % 6] == 1 {
@@ -205,6 +231,13 @@ const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
     match solitary {
         Some(solitary) if solitary_count == 1 => Some(Hexagons { offsets, solitary }),
         _ => None,
+    }
+}
+
+/// As its color indices, [`XTransPattern::rows`].
+impl Serialize for XTransPattern {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.rows().serialize(serializer)
     }
 }
 

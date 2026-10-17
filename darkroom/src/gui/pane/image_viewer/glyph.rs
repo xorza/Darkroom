@@ -1,7 +1,7 @@
 //! The viewer's drawn vocabulary: the four control-button glyphs and the
 //! checkerboard tile behind a transparent image.
 //!
-//! Every one is a pure function of the button side `s` and an ink colour,
+//! Every one is a pure function of the button side `s` and an ink color,
 //! built from `s * k` factors so a glyph fills its box at any button size.
 //! That holds for the one glyph that is *text* rather than primitives
 //! ([`draw_100`]) too — it takes a share of `s` like its siblings rather than
@@ -150,7 +150,7 @@ impl Swatch {
     }
 }
 
-/// The single colour `mode` paints, or `None` for the checker, which is a
+/// The single color `mode` paints, or `None` for the checker, which is a
 /// pattern. The one mapping the swatch and the viewer's backdrop both read.
 pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<RgbaF32> {
     match mode {
@@ -163,7 +163,7 @@ pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<R
 
 /// How much of its button a backdrop swatch fills, leaving room for the ring.
 const SWATCH_SHARE: f32 = 0.54;
-/// The swatch's corner radius: a softened square, so it reads as a colour
+/// The swatch's corner radius: a softened square, so it reads as a color
 /// chip rather than a pixel.
 const SWATCH_RADIUS: f32 = 2.0;
 /// The resting ring's alpha: visible on every backdrop, louder on none.
@@ -173,7 +173,7 @@ const SWATCH_RING_ALPHA: f32 = 0.4;
 mod tests {
     use super::*;
 
-    /// Every flat backdrop maps to its one colour, and the checker, a
+    /// Every flat backdrop maps to its one color, and the checker, a
     /// pattern, to none.
     #[test]
     fn each_flat_backdrop_has_one_fill_and_the_checker_none() {

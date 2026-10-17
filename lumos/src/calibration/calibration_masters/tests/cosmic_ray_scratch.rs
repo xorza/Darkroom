@@ -5,6 +5,7 @@
 
 use imaginarium::Buffer2;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::masks::CONCURRENT_MASKS;
@@ -27,7 +28,7 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
     for side in [1024usize, 6144] {
         let size = Size2us::new(side, side);
         let pixels = size.pixel_count();
-        let packed = new_cr_mask(size).words.len() * size_of::<u64>();
+        let packed = BitBuffer2::heap_bytes(new_cr_mask(size).size);
 
         // Each row pads to 128 bits; 1024 and 6144 are both multiples, so there is no slack here.
         assert_eq!(
@@ -46,12 +47,12 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
     // its own: 6144² = 37 748 736 px, 4 718 592 B per packed mask, three of them = 14 155 776 B.
     // A fourth concurrent mask, or a revert to `Vec<bool>`, both land here.
     let size = Size2us::new(6144, 6144);
-    let peak = CONCURRENT_MASKS * new_cr_mask(size).words.len() * size_of::<u64>();
+    let peak = CONCURRENT_MASKS * BitBuffer2::heap_bytes(new_cr_mask(size).size);
     assert_eq!(peak, 14_155_776, "peak cosmic-ray mask footprint");
 }
 
-/// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `niter` is — it is
-/// allocated on the first iteration and reused by the rest.
+/// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `max_iterations` is —
+/// it is allocated on the first iteration and reused by the rest.
 ///
 /// This is the side of the detector's footprint that dwarfs the masks above: 720 MB on a 6144²
 /// frame against their 14 MB. A plane added back (or a stage that allocates its own again) costs

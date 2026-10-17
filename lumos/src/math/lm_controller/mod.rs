@@ -40,26 +40,19 @@ pub(crate) trait LmProblem<const N: usize> {
 pub(crate) struct LmFit<const N: usize> {
     pub(crate) params: [f64; N],
     pub(crate) chi2: f64,
-    /// The steps the fit took; only the fits' tests read it, to check how fast a fit converges.
-    #[cfg(test)]
+    /// The steps the fit took.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "a fact of every fit; only the fits' tests read it so far, to check how fast \
+                      a fit converges"
+        )
+    )]
     pub(crate) iterations: usize,
     /// The diagonal of `(JᵀWJ)⁻¹` at the solution: each parameter's variance per unit of the
     /// residuals' variance. `None` when the undamped Hessian is singular there.
     pub(crate) inverse_hessian_diagonal: Option<[f64; N]>,
-}
-
-impl<const N: usize> LmFit<N> {
-    /// This fit as `iterations` steps reached it.
-    #[cfg(test)]
-    const fn after(self, iterations: usize) -> Self {
-        Self { iterations, ..self }
-    }
-
-    /// This fit: only tests keep the step count.
-    #[cfg(not(test))]
-    const fn after(self, _iterations: usize) -> Self {
-        self
-    }
 }
 
 /// Levenberg–Marquardt as Madsen, Nielsen and Tingleff state it (*Methods for Non-Linear Least
@@ -125,7 +118,7 @@ impl LmController {
             }
             let scale = Scale::of(&equations.hessian)?;
             if chi2 == 0.0 || self.gradient_is_orthogonal(&equations, &scale, chi2) {
-                return Some(self.fitted(problem, params, chi2).after(iteration - 1));
+                return Some(fitted(params, chi2, &equations, iteration - 1));
             }
             if let Some(step) = scale.solve_damped(&equations, 0.0)
                 && (self.is_negligible(&step, &params, &scale)
@@ -136,8 +129,8 @@ impl LmController {
                     *value += delta;
                 }
                 problem.constrain(&mut params);
-                let chi2 = problem.chi2(&params);
-                return Some(self.fitted(problem, params, chi2).after(iteration));
+                let equations = problem.normal_equations(&params);
+                return Some(fitted(params, equations.chi2, &equations, iteration));
             }
             let step = scale.solve_damped(&equations, damping)?;
             let mut trial = params;
@@ -155,10 +148,10 @@ impl LmController {
                 chi2 = trial_chi2;
                 damping *= (1.0 - (2.0 * ratio - 1.0).powi(3)).max(1.0 / 3.0);
                 growth = 2.0;
-                if settled {
-                    return Some(self.fitted(problem, params, chi2).after(iteration));
-                }
                 equations = problem.normal_equations(&params);
+                if settled {
+                    return Some(fitted(params, chi2, &equations, iteration));
+                }
             } else {
                 damping *= growth;
                 growth *= 2.0;
@@ -198,22 +191,22 @@ impl LmController {
             .zip(&scale.factors)
             .all(|(&gradient, &factor)| (gradient * factor).abs() <= self.gradient_tolerance * norm)
     }
+}
 
-    fn fitted<const N: usize>(
-        &self,
-        problem: &impl LmProblem<N>,
-        params: [f64; N],
-        chi2: f64,
-    ) -> LmFit<N> {
-        let equations = problem.normal_equations(&params);
-        LmFit {
-            params,
-            chi2,
-            #[cfg(test)]
-            iterations: 0,
-            inverse_hessian_diagonal: Scale::of(&equations.hessian)
-                .and_then(|scale| scale.inverse_diagonal(&equations.hessian)),
-        }
+/// The fit at `params`, of `chi2`, that `iterations` steps reached: its inverse Hessian's diagonal
+/// from `equations`, the normal equations there.
+fn fitted<const N: usize>(
+    params: [f64; N],
+    chi2: f64,
+    equations: &NormalEquations<N>,
+    iterations: usize,
+) -> LmFit<N> {
+    LmFit {
+        params,
+        chi2,
+        iterations,
+        inverse_hessian_diagonal: Scale::of(&equations.hessian)
+            .and_then(|scale| scale.inverse_diagonal(&equations.hessian)),
     }
 }
 

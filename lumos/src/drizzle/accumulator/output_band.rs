@@ -5,8 +5,9 @@ use std::ops::Range;
 use glam::DVec2;
 
 use crate::drizzle::accumulator::PlaneSpan;
+use crate::drizzle::accumulator::band_scan::BandScan;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
-use crate::drizzle::accumulator::frame_source::{BandScan, Drop, Fluxes, FrameSource, InputPixel};
+use crate::drizzle::accumulator::frame_source::{Drop, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::vec2us::Vec2us;
@@ -16,10 +17,6 @@ use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
 /// about pixel `(x, y)`, as `(x + dx, y + dy)`: lattice
 /// point `(j, k)` is input point `(j − ½, k − ½)`.
 const LATTICE_CORNERS: [[usize; 2]; 4] = [[0, 0], [1, 0], [1, 1], [0, 1]];
-
-/// A drop whose kernel taps sum to less than this has no normalizer worth dividing by: the radial
-/// kernels' taps sum to about the drop's area in output pixels, so this is far below any drop.
-const KERNEL_WEIGHT_MIN: f32 = 1e-10;
 
 /// One radial drop's kernel along each axis, one value per output column and per output row of
 /// its neighbourhood. Both kernels are separable — the Gaussian is a product of one-axis
@@ -40,8 +37,8 @@ impl Shapeless for RadialScratch {}
 /// the deposits are too.
 ///
 /// Two lattice rows are held, the two an input row's drops span. Each point carries the lattice
-/// row it was mapped for, so a row is reused without being cleared, by the next input row and by
-/// the next band on the same worker alike.
+/// row it was mapped for, so a band's next input row reuses a row without clearing it. Each lease
+/// starts with no point mapped.
 #[derive(Debug, Default)]
 pub(super) struct CornerLattice {
     rows: [LatticeRow; 2],
@@ -152,13 +149,20 @@ impl OutputBand<'_> {
             KernelPlan::Gaussian {
                 radius,
                 inv_2sigma_sq,
-            } => self.distribute_radial(source, radius, |d| (-d * d * inv_2sigma_sq).exp()),
+            } => self.distribute_radial(source, radius, |step, nearest| {
+                // `d² − d₀²` for `d = step + d₀`: the nearest tap is 1 and every other one below
+                // it, so the sum stays at least 1 however narrow the drop and however far off a
+                // pixel centre it lands, where `exp(−d²/2σ²)` underflows to a sum of 0.
+                let excess = step as f64 * (step as f64 + 2.0 * nearest);
+                (-(excess as f32) * inv_2sigma_sq).exp()
+            }),
             KernelPlan::Lanczos { radius } => {
                 // The warp's table, within 1.1e-7 of the kernel: two `sin`s and two divisions a
                 // tap, fourteen taps a drop, become two reads and a fused multiply-add.
                 let lut = LANCZOS_ORDER.lut();
-                self.distribute_radial(source, radius, |d| {
-                    lut.at(d.abs() * LANCZOS_LUT_RESOLUTION as f32)
+                self.distribute_radial(source, radius, |step, nearest| {
+                    let distance = (step as f64 + nearest) as f32;
+                    lut.at(distance.abs() * LANCZOS_LUT_RESOLUTION as f32)
                 })
             }
         }
@@ -328,6 +332,11 @@ impl OutputBand<'_> {
     /// output pixels within `radius` of the drop's rounded centre, normalized so the weights sum
     /// to 1.
     ///
+    /// `kernel(step, nearest)` is the tap `step` pixels from the drop's nearest output pixel, whose
+    /// centre lies `nearest` from the drop's, at most half a pixel. A factor common to every tap of
+    /// an axis cancels in the normalization, so a kernel may scale an axis to keep its sum
+    /// representable, and must keep it positive.
+    ///
     /// The normalizer runs over the drop's **whole** neighbourhood, past the edge of the output
     /// grid included: it has to be the same number in every band, and flux that falls off the grid
     /// has to be lost rather than redistributed inward, which is what the compact kernels do and
@@ -337,7 +346,7 @@ impl OutputBand<'_> {
         &mut self,
         source: &FrameSource<'_>,
         radius: isize,
-        kernel: impl Fn(f32) -> f32,
+        kernel: impl Fn(isize, f64) -> f32,
     ) -> usize {
         let mut scratch = self.radial.acquire();
         let reach = radius as f64;
@@ -372,18 +381,16 @@ impl OutputBand<'_> {
                 scratch.columns.extend(
                     offsets
                         .clone()
-                        .map(|dx| kernel(((centre_col + dx) as f64 - drop.centre.x) as f32)),
+                        .map(|dx| kernel(dx, nearest_col - drop.centre.x)),
                 );
                 scratch.rows.clear();
                 scratch.rows.extend(
                     offsets
                         .clone()
-                        .map(|dy| kernel(((centre_row + dy) as f64 - drop.centre.y) as f32)),
+                        .map(|dy| kernel(dy, nearest_row - drop.centre.y)),
                 );
                 let total = scratch.columns.iter().sum::<f32>() * scratch.rows.iter().sum::<f32>();
-                if total.abs() < KERNEL_WEIGHT_MIN {
-                    return;
-                }
+                debug_assert!(total > 0.0, "a radial kernel's taps sum to {total}");
                 let fluxes = source.fluxes(pixel);
                 let normalizer = (drop.weight / f64::from(total)) as f32;
                 for (oy, &row_value) in offsets.clone().map(|dy| centre_row + dy).zip(&scratch.rows)
@@ -459,17 +466,17 @@ impl OutputBand<'_> {
     #[inline]
     fn accumulate(&mut self, fluxes: &Fluxes, index: usize, weight: f32) {
         // A pixel whose channels all deposit shares one weight plane; a photosite deposits its one
-        // sample, and its weight, in its colour's.
-        let weights = match fluxes.colour {
+        // sample, and its weight, in its color's.
+        let weights = match fluxes.color {
             None => {
                 for (plane, &flux) in self.planes.data.iter_mut().zip(&fluxes.values) {
                     plane[index] += flux * weight;
                 }
                 0
             }
-            Some(colour) => {
-                self.planes.data[colour][index] += fluxes.values[0] * weight;
-                colour
+            Some(color) => {
+                self.planes.data[color][index] += fluxes.values[0] * weight;
+                color
             }
         };
         self.planes.weight[weights][index] += weight;
@@ -490,11 +497,13 @@ mod tests {
     use super::*;
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_frame::DrizzleFrame;
+    use crate::drizzle::output_grid::OutputGrid;
     use crate::internals::images::gray_image;
     use crate::math::size2us::Size2us;
     use crate::registration::distortion::sip::SipModel;
+    use crate::registration::distortion::sip::sip_order::SipOrder;
     use crate::registration::transform::Transform;
-    use crate::registration::transform::warp_transform::WarpTransform;
+    use crate::registration::warp_transform::WarpTransform;
 
     /// The corner lattice gives every drop at pixfrac 1 the quadrilateral it would map itself, bit
     /// for bit — corners, weight, and the failures of a SIP inverse alike — whatever order its
@@ -517,7 +526,7 @@ mod tests {
         let target: Vec<DVec2> = reference.iter().map(|&r| bend(r)).collect();
         let identity = Transform::identity();
         let sip = SipModel {
-            order: 3,
+            order: SipOrder::Three,
             origin: centre,
         }
         .fitted_under(&identity, &reference, &target);
@@ -541,7 +550,7 @@ mod tests {
         };
         for (name, warp) in warps {
             let frame = DrizzleFrame::new(image.clone(), warp);
-            let source = FrameSource::new(&frame, Deposit::of(&image), 2.0);
+            let source = FrameSource::new(&frame, Deposit::of(&image), OutputGrid::new(2.0, size));
             let pixel = |x: usize, y: usize| InputPixel {
                 position: Vec2us::new(x, y),
                 index: y * size.width + x,

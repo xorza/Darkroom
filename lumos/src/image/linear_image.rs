@@ -1,131 +1,57 @@
-use std::path::Path;
+use std::slice;
+use std::sync::Arc;
 
-use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
+use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
-use crate::frame::frame_peek::FramePeek;
-use crate::frame::stackable_image::{ImageParts, StackableImage};
-use crate::frame_store::decode_cache::cache_key::DecoderKind;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flat_gain::FlatGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
-};
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::rgb::Rgb;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::decode as fits_decode;
-use crate::io::input_format::InputFormat;
-use crate::io::load_context::LoadContext;
-use crate::io::standard;
+use crate::image::stackable_image::{ImageParts, StackableImage};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
 pub struct LinearImage {
     pub metadata: ImageMetadata,
-    pub(crate) pixels: LinearPixels,
+    pixels: LinearPixels,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
     /// [`QualityFlags::NO_DATA`](crate::image::quality_flags::QualityFlags::NO_DATA) are a finite
     /// fill, not data.
-    pub(crate) flags: Option<PixelFlags>,
+    flags: Option<PixelFlags>,
+    /// The gain a flat applied to each pixel's value and noise, in this image's own pixels — see
+    /// [`FlatGain`]. `None` for an image no flat divided, and for a master, which the combine made.
+    flat_gain: Option<Arc<FlatGain>>,
 }
 
 impl LinearImage {
-    /// Load an already-linear scientific image from a file.
-    ///
-    /// Supported formats:
-    /// - FITS without CFA metadata: .fit, .fits
-    /// - Floating-point TIFF, taken as linear: .tiff, .tif
-    ///
-    /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
-    /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
-    pub fn from_file(path: impl AsRef<Path>, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::load_path(path.as_ref(), context)
-    }
-
-    fn load_path(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        context.check_cancelled(path)?;
-        let format = match InputFormat::of(path)? {
-            InputFormat::Fits => return fits_decode::load_linear(path, context),
-            InputFormat::CameraRaw => {
-                return Err(ImageError::scientific_rejection(
-                    path,
-                    ScientificRefusal::CameraRaw,
-                ));
-            }
-            InputFormat::Raster(format) => format,
+    /// The image of `pixels`, its `flags` and `metadata`, with no flat gain.
+    pub(crate) fn new(
+        pixels: LinearPixels,
+        flags: Option<PixelFlags>,
+        metadata: ImageMetadata,
+    ) -> Self {
+        let mut image = Self {
+            metadata,
+            pixels,
+            flags: None,
+            flat_gain: None,
         };
-        if format != FileFormat::Tiff {
-            return Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::PreviewOnlyRaster { format },
-            ));
-        }
-
-        let decoded = standard::read(path)?;
-        context.check_cancelled(path)?;
-        let desc = decoded.desc();
-        if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
-            return Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::RasterSideTooLong {
-                    width: desc.width,
-                    height: desc.height,
-                },
-            ));
-        }
-        if !decoded.desc().color_format.sample_type.is_float() {
-            return Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::IntegerRaster,
-            ));
-        }
-        if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
-            return Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::AlphaChannel,
-            ));
-        }
-
-        let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
-            ColorProvenance::Monochrome
-        } else {
-            ColorProvenance::Unspecified
-        };
-        let mut image = Self::from(&decoded);
-        image.metadata.provenance = Some(ImageProvenance {
-            container: SourceContainer::from(format),
-            decoder: DecoderProvenance::Imaginarium,
-            transfer: TransferProvenance::FloatRaster,
-            color,
-            clipped: false,
-            demosaic: DemosaicProvenance::None,
-            // Every raster format this path reads stores its first row at the top.
-            row_order: RowOrder::TopDown,
-        });
-        // A float raster is taken as it stands, so one sample is one unit of whatever the file
-        // already held — which it does not name, and whose span and zero point it does not state.
-        image.metadata.domain = Some(SampleDomain {
-            scale: 1.0,
-            origin: ScaleOrigin::Assumed,
-            pedestal: Pedestal::Unknown,
-            unit: None,
-        });
-        Ok(image)
+        image.set_flags(flags);
+        image
     }
 
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
-    pub fn from_pixels(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
-        Self {
-            metadata: ImageMetadata::default(),
-            pixels: LinearPixels::from_interleaved(dimensions, pixels),
-            flags: None,
-        }
+    pub fn from_interleaved(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
+        Self::new(
+            LinearPixels::from_interleaved(dimensions, pixels),
+            None,
+            ImageMetadata::default(),
+        )
     }
 
     /// Create from planar channel data ([R, G, B] or single channel).
@@ -133,19 +59,19 @@ impl LinearImage {
         dimensions: ImageDimensions,
         channels: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
-        Self {
-            metadata: ImageMetadata::default(),
-            pixels: LinearPixels::from_planar_channels(dimensions, channels),
-            flags: None,
-        }
+        Self::new(
+            LinearPixels::from_planar_channels(dimensions, channels),
+            None,
+            ImageMetadata::default(),
+        )
     }
 
     pub fn width(&self) -> usize {
-        self.pixels.channel(0).width()
+        self.dimensions().width()
     }
 
     pub fn height(&self) -> usize {
-        self.pixels.channel(0).height()
+        self.dimensions().height()
     }
 
     pub const fn channels(&self) -> usize {
@@ -157,11 +83,11 @@ impl LinearImage {
     }
 
     pub fn pixel_count(&self) -> usize {
-        self.width() * self.height()
+        self.dimensions().pixel_count()
     }
 
     pub fn sample_count(&self) -> usize {
-        self.pixel_count() * self.channels()
+        self.dimensions().sample_count()
     }
 
     pub const fn is_grayscale(&self) -> bool {
@@ -195,8 +121,7 @@ impl LinearImage {
     /// The samples, mutably, with the noise facts that described them dropped. Every mutable path
     /// to the samples comes through here, so no change to them keeps a stale noise.
     const fn samples_mut(&mut self) -> &mut LinearPixels {
-        self.metadata.quantization_sigma = None;
-        self.metadata.mosaic_noise = None;
+        self.metadata.derived.after_edit();
         &mut self.pixels
     }
 
@@ -205,9 +130,55 @@ impl LinearImage {
         self.flags.as_ref()
     }
 
+    /// Replace the flags with `flags`, of these pixels.
+    pub(crate) fn set_flags(&mut self, flags: Option<PixelFlags>) {
+        debug_assert!(
+            flags
+                .as_ref()
+                .is_none_or(|flags| flags.size() == self.dimensions().size()),
+            "flags for another geometry"
+        );
+        self.flags = flags;
+    }
+
+    /// The flags, moved out.
+    pub(crate) const fn take_flags(&mut self) -> Option<PixelFlags> {
+        self.flags.take()
+    }
+
+    /// The gain a flat applied to the pixels, for an image a flat divided.
+    pub const fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+        self.flat_gain.as_ref()
+    }
+
+    /// Replace the flat gain with `gain`, which covers these pixels and channels.
+    pub(crate) fn set_flat_gain(&mut self, gain: Option<Arc<FlatGain>>) {
+        debug_assert!(
+            gain.as_ref()
+                .is_none_or(|gain| gain.covers(self.dimensions().size(), self.channels())),
+            "an image's flat gain covers another image's pixels"
+        );
+        self.flat_gain = gain;
+    }
+
+    /// The pixels, moved out.
+    pub(crate) fn into_pixels(self) -> LinearPixels {
+        self.pixels
+    }
+
     /// Iterate the channel planes in channel order: one for grayscale, three for RGB.
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
         self.samples_mut().planes_mut()
+    }
+
+    /// The channel planes to edit, in channel order, beside the flags of their pixels: a split
+    /// borrow, so an edit that leaves flagged pixels out reads the flags without a copy of them.
+    pub(crate) fn planes_mut_with_flags(&mut self) -> PlanesWithFlags<'_> {
+        self.metadata.derived.after_edit();
+        PlanesWithFlags {
+            planes: self.pixels.planes_mut(),
+            flags: self.flags.as_ref(),
+        }
     }
 
     /// The three channel planes' samples, borrowed at once — what a cross-channel per-pixel op
@@ -225,16 +196,16 @@ impl LinearImage {
     /// If `image` is not one of those two formats. Callers check the format themselves — the
     /// ops live on `LinearImage`, so there is no shared gate to name.
     fn from_f32_image(image: &Image) -> Self {
-        Self {
-            metadata: ImageMetadata::default(),
-            pixels: LinearPixels::from_f32_image(image),
-            flags: None,
-        }
+        Self::new(
+            LinearPixels::from_f32_image(image),
+            None,
+            ImageMetadata::default(),
+        )
     }
 
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
     /// grayscale image, which has no cross-channel relationship for `rgb` to act on — every caller
-    /// (SCNR, background neutralization, the colour-preserving stretch) is meaningless in mono and
+    /// (SCNR, background neutralization, the color-preserving stretch) is meaningless in mono and
     /// returned early on it when the storage was interleaved.
     pub(crate) fn map_rgb(&mut self, rgb: impl Fn(Rgb) -> Rgb + Sync) {
         if !self.is_rgb() {
@@ -321,19 +292,16 @@ impl LinearImage {
                 }
             });
     }
+}
 
-    /// Save to file (PNG, JPEG, TIFF supported).
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), ImageError> {
-        let image: Image = self.into();
-        image
-            .save_file(path)
-            .map_err(|source| ImageError::Save { source })
-    }
+/// [`LinearImage::planes_mut_with_flags`]: the planes, and the flags beside them.
+#[derive(Debug)]
+pub(crate) struct PlanesWithFlags<'a> {
+    pub(crate) planes: slice::IterMut<'a, Buffer2<f32>>,
+    pub(crate) flags: Option<&'a PixelFlags>,
 }
 
 impl StackableImage for LinearImage {
-    const DECODER: DecoderKind = DecoderKind::Linear;
-
     fn dimensions(&self) -> ImageDimensions {
         self.dimensions()
     }
@@ -354,55 +322,39 @@ impl StackableImage for LinearImage {
         None
     }
 
-    fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        Self::load_path(path, context)
-    }
-
-    /// A FITS header answers without a decode, the reader's chunk buffers with it. A float TIFF
-    /// has no header this reads apart from its pixels.
-    fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
-        match InputFormat::of(path).ok()? {
-            InputFormat::Fits => fits_decode::linear_peek(path, context).ok(),
-            InputFormat::CameraRaw | InputFormat::Raster(_) => None,
-        }
-    }
-
     fn into_parts(self) -> ImageParts {
         ImageParts {
             planes: self.pixels.into_planes(),
             flags: self.flags,
+            flat_gain: self.flat_gain,
         }
     }
 
     fn from_parts(parts: ImageParts, _cfa_type: Option<CfaType>, metadata: ImageMetadata) -> Self {
-        let ImageParts { planes, flags } = parts;
-        let first = &planes[0];
-        let dimensions = ImageDimensions::new((first.width(), first.height()), planes.len());
-        let mut image =
-            Self::from_planar_channels(dimensions, planes.into_iter().map(Buffer2::into_vec));
-        image.metadata = metadata;
-        image.flags = flags;
+        let ImageParts {
+            planes,
+            flags,
+            flat_gain,
+        } = parts;
+        let mut image = Self::new(LinearPixels::from(planes), flags, metadata);
+        image.set_flat_gain(flat_gain);
         image
+    }
+
+    fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+        Self::flat_gain(self)
     }
 }
 
 impl From<Buffer2<f32>> for LinearImage {
     fn from(plane: Buffer2<f32>) -> Self {
-        Self {
-            metadata: ImageMetadata::default(),
-            pixels: plane.into(),
-            flags: None,
-        }
+        Self::new(plane.into(), None, ImageMetadata::default())
     }
 }
 
 impl From<[Buffer2<f32>; 3]> for LinearImage {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
-        Self {
-            metadata: ImageMetadata::default(),
-            pixels: planes.into(),
-            flags: None,
-        }
+        Self::new(planes.into(), None, ImageMetadata::default())
     }
 }
 
@@ -420,7 +372,7 @@ impl From<&Image> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
     /// source is not already in one, rather than asking the caller to arrive with one.
     fn from(image: &Image) -> Self {
-        let target = standard::f32_target_format(image);
+        let target = f32_target_format(image);
         if image.desc().color_format == target {
             Self::from_f32_image(image)
         } else {
@@ -432,6 +384,15 @@ impl From<&Image> for LinearImage {
 impl From<LinearImage> for Image {
     fn from(linear: LinearImage) -> Self {
         Self::from(&linear)
+    }
+}
+
+/// The `f32` format `image` deinterleaves into: `L_F32` for grayscale, `RGB_F32` for color, an
+/// alpha channel dropped.
+pub(crate) const fn f32_target_format(image: &Image) -> ColorFormat {
+    match image.desc().color_format.channel_count {
+        ChannelCount::L => ColorFormat::L_F32,
+        ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }
 }
 

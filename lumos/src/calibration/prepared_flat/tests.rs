@@ -1,29 +1,27 @@
+use crate::CfaType;
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
+use crate::calibration::subtraction::internals::subtract_bias;
+use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::internals::cfa::XTRANS_PATTERN;
+use crate::internals::assertions::bits;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-use crate::CfaType;
-use crate::calibration::calibration_masters::CalibrationMasters;
-use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
-use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::sample_domain::DomainMap;
-use crate::internals::assertions::bits;
-use crate::internals::cfa::make_cfa;
-
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
     if let Some(subtractor) = subtractor {
-        flat.subtract(subtractor, DomainMap::IDENTITY);
+        subtract_bias(&mut flat, subtractor);
     }
     PreparedFlat::new(flat).unwrap()
 }
 
 /// Calibrate `light` by `prepared` alone, its saturation taken as flagged.
 fn divide(prepared: PreparedFlat, light: &mut CfaImage) {
-    light.metadata.saturation_flagged = true;
+    light.metadata.derived.set_saturation_flagged(true);
     CalibrationMasters::builder()
         .flat(prepared)
         .build()
@@ -41,24 +39,40 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
     let flat = make_cfa(Size2us::new(2, 2), vec![0.0, 1.0, 1.0, 2.0], CfaType::Mono);
     let prepared = prepare(flat, None);
     assert_eq!(
-        prepared.divisor().data.pixels(),
+        prepared.divisor().data().pixels(),
         &[MIN_NORMALIZED_FLAT, 1.0, 1.0, 2.0]
     );
     assert_eq!(prepared.floored(), 1);
 
     let mut light = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
     divide(prepared, &mut light);
-    assert_eq!(light.data.pixels(), &[10.0, 1.0, 1.0, 0.5]);
+    assert_eq!(light.data().pixels(), &[10.0, 1.0, 1.0, 0.5]);
     // The light carries the flat's gain for its noise: the one node over the 2×2 frame is the mean
     // gain of the photosites the floor left alone, (1 + 1 + ½)/3 = 5/6; the floored photosite's
     // 10 would raise it to 3.125.
-    let gain = light.metadata.flat_gain.as_ref().unwrap();
+    let gain = light.flat_gain().unwrap();
     assert_eq!(gain.at(0, 0.0, 0.0), (5.0f64 / 6.0) as f32);
     // The floored divisor is flagged, and only it: that pixel is corrected by less than its flat
     // asked for.
-    let flags = light.flags.as_ref().unwrap();
+    let flags = light.flags().unwrap();
     assert_eq!(flags.count(QualityFlags::FLAT_FLOOR), 1);
     assert_eq!(flags.at(0), QualityFlags::FLAT_FLOOR);
+}
+
+/// Each normalized sample is one correctly rounded f64 quotient. For 0.3, 0.7, 0.9 (as f32) the
+/// mean is 0.633…, and an f32 mean inverted in f32 lands each quotient an ulp or two off: 0.3 read
+/// 0.473_684_25 for 0.473_684_22.
+#[test]
+fn a_flat_is_normalized_by_one_rounding() {
+    let samples = [0.3f32, 0.7, 0.9];
+    let prepared = prepare(
+        make_cfa(Size2us::new(3, 1), samples.to_vec(), CfaType::Mono),
+        None,
+    );
+    let mean = samples.iter().map(|&value| f64::from(value)).sum::<f64>() / 3.0;
+    let expected = samples.map(|value| (f64::from(value) / mean) as f32);
+    assert_eq!(prepared.divisor().data().pixels(), &expected);
+    assert_ne!(expected[0], samples[0] * (1.0 / mean as f32));
 }
 
 /// A flat's mean leaves out the photosites that hold no measurement, and the light holds none
@@ -69,18 +83,18 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
 fn a_flats_mean_leaves_out_what_it_did_not_measure() {
     let size = Size2us::new(2, 2);
     let mut flat = make_cfa(size, vec![1.0, 3.0, 5.0, 9.0], CfaType::Mono);
-    flat.flags = PixelFlags::from_fn(size, |index| match index {
+    flat.set_flags(PixelFlags::from_fn(size, |index| match index {
         2 => QualityFlags::SATURATED,
         3 => QualityFlags::NO_DATA,
         _ => QualityFlags::default(),
-    });
+    }));
     let prepared = prepare(flat, None);
-    assert_eq!(prepared.divisor().data.pixels(), &[0.5, 1.5, 2.5, 4.5]);
+    assert_eq!(prepared.divisor().data().pixels(), &[0.5, 1.5, 2.5, 4.5]);
 
     let mut light = make_cfa(size, vec![1.0; 4], CfaType::Mono);
     divide(prepared, &mut light);
-    assert_eq!(light.data.pixels()[0], 2.0);
-    let flags = light.flags.as_ref().unwrap();
+    assert_eq!(light.data().pixels()[0], 2.0);
+    let flags = light.flags().unwrap();
     assert_eq!(
         (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
         [
@@ -106,7 +120,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         let mut expected_divisors = Vec::with_capacity(size.pixel_count());
         for y in 0..size.height {
             for x in 0..size.width {
-                let color = cfa_type.color_at(Vec2us::new(x, y));
+                let color = cfa_type.slot_at(Vec2us::new(x, y));
                 let divisor = if counts[color].is_multiple_of(2) {
                     0.5
                 } else {
@@ -122,7 +136,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         let subtractor = make_cfa(size, vec![0.125; size.pixel_count()], cfa_type);
         let prepared = prepare(flat, Some(&subtractor));
         assert_eq!(
-            bits(prepared.divisor().data.pixels()),
+            bits(prepared.divisor().data().pixels()),
             bits(&expected_divisors)
         );
         assert_eq!(prepared.floored(), 0);
@@ -133,16 +147,8 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
             .iter()
             .map(|divisor| 0.75 / divisor)
             .collect();
-        assert_eq!(bits(light.data.pixels()), bits(&expected));
+        assert_eq!(bits(light.data().pixels()), bits(&expected));
     }
-}
-
-#[test]
-#[should_panic(expected = "CfaImage dimensions mismatch")]
-fn preparation_rejects_mismatched_subtractor_dimensions() {
-    let flat = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
-    let subtractor = make_cfa(Size2us::new(3, 2), vec![0.1; 6], CfaType::Mono);
-    prepare(flat, Some(&subtractor));
 }
 
 /// A flat prepares to the same bits on one thread as on seven, mono and mosaic: each mean is a
@@ -165,7 +171,12 @@ fn preparation_does_not_depend_on_the_thread_count() {
                 .build()
                 .unwrap();
             let flat = make_cfa(size, pixels.clone(), cfa_type);
-            bits(pool.install(|| prepare(flat, None)).divisor().data.pixels())
+            bits(
+                pool.install(|| prepare(flat, None))
+                    .divisor()
+                    .data()
+                    .pixels(),
+            )
         };
         assert_eq!(run(1), run(7), "{cfa_type:?}");
     }

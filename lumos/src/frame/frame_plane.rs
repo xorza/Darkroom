@@ -1,8 +1,7 @@
 //! [`FramePlane`]: which of a frame's planes a check is about, and the range its values take.
 
 use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 /// Which of a frame's planes a validation failure is about.
 ///
@@ -12,7 +11,7 @@ use std::fmt::Formatter;
 /// comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FramePlane {
-    /// One of the image's colour planes.
+    /// One of the image's color planes.
     Channel,
     /// Per-pixel warp support, in `[0, 1]`.
     Coverage,
@@ -20,6 +19,8 @@ pub enum FramePlane {
     Confidence,
     /// A drizzled frame's per-pixel drop weight `Σw`, non-negative.
     DropWeight,
+    /// The per-pixel weight a caller gives a drizzle frame's input pixels, non-negative.
+    PixelWeight,
 }
 
 impl FramePlane {
@@ -27,11 +28,11 @@ impl FramePlane {
     pub(crate) fn accepts(self, value: f32) -> bool {
         value.is_finite()
             && match self {
-                // Finiteness is the whole rule for image data, as in `validate_sample_channels`:
-                // dark subtraction takes a calibrated channel below zero legitimately.
+                // Finiteness is the whole rule for image data: dark subtraction takes a calibrated
+                // channel below zero legitimately.
                 Self::Channel => true,
                 Self::Coverage => (0.0..=1.0).contains(&value),
-                Self::Confidence | Self::DropWeight => value >= 0.0,
+                Self::Confidence | Self::DropWeight | Self::PixelWeight => value >= 0.0,
             }
     }
 }
@@ -43,6 +44,7 @@ impl Display for FramePlane {
             Self::Coverage => "coverage",
             Self::Confidence => "confidence",
             Self::DropWeight => "drop weight",
+            Self::PixelWeight => "pixel weight map",
         })
     }
 }

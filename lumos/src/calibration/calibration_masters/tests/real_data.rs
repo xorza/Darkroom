@@ -8,8 +8,6 @@
 //! Gated behind the `real-data` feature (the dataset is gitignored; fetch it with
 //! `scripts/fetch-test-data.sh`).
 
-use crate::io::load_context::LoadContext;
-use crate::math::size2us::Size2us;
 use std::cmp::Ordering;
 use std::path::PathBuf;
 
@@ -17,13 +15,15 @@ use common::CancelToken;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::calibration::defect_map::DefectMap;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::master_stack::MasterStack;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::internals::init_tracing;
-use crate::internals::real_data;
+use crate::internals::{init_tracing, real_data};
+use crate::io::load_context::LoadContext;
 use crate::io::raw;
+use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, MasterRole, StackConfig};
+use crate::{CalibrationSet, CfaImage, MasterRole, StackConfig};
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
@@ -36,11 +36,12 @@ fn raw_frame_info_matches_full_decode() {
     let loaded = raw::load_cfa(path, &LoadContext::default()).expect("full decode");
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
-        (loaded.data.width(), loaded.data.height()),
+        (loaded.data().width(), loaded.data().height()),
         "peeked header dims must match the decoded frame"
     );
     assert_eq!(
-        peeked.cfa_type, loaded.cfa_type,
+        peeked.cfa_type,
+        loaded.cfa_type(),
         "the peeked sensor pattern must be the decoded frame's"
     );
 }
@@ -57,7 +58,7 @@ fn builds_full_master_set() {
             bias: &paths.bias,
             flat_dark: &[],
         },
-        DEFAULT_SIGMA_THRESHOLD,
+        SigmaThreshold::DEFAULT,
     );
 
     // Every supplied role yields a master; the flat-dark is spent on the flat and not kept.
@@ -70,7 +71,7 @@ fn builds_full_master_set() {
     let bias = masters.bias.as_ref().expect("master bias");
 
     // All masters share the single sensor geometry (one CFA plane each).
-    let size = Size2us::from(&dark.data);
+    let size = Size2us::from(dark.data());
     assert!(
         size.width > 0 && size.height > 0,
         "degenerate master dimensions {}x{}",
@@ -78,12 +79,12 @@ fn builds_full_master_set() {
         size.height
     );
     assert_eq!(
-        (flat.data.width(), flat.data.height()),
+        (flat.data().width(), flat.data().height()),
         (size.width, size.height),
         "flat master dimensions differ from dark"
     );
     assert_eq!(
-        (bias.data.width(), bias.data.height()),
+        (bias.data().width(), bias.data().height()),
         (size.width, size.height),
         "bias master dimensions differ from dark"
     );
@@ -103,7 +104,7 @@ fn builds_full_master_set() {
     // assume it), each master non-degenerate (real variation, not a flat buffer), and all
     // values within a sane normalized envelope.
     let check_master = |m: &CfaImage, name: &str| {
-        let px = m.data.pixels();
+        let px = m.data().pixels();
         assert!(
             px.iter().all(|v| v.is_finite()),
             "{name} master has non-finite pixels"
@@ -122,7 +123,7 @@ fn builds_full_master_set() {
     check_master(dark, "dark");
     check_master(bias, "bias");
 
-    let flat_pixels = flat.data.pixels();
+    let flat_pixels = flat.data().pixels();
     assert!(flat_pixels.iter().all(|value| value.is_finite()));
     assert!(flat_pixels.iter().all(|&value| value >= 0.1));
     let (flat_min, flat_max) = flat_pixels
@@ -223,14 +224,14 @@ fn hot_mask_spatial_distribution_and_repeatability() {
             role: MasterRole::Dark,
             config: StackConfig::bias_or_dark(),
             ingest: &IngestConfig::default(),
-            subtract: None,
+            subtract: &[],
         }
         .run(ProgressMonitor::unattended())
         .expect("master-dark stack failed")
         .expect("master dark");
-        let size = Size2us::from(&dark.data);
+        let size = Size2us::from(dark.data());
         let map = DefectMap::new(dark.size())
-            .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+            .detect_hot(&dark, SigmaThreshold::DEFAULT, &CancelToken::never())
             .expect("hot detection failed");
         DetectedHotMask { map, size }
     };

@@ -14,19 +14,20 @@
 
 mod simd;
 
+use std::ops::RangeInclusive;
+
+use glam::DVec2;
+
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
-use crate::star_detection::centroid;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
-use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
+use crate::star_detection::centroid::profile_bounds::ProfileBounds;
+use crate::star_detection::centroid::profile_problem::{FitData, LMModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp;
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
-use crate::star_detection::centroid::{MIN_PROFILE_SIGMA, PIXEL_MEAN_TOLERANCE};
-use glam::DVec2;
-use std::ops::RangeInclusive;
+use crate::star_detection::centroid::{profile_problem, stamp};
 
 /// A converged 2D Gaussian fitted to one star stamp: where its centre landed and its
 /// shape. Build one with [`GaussianFit::new`].
@@ -50,8 +51,8 @@ pub(super) struct GaussianFit {
 /// `[x0, y0, amplitude, a, b, c, background]`.
 #[derive(Debug)]
 struct Gaussian2D {
-    /// The widest σ the fit may take, in px: the stamp radius.
-    max_sigma: f64,
+    /// The σ the fit may take, in px.
+    sigma: RangeInclusive<f64>,
     /// The smallest amplitude the fit may take; see `stamp::min_amplitude`.
     min_amplitude: f64,
     /// The midpoint until [`StampFit::fit`] sets the order the profile needs.
@@ -59,19 +60,20 @@ struct Gaussian2D {
 }
 
 impl Gaussian2D {
-    fn new(max_sigma: f64, min_amplitude: f64) -> Self {
+    fn new(bounds: ProfileBounds, min_amplitude: f64) -> Self {
         Self {
-            max_sigma,
+            sigma: bounds.sigma(),
             min_amplitude,
             quadrature: PixelQuadrature::gauss_legendre(1),
         }
     }
 
-    /// The range the inverse covariance's eigenvalues are held to: `1/σ²` for a principal σ
-    /// between [`MIN_PROFILE_SIGMA`] and the stamp radius. Its diagonal lies between the eigenvalues, so
-    /// `a` and `c` are held to it too.
-    const fn curvature_range(&self) -> RangeInclusive<f64> {
-        1.0 / (self.max_sigma * self.max_sigma)..=1.0 / (MIN_PROFILE_SIGMA * MIN_PROFILE_SIGMA)
+    /// The range the inverse covariance's eigenvalues are held to: `1/σ²` for a principal σ within
+    /// the stamp's [`ProfileBounds`]. Its diagonal lies between the eigenvalues, so `a` and `c` are
+    /// held to it too.
+    fn curvature_range(&self) -> RangeInclusive<f64> {
+        let (narrowest, widest) = (*self.sigma.start(), *self.sigma.end());
+        1.0 / (widest * widest)..=1.0 / (narrowest * narrowest)
     }
 
     /// The largest `|b|` beside `a` and `c` within [`Self::curvature_range`] that keeps both
@@ -105,8 +107,9 @@ impl LMModel<7> for Gaussian2D {
     }
 
     /// From the narrower of the σ along each pixel axis at a fixed offset along the other,
-    /// `1/√a` and `1/√c`; within the curvature range it is at least [`MIN_PROFILE_SIGMA`], where
-    /// the order is 7.
+    /// `1/√a` and `1/√c`; within the curvature range it is at least
+    /// [`MIN_PROFILE_SIGMA`](crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA),
+    /// where the order is 7.
     fn sufficient_order(&self, params: &[f64; 7]) -> usize {
         let sigma = 1.0 / params[3].max(params[5]).sqrt();
         PixelQuadrature::sufficient_order(AnalyticProfile::Gaussian { sigma }, PIXEL_MEAN_TOLERANCE)
@@ -156,7 +159,7 @@ impl GaussianFit {
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain seven
     /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
-    /// ([`centroid::fit_is_plausible`]), or an amplitude or shape pinned at one of
+    /// ([`profile_problem::fit_is_plausible`]), or an amplitude or shape pinned at one of
     /// [`Gaussian2D::constrain`]'s bounds.
     pub(super) fn new(inputs: FitInputs<'_>) -> Option<Self> {
         let FitInputs {
@@ -169,7 +172,7 @@ impl GaussianFit {
         let amplitude_seed = fit.amplitude_seed()?;
 
         // A round seed; the fit finds the elongation and its angle.
-        let curvature = 1.0 / (f64::from(fit.sigma_est) * f64::from(fit.sigma_est));
+        let curvature = 1.0 / (fit.sigma_est * fit.sigma_est);
         let initial_params: [f64; 7] = [
             fit.local_pos.x,
             fit.local_pos.y,
@@ -180,7 +183,10 @@ impl GaussianFit {
             f64::from(background),
         ];
 
-        let mut model = Gaussian2D::new(grid.radius as f64, stamp::min_amplitude(amplitude_seed));
+        let mut model = Gaussian2D::new(
+            ProfileBounds::of_stamp(grid.radius as f64),
+            stamp::min_amplitude(amplitude_seed),
+        );
         let result = fit.fit(&mut model, grid, initial_params)?;
 
         let [x0, y0, amplitude, a, b, c, _] = result.params;
@@ -192,13 +198,13 @@ impl GaussianFit {
                 .iter()
                 .all(|&k| k > *curvature.start() && k < *curvature.end())
             && b.abs() < b_max;
-        if !shape_free || !centroid::fit_is_plausible(result_pos, pos, grid.radius) {
+        if !shape_free || !profile_problem::fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
         let det = a * c - b * b;
         Some(Self {
             pos: result_pos,
-            position_sigma: centroid::position_sigma(&result, fit.stamp.z.len())?,
+            position_sigma: profile_problem::position_sigma(&result, fit.stamp.z.len())?,
             covariance: Cov2 {
                 xx: c / det,
                 yy: a / det,

@@ -1,18 +1,18 @@
 use common::CancelToken;
+use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::cfa::demosaic::bayer::bayer_image::BayerImage;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
 use crate::image::cfa::demosaic::bayer::rcd::{
     INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, Neighbour, TILE, demosaic, estimate_green,
 };
+use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::portable::Portable;
 use crate::simd::{F32_LANES, F32x8, Isa};
-use imaginarium::Buffer2;
 
 /// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
 fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
@@ -120,7 +120,7 @@ fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
 fn the_green_estimate_is_continuous_across_the_switch() {
     let condition = f64::from(MIN_SIGNED_DENOMINATOR_RATIO);
     for (green, center) in [(0.25f64, 1.0f64), (-0.5, 2.0), (1.5, 0.3)] {
-        // The negative same-colour LPF that puts the denominator at `t` times the transition:
+        // The negative same-color LPF that puts the denominator at `t` times the transition:
         // c + s = t·R·(c − s), solved for s.
         let same_color_at = |t: f64| (t * condition * center - center) / (1.0 + t * condition);
         let at = |t: f64| estimate(green as f32, center as f32, same_color_at(t) as f32);
@@ -180,7 +180,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
         ],
     ];
     let scenes: [(&str, Scene); 4] = [
-        ("colour edge", |channel, x, _| {
+        ("color edge", |channel, x, _| {
             let (left, right) = ([0.1, 0.3, 0.8], [0.9, 0.6, 0.2]);
             if x < WIDTH / 2 {
                 left[channel]
@@ -202,7 +202,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
             let amplitude = [0.9f32, 0.7, 0.5][channel];
             0.02 + amplitude / (1.0 + (dx * dx + dy * dy) / (width * width))
         }),
-        ("colour grating", |channel, x, y| {
+        ("color grating", |channel, x, y| {
             let phase = [0.0f32, 0.333_333_34, 0.666_666_7][channel];
             let t = 0.075 * x as f32 + 0.05 * y as f32 + phase;
             0.1 + 1.6 * (t - t.floor() - 0.5).abs()
@@ -220,7 +220,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
             let data = Buffer2::from_fn(size.width, size.height, |x, y| {
                 scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
             });
-            let planes = demosaic(&BayerImage::new(&data, pattern), &CancelToken::never()).unwrap();
+            let planes = demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325u64;
             for plane in &planes {
                 for row in INTERPOLATED_BORDER..HEIGHT - INTERPOLATED_BORDER {
@@ -259,10 +259,10 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
         ] {
             let run = |poison: f32| {
                 let mut planes = [(); 3].map(|()| vec![f32::NAN; size.pixel_count()]);
-                let out = OutputPlanes::of(&mut planes);
+                let out = OutputPlanes::new(&mut planes, [1.0; 3]);
                 let mut tile = Tile::new(pattern);
                 tile.poison(poison);
-                unsafe { tile.demosaic(&BayerImage::new(&data, pattern), place, out) };
+                unsafe { tile.demosaic(&MosaicView::new(&data, pattern), place, out) };
                 planes
             };
             let (high, low) = (run(1000.0), run(-1000.0));
@@ -284,7 +284,7 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
 
 /// Under a white balance, the interior is the demosaic of the balanced samples brought back: each
 /// native sample the input's own, and each interpolated one the balanced run's divided by its
-/// colour's gain. Green's unit gain leaves its values as they are. On a frame of several tiles, in
+/// color's gain. Green's unit gain leaves its values as they are. On a frame of several tiles, in
 /// each Bayer phase.
 #[test]
 fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
@@ -293,23 +293,23 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let mut rng = TestRng::new(5);
     let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
     for pattern in CfaPattern::ALL {
-        let colour = |index: usize| pattern.color_at(size.point_of(index)).index();
+        let color = |index: usize| pattern.color_at(size.point_of(index)).index();
         let balanced = Buffer2::new(
             size.width,
             size.height,
             data.iter()
                 .enumerate()
-                .map(|(index, &sample)| sample * gains[colour(index)])
+                .map(|(index, &sample)| sample * gains[color(index)])
                 .collect(),
         );
         let never = CancelToken::never();
-        let planes = demosaic(&BayerImage::new(&data, pattern).with_gains(gains), &never).unwrap();
-        let reference = demosaic(&BayerImage::new(&balanced, pattern), &never).unwrap();
+        let planes = demosaic(&MosaicView::new(&data, pattern).with_gains(gains), &never).unwrap();
+        let reference = demosaic(&MosaicView::new(&balanced, pattern), &never).unwrap();
         let border = INTERPOLATED_BORDER;
         for row in border..size.height - border {
             for index in row * size.width + border..(row + 1) * size.width - border {
                 for (channel, (plane, reference)) in planes.iter().zip(&reference).enumerate() {
-                    let expected = if channel == colour(index) {
+                    let expected = if channel == color(index) {
                         data[index]
                     } else {
                         reference[index] / gains[channel]

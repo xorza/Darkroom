@@ -1,10 +1,8 @@
-use common::CancelToken;
-
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
 use crate::internals::images::gray_image;
 use crate::internals::test_rng::TestRng;
@@ -29,9 +27,9 @@ fn channel_with_mad(center: f32, mad: f32) -> Vec<f32> {
 
 #[test]
 fn prepare_uniform() {
-    let dim = ImageDimensions::new((64, 64), 1);
+    let dim = ImageDimensions::new((64, 64), ChannelLayout::Mono);
     let data = vec![0.5f32; 64 * 64];
-    let image = LinearImage::from_pixels(dim, data);
+    let image = LinearImage::from_interleaved(dim, data);
 
     let pool = DetectionResources::new(Size2us::new(64, 64));
     let result = prepare(&image, &pool);
@@ -51,8 +49,8 @@ fn prepare_with_star() {
     // Add bright pixel (simulating a star)
     data[32 * width + 32] = 0.9;
 
-    let dim = ImageDimensions::new((width, height), 1);
-    let image = LinearImage::from_pixels(dim, data);
+    let dim = ImageDimensions::new((width, height), ChannelLayout::Mono);
+    let image = LinearImage::from_interleaved(dim, data);
 
     let pool = DetectionResources::new(Size2us::new(width, height));
     let result = prepare(&image, &pool);
@@ -104,16 +102,20 @@ fn the_median_filter_follows_interpolation() {
 
     let config = StarDetectionConfig::default();
     for case in cases {
-        let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), data.clone());
-        image.metadata.provenance = case.demosaic.map(|demosaic| ImageProvenance {
-            container: SourceContainer::CameraRaw,
-            decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized,
-            color: ColorProvenance::SensorRgb,
-            clipped: true,
-            demosaic,
-            row_order: RowOrder::TopDown,
-        });
+        let mut image = LinearImage::from_interleaved(
+            ImageDimensions::new(size, ChannelLayout::Mono),
+            data.clone(),
+        );
+        image
+            .metadata
+            .derived
+            .set_provenance(case.demosaic.map(|demosaic| ImageProvenance {
+                source: SourceProvenance::CameraRaw,
+                color: ColorProvenance::SensorRgb,
+                clipped: true,
+                demosaic,
+                row_order: RowOrder::TopDown,
+            }));
 
         let mut pool = DetectionResources::new(size);
         let frame = PreparedFrame::new(&image, &config, &mut pool);
@@ -165,7 +167,7 @@ fn detection_weights_ignore_signal() {
             .collect()
     };
     let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((size, size), 3),
+        ImageDimensions::new((size, size), ChannelLayout::Rgb),
         vec![channel(true), channel(false), channel(false)],
     );
     let weights = inverse_variance_weights(channel_noise(&image));
@@ -178,7 +180,7 @@ fn detection_weights_ignore_signal() {
 fn prepare_rgb_equal_noise_is_mean() {
     // Distinct per-channel levels; a 4 × 4 frame is too small for the noise estimate, which reads
     // 0 in every channel, so the weights are equal and the detection plane is the plain mean.
-    let dims = ImageDimensions::new((4, 4), 3);
+    let dims = ImageDimensions::new((4, 4), ChannelLayout::Rgb);
     let r = channel_with_mad(0.30, 0.02);
     let g = channel_with_mad(0.50, 0.02);
     let b = channel_with_mad(0.70, 0.02);
@@ -200,7 +202,7 @@ fn prepare_rgb_equal_noise_is_mean() {
 fn prepare_rgb_red_star_survives() {
     // A star bright only in R must remain prominent in the detection plane. With equal weights the
     // star peak lands at 1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
-    let dims = ImageDimensions::new((4, 4), 3);
+    let dims = ImageDimensions::new((4, 4), ChannelLayout::Rgb);
     let mut r = channel_with_mad(0.10, 0.01);
     r[5] = 0.90; // bright red star, off the symmetric background
     let g = channel_with_mad(0.10, 0.01);
@@ -239,14 +241,14 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
     assert_eq!([mask.get(0), mask.get(1)], [true, false]);
 
     let mut flagged = rgb_image(size, [vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]]);
-    flagged.metadata.saturation_flagged = true;
-    flagged.flags = PixelFlags::from_fn(size, |index| {
+    flagged.metadata.derived.set_saturation_flagged(true);
+    flagged.set_flags(PixelFlags::from_fn(size, |index| {
         if index == 1 {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
         }
-    });
+    }));
     mark_saturated(&flagged, &mut mask);
     assert_eq!([mask.get(0), mask.get(1)], [false, true]);
 }
@@ -263,17 +265,14 @@ fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
         .map(|_| 0.1 + 0.01 * rng.next_gaussian_f32())
         .collect();
     let mut image = make_cfa(size, pixels, CfaType::Bayer(CfaPattern::Rggb))
-        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
-        .unwrap();
-    image.metadata.provenance = Some(ImageProvenance {
-        container: SourceContainer::CameraRaw,
-        decoder: DecoderProvenance::LibRaw,
-        transfer: TransferProvenance::RawNormalized,
+        .demosaic_measured(MarkesteijnPasses::One);
+    image.metadata.derived.set_provenance(Some(ImageProvenance {
+        source: SourceProvenance::CameraRaw,
         color: ColorProvenance::SensorRgb,
         clipped: true,
         demosaic: DemosaicProvenance::LumosRcd,
         row_order: RowOrder::TopDown,
-    });
+    }));
     image
 }
 
@@ -319,7 +318,7 @@ fn the_detection_threshold_passes_the_sky_it_states() {
 #[test]
 fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     use crate::image::pixel_flags::PixelFlags;
-    use crate::star_detection::star_detector::stages::detect::DetectResult;
+    use crate::star_detection::star_detector::stages::detect::Candidates;
 
     let size = Size2us::new(128, 128);
     let missing = |index: usize| index % size.width < 64 && index / size.width < 64;
@@ -331,20 +330,20 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
         })
         .collect();
     let mut image = gray_image(size, pixels);
-    image.flags = PixelFlags::from_fn(size, |index| {
+    image.set_flags(PixelFlags::from_fn(size, |index| {
         if missing(index) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
         }
-    });
+    }));
     let config = StarDetectionConfig::default();
     let mut pool = DetectionResources::new(size);
     let frame = PreparedFrame::new(&image, &config, &mut pool);
     let sigma = frame.sky.noise[(32, 32)];
     assert!((sigma / 0.01 - 1.0).abs() <= 0.1, "{sigma}");
     let plane = frame.detection_plane(Some(4.0), &config, &mut pool);
-    let detected = DetectResult::from_plane(
+    let detected = Candidates::detect(
         DetectionInput {
             plane: &plane,
             no_data: frame.no_data.as_deref(),

@@ -18,199 +18,162 @@
 //! is not.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::error::Cancelled;
-use crate::frame::frame_peek::FramePeek;
-use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::io::error::{FitsRefusal, ImageError, ScientificRefusal};
-use crate::io::fits::decode::selected_fits::SelectedFits;
-
+use crate::image::flat_gain::FlatGain;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
-use crate::io::fits::metadata;
+use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
+use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
+use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
+use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 mod hdu_sections;
-pub(crate) mod open_fits;
 mod pixels;
 mod plan;
-mod selected_fits;
+pub(crate) mod selected_fits;
 mod selection;
 
 #[derive(Debug)]
-struct DecodedFitsImage {
+pub(crate) struct DecodedFitsImage {
     metadata: ImageMetadata,
-    /// The pattern the header declares, which makes the image a mosaic to load as a `CfaImage`.
-    cfa_type: Option<CfaType>,
     pixels: LinearPixels,
     /// Where the HDU declared no measurement, or `None` when it declared none anywhere. Absent
-    /// whenever [`FitsNullPolicy::Reject`](crate::FitsNullPolicy) is in force, which fails the load
+    /// whenever [`NullPolicy::Reject`](crate::NullPolicy::Reject) is in force, which fails the load
     /// instead of reaching here.
     flags: Option<PixelFlags>,
+    /// The gain the file's `LUMGAIN` extension stores, when it has one.
+    flat_gain: Option<Arc<FlatGain>>,
 }
 
 impl DecodedFitsImage {
-    fn into_linear(self, path: &Path) -> Result<LinearImage, ImageError> {
-        // A mono sensor frame has no mosaic to demosaic, so it is linear data like any other
-        // single-plane image.
-        if self
-            .cfa_type
-            .is_some_and(|cfa_type| cfa_type != CfaType::Mono)
-        {
-            return Err(ImageError::scientific_rejection(
-                path,
-                ScientificRefusal::MosaicFits,
-            ));
-        }
-
-        check_gain_channels(path, &self.metadata, self.pixels.dimensions().channels())?;
-        Ok(LinearImage {
-            metadata: self.metadata,
-            pixels: self.pixels,
-            flags: self.flags,
-        })
+    pub(crate) fn into_linear(self) -> Result<LinearImage, FitsLoadError> {
+        check_gain_channels(
+            self.flat_gain.as_deref(),
+            self.pixels.dimensions().channels(),
+        )?;
+        let mut image = LinearImage::new(self.pixels, self.flags, self.metadata);
+        image.set_flat_gain(self.flat_gain);
+        Ok(image)
     }
 
-    fn into_cfa(self, path: &Path) -> Result<CfaImage, ImageError> {
-        let dimensions = self.pixels.dimensions();
-        if !dimensions.is_grayscale() {
-            return Err(ImageError::fits_unsupported(
-                path,
-                FitsRefusal::CfaPlanes {
-                    planes: dimensions.channels(),
-                },
-            ));
-        }
-        let Some(cfa_type) = self.cfa_type else {
-            return Err(ImageError::fits_unsupported(
-                path,
-                FitsRefusal::MissingCfaPattern,
-            ));
-        };
-
-        check_gain_channels(path, &self.metadata, cfa_type.num_colors())?;
+    /// The image as the `cfa_type` mosaic its selection required.
+    pub(crate) fn into_cfa(self, cfa_type: CfaType) -> Result<CfaImage, FitsLoadError> {
+        check_gain_channels(self.flat_gain.as_deref(), cfa_type.num_colors())?;
         let Self {
             mut metadata,
             pixels,
             flags,
-            ..
+            flat_gain,
         } = self;
-        if let Some(provenance) = &mut metadata.provenance {
+        if let Some(provenance) = metadata.derived.provenance_mut() {
             provenance.color = ColorProvenance::SensorCfa;
         }
-        Ok(CfaImage {
-            data: pixels.into_l(),
-            cfa_type,
-            metadata,
-            flags,
-        })
+        let mut image = CfaImage::from_plane(pixels.into_l(), cfa_type, metadata);
+        image.set_flags(flags);
+        image.set_flat_gain(flat_gain);
+        Ok(image)
     }
 }
 
-/// Refuse a stored flat gain whose grids are not one per colour of the mosaic, or per channel of
-/// the image, that `metadata` describes: `channels` of them.
-fn check_gain_channels(
-    path: &Path,
-    metadata: &ImageMetadata,
-    channels: usize,
-) -> Result<(), ImageError> {
-    match metadata.flat_gain.as_deref() {
-        Some(gain) if gain.channels() != channels => Err(ImageError::fits_unsupported(
-            path,
-            FitsRefusal::GainChannels {
-                grids: gain.channels(),
-                channels,
-            },
-        )),
+/// Refuse a stored flat gain whose grids are not one per color of the mosaic, or per channel of
+/// the image: `channels` of them.
+fn check_gain_channels(flat_gain: Option<&FlatGain>, channels: usize) -> Result<(), FitsLoadError> {
+    match flat_gain {
+        Some(gain) if gain.channels() != channels => Err(FitsRefusal::GainChannels {
+            grids: gain.channels(),
+            channels,
+        }
+        .into()),
         _ => Ok(()),
     }
 }
 
-/// Load an already-linear astronomical image from a FITS file.
-pub(crate) fn load_linear(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-    read_selected_image(path, context)?.into_linear(path)
-}
-
-pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-    let decoded = read_selected_image(path, context)?;
-    if decoded.cfa_type.is_some() {
-        Ok(decoded
-            .into_cfa(path)?
-            .demosaic(context.xtrans_passes, &context.cancel)
-            .map_err(|Cancelled| ImageError::cancelled(path))?)
-    } else {
-        decoded.into_linear(path)
-    }
-}
-
-fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFitsImage, ImageError> {
-    SelectedFits::open(path, context)?.read(path, context)
-}
-
-pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    SelectedFits::open(path, context)?
-        .read(path, context)?
-        .into_cfa(path)
-}
-
-pub(crate) fn cfa_frame_info(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<CfaFrameInfo, ImageError> {
-    let selected = SelectedFits::open(path, context)?;
-    let dimensions = selected.plan.dimensions;
-    if !dimensions.is_grayscale() {
-        return Err(ImageError::fits_unsupported(
-            path,
-            FitsRefusal::CfaPlanes {
-                planes: dimensions.channels(),
-            },
-        ));
-    }
-    let cfa_type = metadata::read_cfa(
-        selected.header(),
-        dimensions.height(),
-        context.fits.unstated_bayer_pattern,
-    )
-    .map_err(|source| ImageError::fits(path, source))?
-    .ok_or_else(|| ImageError::fits_unsupported(path, FitsRefusal::MissingCfaPattern))?;
-    Ok(CfaFrameInfo {
-        dimensions,
-        cfa_type,
-        decoder_bytes: usize::try_from(selected.beside_frame_bytes())
-            .expect("a decode the plan admitted fits the address space"),
-    })
-}
-
-/// What a linear FITS image of `path` is worth to a memory estimate, from its header alone: the
-/// dimensions it decodes to and what its decode holds beside them, by the same selection, cube
-/// reading and limits [`load_linear`] applies, without reading a sample. A header that
-/// declares a mosaic is refused, as the load refuses it.
-pub(crate) fn linear_peek(path: &Path, context: &LoadContext) -> Result<FramePeek, ImageError> {
-    let selected = SelectedFits::open(path, context)?;
-    let dimensions = selected.plan.dimensions;
-    let cfa_type = metadata::read_cfa(
-        selected.header(),
-        dimensions.height(),
-        context.fits.unstated_bayer_pattern,
-    )
-    .map_err(|source| ImageError::fits(path, source))?;
-    if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
+/// Refuse, as a linear load of `path` does, an image whose header declares a mosaic: it loads as a
+/// `CfaImage`, to be calibrated before it is demosaiced.
+fn refuse_mosaic(path: &Path, selected: &SelectedFits<'_>) -> Result<(), ImageError> {
+    if selected.is_mosaic() {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::MosaicFits,
         ));
     }
-    Ok(FramePeek {
-        dimensions,
+    Ok(())
+}
+
+/// Load an already-linear astronomical image from a FITS file.
+pub(crate) fn load_linear(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+    let fits = |error| ImageError::fits_load(path, error);
+    let mut reader = selected_fits::open(path, context).map_err(fits)?;
+    let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
+    refuse_mosaic(path, &selected)?;
+    selected
+        .read(context, Checksum::Judged)
+        .and_then(DecodedFitsImage::into_linear)
+        .map_err(fits)
+}
+
+pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+    let preview = || {
+        let mut reader = selected_fits::open(path, context)?;
+        let selected = SelectedFits::select(&mut reader, context)?;
+        if selected.cfa_type.is_none() {
+            return selected.read(context, Checksum::Judged)?.into_linear();
+        }
+        let info = selected.cfa_frame_info()?;
+        info.admit_demosaic(context)
+            .map_err(|budget| FitsRefusal::OverBudget {
+                allocation: FitsAllocation::Demosaic,
+                budget,
+            })?;
+        let cfa = selected
+            .read(context, Checksum::Judged)?
+            .into_cfa(info.cfa_type)?;
+        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
+        Ok(cfa.demosaic(context.xtrans_passes, noise, &context.cancel)?)
+    };
+    preview().map_err(|error| ImageError::fits_load(path, error))
+}
+
+pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
+    let cfa = || {
+        let mut reader = selected_fits::open(path, context)?;
+        let selected = SelectedFits::select(&mut reader, context)?;
+        let cfa_type = selected.require_cfa()?;
+        selected.read(context, Checksum::Judged)?.into_cfa(cfa_type)
+    };
+    cfa().map_err(|error| ImageError::fits_load(path, error))
+}
+
+pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
+    let info = || {
+        let mut reader = selected_fits::open(path, context)?;
+        SelectedFits::select(&mut reader, context)?.cfa_frame_info()
+    };
+    info().map_err(|error| ImageError::fits_load(path, error))
+}
+
+/// What a linear FITS image of `path` is, from its header alone: the dimensions it decodes to and
+/// what its decode holds beside them, by the same selection, cube reading and limits
+/// [`load_linear`] applies, without reading a sample. A header that declares a mosaic is refused,
+/// as the load refuses it.
+pub(crate) fn linear_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
+    let fits = |error| ImageError::fits_load(path, error);
+    let mut reader = selected_fits::open(path, context).map_err(fits)?;
+    let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
+    refuse_mosaic(path, &selected)?;
+    Ok(FrameInfo {
+        dimensions: selected.plan.dimensions,
+        cfa_type: CfaType::Mono,
         decoder_bytes: usize::try_from(selected.beside_frame_bytes())
             .expect("a decode the plan admitted fits the address space"),
-        mosaic: None,
     })
 }
 

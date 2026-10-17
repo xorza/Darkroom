@@ -1,10 +1,10 @@
 //! Iterative kappa-sigma clipping: reject beyond `k` sigma of the median, repeat.
 
-use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::pass::{Narrowing, Pass};
 use crate::combine::rejection::rejection_scale::RejectionScale;
+use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::combine::rejection::validate_max_passes;
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Configuration for sigma clipping.
@@ -23,23 +23,30 @@ pub struct SigmaClipConfig {
     pub sigma: SigmaBounds,
     /// The most passes to run, the first included. The clip stops earlier when a pass rejects
     /// nothing.
-    pub max_passes: u32,
+    pub max_iterations: u32,
     pub scale: RejectionScale,
 }
 
 impl Default for SigmaClipConfig {
     fn default() -> Self {
-        Self::new(SigmaBounds::symmetric(2.5), 3)
+        Self::DEFAULT
     }
 }
 
 impl SigmaClipConfig {
-    /// Clipping to `sigma` in the robust unit, for at most `max_passes` passes.
-    pub const fn new(sigma: SigmaBounds, max_passes: u32) -> Self {
+    /// 2.5σ either side, for at most 3 passes, in the robust unit.
+    pub const DEFAULT: Self = Self {
+        sigma: SigmaBounds::symmetric(2.5),
+        max_iterations: 3,
+        scale: RejectionScale::Robust,
+    };
+
+    /// Clipping to `sigma` in the robust unit, for at most `max_iterations` passes.
+    pub const fn new(sigma: SigmaBounds, max_iterations: u32) -> Self {
         Self {
             sigma,
-            max_passes,
-            scale: RejectionScale::Robust,
+            max_iterations,
+            ..Self::DEFAULT
         }
     }
 
@@ -49,15 +56,18 @@ impl SigmaClipConfig {
         Self { scale, ..self }
     }
 
-    /// Validate the clip thresholds and pass count.
-    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
+    /// Validate the clip thresholds and pass count: the cap leaves at least one pass to run.
+    pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;
-        validate_max_passes(self.max_passes)
+        ConfigValue::new("max_iterations", self.max_iterations)
+            .must_be("at least 1", self.max_iterations >= 1)
     }
 
-    pub(crate) fn narrow(&self, pass: &Pass<'_>, scores: &mut NormalScores) -> Narrowing {
+    pub(crate) fn narrow(self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
         match self.scale {
-            RejectionScale::Robust => Narrowing::Window(pass.clip_about_median(self.sigma, scores)),
+            RejectionScale::Robust => {
+                Narrowing::Window(pass.clip_about_median(self.sigma, &mut scratch.scores))
+            }
             RejectionScale::CcdModel => pass.clip_by_model(self.sigma),
         }
     }

@@ -4,13 +4,12 @@
 //! 512² tiles, feather-blended) and recovers the stars layer by **unscreen**. A **display-domain**
 //! operation: StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 
-use std::path::PathBuf;
+use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
-use crate::image_ops::ml::backend::TiledOnnxConfig;
-use rayon::prelude::*;
+use crate::image_ops::ml::backend::OnnxModel;
 
 /// The two layers from a star-removal pass.
 #[derive(Debug)]
@@ -23,17 +22,21 @@ pub struct StarRemovalResult {
 
 /// Remove stars from a *stretched* (display-domain, `[0, 1]`) image using a caller-supplied
 /// StarNet-style ONNX model.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RemoveStars {
-    /// Backend settings: which model to run and at what tile stride.
-    pub onnx: TiledOnnxConfig,
+    /// The model the filter runs.
+    pub model: OnnxModel,
+    /// Tile stride in px (overlap = 512 − stride), in `1..=384`: a wider stride would leave bands
+    /// that only the feathered edges of tiles cover.
+    pub stride: usize,
 }
 
 impl RemoveStars {
-    /// Remove stars with the ONNX model at `weights`.
-    pub fn new(weights: impl Into<PathBuf>) -> Self {
+    /// Remove stars with `model`, at [`OnnxModel::DEFAULT_STRIDE`].
+    pub const fn new(model: OnnxModel) -> Self {
         Self {
-            onnx: TiledOnnxConfig::new(weights),
+            model,
+            stride: OnnxModel::DEFAULT_STRIDE,
         }
     }
 
@@ -41,10 +44,8 @@ impl RemoveStars {
     ///
     /// The ONNX inference dominates either way, but this skips the whole-image unscreen pass
     /// [`split`](Self::split) needs to derive the stars layer.
-    pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {
-        let starless = self.onnx.run(image)?;
-        *image = starless;
-        Ok(())
+    pub fn apply(&mut self, image: &mut LinearImage) -> Result<(), MlError> {
+        self.model.run(image, self.stride)
     }
 
     /// Both layers: the starless image and the stars unscreened out of it.
@@ -53,9 +54,10 @@ impl RemoveStars {
     /// longer needed, so `build_stars` overwrites `image`'s own buffer in place to become `stars`
     /// instead of allocating a fresh one — one fewer full-image allocation than building `stars`
     /// as a new `Image`. Callers who still need the original pixels afterward should `.clone()`
-    /// before calling.
-    pub fn split(&self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
-        let starless = self.onnx.run(&image)?;
+    /// before calling. Both layers keep `image`'s metadata and flags.
+    pub fn split(&mut self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
+        let mut starless = image.clone();
+        self.model.run(&mut starless, self.stride)?;
         build_stars(&mut image, &starless);
         Ok(StarRemovalResult {
             starless,

@@ -1,35 +1,37 @@
 use common::TempDir;
 
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
-use crate::combine::frame_cache::sample::SampleQuality;
 use crate::combine::frame_cache::*;
 use crate::combine::pixel_coverage::PixelCoverage;
+use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::Rejection;
-use crate::combine::rejection::mean_combine::MeanCombine;
-use crate::combine::stack_config::{CombineMethod, DEFAULT_MIN_SURVIVORS, Weighting};
+use crate::combine::stack::mean_combine::MeanCombine;
+use crate::combine::stack_config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::stack_config::combine_method::CombineMethod;
+use crate::combine::stack_config::small_n::SmallN;
+use crate::combine::stack_config::weighting::Weighting;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::{DropPlanes, FrameQuality};
-use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::tier::CombineBudget;
+use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
 
-/// A mono request with the default survivor minimum, no weights and no noise.
+/// A request with the default survivor minimum, no weights and no noise.
 fn request(planes: QualityPlanes) -> CombineRequest<'static> {
     CombineRequest {
         weights: None,
         planes,
         min_survivors: DEFAULT_MIN_SURVIVORS,
         noise: None,
-        slots: Slots::new(None, 1),
     }
 }
 
@@ -37,8 +39,8 @@ fn request(planes: QualityPlanes) -> CombineRequest<'static> {
 /// one over its confidence.
 fn with_unit_noise(mut cache: FrameCache) -> FrameCache {
     for frame in &mut cache.frames {
-        for noise in &mut frame.source_stats.noise {
-            *noise = 1.0;
+        for background in &mut frame.source_stats.background {
+            *background = BackgroundSplit::of_sigma(1.0);
         }
     }
     cache
@@ -48,11 +50,11 @@ fn with_unit_noise(mut cache: FrameCache) -> FrameCache {
 fn unrequested_quality_planes_are_never_allocated() {
     // A plane the request declines is never built by the reducer, which only the combine's own
     // output shows, before `finish_product` shapes it.
-    let dims = ImageDimensions::new((4, 2), 1);
+    let dims = ImageDimensions::new((4, 2), ChannelLayout::Mono);
     let cache = FrameCache::from_images(
         vec![
-            LinearImage::from_pixels(dims, vec![1.0; 8]),
-            LinearImage::from_pixels(dims, vec![3.0; 8]),
+            LinearImage::from_interleaved(dims, vec![1.0; 8]),
+            LinearImage::from_interleaved(dims, vec![3.0; 8]),
         ],
         Normalization::None,
     );
@@ -112,12 +114,12 @@ fn unrequested_quality_planes_are_never_allocated() {
 fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     let median = CombineMethod::Median;
     assert_eq!(
-        QualityPlanes::ALL.resolve(median),
-        QualityPlanes::STANDARD.resolve(median),
+        median.planes(QualityPlanes::ALL),
+        median.planes(QualityPlanes::STANDARD),
         "a reducer that is not a weighted mean reports no variance factor and no dispersion"
     );
     assert_eq!(
-        QualityPlanes::ALL.resolve(median),
+        median.planes(QualityPlanes::ALL),
         QualityPlanes {
             inverse_variance: false,
             dispersion: false,
@@ -125,11 +127,11 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
         },
     );
     for mean in [Rejection::None, Rejection::sigma_clip(2.5)].map(CombineMethod::Mean) {
-        assert_eq!(QualityPlanes::ALL.resolve(mean), QualityPlanes::ALL);
+        assert_eq!(mean.planes(QualityPlanes::ALL), QualityPlanes::ALL);
         assert_eq!(
-            QualityPlanes::IMAGE_ONLY.resolve(mean),
+            mean.planes(QualityPlanes::IMAGE_ONLY),
             QualityPlanes::IMAGE_ONLY,
-            "resolving never adds a plane the caller declined"
+            "a method never adds a plane the caller declined"
         );
     }
 
@@ -186,12 +188,14 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // Every read of a stored plane slices it to the cache's pixel count, so a frame that does not
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
-    let dimensions = ImageDimensions::new((4, 2), 1);
+    let dimensions = ImageDimensions::new((4, 2), ChannelLayout::Mono);
     let core = || CacheCore::plain(Tier::Resident, dimensions);
     let frame = |pixels: usize| {
-        let image =
-            LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
-        let stats = FrameStats::measure(&image);
+        let image = LinearImage::from_interleaved(
+            ImageDimensions::new((pixels, 1), ChannelLayout::Mono),
+            vec![1.0; pixels],
+        );
+        let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
 
@@ -211,8 +215,8 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     );
 
     // A quality plane of the wrong length is caught the same way.
-    let image = LinearImage::from_pixels(dimensions, vec![1.0; 8]);
-    let stats = FrameStats::measure(&image);
+    let image = LinearImage::from_interleaved(dimensions, vec![1.0; 8]);
+    let stats = Admitted::measure(&image);
     let short_coverage = StoredFrame::from_memory(
         image,
         FrameQuality::from_coverage(Buffer2::new(2, 1, vec![1.0; 2])),
@@ -246,9 +250,15 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "breaks the pipeline's own frame contract")]
 fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
-    let image = LinearImage::from_pixels(ImageDimensions::new((4, 1), 1), vec![1.0; 4]);
-    let stats = FrameStats::measure(&image);
-    let core = CacheCore::plain(Tier::Resident, ImageDimensions::new((4, 2), 1));
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((4, 1), ChannelLayout::Mono),
+        vec![1.0; 4],
+    );
+    let stats = Admitted::measure(&image);
+    let core = CacheCore::plain(
+        Tier::Resident,
+        ImageDimensions::new((4, 2), ChannelLayout::Mono),
+    );
     let _cache = FrameCache::from_stored_frames(
         vec![StoredFrame::from_memory(image, FrameQuality::None, stats)],
         core,
@@ -257,20 +267,20 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 }
 
 /// Every frame must carry the first frame's mosaic pattern, or, like it, none: the same pixel is a
-/// different colour under another pattern, and a demosaiced frame is no mosaic at all.
+/// different color under another pattern, and a demosaiced frame is no mosaic at all.
 #[test]
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
-    let dimensions = ImageDimensions::new(size, 1);
+    let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
     let core = || CacheCore::plain(Tier::Resident, dimensions);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
-        let stats = FrameStats::measure(&image);
+        let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
     let linear = || {
-        let image = LinearImage::from_pixels(dimensions, vec![1.0; size.pixel_count()]);
-        let stats = FrameStats::measure(&image);
+        let image = LinearImage::from_interleaved(dimensions, vec![1.0; size.pixel_count()]);
+        let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
     let rggb = CfaType::Bayer(CfaPattern::Rggb);
@@ -320,7 +330,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
 /// alike, and a drop weight is never negative.
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
-    let dimensions = ImageDimensions::new((4, 1), 1);
+    let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Mono);
     let core = || CacheCore::plain(Tier::Resident, dimensions);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
@@ -337,8 +347,8 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
             .collect(),
         };
     let frame = |quality: FrameQuality<Buffer2<f32>>| {
-        let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
-        let stats = FrameStats::measure(&image);
+        let image = LinearImage::from_interleaved(dimensions, vec![1.0; 4]);
+        let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, quality, stats)
     };
 
@@ -430,23 +440,24 @@ fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
         planes: QualityPlanes::ALL,
         min_survivors: DEFAULT_MIN_SURVIVORS,
         noise: Some(&noise),
-        slots,
     };
-    let combined = cache.process_chunked(request, |samples, scratch| {
+    let combined = cache.process_chunked(
+        request,
         MeanCombine {
             rejection: Rejection::None,
+            small_n: SmallN::none(),
             min_survivors: DEFAULT_MIN_SURVIVORS,
             quality: SampleQuality::Measured,
         }
-        .combine(&samples, scratch)
-    });
+        .reducer(),
+    );
     cache.finish_product(combined, QualityPlanes::ALL, None)
 }
 
 #[test]
 fn the_combine_stage_counts_active_inputs_and_full_outputs() {
-    let dimensions = ImageDimensions::new((2, 1), 3);
-    let image = || LinearImage::from_pixels(dimensions, vec![1.0; 6]);
+    let dimensions = ImageDimensions::new((2, 1), ChannelLayout::Rgb);
+    let image = || LinearImage::from_interleaved(dimensions, vec![1.0; 6]);
     let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
     let frames = |flagged: bool| {
         let mut frames = vec![
@@ -457,13 +468,15 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         frames[1].quality = FrameQuality::from_coverage(plane());
         frames[2].quality = FrameQuality::from_coverage(plane());
         if flagged {
-            frames[0].image.flags = PixelFlags::from_fn(Size2us::new(2, 1), |index| {
-                if index == 0 {
-                    QualityFlags::SATURATED
-                } else {
-                    QualityFlags::default()
-                }
-            });
+            frames[0]
+                .image
+                .set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |index| {
+                    if index == 0 {
+                        QualityFlags::SATURATED
+                    } else {
+                        QualityFlags::default()
+                    }
+                }));
         }
         FrameCache::from_stack_frames(frames, Normalization::None, ProgressMonitor::unattended())
             .expect("frames are valid")
@@ -511,13 +524,13 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         (0..3)
             .map(|_| {
                 let mut image = image();
-                image.flags = PixelFlags::from_fn(Size2us::new(2, 1), |index| {
+                image.set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |index| {
                     if index == 1 {
                         QualityFlags::NO_DATA
                     } else {
                         QualityFlags::default()
                     }
-                });
+                }));
                 StackFrame::from(image)
             })
             .collect(),
@@ -536,9 +549,9 @@ fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights and unit noise: every pixel sees all 4
     // frames at weight 1, so weight = Σw = 4, inverse variance = (Σw)²/Σw² = 16/4 = 4,
     // coverage = 1.
-    let dims = ImageDimensions::new((3, 2), 1);
+    let dims = ImageDimensions::new((3, 2), ChannelLayout::Mono);
     let images: Vec<LinearImage> = (0..4)
-        .map(|i| LinearImage::from_pixels(dims, vec![i as f32; 6]))
+        .map(|i| LinearImage::from_interleaved(dims, vec![i as f32; 6]))
         .collect();
     let product = mean_product(
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
@@ -571,15 +584,16 @@ fn finish_product_uniform_equal_weights() {
     };
     assert_eq!(weight.pixels(), &[4.0; 6]);
     assert_eq!(inverse_variance.pixels(), &[4.0; 6]);
+    assert_eq!(product.weight_kind, WeightKind::Count);
 }
 
 #[test]
 fn finish_product_uniform_manual_weights() {
     // Weights [1,2,3,4] and unit noise, full coverage: weight = 10, Σw² = 1+4+9+16 = 30, inverse
     // variance = 100/30, rounded once.
-    let dims = ImageDimensions::new((2, 1), 1);
+    let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let images: Vec<LinearImage> = (0..4)
-        .map(|_| LinearImage::from_pixels(dims, vec![0.5; 2]))
+        .map(|_| LinearImage::from_interleaved(dims, vec![0.5; 2]))
         .collect();
     let product = mean_product(
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
@@ -591,6 +605,7 @@ fn finish_product_uniform_manual_weights() {
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
         assert_eq!(inverse_variance.channel(0)[p], 100.0 / 30.0);
     }
+    assert_eq!(product.weight_kind, WeightKind::Relative);
 }
 
 #[test]
@@ -602,7 +617,7 @@ fn finish_product_partial_coverage() {
     //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, inverse variance 4
     //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, inverse variance 3
     //   px2: count 3, as px1
-    let dims = ImageDimensions::new((3, 1), 1);
+    let dims = ImageDimensions::new((3, 1), ChannelLayout::Mono);
     let cov = [
         [1.0_f32, 1.0, 1.0],
         [1.0, 0.5, PixelCoverage::MIN_CONTRIBUTING],
@@ -612,7 +627,7 @@ fn finish_product_partial_coverage() {
     let frames: Vec<StackFrame> = cov
         .iter()
         .map(|c| {
-            let mut frame = StackFrame::from(LinearImage::from_pixels(dims, vec![0.5; 3]));
+            let mut frame = StackFrame::from(LinearImage::from_interleaved(dims, vec![0.5; 3]));
             frame.quality = FrameQuality::from_coverage(Buffer2::new(3, 1, c.to_vec()));
             frame
         })
@@ -645,12 +660,12 @@ fn finish_product_partial_coverage() {
 /// reach the reducer unscaled. An RGB set combines per channel: (1 + 5)/2, (2 + 6)/2, (3 + 7)/2.
 #[test]
 fn light_and_calibration_frames_combine_through_one_engine() {
-    let dims = ImageDimensions::new((2, 2), 1);
+    let dims = ImageDimensions::new((2, 2), ChannelLayout::Mono);
     let caches = |values: &[f32]| {
         let linear = FrameCache::from_images(
             values
                 .iter()
-                .map(|&value| LinearImage::from_pixels(dims, vec![value; 4]))
+                .map(|&value| LinearImage::from_interleaved(dims, vec![value; 4]))
                 .collect(),
             Normalization::None,
         );
@@ -671,7 +686,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
     }
     for cache in caches(&[10.0, 20.0]) {
-        let slots = Slots::new(cache.frames[0].source_stats.facts.cfa_type, 1);
+        let slots = Slots::new(cache.frames[0].facts.cfa_type, 1);
         let weights = FrameWeights::resolve(
             &Weighting::Manual(vec![1.0, 3.0]),
             NormalizedStats {
@@ -685,24 +700,22 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         let weighted = cache.process_chunked(
             CombineRequest {
                 weights: Some(&weights),
-                slots,
                 ..request(QualityPlanes::IMAGE_ONLY)
             },
-            |samples, scratch| {
-                MeanCombine {
-                    rejection: Rejection::None,
-                    min_survivors: DEFAULT_MIN_SURVIVORS,
-                    quality: SampleQuality::ValueOnly,
-                }
-                .combine(&samples, scratch)
-            },
+            MeanCombine {
+                rejection: Rejection::None,
+                small_n: SmallN::none(),
+                min_survivors: DEFAULT_MIN_SURVIVORS,
+                quality: SampleQuality::ValueOnly,
+            }
+            .reducer(),
         );
         assert_eq!(weighted.pixels.channel(0).pixels(), &[17.5; 4]);
     }
 
     let rgb = |values: [f32; 3]| {
         LinearImage::from_planar_channels(
-            ImageDimensions::new((2, 2), 3),
+            ImageDimensions::new((2, 2), ChannelLayout::Rgb),
             values.map(|value| vec![value; 4]),
         )
     };
@@ -710,14 +723,16 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         vec![rgb([1.0, 2.0, 3.0]), rgb([5.0, 6.0, 7.0])],
         Normalization::None,
     );
-    let mean = cache.process_chunked(request(QualityPlanes::IMAGE_ONLY), |samples, scratch| {
+    let mean = cache.process_chunked(
+        request(QualityPlanes::IMAGE_ONLY),
         MeanCombine {
             rejection: Rejection::None,
+            small_n: SmallN::none(),
             min_survivors: DEFAULT_MIN_SURVIVORS,
             quality: SampleQuality::ValueOnly,
         }
-        .combine(&samples, scratch)
-    });
+        .reducer(),
+    );
     for (channel, level) in [3.0, 4.0, 5.0].into_iter().enumerate() {
         assert_eq!(mean.pixels.channel(channel).pixels(), &[level; 4]);
     }
@@ -730,9 +745,9 @@ fn light_and_calibration_frames_combine_through_one_engine() {
 fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
     let scratch = RunScratch::create(temp_dir.path()).unwrap();
-    let dims = ImageDimensions::new((4, 3), 1);
+    let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
     let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = LinearImage::from_pixels(dims, ramp.clone());
+    let image = LinearImage::from_interleaved(dims, ramp.clone());
 
     let resident = FrameCache::from_images(vec![image.clone()], Normalization::None);
     let budget = Budget::new(10, 1);
@@ -747,13 +762,13 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             SpillFrame {
                 image: &image,
                 quality: &FrameQuality::<Buffer2<f32>>::None,
-                source_stats: FrameStats::measure(&image),
+                admitted: Admitted::measure(&image),
             }
             .spill(&scratch)
             .unwrap(),
         ],
         CacheCore::plain(
-            Tier::for_plan(&RunPlan::of(1, &[frame], budget), 0, temp_dir.path()).unwrap(),
+            Tier::for_plan(&RunPlan::of(1, &[frame], budget), temp_dir.path()).unwrap(),
             dims,
         ),
         Normalization::None,

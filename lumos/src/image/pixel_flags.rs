@@ -33,7 +33,7 @@ impl PixelFlags {
             .par_iter_mut()
             .enumerate()
             .for_each(|(index, byte)| *byte = flags_at(index).byte());
-        Self::from_buffer(bits)
+        Self::from_bytes(bits)
     }
 
     /// Flags from a plane of their bytes whose `counts` its producer tallied as it wrote them;
@@ -106,65 +106,28 @@ impl PixelFlags {
     /// OR every flag but `fixed` over the window `reach` spans around each pixel, clipped to the
     /// image: what an operation whose output at a pixel reads its inputs that far away does to the
     /// facts the inputs carried. `fixed` flags stay where they are.
-    ///
-    /// Separable, and each pass is van Herk–Gil-Werman: an OR over blocks of the window's length
-    /// from both ends, so a pixel costs the same at any radius.
     pub(crate) fn dilate_window(&mut self, reach: Reach, fixed: QualityFlags) {
-        if reach.before == 0 && reach.after == 0 {
-            return;
-        }
-        let Size2us { width, height } = self.size();
-        let soft = !fixed.byte();
-        let source: Vec<u8> = self.bits.pixels().iter().map(|&byte| byte & soft).collect();
-        let mut horizontal = vec![0u8; source.len()];
-        horizontal
-            .par_chunks_mut(width)
-            .zip(source.par_chunks(width))
-            .for_each_init(BlockOrs::default, |scratch, (out, row)| {
-                scratch.or_window(row, out, reach);
-            });
-        // The vertical pass runs the same window over whole rows at once: a row is one element of
-        // the column-wise sequence, and OR is element-wise.
-        let mut prefix = horizontal.clone();
-        let mut suffix = horizontal.clone();
-        let block = reach.len();
-        for y in 1..height {
-            if y % block != 0 {
-                let (before, current) = prefix.split_at_mut(y * width);
-                or_into(&mut current[..width], &before[(y - 1) * width..]);
-            }
-        }
-        for y in (0..height.saturating_sub(1)).rev() {
-            if (y + 1) % block != 0 {
-                let (current, after) = suffix.split_at_mut((y + 1) * width);
-                or_into(&mut current[y * width..], &after[..width]);
-            }
-        }
-        let bits = self.bits.pixels_mut();
-        bits.par_chunks_mut(width).enumerate().for_each(|(y, out)| {
-            let parts = WindowParts::of(reach.window(y, height), block, height);
-            let (from_suffix, from_prefix) = match parts {
-                WindowParts::Both { suffix, prefix } => (Some(suffix), Some(prefix)),
-                WindowParts::Prefix(at) => (None, Some(at)),
-                WindowParts::Suffix(at) => (Some(at), None),
-            };
-            for byte in out.iter_mut() {
-                *byte &= fixed.byte();
-            }
-            if let Some(at) = from_suffix {
-                or_into(out, &suffix[at * width..(at + 1) * width]);
-            }
-            if let Some(at) = from_prefix {
-                or_into(out, &prefix[at * width..(at + 1) * width]);
-            }
-        });
+        let size = self.size();
+        dilate_bytes(
+            self.bits.pixels_mut(),
+            size,
+            DilationSpec { reach, fixed },
+            &mut DilationScratch::default(),
+        );
         self.counts = FlagCounts::of(self.bits.pixels());
     }
 
-    /// Flags from a plane of their bytes; `None` when no pixel holds one.
-    pub(crate) fn from_buffer(bits: Buffer2<u8>) -> Option<Self> {
-        let flags = Self::from_bytes(bits);
-        flags.counts.any().then_some(flags)
+    /// These flags grown as [`Self::dilate_window`] grows them, as bytes into `out`, working in
+    /// `scratch`: for an owner that grows a frame's flags frame after frame.
+    pub(crate) fn dilated_into(
+        &self,
+        spec: DilationSpec,
+        out: &mut Buffer2<u8>,
+        scratch: &mut DilationScratch,
+    ) {
+        debug_assert_eq!(Size2us::from(&*out), self.size());
+        out.pixels_mut().copy_from_slice(self.bits.pixels());
+        dilate_bytes(out.pixels_mut(), self.size(), spec, scratch);
     }
 
     /// Whether any pixel holds a flag other than those in `except`.
@@ -172,10 +135,11 @@ impl PixelFlags {
         self.contains(QualityFlags::from_byte(!except.byte()))
     }
 
-    /// Flags restored from a plane of the bytes [`Self::bytes`] holds, as a spill wrote them.
-    pub(crate) fn from_bytes(bits: Buffer2<u8>) -> Self {
+    /// Flags from a plane of their bytes, as [`Self::bytes`] holds them; `None` when no pixel holds
+    /// one.
+    pub(crate) fn from_bytes(bits: Buffer2<u8>) -> Option<Self> {
         let counts = FlagCounts::of(bits.pixels());
-        Self { bits, counts }
+        counts.any().then_some(Self { bits, counts })
     }
 
     pub const fn size(&self) -> Size2us {
@@ -189,6 +153,13 @@ impl PixelFlags {
 
     pub(crate) fn into_buffer(self) -> Buffer2<u8> {
         self.bits
+    }
+
+    /// Whether the pixel at `index` carries any flag: a stage that measures only the pixels of a
+    /// plain measurement leaves it out.
+    #[inline]
+    pub(crate) fn is_flagged(&self, index: usize) -> bool {
+        self.bits.pixels()[index] != 0
     }
 
     /// The flags of the pixel at `index`, row-major.
@@ -226,29 +197,104 @@ impl PixelFlags {
         mask
     }
 
-    /// The pixels as a plane: `0.0` where a pixel holds any of `excluded`, `1.0` elsewhere.
+    /// The pixels as a plane, into `out`: `0.0` where a pixel holds any of `excluded`, `1.0`
+    /// elsewhere.
     ///
-    /// The form the measurement consumers want it in — the combine gates on a coverage plane, and
-    /// the warp resamples this one through the same kernel as the image to find how much real data
-    /// backs each output pixel.
-    pub(crate) fn validity_plane(&self, excluded: QualityFlags) -> Buffer2<f32> {
-        let size = self.size();
-        let bytes = self.bits.pixels();
-        Buffer2::new(
-            size.width,
-            size.height,
-            bytes
-                .par_iter()
-                .map(|&byte| {
-                    if QualityFlags::from_byte(byte).intersects(excluded) {
-                        0.0
-                    } else {
-                        1.0
-                    }
-                })
-                .collect(),
-        )
+    /// The form the warp wants it in: it resamples this plane through the same kernel as the image
+    /// to find how much real data backs each output pixel.
+    pub(crate) fn validity_into(&self, excluded: QualityFlags, out: &mut Buffer2<f32>) {
+        debug_assert_eq!(Size2us::from(&*out), self.size());
+        out.pixels_mut()
+            .par_iter_mut()
+            .zip(self.bits.pixels().par_iter())
+            .for_each(|(value, &byte)| {
+                *value = if QualityFlags::from_byte(byte).intersects(excluded) {
+                    0.0
+                } else {
+                    1.0
+                };
+            });
     }
+}
+
+/// How far a dilation grows the flags, and which of them stay where they are.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DilationSpec {
+    pub(crate) reach: Reach,
+    pub(crate) fixed: QualityFlags,
+}
+
+/// The planes a dilation works in, kept by an owner that dilates frame after frame: the
+/// horizontal pass, and the vertical pass's block ORs from the start of each block, built over it
+/// in place, and from the end.
+#[derive(Debug, Default)]
+pub(crate) struct DilationScratch {
+    prefix: Vec<u8>,
+    suffix: Vec<u8>,
+}
+
+impl DilationScratch {
+    /// The bytes a dilation of a `size` image holds here: its two planes, a byte a pixel each.
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+        2 * size.pixel_count()
+    }
+}
+
+/// [`PixelFlags::dilate_window`] on the bytes `bits` of a `size` image, in `scratch`.
+///
+/// Separable, and each pass is van Herk–Gil-Werman: an OR over blocks of the window's length from
+/// both ends, so a pixel costs the same at any radius.
+fn dilate_bytes(bits: &mut [u8], size: Size2us, spec: DilationSpec, scratch: &mut DilationScratch) {
+    let DilationSpec { reach, fixed } = spec;
+    if reach.before == 0 && reach.after == 0 {
+        return;
+    }
+    let Size2us { width, height } = size;
+    let DilationScratch { prefix, suffix } = scratch;
+    let soft = !fixed.byte();
+    prefix.clear();
+    prefix.resize(bits.len(), 0);
+    prefix
+        .par_chunks_mut(width)
+        .zip(bits.par_chunks(width))
+        .for_each_init(BlockOrs::default, |ors, (out, row)| {
+            ors.or_window(SoftRow { row, soft }, out, reach);
+        });
+    // The vertical pass runs the same window over whole rows at once: a row is one element of the
+    // column-wise sequence, and OR is element-wise.
+    suffix.clear();
+    suffix.extend_from_slice(prefix);
+    let block = reach.len();
+    for y in 1..height {
+        if y % block != 0 {
+            let (before, current) = prefix.split_at_mut(y * width);
+            or_into(&mut current[..width], &before[(y - 1) * width..]);
+        }
+    }
+    for y in (0..height.saturating_sub(1)).rev() {
+        if (y + 1) % block != 0 {
+            let (current, after) = suffix.split_at_mut((y + 1) * width);
+            or_into(&mut current[y * width..], &after[..width]);
+        }
+    }
+    let (prefix, suffix) = (&*prefix, &*suffix);
+    bits.par_chunks_mut(width).enumerate().for_each(|(y, out)| {
+        let parts = WindowParts::of(reach.window(y, height), block, height);
+        let (from_suffix, from_prefix) = match parts {
+            WindowParts::Both { suffix, prefix } => (Some(suffix), Some(prefix)),
+            WindowParts::Prefix(at) => (None, Some(at)),
+            WindowParts::Suffix(at) => (Some(at), None),
+        };
+        for byte in out.iter_mut() {
+            *byte &= fixed.byte();
+        }
+        if let Some(at) = from_suffix {
+            or_into(out, &suffix[at * width..(at + 1) * width]);
+        }
+        if let Some(at) = from_prefix {
+            or_into(out, &prefix[at * width..(at + 1) * width]);
+        }
+    });
 }
 
 /// OR `source` into `target`, element by element.
@@ -265,17 +311,25 @@ struct BlockOrs {
     suffix: Vec<u8>,
 }
 
+/// A row of flag bytes, and the bits of them a dilation grows.
+#[derive(Debug, Clone, Copy)]
+struct SoftRow<'a> {
+    row: &'a [u8],
+    soft: u8,
+}
+
 impl BlockOrs {
-    /// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row, through
-    /// these block ORs.
-    fn or_window(&mut self, row: &[u8], out: &mut [u8], reach: Reach) {
+    /// `out[i]` = OR of the soft bits of `row[i − reach.before ..= i + reach.after]`, clipped to
+    /// the row, through these block ORs.
+    fn or_window(&mut self, row: SoftRow<'_>, out: &mut [u8], reach: Reach) {
+        let SoftRow { row, soft } = row;
         let len = row.len();
         let block = reach.len();
         let Self { prefix, suffix } = self;
         prefix.clear();
-        prefix.extend_from_slice(row);
+        prefix.extend(row.iter().map(|&byte| byte & soft));
         suffix.clear();
-        suffix.extend_from_slice(row);
+        suffix.extend_from_slice(prefix);
         for i in 1..len {
             if i % block != 0 {
                 prefix[i] |= prefix[i - 1];
@@ -452,11 +506,11 @@ mod tests {
                 "index {index}"
             );
             assert_eq!(mask.get(index), expected, "index {index}");
+            assert_eq!(flags.is_flagged(index), expected, "index {index}");
         }
-        assert_eq!(
-            flags.validity_plane(QualityFlags::NO_DATA).pixels(),
-            &[1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
-        );
+        let mut validity = Buffer2::new_default(size.width, size.height);
+        flags.validity_into(QualityFlags::NO_DATA, &mut validity);
+        assert_eq!(validity.pixels(), &[1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
 
         // The same planes with the nulls removed produce no flags at all, so a caller cannot
         // mistake "nothing missing" for "an empty plane".
@@ -467,7 +521,8 @@ mod tests {
             size.width,
             size.height,
             flags.bytes().to_vec(),
-        ));
+        ))
+        .unwrap();
         assert_eq!(restored.bytes(), flags.bytes());
         assert_eq!(restored.count(QualityFlags::NO_DATA), 2);
     }

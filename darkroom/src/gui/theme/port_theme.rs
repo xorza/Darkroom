@@ -7,20 +7,20 @@ use crate::gui::theme::palette::Palette;
 /// A node's ports: the circles straddling the body edge, their labels,
 /// and the column geometry that lays them out.
 ///
-/// Positional colours only — a *typed* port takes its hue from
+/// Positional colors only — a *typed* port takes its hue from
 /// [`TypeColors`](crate::gui::theme::type_colors::TypeColors) instead,
 /// resolved by `gui::pane::graph_ui::node_ui::port_color`, which needs this
 /// roster and the type roster together and so stays a function over the
-/// whole [`Theme`](crate::gui::theme::Theme). Every colour here is a
+/// whole [`Theme`](crate::gui::theme::Theme). Every color here is a
 /// resting one; the pointer lift is applied at that call site.
 #[derive(Clone, Debug)]
 pub(crate) struct PortTheme {
-    /// Positional colour for untyped input ports.
+    /// Positional color for untyped input ports.
     pub(crate) input: RgbaF32,
-    /// Positional colour for untyped output ports.
+    /// Positional color for untyped output ports.
     pub(crate) output: RgbaF32,
     /// Event emitter glyphs, subscription pins, and event wires — distinct
-    /// from the type-coloured data ports.
+    /// from the type-colored data ports.
     pub(crate) event: RgbaF32,
     /// Port + event label ink — de-emphasized against the full-strength
     /// value/editor text so each port row has one strong element. Its own

@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 use crate::calibration::error::CalibrationError;
 use crate::image::calibration_state::CalibrationState;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
@@ -19,7 +20,7 @@ use crate::math::vec2us::Vec2us;
 pub(crate) const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
 /// A flat ready to divide a light by: its additive part removed, normalized to a mean of one per
-/// CFA colour, and floored at [`MIN_NORMALIZED_FLAT`].
+/// CFA color, and floored at [`MIN_NORMALIZED_FLAT`].
 ///
 /// A type rather than a `CfaImage` in the flat's slot, so a raw flat cannot be divided by, and a
 /// prepared one cannot be prepared twice.
@@ -33,10 +34,10 @@ pub(crate) struct PreparedFlat {
 }
 
 impl PreparedFlat {
-    /// Normalize a flat whose additive part is already removed, per CFA colour, and floor it.
+    /// Normalize a flat whose additive part is already removed, per CFA color, and floor it.
     ///
     /// # Errors
-    /// [`CalibrationError::NonPositiveFlat`] when a colour (or the whole mono frame) has no
+    /// [`CalibrationError::NonPositiveFlat`] when a color (or the whole mono frame) has no
     /// positive mean: a property of the user's flats, not of this code.
     pub(crate) fn new(mut flat: CfaImage) -> Result<Self, CalibrationError> {
         normalize(&mut flat)?;
@@ -46,18 +47,18 @@ impl PreparedFlat {
     /// A divisor prepared before, as a saved bundle holds it.
     pub(crate) fn from_divisor(divisor: CfaImage) -> Self {
         let floored = divisor
-            .data
+            .data()
             .par_iter()
             .filter(|&&value| value <= MIN_NORMALIZED_FLAT)
             .count();
-        let flags = divisor.flags.as_ref();
-        let values = divisor.data.pixels();
+        let flags = divisor.flags();
+        let values = divisor.data().pixels();
         let gain = Arc::new(FlatGain::of_divisor(
-            &divisor.data,
-            &divisor.cfa_type,
+            divisor.data(),
+            &divisor.cfa_type(),
             |index| {
                 values[index] <= MIN_NORMALIZED_FLAT
-                    || flags.is_some_and(|flags| flags.at(index) != QualityFlags::default())
+                    || flags.is_some_and(|flags| flags.is_flagged(index))
             },
         ));
         Self {
@@ -77,40 +78,43 @@ impl PreparedFlat {
 
     /// Whether the divisor sits at its floor at `index`.
     pub(crate) fn is_floored(&self, index: usize) -> bool {
-        self.divisor.data.pixels()[index] <= MIN_NORMALIZED_FLAT
+        self.divisor.data().pixels()[index] <= MIN_NORMALIZED_FLAT
     }
 
     /// Record in `image`, divided by this flat, that it lost the flat, and the gain that scaled its
     /// noise.
     pub(crate) fn record(&self, image: &mut CfaImage) {
         debug_assert!(
-            !image.metadata.calibration.flat,
+            !image.metadata.derived.calibration().flat,
             "the flat is divided out twice"
         );
-        image.metadata.calibration = image.metadata.calibration.union(CalibrationState::FLAT);
-        image.metadata.flat_gain = Some(Arc::clone(&self.gain));
+        image
+            .metadata
+            .derived
+            .record_removal(CalibrationState::FLAT);
+        image.set_flat_gain(Some(Arc::clone(&self.gain)));
     }
 }
 
-/// One row's sum and count of each colour.
+/// One row's sum and count of each color.
 #[derive(Debug, Default)]
 struct ColorSums {
     sums: [f64; 3],
     counts: [u64; 3],
 }
 
-/// Normalize `flat` to a mean of one per colour of its pattern, over the photosites that hold a
+/// Normalize `flat` to a mean of one per color of its pattern, over the photosites that hold a
 /// measurement, and floor it at [`MIN_NORMALIZED_FLAT`]. A fill or a saturated bound would move the
 /// mean every other photosite is divided by.
 fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
-    let width = flat.data.width();
-    let cfa_type = flat.cfa_type;
-    let colours = cfa_type.num_colors();
+    let width = flat.data().width();
+    let cfa_type = flat.cfa_type();
+    let colors = cfa_type.num_colors();
     // Each row's sums, added in row order: a rayon `reduce` would add them in whatever tree its
     // work stealing built, and the means would move with the thread count.
     let rows: Vec<ColorSums> = {
-        let flags = flat.flags.as_ref();
-        flat.data
+        let flags = flat.flags();
+        flat.data()
             .par_chunks(width)
             .enumerate()
             .map(|(y, row)| {
@@ -121,7 +125,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
                     }) {
                         continue;
                     }
-                    let color = cfa_type.color_at(Vec2us::new(x, y));
+                    let color = cfa_type.slot_at(Vec2us::new(x, y));
                     sums.sums[color] += f64::from(value);
                     sums.counts[color] += 1;
                 }
@@ -132,31 +136,37 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
     let mut sums = [0.0f64; 3];
     let mut counts = [0u64; 3];
     for row in &rows {
-        for color in 0..colours {
+        for color in 0..colors {
             sums[color] += row.sums[color];
             counts[color] += row.counts[color];
         }
     }
 
-    let mut inv_means = [0.0f32; 3];
-    for color in 0..colours {
-        // A colour with no measured photosite divides 0 by 0.
-        let mean = (sums[color] / counts[color] as f64) as f32;
+    // In f64, so each normalized sample is one correctly rounded quotient: a mean narrowed to f32
+    // and inverted in f32 rounds three times.
+    let mut means = [0.0f64; 3];
+    for color in 0..colors {
+        // A color with no measured photosite divides 0 by 0.
+        let mean = sums[color] / counts[color] as f64;
         if mean.is_nan() || mean <= 0.0 {
             return Err(CalibrationError::NonPositiveFlat {
-                channel: (cfa_type != CfaType::Mono).then_some(color),
+                color: if cfa_type == CfaType::Mono {
+                    None
+                } else {
+                    Some(CfaColor::from_index(color).expect("a mosaic has three colors"))
+                },
             });
         }
-        inv_means[color] = 1.0 / mean;
+        means[color] = mean;
     }
 
-    flat.data
+    flat.data_mut()
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, row)| {
             for (x, value) in row.iter_mut().enumerate() {
-                let color = cfa_type.color_at(Vec2us::new(x, y));
-                *value = (*value * inv_means[color]).max(MIN_NORMALIZED_FLAT);
+                let color = cfa_type.slot_at(Vec2us::new(x, y));
+                *value = ((f64::from(*value) / means[color]) as f32).max(MIN_NORMALIZED_FLAT);
             }
         });
     Ok(())

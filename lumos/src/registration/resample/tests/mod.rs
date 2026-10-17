@@ -1,23 +1,26 @@
+use std::sync::Arc;
+
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::image::background_split::BackgroundSplit;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
+use crate::image::flat_gain::FlatGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
+use crate::image::mosaic_noise::MosaicNoise;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::internals::images::gray_image;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use std::sync::Arc;
-
-use crate::image::cfa::cfa_type::CfaType;
-use crate::image::flat_gain::FlatGain;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
-use crate::registration::resample::{Warp, WarpBuffers, WarpResult};
+use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
-use crate::registration::transform::warp_transform::WarpTransform;
-use crate::scratch_pool::{Scratch, ScratchPool};
+use crate::registration::warp_transform::WarpTransform;
+use crate::scratch_pool::Scratch;
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -38,7 +41,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
     const HEIGHT: usize = 6;
     const BORDER: f32 = -7.0;
     const CONSTANT: f32 = 3.25;
-    let dimensions = ImageDimensions::new((WIDTH, HEIGHT), 1);
+    let dimensions = ImageDimensions::new((WIDTH, HEIGHT), ChannelLayout::Mono);
     let fixtures = [
         ("constant", vec![CONSTANT; WIDTH * HEIGHT]),
         (
@@ -50,19 +53,17 @@ fn translated_images_use_border_only_outside_source_footprint() {
     ];
 
     for (fixture_name, pixels) in fixtures {
-        let image = LinearImage::from_pixels(dimensions, pixels);
+        let image = LinearImage::from_interleaved(dimensions, pixels);
         for (translation, outside_x, inside_x) in [(-0.75, 0, 1), (0.75, WIDTH - 1, WIDTH - 2)] {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
             for method in InterpolationMethod::ALL {
-                let result = transform.warp(
-                    &image,
-                    WarpParams {
-                        method,
-                        border_value: BORDER,
-                        ..Default::default()
-                    },
-                );
+                let result = WarpParams {
+                    method,
+                    border_value: BORDER,
+                    ..Default::default()
+                }
+                .warp(&image, &transform);
                 let y = HEIGHT / 2;
                 assert_eq!(
                     result.image.channel(0)[(outside_x, y)],
@@ -112,11 +113,11 @@ impl NullFixture {
         let mut nulls = vec![0.0f32; dimensions.pixel_count()];
         nulls[null_index] = f32::NAN;
 
-        let mut declared = LinearImage::from_pixels(dimensions, pixels.clone());
-        declared.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
+        let mut declared = LinearImage::from_interleaved(dimensions, pixels.clone());
+        declared.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
         Self {
             declared,
-            undeclared: LinearImage::from_pixels(dimensions, pixels),
+            undeclared: LinearImage::from_interleaved(dimensions, pixels),
         }
     }
 }
@@ -128,7 +129,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     // nothing would spread at all.
     const CONSTANT: f32 = 3.25;
     const BORDER: f32 = -7.0;
-    let dimensions = ImageDimensions::new((16, 16), 1);
+    let dimensions = ImageDimensions::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
@@ -141,8 +142,8 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             border_value: BORDER,
             clamping_threshold: None,
         };
-        let masked = transform.warp(&fixture.declared, params);
-        let plain = transform.warp(&fixture.undeclared, params);
+        let masked = params.warp(&fixture.declared, &transform);
+        let plain = params.warp(&fixture.undeclared, &transform);
 
         // Every pixel the frame still supports reads the constant back to rounding: interpolating a
         // flat field over whichever taps survived is that field, so the fill never reaches the
@@ -185,7 +186,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // Nearest takes one tap, so a null costs exactly the pixel it lands on. Lanczos4 takes 8 per
     // axis, so the same null costs a 64-pixel block. The parameter has to change the answer, or the
     // resampler is not composing the mask through its kernel at all.
-    let dimensions = ImageDimensions::new((16, 16), 1);
+    let dimensions = ImageDimensions::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
@@ -197,8 +198,8 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
             border_value: 0.0,
             ..Default::default()
         };
-        let masked = transform.warp(&fixture.declared, params);
-        let plain = transform.warp(&fixture.undeclared, params);
+        let masked = params.warp(&fixture.declared, &transform);
+        let plain = params.warp(&fixture.undeclared, &transform);
         (0..dimensions.pixel_count())
             .filter(|&index| masked.coverage.pixels()[index] < plain.coverage.pixels()[index])
             .count()
@@ -219,23 +220,24 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     // Where every tap of the window is missing there is nothing to reconstruct from, and the pixel
     // has to read as uncovered rather than as a confident reading of the fill.
     const BORDER: f32 = -7.0;
-    let dimensions = ImageDimensions::new((24, 24), 1);
+    let dimensions = ImageDimensions::new((24, 24), ChannelLayout::Mono);
     let mut nulls = vec![0.0f32; dimensions.pixel_count()];
     for y in 6..18 {
         for x in 6..18 {
             nulls[y * 24 + x] = f32::NAN;
         }
     }
-    let mut image = LinearImage::from_pixels(dimensions, vec![3.25; dimensions.pixel_count()]);
-    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
+    let mut image = LinearImage::from_interleaved(dimensions, vec![3.25; dimensions.pixel_count()]);
+    image.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
 
-    let result = (WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)))).warp(
+    let result = WarpParams {
+        method: InterpolationMethod::Bilinear,
+        border_value: BORDER,
+        ..Default::default()
+    }
+    .warp(
         &image,
-        WarpParams {
-            method: InterpolationMethod::Bilinear,
-            border_value: BORDER,
-            ..Default::default()
-        },
+        &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
     );
 
     // Well inside the block, past the kernel's reach from any valid pixel.
@@ -256,19 +258,22 @@ fn warp_refuses_a_non_finite_border() {
     // `WarpParams::validate` is only reached through `RegistrationConfig::validate`, so a direct
     // caller of the public `warp` could fill every out-of-footprint pixel with NaN and have it
     // noticed only by a debug assert deep in the combine.
-    let image = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![0.5; 16]);
-    let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
-    transform.warp(
-        &image,
-        WarpParams {
-            border_value: f32::NAN,
-            ..Default::default()
-        },
+    let image = LinearImage::from_interleaved(
+        ImageDimensions::new((4, 4), ChannelLayout::Mono),
+        vec![0.5; 16],
     );
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
+    WarpParams {
+        border_value: f32::NAN,
+        ..Default::default()
+    }
+    .warp(&image, &transform);
 }
 /// `warp_into` writes every plane in full, so buffers handed back dirty — NaN, or what the last
 /// frame left — come out bit for bit what a fresh `warp` gives: mono and RGB, without nulls and
-/// with them, for an affine model and a homography.
+/// with them, for an affine model and a homography. The last frame flags other pixels — nulls and
+/// a saturated core elsewhere — so the planes a set keeps for a flagged frame, its validity, its
+/// grown flags and its flag plane, are each rewritten too, and the flags come out the same.
 #[test]
 fn warp_into_overwrites_dirty_buffers_completely() {
     let size = Size2us::new(20, 14);
@@ -281,19 +286,27 @@ fn warp_into_overwrites_dirty_buffers_completely() {
     let mut nulls = vec![0.0f32; size.pixel_count()];
     nulls[5 * size.width + 7] = f32::NAN;
     nulls[9 * size.width + 13] = f32::NAN;
-    let rows = ScratchPool::default();
+    let scratch = WarpScratch::default();
     for channels in [1, 3] {
-        let dimensions = ImageDimensions::new((size.width, size.height), channels);
-        let plain = LinearImage::from_pixels(dimensions, signed_pixels(size, channels));
+        let dimensions = ImageDimensions::new(
+            (size.width, size.height),
+            ChannelLayout::try_from(channels).unwrap(),
+        );
+        let plain = LinearImage::from_interleaved(dimensions, signed_pixels(size, channels));
         let mut masked = plain.clone();
-        masked.flags = PixelFlags::of_non_finite(size, &[&nulls]);
-        let previous = LinearImage::from_pixels(
+        masked.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
+        let mut previous = LinearImage::from_interleaved(
             dimensions,
             signed_pixels(size, channels)
                 .into_iter()
                 .map(|value| value * -3.0)
                 .collect(),
         );
+        previous.set_flags(PixelFlags::from_fn(size, |index| match index {
+            30 | 31 => QualityFlags::NO_DATA,
+            100..=103 => QualityFlags::SATURATED,
+            _ => QualityFlags::default(),
+        }));
         for image in [&plain, &masked] {
             for transform in &transforms {
                 for method in InterpolationMethod::ALL {
@@ -302,26 +315,34 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                         border_value: -7.0,
                         ..Default::default()
                     };
-                    let fresh = transform.warp(image, params);
+                    let fresh = params.warp(image, transform);
 
-                    let mut sentinel = WarpBuffers::build(dimensions);
-                    for plane in sentinel.image.pixels.planes_mut() {
+                    let mut sentinel = WarpResult::build(dimensions);
+                    for plane in sentinel.image.planes_mut() {
                         plane.pixels_mut().fill(f32::NAN);
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(&SourceImage::of(image), Warp { transform, params }, &rows);
+                    sentinel.warp_into(
+                        &SourceImage::of(image),
+                        Warp { transform, params },
+                        &scratch,
+                    );
 
-                    let mut reused = WarpBuffers::build(dimensions);
+                    let mut reused = WarpResult::build(dimensions);
                     reused.warp_into(
                         &SourceImage::of(&previous),
                         Warp {
                             transform: &transforms[0],
                             params,
                         },
-                        &rows,
+                        &scratch,
                     );
-                    reused.warp_into(&SourceImage::of(image), Warp { transform, params }, &rows);
+                    reused.warp_into(
+                        &SourceImage::of(image),
+                        Warp { transform, params },
+                        &scratch,
+                    );
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {
@@ -332,6 +353,11 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                             );
                         }
                         assert_bitwise(buffers.coverage.pixels(), fresh.coverage.pixels(), method);
+                        assert_eq!(
+                            buffers.image.flags().map(PixelFlags::bytes),
+                            fresh.image.flags().map(PixelFlags::bytes),
+                            "{method:?}"
+                        );
                         assert_bitwise(
                             buffers.confidence.pixels(),
                             fresh.confidence.pixels(),
@@ -349,8 +375,8 @@ fn warp_into_overwrites_dirty_buffers_completely() {
 #[test]
 fn an_rgb_warp_is_three_mono_warps() {
     let size = Size2us::new(20, 14);
-    let rgb = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 3),
+    let rgb = LinearImage::from_interleaved(
+        ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
         signed_pixels(size, 3),
     );
     let transform = WarpTransform::new(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
@@ -360,13 +386,13 @@ fn an_rgb_warp_is_three_mono_warps() {
             border_value: 0.0,
             ..Default::default()
         };
-        let warped = transform.warp(&rgb, params);
+        let warped = params.warp(&rgb, &transform);
         for channel in 0..3 {
-            let mono = LinearImage::from_pixels(
-                ImageDimensions::new((size.width, size.height), 1),
+            let mono = LinearImage::from_interleaved(
+                ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
                 rgb.channel(channel).pixels().to_vec(),
             );
-            let alone = transform.warp(&mono, params);
+            let alone = params.warp(&mono, &transform);
             assert_bitwise(
                 warped.image.channel(channel).pixels(),
                 alone.image.channel(0).pixels(),
@@ -424,7 +450,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         let mut pixels = vec![CONSTANT; size.pixel_count()];
         pixels[flagged] = 999.0;
         let mut image = gray_image(size, pixels);
-        image.flags = flag.and_then(|flag| {
+        image.set_flags(flag.and_then(|flag| {
             PixelFlags::from_fn(size, |index| {
                 if index == flagged {
                     flag
@@ -432,21 +458,19 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
                     QualityFlags::default()
                 }
             })
-        });
-        WarpTransform::new(Transform::translation(shift)).warp(
-            &image,
-            WarpParams {
-                method: InterpolationMethod::Lanczos3,
-                border_value: 0.0,
-                ..Default::default()
-            },
-        )
+        }));
+        WarpParams {
+            method: InterpolationMethod::Lanczos3,
+            border_value: 0.0,
+            ..Default::default()
+        }
+        .warp(&image, &WarpTransform::new(Transform::translation(shift)))
     };
     let half = DVec2::splat(0.5);
     let within = |x: usize, y: usize| (7..=12).contains(&x) && (7..=12).contains(&y);
 
     let null = warp(Some(QualityFlags::NO_DATA), half);
-    assert!(null.image.flags.is_none());
+    assert!(null.image.flags().is_none());
     let plain = warp(None, half);
     for y in 0..size.height {
         for x in 0..size.width {
@@ -495,13 +519,13 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
     for (flag, name) in QualityFlags::NAMED {
         let warped = warp(Some(flag), half);
         if flag.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
-            assert!(warped.image.flags.is_none(), "{name}");
+            assert!(warped.image.flags().is_none(), "{name}");
             assert!(same_bits(&warped, &null), "{name}");
             continue;
         }
         carried += 1;
         assert!(close(&warped, &plain), "{name}");
-        let flags = warped.image.flags.as_ref().unwrap();
+        let flags = warped.image.flags().unwrap();
         for y in 0..size.height {
             for x in 0..size.width {
                 let expected = if within(x, y) {
@@ -518,7 +542,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         }
 
         let whole = warp(Some(flag), DVec2::new(1.0, 0.0));
-        let flags = whole.image.flags.as_ref().unwrap();
+        let flags = whole.image.flags().unwrap();
         assert_eq!(flags.count(flag), 1, "{name}");
         assert_eq!(flags.at_pos(Vec2us::new(9, 10)), flag, "{name}");
     }
@@ -533,16 +557,49 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
     let size = Size2us::new(9, 9);
     let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
     let divisor = Buffer2::from_fn(9, 9, |x, _| 1.0 / (1.0 + x as f32 / 8.0));
-    image.metadata.flat_gain = Some(Arc::new(FlatGain::of_divisor(
+    image.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(
         &divisor,
         &CfaType::Mono,
         |_| false,
-    )));
-    let warped = (WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))))
-        .warp(&image, WarpParams::default());
-    let gain = warped.image.metadata.flat_gain.as_ref().unwrap();
+    ))));
+    let warped = WarpParams::default().warp(
+        &image,
+        &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
+    );
+    let gain = warped.image.flat_gain().unwrap();
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875)] {
         let at = gain.at(0, x, 4.0);
         assert!((at - expected).abs() <= 1e-6, "x = {x}: {at}");
+    }
+}
+
+/// A warp keeps the quantization step only where a sample is still one source sample: the nearest
+/// pixel keeps 0.25, and every interpolating kernel clears it. The mosaic's noise, measured before
+/// any warp, stays either way.
+#[test]
+fn only_the_nearest_pixel_keeps_the_quantization_step() {
+    let size = Size2us::new(9, 9);
+    let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
+    image.metadata.derived.set_quantization_sigma(Some(0.25));
+    let mosaic_noise = MosaicNoise {
+        background: [0.1, 0.2, 0.3].map(BackgroundSplit::of_sigma),
+        sky: [1.0; 3],
+        quantization_sigma: Some(0.25),
+    };
+    image.metadata.derived.set_mosaic_noise(Some(mosaic_noise));
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.0)));
+    for method in InterpolationMethod::ALL {
+        let warped = WarpParams::with_method(method).warp(&image, &transform);
+        let expected = (method == InterpolationMethod::Nearest).then_some(0.25);
+        assert_eq!(
+            warped.image.metadata.derived.quantization_sigma(),
+            expected,
+            "{method:?}"
+        );
+        assert_eq!(
+            warped.image.metadata.derived.mosaic_noise(),
+            Some(mosaic_noise),
+            "{method:?}"
+        );
     }
 }

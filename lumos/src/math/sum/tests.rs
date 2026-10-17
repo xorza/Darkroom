@@ -1,12 +1,13 @@
 //! Tests for sum operations.
 
+use std::iter;
+
 use crate::internals::test_rng::TestRng;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
-use crate::math::sum::{SUM_F32_CROSSOVER, mean_f32, scalar, sum_f32, weighted_mean_f32};
+use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
+use crate::simd::Isa;
 use crate::simd::portable::Portable;
 use crate::simd::tier::Tier;
-use crate::simd::{F32_LANES, Isa};
-use std::iter;
 
 /// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
 /// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.
@@ -160,14 +161,23 @@ fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
     }
 }
 
-/// Wherever `mean_f32` and `weighted_mean_f32` take the same path, the unit-weighted mean is the
-/// plain mean bit for bit — by construction, not by numerical luck: `v * 1.0` is exact in f64 and
-/// the weighted kernel accumulates its numerator with the same lane split, fold and padded last
-/// vector as the plain one, so both walk the identical values through the identical additions.
-/// The lengths cross both gates, 8 and 16, or the sweep never leaves the scalar path.
+/// The unit-weighted mean is the plain mean bit for bit at every length — by construction, not by
+/// numerical luck: `v * 1.0` is exact in f64, both entry points go vector at one vector, and the
+/// weighted kernel accumulates its numerator with the same lane split, fold and padded last vector
+/// as the plain one, so both walk the identical values through the identical additions. The
+/// lengths cross the gate, or the sweep never leaves the scalar path.
+///
+/// Eight values whose `±1e7` pairs annihilate, leaving `2·0.001 + 2·0.0003` against terms of 1e7,
+/// are the witness two orders would round apart: left to right and lane `i` beside lane `i + 4`
+/// once landed 2 f32 ULPs apart there.
 #[test]
 fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
-    for len in LENGTHS.into_iter().filter(|&len| !gates_differ(len)) {
+    let cancelling = [1e7f32, 0.001, -1e7, 0.0003, 1e7, 0.001, -1e7, 0.0003];
+    assert_eq!(
+        mean_f32(&cancelling).to_bits(),
+        weighted_mean_f32(&cancelling, &[1.0f32; 8]).to_bits()
+    );
+    for len in LENGTHS {
         let values: Vec<f32> = (0..len).map(|i| 0.1 + (i as f32) * 0.0137).collect();
         let ones = vec![1.0f32; len];
         assert_eq!(
@@ -176,36 +186,6 @@ fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
             "mean and unit-weighted mean disagree at len {len}"
         );
     }
-}
-
-/// Lengths where the two entry points take different paths, so their sums associate differently:
-/// `weighted_sums` goes vector at one vector while `sum_f32` waits for its measured crossover.
-fn gates_differ(len: usize) -> bool {
-    (F32_LANES..SUM_F32_CROSSOVER).contains(&len)
-}
-
-/// The window `gates_differ` excludes is a real divergence, not a technicality worth ignoring, and
-/// pinning it keeps that exclusion honest: unify the gates again and this stops finding its witness
-/// and fails, rather than the exclusion quietly covering nothing.
-///
-/// Eight elements is one full vector. The `±1e7` pairs annihilate, leaving `2·0.001 + 2·0.0003` ≈
-/// 3.25e-4 against terms of 1e7 — a ratio of 3e10. Neither residue is a power of two, so their low
-/// mantissa bits fall below the running total's f64 ULP of 2⁻²⁹ and get rounded away — differently
-/// by each order. `mean_f32` adds left to right; `weighted_mean_f32` pairs lane `i` with lane
-/// `i + 4` before folding. The two land 2 f32 ULPs apart, on every CPU.
-#[test]
-fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
-    assert_eq!(
-        (1..64).filter(|&len| gates_differ(len)).collect::<Vec<_>>(),
-        (8..16).collect::<Vec<_>>()
-    );
-
-    let values = [1e7f32, 0.001, -1e7, 0.0003, 1e7, 0.001, -1e7, 0.0003];
-    assert_eq!(mean_f32(&values).to_bits(), 967_468_226);
-    assert_eq!(
-        weighted_mean_f32(&values, &[1.0f32; 8]).to_bits(),
-        967_468_224
-    );
 }
 
 /// Rounding once beats rounding twice, so `mean_f32` must not be reachable as `sum` then divide.

@@ -21,9 +21,12 @@ mod distortion_map;
 
 use glam::DVec2;
 
-use crate::math::linear_system;
-use crate::registration::distortion::SINGULAR_THRESHOLD;
+use crate::math::linear_system::Lu;
 use crate::registration::point_normalization::PointNormalization;
+
+/// The pivot below which the spline's system is singular. Its coordinates are normalized to about
+/// `[-1, 1]`, so its entries are of order 1, and a pivot 1e-12 of that is a rank's rounding.
+const SINGULAR_THRESHOLD: f64 = 1e-12;
 
 /// Configuration for thin-plate spline fitting.
 ///
@@ -125,12 +128,11 @@ impl ThinPlateSpline {
             solution_y[i] = tgt_norm[i].y;
         }
 
-        // Solved per axis against the same system, and the solve consumes its matrix, so each pass
-        // gets its own copy. The solution replaces the right-hand side it was solved from.
-        let mut scratch = matrix.clone();
-        linear_system::solve_in_place(&mut scratch, &mut solution_x, SINGULAR_THRESHOLD)?;
-        scratch.copy_from_slice(&matrix);
-        linear_system::solve_in_place(&mut scratch, &mut solution_y, SINGULAR_THRESHOLD)?;
+        // One factorization, solved per axis; each solution replaces its right-hand side.
+        let mut pivots = vec![0; matrix_size];
+        let lu = Lu::factor(&mut matrix, &mut pivots, SINGULAR_THRESHOLD)?;
+        lu.solve(&mut solution_x);
+        lu.solve(&mut solution_y);
 
         let weights_x: Vec<f64> = solution_x[..n].to_vec();
         let weights_y: Vec<f64> = solution_y[..n].to_vec();

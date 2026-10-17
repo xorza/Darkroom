@@ -3,7 +3,6 @@
 use std::io;
 use std::path::PathBuf;
 
-use crate::frame::capture_condition::CaptureCondition;
 use crate::io::error::ImageError;
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -60,37 +59,9 @@ pub enum FrameStoreError {
     },
 }
 
-/// Frame `index` of a set was taken under another exposure or sensor temperature than an earlier
-/// frame of it, where the set has to share one: a dark master's thermal signal is one exposure's
-/// at one temperature.
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error(
-    "frame {index} has {condition} {value}, outside the tolerance of frame {reference_index}'s \
-     {reference}"
-)]
-pub struct ConditionMismatch {
-    pub condition: CaptureCondition,
-    pub index: usize,
-    pub value: f64,
-    pub reference_index: usize,
-    pub reference: f64,
-}
-
-impl ConditionMismatch {
-    /// The error with each frame index it holds, a position in the list it was raised over, read
-    /// through `inputs` into the caller's own numbering of those frames.
-    pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
-        Self {
-            index: inputs[self.index],
-            reference_index: inputs[self.reference_index],
-            ..self
-        }
-    }
-}
-
-/// Why a frame could not be read through the decode cache: its decode, or the cache.
+/// Why a frame could not be read through a run's storage: its decode, or the decode cache.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum KeptDecodeError {
+pub(crate) enum LoadError {
     #[error(transparent)]
     Decode(#[from] ImageError),
     #[error(transparent)]

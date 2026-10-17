@@ -107,6 +107,17 @@ impl MappedFile {
         Ok(Self::new(map, None))
     }
 
+    /// The file `file` holds, mapped: for a writer that maps the handle it wrote through before the
+    /// file takes its name, so another writer that replaces the name later is never read instead.
+    ///
+    /// # Safety
+    ///
+    /// As [`Self::open`]: nothing changes the file while it is mapped.
+    pub(crate) unsafe fn of_file(file: &File) -> io::Result<Self> {
+        let map = unsafe { Mmap::map(file) }?;
+        Ok(Self::new(map, None))
+    }
+
     /// `map`, with the handle of its file kept while it lives when one is given.
     fn new(map: Mmap, handle: Option<File>) -> Self {
         files::advise_sequential(&map);

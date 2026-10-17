@@ -4,10 +4,13 @@
 //! around the star, the local sky the tiled map smoothed over, at the cost of needing enough
 //! in-bounds samples to be trustworthy.
 
+use std::ops::{Range, RangeInclusive};
+
 use arrayvec::ArrayVec;
 use glam::DVec2;
 
 use crate::image::masked_plane::MaskedPlane;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
@@ -35,29 +38,21 @@ impl StampBackground {
             pixels: residual,
             mask: no_data,
         } = residual;
-        let icx = pos.x.round() as isize;
-        let icy = pos.y.round() as isize;
-        let inner_r2 = annulus.inner * annulus.inner;
-        let outer_r2 = annulus.outer * annulus.outer;
-        let (width, height) = (residual.width(), residual.height());
-        let reach =
-            isize::try_from(annulus.outer).expect("an annulus is a few hundred pixels across");
+        let spans = || AnnulusSpans::about(pos, annulus, Size2us::from(residual));
+        let measured = |&(x, y): &(usize, usize)| {
+            no_data.is_none_or(|no_data| !no_data.get_at(Vec2us::new(x, y)))
+        };
         // The annulus pixels inside the frame that hold a measurement, row by row, as image
         // positions.
         let pixels = || {
-            (-reach..=reach).flat_map(move |dy| {
-                let y = usize::try_from(icy + dy).ok().filter(|&y| y < height);
-                (-reach..=reach).filter_map(move |dx| {
-                    let r2 = dx.unsigned_abs().pow(2) + dy.unsigned_abs().pow(2);
-                    let x = usize::try_from(icx + dx).ok().filter(|&x| x < width)?;
-                    let at = (x, y?);
-                    let measured =
-                        no_data.is_none_or(|no_data| !no_data.get_at(Vec2us::new(at.0, at.1)));
-                    ((inner_r2..=outer_r2).contains(&r2) && measured).then_some(at)
-                })
-            })
+            spans()
+                .flat_map(|(y, xs)| xs.map(move |x| (x, y)))
+                .filter(measured)
         };
-        let count = pixels().count();
+        let count = match no_data {
+            None => spans().map(|(_, xs)| xs.len()).sum(),
+            Some(_) => pixels().count(),
+        };
         if count < 10 {
             return None;
         }
@@ -87,3 +82,124 @@ impl StampBackground {
 /// The most annulus pixels the sky is measured from: the clipped median of 2048 samples errs by
 /// `1.25·σ/√2048`, under 3% of σ, and a wider annulus is subsampled evenly down to it.
 const MAX_ANNULUS_SAMPLES: usize = 2048;
+
+/// The pixels of an annulus inside a frame, as each row's spans of x: the pixels at `dx, dy` from
+/// the rounded centre with `inner² ≤ dx² + dy² ≤ outer²` lie, on row `dy`, within
+/// `|dx| ≤ ⌊√(outer² − dy²)⌋`, and outside `|dx| ≤ ⌊√(inner² − dy² − 1)⌋` where `dy² < inner²`.
+#[derive(Debug)]
+struct AnnulusSpans {
+    centre_x: isize,
+    centre_y: isize,
+    inner_sq: usize,
+    outer_sq: usize,
+    size: Size2us,
+    rows: RangeInclusive<isize>,
+    /// The right span of the row the left one was handed out of.
+    pending: Option<(usize, Range<usize>)>,
+}
+
+impl AnnulusSpans {
+    fn about(pos: DVec2, annulus: AnnulusRadii, size: Size2us) -> Self {
+        let reach =
+            isize::try_from(annulus.outer).expect("an annulus is a few hundred pixels across");
+        Self {
+            centre_x: pos.x.round() as isize,
+            centre_y: pos.y.round() as isize,
+            inner_sq: annulus.inner * annulus.inner,
+            outer_sq: annulus.outer * annulus.outer,
+            size,
+            rows: -reach..=reach,
+            pending: None,
+        }
+    }
+
+    /// `centre_x + dx` for `dx` in `span`, held to the frame's columns.
+    fn clipped(&self, span: Range<isize>) -> Range<usize> {
+        let width = isize::try_from(self.size.width).expect("a frame's width fits an isize");
+        let column = |dx: isize| {
+            usize::try_from((self.centre_x + dx).clamp(0, width)).expect("clamped non-negative")
+        };
+        column(span.start)..column(span.end)
+    }
+}
+
+impl Iterator for AnnulusSpans {
+    /// A row's image y, and a span of its x.
+    type Item = (usize, Range<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(right) = self.pending.take() {
+            return Some(right);
+        }
+        loop {
+            let dy = self.rows.next()?;
+            let Some(y) = usize::try_from(self.centre_y + dy)
+                .ok()
+                .filter(|&y| y < self.size.height)
+            else {
+                continue;
+            };
+            let dy_sq = dy.unsigned_abs().pow(2);
+            let outer = isize::try_from((self.outer_sq - dy_sq).isqrt()).expect("within reach");
+            let Some(hole) = self.inner_sq.checked_sub(dy_sq + 1) else {
+                return Some((y, self.clipped(-outer..outer + 1)));
+            };
+            let hole = isize::try_from(hole.isqrt()).expect("within reach");
+            self.pending = Some((y, self.clipped(hole + 1..outer + 1)));
+            return Some((y, self.clipped(-outer..-hole)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::star_detection::centroid::stamp_background::*;
+
+    /// The spans hold exactly the pixels a walk over the annulus' square keeps, in its row-major
+    /// order: about the frame's middle, past each edge and corner, and with an annulus wider than
+    /// the frame.
+    #[test]
+    fn the_spans_hold_the_annulus_pixels_in_order() {
+        let size = Size2us::new(40, 30);
+        let annuli = [
+            AnnulusRadii { inner: 5, outer: 9 },
+            AnnulusRadii {
+                inner: 17,
+                outer: 24,
+            },
+            AnnulusRadii { inner: 1, outer: 1 },
+        ];
+        let positions = [
+            DVec2::new(20.0, 15.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(39.4, 29.0),
+            DVec2::new(3.6, 27.2),
+            DVec2::new(-2.0, 15.0),
+        ];
+        for annulus in annuli {
+            for pos in positions {
+                let (cx, cy) = (pos.x.round() as isize, pos.y.round() as isize);
+                let reach = annulus.outer as isize;
+                let (inner_sq, outer_sq) = (annulus.inner.pow(2), annulus.outer.pow(2));
+                let mut walked = Vec::new();
+                for dy in -reach..=reach {
+                    for dx in -reach..=reach {
+                        let (x, y) = (cx + dx, cy + dy);
+                        let r_sq = dx.unsigned_abs().pow(2) + dy.unsigned_abs().pow(2);
+                        let inside = usize::try_from(x)
+                            .ok()
+                            .filter(|&x| x < 40)
+                            .zip(usize::try_from(y).ok().filter(|&y| y < 30));
+                        if let Some(at) = inside.filter(|_| (inner_sq..=outer_sq).contains(&r_sq)) {
+                            walked.push(at);
+                        }
+                    }
+                }
+                let spanned: Vec<_> = AnnulusSpans::about(pos, annulus, size)
+                    .flat_map(|(y, xs)| xs.map(move |x| (x, y)))
+                    .collect();
+                assert_eq!(spanned, walked, "{annulus:?} about {pos}");
+            }
+        }
+    }
+}

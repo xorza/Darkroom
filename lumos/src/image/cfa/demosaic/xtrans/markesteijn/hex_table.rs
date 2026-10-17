@@ -1,13 +1,13 @@
 //! [`HexTable`]: the pattern facts the Markesteijn tiles read, in their input's and their own
 //! strides.
 
-use crate::image::cfa::cfa_colour::CfaColour;
+use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, TILE};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the input crop's stride, which the
-/// samples are read in, and in the tile's, which its buffers are — beside the pattern's colours and
+/// samples are read in, and in the tile's, which its buffers are — beside the pattern's colors and
 /// where its solitary green and its rows of two greens lie: librtprocess's `allhex`, `fc`,
 /// `isgreen`, `sgrow`/`sgcol` and `RightShift`.
 #[derive(Debug)]
@@ -27,7 +27,7 @@ impl HexTable {
             let mut table = [[[0isize; 8]; 3]; 3];
             for (row, cells) in table.iter_mut().enumerate() {
                 for (col, cell) in cells.iter_mut().enumerate() {
-                    for (entry, offset) in cell.iter_mut().zip(hexagons.at(row, col)) {
+                    for (entry, offset) in cell.iter_mut().zip(hexagons.at(Vec2us::new(col, row))) {
                         *entry = isize::from(offset.dy) * stride + isize::from(offset.dx);
                     }
                 }
@@ -37,7 +37,7 @@ impl HexTable {
         let mut right_shift = [false; 3];
         for (row, shift) in right_shift.iter_mut().enumerate() {
             let greens = (0..3)
-                .filter(|&col| pattern.color_at(Vec2us::new(col, row)) == CfaColour::Green)
+                .filter(|&col| pattern.color_at(Vec2us::new(col, row)) == CfaColor::Green)
                 .count();
             *shift = greens == 2;
         }
@@ -63,9 +63,9 @@ impl HexTable {
         &self.tile[row % 3][col % 3]
     }
 
-    /// The colour index at `(row, col)`: 0 red, 1 green, 2 blue.
+    /// The color index at `(row, col)`: 0 red, 1 green, 2 blue.
     #[inline(always)]
-    pub(super) const fn colour(&self, row: usize, col: usize) -> usize {
+    pub(super) const fn color(&self, row: usize, col: usize) -> usize {
         self.pattern.color_at(Vec2us::new(col, row)).index()
     }
 
@@ -74,7 +74,7 @@ impl HexTable {
     pub(super) const fn is_green(&self, row: usize, col: usize) -> bool {
         matches!(
             self.pattern.color_at(Vec2us::new(col % 3, row % 3)),
-            CfaColour::Green
+            CfaColor::Green
         )
     }
 

@@ -43,7 +43,7 @@ impl<const N: usize> DeviationScratch for ArrayVec<f32, N> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClippedStats {
     pub(crate) median: f32,
-    /// MAD-based sigma of the survivors.
+    /// MAD-based sigma of the survivors, with the small-sample factor at their count.
     pub(crate) sigma: f32,
     /// Mean of the survivors. With the median it exposes the residual skew of the clipped
     /// distribution — what SExtractor's Pearson mode estimator corrects for.
@@ -51,14 +51,8 @@ pub(crate) struct ClippedStats {
 }
 
 impl ClippedStats {
-    const ZERO: Self = Self {
-        median: 0.0,
-        sigma: 0.0,
-        mean: 0.0,
-    };
-
     /// Widen a clip pass's estimate with the mean of the same survivors.
-    const fn from_median_mad(location: MedianMad, mean: f32) -> Self {
+    fn from_median_mad(location: MedianMad, mean: f32) -> Self {
         Self {
             median: location.median,
             sigma: location.sigma(),
@@ -68,8 +62,8 @@ impl ClippedStats {
 
     /// Sigma-clipped median, MAD-sigma and mean of `values`, under `clip`.
     ///
-    /// `values` must be NaN-free, as a NaN never passes the clip's band and so has no place among
-    /// the survivors whose mean this reports, and is reordered in place.
+    /// `values` must be non-empty and NaN-free, as a NaN never passes the clip's band and so has no
+    /// place among the survivors whose mean this reports, and is reordered in place.
     ///
     /// `deviations` is borrowed scratch, overwritten in full; only its length matters. Sizing it
     /// is [`DeviationScratch`]'s job, so a heap caller can reuse one `Vec` across calls and a
@@ -79,9 +73,7 @@ impl ClippedStats {
         deviations: &mut impl DeviationScratch,
         clip: SigmaClip,
     ) -> Self {
-        if values.is_empty() {
-            return Self::ZERO;
-        }
+        debug_assert!(!values.is_empty());
         debug_assert!(
             !values.iter().any(|value| value.is_nan()),
             "sigma_clipped requires NaN-free values"
@@ -119,8 +111,8 @@ struct Clipping<'a, D> {
 
 impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
     /// Iteratively clip the values, `iterations` passes at most at `kappa` σ, then measure what
-    /// survived.
-    fn clip(mut self, clip: SigmaClip) -> Survivors {
+    /// survived: the first `count` keys.
+    fn clip(mut self, clip: SigmaClip) -> MedianMad {
         let SigmaClip { kappa, iterations } = clip;
         let (mut len, mut boundary) = (self.keys.len(), 0);
         for _ in 0..iterations {
@@ -128,15 +120,12 @@ impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
                 break;
             }
             match self.pass(len, boundary, kappa) {
-                ClipPass::Converged(location) => return Survivors { location, len },
+                ClipPass::Converged(location) => return location,
                 ClipPass::Clipped { kept, left } => (len, boundary) = (kept, left),
             }
         }
         // A pass keeps at least the values at the median, so `len` stays at least 1.
-        Survivors {
-            location: self.location(len, boundary),
-            len,
-        }
+        self.location(len, boundary)
     }
 
     /// One pass over the first `len` values, at least 3, the keys before `boundary` none above any
@@ -151,9 +140,13 @@ impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
         let median = statistics::median_of_partitioned_keys::<f32>(&mut self.keys[..len], boundary);
         self.fill_deviations(len, median);
         let mad = statistics::median_of_magnitudes(&mut self.deviations[..len]);
-        let sigma = statistics::mad_to_sigma(mad);
+        let sigma = statistics::sigma_of_mad(mad, len);
         if sigma <= Spread::resolution(median) {
-            return ClipPass::Converged(MedianMad { median, mad: 0.0 });
+            return ClipPass::Converged(MedianMad {
+                median,
+                mad: 0.0,
+                count: len,
+            });
         }
 
         // The selection reordered the deviations, so each is taken again from its value. Every key
@@ -172,7 +165,11 @@ impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
         let left = kept;
         close_up(len / 2..len, &mut kept);
         if kept == len {
-            ClipPass::Converged(MedianMad { median, mad })
+            ClipPass::Converged(MedianMad {
+                median,
+                mad,
+                count: len,
+            })
         } else {
             ClipPass::Clipped { kept, left }
         }
@@ -186,6 +183,7 @@ impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
         MedianMad {
             median,
             mad: statistics::median_of_magnitudes(&mut self.deviations[..len]),
+            count: len,
         }
     }
 
@@ -197,13 +195,6 @@ impl<D: Fn(i32) -> f32 + Copy> Clipping<'_, D> {
     }
 }
 
-/// The location and the count of the values a clip kept at the front of its keys.
-#[derive(Debug, Clone, Copy)]
-struct Survivors {
-    location: MedianMad,
-    len: usize,
-}
-
 /// Iteratively clip `values`, then measure what survived.
 ///
 /// `deviations` must already be `values.len()` long — [`ClippedStats::sigma_clipped`] sizes it
@@ -213,7 +204,7 @@ fn sigma_clipped_core(values: &mut [f32], deviations: &mut [f32], clip: SigmaCli
     // selects twice, and the keys select with nothing mapped. Keys left unmapped are the values'
     // own bits, which read back as the values with no flip.
     let mut order = OrderKeys::of(values);
-    let survivors = if order.mapped() {
+    let location = if order.mapped() {
         Clipping {
             keys: order.keys(),
             deviations,
@@ -229,5 +220,5 @@ fn sigma_clipped_core(values: &mut [f32], deviations: &mut [f32], clip: SigmaCli
         .clip(clip)
     };
     let values = order.into_values();
-    ClippedStats::from_median_mad(survivors.location, sum::mean_f32(&values[..survivors.len]))
+    ClippedStats::from_median_mad(location, sum::mean_f32(&values[..location.count]))
 }

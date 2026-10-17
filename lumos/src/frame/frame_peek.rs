@@ -3,11 +3,10 @@
 use std::fmt::Debug;
 
 use crate::frame::frame_stats::FrameStats;
-use crate::frame::stackable_image::StackableImage;
-use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::cfa::cfa_frame_info::CfaFrameInfo;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::stackable_image::StackableImage;
+use crate::io::frame_info::FrameInfo;
 use crate::memory::footprint::Footprint;
 
 /// What one frame is worth to a memory estimate, before the rest of the set is read: its geometry,
@@ -16,9 +15,9 @@ use crate::memory::footprint::Footprint;
 pub(crate) struct FramePeek {
     pub(crate) dimensions: ImageDimensions,
     /// What the decoder holds beside the frame while it makes it — see
-    /// [`CfaFrameInfo::decoder_bytes`].
+    /// [`FrameInfo::decoder_bytes`].
     pub(crate) decoder_bytes: usize,
-    /// The pattern of a mosaic frame, whose statistics measure its noise per colour; `None` for
+    /// The pattern of a mosaic frame, whose statistics measure its noise per color; `None` for
     /// any other frame.
     pub(crate) mosaic: Option<CfaType>,
 }
@@ -34,10 +33,11 @@ impl FramePeek {
         }
     }
 
-    /// Bytes one such frame occupies once resident: its own pixels and its flag plane, which also
-    /// holds the mask of a frame with pixels it has no measurement for.
+    /// Bytes one such frame occupies once resident: its own pixels and its flag plane, charged to
+    /// every frame, since a decoder that flags saturation gives one to most, and which also holds
+    /// the mask of a frame with pixels it has no measurement for.
     pub(crate) const fn resident_bytes(self) -> usize {
-        StoredLayout::decoded(self.dimensions).heap_bytes(self.dimensions)
+        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes()
     }
 
     /// What one such frame's way into a stack holds on `workers`: its decode, the decoder's own
@@ -55,10 +55,10 @@ impl FramePeek {
     }
 }
 
-impl From<CfaFrameInfo> for FramePeek {
+impl From<FrameInfo> for FramePeek {
     /// A CFA peek answers everything this needs and the demosaic kind besides, which no memory
     /// estimate reads.
-    fn from(info: CfaFrameInfo) -> Self {
+    fn from(info: FrameInfo) -> Self {
         Self {
             dimensions: info.dimensions,
             decoder_bytes: info.decoder_bytes,
@@ -71,6 +71,7 @@ impl From<CfaFrameInfo> for FramePeek {
 mod tests {
     use super::*;
     use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::channel_layout::ChannelLayout;
 
     /// A 100 × 100 one-channel frame resides as 40 000 B of samples and 10 000 B of flags.
     ///
@@ -85,7 +86,7 @@ mod tests {
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
         let rggb = Some(CfaType::Bayer(CfaPattern::Rggb));
         let peek = |mosaic, decoder_bytes| FramePeek {
-            dimensions: ImageDimensions::new((100, 100), 1),
+            dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
             decoder_bytes,
             mosaic,
         };

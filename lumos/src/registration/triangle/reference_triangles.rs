@@ -3,12 +3,10 @@
 
 use std::f64::consts::SQRT_2;
 
-use glam::DVec2;
-
 use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::geometry::Triangle;
 use crate::registration::triangle::triangle_config::TriangleConfig;
-use crate::registration::triangle::voting::VoteMatrix;
+use crate::registration::triangle::voting::Votes;
 
 /// The vertex permutations of a triangle: role `i` of one takes role `roles[i]` of the other, and
 /// an odd permutation reverses the orientation.
@@ -33,12 +31,7 @@ pub(super) struct ReferenceTriangles {
 impl ReferenceTriangles {
     /// `triangles` indexed by their ratios; `None` for no triangles.
     pub(super) fn new(triangles: Vec<Triangle>) -> Option<Self> {
-        let invariants = KdTree::build(
-            triangles
-                .iter()
-                .map(|t| DVec2::new(t.ratios.0, t.ratios.1))
-                .collect(),
-        )?;
+        let invariants = KdTree::build(triangles.iter().map(|t| t.ratios).collect())?;
         Some(Self {
             triangles,
             invariants,
@@ -50,12 +43,8 @@ impl ReferenceTriangles {
     /// tolerance, noise can swap their order, and with it the vertex roles and the orientation the
     /// triangle reads; every permutation that trades only such roles votes too, its orientation
     /// test reversed when it is odd.
-    pub(super) fn vote(
-        &self,
-        target_triangles: &[Triangle],
-        config: &TriangleConfig,
-    ) -> VoteMatrix {
-        let mut vote_matrix = VoteMatrix::default();
+    pub(super) fn vote(&self, target_triangles: &[Triangle], config: &TriangleConfig) -> Votes {
+        let mut votes = Votes::default();
         let mut candidates: Vec<usize> = Vec::new();
         let tolerance = config.ratio_tolerance;
 
@@ -65,7 +54,7 @@ impl ReferenceTriangles {
         let l2_radius = tolerance * SQRT_2;
 
         for target_tri in target_triangles {
-            let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);
+            let query = target_tri.ratios;
             self.invariants
                 .radius_indices_into(query, l2_radius, &mut candidates);
 
@@ -85,13 +74,13 @@ impl ReferenceTriangles {
                         continue;
                     }
                     for (i, &role) in roles.iter().enumerate() {
-                        vote_matrix.increment(ref_tri.indices[i], target_tri.indices[role]);
+                        votes.increment(ref_tri.indices[i], target_tri.indices[role]);
                     }
                 }
             }
         }
 
-        vote_matrix
+        votes
     }
 }
 

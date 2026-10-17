@@ -1,15 +1,21 @@
 use fits_well::header::Header;
-
-use crate::image::calibration_state::CalibrationState;
-use crate::image::cfa::cfa_type::CfaType;
 use fits_well::image::SampleType;
 
-use crate::frame::unverified_conditions::UnverifiedConditions;
+use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
+use crate::image::dark_comparison::DarkComparison;
+use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::RowOrder;
+use crate::image::observation_header::ObservationHeader;
+use crate::image::temperature_difference::TemperatureDifference;
+use crate::image::temperature_source::TemperatureSource;
+use crate::internals::fits::fits_refusal;
+use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::metadata::{
-    self, Bayerpat, SOURCE_ROW_ORDER, parse_sexagesimal, read_declared_row_order, read_row_order,
+    self, Bayerpat, SOURCE_ROW_ORDER, domain_keywords, parse_sexagesimal,
+    read_camera_white_balance, read_declared_row_order, read_row_order,
 };
 
 /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
@@ -195,10 +201,10 @@ fn invalid_sexagesimal_values_are_rejected() {
 #[test]
 fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
     let header = bayer_header("TRUE", None);
-    assert!(matches!(
-        Bayerpat::Required.read_cfa(&header, 4, None),
-        Err(fits_well::FitsError::TypeMismatch { name, .. }) if name == "BAYERPAT"
-    ));
+    assert_eq!(
+        fits_refusal(Bayerpat::Required.read_cfa(&header, 4, None).unwrap_err()),
+        FitsRefusal::UnstatedBayerPhase
+    );
     assert_eq!(
         Bayerpat::Required
             .read_cfa(&header, 4, Some(CfaPattern::Grbg))
@@ -240,25 +246,32 @@ fn optional_keywords_of_the_wrong_type_are_absent() {
     header.set("CCD-TEMP", -300.0).unwrap();
     header.set("CCDTEMP", -10.0).unwrap();
     let metadata = metadata::read(&header, SampleType::U16);
-    assert_eq!(metadata.xbinning, None);
-    assert_eq!(metadata.exposure_time, None);
-    assert_eq!(metadata.calibration, CalibrationState::NONE);
-    assert_eq!(metadata.gain, Some(120.0));
-    assert_eq!(metadata.ccd_temp, Some(-10.0));
-    assert_eq!(metadata.sample_type, Some(SampleType::U16));
+    assert_eq!(metadata.header.xbinning, None);
+    assert_eq!(metadata.header.exposure_time, None);
+    assert_eq!(metadata.derived.calibration(), CalibrationState::NONE);
+    assert_eq!(metadata.header.gain, Some(120.0));
+    assert_eq!(metadata.header.ccd_temp, Some(-10.0));
+    assert_eq!(metadata.header.sample_type, Some(SampleType::U16));
     // 05h35m17.3s = 5.588139 h, times 15° per hour.
-    let ra = metadata.ra_deg.unwrap();
+    let ra = metadata.header.ra_deg.unwrap();
     assert!(
         (ra - (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0).abs() < 1e-12,
         "{ra}"
     );
-    assert_eq!(metadata.dec_deg, None);
+    assert_eq!(metadata.header.dec_deg, None);
 
     header.set("EXPTIME", -1.0).unwrap();
-    assert_eq!(metadata::read(&header, SampleType::U16).exposure_time, None);
+    assert_eq!(
+        metadata::read(&header, SampleType::U16)
+            .header
+            .exposure_time,
+        None
+    );
     header.set("EXPOSURE", 0.0).unwrap();
     assert_eq!(
-        metadata::read(&header, SampleType::U16).exposure_time,
+        metadata::read(&header, SampleType::U16)
+            .header
+            .exposure_time,
         Some(0.0)
     );
 }
@@ -273,21 +286,21 @@ fn numeric_keywords_hold_their_ranges() {
     let read = |header: &Header, field: Field| -> Option<f64> {
         let metadata = metadata::read(header, SampleType::U16);
         match field {
-            Field::ExposureTime => metadata.exposure_time,
-            Field::Gain => metadata.gain,
-            Field::Egain => metadata.egain,
-            Field::CcdTemp => metadata.ccd_temp,
-            Field::CameraTemp => metadata.camera_temp,
-            Field::SetTemp => metadata.set_temp,
-            Field::FocalLength => metadata.focal_length,
-            Field::Airmass => metadata.airmass,
-            Field::PixelSizeX => metadata.pixel_size_x,
-            Field::PixelSizeY => metadata.pixel_size_y,
+            Field::ExposureTime => metadata.header.exposure_time,
+            Field::Gain => metadata.header.gain,
+            Field::Egain => metadata.header.egain,
+            Field::CcdTemp => metadata.header.ccd_temp,
+            Field::CameraTemp => metadata.header.camera_temp,
+            Field::SetTemp => metadata.header.set_temp,
+            Field::FocalLength => metadata.header.focal_length,
+            Field::Airmass => metadata.header.airmass,
+            Field::PixelSizeX => metadata.header.pixel_size_x,
+            Field::PixelSizeY => metadata.header.pixel_size_y,
             Field::DataMax => read_data_max(header),
-            Field::Iso => metadata.iso.map(f64::from),
-            Field::XBinning => metadata.xbinning.map(f64::from),
-            Field::YBinning => metadata.ybinning.map(f64::from),
-            Field::Offset => metadata.offset.map(f64::from),
+            Field::Iso => metadata.header.iso.map(f64::from),
+            Field::XBinning => metadata.header.xbinning.map(f64::from),
+            Field::YBinning => metadata.header.ybinning.map(f64::from),
+            Field::Offset => metadata.header.offset.map(f64::from),
             field => panic!("{field:?} is not numeric"),
         }
     };
@@ -302,6 +315,8 @@ fn numeric_keywords_hold_their_ranges() {
         (Field::Airmass, 1.0, 0.99),
         (Field::PixelSizeX, 3.76, 0.0),
         (Field::PixelSizeY, 3.76, -3.76),
+        // A saturation level of 0, a "not computed" placeholder, would flag every sample.
+        (Field::DataMax, 0.5, 0.0),
     ];
     for (field, kept, refused) in reals {
         let mut header = Header::new();
@@ -310,10 +325,6 @@ fn numeric_keywords_hold_their_ranges() {
         header.set(field.keywords()[0], refused).unwrap();
         assert_eq!(read(&header, field), None, "{field:?} at {refused}");
     }
-    let mut header = Header::new();
-    header.set("DATAMAX", -12.5).unwrap();
-    assert_eq!(read(&header, Field::DataMax), Some(-12.5));
-
     let integers = [
         (Field::Iso, 1, Some(0)),
         (Field::XBinning, 1, Some(0)),
@@ -352,7 +363,7 @@ fn wcs_pointing_follows_the_axis_types() {
         header.set("CRVAL1", 83.8).unwrap();
         header.set("CRVAL2", -5.4).unwrap();
         let metadata = metadata::read(&header, SampleType::F32);
-        [metadata.ra_deg, metadata.dec_deg]
+        [metadata.header.ra_deg, metadata.header.dec_deg]
     };
     assert_eq!(wcs(["RA---TAN", "DEC--TAN"]), [Some(83.8), Some(-5.4)]);
     assert_eq!(wcs(["DEC--TAN", "RA---TAN"]), [Some(-5.4), Some(83.8)]);
@@ -372,28 +383,28 @@ fn every_alias_reads_into_its_field() {
         let real = |value: Option<f64>| value.map(|value| format!("{value}"));
         let integer = |value: Option<i64>| value.map(|value| format!("{value}"));
         match field {
-            MetadataField::Object => text(metadata.object),
-            MetadataField::Instrument => text(metadata.instrument),
-            MetadataField::Telescope => text(metadata.telescope),
-            MetadataField::DateObs => text(metadata.date_obs),
-            MetadataField::DateLocal => text(metadata.date_local),
-            MetadataField::Filter => text(metadata.filter),
-            MetadataField::ImageType => text(metadata.image_type),
-            MetadataField::ExposureTime => real(metadata.exposure_time),
-            MetadataField::Gain => real(metadata.gain),
-            MetadataField::Egain => real(metadata.egain),
-            MetadataField::CcdTemp => real(metadata.ccd_temp),
-            MetadataField::CameraTemp => real(metadata.camera_temp),
-            MetadataField::SetTemp => real(metadata.set_temp),
-            MetadataField::FocalLength => real(metadata.focal_length),
-            MetadataField::Airmass => real(metadata.airmass),
-            MetadataField::PixelSizeX => real(metadata.pixel_size_x),
-            MetadataField::PixelSizeY => real(metadata.pixel_size_y),
+            MetadataField::Object => text(metadata.header.object),
+            MetadataField::Instrument => text(metadata.header.instrument),
+            MetadataField::Telescope => text(metadata.header.telescope),
+            MetadataField::DateObs => text(metadata.header.date_obs),
+            MetadataField::DateLocal => text(metadata.header.date_local),
+            MetadataField::Filter => text(metadata.header.filter),
+            MetadataField::ImageType => text(metadata.header.image_type),
+            MetadataField::ExposureTime => real(metadata.header.exposure_time),
+            MetadataField::Gain => real(metadata.header.gain),
+            MetadataField::Egain => real(metadata.header.egain),
+            MetadataField::CcdTemp => real(metadata.header.ccd_temp),
+            MetadataField::CameraTemp => real(metadata.header.camera_temp),
+            MetadataField::SetTemp => real(metadata.header.set_temp),
+            MetadataField::FocalLength => real(metadata.header.focal_length),
+            MetadataField::Airmass => real(metadata.header.airmass),
+            MetadataField::PixelSizeX => real(metadata.header.pixel_size_x),
+            MetadataField::PixelSizeY => real(metadata.header.pixel_size_y),
             MetadataField::DataMax => real(read_data_max(header)),
-            MetadataField::Iso => integer(metadata.iso.map(i64::from)),
-            MetadataField::XBinning => integer(metadata.xbinning.map(i64::from)),
-            MetadataField::YBinning => integer(metadata.ybinning.map(i64::from)),
-            MetadataField::Offset => integer(metadata.offset.map(i64::from)),
+            MetadataField::Iso => integer(metadata.header.iso.map(i64::from)),
+            MetadataField::XBinning => integer(metadata.header.xbinning.map(i64::from)),
+            MetadataField::YBinning => integer(metadata.header.ybinning.map(i64::from)),
+            MetadataField::Offset => integer(metadata.header.offset.map(i64::from)),
         }
     };
     let set = |header: &mut Header, field: MetadataField, keyword: &str, value: i32| {
@@ -453,54 +464,201 @@ fn every_alias_reads_into_its_field() {
     assert_eq!(written.get_real("EXPOSURE").unwrap(), None);
 }
 
-/// Each part calibration removed, and each condition a dark match left uncompared, is written as
-/// its own logical keyword and read back as the same record; a part not set writes nothing.
+/// Each part calibration removed is written as its own logical keyword, and the dark comparison
+/// as its reading, its exposure and any difference; each reads back as the same record, and a
+/// part not set writes nothing.
 #[test]
 fn the_calibration_record_round_trips() {
-    let temperature = UnverifiedConditions {
-        exposure: false,
-        temperature: true,
+    let unshared = DarkComparison {
+        exposure_compared: true,
+        temperature: None,
+        temperature_difference: None,
     };
-    let both = UnverifiedConditions {
-        exposure: true,
-        temperature: true,
+    let differing = DarkComparison {
+        exposure_compared: false,
+        temperature: Some(TemperatureSource::Camera),
+        temperature_difference: Some(TemperatureDifference {
+            reading: TemperatureSource::Camera,
+            frame: 21.5,
+            dark: 23.25,
+        }),
     };
-    for (calibration, unverified_dark) in [
-        (CalibrationState::NONE, UnverifiedConditions::NONE),
-        (CalibrationState::BIAS, temperature),
+    for (calibration, dark, keywords) in [
+        (CalibrationState::NONE, None, vec![]),
+        (
+            CalibrationState::BIAS,
+            Some(unshared),
+            vec![("LUMDKRD", "NONE")],
+        ),
         (
             CalibrationState::THERMAL.union(CalibrationState::FLAT),
-            both,
+            Some(differing),
+            vec![("LUMDKRD", "CAMERA"), ("LUMDKDRD", "CAMERA")],
         ),
         (
             CalibrationState::ADDITIVE.union(CalibrationState::FLAT),
-            UnverifiedConditions::NONE,
+            None,
+            vec![],
         ),
     ] {
         let mut header = Header::new();
         let metadata = ImageMetadata {
-            calibration,
-            unverified_dark,
-            ..Default::default()
+            header: ObservationHeader::default(),
+            derived: DerivedFacts::builder()
+                .calibration(calibration)
+                .dark_comparison(dark)
+                .build(),
         };
         metadata::write_image(&mut header, &metadata, None).unwrap();
         for (keyword, set) in [
             ("LUMCALB", calibration.bias),
             ("LUMCALD", calibration.thermal),
             ("LUMCALF", calibration.flat),
-            ("LUMUVEXP", unverified_dark.exposure),
-            ("LUMUVTMP", unverified_dark.temperature),
         ] {
             assert_eq!(
                 header.get_logical(keyword).unwrap(),
                 set.then_some(true),
-                "{calibration:?}, {unverified_dark:?}: {keyword}"
+                "{calibration:?}: {keyword}"
             );
         }
+        for keyword in ["LUMDKRD", "LUMDKDRD"] {
+            let expected = keywords
+                .iter()
+                .find(|(written, _)| *written == keyword)
+                .map(|(_, value)| *value);
+            assert_eq!(header.get_text(keyword).unwrap(), expected, "{dark:?}");
+        }
+        assert_eq!(
+            header.get_logical("LUMDKEXP").unwrap(),
+            dark.map(|dark| dark.exposure_compared),
+            "{dark:?}"
+        );
         let read = metadata::read(&header, SampleType::F32);
         assert_eq!(
-            (read.calibration, read.unverified_dark),
-            (calibration, unverified_dark)
+            (read.derived.calibration(), read.derived.dark_comparison()),
+            (calibration, dark)
         );
     }
+}
+
+/// Each rule lumos holds a header to is refused as its own case: a pattern no reader knows, a
+/// Bayer type without its phase, an X-Trans row missing, short, of a digit past 2, or six rows of
+/// no layout, a white balance stated in part or of a multiplier at zero, and a domain keyword of a
+/// value its meaning does not have.
+#[test]
+fn each_header_rule_is_refused_as_its_own_case() {
+    let header = |entries: &[(&str, &str)]| {
+        let mut header = Header::new();
+        for &(keyword, value) in entries {
+            header.set(keyword, value).unwrap();
+        }
+        header
+    };
+    let xtrans = |rows: [&str; 6]| {
+        let mut entries = vec![("CFATYPE", "XTRANS")];
+        let names = [
+            "XTRNROW0", "XTRNROW1", "XTRNROW2", "XTRNROW3", "XTRNROW4", "XTRNROW5",
+        ];
+        entries.extend(names.into_iter().zip(rows));
+        header(&entries)
+    };
+    let valid = ["110112", "112110", "201021", "112110", "110112", "021201"];
+    assert!(metadata::read_cfa(&xtrans(valid), 6, None).is_ok());
+    let mut short = valid;
+    short[3] = "11211";
+    let mut digit = valid;
+    digit[5] = "021203";
+    for (name, read, expected) in [
+        (
+            "an unknown CFATYPE",
+            header(&[("CFATYPE", "QUAD")]),
+            FitsRefusal::CfaTypeKeyword {
+                value: "QUAD".to_owned(),
+            },
+        ),
+        (
+            "BAYER with no BAYERPAT",
+            header(&[("CFATYPE", "BAYER")]),
+            FitsRefusal::MissingBayerPattern,
+        ),
+        (
+            "a BAYERPAT of no phase",
+            header(&[("BAYERPAT", "RGBG")]),
+            FitsRefusal::BayerPattern {
+                value: "RGBG".to_owned(),
+            },
+        ),
+        (
+            "a missing X-Trans row",
+            header(&[("CFATYPE", "XTRANS")]),
+            FitsRefusal::XTransRow { row: 0 },
+        ),
+        (
+            "a short X-Trans row",
+            xtrans(short),
+            FitsRefusal::XTransRow { row: 3 },
+        ),
+        (
+            "a digit past 2",
+            xtrans(digit),
+            FitsRefusal::XTransRow { row: 5 },
+        ),
+    ] {
+        assert_eq!(
+            fits_refusal(metadata::read_cfa(&read, 6, None).unwrap_err()),
+            expected,
+            "{name}"
+        );
+    }
+    assert!(matches!(
+        fits_refusal(metadata::read_cfa(&xtrans(["111111"; 6]), 6, None).unwrap_err()),
+        FitsRefusal::XTransPattern(_)
+    ));
+
+    let mut partial = Header::new();
+    partial.set("LUMWBR", 2.0).unwrap();
+    assert_eq!(
+        fits_refusal(read_camera_white_balance(&partial).unwrap_err()),
+        FitsRefusal::PartialWhiteBalance
+    );
+    let mut zero = partial.clone();
+    for keyword in ["LUMWBG1", "LUMWBB", "LUMWBG2"] {
+        zero.set(keyword, 1.0).unwrap();
+    }
+    assert_eq!(
+        read_camera_white_balance(&zero).unwrap(),
+        Some([2.0, 1.0, 1.0, 1.0])
+    );
+    zero.set("LUMWBB", 0.0).unwrap();
+    assert_eq!(
+        fits_refusal(read_camera_white_balance(&zero).unwrap_err()),
+        FitsRefusal::WhiteBalanceRange
+    );
+
+    assert_eq!(
+        fits_refusal(
+            domain_keywords::read_origin(&header(&[("LUMSORIG", "GUESSED")])).unwrap_err()
+        ),
+        FitsRefusal::ScaleOrigin {
+            value: "GUESSED".to_owned()
+        }
+    );
+    assert_eq!(
+        fits_refusal(domain_keywords::read_pedestal(&header(&[("LUMPED", "HALF")])).unwrap_err()),
+        FitsRefusal::Pedestal {
+            value: "HALF".to_owned()
+        }
+    );
+    assert_eq!(
+        fits_refusal(domain_keywords::read_pedestal(&header(&[("LUMPED", "KEPT")])).unwrap_err()),
+        FitsRefusal::PedestalLevel
+    );
+    let mut negative = Header::new();
+    negative.set("LUMQSIG", -1.0).unwrap();
+    assert_eq!(
+        fits_refusal(domain_keywords::read_quantization_sigma(&negative).unwrap_err()),
+        FitsRefusal::KeywordOutOfRange {
+            keyword: "LUMQSIG".to_owned()
+        }
+    );
 }

@@ -1,5 +1,8 @@
+use crate::image::background_split::BackgroundSplit;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
+use crate::image::mosaic_noise::MosaicNoise;
 use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
@@ -10,7 +13,6 @@ use crate::image_ops::local_contrast::LocalContrast;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::internals::images::gray_image;
 use crate::math::size2us::Size2us;
-use crate::noise::mosaic_noise::MosaicNoise;
 
 /// An op under test, applied in place.
 type Op = fn(&mut LinearImage) -> Result<(), OpError>;
@@ -21,9 +23,9 @@ type Op = fn(&mut LinearImage) -> Result<(), OpError>;
 /// 64 of them and its gradient is there to remove.
 #[test]
 fn every_op_drops_the_noise_of_the_samples_it_changed() {
-    let dimensions = ImageDimensions::new((128, 128), 3);
+    let dimensions = ImageDimensions::new((128, 128), ChannelLayout::Rgb);
     let frame = || {
-        let mut image = LinearImage::from_pixels(
+        let mut image = LinearImage::from_interleaved(
             dimensions,
             (0..dimensions.sample_count())
                 .map(|index| {
@@ -35,13 +37,15 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
                 })
                 .collect(),
         );
-        image.metadata.quantization_sigma = Some(1.0 / 65_536.0);
-        image.metadata.mosaic_noise = Some(MosaicNoise {
-            sigma: [0.01; 3],
-            read_share: [0.0; 3],
+        image
+            .metadata
+            .derived
+            .set_quantization_sigma(Some(1.0 / 65_536.0));
+        image.metadata.derived.set_mosaic_noise(Some(MosaicNoise {
+            background: [BackgroundSplit::of_sigma(0.01); 3],
             sky: [0.1, 0.15, 0.2],
             quantization_sigma: Some(1.0 / 65_536.0),
-        });
+        }));
         image
     };
     let ops: [(&str, Op); 7] = [
@@ -76,8 +80,8 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
                 .collect::<Vec<_>>(),
             "{name} left the samples as they were"
         );
-        assert_eq!(after.metadata.quantization_sigma, None, "{name}");
-        assert_eq!(after.metadata.mosaic_noise, None, "{name}");
+        assert_eq!(after.metadata.derived.quantization_sigma(), None, "{name}");
+        assert_eq!(after.metadata.derived.mosaic_noise(), None, "{name}");
     }
 }
 
@@ -92,8 +96,8 @@ fn every_op_apply_rejects_an_invalid_config() {
         let mut image = gray_image(Size2us::new(4, 4), vec![0.0; 16]);
         let error = apply(&mut image).unwrap_err();
         assert!(
-            matches!(&error, OpError::InvalidConfig(invalid) if invalid.field == field),
-            "expected an InvalidConfig on {field}, got {error:?}"
+            matches!(&error, OpError::Config(invalid) if invalid.field == field),
+            "expected a config error on {field}, got {error:?}"
         );
     }
 
@@ -106,7 +110,9 @@ fn every_op_apply_rejects_an_invalid_config() {
             .apply(image)
         });
     }
-    rejects("SCNR amount", |image| Scnr::additive_mask(1.5).apply(image));
+    rejects("SCNR strength", |image| {
+        Scnr::additive_mask(1.5).apply(image)
+    });
     rejects("denoise strength", |image| {
         Denoise {
             strength: 1.5,

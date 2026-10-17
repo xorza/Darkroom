@@ -10,17 +10,24 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::files::{LIGHTS, MasterFiles};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
-use crate::calibration::calibration_masters::{
-    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, MasterBuild,
-};
+use crate::calibration::calibration_masters::{CalibrationMasters, MasterBuild};
 use crate::calibration::calibration_set::CalibrationSet;
+use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::master_cache::NoMasterCache;
+use crate::calibration::{cosmic_ray, defect_map, prepared_flat};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::progress::progress_monitor::ProgressMonitor;
 
 pub(crate) fn atomic(c: &mut Criterion) {
+    apply(c);
+    defect_map::bench::atomic(c);
+    cosmic_ray::bench::atomic(c);
+    prepared_flat::bench::atomic(c);
+}
+
+fn apply(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
     let mut group = Kind::Atomic.group(c, "calibration/apply/frame", Scale::Frame);
@@ -28,7 +35,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("light/rggb", field.name()), |b| {
         let masters = CalibrationMasters::from_images(
             scene::masters(FRAME, cfa_type),
-            DEFAULT_SIGMA_THRESHOLD,
+            SigmaThreshold::DEFAULT,
             &CancelToken::never(),
         )
         .unwrap();
@@ -36,7 +43,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         b.iter_batched_ref(
             || light.clone(),
             |light| masters.calibrate(light).unwrap(),
-            fixture::fresh_copies(size_of_val(light.data.pixels())),
+            fixture::fresh_copies(size_of_val(light.data().pixels())),
         );
     });
 }
@@ -66,11 +73,11 @@ pub(crate) fn integration(c: &mut Criterion) {
             CalibrationMasters::build(
                 MasterBuild {
                     frames,
-                    sigma_threshold: DEFAULT_SIGMA_THRESHOLD,
+                    sigma_threshold: SigmaThreshold::DEFAULT,
                     cache: &NoMasterCache,
                 },
                 &ingest,
-                &ProgressMonitor::unattended(),
+                ProgressMonitor::unattended(),
             )
             .unwrap()
         });

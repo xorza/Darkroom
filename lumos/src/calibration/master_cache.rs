@@ -4,19 +4,19 @@ use crate::calibration::master_recipe::MasterRecipe;
 use crate::calibration::master_role::MasterRole;
 use crate::image::cfa::cfa_image::CfaImage;
 
-/// What one role's master is stacked from: its frames, the master taken from each of them with
-/// that master's own frames — a flat's flat-dark or bias — and how lumos stacks it. A cache keys a
-/// master by all of them, so a master stacked before its subtractor changed, by an older lumos, or
-/// under other decode options, is stacked again.
+/// What one role's master is stacked from: its frames, the masters taken from each of them with
+/// those masters' own frames — a flat's bias and flat-dark — and how lumos stacks it. A cache keys
+/// a master by all of them, so a master stacked before its subtractor changed, by an older lumos,
+/// or under other decode options, is stacked again.
 #[derive(Debug)]
 pub struct MasterInputs<'a, P> {
     pub role: MasterRole,
     pub frames: &'a [P],
-    pub subtracted: Option<SubtractedFrames<'a, P>>,
+    pub subtracted: &'a [SubtractedFrames<'a, P>],
     pub recipe: MasterRecipe,
 }
 
-/// The frames of the master a stack takes from each of its frames, and that master's role.
+/// The frames of a master a stack takes from each of its frames, and that master's role.
 #[derive(Debug)]
 pub struct SubtractedFrames<'a, P> {
     pub role: MasterRole,

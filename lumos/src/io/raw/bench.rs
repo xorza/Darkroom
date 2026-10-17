@@ -86,7 +86,7 @@ impl RawSensor {
                 u16::try_from(BLACK + CHANNEL_BLACK[raw::filter_color(RGGB, y, x)]).unwrap()
             })
             .collect();
-        for (index, &sample) in light.data.pixels().iter().enumerate() {
+        for (index, &sample) in light.data().pixels().iter().enumerate() {
             let (x, y) = (index % active.width, index / active.width);
             let level = black.of_channel(raw::filter_color(RGGB, y, x))
                 + (f64::from(sample) - f64::from(BIAS)) * span;
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(decoded.pixels.len(), active.pixel_count());
         let headroom =
             f64::from(u32::from(WHITE) - BLACK - CHANNEL_BLACK.into_iter().max().unwrap());
-        for (&decoded, &sample) in decoded.pixels.iter().zip(light.data.pixels()) {
+        for (&decoded, &sample) in decoded.pixels.iter().zip(light.data().pixels()) {
             let above_black = f64::from(sample) - f64::from(BIAS);
             if above_black * span < headroom {
                 let error = (f64::from(decoded) - above_black).abs();

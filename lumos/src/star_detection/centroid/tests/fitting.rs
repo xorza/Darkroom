@@ -1,6 +1,7 @@
+use rayon::prelude::*;
+
 use super::*;
 use crate::math::error_function;
-use rayon::prelude::*;
 
 /// Every centroid method over a 10 × 10 grid of sub-pixel offsets in 0.1 px steps, each fit seeded
 /// at the pixel nearest the star; the cells are independent, so they run in parallel.
@@ -156,7 +157,7 @@ fn moment_metrics_of_gaussian_stars() {
 /// once here rather than per model.
 #[test]
 fn fit_plausibility_rejects_non_finite_and_keeps_its_bounds() {
-    use crate::star_detection::centroid::fit_is_plausible;
+    use crate::star_detection::centroid::profile_problem::fit_is_plausible;
 
     let at = DVec2::splat(8.0);
     let radius = 8usize;

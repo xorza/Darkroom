@@ -71,7 +71,7 @@ fn windowed_centroid_limits() {
 }
 
 #[test]
-fn compute_star_of_a_clean_star() {
+fn moment_star_of_a_clean_star() {
     let size = Size2us::new(64, 64);
     let centre = DVec2::splat(32.0);
     let npix = (2 * TEST_STAMP_RADIUS + 1) as f32;
@@ -293,7 +293,7 @@ fn a_one_sided_tail_moves_sround() {
 }
 
 #[test]
-fn compute_star_local_offset_removes_what_the_global_map_left() {
+fn moment_star_local_offset_removes_what_the_global_map_left() {
     // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map that
     // under-estimates it at 0.05 (noise 0.01): the residual still carries 0.05 at every pixel.
     // A local offset of 0.05 removes it from every one of the 15² = 225 stamp pixels, so
@@ -321,7 +321,7 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
     };
     let psf_sigma = MeasureGrid::new(TEST_EXPECTED_FWHM).window_sigma;
 
-    let global = compute_star(
+    let global = moment_star(
         StampAt {
             residual: &residual,
             pos,
@@ -331,7 +331,7 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
         global_bg,
     )
     .unwrap();
-    let local = compute_star(
+    let local = moment_star(
         StampAt {
             residual: &residual,
             pos,
@@ -366,7 +366,7 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
 }
 
 #[test]
-fn compute_star_invalid_position_returns_none() {
+fn moment_star_invalid_position_returns_none() {
     let pixels = Buffer2::new_filled(64, 64, 0.5f32);
     let measured = Measured::flat(&pixels, 0.1, 0.01);
     assert!(
@@ -405,8 +405,10 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         &pixels,
         &BackgroundEstimate {
             background: Pooled::loose(sky_plane, size),
-            noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, 0.01), size),
-            noise_floor: 1e-6,
+            sky: SkyNoise {
+                noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, 0.01), size),
+                floor: 1e-6,
+            },
         },
     );
     let config = MeasurementConfig {
@@ -432,7 +434,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         MeasureGrid::new(4.0).annulus,
     )
     .expect("annulus has samples");
-    let expected = compute_star(
+    let expected = moment_star(
         StampAt {
             residual: &measured.residual,
             pos: star.pos,
@@ -482,7 +484,7 @@ fn sky_noise_adds_no_flux_or_snr() {
     residual[(24, 24)] += 1.0;
 
     for radius in [7, 13, 15] {
-        let star = compute_star(
+        let star = moment_star(
             StampAt {
                 residual: &residual,
                 pos,
@@ -527,7 +529,7 @@ fn empty_sky_stamps_measure_no_signal() {
         for &cy in &centres {
             for &cx in &centres {
                 let pos = DVec2::new(cx as f64, cy as f64);
-                if let Some(star) = compute_star(
+                if let Some(star) = moment_star(
                     StampAt {
                         residual: &residual,
                         pos,

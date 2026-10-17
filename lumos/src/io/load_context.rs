@@ -4,11 +4,21 @@ use std::path::Path;
 
 use common::CancelToken;
 
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::io::error::ImageError;
+use crate::image::linear_image::LinearImage;
+use crate::image::preview_image::PreviewImage;
+use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::fits::calibration_bundle::error::BundleError;
 use crate::io::fits::fits_load_options::FitsLoadOptions;
-use crate::memory;
-use crate::platform::SystemMemory;
+use crate::io::fits::{calibration_bundle, decode as fits_decode, product as fits_product};
+use crate::io::frame_info::FrameInfo;
+use crate::io::input_format::InputFormat;
+use crate::io::null_policy::NullPolicy;
+use crate::io::{raster, raw};
+use crate::memory::run_memory::RunMemory;
+use crate::stack_product::StackProduct;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
 #[derive(Debug, Clone)]
@@ -19,6 +29,9 @@ pub struct LoadContext {
     pub memory_limit_bytes: u64,
     /// FITS-specific policy; ignored by non-FITS decoders.
     pub fits: FitsLoadOptions,
+    /// What a null sample does to a linear decode: a FITS null, or a floating-point raster's NaN
+    /// or infinity.
+    pub nulls: NullPolicy,
     /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
     pub xtrans_passes: MarkesteijnPasses,
     /// How many threads one decode may run inside a decoder that parallelizes itself — LibRaw's
@@ -35,6 +48,7 @@ impl LoadContext {
             cancel,
             memory_limit_bytes,
             fits: FitsLoadOptions::default(),
+            nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
             decode_threads: rayon::current_num_threads(),
         }
@@ -46,6 +60,85 @@ impl LoadContext {
         Self {
             decode_threads: threads_per_decode(self.decode_threads, slots),
             ..self.clone()
+        }
+    }
+
+    /// Load an already-linear scientific image: FITS without CFA metadata, or a floating-point
+    /// TIFF, taken as linear.
+    ///
+    /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are refused: load those
+    /// with [`Self::cfa`] or [`Self::preview`].
+    pub fn linear(&self, path: impl AsRef<Path>) -> Result<LinearImage, ImageError> {
+        let path = path.as_ref();
+        self.check_cancelled(path)?;
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::load_linear(path, self),
+            InputFormat::CameraRaw => Err(ImageError::scientific_rejection(
+                path,
+                ScientificRefusal::CameraRaw,
+            )),
+            InputFormat::Raster(format) => raster::linear(path, format, self),
+        }
+    }
+
+    /// Load an undemosaiced sensor image from camera RAW or mosaic FITS.
+    pub fn cfa(&self, path: impl AsRef<Path>) -> Result<CfaImage, ImageError> {
+        let path = path.as_ref();
+        self.check_cancelled(path)?;
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::load_cfa(path, self),
+            InputFormat::CameraRaw => raw::load_cfa(path, self),
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
+                path,
+                ScientificRefusal::RasterCfa,
+            )),
+        }
+    }
+
+    /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
+    pub fn preview(&self, path: impl AsRef<Path>) -> Result<PreviewImage, ImageError> {
+        let path = path.as_ref();
+        self.check_cancelled(path)?;
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::load_preview(path, self).map(Into::into),
+            InputFormat::CameraRaw => raw::load_preview(path, self).map(Into::into),
+            InputFormat::Raster(format) => raster::preview(path, format, self),
+        }
+    }
+
+    /// Load a stack product that [`writer::product_fits`](crate::writer::product_fits) wrote:
+    /// its image, every quality plane it holds, and its run report.
+    pub fn product(&self, path: impl AsRef<Path>) -> Result<StackProduct, ImageError> {
+        let path = path.as_ref();
+        self.check_cancelled(path)?;
+        fits_product::load(path, self)
+    }
+
+    /// Load a calibration bundle that
+    /// [`writer::calibration_bundle`](crate::writer::calibration_bundle) wrote, without rebuilding
+    /// its prepared flat or defect map: cancellation reads as [`BundleError::Cancelled`], and the
+    /// memory limit applies to each master's decode. The file is streamed, never read into RAM
+    /// whole.
+    ///
+    /// # Errors
+    ///
+    /// [`BundleError`], one variant for each way a file can fail to be a bundle of this version.
+    pub fn calibration_masters(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<CalibrationMasters, BundleError> {
+        calibration_bundle::load(path.as_ref(), self)
+    }
+
+    /// What the CFA frame at `path` is, read from its header without decoding it.
+    pub(crate) fn cfa_info(&self, path: &Path) -> Result<FrameInfo, ImageError> {
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::cfa_frame_info(path, self),
+            InputFormat::CameraRaw => raw::cfa_frame_info(path, self),
+            InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
+                path,
+                ScientificRefusal::RasterCfa,
+            )),
         }
     }
 
@@ -66,11 +159,10 @@ const fn threads_per_decode(cores: usize, slots: usize) -> usize {
 }
 
 impl Default for LoadContext {
+    /// The system's memory read once, its decode ceiling the limit: a load of one file outside
+    /// any run.
     fn default() -> Self {
-        Self::new(
-            CancelToken::never(),
-            memory::usable(SystemMemory::available()),
-        )
+        Self::new(CancelToken::never(), RunMemory::read(None).decode_ceiling())
     }
 }
 

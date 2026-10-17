@@ -2,14 +2,14 @@
 //!
 //! Frames of the same field differ in sky level and transparency, so combining them raw would let
 //! the brightest dominate and turn rejection into a vote about exposure rather than about
-//! outliers. Each frame gets an affine `gain`/`offset` per slot — a channel, or a colour of a
-//! mosaic, whose colours drift apart over a session of twilight flats — measured against a
+//! outliers. Each frame gets an affine `gain`/`offset` per slot — a channel, or a color of a
+//! mosaic, whose colors drift apart over a session of twilight flats — measured against a
 //! reference, the least noisy of the set, and the combine applies it as it gathers.
 //!
 //! `Normalization::Global` fits every frame's gain against the reference by
 //! [`photometric_gain`]'s errors-in-variables fit over paired pixels, and its offset from the two
 //! medians. `Normalization::Multiplicative` takes the ratio of medians. A slot is measured over
-//! its own pixels — a colour over its photosites — and coverage narrows them: frames that each
+//! its own pixels — a color over its photosites — and coverage narrows them: frames that each
 //! cover every pixel are measured over all of them, and when any frame contributes at only some
 //! pixels — a warp's edge, or a source's declared nulls — over [`common_domain`], the pixels every
 //! frame reached. Frames gathered in each channel by their own rule, a drizzle of mosaics, are
@@ -27,12 +27,24 @@ pub(crate) mod slot_planes;
 use arrayvec::ArrayVec;
 
 use crate::combine::error::StackError;
-use crate::combine::normalization::norm_fit::NormFit;
+use crate::combine::normalization::norm_fit::{Fitted, NormFit};
 use crate::combine::normalization::slot_planes::SlotPlanes;
-use crate::combine::stack_config::Normalization;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::sample_domain::DomainMap;
+
+/// Frame normalization method applied before stacking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Normalization {
+    /// No normalization.
+    None,
+    /// Match global median and scale across frames (additive + scaling).
+    /// Best for light frames.
+    Global,
+    /// Scale by ratio of medians (no additive offset).
+    /// Best for flat frames where exposure varies.
+    Multiplicative,
+}
 
 /// One slot's affine normalization, applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,7 +91,7 @@ impl SlotNorm {
 }
 
 /// A frame's affine normalization, one per
-/// [`Slots`](crate::combine::frame_cache::slots::Slots) slot.
+/// [`Slots`](crate::combine::frame_read::slots::Slots) slot.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameNorm {
     pub(crate) slots: ArrayVec<SlotNorm, 3>,
@@ -100,7 +112,7 @@ impl FrameNorm {
         normalization: Normalization,
     ) -> Result<Option<Vec<Self>>, StackError> {
         let to_domain = domain_maps(planes.frames);
-        if normalization == Normalization::None {
+        let Some(fitted) = Fitted::of(normalization) else {
             return Ok(to_domain
                 .iter()
                 .any(|&map| map != DomainMap::IDENTITY)
@@ -117,11 +129,11 @@ impl FrameNorm {
                         })
                         .collect()
                 }));
-        }
+        };
         Cancelled::check(planes.cancel)?;
         let fit = NormFit {
             planes,
-            normalization,
+            normalization: fitted,
             reference: select_reference_frame(planes.frames, &to_domain),
         };
         let mut norms = fit.frame_norms()?;
@@ -146,19 +158,15 @@ impl FrameNorm {
 ///
 /// [`SetFacts`]: crate::ingest::set_facts::SetFacts
 fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
-    let reference = frames
-        .iter()
-        .find_map(|frame| frame.source_stats.facts.domain.as_ref());
+    let reference = frames.iter().find_map(|frame| frame.facts.domain.as_ref());
     frames
         .iter()
-        .map(
-            |frame| match (&frame.source_stats.facts.domain, reference) {
-                (Some(domain), Some(reference)) => domain
-                    .conversion_to(reference)
-                    .expect("the frame set's sample domains were validated as convertible"),
-                _ => DomainMap::IDENTITY,
-            },
-        )
+        .map(|frame| match (&frame.facts.domain, reference) {
+            (Some(domain), Some(reference)) => domain
+                .conversion_to(reference)
+                .expect("the frame set's sample domains were validated as convertible"),
+            _ => DomainMap::IDENTITY,
+        })
         .collect()
 }
 

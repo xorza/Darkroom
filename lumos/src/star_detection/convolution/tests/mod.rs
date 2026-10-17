@@ -14,7 +14,9 @@ use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
-use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
+use crate::star_detection::convolution::filter_kernels::{
+    EllipticalGaussian, FilterKernels, KernelShape,
+};
 use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
@@ -998,4 +1000,54 @@ fn convolution_scaling() {
             result_scaled[i]
         );
     }
+}
+
+/// An elliptical kernel's pixel rule follows its narrowest σ across the pixel axes: at FWHM 4 and
+/// angle 0.3 a round-ish ellipse (ratio 0.9) takes one cell per pixel and a modest order; a thin
+/// one (0.05), σ 0.087 px across the axes, splits each pixel so the 16-point rule resolves it, and
+/// its kernel still sums to 1 with every weight finite, where one fixed order 16 lost the ridge.
+#[test]
+fn the_elliptical_kernels_pixel_rule_follows_its_thinnest_width() {
+    let ellipse = |axis_ratio| EllipticalGaussian {
+        sigma: fwhm::to_sigma(4.0),
+        axis_ratio,
+        angle: 0.3,
+    };
+    let round = ellipse(0.9).pixel_rule().unwrap();
+    let thin = ellipse(0.05).pixel_rule().unwrap();
+    assert_eq!(round.subdivision, 1, "{round:?}");
+    assert!(thin.subdivision > 1, "{thin:?}");
+    assert!(ellipse(1e-4).pixel_rule().is_none());
+
+    let mut weights = Vec::new();
+    ellipse(0.05).fill_kernel(&mut weights);
+    assert!(weights.iter().all(|weight| weight.is_finite()));
+    let sum: f64 = weights.iter().map(|&weight| f64::from(weight)).sum();
+    assert!((sum - 1.0).abs() <= 1e-5, "{sum}");
+}
+
+/// An ellipse along the pixel axes filters as its two exact 1D profiles, however near round: a
+/// ratio of 0.995 at 0 and at a quarter turn keeps its minor σ on the axis it lies along. At any
+/// other angle a ratio within 0.01 of 1 takes the circular kernel, and a narrower one the 2D.
+#[test]
+fn a_kernel_along_the_axes_keeps_its_axes_however_near_round() {
+    let sigma = fwhm::to_sigma(4.0);
+    let shape = |axis_ratio: f32, angle: f32| {
+        KernelShape::of(MatchedFilter {
+            fwhm: 4.0,
+            axis_ratio,
+            angle,
+        })
+    };
+    let separable = |shape: KernelShape| match shape {
+        KernelShape::Separable(sigmas) => Some(sigmas),
+        KernelShape::Elliptical(_) => None,
+    };
+    assert_eq!(separable(shape(0.995, 0.0)), Some([sigma, sigma * 0.995]));
+    assert_eq!(
+        separable(shape(0.995, FRAC_PI_2)),
+        Some([sigma * 0.995, sigma])
+    );
+    assert_eq!(separable(shape(0.995, 0.3)), Some([sigma, sigma]));
+    assert_eq!(separable(shape(0.5, 0.3)), None);
 }

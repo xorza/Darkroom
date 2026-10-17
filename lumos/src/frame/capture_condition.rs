@@ -4,7 +4,7 @@
 use std::fmt;
 
 use crate::frame::capture_conditions::CaptureConditions;
-use crate::frame_store::error::ConditionMismatch;
+use crate::frame::error::ConditionMismatch;
 
 /// Exposures within this share of each other count as one: capture software times frames to a few
 /// milliseconds, far inside it, and a dark that matters, such as 120 s on 300 s lights, is far

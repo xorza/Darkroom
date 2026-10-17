@@ -8,10 +8,9 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::labeling::component_data::ComponentData;
-use crate::star_detection::labeling::run;
 use crate::star_detection::labeling::run::{Run, RunJoin};
 use crate::star_detection::labeling::union_find::UnionFind;
-use crate::star_detection::labeling::{LabelMap, LabelRun};
+use crate::star_detection::labeling::{LabelMap, LabelRun, run};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose
@@ -189,7 +188,6 @@ impl Labeler {
 impl Strip {
     /// Find the runs of `rows` of `mask`, joining each to the runs of the row above it.
     fn label_rows(&mut self, mask: &BitBuffer2, rows: Range<usize>, join: RunJoin<'_>) {
-        let words_per_row = mask.words_per_row();
         let Self {
             runs,
             first_row_runs,
@@ -206,11 +204,7 @@ impl Strip {
         let last = rows.end - 1;
         for y in rows {
             curr_runs.clear();
-            run::extract_runs_from_row(
-                &mask.words[y * words_per_row..(y + 1) * words_per_row],
-                mask.size.width,
-                curr_runs,
-            );
+            run::extract_runs_from_row(mask.row_words(y), mask.size.width, curr_runs);
 
             if curr_runs.is_empty() {
                 prev_runs.clear();

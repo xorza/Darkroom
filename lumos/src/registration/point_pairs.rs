@@ -2,7 +2,8 @@
 
 use glam::DVec2;
 
-use crate::registration::triangle::voting::{MatchIndices, PointMatch};
+use crate::registration::match_indices::MatchIndices;
+use crate::registration::triangle::voting::PointMatch;
 
 /// A set of matched points as two parallel position slices, paired by index.
 ///

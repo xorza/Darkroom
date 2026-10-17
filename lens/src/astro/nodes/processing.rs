@@ -5,19 +5,19 @@
 //! port declared to override the knob, so a wired config is what runs and the
 //! editor shows the knob set aside.
 
-use std::fmt;
-use std::mem;
+use std::{fmt, mem};
 
 use common::Introspect;
 use lumos::{
     BackgroundMode, Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast,
-    NeutralizeBackground, OpError, Scnr, Stretch,
+    NeutralizeBackground, OpError, Scnr, ScnrProtection, Stretch,
 };
-use scenarium::async_lambda;
-use scenarium::{DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library};
+use scenarium::{
+    DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
+};
 
 use crate::astro::config::preset::Preset;
-use crate::astro::config::processing::{ScnrMethodChoice, StretchMethodChoice};
+use crate::astro::config::processing::StretchMethodChoice;
 use crate::astro::nodes::runtime;
 use crate::config_node::ConfigValue;
 use crate::image::{IMAGE_DATA_TYPE, Image};
@@ -35,7 +35,7 @@ const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-
 pub(crate) fn register(library: &mut Library) {
     StretchMethodChoice::register(library);
     BackgroundMode::register(library);
-    ScnrMethodChoice::register(library);
+    ScnrProtection::register(library);
     library.add(preset_func::<StretchMethodChoice>(
         NodeSpec {
             id: AUTO_STRETCH_FUNC_ID,
@@ -52,13 +52,13 @@ pub(crate) fn register(library: &mut Library) {
         },
         "Mode",
     ));
-    library.add(preset_func::<ScnrMethodChoice>(
+    library.add(preset_func::<ScnrProtection>(
         NodeSpec {
             id: SCNR_FUNC_ID,
             name: "SCNR",
             description: "Removes the residual green cast (SCNR).",
         },
-        "Method",
+        "Protection",
     ));
     library.add(strength_func(
         NodeSpec {

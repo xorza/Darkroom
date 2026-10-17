@@ -3,20 +3,18 @@
 pub(crate) mod detection_result;
 pub(super) mod stages;
 
+use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::math::size2us::Size2us;
-
-use crate::error::InvalidConfigField;
-use crate::math::statistics::median_mut;
+use crate::math::statistics;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::detection_result::{
     DetectionDiagnostics, DetectionResult,
 };
-use crate::star_detection::star_detector::stages::detect::{DetectResult, DetectionInput};
-use crate::star_detection::star_detector::stages::filter::{FilterOutcome, FilterScratch};
-use crate::star_detection::star_detector::stages::fwhm;
-use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
+use crate::star_detection::star_detector::stages::detect::{Candidates, DetectionInput};
+use crate::star_detection::star_detector::stages::filter::FilterOutcome;
+use crate::star_detection::star_detector::stages::prepared_frame::{MeasureRequest, PreparedFrame};
 
 /// Star detector with reusable processing resources.
 #[derive(Debug)]
@@ -48,50 +46,49 @@ impl StarDetector {
 
     /// Detect stars in a single image.
     pub fn detect(&mut self, image: &LinearImage) -> DetectionResult {
+        let config = &self.config;
         let resources = &mut self.resources;
         resources.reshape(Size2us::new(image.width(), image.height()));
 
-        let mut frame = PreparedFrame::new(image, &self.config, resources);
-        let fwhm = fwhm::estimate(&frame, &self.config, resources);
-        let plane = frame.detection_plane(fwhm.value(), &self.config, resources);
-        frame.drop_sources();
-        let detect_result = DetectResult::from_plane(
+        let mut frame = PreparedFrame::new(image, config, resources);
+        let fwhm = frame.estimate_fwhm(config, resources);
+        let plane = frame.final_plane(fwhm.value(), config, resources);
+        let candidates = Candidates::detect(
             DetectionInput {
                 plane: &plane,
                 no_data: frame.no_data.as_deref(),
             },
-            &self.config.extraction,
+            &config.extraction,
             resources,
         );
+        drop(plane);
+        tracing::debug!("Detected {} star candidates", candidates.regions.len());
 
+        let mut stars = Vec::new();
+        frame.measure_stars(
+            MeasureRequest {
+                regions: &candidates.regions,
+                config: &config.measurement,
+                expected_fwhm: fwhm.value(),
+            },
+            &mut resources.measured,
+            &mut stars,
+        );
         let mut diagnostics = DetectionDiagnostics {
-            pixels_above_threshold: detect_result.pixels_above_threshold,
-            connected_components: detect_result.connected_components,
-            candidates_after_filtering: detect_result.regions.len(),
-            deblended_components: detect_result.deblended_components,
+            pixels_above_threshold: candidates.pixels_above_threshold,
+            connected_components: candidates.connected_components,
+            candidates_after_filtering: candidates.regions.len(),
+            deblended_components: candidates.deblended_components,
+            stars_after_centroid: stars.len(),
             fwhm,
             ..Default::default()
         };
-        tracing::debug!("Detected {} star candidates", detect_result.regions.len());
-
-        let stars = frame.measure_stars(
-            &detect_result.regions,
-            &self.config.measurement,
-            fwhm.value(),
-        );
-        diagnostics.stars_after_centroid = stars.len();
+        candidates.release(resources);
 
         let FilterOutcome {
             stars,
             diagnostics: quality_filter,
-        } = FilterOutcome::from_stars(
-            stars,
-            &self.config.filter,
-            FilterScratch {
-                values: &mut resources.values,
-                duplicates: &mut resources.duplicates,
-            },
-        );
+        } = FilterOutcome::from_stars(stars, &config.filter, resources);
         diagnostics.quality_filter = quality_filter;
 
         if diagnostics.quality_filter.fwhm_outliers > 0 {
@@ -111,10 +108,10 @@ impl StarDetector {
             let values = &mut resources.values;
             values.clear();
             values.extend(stars.iter().map(|s| s.fwhm));
-            diagnostics.median_fwhm = Some(median_mut(values));
+            diagnostics.median_fwhm = Some(statistics::median_mut(values));
             values.clear();
             values.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = Some(median_mut(values));
+            diagnostics.median_snr = Some(statistics::median_mut(values));
         }
 
         DetectionResult { stars, diagnostics }

@@ -1,10 +1,8 @@
 use common::CancelToken;
+use fits_well::image::{Scaling, View as FitsView};
 
 use crate::error::Cancelled;
-use crate::io::fits::decode::pixels::{
-    ChunkScan, Conversion, FILL_MEDIAN_SAMPLES, NullSummary, SampleScan, fill_nulls,
-};
-use fits_well::image::{Scaling, View as FitsView};
+use crate::io::fits::decode::pixels::{ChunkScan, Conversion, NullSummary, SampleScan};
 
 const IDENTITY: Scaling = Scaling {
     bscale: 1.0,
@@ -151,6 +149,20 @@ fn the_blank_sentinel_is_a_null_and_stays_out_of_the_integer_scan() {
     assert_eq!(scan.scan.integer_step(1.0), 4.0);
 }
 
+/// With no `BLANK`, every stored value is a sample. Under the unsigned-64 convention
+/// (`BZERO = 2^63`), stored `i64::MIN` is physical 0 and stored `i64::MAX` is `2^64 − 1`.
+#[test]
+fn without_blank_the_most_negative_stored_integer_is_a_sample() {
+    let unsigned = Scaling {
+        bzero: 2f64.powi(63),
+        ..IDENTITY
+    };
+    let Converted { samples: out, scan } =
+        convert(FitsView::I64(&[i64::MIN, i64::MAX]), unsigned, 1.0);
+    assert_eq!(out, [0.0, 2f32.powi(64)]);
+    assert_eq!(scan.nulls, None);
+}
+
 #[test]
 fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
     // The divide runs before the finite test, so a divisor small enough to push a finite
@@ -217,52 +229,4 @@ fn summaries_from_two_chunks_combine_into_the_planes_index_space() {
     // it arrives on.
     assert_eq!(second.offset_by(8).first_index, 8);
     assert_eq!(second.offset_by(8).merge(first).first_index, 2);
-}
-
-#[test]
-fn nulls_are_filled_with_the_median_of_the_finite_samples() {
-    // Finite samples 1, 2, 3, 4, 10 — five of them, so the median is the middle one, 3. Both
-    // nulls take it, and no finite sample moves.
-    let mut samples = [1.0, f32::NAN, 2.0, 3.0, f32::INFINITY, 4.0, 10.0];
-    fill_nulls(&mut samples, 2);
-    assert_eq!(samples, [1.0, 3.0, 2.0, 3.0, 3.0, 4.0, 10.0]);
-
-    // Zero fills a plane with no finite sample to borrow a level from: nothing else is more
-    // right, and the mask is what records that none of it is data.
-    let mut empty = [f32::NAN; 3];
-    fill_nulls(&mut empty, 3);
-    assert_eq!(empty, [0.0; 3]);
-}
-
-#[test]
-fn the_fills_median_is_sampled_rather_than_taken_over_a_whole_plane() {
-    // Twice the sample bound of valid data, so the stride is exactly 2 and the scratch holds
-    // `FILL_MEDIAN_SAMPLES` values instead of a second copy of the plane — the allocation the
-    // decode's memory preflight does not budget for.
-    //
-    // Valid samples are the ramp 0..200_000. Every second one is 0, 2, … 199_998, whose median
-    // is the mean of its two middle values (99_998 and 100_000) = 99_999. The whole ramp's
-    // median is 99_999.5, so the bound costs half a unit in two hundred thousand.
-    const VALID: usize = 2 * FILL_MEDIAN_SAMPLES;
-    let mut samples: Vec<f32> = (0..VALID).map(|index| index as f32).collect();
-    samples.push(f32::NAN);
-    fill_nulls(&mut samples, 1);
-    assert_eq!(samples[VALID], 99_999.0);
-
-    // The stride runs over the finite samples, not over plane positions: masking the whole
-    // first half would otherwise spend that half of the quota on pixels that are dropped
-    // anyway, and draw the median from the tail alone.
-    let mut lopsided: Vec<f32> = (0..VALID)
-        .map(|index| {
-            if index < VALID / 2 {
-                f32::NAN
-            } else {
-                index as f32
-            }
-        })
-        .collect();
-    fill_nulls(&mut lopsided, VALID / 2);
-    // The surviving ramp is 100_000..200_000, whose median is 149_999.5; sampling every one of
-    // them (stride 1, since the survivors are exactly the bound) reproduces it exactly.
-    assert_eq!(lopsided[0], 149_999.5);
 }

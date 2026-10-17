@@ -1,7 +1,7 @@
 //! [`NormalizedStats`]: the frames' statistics, and the norms that carry them into the combine's
 //! units.
 
-use crate::combine::frame_cache::slots::Slots;
+use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::FrameNorm;
 
 /// Each frame's source statistics in frame order, `stats`, the norms that put the frames on one

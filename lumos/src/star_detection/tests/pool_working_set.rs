@@ -1,10 +1,10 @@
 //! The detector's pool of image-sized scratch, pinned to what the memory planner charges for it.
 //!
 //! A reused [`StarDetector`] recycles a fixed set of image-sized scratch buffers through its
-//! [`DetectionResources`]. The planner charges that set as [`DETECTION_WORKING_PLANES`] planes,
-//! which only means anything while it matches what the pool holds: [`WORKING_SET`] pins the pool,
-//! and the planner's figure is checked against the pin. That the detector's heap stays the same
-//! from frame to frame is the `memory_budget` integration test's.
+//! [`DetectionResources`]. The planner charges [`DetectionResources::heap_bytes`] for it, from the
+//! pool's peak counts, which only means anything while they match what the pool holds:
+//! [`WORKING_SET`] pins the pool, and the counts are checked against the pin. That the detector's
+//! heap stays the same from frame to frame is the `memory_budget` integration test's.
 //!
 //! [`StarDetector`]: crate::star_detection::star_detector::StarDetector
 //! [`DetectionResources`]: crate::star_detection::resources::DetectionResources
@@ -13,8 +13,8 @@ use rayon::prelude::*;
 
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
-use crate::memory::DETECTION_WORKING_PLANES;
 use crate::star_detection::resources::internals::BufferCounts;
+use crate::star_detection::resources::{DetectionResources, PEAK_BITMASKS, PEAK_FLOATS};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
 
@@ -32,25 +32,21 @@ const WORKING_SET: BufferCounts = BufferCounts {
 /// do not carry.
 const NO_DATA_MASK: usize = 1;
 
-/// The plane the labeling's runs are charged: a run is 16 bytes in its strip and 12 in the label
-/// map, so the runs hold under one f32 plane while fewer than one pixel in seven starts a run — a
-/// mask of sources a few σ above the sky starts far fewer.
-const LABEL_RUNS: usize = 1;
-
-/// The memory planner charges [`DETECTION_WORKING_PLANES`] image-sized planes for a frame in
-/// detection, which only means anything while that matches what the pool actually holds. Tying the
-/// two together here is what stops the planner's figure from being a number nobody can check: a
-/// stage that grows its scratch fails [`warmed_pool_holds_the_pinned_working_set`] first, and
-/// raising `WORKING_SET` to match then fails this until the planner is raised too.
+/// The planner charges [`DetectionResources::heap_bytes`] from the pool's peak counts, which only
+/// means anything while they match what the pool actually holds. Tying the two together here is
+/// what stops the planner's figure from being a number nobody can check: a stage that grows its
+/// scratch fails [`warmed_pool_holds_the_pinned_working_set`] first, and raising `WORKING_SET` to
+/// match then fails this until the peak counts are raised too. A 64 × 64 frame's pool holds five
+/// planes of 16 KiB — four f32 planes and the labeling's runs — and four bitmasks of 64 rows of
+/// 128 bits, 1 KiB each.
 #[test]
 fn pinned_working_set_matches_what_the_memory_planner_charges() {
     let BufferCounts { floats, bitmasks } = WORKING_SET;
-
-    // A bitmask is one bit per pixel against an f32 plane's 32, and the planner rounds each up to
-    // a whole plane rather than model a fraction — so a plain sum is the figure it should carry.
+    assert_eq!(floats, PEAK_FLOATS);
+    assert_eq!(bitmasks + NO_DATA_MASK, PEAK_BITMASKS);
     assert_eq!(
-        floats + LABEL_RUNS + bitmasks + NO_DATA_MASK,
-        DETECTION_WORKING_PLANES
+        DetectionResources::heap_bytes(Size2us::new(64, 64)),
+        5 * 16_384 + 4 * 1024
     );
 }
 

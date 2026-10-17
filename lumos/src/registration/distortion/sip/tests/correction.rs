@@ -3,7 +3,7 @@ use super::*;
 /// At the reference point every SIP monomial is zero, so the correction is exactly nothing.
 #[test]
 fn correct_at_reference_point_is_identity() {
-    let sip = fit_field(&barrel(), Grid::DEFAULT, 3);
+    let sip = fit_field(&barrel(), Grid::DEFAULT, SipOrder::Three);
     assert_eq!(sip.correct(barrel().centre), barrel().centre);
 }
 
@@ -37,7 +37,7 @@ fn an_order_3_fit_recovers_a_cubic_field() {
         ),
     ];
     for (field, grid) in fields {
-        let sip = fit_field(&field, grid, 3);
+        let sip = fit_field(&field, grid, SipOrder::Three);
         for p in [
             DVec2::new(700.0, 300.0),
             DVec2::new(123.4, 876.5),
@@ -55,14 +55,14 @@ fn an_order_3_fit_recovers_a_cubic_field() {
 /// to the rounding of each fit.
 #[test]
 fn the_fit_is_linear_in_the_field() {
-    let one = fit_field(&barrel(), Grid::DEFAULT, 3);
+    let one = fit_field(&barrel(), Grid::DEFAULT, SipOrder::Three);
     let negated = fit_field(
         &RadialField {
             k: -1e-7,
             ..barrel()
         },
         Grid::DEFAULT,
-        3,
+        SipOrder::Three,
     );
     let fivefold = fit_field(
         &RadialField {
@@ -70,7 +70,7 @@ fn the_fit_is_linear_in_the_field() {
             ..barrel()
         },
         Grid::DEFAULT,
-        3,
+        SipOrder::Three,
     );
     for p in [DVec2::new(800.0, 200.0), DVec2::new(0.0, 0.0)] {
         let base = one.correct(p) - p;
@@ -96,7 +96,7 @@ fn jacobian_is_the_derivative_of_correct() {
             step: 50,
             ..Grid::DEFAULT
         },
-        5,
+        SipOrder::Five,
     );
     let h = 1e-2;
     for p in [

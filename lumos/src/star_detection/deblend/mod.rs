@@ -45,16 +45,6 @@ fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
     nearest
 }
 
-/// Whether two peak positions are closer than a squared-distance threshold, by the same
-/// squared Euclidean metric [`nearest_peak_index`] uses for the Voronoi assignment every
-/// deblender's peaks eventually feed into. `min_sep_sq` is
-/// `min_separation * min_separation`, pre-squared by the caller since peak-separation
-/// checks run in a loop over many candidate pairs.
-#[inline]
-const fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
-    dist_sq(a, b) < min_sep_sq
-}
-
 #[cfg(test)]
 pub(crate) mod internals {
     use imaginarium::Buffer2;

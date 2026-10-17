@@ -1,7 +1,5 @@
-//! 3x3 median filter for removing Bayer pattern artifacts.
-//!
-//! This filter is essential for images from color sensors where alternating rows
-//! have different sensitivities due to the Bayer color filter array.
+//! 3×3 median filter for the artifacts a demosaic leaves: its interpolation can leave structure a
+//! single pixel wide, which a detection plane of a demosaiced frame passes through this first.
 
 pub(super) mod simd;
 
@@ -13,10 +11,10 @@ use crate::math::vec2us::Vec2us;
 use crate::simd::Kernel;
 use crate::star_detection::median_filter::simd::MedianRow;
 
-/// Apply 3x3 median filter to remove Bayer pattern artifacts.
+/// The 3×3 median of `pixels`, into `output`.
 ///
-/// Uses parallel processing for large images. Separates interior pixels
-/// (full 9-element neighborhood) from edge pixels for better performance.
+/// Rows run in parallel, and each separates its interior pixels, of a full 9-element
+/// neighbourhood, from its edge pixels.
 ///
 /// Border pixels are filtered over the 4 or 6 neighbours that exist rather than over a window
 /// padded out to 9 — no sample is duplicated. That is why `cosmic_ray`'s `median_window` is a

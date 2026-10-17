@@ -3,6 +3,8 @@
 
 use std::ops::Range;
 
+use crate::math::statistics::float;
+
 /// A pixel's samples sorted once, for every rejection method to narrow a window of.
 ///
 /// The sort runs on `u64` keys: the sample's bits mapped to an unsigned integer of the same order in
@@ -14,6 +16,8 @@ pub(crate) struct SortedSamples {
     keys: Vec<u64>,
     values: Vec<f32>,
     positions: Vec<u32>,
+    /// Whether each sample of the window [`Self::classify`] last saw is kept, from its start.
+    kept: Vec<bool>,
 }
 
 impl SortedSamples {
@@ -22,6 +26,7 @@ impl SortedSamples {
         self.keys.reserve(count);
         self.values.reserve(count);
         self.positions.reserve(count);
+        self.kept.reserve(count);
     }
 
     /// Sort `values`, which must be finite, remembering where each came from.
@@ -29,12 +34,10 @@ impl SortedSamples {
         debug_assert!(values.iter().all(|value| value.is_finite()));
         debug_assert!(u32::try_from(values.len()).is_ok());
         self.keys.clear();
-        self.keys.extend(
-            values
-                .iter()
-                .enumerate()
-                .map(|(position, &value)| (u64::from(order_key(value)) << 32) | position as u64),
-        );
+        self.keys
+            .extend(values.iter().enumerate().map(|(position, &value)| {
+                (u64::from(float::unsigned_key(value)) << 32) | position as u64
+            }));
         self.keys.sort_unstable();
         self.values.clear();
         self.positions.clear();
@@ -54,49 +57,46 @@ impl SortedSamples {
         &self.positions
     }
 
-    /// How many samples of `window` `keep` keeps, given each one's value and gather position.
-    pub(crate) fn count_kept(
-        &self,
+    /// Decide once, by `keep` on each one's value and gather position, which samples of `window`
+    /// stay, for [`Self::partition`] to move; how many stay.
+    pub(crate) fn classify(
+        &mut self,
         window: Range<usize>,
         keep: impl Fn(f32, u32) -> bool,
     ) -> usize {
-        window
-            .filter(|&index| keep(self.values[index], self.positions[index]))
-            .count()
+        self.kept.clear();
+        self.kept
+            .extend(window.map(|index| keep(self.values[index], self.positions[index])));
+        self.kept.iter().filter(|&&kept| kept).count()
     }
 
-    /// Move the samples of `window` that `keep` rejects to its ends — those below `centre` to its
-    /// start, the rest to its end — and return the run of kept ones between them, still
-    /// ascending, so a later pass reads them as a sorted window. The rejected ones keep no order:
-    /// nothing reads them again. The sort keys serve as the scratch, so nothing allocates.
-    pub(crate) fn partition(
-        &mut self,
-        window: Range<usize>,
-        centre: f32,
-        keep: impl Fn(f32, u32) -> bool,
-    ) -> Range<usize> {
+    /// Move the samples of `window` that [`Self::classify`] rejected to its ends — those below
+    /// `centre` to its start, the rest to its end — and return the run of kept ones between them,
+    /// still ascending, so a later pass reads them as a sorted window. The rejected ones keep no
+    /// order: nothing reads them again. The sort keys serve as the scratch, so nothing allocates.
+    pub(crate) fn partition(&mut self, window: Range<usize>, centre: f32) -> Range<usize> {
+        debug_assert_eq!(self.kept.len(), window.len(), "the window classified");
         let pack =
             |value: f32, position: u32| (u64::from(value.to_bits()) << 32) | u64::from(position);
+        let side = |index: usize, kept: bool| {
+            let value = self.values[index];
+            match (kept, value < centre) {
+                (true, _) => 1,
+                (false, true) => 0,
+                (false, false) => 2,
+            }
+        };
         self.keys.clear();
-        let mut low = 0;
-        for index in window.clone() {
-            let (value, position) = (self.values[index], self.positions[index]);
-            if !keep(value, position) && value < centre {
-                self.keys.push(pack(value, position));
-                low += 1;
-            }
+        let mut counts = [0; 3];
+        for (offset, index) in window.clone().enumerate() {
+            counts[side(index, self.kept[offset])] += 1;
         }
-        for index in window.clone() {
-            let (value, position) = (self.values[index], self.positions[index]);
-            if keep(value, position) {
-                self.keys.push(pack(value, position));
-            }
-        }
-        let kept = self.keys.len() - low;
-        for index in window.clone() {
-            let (value, position) = (self.values[index], self.positions[index]);
-            if !keep(value, position) && value >= centre {
-                self.keys.push(pack(value, position));
+        for wanted in 0..3 {
+            for (offset, index) in window.clone().enumerate() {
+                if side(index, self.kept[offset]) == wanted {
+                    self.keys
+                        .push(pack(self.values[index], self.positions[index]));
+                }
             }
         }
         debug_assert_eq!(self.keys.len(), window.len());
@@ -104,6 +104,7 @@ impl SortedSamples {
             self.values[window.start + offset] = f32::from_bits((key >> 32) as u32);
             self.positions[window.start + offset] = key as u32;
         }
+        let [low, kept, _] = counts;
         window.start + low..window.start + low + kept
     }
 
@@ -123,41 +124,11 @@ impl SortedSamples {
     }
 }
 
-/// An unsigned integer that orders as the float does: a positive float's bits order as its value
-/// once the sign bit is set, and a negative float's order backwards, so all of its bits flip.
-const fn order_key(value: f32) -> u32 {
-    let bits = value.to_bits();
-    if bits >> 31 == 1 {
-        !bits
-    } else {
-        bits | (1 << 31)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::cell::Cell;
 
-    /// Keys order as the floats: negative and positive, zeros of both signs, subnormals and the
-    /// largest magnitudes.
-    #[test]
-    fn keys_order_as_the_floats() {
-        let ascending = [
-            f32::MIN,
-            -1.0,
-            -f32::MIN_POSITIVE,
-            -1e-45,
-            -0.0,
-            0.0,
-            1e-45,
-            f32::MIN_POSITIVE,
-            1.0,
-            f32::MAX,
-        ];
-        for pair in ascending.windows(2) {
-            assert!(order_key(pair[0]) < order_key(pair[1]), "{pair:?}");
-        }
-    }
+    use super::*;
 
     /// Every permutation of eight distinct values comes out ascending, each with the position it
     /// came from: 8! = 40320 cases. Equal values keep their gather order.
@@ -184,14 +155,20 @@ mod tests {
 
     /// A partition moves each rejected sample to the end on its side of the centre and keeps the
     /// rest ascending between them: of 1 … 6 about 3.5, rejecting 2 and 5, the 2 goes first and
-    /// the 5 last, and 1, 3, 4, 6 are the kept run, each still with its position.
+    /// the 5 last, and 1, 3, 4, 6 are the kept run, each still with its position. The band is
+    /// asked of each sample once.
     #[test]
     fn a_partition_keeps_the_survivors_one_ascending_run() {
         let mut samples = SortedSamples::default();
         samples.fill(&[6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
-        let keep = |value: f32, _: u32| value != 2.0 && value != 5.0;
-        assert_eq!(samples.count_kept(0..6, keep), 4);
-        assert_eq!(samples.partition(0..6, 3.5, keep), 1..5);
+        let calls = Cell::new(0);
+        let keep = |value: f32, _: u32| {
+            calls.set(calls.get() + 1);
+            value != 2.0 && value != 5.0
+        };
+        assert_eq!(samples.classify(0..6, keep), 4);
+        assert_eq!(samples.partition(0..6, 3.5), 1..5);
+        assert_eq!(calls.get(), 6, "each sample classified once");
         assert_eq!(samples.values(), [2.0, 1.0, 3.0, 4.0, 6.0, 5.0]);
         assert_eq!(samples.positions(), [3, 1, 5, 2, 0, 4]);
     }

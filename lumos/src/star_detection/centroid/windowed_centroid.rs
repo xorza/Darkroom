@@ -3,11 +3,11 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::math::size2us::Size2us;
-use crate::star_detection::centroid;
-use crate::star_detection::centroid::MAX_STAMP_SIZE;
+use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
+use crate::star_detection::centroid::stamp::StampAt;
 use crate::star_detection::centroid::star_noise::StarNoise;
+use crate::star_detection::centroid::windowed_stamp::{Moments, WindowedStamp};
 
 /// The error left in a centre at which the iteration stops, in pixels: a hundredth of what the
 /// brightest stars' noise allows, about 1e-3 px.
@@ -51,17 +51,6 @@ pub(super) struct WindowedInputs {
     pub(super) noise: StarNoise,
 }
 
-/// The windowed moments about one centre.
-#[derive(Debug, Default)]
-struct Moments {
-    weight: f64,
-    x: f64,
-    y: f64,
-    xx: f64,
-    yy: f64,
-    xy: f64,
-}
-
 impl WindowedCentroid {
     /// The converged centre from the inputs' start; `None` when the stamp leaves the frame, holds
     /// no positive windowed signal, wanders more than half the stamp radius from the start, or does
@@ -74,18 +63,22 @@ impl WindowedCentroid {
         let start = inputs.start;
         let radius = grid.stamp.radius;
         let window_sq = grid.window_sigma * grid.window_sigma;
+        let stamp_at = |pos: DVec2| {
+            WindowedStamp::new(
+                StampAt {
+                    residual,
+                    pos,
+                    radius,
+                },
+                window_sq,
+            )
+        };
         let mut pos = start;
         let mut previous_step: Option<f64> = None;
         for _ in 0..MAX_STEPS {
-            let moments =
-                Moments::about(&Stamp::at(residual, pos, grid)?, residual, inputs.offset)?;
-            let mean = DVec2::new(moments.x, moments.y) / moments.weight;
-            let covariance = [
-                moments.xx / moments.weight - mean.x * mean.x,
-                moments.xy / moments.weight - mean.x * mean.y,
-                moments.yy / moments.weight - mean.y * mean.y,
-            ];
-            let gain = newton_gain(window_sq, covariance);
+            let moments = Moments::about(&stamp_at(pos)?, inputs.offset)?;
+            let mean = moments.mean();
+            let gain = newton_gain(window_sq, moments.about_mean());
             let step = DVec2::new(
                 gain[0] * mean.x + gain[1] * mean.y,
                 gain[1] * mean.x + gain[2] * mean.y,
@@ -106,7 +99,7 @@ impl WindowedCentroid {
                     }
                 });
             if settled {
-                let sigma = Stamp::at(residual, pos, grid)?.sigma(residual, inputs, gain)?;
+                let sigma = centre_sigma(&stamp_at(pos)?, inputs, gain)?;
                 return Some(Self { pos, sigma });
             }
             previous_step = Some(length);
@@ -115,11 +108,11 @@ impl WindowedCentroid {
     }
 }
 
-/// The Newton gain `σ_w²·(σ_w²·I − C)⁻¹` for the windowed covariance `C = [xx, xy, yy]`, as the
-/// symmetric `[g_xx, g_xy, g_yy]`. Where the window's own width does not exceed the profile's
-/// windowed spread on both axes — noise in a faint stamp — the step is the plain fixed point.
-fn newton_gain(window_sq: f64, covariance: [f64; 3]) -> [f64; 3] {
-    let [xx, xy, yy] = covariance;
+/// The Newton gain `σ_w²·(σ_w²·I − C)⁻¹` for the windowed covariance `C`, as the symmetric
+/// `[g_xx, g_xy, g_yy]`. Where the window's own width does not exceed the profile's windowed
+/// spread on both axes — noise in a faint stamp — the step is the plain fixed point.
+fn newton_gain(window_sq: f64, covariance: Cov2) -> [f64; 3] {
+    let Cov2 { xx, yy, xy } = covariance;
     let (a, b, c) = (window_sq - xx, -xy, window_sq - yy);
     let det = a * c - b * b;
     if a <= 0.0 || det <= 0.0 {
@@ -129,134 +122,35 @@ fn newton_gain(window_sq: f64, covariance: [f64; 3]) -> [f64; 3] {
     [scale * c, -scale * b, scale * a]
 }
 
-/// A stamp about a centre, with its window's per-axis weights and offsets.
-#[derive(Debug)]
-struct Stamp {
-    x0: usize,
-    y0: usize,
-    size: usize,
-    pos: DVec2,
-    inv_two_window: f64,
-    column_weights: [f64; MAX_STAMP_SIZE],
-    column_offsets: [f64; MAX_STAMP_SIZE],
-}
-
-impl Stamp {
-    /// The stamp of `grid`'s radius and window about `pos`; `None` when it leaves the frame.
-    fn at(residual: &Buffer2<f32>, pos: DVec2, grid: &MeasureGrid) -> Option<Self> {
-        let radius = grid.stamp.radius;
-        let centre = centroid::stamp_centre(pos, Size2us::from(residual), radius)?;
-        let inv_two_window = 1.0 / (2.0 * grid.window_sigma * grid.window_sigma);
-        let size = 2 * radius + 1;
-        let (x0, y0) = (centre.x - radius, centre.y - radius);
-        let mut column_weights = [0.0; MAX_STAMP_SIZE];
-        let mut column_offsets = [0.0; MAX_STAMP_SIZE];
-        for column in 0..size {
-            let dx = (x0 + column) as f64 - pos.x;
-            column_offsets[column] = dx;
-            column_weights[column] = (-dx * dx * inv_two_window).exp();
-        }
-        Some(Self {
-            x0,
-            y0,
-            size,
-            pos,
-            inv_two_window,
-            column_weights,
-            column_offsets,
-        })
-    }
-
-    /// Each row: its image y, its window weight and its offset from the centre.
-    fn rows(&self) -> impl Iterator<Item = (usize, f64, f64)> + '_ {
-        (self.y0..self.y0 + self.size).map(|y| {
-            let dy = y as f64 - self.pos.y;
-            (y, (-dy * dy * self.inv_two_window).exp(), dy)
-        })
-    }
-
-    /// The noise of a centre at the stamp's `pos`: the windowed mean offset `m = Σwv·d / Σwv`
-    /// varies with pixel `i` as `w_i·(d_i − m)/Σwv`, so
-    /// `Var(m) = Σ w_i²·(d_i − m)(d_i − m)ᵀ·σ_i² / (Σwv)²`, and the Newton step carries it as
-    /// `G·Var(m)·Gᵀ`.
-    fn sigma(
-        &self,
-        residual: &Buffer2<f32>,
-        inputs: WindowedInputs,
-        gain: [f64; 3],
-    ) -> Option<f64> {
-        let mut weight = 0.0;
-        let mut mean = DVec2::ZERO;
-        let mut spread = [0.0f64; 3];
-        for (y, row_weight, dy) in self.rows() {
-            let row = residual.row(y);
-            for (column, (&column_weight, &dx)) in self.columns() {
-                let value = f64::from(row[self.x0 + column] - inputs.offset);
-                let w = column_weight * row_weight;
-                weight += w * value;
-                mean += w * value * DVec2::new(dx, dy);
-            }
-        }
-        if weight <= 0.0 {
-            return None;
-        }
-        mean /= weight;
-        for (y, row_weight, dy) in self.rows() {
-            let row = residual.row(y);
-            for (column, (&column_weight, &dx)) in self.columns() {
-                let value = f64::from(row[self.x0 + column] - inputs.offset);
-                let variance = inputs.noise.variance(value);
-                let w = column_weight * row_weight;
-                let (ex, ey) = (dx - mean.x, dy - mean.y);
-                let scale = w * w * variance;
-                spread[0] += scale * ex * ex;
-                spread[1] += scale * ex * ey;
-                spread[2] += scale * ey * ey;
-            }
-        }
-        let norm = weight * weight;
-        let [vxx, vxy, vyy] = spread.map(|value| value / norm);
-        // G·V·Gᵀ for the symmetric G = [[g0, g1], [g1, g2]].
-        let [g0, g1, g2] = gain;
-        let xx = g0 * (g0 * vxx + g1 * vxy) + g1 * (g0 * vxy + g1 * vyy);
-        let yy = g1 * (g1 * vxx + g2 * vxy) + g2 * (g1 * vxy + g2 * vyy);
-        Some(f64::midpoint(xx, yy).sqrt())
-    }
-
-    /// Each column of the stamp, with its window weight and offset.
-    fn columns(&self) -> impl Iterator<Item = (usize, (&f64, &f64))> + '_ {
-        self.column_weights[..self.size]
+/// The noise of a centre at `stamp`'s centre: the windowed mean offset `m = Σwv·d / Σwv` varies
+/// with pixel `i` as `w_i·(d_i − m)/Σwv`, so `Var(m) = Σ w_i²·(d_i − m)(d_i − m)ᵀ·σ_i² / (Σwv)²`,
+/// and the Newton step `gain` carries it as `G·Var(m)·Gᵀ`; `None` when the stamp holds no positive
+/// windowed signal.
+fn centre_sigma(stamp: &WindowedStamp<'_>, inputs: WindowedInputs, gain: [f64; 3]) -> Option<f64> {
+    let moments = Moments::about(stamp, inputs.offset)?;
+    let mean = moments.mean();
+    let mut spread = [0.0f64; 3];
+    for row in stamp.rows() {
+        for ((&pixel, &column_weight), &dx) in row
+            .pixels
             .iter()
-            .zip(&self.column_offsets[..self.size])
-            .enumerate()
-    }
-}
-
-impl Moments {
-    /// The windowed moments of the signed signal less `offset` over `stamp`, offsets measured from
-    /// its `pos`; `None` when the stamp holds no positive windowed signal.
-    fn about(stamp: &Stamp, residual: &Buffer2<f32>, offset: f32) -> Option<Self> {
-        let mut moments = Self::default();
-        for (y, row_weight, dy) in stamp.rows() {
-            let row = &residual.row(y)[stamp.x0..stamp.x0 + stamp.size];
-            let mut row_sum = Self::default();
-            for ((&value, &column_weight), &dx) in row
-                .iter()
-                .zip(&stamp.column_weights[..stamp.size])
-                .zip(&stamp.column_offsets[..stamp.size])
-            {
-                let wv = column_weight * f64::from(value - offset);
-                row_sum.weight += wv;
-                row_sum.x += wv * dx;
-                row_sum.xx += wv * dx * dx;
-            }
-            moments.weight += row_weight * row_sum.weight;
-            moments.x += row_weight * row_sum.x;
-            moments.y += row_weight * row_sum.weight * dy;
-            moments.xx += row_weight * row_sum.xx;
-            moments.yy += row_weight * row_sum.weight * dy * dy;
-            moments.xy += row_weight * row_sum.x * dy;
+            .zip(stamp.column_weights())
+            .zip(stamp.column_offsets())
+        {
+            let variance = inputs.noise.variance(f64::from(pixel - inputs.offset));
+            let w = column_weight * row.weight;
+            let (ex, ey) = (dx - mean.x, row.dy - mean.y);
+            let scale = w * w * variance;
+            spread[0] += scale * ex * ex;
+            spread[1] += scale * ex * ey;
+            spread[2] += scale * ey * ey;
         }
-        (moments.weight > 0.0).then_some(moments)
     }
+    let norm = moments.weight() * moments.weight();
+    let [vxx, vxy, vyy] = spread.map(|value| value / norm);
+    // G·V·Gᵀ for the symmetric G = [[g0, g1], [g1, g2]].
+    let [g0, g1, g2] = gain;
+    let xx = g0 * (g0 * vxx + g1 * vxy) + g1 * (g0 * vxy + g1 * vyy);
+    let yy = g1 * (g1 * vxx + g2 * vxy) + g2 * (g1 * vxy + g2 * vyy);
+    Some(f64::midpoint(xx, yy).sqrt())
 }

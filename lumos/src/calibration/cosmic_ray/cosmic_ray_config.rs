@@ -3,19 +3,21 @@
 use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
-/// Laplacian-edge cosmic-ray detection parameters. Defaults match ccdproc/astroscrappy.
+/// Laplacian-edge cosmic-ray detection parameters (van Dokkum 2001, L.A.Cosmic). Defaults match
+/// ccdproc/astroscrappy; each field names L.A.Cosmic's parameter it is.
 #[derive(Debug, Clone)]
 pub struct CosmicRayConfig {
-    /// `σ_lim`: Laplacian-to-noise significance threshold (lower → more sensitive). Default 4.5.
-    pub sigclip: f32,
-    /// `f_lim`: minimum CR-to-fine-structure contrast separating CRs from PSF-broadened stars.
-    /// Default 5.0.
-    pub objlim: f32,
-    /// Fraction of `sigclip` used when growing the mask onto a flagged CR's fainter wings. Default
-    /// 0.3.
-    pub sigfrac: f32,
-    /// Maximum detect→replace iterations (multi-pixel CRs need several). Default 4.
-    pub niter: usize,
+    /// `sigclip`, `σ_lim`: the Laplacian-to-noise significance a hit must reach (lower → more
+    /// sensitive). Default 4.5.
+    pub detection_sigma: f32,
+    /// `objlim`, `f_lim`: the least contrast between a hit and the fine structure around it, which
+    /// separates hits from stars a PSF broadens. Default 5.0.
+    pub contrast_limit: f32,
+    /// `sigfrac`: the share of `detection_sigma` a neighbour of a hit must reach to join it, which
+    /// grows the mask onto the hit's fainter wings. Default 0.3.
+    pub growth_fraction: f32,
+    /// `niter`: the most detect→replace iterations; a multi-pixel hit needs several. Default 4.
+    pub max_iterations: usize,
     /// How per-pixel noise is estimated for the significance image.
     pub noise: NoiseEstimation,
 }
@@ -23,10 +25,10 @@ pub struct CosmicRayConfig {
 impl Default for CosmicRayConfig {
     fn default() -> Self {
         Self {
-            sigclip: 4.5,
-            objlim: 5.0,
-            sigfrac: 0.3,
-            niter: 4,
+            detection_sigma: 4.5,
+            contrast_limit: 5.0,
+            growth_fraction: 0.3,
+            max_iterations: 4,
             noise: NoiseEstimation::Measured,
         }
     }
@@ -37,14 +39,14 @@ impl CosmicRayConfig {
     /// growth fraction of the detection threshold, at least one pass, and a positive gain when one
     /// is given.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("cosmic-ray sigclip", self.sigclip)
+        ConfigValue::new("cosmic-ray detection_sigma", self.detection_sigma)
             .finite_and("finite and positive", |v| v > 0.0)?;
-        ConfigValue::new("cosmic-ray objlim", self.objlim)
+        ConfigValue::new("cosmic-ray contrast_limit", self.contrast_limit)
             .finite_and("finite and positive", |v| v > 0.0)?;
-        ConfigValue::new("cosmic-ray sigfrac", self.sigfrac)
+        ConfigValue::new("cosmic-ray growth_fraction", self.growth_fraction)
             .finite_and("finite and in (0, 1]", |v| v > 0.0 && v <= 1.0)?;
-        ConfigValue::count("cosmic-ray niter", self.niter)
-            .must_be("at least 1", self.niter >= 1)?;
+        ConfigValue::count("cosmic-ray max_iterations", self.max_iterations)
+            .must_be("at least 1", self.max_iterations >= 1)?;
         if let NoiseEstimation::Gain { electrons_per_adu } = self.noise {
             ConfigValue::new("cosmic-ray electrons_per_adu", electrons_per_adu)
                 .finite_and("finite and positive", |v| v > 0.0)?;
@@ -57,7 +59,7 @@ impl CosmicRayConfig {
 /// (the mono path adds a ½ for its ×2 subsample).
 ///
 /// Either way `N² = σ² + max(m₅ − sky, 0)·k`, as astroscrappy's `√(m₅ + rn² + bkg)` in electrons:
-/// `sky` and `σ` are the local background of the pixel's colour, read from a tile mesh of the frame,
+/// `sky` and `σ` are the local background of the pixel's color, read from a tile mesh of the frame,
 /// so σ already holds the read noise, the subtracted dark's and sky's photon noise and the
 /// quantization; `m₅` is the median-filtered signal, and `k` is the variance one unit of signal
 /// above the sky adds, `1/electrons_per_unit`.

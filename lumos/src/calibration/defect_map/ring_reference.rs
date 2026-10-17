@@ -1,13 +1,15 @@
 //! [`RingReference`]: the dark level a hot-pixel candidate is held to, from the photosites of its
-//! colour around it.
+//! color around it.
+
+use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_to_sigma, median_mut};
+use crate::math::statistics;
+use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 
-/// The ring's inner reach, in pixels: a same-colour cluster of up to this many pixels across keeps
+/// The ring's inner reach, in pixels: a same-color cluster of up to this many pixels across keeps
 /// most of itself out of its members' rings, and what it leaves in, the clip takes out.
 const RING_INNER: usize = 6;
 /// The ring's outer reach, in pixels: close enough that smooth structure is a plane across it to
@@ -19,7 +21,7 @@ const MIN_RING_SAMPLES: usize = 12;
 /// The clip, in σ of the residuals about the current fit: hot pixels in the ring are far past it.
 const CLIP_SIGMAS: f64 = 3.0;
 
-/// The level at a pixel from a robust plane through the photosites of its colour 6 to 8 pixels
+/// The level at a pixel from a robust plane through the photosites of its color 6 to 8 pixels
 /// around it, in the Chebyshev metric.
 ///
 /// The broad tile mesh is the screen, and this the confirmation: a pixel the mesh calls hot is hot
@@ -33,7 +35,7 @@ const CLIP_SIGMAS: f64 = 3.0;
 #[derive(Debug, Default)]
 pub(crate) struct RingReference {
     samples: Vec<RingSample>,
-    residuals: Vec<f32>,
+    residuals: Vec<f64>,
 }
 
 /// The frame a ring is read from: its size, and its sample at each flat index.
@@ -70,7 +72,7 @@ struct Plane {
 }
 
 impl RingReference {
-    /// The plane's level at `point` of `frame`, of its colour under `cfa`; `None` when the frame
+    /// The plane's level at `point` of `frame`, of its color under `cfa`; `None` when the frame
     /// gives the ring too few photosites, or they fix no plane.
     pub(crate) fn at(
         &mut self,
@@ -79,7 +81,7 @@ impl RingReference {
         point: Vec2us,
     ) -> Option<f32> {
         let RingFrame { size, value } = frame;
-        let colour = cfa.color_at(point);
+        let color = cfa.slot_at(point);
         self.samples.clear();
         let reach = RING_OUTER as isize;
         for dy in -reach..=reach {
@@ -94,7 +96,7 @@ impl RingReference {
                     continue;
                 };
                 let at = Vec2us::new(x, y);
-                if x < size.width && y < size.height && cfa.color_at(at) == colour {
+                if x < size.width && y < size.height && cfa.slot_at(at) == color {
                     self.samples.push(RingSample {
                         dx: dx as f64,
                         dy: dy as f64,
@@ -127,23 +129,18 @@ impl RingReference {
     }
 
     /// The clip about `plane`: the median of the samples' residuals from it, and [`CLIP_SIGMAS`]
-    /// of their normalized MAD.
+    /// of their σ from the MAD.
     fn clip_cut(&mut self, plane: Plane) -> Clip {
-        let centre = median_of(
-            &mut self.residuals,
+        self.residuals.clear();
+        self.residuals.extend(
             self.samples
                 .iter()
                 .map(|sample| sample.value - plane.at(sample)),
         );
-        let spread = median_of(
-            &mut self.residuals,
-            self.samples
-                .iter()
-                .map(|sample| (sample.value - plane.at(sample) - centre).abs()),
-        );
+        let residual = MedianMad::of_mut(&mut self.residuals);
         Clip {
-            centre,
-            reach: CLIP_SIGMAS * f64::from(mad_to_sigma(spread as f32)),
+            centre: residual.median,
+            reach: CLIP_SIGMAS * residual.sigma(),
         }
     }
 }
@@ -156,10 +153,10 @@ struct Clip {
 }
 
 /// The median of `values`, through `scratch`.
-fn median_of(scratch: &mut Vec<f32>, values: impl Iterator<Item = f64>) -> f64 {
+fn median_of(scratch: &mut Vec<f64>, values: impl Iterator<Item = f64>) -> f64 {
     scratch.clear();
-    scratch.extend(values.map(|value| value as f32));
-    f64::from(median_mut(scratch))
+    scratch.extend(values);
+    statistics::median_mut(scratch)
 }
 
 impl Plane {

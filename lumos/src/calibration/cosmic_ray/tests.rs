@@ -6,20 +6,22 @@
 use glam::Vec2;
 use imaginarium::Buffer2;
 
+use crate::background_mesh::color_mesh::LocalBackground;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::mono::Repair;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
+use crate::calibration::cosmic_ray::noise_model::PixelBackground;
 use crate::calibration::cosmic_ray::*;
-use crate::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::image::pixel_flags::PixelFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane};
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
 use crate::internals::test_rng::TestRng;
+use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
+use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::scratch_pool::ScratchPool;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
@@ -70,7 +72,7 @@ fn removes_cosmic_rays_preserves_stars() {
 
     let mut img = cfa_from_plane(data, CfaType::Mono);
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
-    let out = img.data.pixels();
+    let out = img.data().pixels();
 
     // Every injected CR is removed (the spike drops back toward sky, ≪ 0.95).
     for &p in crs.iter().chain(&streak) {
@@ -92,9 +94,10 @@ fn removes_cosmic_rays_preserves_stars() {
             out[size.index_of(p)]
         );
     }
-    // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54), and
-    // (51, 49) diagonal to (50, 50), each inside its hit's box and clearing `sigfrac · sigclip`. The
-    // growth tests no contrast, as astroscrappy's does not.
+    // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54),
+    // and (51, 49) diagonal to (50, 50), each inside its hit's box and clearing
+    // `growth_fraction · detection_sigma`. The growth tests no contrast, as astroscrappy's does
+    // not.
     assert_eq!(count, 9);
 }
 
@@ -111,7 +114,8 @@ fn clean_field_few_false_positives() {
 
 #[test]
 fn sigclip_controls_sensitivity() {
-    // A modest spike (~15σ): a sensitive sigclip flags it, a strict one doesn't (A→X, B→Y, X≠Y).
+    // A modest spike (~15σ): a sensitive detection_sigma flags it, a strict one doesn't (A→X, B→Y,
+    // X≠Y).
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
@@ -120,7 +124,7 @@ fn sigclip_controls_sensitivity() {
     let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig {
-            sigclip: 3.0,
+            detection_sigma: 3.0,
             ..Default::default()
         },
     )
@@ -128,14 +132,14 @@ fn sigclip_controls_sensitivity() {
     let strict = reject(
         &mut cfa_from_plane(data, CfaType::Mono),
         &CosmicRayConfig {
-            sigclip: 60.0,
+            detection_sigma: 60.0,
             ..Default::default()
         },
     )
     .unwrap();
     assert!(
         sensitive > strict,
-        "lower sigclip must flag more: sensitive={sensitive}, strict={strict}"
+        "lower detection_sigma must flag more: sensitive={sensitive}, strict={strict}"
     );
 }
 
@@ -156,7 +160,9 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
     ] {
         let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
         // A 12-bit ADC: one step is 1/4095 of a sample unit.
-        img.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0);
+        img.metadata
+            .derived
+            .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0));
         let count = reject(
             &mut img,
             &CosmicRayConfig {
@@ -167,7 +173,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
         .unwrap();
         assert!(count >= 1, "bright CR missed");
         assert!(
-            img.data.pixels()[size.index_of(cr)] < 0.2,
+            img.data().pixels()[size.index_of(cr)] < 0.2,
             "bright CR not in-painted"
         );
     }
@@ -210,7 +216,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
-    let out = img.data.pixels();
+    let out = img.data().pixels();
     for &p in &crs {
         assert!(
             out[size.index_of(p)] < 0.2,
@@ -227,13 +233,13 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     );
     // The four CRs, and three pixels the growth pass takes: (10, 10) beside (8, 8), (11, 10) beside
     // (9, 12) and (35, 39) beside (37, 37), each a diagonal neighbour in its CR's phase plane,
-    // inside the 2×2 subsample block that lifts its significance past `sigfrac · sigclip`. The
-    // noise is the local sky σ of each colour, which the star does not inflate as it inflated the
-    // whole-plane MAD, so (8, 8) grows as the others do.
+    // inside the 2×2 subsample block that lifts its significance past
+    // `growth_fraction · detection_sigma`. The noise is the local sky σ of each color, which the
+    // star does not inflate as it inflated the whole-plane MAD, so (8, 8) grows as the others do.
     assert_eq!(count, 7);
     // Every in-painted photosite is flagged at its mosaic position, and nothing else is: the four
     // phase planes map back without crossing.
-    let flags = img.flags.as_ref().unwrap();
+    let flags = img.flags().unwrap();
     let repaired = QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED);
     assert_eq!(flags.count(QualityFlags::COSMIC_RAY), 7);
     assert_eq!(flags.count(QualityFlags::REPAIRED), 7);
@@ -248,12 +254,12 @@ fn bayer_removes_cosmic_rays_preserves_star() {
 
 #[test]
 fn bayer_tight_star_eaten_is_a_known_limitation() {
-    // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px
-    // in the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
+    // CR-2 characterization (not a goal — a documented limitation). A *tight* star (FWHM≈2.35 px in
+    // the mosaic → ~1.2 px in each half-res Bayer phase plane) is undersampled there: median₃
     // erases its core exactly like a cosmic ray, so the fine-structure test F→0 and L.A.Cosmic
-    // *cannot* tell the core from a CR at any `objlim`. The per-phase detector therefore eats it.
-    // This is why the module doc steers tight / dithered OSC data to stack-time σ-rejection
-    // instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
+    // *cannot* tell the core from a CR at any `contrast_limit`. The per-phase detector therefore
+    // eats it. This is why the module doc steers tight / dithered OSC data to stack-time
+    // σ-rejection instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
     // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
     // which uses a *well-sampled* FWHM≈5.9 px star that survives.
     let size = Size2us::new(48, 48);
@@ -283,7 +289,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     reject(&mut img, &CosmicRayConfig::default()).unwrap();
-    let out = img.data.pixels();
+    let out = img.data().pixels();
     // CR rejection still works — the injected CRs are removed.
     for &p in &crs {
         assert!(
@@ -306,8 +312,9 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
 /// An independently written reference for [`Repair::apply`], asserting the property that makes
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
 /// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
-/// that, and this is what would catch a change that broke it.
-fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2) -> Buffer2<f32> {
+/// that, and this is what would catch a change that broke it. A pixel with no unmasked neighbour
+/// within the 5×5 window widens it a ring at a time to 15×15, then takes `sky`.
+fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Buffer2<f32> {
     let size = Size2us::from(pixels);
     let src = pixels;
     let mut out = pixels.clone();
@@ -319,19 +326,29 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2) -> Buffer2<f32>
                 continue;
             }
             let mut buf = Vec::new();
-            for dy in -2..=2 {
-                let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                for dx in -2..=2 {
-                    let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                    let j = size.index_of(Vec2us::new(xx, yy));
-                    if !mask.get(j) {
-                        buf.push(src[j]);
+            for reach in 2..=7isize {
+                for dy in -reach..=reach {
+                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
+                    for dx in -reach..=reach {
+                        if reach > 2 && dx.abs().max(dy.abs()) != reach {
+                            continue;
+                        }
+                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                        let j = size.index_of(Vec2us::new(xx, yy));
+                        if !mask.get(j) {
+                            buf.push(src[j]);
+                        }
                     }
                 }
+                if !buf.is_empty() {
+                    break;
+                }
             }
-            if !buf.is_empty() {
-                out[target] = median_mut(&mut buf);
-            }
+            out[target] = if buf.is_empty() {
+                sky
+            } else {
+                statistics::median_mut(&mut buf)
+            };
         }
     }
     out
@@ -354,27 +371,44 @@ fn a_repair_matches_a_snapshot_reference() {
     }
     // Corner, to exercise the clamped window.
     mask.set(at(0, 0), true);
-    // A hit whose entire 5x5 is masked — nothing to repair from, so it must be left alone.
+    // A hit whose entire 5x5 is masked: the window widens to the first ring with an unmasked
+    // pixel. For (9, 2) that is reach 3, rows y −1 to 5 (−1 clamped to 0) and columns x 6 to 12
+    // (12 clamped to 11). Its unmasked pixels are x = 6 of the top row (6) and of rows 0 to 4
+    // (6, 18, 30, 42, 54), and the bottom row y = 5 (66 to 71, then 71 again for x = 12): 13
+    // values, 6, 6, 18, 30, 42, 54, 66, 67, 68, 69, 70, 71, 71, whose median, the 7th, is 66.
     for y in 0..5 {
         for x in 7..12 {
             mask.set(at(x, y), true);
         }
     }
 
-    let want = repair_via_snapshot(&pixels, &mask);
+    let sky = 0.5;
+    let want = repair_via_snapshot(&pixels, &mask, sky);
+    let local = |_| PixelBackground {
+        local: LocalBackground { sky, noise: 1.0 },
+        flat_gain: 1.0,
+    };
+    let repair = |pixels: &Buffer2<f32>, mask: &BitBuffer2| {
+        let mut got = pixels.clone();
+        Repair {
+            flagged: mask,
+            unread: None,
+            local: &local,
+        }
+        .apply(&mut got, &mut Buffer2::default(), &ScratchPool::default());
+        got
+    };
 
-    let mut got = pixels.clone();
-    Repair {
-        flagged: &mask,
-        unread: None,
-    }
-    .apply(&mut got, &mut Buffer2::default(), &ScratchPool::default());
-
+    let got = repair(&pixels, &mask);
     assert_eq!(got, want);
-    // The fully-masked interior keeps its original value rather than picking up a neighbour.
-    assert_eq!(got[at(9, 2)], pixels[at(9, 2)]);
-    // ...while a repairable hit actually moved.
+    assert_eq!(got[at(9, 2)], 66.0);
     assert_ne!(got[at(6, 6)], pixels[at(6, 6)]);
+
+    // With every pixel masked no ring holds a measurement, and each takes its local sky.
+    let mut everything = BitBuffer2::new_default(size);
+    everything.fill(true);
+    let got = repair(&pixels, &everything);
+    assert!(got.pixels().iter().all(|&value| value == sky), "{got:?}");
 }
 
 /// Each field at the edge of what the detector can run with: the default passes, and every row
@@ -385,44 +419,44 @@ fn validate_rejects_each_field_out_of_range() {
     let gain = |electrons_per_adu| NoiseEstimation::Gain { electrons_per_adu };
     for (field, config) in [
         (
-            "cosmic-ray sigclip",
+            "cosmic-ray detection_sigma",
             CosmicRayConfig {
-                sigclip: 0.0,
+                detection_sigma: 0.0,
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray sigclip",
+            "cosmic-ray detection_sigma",
             CosmicRayConfig {
-                sigclip: f32::NAN,
+                detection_sigma: f32::NAN,
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray objlim",
+            "cosmic-ray contrast_limit",
             CosmicRayConfig {
-                objlim: -1.0,
+                contrast_limit: -1.0,
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray sigfrac",
+            "cosmic-ray growth_fraction",
             CosmicRayConfig {
-                sigfrac: 0.0,
+                growth_fraction: 0.0,
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray sigfrac",
+            "cosmic-ray growth_fraction",
             CosmicRayConfig {
-                sigfrac: 1.5,
+                growth_fraction: 1.5,
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray niter",
+            "cosmic-ray max_iterations",
             CosmicRayConfig {
-                niter: 0,
+                max_iterations: 0,
                 ..Default::default()
             },
         ),
@@ -445,8 +479,8 @@ fn validate_rejects_each_field_out_of_range() {
         assert_eq!(error.field, field, "{config:?}");
     }
     let edge = CosmicRayConfig {
-        sigfrac: 1.0,
-        niter: 1,
+        growth_fraction: 1.0,
+        max_iterations: 1,
         noise: gain(1.5),
         ..Default::default()
     };
@@ -489,8 +523,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
     reject(&mut image, &CosmicRayConfig::default()).unwrap();
     assert!(
         image
-            .flags
-            .as_ref()
+            .flags()
             .unwrap()
             .at_pos(hit)
             .intersects(QualityFlags::COSMIC_RAY),
@@ -498,15 +531,16 @@ fn a_faint_hit_on_a_gradient_is_caught() {
     );
 }
 
-/// The growth is astroscrappy's: the box about every hit, kept where `S' > sigclip`, then the box
-/// about that, kept where `S' > sigclip·sigfrac`, with no contrast test on either. On an 8×3 frame
-/// with `sigclip` 5, `sigfrac` 0.3 (so 1.5) and `objlim` 5, row 1 holds the hit P at x = 2 (S' 10,
-/// no fine structure), A at x = 3 (S' 6, but fine structure 10 σ, so it fails the contrast), B at
-/// x = 4 and C at x = 5 (S' 2 each), and E at x = 0 (S' 6, fine structure 10 σ, so no hit of its
-/// own); D below P has S' 2. P is the hit. A is
-/// in its box and clears `sigclip`: the first ring takes it, contrast or not. B is in A's box and
-/// clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring pixel's box,
-/// and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took two.
+/// The growth is astroscrappy's: the box about every hit, kept where `S' > detection_sigma`, then
+/// the box about that, kept where `S' > detection_sigma·growth_fraction`, with no contrast test on
+/// either. On an 8×3 frame with `detection_sigma` 5, `growth_fraction` 0.3 (so 1.5) and
+/// `contrast_limit` 5, row 1 holds the hit P at x = 2 (S' 10, no fine structure), A at x = 3 (S' 6,
+/// but fine structure 10 σ, so it fails the contrast), B at x = 4 and C at x = 5 (S' 2 each), and E
+/// at x = 0 (S' 6, fine structure 10 σ, so no hit of its own); D below P has S' 2. P is the hit. A
+/// is in its box and clears `detection_sigma`: the first ring takes it, contrast or not. B is in
+/// A's box and clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring
+/// pixel's box, and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took
+/// two.
 #[test]
 fn the_mask_grows_in_astroscrappys_two_rings() {
     let size = Size2us::new(8, 3);
@@ -523,9 +557,9 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
     fine[at(0, 1)] = 10.0;
     significance[at(2, 2)] = 2.0;
     let cfg = CosmicRayConfig {
-        sigclip: 5.0,
-        sigfrac: 0.3,
-        objlim: 5.0,
+        detection_sigma: 5.0,
+        growth_fraction: 0.3,
+        contrast_limit: 5.0,
         ..CosmicRayConfig::default()
     };
     // Sized from a larger plane's detection, as a Bayer mosaic's later phases are: clearing to the
@@ -605,7 +639,7 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
                             window.push(data[yy * width + xx]);
                         }
                     }
-                    let expected = median_mut(&mut window);
+                    let expected = statistics::median_mut(&mut window);
                     assert_eq!(
                         medians[y * width + x].to_bits(),
                         expected.to_bits(),
@@ -660,21 +694,20 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
     let rejected = |data: Buffer2<f32>, flag: bool| {
         let mut image = cfa_from_plane(data, CfaType::Mono);
         if flag {
-            image.flags = PixelFlags::from_fn(size, |index| {
+            image.set_flags(PixelFlags::from_fn(size, |index| {
                 if clipped.contains(&index) {
                     QualityFlags::SATURATED
                 } else {
                     QualityFlags::default()
                 }
-            });
+            }));
         }
         reject(&mut image, &CosmicRayConfig::default()).unwrap();
         image
     };
     let cosmic = |image: &CfaImage, index: usize| {
         image
-            .flags
-            .as_ref()
+            .flags()
             .is_some_and(|flags| flags.at(index).intersects(QualityFlags::COSMIC_RAY))
     };
 
@@ -694,13 +727,13 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
             "core pixel {:?}",
             size.point_of(index)
         );
-        assert_eq!(kept.data[index], 0.9);
+        assert_eq!(kept.data()[index], 0.9);
     }
     assert!(cosmic(&kept, size.index_of(hit)));
     assert!(
-        (kept.data[size.index_of(hit)] - 0.05).abs() < 0.02,
+        (kept.data()[size.index_of(hit)] - 0.05).abs() < 0.02,
         "the hit is repaired from the sky: {}",
-        kept.data[size.index_of(hit)]
+        kept.data()[size.index_of(hit)]
     );
 }
 
@@ -712,18 +745,18 @@ fn an_xtrans_mosaic_is_refused_untouched() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.04 + 0.01 * cfa.color_at(size.point_of(index)) as f32)
+        .map(|index| 0.04 + 0.01 * cfa.slot_at(size.point_of(index)) as f32)
         .collect();
     data[size.index_of(Vec2us::new(18, 18))] = 0.95;
     let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data.clone()), cfa);
-    image.flags = PixelFlags::from_fn(size, |index| {
+    image.set_flags(PixelFlags::from_fn(size, |index| {
         if index == 7 {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
         }
-    });
-    let flags = image.flags.as_ref().unwrap().bytes().to_vec();
+    }));
+    let flags = image.flags().unwrap().bytes().to_vec();
     for noise in [
         NoiseEstimation::Measured,
         NoiseEstimation::Gain {
@@ -738,8 +771,8 @@ fn an_xtrans_mosaic_is_refused_untouched() {
             reject(&mut image, &config),
             Err(CosmicRayError::XTransUnsupported)
         );
-        assert_eq!(bits(image.data.pixels()), bits(&data));
-        assert_eq!(image.flags.as_ref().unwrap().bytes(), flags);
+        assert_eq!(bits(image.data().pixels()), bits(&data));
+        assert_eq!(image.flags().unwrap().bytes(), flags);
     }
     assert_eq!(
         heap_bytes(&cfa, size),
@@ -806,6 +839,6 @@ fn the_local_recompute_is_the_full_one() {
         30,
         "the 29 hit pixels and one the growth takes"
     );
-    assert_eq!(found_local.words, found_full.words);
+    assert_eq!(found_local, found_full);
     assert_eq!(bits(&local), bits(&full));
 }

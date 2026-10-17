@@ -14,7 +14,7 @@ pub enum CosmicRayError {
     )]
     UnknownAdcStep,
     /// The frame is an X-Trans mosaic. Its red and blue photosites have no point-symmetric
-    /// same-colour pair near enough for a second difference, so no statistic tells a hit from a
+    /// same-color pair near enough for a second difference, so no statistic tells a hit from a
     /// star's wing there, and no reference tool runs L.A.Cosmic on one.
     #[error(
         "single-frame cosmic-ray rejection does not run on X-Trans mosaics; rely on dithering and \

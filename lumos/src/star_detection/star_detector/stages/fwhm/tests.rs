@@ -1,6 +1,7 @@
 use glam::DVec2;
 
 use crate::star_detection::roundness::Roundness;
+use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
 use crate::star_detection::star_detector::stages::fwhm::*;
 
 // FWHM estimation never reads position, so every fixture below sits at the origin, and the
@@ -46,7 +47,8 @@ fn nine_and(spoiled: Star) -> Vec<Star> {
 /// The quality cases spoil a star whose FWHM is the same 3.0 as the rest, so only the quality
 /// filter can remove it: the outcome is `Estimated { 3.0, 9 }` with the filter and would be
 /// `{ 3.0, 10 }` without. Medians of ten take the mean of the middle two; the MAD floor is
-/// `0.1 · median`, so a 3.0 cluster with MAD 0 keeps `|f − 3| ≤ 3 · 0.3 = 0.9`.
+/// `0.1 · median`, so a 3.0 cluster with MAD 0 keeps `|f − 3| ≤ 3σ`, σ the floor's 0.3 carried to
+/// σ for ten: at least `3 · 1.4826 · 0.3 = 1.33`.
 #[test]
 fn estimate_over_every_case() {
     let base = Star::at(DVec2::ZERO);
@@ -58,8 +60,8 @@ fn estimate_over_every_case() {
             5,
             FwhmSource::Configured(FALLBACK),
         ),
-        // Median 3.0 over ten; MAD 0 → threshold 0.9 drops the four 18.0s, leaving 6 < 7: the
-        // pre-rejection median, credited to the ten that made it.
+        // Median 3.0 over ten; MAD 0 → a threshold near 1.4 drops the four 18.0s, leaving 6 < 7:
+        // the pre-rejection median, credited to the ten that made it.
         (
             "pre-rejection median",
             {
@@ -68,6 +70,17 @@ fn estimate_over_every_case() {
                 stars
             },
             7,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 10,
+            },
+        ),
+        // A star 1.2 off the 3.0 cluster sits inside 3σ, though past three of the floor's MADs,
+        // 0.9: the clip is stated in σ, so it is kept and counted.
+        (
+            "inside three sigma",
+            nine_and(base.with_fwhm(4.2)),
+            5,
             FwhmSource::Estimated {
                 fwhm: 3.0,
                 stars_used: 10,

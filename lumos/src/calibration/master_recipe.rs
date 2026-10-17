@@ -4,8 +4,8 @@
 use std::fmt;
 
 use crate::calibration::master_role::MasterRole;
-use crate::frame_store::decode_cache::decode_pins::DECODE_VERSION;
-use crate::frame_store::decode_cache::fnv1a;
+use crate::decode::decode_pins::DECODE_VERSION;
+use crate::decode::fnv1a;
 use crate::ingest::ingest_config::IngestConfig;
 
 /// What `master_snapshot` (`internals::characterization`) pins of the master stack: a bias, a dark

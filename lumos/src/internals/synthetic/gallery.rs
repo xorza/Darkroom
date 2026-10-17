@@ -17,12 +17,7 @@ use std::path::PathBuf;
 use common::internals;
 use common::internals::DEBUG_OUTPUT_VAR;
 use glam::{DVec2, Vec2};
-
 use imaginarium::Buffer2;
-
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use crate::registration::transform::Transform;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::artifacts::CosmicRays;
@@ -33,6 +28,9 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::registration::transform::Transform;
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
@@ -271,7 +269,7 @@ fn gallery_sensor() {
             edge: 0.4,
             falloff: 2.5,
         }),
-        colour_gain: [1.0; 3],
+        color_gain: [1.0; 3],
     };
     save(
         &vignette_flat.render(size, &CfaType::Mono),

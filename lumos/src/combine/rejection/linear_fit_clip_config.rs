@@ -1,10 +1,10 @@
 //! Linear-fit clipping: regress the sorted samples on their expected Gaussian positions, and clip
 //! about the fitted centre in units of the fitted σ.
 
-use crate::combine::rejection::normal_scores::NormalScores;
-use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::pass::{Narrowing, Pass};
+use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::combine::rejection::validate_max_passes;
+use crate::config_value::ConfigValue;
 use crate::error::InvalidConfigField;
 
 /// Configuration for linear fit clipping.
@@ -24,38 +24,47 @@ use crate::error::InvalidConfigField;
 pub struct LinearFitClipConfig {
     /// How far either side of the fitted centre a value may sit, in sigma.
     pub sigma: SigmaBounds,
-    /// The most passes to run, the first clip included. The clip stops earlier when a fitted pass
-    /// rejects nothing.
-    pub max_passes: u32,
+    /// The most passes to run, the first clip included, so at least 2: one fit after it. The clip
+    /// stops earlier when a fitted pass rejects nothing.
+    pub max_iterations: u32,
 }
 
 impl Default for LinearFitClipConfig {
     fn default() -> Self {
-        Self {
-            sigma: SigmaBounds::symmetric(3.0),
-            max_passes: 4,
-        }
+        Self::DEFAULT
     }
 }
 
 impl LinearFitClipConfig {
-    /// Clipping to `sigma` about the fitted line, for at most `max_passes` passes, the first clip
-    /// about the median among them.
-    pub const fn new(sigma: SigmaBounds, max_passes: u32) -> Self {
-        Self { sigma, max_passes }
+    /// 3σ either side, for at most 4 passes.
+    pub const DEFAULT: Self = Self {
+        sigma: SigmaBounds::symmetric(3.0),
+        max_iterations: 4,
+    };
+
+    /// Clipping to `sigma` about the fitted line, for at most `max_iterations` passes, the first
+    /// clip about the median among them.
+    pub const fn new(sigma: SigmaBounds, max_iterations: u32) -> Self {
+        Self {
+            sigma,
+            max_iterations,
+        }
     }
 
-    /// Validate the clip thresholds and pass count.
-    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
+    /// Validate the clip thresholds and pass count: a single pass is the median clip alone, and
+    /// never fits a line.
+    pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;
-        validate_max_passes(self.max_passes)
+        ConfigValue::new("max_iterations", self.max_iterations)
+            .must_be("at least 2", self.max_iterations >= 2)
     }
 
-    pub(crate) fn narrow(&self, pass: &Pass<'_>, scores: &mut NormalScores) -> Proposal {
+    pub(crate) fn narrow(self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
+        let scores = &mut scratch.scores;
         if pass.index == 0 {
-            return pass.clip_about_median(self.sigma, scores);
+            return Narrowing::Window(pass.clip_about_median(self.sigma, scores));
         }
         let fit = pass.rank_fit(scores);
-        pass.keep(self.sigma, fit.centre, pass.floored(fit))
+        Narrowing::Window(pass.keep(self.sigma, fit.centre, pass.floored(fit)))
     }
 }

@@ -1,13 +1,13 @@
 use std::fmt;
 
 use lumos::{
-    BackgroundMode, ColorMode, Combine, ExtractBackground, RegistrationConfig, Scnr, StackConfig,
-    StarDetectionConfig, Stretch, StretchMethod,
+    BackgroundMode, ColorMode, Combine, ExtractBackground, RegistrationConfig, Scnr,
+    ScnrProtection, StackConfig, StarDetectionConfig, Stretch, StretchMethod,
 };
 use scenarium::{ConstValue, DataType, DynamicValue, TypeId};
 
 use crate::astro::config::preset::Preset;
-use crate::astro::config::processing::{ScnrMethodChoice, StretchKnobs, StretchMethodChoice};
+use crate::astro::config::processing::{StretchKnobs, StretchMethodChoice};
 use crate::astro::config::stacking::{CombineMethodChoice, DetectionPreset, RegistrationPreset};
 use crate::config_node::{ConfigValue, config_data_type};
 
@@ -49,7 +49,7 @@ fn each_picker_offers_its_variants_under_their_labels() {
     );
     assert_eq!(names(offered::<BackgroundMode>()), ["subtract", "divide"]);
     assert_eq!(
-        names(offered::<ScnrMethodChoice>()),
+        names(offered::<ScnrProtection>()),
         [
             "average_neutral",
             "additive_mask",
@@ -97,19 +97,19 @@ fn each_pick_builds_the_preset_it_names() {
     );
     same(&StretchMethodChoice::AutoStf.config(), &Stretch::auto_stf());
     same(
-        &ScnrMethodChoice::AverageNeutral.config(),
+        &ScnrProtection::AverageNeutral.config(),
         &Scnr::average_neutral(1.0),
     );
     same(
-        &ScnrMethodChoice::MaximumNeutral.config(),
+        &ScnrProtection::MaximumNeutral.config(),
         &Scnr::maximum_neutral(1.0),
     );
     same(
-        &ScnrMethodChoice::MaximumMask.config(),
+        &ScnrProtection::MaximumMask.config(),
         &Scnr::maximum_mask(1.0),
     );
     same(
-        &ScnrMethodChoice::AdditiveMask.config(),
+        &ScnrProtection::AdditiveMask.config(),
         &Scnr::additive_mask(1.0),
     );
     assert_eq!(BackgroundMode::Divide.config().mode, BackgroundMode::Divide);
@@ -154,10 +154,7 @@ fn each_pick_builds_the_preset_it_names() {
     }
     // A pick sets the method; the lights keep their policy.
     for (pick, combine) in [
-        (
-            CombineMethodChoice::SigmaClipped,
-            Combine::sigma_clipped(3.0),
-        ),
+        (CombineMethodChoice::SigmaClipped, Combine::sigma_clip(3.0)),
         (CombineMethodChoice::Winsorized, Combine::winsorized(3.0)),
         (CombineMethodChoice::Median, Combine::median()),
         (CombineMethodChoice::Mean, Combine::mean()),

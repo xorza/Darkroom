@@ -1,4 +1,5 @@
 use super::*;
+use crate::image::channel_layout::ChannelLayout;
 
 #[test]
 fn drizzle_config_default() {
@@ -6,30 +7,6 @@ fn drizzle_config_default() {
     assert_eq!(config.scale, 2.0);
     assert_eq!(config.pixfrac, 0.8);
     assert_eq!(config.kernel, DrizzleKernel::Square);
-}
-
-#[test]
-fn drizzle_config_presets() {
-    let x1_5 = DrizzleConfig::x1_5();
-    assert_eq!(x1_5.scale, 1.5);
-
-    assert_eq!(DrizzleConfig::default().scale, 2.0);
-
-    let x3 = DrizzleConfig::x3();
-    assert_eq!(x3.scale, 3.0);
-}
-
-#[test]
-fn drizzle_config_builder() {
-    let config = DrizzleConfig::default()
-        .with_pixfrac(0.5)
-        .with_kernel(DrizzleKernel::Gaussian)
-        .with_min_weight_fraction(0.2);
-
-    assert_eq!(config.pixfrac, 0.5);
-    assert_eq!(config.kernel, DrizzleKernel::Gaussian);
-    assert_eq!(config.min_weight_fraction, 0.2);
-    assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]
@@ -44,7 +21,14 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
             "scale",
             0.0,
         ),
-        (DrizzleConfig::default().with_pixfrac(1.5), "pixfrac", 1.5),
+        (
+            DrizzleConfig {
+                pixfrac: 1.5,
+                ..Default::default()
+            },
+            "pixfrac",
+            1.5,
+        ),
         (
             DrizzleConfig {
                 fill_value: f32::INFINITY,
@@ -54,7 +38,10 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
             f64::INFINITY,
         ),
         (
-            DrizzleConfig::default().with_min_weight_fraction(-0.1),
+            DrizzleConfig {
+                min_weight_fraction: -0.1,
+                ..Default::default()
+            },
             "min_weight_fraction",
             // -0.1 has no exact f64 twin: compare against the f32 the field actually holds.
             f64::from(-0.1f32),
@@ -69,9 +56,11 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 
     // The kernel constrains scale and pixfrac together, so it keeps its own variant.
     assert_eq!(
-        DrizzleConfig::default()
-            .with_kernel(DrizzleKernel::Lanczos)
-            .validate(),
+        DrizzleConfig {
+            kernel: DrizzleKernel::Lanczos,
+            ..Default::default()
+        }
+        .validate(),
         Err(DrizzleConfigError::InvalidLanczosSampling {
             scale: 2.0,
             pixfrac: 0.8,
@@ -98,7 +87,10 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 
     let error = DrizzleAccumulator::new(
         &constant_image(Size2us::new(2, 2), 0.0),
-        DrizzleConfig::default().with_pixfrac(1.5),
+        DrizzleConfig {
+            pixfrac: 1.5,
+            ..Default::default()
+        },
         0,
     )
     .unwrap_err();
@@ -111,7 +103,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 #[test]
 fn drizzle_output_grid_is_the_input_scaled() {
     let config = DrizzleConfig::default();
-    let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
+    let acc = accumulator(ImageDimensions::new((100, 80), ChannelLayout::Rgb), config);
     let dims = acc.finalize().image.dimensions();
     assert_eq!(dims.width(), 200);
     assert_eq!(dims.height(), 160);

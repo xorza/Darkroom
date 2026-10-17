@@ -62,18 +62,18 @@ fn seeing_scale_widens_and_lowers_peak() {
     assert!((s_sum - b_sum).abs() < 2.0);
 }
 
-/// The default flat is 1 everywhere, each photosite of a mosaic takes its colour's gain, a mono
+/// The default flat is 1 everywhere, each photosite of a mosaic takes its color's gain, a mono
 /// sensor the first, and a vignette reads its centre level at the centre pixel (32, 32) and its
 /// edge level at the corner (0, 0), which sits at the corner radius: `1 + (0.5 − 1)·1`, exact in
 /// f32. Times the gain 1.25, also exact.
 #[test]
-fn flat_field_colour_gain_and_vignette() {
+fn flat_field_color_gain_and_vignette() {
     let flat = FlatField::default().render(Size2us::new(8, 8), &CfaType::Mono);
     assert!(flat.iter().all(|&f| f == 1.0));
 
     let ff = FlatField {
         vignette: None,
-        colour_gain: [0.9, 1.0, 1.25],
+        color_gain: [0.9, 1.0, 1.25],
     };
     assert!(
         ff.render(Size2us::new(4, 4), &CfaType::Mono)
@@ -90,7 +90,7 @@ fn flat_field_colour_gain_and_vignette() {
             edge: 0.5,
             falloff: 2.0,
         }),
-        colour_gain: [1.0, 1.0, 1.25],
+        color_gain: [1.0, 1.0, 1.25],
     };
     let map = vig.render(Size2us::new(64, 64), &CfaType::Mono);
     assert_eq!((map[32 * 64 + 32], map[0]), (1.0, 0.5));

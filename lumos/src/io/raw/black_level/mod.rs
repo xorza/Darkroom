@@ -1,9 +1,8 @@
 //! [`BlackLevel`]: a RAW file's black level in ADU, folded as LibRaw folds it, without its
 //! roundings.
 
-use rayon::prelude::*;
-
 use imaginarium::Buffer2;
+use rayon::prelude::*;
 
 use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::PixelFlags;
@@ -30,7 +29,7 @@ pub(crate) struct LibrawBlack<'a> {
     /// A DNG's black levels as its tags state them, before LibRaw rounds them into `black` and
     /// `cblack`.
     pub(crate) dng: Option<DngLevels<'a>>,
-    /// LibRaw's `black_stat`: the sums of the masked pixels per colour, then their counts.
+    /// LibRaw's `black_stat`: the sums of the masked pixels per color, then their counts.
     pub(crate) masked: [u32; 8],
 }
 
@@ -41,7 +40,7 @@ pub(crate) struct DngLevels<'a> {
     pub(crate) cblack: &'a [f32; CBLACK_LEN],
 }
 
-/// A file's black level in ADU: the common level, what each LibRaw colour channel adds, and a
+/// A file's black level in ADU: the common level, what each LibRaw color channel adds, and a
 /// spatial pattern on top, as LibRaw's `adjust_bl` leaves them.
 ///
 /// LibRaw stores every term as a whole ADU, truncating or rounding what the file holds: a mean of
@@ -210,12 +209,12 @@ impl BlackLevel {
         self.maximum - self.common
     }
 
-    /// The black level of LibRaw colour channel `channel`, without the spatial pattern.
+    /// The black level of LibRaw color channel `channel`, without the spatial pattern.
     pub(crate) const fn of_channel(&self, channel: usize) -> f64 {
         self.common + self.channel[channel]
     }
 
-    /// The black level at visible pixel `(x, y)` of colour channel `channel`.
+    /// The black level at visible pixel `(x, y)` of color channel `channel`.
     #[inline]
     fn at(&self, channel: usize, x: usize, y: usize) -> f64 {
         self.of_channel(channel)
@@ -225,7 +224,7 @@ impl BlackLevel {
     }
 
     /// The visible area of `raw` as `(v − black(x, y)) / span`, and the flags `rule` gives its raw
-    /// values, in one row-parallel pass. `channel` names each pixel's LibRaw colour channel.
+    /// values, in one row-parallel pass. `channel` names each pixel's LibRaw color channel.
     ///
     /// Where every black term is a whole ADU, `v − black` and `span` are integers below 2¹⁶, exact
     /// in f32, and their f64 quotient narrowed to f32 is the correctly rounded one: f64 carries
@@ -333,7 +332,7 @@ struct PhaseLevels {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FlagRule {
     pub(crate) zero_is_bad: bool,
-    /// The raw value at which each LibRaw colour channel saturates, black included.
+    /// The raw value at which each LibRaw color channel saturates, black included.
     pub(crate) saturation: [f64; 4],
 }
 

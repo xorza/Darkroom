@@ -1,21 +1,19 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
-use scenarium::FuncId;
-use scenarium::async_lambda;
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::{
-    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD,
-    IngestConfig, LoadContext, MasterBuild, MasterBuildError, MasterCache, MasterInputs,
-    MasterRole,
+    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadContext,
+    MasterBuild, MasterBuildError, MasterCache, MasterInputs, MasterRole, ProgressCallback,
+    ProgressMonitor, SigmaThreshold, WriteError, writer,
 };
-use lumos::{FitsWriteError, ProgressCallback, ProgressMonitor};
-use scenarium::Invocation;
-use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
+use scenarium::{
+    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
+    async_lambda,
+};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
@@ -42,7 +40,7 @@ enum CacheError {
     WriteMaster {
         path: PathBuf,
         #[source]
-        source: FitsWriteError,
+        source: WriteError,
     },
     #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
     Write {
@@ -68,7 +66,7 @@ enum Caching {
 #[derive(Debug)]
 struct MastersRequest {
     frames: CalibrationSet<Vec<PathBuf>>,
-    sigma: f32,
+    sigma: SigmaThreshold,
     caching: Caching,
 }
 
@@ -89,7 +87,7 @@ impl MastersRequest {
                 },
             },
             &IngestConfig::default(),
-            &ProgressMonitor::new(ProgressCallback::default(), cancel.clone()),
+            ProgressMonitor::new(ProgressCallback::default(), cancel.clone()),
         )
     }
 }
@@ -146,7 +144,12 @@ pub(crate) fn register(library: &mut Library) {
                         bias: frames(2),
                         flat_dark: frames(3),
                     },
-                    sigma: inputs[4].required_f64() as f32,
+                    sigma: {
+                        let sigma = inputs[4].required_f64();
+                        SigmaThreshold::new(sigma as f32).map_err(|_refused| {
+                            InvokeError::invalid_input(4, "a finite σ of at least 1", sigma)
+                        })?
+                    },
                     caching: if inputs[5].required_bool() {
                         Caching::BesideFrames
                     } else {
@@ -179,9 +182,10 @@ pub(crate) fn register(library: &mut Library) {
             FuncInput::required("Sigma", DataType::Float)
                 .description(
                     "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
-                     above its color's dark background is a defect. Values below 1 count as 1.",
+                     above its color's dark background is a defect. It must be finite and \
+                     at least 1.",
                 )
-                .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
+                .default(f64::from(SigmaThreshold::DEFAULT.get())),
         )
         .input(
             FuncInput::required("Cache", DataType::Bool)
@@ -201,8 +205,8 @@ fn frames_input(name: &str, what: &str) -> FuncInput {
 }
 
 /// Each master kept next to its frames, which must share one directory, beside a marker that keys
-/// it by them, by the frames of the master subtracted from each, and by lumos's recipe for it, so a
-/// flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
+/// it by them, by the frames of each master subtracted from them, and by lumos's recipe for it, so
+/// a flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
 /// nothing and keys nothing: a key is a `stat` per frame, and one that fails would fail a build
 /// that never reads the cache.
 #[derive(Debug)]
@@ -232,7 +236,7 @@ impl CachePlace {
         let mut key = frame_set_key(inputs.frames)?;
         key.push_str("\nrecipe ");
         key.push_str(&inputs.recipe.to_string());
-        if let Some(subtracted) = &inputs.subtracted {
+        for subtracted in inputs.subtracted {
             key.push_str("\nsubtract ");
             key.push_str(&frame_set_key(subtracted.frames)?);
         }
@@ -260,7 +264,7 @@ impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
                 cancel: self.cancel.clone(),
                 ..Default::default()
             };
-            match CfaImage::from_file(&place.paths.master, &context) {
+            match context.cfa(&place.paths.master) {
                 Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
                 Err(error) => tracing::warn!(
                     path = %place.paths.master.display(),
@@ -276,12 +280,10 @@ impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
         let Some(CachePlace { paths, key }) = place else {
             return Ok(());
         };
-        master
-            .save_fits(&paths.master)
-            .map_err(|source| CacheError::WriteMaster {
-                path: paths.master.clone(),
-                source,
-            })?;
+        writer::cfa_fits(master, &paths.master).map_err(|source| CacheError::WriteMaster {
+            path: paths.master.clone(),
+            source,
+        })?;
         file_utils::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(
             |source| CacheError::Write {
                 path: paths.marker,

@@ -1,10 +1,6 @@
 //! Four calibration roles carrying values of one common type.
 
-use crate::calibration::error::CalibrationError;
 use crate::calibration::master_role::MasterRole;
-use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_type::CfaType;
-use crate::math::size2us::Size2us;
 
 /// Four calibration roles carrying values of one common type.
 ///
@@ -50,44 +46,5 @@ impl<T> CalibrationSet<T> {
         MasterRole::ALL
             .into_iter()
             .map(|role| (role, self.get(role)))
-    }
-}
-
-impl CalibrationSet<Option<CfaImage>> {
-    /// The sensor extent every present master shares, or `None` when the set is empty; they must
-    /// share one CFA pattern too.
-    ///
-    /// The masters are combined pixel-for-pixel by flat index — dark subtracted from flat,
-    /// defects detected on one and corrected on another — so a set that spans two sensors has no
-    /// coherent interpretation. Reported as an error rather than left to the individual
-    /// operations, which each assert on only the pair they touch and cover the set unevenly: a
-    /// bias in a set with no flat is never anyone's operand.
-    pub(crate) fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
-        let mut expected: Option<(Size2us, CfaType)> = None;
-        for (role, master) in self
-            .iter()
-            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
-        {
-            let size = Size2us::from(&master.data);
-            let Some((expected_size, expected_pattern)) = expected else {
-                expected = Some((size, master.cfa_type));
-                continue;
-            };
-            if size != expected_size {
-                return Err(CalibrationError::DimensionMismatch {
-                    component: role.into(),
-                    expected: expected_size,
-                    master: size,
-                });
-            }
-            if master.cfa_type != expected_pattern {
-                return Err(CalibrationError::CfaPatternMismatch {
-                    component: role,
-                    expected: expected_pattern,
-                    master: master.cfa_type,
-                });
-            }
-        }
-        Ok(expected.map(|(size, _)| size))
     }
 }
