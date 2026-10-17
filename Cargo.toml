@@ -87,14 +87,18 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
-# Path dependencies, which "*" would build at 3.
+# Path dependencies, which "*" would build at 3 with no debug info.
 [profile.dev.package.palantir]
 opt-level = 1
+debug = "line-tables-only"
 [profile.dev.package.imaginarium]
 opt-level = 1
+debug = "line-tables-only"
 [profile.dev.package.fits-well]
 opt-level = 1
+debug = "line-tables-only"
 
 # Its build script compiles LibRaw at the profile's opt-level.
 [profile.dev.package.libraw-sys]
