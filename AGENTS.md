@@ -34,39 +34,37 @@ Windows, `libclang-dev` on Linux.
 
 ## Verification
 
-`x.py` at the root runs every check (`python x.py` on Windows). `gate` runs,
-on the packages the working tree changed: rustfmt in place, clippy on every
-target per lint set, plain clippy for the build that ships, rustdoc with
-private items under `-D warnings`, the tests per test set, and the doc tests.
-It stops after the first step that fails. Each cargo call prints one line, a
-failure adds only its diagnostics or failed tests, and the full output is in
-`target/x/last/`.
+`cargo drive` runs every check: the driver is the `drive` submodule at the
+root, the same repository in every project. Run it from the root.
 
 ```
-./x.py gate                        # the changed packages
-./x.py gate -p <pkg>               # named packages; --workspace for every one
-./x.py test -p <pkg> -- <filter>   # one step: fmt, lint, doc, test, nextest, doctest
-./x.py test --lib                  # or --test <name>, in place of the set's targets
-./x.py bench -- <filter>           # --smoke runs each case once, --no-run prints the binary
-./x.py watch                       # rebuilds on change, so the cache stays warm
+cargo drive check          # after each change: the root's `check` lanes
+cargo drive test [args]    # the tests, each time; the runner's arguments pick some: a test name
+cargo drive bench [args]   # the benches; a filter, or --test to run each case once
+cargo drive gate           # the full check, as CI runs it: the root's `gate` lanes, fmt --check
 ```
 
-Check through `x.py`, not cargo: each call is one package with fixed flags,
-so every run reuses the build `watch` keeps warm, and another flag set builds
-another copy of the crate. A package's feature sets are in its `Cargo.toml`,
-under `[package.metadata.x]`. `x.py` is one file, the same in darkroom and
-in each submodule: a change to it is copied to the others.
+`check` takes no arguments: each lane covers the whole workspace, and the
+workspace of each path dependency outside it, in its own folder. A step does
+not run again when no input changed since it passed; under nextest, the tests
+run only for the crates a change reaches and every crate that depends on them.
+Each step prints one line; a failure prints each diagnostic once and names its
+log, `target/drive/log/<step>.log`. Read the log rather than run cargo by
+hand: another shape of a cargo command builds another copy of the crates.
 
-A changed file in a submodule puts its packages in scope; they build in the
-submodule's directory, into its target dir, under its own sets. `-p` names a
-package of any root, and `--workspace` means this root's members.
+A root's lanes are in its `Cargo.toml`, under `[workspace.metadata.drive]`,
+or `[package.metadata.drive]` in a root that is one package. Its `check` list
+runs fmt, lint, ship, tests and doc tests by default, and its `gate` list adds
+rustdoc. `test-runner` is `nextest` (the default) or `cargo-test`, which needs
+nothing installed but runs every test when a change reaches any crate. Every
+lane runs `--locked`: after a change to the dependencies,
+`cargo update --workspace` writes the lock.
 
-The second clippy lints the build that ships: `--all-targets` turns `internals`
+The ship lane lints the build that ships: `--all-targets` turns `internals`
 on through the self dev-dependency, so only a build of the library and binaries
 alone shows what production compiles, such as a field only test code reads.
-The doc step fails on a broken intra-doc link; it documents private items,
-where most of the workspace's docs sit. Rustdoc never builds `cfg(test)`
-code, so a doc names a test-only item in a code span, not a link.
+Rustdoc never builds `cfg(test)` code, so a doc names a test-only item in a
+code span, not a link.
 
 ## Test code
 
@@ -89,10 +87,10 @@ An `atomic` case times one operation on the unit production hands it; an
 `integration` case times a pipeline stage, a frame or a public entry point end
 to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's filter
 selects by it; a crate with GPU cases puts the backend first in every case, so
-`'/cpu/'` opens no device. `./x.py bench` runs them in this workspace (lumos,
-and darkroom's editor frame) and in each submodule, with that package's fixed
-bench features; `--smoke` runs each case once, and a change to bench code runs
-it.
+`'/cpu/'` opens no device. `cargo drive bench` runs the benches of the root
+it runs in (here lumos, and darkroom's editor frame; each submodule runs its
+own), with the root's fixed bench features; `--test` runs each case once, and
+a change to bench code runs it.
 
 ## Conventions
 
