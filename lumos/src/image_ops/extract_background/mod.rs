@@ -339,7 +339,7 @@ impl Surface {
             .max()
             .unwrap_or(0);
         // `validate` caps the degree at 4, so `degree + 1 ≤ 5` fits fixed buffers.
-        assert!(degree <= 4, "background surface degree {degree} exceeds 4");
+        debug_assert!(degree <= 4, "background surface degree {degree} exceeds 4");
         let d1 = degree + 1;
         let mut c_mat = [0.0f64; 25];
         for (term, &c) in polynomial.terms.iter().zip(polynomial.coeffs.iter()) {

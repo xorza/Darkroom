@@ -37,7 +37,7 @@ impl NormalScores {
         }
     }
 
-    pub(crate) fn of_count(&mut self, n: usize) -> &[f64] {
+    pub(super) fn of_count(&mut self, n: usize) -> &[f64] {
         debug_assert!(n > 0, "the scores of no samples");
         self.reserve(n);
         if self.counts.is_empty() {

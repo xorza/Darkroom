@@ -36,7 +36,7 @@ impl PointNormalization {
     /// Hartley's normalization: the centroid as center, and the scale that puts the average
     /// distance from it at √2. No points, or points that all coincide, give the identity: there is
     /// no spread to condition.
-    pub(crate) fn hartley(points: &[DVec2]) -> Self {
+    pub(super) fn hartley(points: &[DVec2]) -> Self {
         if points.is_empty() {
             return Self::IDENTITY;
         }
@@ -68,17 +68,17 @@ impl PointNormalization {
 
     /// Map a point from normalized space back to pixel space.
     #[inline]
-    pub(crate) fn denormalize(self, p: DVec2) -> DVec2 {
+    pub(super) fn denormalize(self, p: DVec2) -> DVec2 {
         p * self.scale + self.center
     }
 
     #[inline]
-    pub(crate) fn denormalize_delta(self, d: DVec2) -> DVec2 {
+    pub(super) fn denormalize_delta(self, d: DVec2) -> DVec2 {
         d * self.scale
     }
 
     /// [`Self::normalize`] as a transform.
-    pub(crate) fn normalizing_transform(self) -> Transform {
+    pub(super) fn normalizing_transform(self) -> Transform {
         let inverse = 1.0 / self.scale;
         Transform::affine([
             inverse,
@@ -92,7 +92,7 @@ impl PointNormalization {
 
     /// [`Self::denormalize`] as a transform, built directly rather than by inverting
     /// [`Self::normalizing_transform`].
-    pub(crate) const fn denormalizing_transform(self) -> Transform {
+    pub(super) const fn denormalizing_transform(self) -> Transform {
         Transform::affine([
             self.scale,
             0.0,

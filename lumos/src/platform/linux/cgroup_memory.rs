@@ -42,7 +42,7 @@ enum CgroupVersion {
 
 impl CgroupMemory {
     /// This process's groups; `None` where its memory hierarchy cannot be found.
-    pub(crate) fn of_process(mounts: &MountTable) -> Option<Self> {
+    pub(super) fn of_process(mounts: &MountTable) -> Option<Self> {
         let membership = fs::read_to_string("/proc/self/cgroup").ok()?;
         Self::locate(&membership, mounts, Path::new("/"))
     }

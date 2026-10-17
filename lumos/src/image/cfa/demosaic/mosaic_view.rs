@@ -61,12 +61,12 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     }
 
     /// This mosaic, its colors balanced by `gains` for the direction decisions.
-    pub(crate) const fn with_gains(self, gains: [f32; 3]) -> Self {
+    pub(super) const fn with_gains(self, gains: [f32; 3]) -> Self {
         Self { gains, ..self }
     }
 
     /// The frame's width, the stride of its rows.
-    pub(crate) const fn frame_width(&self) -> usize {
+    pub(super) const fn frame_width(&self) -> usize {
         self.size.width
     }
 
@@ -82,7 +82,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
 
     /// The gain that balances the color of the photosite at `at`.
     #[inline(always)]
-    pub(crate) fn gain_at(&self, at: Vec2us) -> f32 {
+    pub(super) fn gain_at(&self, at: Vec2us) -> f32 {
         self.gains[self.pattern.color_at(at).index()]
     }
 

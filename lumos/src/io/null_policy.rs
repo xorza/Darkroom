@@ -98,7 +98,7 @@ pub(crate) struct NullSamples {
 /// bound is what keeps this off the memory preflight: the scratch is a fixed 400 KB rather than a
 /// second copy of the plane the preflight did not budget for. `defect_map::sampling` bounds its own
 /// medians the same way and for the same reason.
-pub(crate) const FILL_MEDIAN_SAMPLES: usize = 100_000;
+const FILL_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Replace a plane's `null_count` non-finite samples with the median of its finite ones.
 ///
@@ -114,7 +114,7 @@ pub(crate) fn fill(samples: &mut [f32], null_count: usize) {
 /// Replace the samples of a plane that `flags` mark [`QualityFlags::NO_DATA`] with the median of
 /// the rest, as [`fill`] replaces a null: a decoder that reads a photosite as no measurement
 /// leaves the same stand-in under it as one that reads a null.
-pub(crate) fn fill_flagged(samples: &mut [f32], flags: &PixelFlags) {
+pub(super) fn fill_flagged(samples: &mut [f32], flags: &PixelFlags) {
     let count = flags.count(QualityFlags::NO_DATA);
     if count > 0 {
         let missing = |index: usize, _| flags.at(index).intersects(QualityFlags::NO_DATA);

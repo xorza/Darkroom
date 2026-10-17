@@ -52,7 +52,7 @@ pub(crate) struct PlaneSpec<'a> {
 impl DetectionPlane {
     /// Filter `residual`, a plane from `resources` that the plane takes over, and measure its
     /// noise.
-    pub(crate) fn from_residual(
+    pub(super) fn from_residual(
         mut residual: Pooled<Buffer2<f32>>,
         spec: PlaneSpec<'_>,
         resources: &mut DetectionResources,
@@ -87,7 +87,7 @@ impl DetectionPlane {
     }
 
     /// The threshold `sigma` of the plane's own noise, held to its floor.
-    pub(crate) const fn threshold_params(&self, sigma: f32) -> ThresholdParams {
+    pub(super) const fn threshold_params(&self, sigma: f32) -> ThresholdParams {
         ThresholdParams {
             sigma,
             min_noise: self.noise.floor,

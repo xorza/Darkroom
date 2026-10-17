@@ -54,7 +54,7 @@ pub(crate) struct FilterSampling {
 
 impl SampleMethod {
     /// What `params` asks for, at the stretch `warp` needs over an output frame of `size`.
-    pub(crate) fn for_frame(params: WarpParams, warp: &WarpTransform, size: Size2us) -> Self {
+    pub(super) fn for_frame(params: WarpParams, warp: &WarpTransform, size: Size2us) -> Self {
         match Filter::of(params.method) {
             None => Self::Nearest,
             Some(filter) => Self::Filter(FilterSampling {
@@ -74,7 +74,7 @@ impl SampleMethod {
 
     /// The source pixels around a sample's cell a filter's windows read; `None` for the nearest
     /// pixel, which reads its own flags.
-    pub(crate) const fn window_reach(self) -> Option<Reach> {
+    pub(super) const fn window_reach(self) -> Option<Reach> {
         match self {
             Self::Nearest => None,
             Self::Filter(filter) => Some(filter.kernel.window_reach()),

@@ -17,7 +17,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::math::vec2us::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
-pub(crate) const MIN_NORMALIZED_FLAT: f32 = 0.1;
+pub(super) const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
 /// A flat ready to divide a light by: its additive part removed, normalized to a mean of one per
 /// CFA color, and floored at [`MIN_NORMALIZED_FLAT`].
@@ -77,7 +77,7 @@ impl PreparedFlat {
     }
 
     /// Whether the divisor sits at its floor at `index`.
-    pub(crate) fn is_floored(&self, index: usize) -> bool {
+    pub(super) fn is_floored(&self, index: usize) -> bool {
         self.divisor.data().pixels()[index] <= MIN_NORMALIZED_FLAT
     }
 

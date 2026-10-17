@@ -153,7 +153,7 @@ fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
 /// the visible area alone, then a clamp — so the preview and a calibrated frame cannot disagree
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
 /// three-color CFA — is LibRaw's own processing.
-pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+pub(super) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
     let raw = open_raw(path, context, |libraw| preview_route(libraw, context))?;
     context.check_cancelled(path)?;
     raw.into_linear_image(context)

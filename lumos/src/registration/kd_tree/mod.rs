@@ -116,7 +116,7 @@ impl KdTree {
                 },
             );
 
-            // Push right first so left is processed first (stack is LIFO).
+            // The stack is LIFO: right goes first so left is processed first.
             let [left, right] = subtree.children();
             if right.len() > 0 {
                 stack.push(right);

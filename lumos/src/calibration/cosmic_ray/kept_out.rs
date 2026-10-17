@@ -66,7 +66,7 @@ impl KeptOut {
 
     /// Into `plane`, the same over the photosites of `phase`. Fills `plane`'s allocations, which
     /// grow only for a larger plane.
-    pub(crate) fn sample_into(&self, plane: &mut Self, phase: BayerPhase) {
+    pub(super) fn sample_into(&self, plane: &mut Self, phase: BayerPhase) {
         phase.deinterleave_mask(&self.never_flagged, &mut plane.never_flagged);
         phase.deinterleave_mask(&self.unread, &mut plane.unread);
     }

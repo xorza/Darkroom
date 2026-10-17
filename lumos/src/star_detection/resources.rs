@@ -72,11 +72,11 @@ impl DetectionResources {
         self.floats.shape()
     }
 
-    pub(crate) fn acquire_f32(&self) -> Pooled<Buffer2<f32>> {
+    pub(super) fn acquire_f32(&self) -> Pooled<Buffer2<f32>> {
         self.floats.acquire()
     }
 
-    pub(crate) fn acquire_bit(&self) -> Pooled<BitBuffer2> {
+    pub(super) fn acquire_bit(&self) -> Pooled<BitBuffer2> {
         self.bitmasks.acquire()
     }
 

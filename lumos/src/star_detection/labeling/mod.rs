@@ -41,7 +41,7 @@ pub(crate) struct LabelRun {
 impl LabelMap {
     /// Number of connected components (excluding background).
     #[inline]
-    pub(crate) const fn num_labels(&self) -> usize {
+    pub(super) const fn num_labels(&self) -> usize {
         self.components.len()
     }
 
@@ -53,7 +53,7 @@ impl LabelMap {
 
     /// The runs of the component with `label`, in raster order.
     #[inline]
-    pub(crate) fn runs_of(&self, label: u32) -> &[LabelRun] {
+    pub(super) fn runs_of(&self, label: u32) -> &[LabelRun] {
         let index = label as usize - 1;
         &self.runs[self.run_starts[index] as usize..self.run_starts[index + 1] as usize]
     }

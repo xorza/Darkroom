@@ -36,7 +36,7 @@ impl RunScratch {
     }
 
     /// See [`DiskRoot::ensure_space`].
-    pub(crate) fn ensure_space(&self, needed: u64) -> Result<(), FrameStoreError> {
+    pub(super) fn ensure_space(&self, needed: u64) -> Result<(), FrameStoreError> {
         self.root.ensure_space(needed)
     }
 

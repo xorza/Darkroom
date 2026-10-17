@@ -88,7 +88,7 @@ pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
 /// The median of `magnitudes`, in place: values with no sign bit set, as `|x − c|` makes them,
 /// whose bits order as `total_cmp` does already, so they select with nothing mapped either way.
 #[inline]
-pub(crate) fn median_of_magnitudes<F: Float>(magnitudes: &mut [F]) -> F {
+pub(super) fn median_of_magnitudes<F: Float>(magnitudes: &mut [F]) -> F {
     debug_assert!(!magnitudes.is_empty());
     let keys = F::as_keys(magnitudes);
     debug_assert!(

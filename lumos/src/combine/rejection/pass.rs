@@ -91,7 +91,7 @@ impl Pass<'_> {
     ///
     /// The floor under every σ a pass measures: a spread measured from a few samples can fall far
     /// below the noise the frames are known to carry, and an outlier cannot lower the model.
-    pub(crate) fn model_sigma(&self, centre: f32) -> f32 {
+    pub(super) fn model_sigma(&self, centre: f32) -> f32 {
         let Some(noise) = self.noise else {
             return 0.0;
         };
@@ -113,7 +113,7 @@ impl Pass<'_> {
     /// sample; a later one by [`Self::rank_fit`]'s σ, because the window it measures is what the
     /// earlier passes left, whose tails they cut: its own MAD, scaled as a complete sample, would
     /// shrink at every pass and reject clean samples at several times the Gaussian tail share.
-    pub(crate) fn clip_about_median(
+    pub(super) fn clip_about_median(
         &self,
         bounds: SigmaBounds,
         scores: &mut NormalScores,
@@ -134,7 +134,7 @@ impl Pass<'_> {
     /// full count, so the window's ranks place it where it sits in the whole sample, and a window
     /// whose tails a pass cut still measures the σ of the whole. Sums run in f64 about the means,
     /// so neither cancels.
-    pub(crate) fn rank_fit(&self, scores: &mut NormalScores) -> Spread {
+    pub(super) fn rank_fit(&self, scores: &mut NormalScores) -> Spread {
         debug_assert!(
             self.sorted.is_sorted(),
             "ranks are read only where no per-sample band reordered the samples"
@@ -163,7 +163,7 @@ impl Pass<'_> {
     /// `imcombine reject=ccdclip` does: a sample is kept while `|x − c| / σᵢ` lies within `bounds`.
     /// The samples' variances differ — a warp's confidence and a frame's gain set them — so one
     /// band would be too loose for the precise samples and too tight for the noisy ones.
-    pub(crate) fn clip_by_model(&self, bounds: SigmaBounds) -> Narrowing {
+    pub(super) fn clip_by_model(&self, bounds: SigmaBounds) -> Narrowing {
         debug_assert!(
             self.noise.is_some(),
             "a spread-measuring combine gathers the noise models"

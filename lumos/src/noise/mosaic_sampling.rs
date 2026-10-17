@@ -53,7 +53,7 @@ impl Pair {
 
 impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
     /// The index and color of every sampled photosite.
-    pub(crate) fn for_each_photosite(&self, mut visit: impl FnMut(usize, usize)) {
+    pub(super) fn for_each_photosite(&self, mut visit: impl FnMut(usize, usize)) {
         let Size2us { width, .. } = self.size;
         for y in self.cfa_type.sampled_rows(self.size, self.per_color) {
             for x in 0..width {
@@ -66,7 +66,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
     }
 
     /// How many photosites of each color [`Self::for_each_photosite`] visits.
-    pub(crate) fn photosite_counts(&self) -> [usize; 3] {
+    pub(super) fn photosite_counts(&self) -> [usize; 3] {
         let mut counts = [0; 3];
         self.for_each_photosite(|_, color| counts[color] += 1);
         counts
@@ -74,7 +74,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
 
     /// Every pair of a sampled photosite and the nearest same-color photosite to its right in its
     /// row; a pair touching an excluded pixel is skipped.
-    pub(crate) fn for_each_pair(&self, mut visit: impl FnMut(Pair)) {
+    pub(super) fn for_each_pair(&self, mut visit: impl FnMut(Pair)) {
         let Size2us { width, .. } = self.size;
         for y in self.cfa_type.sampled_rows(self.size, self.per_color) {
             for x in 0..width {
@@ -99,7 +99,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
     }
 
     /// How many pairs of each color [`Self::for_each_pair`] visits.
-    pub(crate) fn pair_counts(&self) -> ArrayVec<usize, 3> {
+    pub(super) fn pair_counts(&self) -> ArrayVec<usize, 3> {
         let mut counts: ArrayVec<usize, 3> = (0..self.cfa_type.num_colors()).map(|_| 0).collect();
         self.for_each_pair(|pair| counts[pair.color] += 1);
         counts
@@ -169,7 +169,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
 
     /// The most bytes an estimate over the mosaic holds: every pair of every color, as
     /// [`Self::backgrounds`] holds them, each with its gain bin.
-    pub(crate) fn noise_heap_bytes(&self) -> usize {
+    pub(super) fn noise_heap_bytes(&self) -> usize {
         self.pair_counts()
             .into_iter()
             .map(BinnedSamples::<Vec<f32>>::heap_bytes)

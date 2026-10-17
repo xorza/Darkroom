@@ -39,7 +39,7 @@ impl SigmaBounds {
     /// survivors of this band scatter, in units of its σ.
     /// `1 + (αφ(α) − βφ(β))/Z − ((φ(α) − φ(β))/Z)²` with `α = −low`, `β = high` and
     /// `Z = Φ(β) − Φ(α)`.
-    pub(crate) fn truncated_variance(self) -> f64 {
+    pub(super) fn truncated_variance(self) -> f64 {
         let normal = Normal::standard();
         let (alpha, beta) = (-f64::from(self.low), f64::from(self.high));
         let mass = normal.cdf(beta) - normal.cdf(alpha);

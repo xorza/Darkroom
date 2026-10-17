@@ -35,7 +35,7 @@ struct Stated<T> {
 impl SetFacts {
     /// The facts frame 0 states, for a frame decoding beside the others to check against before
     /// the set is complete, so a mismatched set stops before the rest decodes.
-    pub(crate) fn of_first(facts: &FrameFacts) -> Self {
+    pub(super) fn of_first(facts: &FrameFacts) -> Self {
         let mut set = Self::default();
         set.record(0, facts);
         set

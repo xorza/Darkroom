@@ -43,7 +43,7 @@ impl OutputGrid {
     }
 
     /// The map from reference pixels onto the grid: `o = s·p + (s − 1)/2`.
-    pub(crate) fn reference_map(self) -> Transform {
+    pub(super) fn reference_map(self) -> Transform {
         let offset = (self.scale - 1.0) / 2.0;
         Transform::affine([self.scale, 0.0, offset, 0.0, self.scale, offset])
     }

@@ -27,15 +27,10 @@ impl NaturalSpline<'_> {
             return;
         }
 
-        // Interval spacings: h[i] = centers[i+1] - centers[i]
-        // For n points, we have n-1 intervals and n-2 interior equations.
-        //
-        // The tridiagonal system for interior points i = 1..n-2:
+        // With `h[i] = centers[i+1] - centers[i]`, the interior nodes i = 1..n-2 satisfy
         //   h[i-1] * d2[i-1] + 2*(h[i-1]+h[i]) * d2[i] + h[i] * d2[i+1]
-        //     = 6 * ((f[i+1]-f[i])/h[i] - (f[i]-f[i-1])/h[i-1])
-        //
-        // With natural BC: d2[0] = 0, d2[n-1] = 0.
-        // This reduces to (n-2) equations for d2[1..n-2].
+        //     = 6 * ((f[i+1]-f[i])/h[i] - (f[i]-f[i-1])/h[i-1]),
+        // and the natural ends d2[0] = d2[n-1] = 0 leave n-2 equations in d2[1..n-2].
 
         let m = n - 2;
         debug_assert!(scratch.len() >= m);

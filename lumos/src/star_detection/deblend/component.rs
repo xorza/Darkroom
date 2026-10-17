@@ -73,7 +73,7 @@ impl<'a> Component<'a> {
     /// fewer than two peaks, else every pixel assigned to its nearest peak (squared-Euclidean
     /// Voronoi; the first peak wins ties) and one [`Region`] per peak that captured any — the
     /// shared tail of both deblenders. Returns how many it pushed.
-    pub(crate) fn split_at(
+    pub(super) fn split_at(
         &self,
         peaks: &[Pixel],
         scratch: &mut Assignment,

@@ -8,9 +8,9 @@ use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
 /// The keyword that names the image HDU an extension is for: its `EXTNAME`, or [`PRIMARY`].
-pub(crate) const IMAGE_KEYWORD: &str = "LUMFOR";
+pub(super) const IMAGE_KEYWORD: &str = "LUMFOR";
 /// The name of a primary HDU without an `EXTNAME`, as astropy and fitsio name it.
-pub(crate) const PRIMARY: &str = "PRIMARY";
+pub(super) const PRIMARY: &str = "PRIMARY";
 
 /// The extensions of one kind in a file, each with the image it names, checked so that each names
 /// an image of the file no other names: one that names none would be dropped unseen.
@@ -70,7 +70,7 @@ impl ExtensionClaims {
     }
 
     /// The extension for the image at HDU `image`; `None` when it has none.
-    pub(crate) fn for_image(
+    pub(super) fn for_image(
         &self,
         hdus: &[Hdu],
         image: usize,
@@ -88,7 +88,7 @@ impl ExtensionClaims {
     /// Whether `hdu` is an image of its own: an image HDU with at least one axis, which no lumos
     /// extension that describes another image is. A header-only image extension (`NAXIS = 0`) is
     /// none; one with a zero-length axis is, and is refused for that when it is read.
-    pub(crate) fn holds_image(hdu: &Hdu) -> Result<bool, FitsLoadError> {
+    pub(super) fn holds_image(hdu: &Hdu) -> Result<bool, FitsLoadError> {
         Ok(hdu.is_image() && hdu.header.naxis()? > 0 && !Self::describes_another(hdu)?)
     }
 

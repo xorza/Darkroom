@@ -458,7 +458,7 @@ struct AsinhCurve {
 
 impl AsinhCurve {
     fn new(beta: f32) -> Self {
-        assert!(
+        debug_assert!(
             beta > 0.0,
             "asinh softening beta must be positive, got {beta}"
         );

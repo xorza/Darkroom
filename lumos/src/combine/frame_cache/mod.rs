@@ -130,7 +130,7 @@ pub(crate) struct FrameCache {
 
 impl FrameCache {
     /// Build a cache from frames already placed in the shared frame store.
-    pub(crate) fn from_stored_frames(
+    pub(super) fn from_stored_frames(
         frames: Vec<StoredFrame>,
         core: CacheCore,
         normalization: Normalization,
@@ -163,7 +163,7 @@ impl FrameCache {
     }
 
     /// Build an in-memory frame-quality-aware cache from [`StackFrame`]s.
-    pub(crate) fn from_stack_frames(
+    pub(super) fn from_stack_frames(
         frames: Vec<StackFrame>,
         normalization: Normalization,
         monitor: ProgressMonitor,
@@ -239,7 +239,7 @@ impl FrameCache {
     }
 
     /// Assemble the combined image, geometric coverage, and per-channel survivor quality.
-    pub(crate) fn finish_product(
+    pub(super) fn finish_product(
         &self,
         combined: CombineOutput,
         planes: QualityPlanes,
@@ -323,7 +323,7 @@ impl FrameCache {
     /// frame was gathered, divides its noise model. A frame carrying no frame quality contributes
     /// everywhere at unit confidence, which is what lets calibration masters and registered light
     /// stacks share this loop. A pixel no frame supports gets `0`.
-    pub(crate) fn process_chunked<Combine>(
+    pub(super) fn process_chunked<Combine>(
         &self,
         request: CombineRequest<'_>,
         combine: Combine,

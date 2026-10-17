@@ -152,7 +152,7 @@ impl PixelQuadrature {
     /// out after: a fit takes one per star, and the nodes never change.
     pub(crate) fn gauss_legendre(order: usize) -> Self {
         static RULES: OnceLock<[PixelQuadrature; MAX_ORDER]> = OnceLock::new();
-        assert!(
+        debug_assert!(
             (1..=MAX_ORDER).contains(&order),
             "a pixel quadrature has 1 to {MAX_ORDER} points, not {order}"
         );

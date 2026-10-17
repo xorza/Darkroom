@@ -33,7 +33,7 @@ pub(crate) enum DarkBias {
 
 impl DarkBias {
     /// Whether `held`, the parts a dark still holds, names the bias.
-    pub(crate) const fn held_in(held: CalibrationState) -> Self {
+    pub(super) const fn held_in(held: CalibrationState) -> Self {
         if held.bias { Self::Held } else { Self::Removed }
     }
 }

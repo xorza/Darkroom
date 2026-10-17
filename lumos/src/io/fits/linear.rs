@@ -19,10 +19,10 @@ use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
 
-pub(crate) const LINEAR_FITS_FORMAT: &str = "LINIMAGE";
+pub(super) const LINEAR_FITS_FORMAT: &str = "LINIMAGE";
 /// 1: the samples normalized with the domain's scale as `BSCALE`, an RGB image as a cube of three
 /// planes, `NO_DATA` as NaN in every channel.
-pub(crate) const LINEAR_FITS_VERSION: i64 = 1;
+pub(super) const LINEAR_FITS_VERSION: i64 = 1;
 
 /// The image and header one linear image's HDU writes.
 #[derive(Debug)]
@@ -99,7 +99,7 @@ pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
 }
 
 /// Whether `image` is a Lumos linear image's header, refused when it is one of another version.
-pub(crate) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
+pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
     let is_lumos_linear = image
         .get_text(FORMAT_KEYWORD)?
         .is_some_and(|format| format == LINEAR_FITS_FORMAT);

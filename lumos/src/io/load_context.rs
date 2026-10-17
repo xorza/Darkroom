@@ -142,7 +142,7 @@ impl LoadContext {
         }
     }
 
-    pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
+    pub(super) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
         if self.cancel.is_cancelled() {
             return Err(ImageError::cancelled(path));
         }

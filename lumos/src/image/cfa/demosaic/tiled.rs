@@ -109,7 +109,7 @@ impl OutputPlanes {
     /// The planes cover the frame, and no other tile writes the pixels from `index` to
     /// `index + values.len()`.
     #[inline(always)]
-    pub(crate) const unsafe fn write_row(self, channel: usize, index: usize, values: &[f32]) {
+    pub(super) const unsafe fn write_row(self, channel: usize, index: usize, values: &[f32]) {
         unsafe {
             self.planes[channel]
                 .get()
@@ -133,7 +133,7 @@ impl OutputPlanes {
     ///
     /// The planes cover the frame, and no other tile writes the pixel.
     #[inline(always)]
-    pub(crate) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3]) {
+    pub(super) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3]) {
         let NativePixel {
             index,
             native,

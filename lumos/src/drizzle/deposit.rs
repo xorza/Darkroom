@@ -27,7 +27,7 @@ impl Deposit {
     }
 
     /// The output's channels: the frame's own, or the mosaic's colors.
-    pub(crate) const fn output_layout(self) -> ChannelLayout {
+    pub(super) const fn output_layout(self) -> ChannelLayout {
         match self {
             Self::Channels(layout) => layout,
             Self::Mosaic(cfa_type) => cfa_type.color_layout(),
@@ -43,7 +43,7 @@ impl Deposit {
     }
 
     /// The weight planes the output keeps: one every channel shares, or one per color.
-    pub(crate) const fn weight_planes(self) -> usize {
+    pub(super) const fn weight_planes(self) -> usize {
         match self {
             Self::Channels(_) => 1,
             Self::Mosaic(cfa_type) => cfa_type.num_colors(),
@@ -52,7 +52,7 @@ impl Deposit {
 
     /// Where the frames of this deposit cover the output: in every channel at once, or each channel
     /// at the pixels its own color's photosites reached.
-    pub(crate) const fn set_coverage(self) -> SetCoverage {
+    pub(super) const fn set_coverage(self) -> SetCoverage {
         match self {
             Self::Channels(_) => SetCoverage::Common,
             Self::Mosaic(_) => SetCoverage::PerChannel,
@@ -60,7 +60,7 @@ impl Deposit {
     }
 
     /// The weight plane of output channel `channel`: the shared one, or its color's.
-    pub(crate) const fn weight_plane(self, channel: usize) -> usize {
+    pub(super) const fn weight_plane(self, channel: usize) -> usize {
         match self {
             Self::Channels(_) => 0,
             Self::Mosaic(_) => channel,

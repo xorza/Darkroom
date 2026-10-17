@@ -49,7 +49,7 @@ impl PixelFlags {
 
     /// OR `flags` into every pixel whose row-major index satisfies `holds`. The counts take the
     /// bits it sets, row by row, rather than a recount of the plane.
-    pub(crate) fn or_where(&mut self, flags: QualityFlags, holds: impl Fn(usize) -> bool + Sync) {
+    pub(super) fn or_where(&mut self, flags: QualityFlags, holds: impl Fn(usize) -> bool + Sync) {
         let width = self.size().width.max(1);
         let added = self
             .bits
@@ -71,7 +71,7 @@ impl PixelFlags {
     }
 
     /// OR `flags` into the pixels at `indices`; the counts take the bits it sets.
-    pub(crate) fn or_at(&mut self, flags: QualityFlags, indices: &[usize]) {
+    pub(super) fn or_at(&mut self, flags: QualityFlags, indices: &[usize]) {
         let bytes = self.bits.pixels_mut();
         for &index in indices {
             self.counts
@@ -82,7 +82,7 @@ impl PixelFlags {
 
     /// A `size` plane holding `flags` at `indices` alone; `None` when there are none, so no pixel
     /// holds one.
-    pub(crate) fn at_indices(
+    pub(super) fn at_indices(
         size: Size2us,
         flags: QualityFlags,
         indices: &[usize],
@@ -106,7 +106,7 @@ impl PixelFlags {
     /// OR every flag but `fixed` over the window `reach` spans around each pixel, clipped to the
     /// image: what an operation whose output at a pixel reads its inputs that far away does to the
     /// facts the inputs carried. `fixed` flags stay where they are.
-    pub(crate) fn dilate_window(&mut self, reach: Reach, fixed: QualityFlags) {
+    fn dilate_window(&mut self, reach: Reach, fixed: QualityFlags) {
         let size = self.size();
         dilate_bytes(
             self.bits.pixels_mut(),

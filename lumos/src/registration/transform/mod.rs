@@ -240,7 +240,7 @@ impl Transform {
 
     /// A homography from a matrix of arbitrary homogeneous scale, such as a DLT solve's null
     /// vector; `None` when [`Self::from_matrix`] cannot normalize it.
-    pub(crate) fn from_homography_matrix(matrix: DMat3) -> Option<Self> {
+    pub(super) fn from_homography_matrix(matrix: DMat3) -> Option<Self> {
         Self::from_matrix(matrix, TransformType::Homography)
     }
 

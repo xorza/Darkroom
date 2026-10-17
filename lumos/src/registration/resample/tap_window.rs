@@ -49,7 +49,7 @@ impl WindowWeights {
     /// that do not raise it past one pixel. A whole kernel passes at every fraction — at an integer
     /// one it is the centre tap alone, at the boundary — so the test only decides the windows the
     /// source edge or a null has cut.
-    pub(crate) fn well_conditioned(self) -> bool {
+    pub(super) fn well_conditioned(self) -> bool {
         let total = self.total();
         total > 0.0 && total * total >= self.square
     }
@@ -86,7 +86,7 @@ impl AxisSums {
 
     /// The sums of one vector of weights, its lanes past the taps cleared.
     #[inline(always)]
-    pub(crate) fn of_lanes<S: Isa>(isa: S, weights: S::F32) -> Self {
+    pub(super) fn of_lanes<S: Isa>(isa: S, weights: S::F32) -> Self {
         let zero = isa.splat_f32(0.0);
         Self {
             positive: weights.max(zero).reduce_sum(),
@@ -126,7 +126,7 @@ impl<V: F32x8> Lobes<V> {
     /// `row` carried into these sums by its weight `wy`: a negative `wy` turns each split's sign,
     /// so each goes to the other lobe.
     #[inline(always)]
-    pub(crate) fn add_row<S: Isa<F32 = V>>(&mut self, isa: S, row: Self, wy: f32) {
+    pub(super) fn add_row<S: Isa<F32 = V>>(&mut self, isa: S, row: Self, wy: f32) {
         let (to_positive, to_negative) = if wy > 0.0 {
             (row.positive, row.negative)
         } else {
@@ -219,12 +219,12 @@ impl<'a> TapWindow<'a> {
     }
 
     /// Whether the source edge cut some tap of the kernel.
-    pub(crate) const fn is_clipped(&self) -> bool {
+    pub(super) const fn is_clipped(&self) -> bool {
         self.wx.len() < self.whole_x.len() || self.wy.len() < self.whole_y.len()
     }
 
     /// `Σ |L|` over the whole kernel, in bounds or not.
-    pub(crate) fn whole_magnitude(&self) -> f32 {
+    pub(super) fn whole_magnitude(&self) -> f32 {
         let magnitude = |weights: &[f32]| weights.iter().map(|weight| weight.abs()).sum::<f32>();
         magnitude(self.whole_x) * magnitude(self.whole_y)
     }
@@ -237,7 +237,7 @@ impl<'a> TapWindow<'a> {
     /// The weight sums over the taps `validity` marks with 1, the others 0: a source with nulls,
     /// where the window is no longer a product of its axes.
     #[inline(always)]
-    pub(crate) fn masked_weights<S: Isa>(
+    pub(super) fn masked_weights<S: Isa>(
         &self,
         isa: S,
         validity: SourcePlane<'_>,
@@ -305,7 +305,7 @@ impl<'a> TapWindow<'a> {
     /// The window of `plane` summed as [`LobeSums`] reads it, over the taps `validity` holds when
     /// it is given.
     #[inline(always)]
-    pub(crate) fn lobe_sums<S: Isa>(
+    pub(super) fn lobe_sums<S: Isa>(
         &self,
         isa: S,
         plane: SourcePlane<'_>,

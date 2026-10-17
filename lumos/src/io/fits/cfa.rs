@@ -16,12 +16,12 @@ use crate::io::fits::linear::LINEAR_FITS_FORMAT;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
 
-pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
+pub(super) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
 /// 5: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration
 /// removed (`LUMCALB`, `LUMCALD`, `LUMCALF`) and what its dark was compared on (`LUMDK*`). A file
 /// of an earlier version is refused, so a master cached by one, whose record is missing, is rebuilt
 /// instead.
-pub(crate) const CFA_FITS_VERSION: i64 = 5;
+pub(super) const CFA_FITS_VERSION: i64 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {
@@ -51,7 +51,7 @@ pub(super) fn validate_container_format(primary: Option<&Header>) -> Result<(), 
     Ok(())
 }
 
-pub(crate) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
+pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
     let is_lumos_cfa = image
         .get_text(FORMAT_KEYWORD)?
         .is_some_and(|format| format == CFA_FITS_FORMAT);

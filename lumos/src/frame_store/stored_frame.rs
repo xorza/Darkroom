@@ -65,7 +65,7 @@ impl StoredFrame {
     }
 
     /// Each slot's [`StratifiedSamples`] of `image`, each stored by `store(slot, samples)`.
-    pub(crate) fn store_samples(
+    pub(super) fn store_samples(
         image: &impl StackableImage,
         mut store: impl FnMut(usize, &[f32]) -> Result<StoredPlane, FrameStoreError>,
     ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {

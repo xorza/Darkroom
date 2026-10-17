@@ -25,7 +25,7 @@ pub(crate) struct Mount {
 
 impl Mount {
     /// A file system that keeps its files in memory: writing to it spends RAM, not disk.
-    pub(crate) fn is_memory_backed(&self) -> bool {
+    pub(super) fn is_memory_backed(&self) -> bool {
         matches!(self.filesystem.as_str(), "tmpfs" | "ramfs")
     }
 }
@@ -67,7 +67,7 @@ impl MountTable {
     /// The mount `path` lies on: the one whose mount point is the longest ancestor of the path,
     /// the last listed of those on the same point. `path` is taken as given, so the caller
     /// resolves symbolic links first.
-    pub(crate) fn mount_of(&self, path: &Path) -> Option<&Mount> {
+    pub(super) fn mount_of(&self, path: &Path) -> Option<&Mount> {
         self.mounts
             .iter()
             .filter(|mount| path.starts_with(&mount.mount_point))

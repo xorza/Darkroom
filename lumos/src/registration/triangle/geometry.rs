@@ -48,11 +48,7 @@ impl Triangle {
 
         // Equal sides tie-break by vertex index, so the order is deterministic.
         let mut side_vertex_pairs = [(d01, 2), (d12, 0), (d20, 1)];
-        side_vertex_pairs.sort_by(|a, b| {
-            a.0.partial_cmp(&b.0)
-                .unwrap()
-                .then(indices[a.1].cmp(&indices[b.1]))
-        });
+        side_vertex_pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(indices[a.1].cmp(&indices[b.1])));
 
         let sides = [
             side_vertex_pairs[0].0,
@@ -69,10 +65,7 @@ impl Triangle {
         }
         let ratios = DVec2::new(sides[0] / longest, sides[1] / longest);
 
-        // Reorder indices by geometric role:
-        // indices[0] = vertex opposite shortest side
-        // indices[1] = vertex opposite middle side
-        // indices[2] = vertex opposite longest side
+        // Ordered by role: the vertex opposite the shortest, the middle and the longest side.
         let reordered = [
             indices[side_vertex_pairs[0].1],
             indices[side_vertex_pairs[1].1],

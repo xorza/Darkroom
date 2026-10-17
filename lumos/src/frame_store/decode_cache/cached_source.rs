@@ -41,7 +41,7 @@ impl CachedSource {
     /// # Errors
     ///
     /// [`FrameStoreError::SourceChanged`], or the source cannot be read.
-    pub(crate) fn ensure_unchanged(&self) -> Result<(), FrameStoreError> {
+    pub(super) fn ensure_unchanged(&self) -> Result<(), FrameStoreError> {
         let now = identity(&self.path, &canonicalize(&self.path)?)?;
         if now == self.key.source {
             Ok(())
