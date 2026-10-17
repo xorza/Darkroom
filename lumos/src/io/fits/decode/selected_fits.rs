@@ -25,6 +25,7 @@ use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::lumos_extension::DescribedImage;
 use crate::io::fits::{cfa, linear, metadata};
+use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
 
 /// One image HDU of an open FITS file: the reader, the HDU, its decode plan, the mosaic its header
@@ -196,6 +197,16 @@ impl<'r> SelectedFits<'r> {
         }
         self.cfa_type
             .ok_or_else(|| FitsRefusal::MissingCfaPattern.into())
+    }
+
+    /// The sensor frame as its header states it, which a CFA load requires ([`Self::require_cfa`]).
+    pub(crate) fn cfa_frame_info(&self) -> Result<FrameInfo, FitsLoadError> {
+        Ok(FrameInfo {
+            dimensions: self.plan.dimensions,
+            cfa_type: self.require_cfa()?,
+            decoder_bytes: usize::try_from(self.beside_frame_bytes())
+                .expect("a decode the plan admitted fits the address space"),
+        })
     }
 
     /// What the decode holds beside the frame it makes — see

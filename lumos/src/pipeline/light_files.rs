@@ -7,8 +7,6 @@ use crate::calibration::cosmic_ray;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_storage::RunStorage;
-use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::cfa::demosaic::Demosaic;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
@@ -16,8 +14,6 @@ use crate::io::decoder::Decoder;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::load_context::LoadContext;
-use crate::memory::footprint::Footprint;
-use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_shape::LightShape;
 use crate::pipeline::mosaic_preparation::MosaicPreparation;
@@ -89,7 +85,6 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         };
         let info = run.context.cfa_info(first)?;
         let size = info.dimensions.size();
-        let mosaic = StoredLayout::decoded(info.dimensions).heap_bytes(info.dimensions);
         // Refused here, before any light is decoded, when the pass cannot run on this sensor.
         let cosmic_ray = match cosmic_ray {
             Some(_) => cosmic_ray::heap_bytes(&info.cfa_type, size).map_err(|source| {
@@ -100,36 +95,22 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             })?,
             None => 0,
         };
-        let noise = if info.cfa_type.is_mosaic() {
-            MosaicNoiseMeasure::heap_bytes(size, &info.cfa_type)
-        } else {
-            0
-        };
-        // The flags travel from the mosaic to the frame its demosaic makes.
-        let flags = info.dimensions.flag_plane_bytes();
-        let demosaic = Demosaic::of(info.cfa_type, run.context.xtrans_passes)
-            .footprint(info.dimensions, workers);
         let dimensions = ImageDimensions::new(size, info.cfa_type.color_layout());
-        // The decoder's bytes beside the mosaic it makes; the cosmic-ray pass over the mosaic; the
-        // noise the demosaic measures on it; the demosaic; the statistics, or the detection's
-        // noise estimate, beside the demosaiced frame.
-        let prepared = Footprint {
-            kept: mosaic,
-            peak: mosaic + info.decoder_bytes,
-        }
-        .beside(cosmic_ray)
-        .beside(noise)
-        .then(Footprint {
-            kept: demosaic.kept + flags,
-            peak: demosaic.peak + flags,
-        })
-        .beside(FrameStats::heap_bytes(dimensions, None, workers));
+        // The decode; the cosmic-ray pass over the mosaic; the demosaic; the statistics, or the
+        // detection's noise estimate, beside the demosaiced frame.
+        let prepared = info
+            .demosaiced(
+                info.decoded().beside(cosmic_ray),
+                run.context.xtrans_passes,
+                workers,
+            )
+            .beside(FrameStats::heap_bytes(dimensions, None, workers));
         Ok(LightShape {
             count: self.paths.len(),
             dimensions,
             prepared,
             held: 0,
-            kept_writes: self.kept_writes::<CfaDecoder>(mosaic, run),
+            kept_writes: self.kept_writes::<CfaDecoder>(info.decoded().kept, run),
         })
     }
 

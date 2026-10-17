@@ -629,6 +629,8 @@ pub enum FitsAllocation {
     NativeDecodeChunk,
     /// A stack product's image beside the quality planes read after it.
     QualityPlanes,
+    /// A mosaic's decode, then its demosaic, which a preview makes.
+    Demosaic,
 }
 
 impl Display for FitsAllocation {
@@ -644,6 +646,7 @@ impl Display for FitsAllocation {
             Self::DecodeChunk => "decode chunk",
             Self::NativeDecodeChunk => "native decode chunk",
             Self::QualityPlanes => "image with its quality planes",
+            Self::Demosaic => "mosaic with its demosaic",
         })
     }
 }

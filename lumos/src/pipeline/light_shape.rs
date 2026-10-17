@@ -13,6 +13,7 @@ use crate::memory::stage::{Stage, Units};
 use crate::pipeline::align_stack_config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::{FrameParking, StagePlan};
+use crate::registration::resample::WarpScratch;
 use crate::star_detection::resources::DetectionResources;
 
 /// What a run of lights holds: how many there are, each one's demosaiced dimensions, its way from
@@ -95,9 +96,14 @@ impl LightShape {
         DetectionResources::heap_bytes(self.dimensions.size())
     }
 
+    /// What each light's warp holds beside its source and its result: a flagged light's planes.
+    const fn warp_bytes(&self) -> usize {
+        WarpScratch::heap_bytes(self.dimensions.size())
+    }
+
     /// The stages of the lights with the reference found, under `config` on `workers`: each light
-    /// prepared and detected; then warped, the light it warps from in hand; the normalization; the
-    /// combine.
+    /// prepared and detected; then warped, the light it warps from and the warp's planes in hand;
+    /// the normalization; the combine.
     pub(super) fn found_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 4] {
         let warped = self.warped() - self.held;
         let [normalize, combine] = self.combined(warped, config, workers);
@@ -111,7 +117,7 @@ impl LightShape {
             Stage {
                 kept: warped,
                 held: 0,
-                in_flight: self.prepared.kept,
+                in_flight: self.prepared.kept + self.warp_bytes(),
                 units: Units::Frames,
             },
             normalize,
@@ -121,7 +127,8 @@ impl LightShape {
 
     /// The stages of the lights with the reference named, under `config` on `workers`: each light
     /// taken through its preparation, its detection and its warp by one worker, which keeps only
-    /// the warped light; the normalization; the combine.
+    /// the warped light, and holds its detector and its warp's planes from one light to the next;
+    /// the normalization; the combine.
     pub(super) fn named_reference(&self, config: &AlignStackConfig, workers: usize) -> [Stage; 3] {
         debug_assert_eq!(self.held, 0, "a single pass decodes its own lights");
         let warped = self.warped();
@@ -130,7 +137,7 @@ impl LightShape {
             Stage {
                 kept: warped,
                 held: 0,
-                in_flight: self.prepared.peak + self.detector_bytes(),
+                in_flight: self.prepared.peak + self.detector_bytes() + self.warp_bytes(),
                 units: Units::Frames,
             },
             normalize,
@@ -180,11 +187,14 @@ mod tests {
     /// 4 bitmasks of 4 rows padded to 128 bits, 256 B: 576 B.
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
     /// row reads 12 + 1 B a pixel and 4 B of gain over 16 pixels, rounded up to 1: 14 B a pixel,
-    /// 168 B for three over 4 pixels. The combine holds the image and its flag byte, 80 B.
+    /// 168 B for three over 4 pixels. The combine holds the image and its flag byte, 80 B. A warp's
+    /// flag planes are a validity plane of 4 B a pixel, and the grown flags, the growth's two
+    /// planes and the warped flags', a byte a pixel each: 128 B.
     ///
     /// Found, a light in work holds its statistics and its detector, 1704 B, and a warp its 80 B
-    /// source. Named, a worker holds the light at its peak, 1208 B, and the detector. Held by the
-    /// caller, a light keeps nothing until it is warped, then 224 − 80 = 144 B.
+    /// source and its planes, 208 B. Named, a worker holds the light at its peak, 1208 B, the
+    /// detector and the warp's planes, 1912 B. Held by the caller, a light keeps nothing until it
+    /// is warped, then 224 − 80 = 144 B.
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
         let peek = FramePeek {
@@ -218,21 +228,21 @@ mod tests {
             decoded.found_reference(&config, 1),
             [
                 stage(80, 0, 1704, Units::Frames),
-                stage(224, 0, 80, Units::Frames),
+                stage(224, 0, 208, Units::Frames),
                 normalize,
                 combine,
             ]
         );
         assert_eq!(
             decoded.named_reference(&config, 1),
-            [stage(224, 0, 1784, Units::Frames), normalize, combine]
+            [stage(224, 0, 1912, Units::Frames), normalize, combine]
         );
         let [normalize, combine] = tail(144);
         assert_eq!(
             LightShape::held(peek, 3, 1).found_reference(&config, 1),
             [
                 stage(0, 0, 1704, Units::Frames),
-                stage(144, 0, 80, Units::Frames),
+                stage(144, 0, 208, Units::Frames),
                 normalize,
                 combine,
             ]

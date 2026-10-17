@@ -54,6 +54,14 @@ pub(crate) struct FlagScratch {
 }
 
 impl FlagScratch {
+    /// The bytes the scratch holds beside a `size` frame's warp at the most: its validity plane,
+    /// its flags grown by the kernel's window, that growth's planes, and the plane for the warped
+    /// flags, which it keeps from a frame whose warp carried none.
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+        size.pixel_count() * (size_of::<f32>() + 2 * size_of::<u8>())
+            + DilationScratch::heap_bytes(size)
+    }
+
     /// `flags`' sources prepared in this scratch, for windows that read `reach` around their
     /// cell, or for the nearest pixel when `reach` is `None`.
     pub(crate) fn prepare<'a>(

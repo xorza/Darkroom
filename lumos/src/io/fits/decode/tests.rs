@@ -19,7 +19,6 @@ use crate::io::error::OverBudget;
 use crate::io::fits::cfa;
 use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::*;
-use crate::io::fits::error::FitsAllocation;
 use crate::io::fits::fits_load_options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
 };

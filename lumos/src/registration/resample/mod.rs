@@ -77,6 +77,14 @@ pub(crate) struct WarpScratch {
     flags: ScratchPool<FlagScratch>,
 }
 
+impl WarpScratch {
+    /// The bytes one warp of a `size` frame holds here at the most, its flag planes: a row's
+    /// scratch is a few bytes a pixel of one row, which a plan counts nowhere.
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+        FlagScratch::heap_bytes(size)
+    }
+}
+
 /// What one row of a warp works in: the row's source positions, and the tap axes of the pixel it
 /// is sampling.
 #[derive(Debug, Default)]

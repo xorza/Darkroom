@@ -397,6 +397,28 @@ fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
     assert_eq!(refused(RawPath::Processed, 14888), None);
     assert_eq!(refused(RawPath::Processed, 14887), over(14888, 14887));
     assert_eq!(RawPath::preview(&libraw).unwrap(), RawPath::Mosaic);
+    // The preview demosaics the mosaic too, which holds four of its planes at once — past the
+    // 4240 bytes its decode alone is admitted under — and is refused one byte short of its way.
+    let info = frame_info(&libraw).unwrap();
+    let way = u64::try_from(
+        info.demosaiced(
+            info.decoded(),
+            MarkesteijnPasses::default(),
+            rayon::current_num_threads(),
+        )
+        .peak,
+    )
+    .unwrap();
+    assert!(way >= 4 * 1936, "{way}");
+    let context = |limit| LoadContext::new(CancelToken::never(), limit);
+    assert_eq!(
+        preview_route(&libraw, &context(way)).unwrap(),
+        RawPath::Mosaic
+    );
+    assert!(matches!(
+        preview_route(&libraw, &context(way - 1)),
+        Err(RawError::OverBudget(budget)) if budget == OverBudget { required: way, limit: way - 1 }
+    ));
 
     // A file longer than the limit is refused before it is read: these 3 bytes past a limit of 2.
     let directory = TempDir::new("raw-over-budget");

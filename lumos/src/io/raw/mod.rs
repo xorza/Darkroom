@@ -154,10 +154,20 @@ fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
 /// three-color CFA — is LibRaw's own processing.
 pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-    let raw = open_raw(path, context, RawPath::preview)?;
+    let raw = open_raw(path, context, |libraw| preview_route(libraw, context))?;
     context.check_cancelled(path)?;
     raw.into_linear_image(context)
         .map_err(|source| ImageError::raw(path, source))
+}
+
+/// The path a preview of the open `libraw` takes ([`RawPath::preview`]), once a mosaic's demosaic
+/// is admitted under `context` beside its decode ([`FrameInfo::admit_demosaic`]).
+fn preview_route(libraw: &Libraw, context: &LoadContext) -> Result<RawPath, RawError> {
+    let route = RawPath::preview(libraw)?;
+    if route == RawPath::Mosaic {
+        frame_info(libraw)?.admit_demosaic(context)?;
+    }
+    Ok(route)
 }
 
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`: the file is

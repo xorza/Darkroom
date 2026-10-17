@@ -233,6 +233,13 @@ pub(crate) struct DilationScratch {
     suffix: Vec<u8>,
 }
 
+impl DilationScratch {
+    /// The bytes a dilation of a `size` image holds here: its two planes, a byte a pixel each.
+    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+        2 * size.pixel_count()
+    }
+}
+
 /// [`PixelFlags::dilate_window`] on the bytes `bits` of a `size` image, in `scratch`.
 ///
 /// Separable, and each pass is van Herk–Gil-Werman: an OR over blocks of the window's length from

@@ -41,9 +41,9 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::{fits_refusal, write_fits};
 use crate::io::decoder::Decoder;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
-use crate::io::error::{ImageError, ScientificRefusal};
+use crate::io::error::{ImageError, OverBudget, ScientificRefusal};
 use crate::io::fits::decode;
-use crate::io::fits::error::FitsRefusal;
+use crate::io::fits::error::{FitsAllocation, FitsRefusal};
 use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions};
 use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
@@ -858,6 +858,31 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             PreviewPixels::Planes(_)
         ),
         "a demosaiced decode hands back its planes"
+    );
+    // The preview is admitted with its demosaic, from the header: refused one byte short of the
+    // way's peak, past what the decode alone holds.
+    let info = CfaDecoder::peek(&path, &LoadContext::default()).unwrap();
+    let way = u64::try_from(
+        info.demosaiced(
+            info.decoded(),
+            MarkesteijnPasses::default(),
+            rayon::current_num_threads(),
+        )
+        .peak,
+    )
+    .unwrap();
+    assert!(way > u64::try_from(info.decoded().peak).unwrap(), "{way}");
+    let limited = |limit| LoadContext::new(CancelToken::never(), limit);
+    limited(way).preview(&path).unwrap();
+    assert_eq!(
+        fits_refusal(limited(way - 1).preview(&path).unwrap_err()),
+        FitsRefusal::OverBudget {
+            allocation: FitsAllocation::Demosaic,
+            budget: OverBudget {
+                required: way,
+                limit: way - 1,
+            },
+        }
     );
     let preview: imaginarium::Image = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);

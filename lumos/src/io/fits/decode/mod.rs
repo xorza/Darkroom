@@ -30,7 +30,7 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
-use crate::io::fits::error::{FitsLoadError, FitsRefusal};
+use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::frame_info::FrameInfo;
 use crate::io::load_context::LoadContext;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -127,10 +127,15 @@ pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearI
         if selected.cfa_type.is_none() {
             return selected.read(context, Checksum::Judged)?.into_linear();
         }
-        let cfa_type = selected.require_cfa()?;
+        let info = selected.cfa_frame_info()?;
+        info.admit_demosaic(context)
+            .map_err(|budget| FitsRefusal::OverBudget {
+                allocation: FitsAllocation::Demosaic,
+                budget,
+            })?;
         let cfa = selected
             .read(context, Checksum::Judged)?
-            .into_cfa(cfa_type)?;
+            .into_cfa(info.cfa_type)?;
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
         Ok(cfa.demosaic(context.xtrans_passes, noise, &context.cancel)?)
     };
@@ -150,13 +155,7 @@ pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, I
 pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
     let info = || {
         let mut reader = selected_fits::open(path, context)?;
-        let selected = SelectedFits::select(&mut reader, context)?;
-        Ok(FrameInfo {
-            dimensions: selected.plan.dimensions,
-            cfa_type: selected.require_cfa()?,
-            decoder_bytes: usize::try_from(selected.beside_frame_bytes())
-                .expect("a decode the plan admitted fits the address space"),
-        })
+        SelectedFits::select(&mut reader, context)?.cfa_frame_info()
     };
     info().map_err(|error| ImageError::fits_load(path, error))
 }
