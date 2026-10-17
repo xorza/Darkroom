@@ -85,7 +85,7 @@ pub struct StackConfig {
 }
 
 /// [`StackConfig::min_survivors`] by default, as PixInsight's `ImageIntegration`.
-pub(crate) const DEFAULT_MIN_SURVIVORS: usize = 3;
+pub(super) const DEFAULT_MIN_SURVIVORS: usize = 3;
 
 impl StackConfig {
     /// This configuration for the frames left once the input frames at `dropped` (ascending)

@@ -72,7 +72,7 @@ impl BlackLevel {
     ///
     /// Every value is the file's, so each is checked: a pattern too large for LibRaw's table, and
     /// a black at or above `maximum` anywhere, are refused rather than normalized into nonsense.
-    pub(crate) fn from_libraw(libraw: &LibrawBlack<'_>) -> Result<Self, BlackLevelError> {
+    pub(super) fn from_libraw(libraw: &LibrawBlack<'_>) -> Result<Self, BlackLevelError> {
         let raw = libraw.cblack;
         let (height, width) = (raw[4], raw[5]);
         let pattern_len = if height > 0 && width > 0 {
@@ -210,7 +210,7 @@ impl BlackLevel {
     }
 
     /// The black level of LibRaw color channel `channel`, without the spatial pattern.
-    pub(crate) const fn of_channel(&self, channel: usize) -> f64 {
+    pub(super) const fn of_channel(&self, channel: usize) -> f64 {
         self.common + self.channel[channel]
     }
 

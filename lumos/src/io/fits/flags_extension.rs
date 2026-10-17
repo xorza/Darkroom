@@ -17,9 +17,9 @@ use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-pub(crate) const FLAGS_EXTNAME: &str = "LUMFLAGS";
-pub(crate) const FLAGS_FORMAT: &str = "PIXFLAGS";
-pub(crate) const FLAGS_VERSION: i64 = 1;
+pub(super) const FLAGS_EXTNAME: &str = "LUMFLAGS";
+pub(super) const FLAGS_FORMAT: &str = "PIXFLAGS";
+pub(super) const FLAGS_VERSION: i64 = 1;
 
 /// The flags of one image as a `BITPIX = 8` image extension: one byte per pixel, bit `i` the flag
 /// `1 << i`, after the HST and JWST `DQ` arrays.
@@ -96,7 +96,7 @@ impl FlagsExtension {
 
     /// Each flags extension of the file and the image it is for, refused unless each names an
     /// image of the file that no other names: one that names none would be dropped unseen.
-    pub(crate) fn check_claims(file: &[Hdu]) -> Result<ExtensionClaims, FitsLoadError> {
+    pub(super) fn check_claims(file: &[Hdu]) -> Result<ExtensionClaims, FitsLoadError> {
         ExtensionClaims::of(file, LumosExtension::Flags)
     }
 

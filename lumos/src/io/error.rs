@@ -76,7 +76,7 @@ impl ImageError {
     }
 
     /// The FITS load of `path` that failed for `error`.
-    pub(crate) fn fits_load(path: &Path, error: FitsLoadError) -> Self {
+    pub(super) fn fits_load(path: &Path, error: FitsLoadError) -> Self {
         match error {
             FitsLoadError::Io(source) => Self::Io {
                 path: path.to_path_buf(),
@@ -107,7 +107,7 @@ impl ImageError {
     }
 
     /// A FITS file at `path` this decoder refuses, for `reason`.
-    pub(crate) fn fits_unsupported(path: &Path, reason: FitsRefusal) -> Self {
+    fn fits_unsupported(path: &Path, reason: FitsRefusal) -> Self {
         Self::FitsUnsupported {
             path: path.to_path_buf(),
             reason,
@@ -116,7 +116,7 @@ impl ImageError {
 
     /// The `count` null samples of the image at `path`, the first at `first_index`, under
     /// [`NullPolicy::Reject`](crate::NullPolicy::Reject).
-    pub(crate) fn null_samples(path: &Path, count: usize, first_index: usize) -> Self {
+    pub(super) fn null_samples(path: &Path, count: usize, first_index: usize) -> Self {
         Self::NullSamples {
             path: path.to_path_buf(),
             count,
@@ -125,7 +125,7 @@ impl ImageError {
     }
 
     /// An image at `path` refused as scientific input, for `reason`.
-    pub(crate) fn scientific_rejection(path: &Path, reason: ScientificRefusal) -> Self {
+    pub(super) fn scientific_rejection(path: &Path, reason: ScientificRefusal) -> Self {
         Self::ScientificInputRejected {
             path: path.to_path_buf(),
             reason,

@@ -29,7 +29,7 @@ impl Subtractor<'_> {
     /// nothing to convert between. Refused when the two cannot be related exactly — a different
     /// stated unit, a span the decoder had to assume, or a known pedestal against an unknown one —
     /// because subtracting across such a gap is silently wrong.
-    pub(crate) fn map_into(
+    pub(super) fn map_into(
         self,
         frame: Option<&SampleDomain>,
     ) -> Result<DomainMap, SubtractionFault> {

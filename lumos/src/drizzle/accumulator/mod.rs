@@ -34,7 +34,7 @@ use crate::scratch_pool::ScratchPool;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colors, so it never carries more planes, and the output never more channels.
-pub(crate) const MAX_CHANNELS: usize = 3;
+pub(super) const MAX_CHANNELS: usize = 3;
 /// Output bands per rayon worker — enough for work-stealing to even out bands that different
 /// amounts of the input reach.
 const BANDS_PER_WORKER: usize = 4;

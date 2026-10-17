@@ -17,6 +17,7 @@ struct MedianCase {
 /// each case.
 #[test]
 fn sigma_clipped_degenerate_inputs() {
+    #[derive(Debug)]
     struct Case {
         values: &'static [f32],
         median: f32,

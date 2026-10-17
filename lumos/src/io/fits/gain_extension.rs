@@ -15,9 +15,9 @@ use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::math::size2us::Size2us;
 
-pub(crate) const GAIN_EXTNAME: &str = "LUMGAIN";
-pub(crate) const GAIN_FORMAT: &str = "FLATGAIN";
-pub(crate) const GAIN_VERSION: i64 = 1;
+pub(super) const GAIN_EXTNAME: &str = "LUMGAIN";
+pub(super) const GAIN_FORMAT: &str = "FLATGAIN";
+pub(super) const GAIN_VERSION: i64 = 1;
 /// The keyword that states the pixels between nodes, which a reader must share.
 const STEP_KEYWORD: &str = "LUMGSTEP";
 

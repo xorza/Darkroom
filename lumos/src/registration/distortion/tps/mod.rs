@@ -81,16 +81,11 @@ impl ThinPlateSpline {
         let src_norm: Vec<DVec2> = source_points.iter().map(|&p| norm.normalize(p)).collect();
         let tgt_norm: Vec<DVec2> = target_points.iter().map(|&p| norm.normalize(p)).collect();
 
-        // Build the TPS system matrix in normalized coordinates.
-        // The system has the form:
+        // The system, in normalized coordinates, is
         // [K + λI  P] [w]   [v]
-        // [P^T     0] [a] = [0]
-        //
-        // where K[i,j] = U(||p_i - p_j||)
-        //       P[i,:] = [1, x_i, y_i]
-        //       w = weights for RBF
-        //       a = affine coefficients
-
+        // [Pᵀ      0] [a] = [0]
+        // with K[i,j] = U(‖p_i − p_j‖), P[i,:] = [1, x_i, y_i], w the RBF weights and a the
+        // affine coefficients.
         // Row-major and contiguous, because the solver takes it that way — and because a row of
         // `Vec`s cost one allocation per row to hold `f64`s that are read in row order anyway.
         let matrix_size = n + 3;

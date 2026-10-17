@@ -124,7 +124,7 @@ impl ComponentPixels {
 
     /// Call `visit` with the index of each neighbour of pixel `index` that the component holds,
     /// under `connectivity`.
-    pub(crate) fn for_each_neighbour(
+    pub(super) fn for_each_neighbour(
         &self,
         index: usize,
         connectivity: Connectivity,

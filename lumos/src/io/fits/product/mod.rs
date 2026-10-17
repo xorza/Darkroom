@@ -40,11 +40,11 @@ use crate::stack_product::weight_kind::WeightKind;
 
 /// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
 /// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
-pub(crate) const PRODUCT_VERSION: i64 = 2;
-pub(crate) const QUALITY_FORMAT: &str = "QUALPLAN";
-pub(crate) const QUALITY_VERSION: i64 = 1;
+pub(super) const PRODUCT_VERSION: i64 = 2;
+pub(super) const QUALITY_FORMAT: &str = "QUALPLAN";
+pub(super) const QUALITY_VERSION: i64 = 1;
 /// The `UTYPE` astropy names an inverse-variance uncertainty by: its class's name.
-pub(crate) const INVERSE_VARIANCE: &str = "InverseVariance";
+pub(super) const INVERSE_VARIANCE: &str = "InverseVariance";
 
 /// The primary header's keyword that names a stack product, and states its version.
 const PRODUCT_KEYWORD: &str = "LUMPRODV";

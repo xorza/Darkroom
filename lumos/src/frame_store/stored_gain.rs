@@ -78,7 +78,7 @@ impl StoredGain {
 
     /// The gain as a [`FlatGain`] in RAM: shared when it is one already, copied out of its maps
     /// otherwise.
-    pub(crate) fn to_flat_gain(&self) -> Arc<FlatGain> {
+    pub(super) fn to_flat_gain(&self) -> Arc<FlatGain> {
         match self {
             Self::Resident(gain) => Arc::clone(gain),
             Self::Mapped { size, planes } => {

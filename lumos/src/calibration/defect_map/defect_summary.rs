@@ -41,7 +41,7 @@ impl ColorShares {
 
     /// The defects of the color in `slot`, as [`CfaType::slot_at`](crate::CfaType::slot_at)
     /// numbers them.
-    pub(crate) const fn slot_mut(&mut self, slot: usize) -> &mut ColorDefects {
+    pub(super) const fn slot_mut(&mut self, slot: usize) -> &mut ColorDefects {
         match self {
             Self::Mono(defects) => defects,
             Self::Mosaic(colors) => &mut colors[slot],

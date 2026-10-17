@@ -37,7 +37,7 @@ impl FitModel {
     }
 
     /// The model's free parameters: the transform's, and the SIP correction's two per term.
-    pub(crate) fn parameter_count(self) -> usize {
+    pub(super) fn parameter_count(self) -> usize {
         self.transform_type().parameter_count()
             + match self {
                 Self::Plain(_) => 0,

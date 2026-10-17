@@ -20,7 +20,7 @@ pub(crate) struct PixelCoverage(f32);
 impl PixelCoverage {
     /// Coverage at or below this is dominated by warp border fill rather than source data, so it is
     /// kept out of the statistics.
-    pub(crate) const MIN_CONTRIBUTING: f32 = 1e-3;
+    pub(super) const MIN_CONTRIBUTING: f32 = 1e-3;
 
     #[inline]
     pub(crate) const fn new(fraction: f32) -> Self {

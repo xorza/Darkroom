@@ -78,7 +78,7 @@ impl<V: F32x8> InteriorWindow<V> {
 
     /// The window of `plane` summed as [`LobeSums`] reads it.
     #[inline(always)]
-    pub(crate) fn lobe_sums<S: Isa<F32 = V>>(&self, isa: S, plane: SourcePlane<'_>) -> LobeSums {
+    pub(super) fn lobe_sums<S: Isa<F32 = V>>(&self, isa: S, plane: SourcePlane<'_>) -> LobeSums {
         let zero = isa.splat_f32(0.0);
         let (x_positive, x_negative) = (self.wx.max(zero), self.wx.min(zero));
         let mut lobes = Lobes::zero(isa);

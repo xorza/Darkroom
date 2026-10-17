@@ -85,7 +85,7 @@ impl OnnxModel {
 /// # Errors
 /// [`MlError::Config`] for a stride that does not cover the frame at full weight, refused before
 /// any tile runs; [`MlError::TooSmall`] for an image smaller than a tile; and what `infer` returns.
-pub(crate) fn run_tiles(
+fn run_tiles(
     image: &mut LinearImage,
     stride: usize,
     mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,

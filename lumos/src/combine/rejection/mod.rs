@@ -100,7 +100,7 @@ impl Rejection {
     }
 
     /// Whether the rejection holds each sample to its own CCD noise model.
-    pub(crate) const fn uses_ccd_model(&self) -> bool {
+    pub(super) const fn uses_ccd_model(&self) -> bool {
         matches!(
             self,
             Self::SigmaClip(SigmaClipConfig {
@@ -113,7 +113,7 @@ impl Rejection {
     /// What a clipped pixel's dispersion is multiplied by to read the frames' full scatter: the
     /// reciprocal of a unit normal's variance truncated to the method's band, for the methods that
     /// clip in a band of σ, and 1 for the others, whose cut is not one in σ.
-    pub(crate) fn dispersion_correction(&self) -> f32 {
+    pub(super) fn dispersion_correction(&self) -> f32 {
         let bounds = match self {
             Self::SigmaClip(config) => config.sigma,
             Self::Winsorized(config) => config.sigma,
@@ -124,7 +124,7 @@ impl Rejection {
     }
 
     /// Whether the method measures a spread, and so needs the frames' noise as its floor.
-    pub(crate) const fn measures_spread(&self) -> bool {
+    pub(super) const fn measures_spread(&self) -> bool {
         !matches!(self, Self::None | Self::Trim(_))
     }
 
@@ -164,7 +164,7 @@ impl Rejection {
     /// before it that sit nearest the pass's centre, and stops: a pixel never loses every sample,
     /// and the samples it keeps are the ones the method trusted most. A pass with a band for each
     /// sample reorders the window so its survivors stay one ascending run.
-    pub(crate) fn surviving_window(
+    pub(super) fn surviving_window(
         &self,
         scratch: &mut ScratchBuffers,
         noise: Option<NoiseColumns<'_>>,

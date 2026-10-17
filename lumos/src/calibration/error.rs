@@ -289,7 +289,7 @@ impl From<SubtractionFault> for CalibrationError {
 
 impl SubtractionError {
     /// The `fault` of taking a master from frame `index` of a calibration stack.
-    pub(crate) fn of_frame(index: usize, fault: SubtractionFault) -> Self {
+    pub(super) fn of_frame(index: usize, fault: SubtractionFault) -> Self {
         match fault {
             SubtractionFault::Conditions { source, .. } => {
                 Self::SubtractorConditions { index, source }

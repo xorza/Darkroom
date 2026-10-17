@@ -91,7 +91,7 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) fn from_f32_image(image: &Image) -> Self {
+    pub(super) fn from_f32_image(image: &Image) -> Self {
         match image.desc().color_format.channel_count {
             ChannelCount::L => {
                 let [plane]: [Buffer2<f32>; 1] = image

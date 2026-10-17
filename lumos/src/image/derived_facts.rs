@@ -170,7 +170,7 @@ impl DerivedFacts {
     }
 
     /// After an edit of the samples in place: no noise fact describes the edited samples.
-    pub(crate) const fn after_edit(&mut self) {
+    pub(super) const fn after_edit(&mut self) {
         self.quantization_sigma = None;
         self.mosaic_noise = None;
     }
@@ -185,7 +185,7 @@ impl DerivedFacts {
     /// After an interpolation across a mosaic's photosites, from `mosaic_noise`, the noise the
     /// mosaic was measured to hold where it was: each sample mixes neighbours, so one step's σ no
     /// longer bounds it, and the correlation hides part of their noise from a later measurement.
-    pub(crate) const fn after_interpolation(&mut self, mosaic_noise: Option<MosaicNoise>) {
+    pub(super) const fn after_interpolation(&mut self, mosaic_noise: Option<MosaicNoise>) {
         self.quantization_sigma = None;
         self.mosaic_noise = mosaic_noise;
     }

@@ -56,7 +56,7 @@ impl GesdConfig {
     }
 
     /// The configured maximum, or `⌊0.3·n⌋`.
-    pub(crate) const fn max_outliers_for_size(self, n: usize) -> usize {
+    pub(super) const fn max_outliers_for_size(self, n: usize) -> usize {
         match self.max_outliers {
             Some(max_outliers) => max_outliers,
             None => 3 * n / 10,

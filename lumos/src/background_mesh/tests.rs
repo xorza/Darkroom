@@ -208,6 +208,7 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
 /// tile clamped to a 20-px image at 9.5. Both axes from one rule.
 #[test]
 fn tile_centres_are_the_mean_pixel_index() {
+    #[derive(Debug)]
     struct Case {
         size: Size2us,
         tile_size: usize,

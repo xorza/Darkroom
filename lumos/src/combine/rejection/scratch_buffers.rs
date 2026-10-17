@@ -34,7 +34,7 @@ impl GesdScratch {
     /// `λ = (L − 1)·t / √((L − 2 + t²)·L)`, with `t` the `1 − α/(2L)` quantile of Student's t at
     /// `L − 2` degrees of freedom. At an α no t quantile resolves, t is infinite and λ is its limit
     /// `(L − 1)/√L`.
-    pub(crate) fn critical_value(&mut self, live: usize) -> f64 {
+    pub(super) fn critical_value(&mut self, live: usize) -> f64 {
         debug_assert!(live >= 3);
         if self.critical_values.len() <= live {
             self.critical_values.resize(live + 1, f64::NAN);

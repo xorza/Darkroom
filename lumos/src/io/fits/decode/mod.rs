@@ -54,7 +54,7 @@ pub(crate) struct DecodedFitsImage {
 }
 
 impl DecodedFitsImage {
-    pub(crate) fn into_linear(self) -> Result<LinearImage, FitsLoadError> {
+    pub(super) fn into_linear(self) -> Result<LinearImage, FitsLoadError> {
         check_gain_channels(
             self.flat_gain.as_deref(),
             self.pixels.dimensions().channels(),
@@ -65,7 +65,7 @@ impl DecodedFitsImage {
     }
 
     /// The image as the `cfa_type` mosaic its selection required.
-    pub(crate) fn into_cfa(self, cfa_type: CfaType) -> Result<CfaImage, FitsLoadError> {
+    pub(super) fn into_cfa(self, cfa_type: CfaType) -> Result<CfaImage, FitsLoadError> {
         check_gain_channels(self.flat_gain.as_deref(), cfa_type.num_colors())?;
         let Self {
             mut metadata,

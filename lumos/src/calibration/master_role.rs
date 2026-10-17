@@ -56,14 +56,14 @@ impl MasterRole {
 
     /// Whether a master of this role is dark signal, one exposure's at one temperature: a dark or a
     /// flat-dark.
-    pub(crate) const fn is_dark(self) -> bool {
+    pub(super) const fn is_dark(self) -> bool {
         matches!(self, Self::Dark | Self::FlatDark)
     }
 
     /// What a master of this role may have lost before it serves the set: a bias nothing, since
     /// the bias is what it holds; a dark or flat-dark its bias, leaving the dark signal alone; a
     /// flat both additive parts, never its own response.
-    pub(crate) const fn may_have_lost(self) -> CalibrationState {
+    pub(super) const fn may_have_lost(self) -> CalibrationState {
         match self {
             Self::Bias => CalibrationState::NONE,
             Self::Dark | Self::FlatDark => CalibrationState::BIAS,

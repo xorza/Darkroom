@@ -27,7 +27,7 @@ impl SampleTypeRecord {
         clippy::trivially_copy_pass_by_ref,
         reason = "serde's `serialize_with` hands the field over by reference"
     )]
-    pub(crate) fn serialize_option<S: Serializer>(
+    pub(super) fn serialize_option<S: Serializer>(
         value: &Option<SampleType>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
@@ -35,7 +35,7 @@ impl SampleTypeRecord {
     }
 
     /// Read back what [`Self::serialize_option`] wrote.
-    pub(crate) fn deserialize_option<'de, D: Deserializer<'de>>(
+    pub(super) fn deserialize_option<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<SampleType>, D::Error> {
         Ok(Option::<Self>::deserialize(deserializer)?.map(SampleType::from))

@@ -37,7 +37,7 @@ const BORDER: usize = 4;
 /// stage computed. A test pins the reach: from this distance in, a frame demosaics bit for bit as
 /// it does inside a larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same
 /// reason.
-pub(crate) const INTERPOLATED_BORDER: usize = 10;
+pub(super) const INTERPOLATED_BORDER: usize = 10;
 
 /// The side of a tile, where its phase planes stay in a core's cache, and even, so that every
 /// tile starts on the frame's phase. On a Ryzen 7 6800U (512 KiB of L2 per core), built for plain

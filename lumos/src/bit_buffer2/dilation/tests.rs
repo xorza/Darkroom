@@ -143,6 +143,7 @@ fn dilate_mask_radius_above_63_panics() {
 #[test]
 fn dilation_matches_the_brute_force_reference() {
     /// How a case seeds its mask before dilating.
+    #[derive(Debug)]
     enum Seed {
         /// Individual `(x, y)` pixels.
         Pixels(&'static [(usize, usize)]),
@@ -150,6 +151,7 @@ fn dilation_matches_the_brute_force_reference() {
         Every(usize),
     }
 
+    #[derive(Debug)]
     struct Case {
         name: &'static str,
         size: Size2us,

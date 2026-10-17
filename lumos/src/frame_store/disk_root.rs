@@ -49,7 +49,7 @@ impl DiskRoot {
     /// # Errors
     ///
     /// [`FrameStoreError::InsufficientSpace`].
-    pub(crate) fn ensure_space(&self, needed: u64) -> Result<(), FrameStoreError> {
+    pub(super) fn ensure_space(&self, needed: u64) -> Result<(), FrameStoreError> {
         space_for(&self.path, needed, FileSystem::free_space(&self.path))
     }
 }

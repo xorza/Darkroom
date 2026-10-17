@@ -160,14 +160,14 @@ impl FlaggedSources<'_> {
 
     /// The carried flags of source pixel `index`, none when it is excluded: an excluded pixel is
     /// never sampled.
-    pub(crate) fn carried_at(&self, index: usize) -> QualityFlags {
+    pub(super) fn carried_at(&self, index: usize) -> QualityFlags {
         carried(self.flags.at(index))
     }
 
     /// The carried flags of every in-bounds source pixel the window of `x` and `y` gives a weight
     /// other than zero. A carried value has no limit on how far it is from the truth — a clipped
     /// core can be any amount brighter — so any weight on it can move the sample by any amount.
-    pub(crate) fn carried_in(&self, x: &TapAxis, y: &TapAxis) -> QualityFlags {
+    pub(super) fn carried_in(&self, x: &TapAxis, y: &TapAxis) -> QualityFlags {
         let size = self.flags.size();
         let mut carried = QualityFlags::default();
         for row in weighed_taps(y, size.height) {

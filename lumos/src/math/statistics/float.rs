@@ -70,7 +70,7 @@ impl<'a, F: Float> OrderKeys<'a, F> {
     }
 
     /// The values again, in the order the keys were left in.
-    pub(crate) fn into_values(self) -> &'a mut [F] {
+    pub(super) fn into_values(self) -> &'a mut [F] {
         if self.mapped {
             F::map_keys(self.keys);
         }
@@ -93,7 +93,7 @@ pub(crate) const fn unsigned_key(value: f32) -> u32 {
 
 /// The value whose [`unsigned_key`] is `key`.
 #[inline]
-pub(crate) const fn from_unsigned_key(key: u32) -> f32 {
+pub(super) const fn from_unsigned_key(key: u32) -> f32 {
     f32::from_bits(total_order_32((key ^ (1 << 31)).cast_signed()).cast_unsigned())
 }
 

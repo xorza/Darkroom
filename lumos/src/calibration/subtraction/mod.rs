@@ -50,7 +50,7 @@ impl<'a> Term<'a> {
 
     /// The scale its match gives the master's signal: the frame's exposure over the master's, 1
     /// for a master of no dark signal or one taken at the frame's exposure.
-    pub(crate) fn matched_scale(&self) -> f64 {
+    pub(super) fn matched_scale(&self) -> f64 {
         self.matched.map_or(1.0, DarkMatch::factor)
     }
 }

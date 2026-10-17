@@ -1,8 +1,7 @@
 //! [`NeutralizeBackground`]: each channel's sky shifted to one level, so the sky is neutral grey.
 
-use crate::image::rgb::Rgb;
-
 use crate::image::linear_image::LinearImage;
+use crate::image::rgb::Rgb;
 use crate::image_ops::error::OpError;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::subsample::Subsample;

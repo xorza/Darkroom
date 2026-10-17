@@ -74,7 +74,7 @@ impl Filter {
     }
 
     /// Whether some tap can weigh less than zero: what the ringing clamp acts on.
-    pub(crate) const fn has_negative_lobes(self) -> bool {
+    pub(super) const fn has_negative_lobes(self) -> bool {
         !matches!(self, Self::Bilinear)
     }
 }
@@ -156,7 +156,7 @@ impl TapAxis {
     }
 
     /// The weights from tap `from` on, with the slack after them: what a vector load starts at.
-    pub(crate) fn padded_from(&self, from: usize) -> &[f32] {
+    pub(super) fn padded_from(&self, from: usize) -> &[f32] {
         &self.storage[from..]
     }
 
@@ -197,7 +197,7 @@ impl WarpKernel {
     }
 
     /// `filter` at the stretch `warp` needs over an output frame of `size`, the source's own.
-    pub(crate) fn for_frame(filter: Filter, warp: &WarpTransform, size: Size2us) -> Self {
+    pub(super) fn for_frame(filter: Filter, warp: &WarpTransform, size: Size2us) -> Self {
         Self::new(filter, frame_stretch(warp, size))
     }
 
@@ -213,7 +213,7 @@ impl WarpKernel {
         clippy::cast_sign_loss,
         reason = "a reach is a positive radius times a stretch of at least 1"
     )]
-    pub(crate) const fn window_reach(self) -> Reach {
+    pub(super) const fn window_reach(self) -> Reach {
         let reach = self.reach.ceil() as usize;
         Reach {
             before: reach - 1,
@@ -254,7 +254,7 @@ impl WarpKernel {
     /// A tap's distance is `|t − frac|`, which rounds as `−t + frac` at or below the cell and
     /// `t − frac` above it.
     #[inline(always)]
-    pub(crate) fn weight_lanes<S: Isa>(&self, isa: S, first: i32, frac: f32) -> S::F32 {
+    pub(super) fn weight_lanes<S: Isa>(&self, isa: S, first: i32, frac: f32) -> S::F32 {
         let signed = isa.load_f32(&LANE_INDEX) + isa.splat_f32(first as f32) - isa.splat_f32(frac);
         let distance = signed.max(isa.splat_f32(0.0) - signed);
         let weight = match self.shape {

@@ -3,7 +3,7 @@
 use crate::memory::budget::Budget;
 
 /// The fewest rows a combine reads at once, so a tight budget still makes progress.
-pub(crate) const MIN_CHUNK_ROWS: usize = 64;
+pub(super) const MIN_CHUNK_ROWS: usize = 64;
 
 /// One stage of a run, in what it holds: what it keeps of each frame once done with it, beyond
 /// what the caller held; what it holds beside the frames for its whole length; and what one unit
