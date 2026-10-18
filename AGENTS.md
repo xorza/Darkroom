@@ -38,10 +38,10 @@ Windows, `libclang-dev` on Linux.
 root, the same repository in every project. Run it from the root.
 
 ```
-cargo drive check          # after each change: the root's `check` lanes
+cargo drive check          # after each change: fmt, then clippy --all-targets --all-features
 cargo drive test [args]    # the tests, each time; the runner's arguments pick some: a test name
 cargo drive bench [args]   # the benches; a filter, or --test to run each case once
-cargo drive gate           # the full check, the root's `gate` lanes; CI adds --ci
+cargo drive gate           # the full check: fmt, each lint set, ship, tests, docs; CI adds --ci
 ```
 
 `check` takes no arguments: each lane covers the whole workspace, and the
@@ -54,12 +54,14 @@ hand: another shape of a cargo command builds another copy of the crates.
 `check` and `gate` format the code and end at the first failed step; `gate
 --ci` formats nothing and runs every step.
 
-A root's lanes are in its `Cargo.toml`, under `[workspace.metadata.drive]`,
-or `[package.metadata.drive]` in a root that is one package. Its `check` list
-runs fmt, lint, ship, tests and doc tests by default, and its `gate` list adds
-rustdoc. `test-runner` is `nextest` (the default) or `cargo-test`, which needs
-nothing installed but runs every test when a change reaches any crate. Every
-lane runs `--locked`: after a change to the dependencies,
+A root's flags are in its `Cargo.toml`, under `[workspace.metadata.drive]`,
+or `[package.metadata.drive]` in a root that is one package. `gate` lints with
+each set of the `lint` key and tests with each set of the `test` key, both
+`--all-features` by default; `check` lints with `--all-features` alone.
+`docs = true` adds rustdoc and the doc tests to `gate`, after the others; they
+are off by default. `test-runner` is `nextest` (the default) or `cargo-test`,
+which needs nothing installed but runs every test when a change reaches any
+crate. Every lane runs `--locked`: after a change to the dependencies,
 `cargo update --workspace` writes the lock.
 
 The ship lane lints the build that ships: `--all-targets` turns `internals`
