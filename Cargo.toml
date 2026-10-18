@@ -157,6 +157,7 @@ ignored = ["strum"]
 [package.metadata.drive]
 lint = ["--all-features", ""]
 bench = "--features wgpu"
+docs = true
 
 # The same profiles in every workspace root here: Cargo reads them from the root alone.
 [profile.dev]
