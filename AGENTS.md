@@ -24,7 +24,7 @@ root, the same repository in every project. Run it from the root.
 cargo drive check          # after each change: the root's `check` lanes
 cargo drive test [args]    # the tests, each time; the runner's arguments pick some: a test name
 cargo drive bench [args]   # the benches; a filter, or --test to run each case once
-cargo drive gate           # the full check, as CI runs it: the root's `gate` lanes, fmt --check
+cargo drive gate           # the full check, the root's `gate` lanes; CI adds --ci
 ```
 
 `check` takes no arguments: each lane covers the whole workspace, and the
@@ -34,6 +34,8 @@ run only for the crates a change reaches and every crate that depends on them.
 Each step prints one line; a failure prints each diagnostic once and names its
 log, `target/drive/log/<step>.log`. Read the log rather than run cargo by
 hand: another shape of a cargo command builds another copy of the crates.
+`check` and `gate` format the code and end at the first failed step; `gate
+--ci` formats nothing and runs every step.
 
 A root's lanes are in its `Cargo.toml`, under `[workspace.metadata.drive]`,
 or `[package.metadata.drive]` in a root that is one package. Its `check` list
