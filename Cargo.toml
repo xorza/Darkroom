@@ -159,9 +159,8 @@ lint = ["--all-features", ""]
 bench = "--features wgpu"
 docs = true
 
-# The same profiles in every workspace root here: Cargo reads them from the root alone.
 [profile.dev]
-opt-level = 0
+opt-level = 1
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
