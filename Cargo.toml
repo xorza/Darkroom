@@ -19,11 +19,10 @@ edition = "2024"
 
 # The driver's lanes (drive/src/main.rs). The tests leave out the data bundle a fresh clone lacks,
 # and Tracy, which makes each test wait on its profiler. `cargo test` ran the suite in 2.2 s where
-# nextest took 3.5 s. The gate runs neither rustdoc nor the doc tests.
+# nextest took 3.5 s.
 [workspace.metadata.drive]
 test = [{ all-features-but = ["lumos/real-data", "darkroom/profile-with-tracy"] }]
 test-runner = "cargo-test"
-gate = ["fmt", "lint", "ship", "tests"]
 
 [workspace.dependencies]
 common = { path = "common" }
