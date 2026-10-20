@@ -155,6 +155,7 @@ ignored = ["strum"]
 
 # The second lint set is the CPU-only build. Benches always measure the GPU build.
 [package.metadata.drive]
+version = "0.2"
 lint = ["--all-features", ""]
 bench = "--features wgpu"
 docs = true
