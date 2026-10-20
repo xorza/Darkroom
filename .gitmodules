@@ -10,6 +10,3 @@
 [submodule "libraw-sys/LibRaw"]
 	path = libraw-sys/LibRaw
 	url = https://github.com/LibRaw/LibRaw.git
-[submodule "drive"]
-	path = drive
-	url = git@github.com:xorza/drive.git
