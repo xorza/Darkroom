@@ -44,7 +44,7 @@ bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 glam = { version = "0.34", features = ["serde"] }
 strum = { version = "0.28" }
 rand = { version = "0.10" }
-tokio = { version = "1.53" }
+tokio = { version = "1.54" }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -83,8 +83,8 @@ criterion = { version = "0.8" }
 statrs = { version = "0.19", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
 winresource = { version = "0.1" }
-ort = { version = "2.0.0-rc.14" }
-cc = { version = "1.8" }
+ort = { version = "2.0.0-rc.15" }
+cc = { version = "1.9" }
 libz-sys = { version = "1.1", default-features = false, features = ["static"] }
 bindgen = { version = "0.73", default-features = false }
 
