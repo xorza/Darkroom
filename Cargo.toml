@@ -21,7 +21,7 @@ edition = "2024"
 # and Tracy, which makes each test wait on its profiler. `cargo test` ran the suite in 2.2 s where
 # nextest took 3.5 s.
 [workspace.metadata.drive]
-version = "0.2"
+version = "0.2.1"
 test = [{ all-features-but = ["lumos/real-data", "darkroom/profile-with-tracy"] }]
 test-runner = "cargo-test"
 
