@@ -202,8 +202,8 @@ impl Document {
             }
         }
         for subscription in graph.subscriptions() {
-            if let Some(emitter) = graph.find(subscription.emitter)
-                && !declaration::admits_event(emitter, library, subscription.event_idx)
+            if let Some(emitter) = graph.find(subscription.event.node_id)
+                && !declaration::admits_event(emitter, library, subscription.event.event_idx)
             {
                 return Err(DocumentValidationError::UndeclaredEvent { subscription });
             }

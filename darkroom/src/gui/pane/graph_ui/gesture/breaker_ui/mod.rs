@@ -114,7 +114,7 @@ impl BreakerUI {
         // step captures every edge touching it), so skip any whose
         // emitter or subscriber is doomed to avoid redundant history.
         for s in broken_subscriptions.drain(..) {
-            if broken_nodes.contains(&s.emitter) || broken_nodes.contains(&s.subscriber) {
+            if broken_nodes.contains(&s.event.node_id) || broken_nodes.contains(&s.subscriber) {
                 continue;
             }
             out.push_graph(GraphIntent::SetSubscription {

@@ -4,8 +4,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use scenarium::{
-    Binding, Compiler, ConstValue, Graph, InputPort, WorkerActivity, WorkerReport, system_library,
-    worker_events_library,
+    Binding, Compiler, ConstValue, EventPort, Graph, InputPort, WorkerActivity, WorkerReport,
+    system_library, worker_events_library,
 };
 
 use crate::core::wake::Wake;
@@ -35,7 +35,7 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
         InputPort::new(print, 0),
         Binding::from(ConstValue::String("tick".to_string())),
     );
-    graph.subscribe(frame, 1, print);
+    graph.subscribe(EventPort::new(frame, 1), print);
     let compiled = Compiler::default()
         .compile(&graph, &library)
         .unwrap()

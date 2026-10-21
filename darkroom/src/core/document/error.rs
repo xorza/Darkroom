@@ -43,8 +43,8 @@ pub(crate) enum DocumentValidationError {
     UndeclaredOutput { port: OutputPort },
     #[error(
         "a subscription listens to event {} of node {:?}, which it does not declare",
-        .subscription.event_idx,
-        .subscription.emitter
+        .subscription.event.event_idx,
+        .subscription.event.node_id
     )]
     UndeclaredEvent { subscription: Subscription },
 }

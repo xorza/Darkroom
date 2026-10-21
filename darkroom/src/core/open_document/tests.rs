@@ -18,8 +18,8 @@ use crate::core::io::preferences::Preferences;
 use crate::core::open_document::{LaunchSource, OpenDocument};
 use crate::core::status_log::StatusLog;
 use scenarium::{
-    Binding, ConstValue, DataType, FuncId, FuncInput, FuncOutput, Graph, InputPort, Library, Node,
-    NodeId, internals, system_library,
+    Binding, ConstValue, DataType, EventPort, FuncId, FuncInput, FuncOutput, Graph, InputPort,
+    Library, Node, NodeId, internals, system_library,
 };
 
 #[test]
@@ -283,7 +283,7 @@ fn wiring_past_the_declaration_fails_the_load() {
 
     load(&|graph, producer, consumer| {
         graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-        graph.subscribe(producer, 0, consumer);
+        graph.subscribe(EventPort::new(producer, 0), consumer);
     })
     .expect("wiring inside the declaration loads");
 
@@ -308,9 +308,11 @@ fn wiring_past_the_declaration_fails_the_load() {
         refused(wire),
         DocumentValidationError::UndeclaredOutput { port } if port.port_idx == 1
     ));
-    let subscription = load(&|graph, producer, consumer| graph.subscribe(producer, 1, consumer));
+    let subscription =
+        load(&|graph, producer, consumer| graph.subscribe(EventPort::new(producer, 1), consumer));
     assert!(matches!(
         refused(subscription),
-        DocumentValidationError::UndeclaredEvent { subscription } if subscription.event_idx == 1
+        DocumentValidationError::UndeclaredEvent { subscription }
+            if subscription.event.event_idx == 1
     ));
 }

@@ -46,7 +46,7 @@ use crate::execution::index::{InputIdx, NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::func::func_input::FuncInput;
-use crate::graph::identity::{InputPort, NodeId, OutputPort};
+use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
 use crate::graph::output_types::OutputTypes;
 use crate::library::Library;
 
@@ -227,17 +227,14 @@ impl Compiler {
             // tolerance the type gate applies to data edges.
             let node_events = compiled.events.append(func.events().iter().enumerate().map(
                 |(event_idx, event)| {
-                    while subscriptions
-                        .next_if(|sub| (sub.emitter, sub.event_idx) < (node_id, event_idx))
-                        .is_some()
-                    {}
+                    let port = EventPort::new(node_id, event_idx);
+                    while subscriptions.next_if(|sub| sub.event < port).is_some() {}
                     let subscribers = compiled.subscribers.append(
-                        iter::from_fn(|| {
-                            subscriptions
-                                .next_if(|sub| sub.emitter == node_id && sub.event_idx == event_idx)
-                        })
-                        .filter(|sub| !node.disabled && !self.placement(sub.subscriber).disabled)
-                        .map(|sub| self.idx(sub.subscriber)),
+                        iter::from_fn(|| subscriptions.next_if(|sub| sub.event == port))
+                            .filter(|sub| {
+                                !node.disabled && !self.placement(sub.subscriber).disabled
+                            })
+                            .map(|sub| self.idx(sub.subscriber)),
                     );
                     ExecutionEvent {
                         subscribers,

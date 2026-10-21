@@ -9,7 +9,7 @@ use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::func_builder::FuncBuilder;
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{EventPort, FuncId};
 use crate::graph::node::{CacheMode, FuncResolution, Node, NodeKind};
 use crate::graph::subscription::Subscription;
 use crate::graph::{InputPort, NodeId, OutputPort};
@@ -436,12 +436,12 @@ fn subscribe_unsubscribe_is_subscribed() {
     let mut g = TestGraph::sample();
     let (emitter, sub) = (g.id("get_a"), g.id("sum"));
 
-    assert!(!g.graph.is_subscribed(emitter, 0, sub));
+    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
     g.subscribe("get_a", 0, "sum");
-    assert!(g.graph.is_subscribed(emitter, 0, sub));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
 
     // Distinct event_idx is a distinct edge.
-    assert!(!g.graph.is_subscribed(emitter, 1, sub));
+    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 1), sub));
 
     // Re-subscribing is idempotent (BTreeSet dedups).
     g.subscribe("get_a", 0, "sum");
@@ -452,39 +452,27 @@ fn subscribe_unsubscribe_is_subscribed() {
     let (sub2, other) = (g.id("mult"), g.id("Print"));
     g.subscribe("get_a", 0, "mult");
     g.subscribe("get_a", 1, "Print");
-    assert!(g.graph.is_subscribed(emitter, 0, sub));
-    assert!(g.graph.is_subscribed(emitter, 0, sub2));
-    assert!(g.graph.is_subscribed(emitter, 1, other));
-    assert!(!g.graph.is_subscribed(emitter, 1, sub));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub2));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 1), other));
+    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 1), sub));
 
-    // `subscriptions` yields them in (emitter, event_idx, subscriber) order,
-    // whatever order they were authored in — the determinism a compile's
-    // subscriber lists inherit.
+    // `subscriptions` yields them in (event, subscriber) order, whatever
+    // order they were authored in — the determinism a compile's subscriber
+    // lists inherit.
     let mut expected = vec![
-        Subscription {
-            emitter,
-            event_idx: 0,
-            subscriber: sub,
-        },
-        Subscription {
-            emitter,
-            event_idx: 0,
-            subscriber: sub2,
-        },
-        Subscription {
-            emitter,
-            event_idx: 1,
-            subscriber: other,
-        },
+        Subscription::new(EventPort::new(emitter, 0), sub),
+        Subscription::new(EventPort::new(emitter, 0), sub2),
+        Subscription::new(EventPort::new(emitter, 1), other),
     ];
     expected.sort();
     assert_eq!(g.graph.subscriptions().collect::<Vec<_>>(), expected);
 
     // Dropping one edge leaves its siblings alone.
     g.unsubscribe("get_a", 0, "sum");
-    assert!(!g.graph.is_subscribed(emitter, 0, sub));
-    assert!(g.graph.is_subscribed(emitter, 0, sub2));
-    assert!(g.graph.is_subscribed(emitter, 1, other));
+    assert!(!g.graph.is_subscribed(EventPort::new(emitter, 0), sub));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 0), sub2));
+    assert!(g.graph.is_subscribed(EventPort::new(emitter, 1), other));
 
     g.unsubscribe("get_a", 0, "mult");
     g.unsubscribe("get_a", 1, "Print");
@@ -519,7 +507,7 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let edges_before = g.graph.edges().count();
     let detached = g.remove("sum");
     assert_eq!(g.graph.edges().count(), edges_before - 3);
-    assert!(!g.graph.is_subscribed(get_a, 0, sum));
+    assert!(!g.graph.is_subscribed(EventPort::new(get_a, 0), sum));
     assert_eq!(detached.bindings().len(), 3);
     assert_eq!(detached.subscriptions().len(), 1);
 
@@ -545,11 +533,7 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
         binding: Binding::Const(1i64.into()),
     };
     let first = detached.bindings()[0].clone();
-    let elsewhere = Subscription {
-        emitter: get_a,
-        event_idx: 0,
-        subscriber: mult,
-    };
+    let elsewhere = Subscription::new(EventPort::new(get_a, 0), mult);
     let own = detached.subscriptions()[0];
     let refusals = [
         (
@@ -736,7 +720,7 @@ fn validate_tolerates_library_range_drift() {
     let one_out = g.id("one_out");
     g.graph
         .set_input_binding(InputPort::new(one_out, 5), Binding::bind(one_out, 7));
-    g.graph.subscribe(one_out, 3, one_out);
+    g.graph.subscribe(EventPort::new(one_out, 3), one_out);
     assert!(g.graph.validate_with(&g.library).is_ok());
 
     // `Null` consts ("explicitly unset") are tolerated on both sides:

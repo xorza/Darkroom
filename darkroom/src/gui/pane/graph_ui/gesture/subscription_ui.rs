@@ -135,11 +135,7 @@ impl SubscriptionUI {
                 from: subscriber,
                 snap: Some(emitter),
             }) => out.push_graph(GraphIntent::SetSubscription {
-                subscription: Subscription {
-                    emitter: emitter.node_id,
-                    event_idx: emitter.event_idx,
-                    subscriber,
-                },
+                subscription: Subscription::new(emitter, subscriber),
                 subscribe: true,
             }),
             _ => {}
@@ -216,15 +212,14 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (theme, graph_ctx, geometry) =
         (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
     for s in graph_ctx.subscriptions() {
-        let emitter = EventPort::new(s.emitter, s.event_idx);
         let (Some(p0), Some(p3)) = (
-            geometry.events.center(emitter),
+            geometry.events.center(s.event),
             geometry.subs.center(s.subscriber),
         ) else {
             continue;
         };
         let hover = Hover::from(
-            geometry.events.is_hovered(emitter) || geometry.subs.is_hovered(s.subscriber),
+            geometry.events.is_hovered(s.event) || geometry.subs.is_hovered(s.subscriber),
         );
         let wire = Wire::event(p0, p3);
         // Events carry no data type, so one neutral swatch runs the whole

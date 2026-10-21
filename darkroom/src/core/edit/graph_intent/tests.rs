@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, CacheMode, ConstValue, DataType, FuncId, FuncInput, FuncOutput,
-    InputPort, Library, Node, NodeId, OutputPort, Subscription, internals,
+    Binding, BindingEntry, CacheMode, ConstValue, DataType, EventPort, FuncId, FuncInput,
+    FuncOutput, InputPort, Library, Node, NodeId, OutputPort, Subscription, internals,
 };
 
 use crate::core::document::Document;
@@ -59,11 +59,7 @@ fn undo_all(doc: &mut Document, steps: &[UndoStep]) {
 
 fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphIntent {
     GraphIntent::SetSubscription {
-        subscription: Subscription {
-            emitter,
-            event_idx: 0,
-            subscriber,
-        },
+        subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
         subscribe,
     }
 }
@@ -118,7 +114,7 @@ fn a_removed_node_comes_back_whole() {
     let mut doc = fixture.doc;
     let edge = InputPort::new(b, 0);
     doc.graph.set_input_binding(edge, Binding::bind(a, 0));
-    doc.graph.subscribe(a, 0, b);
+    doc.graph.subscribe(EventPort::new(a, 0), b);
     doc.main_view.selected = [a].into_iter().collect();
     let placement = doc.main_view.item_placements[&a];
 
@@ -130,7 +126,10 @@ fn a_removed_node_comes_back_whole() {
     assert!(!doc.main_view.item_placements.contains_key(&a));
     assert!(!doc.main_view.selected.contains(&a), "selection is pruned");
     assert_eq!(doc.graph.bindings.get(&edge), None, "the edge went with it");
-    assert!(!doc.graph.is_subscribed(a, 0, b), "so did the subscription");
+    assert!(
+        !doc.graph.is_subscribed(EventPort::new(a, 0), b),
+        "so did the subscription"
+    );
     doc.validate().expect("a removal leaves a valid document");
 
     step.revert(&mut doc);
@@ -141,7 +140,7 @@ fn a_removed_node_comes_back_whole() {
     );
     assert!(doc.main_view.selected.contains(&a));
     assert_eq!(doc.graph.bindings.get(&edge), Some(&Binding::bind(a, 0)));
-    assert!(doc.graph.is_subscribed(a, 0, b));
+    assert!(doc.graph.is_subscribed(EventPort::new(a, 0), b));
     doc.validate()
         .expect("an undone removal leaves a valid document");
 
@@ -268,7 +267,7 @@ fn crossing_wire() -> CrossingWire {
         .set_input_binding(InputPort::new(b, 1), Binding::Const(ConstValue::from(7i64)));
     doc.graph
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
-    doc.graph.subscribe(a, 0, b);
+    doc.graph.subscribe(EventPort::new(a, 0), b);
     doc.main_view.selected = [a, b].into_iter().collect();
     CrossingWire {
         doc,
@@ -342,7 +341,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
         None,
         "the edge from unselected c is dropped"
     );
-    assert!(doc.graph.is_subscribed(a_clone, 0, b_clone));
+    assert!(doc.graph.is_subscribed(EventPort::new(a_clone, 0), b_clone));
 
     // One batch, so one undo: every clone and its wiring goes, and the
     // selection is the one the duplicate replaced.
@@ -483,7 +482,10 @@ fn subscribe_unsubscribe_commit_and_undo() {
         .commit(&mut doc, &fixture.library)
         .unwrap()
         .expect("subscribe commits");
-    assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
 
     // A second identical subscribe is a no-op (from == to == true).
     assert!(
@@ -496,23 +498,38 @@ fn subscribe_unsubscribe_commit_and_undo() {
 
     // Undo removes it; redo restores it.
     step.revert(&mut doc);
-    assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        !doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
     step.apply(&mut doc);
-    assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
     let step = subscribe(emitter, subscriber, false)
         .commit(&mut doc, &fixture.library)
         .unwrap()
         .expect("unsubscribe commits");
-    assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        !doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
     step.revert(&mut doc);
-    assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
 
     // Redo the unsubscribe (apply writes the `to = unsubscribed` half),
     // then unsubscribing the now-absent edge is a no-op.
     step.apply(&mut doc);
-    assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
+    assert!(
+        !doc.graph
+            .is_subscribed(EventPort::new(emitter, 0), subscriber)
+    );
     assert!(
         subscribe(emitter, subscriber, false)
             .commit(&mut doc, &fixture.library)
@@ -1020,11 +1037,7 @@ fn indices_past_the_declaration_are_refused() {
         }],
     };
     let listen = |event_idx: usize| GraphIntent::SetSubscription {
-        subscription: Subscription {
-            emitter: producer,
-            event_idx,
-            subscriber: consumer,
-        },
+        subscription: Subscription::new(EventPort::new(producer, event_idx), consumer),
         subscribe: true,
     };
 
@@ -1063,7 +1076,7 @@ fn indices_past_the_declaration_are_refused() {
     ));
     assert!(matches!(
         refused(listen(1), &mut doc),
-        MalformedIntent::UndeclaredEvent { subscription } if subscription.event_idx == 1
+        MalformedIntent::UndeclaredEvent { subscription } if subscription.event.event_idx == 1
     ));
 
     assert!(

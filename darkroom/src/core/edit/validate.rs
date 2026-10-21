@@ -157,7 +157,7 @@ pub(super) fn declared_event(
     library: &Library,
     subscription: Subscription,
 ) -> Result<(), MalformedIntent> {
-    if !declaration::admits_event(emitter, library, subscription.event_idx) {
+    if !declaration::admits_event(emitter, library, subscription.event.event_idx) {
         return Err(MalformedIntent::UndeclaredEvent { subscription });
     }
     Ok(())

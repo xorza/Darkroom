@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{Binding, CacheMode, ConstValue, InputPort, NodeId, Subscription};
+use scenarium::{Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, Subscription};
 
 use crate::core::document::internals::DocFixture;
 use crate::core::document::viewport::Viewport;
@@ -53,11 +53,7 @@ fn cst(v: f64) -> Binding {
 /// `subscriber` subscribing to `emitter`'s first event.
 fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
     UndoStep::SetSubscription(SetSubscription {
-        subscription: Subscription {
-            emitter,
-            event_idx: 0,
-            subscriber,
-        },
+        subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
         subscribed: Change {
             from: false,
             to: true,
