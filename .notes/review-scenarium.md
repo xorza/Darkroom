@@ -74,21 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 4. Move the sweep out of the schedule
-
-Files:
-`src/execution/schedule/mod.rs`, new `src/execution/resolve.rs`,
-`src/execution/engine/mod.rs`, `src/execution/mod.rs`.
-
-- [ ] `schedule/mod.rs:526` `RunSchedule::resolve` — calls
-  `RuntimeCache::stamp_digests` and `probe_reuse`, while
-  `runtime_cache/mod.rs:38` imports `schedule::NodeState` (cycle `schedule` ↔
-  `cache`, edge to cut: `schedule/mod.rs:46`). Target: the sweep moves to
-  `execution/resolve.rs` as a free fn over `(&CompiledGraph, &mut
-  RunSchedule, &mut RuntimeCache)`. `NodeState::promote_to_run` becomes
-  `pub(crate)`. Update the phase list in the `execution` and `schedule`
-  module docs.
-
 ### 5. Func signatures
 
 Files: `src/graph/node/mod.rs`, `src/graph/mod.rs`,

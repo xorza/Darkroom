@@ -20,6 +20,7 @@ use crate::execution::error::Result;
 use crate::execution::executor::{CollectRequest, Executor, RunRequest};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::run_reporter::RunReporter;
+use crate::execution::resolve;
 use crate::execution::schedule::RunSchedule;
 use crate::execution::schedule::planner::Planner;
 use crate::execution::seeds::RunSeeds;
@@ -155,7 +156,7 @@ impl ExecutionEngine {
         // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
         // disposition, exact output demand, and live readers together. The resolved run is
         // authoritative: a cache-hit or blocked consumer contributes no upstream demand.
-        self.schedule.resolve(compiled, &mut self.cache).await;
+        resolve::sweep(compiled, &mut self.schedule, &mut self.cache).await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -270,6 +271,7 @@ pub(crate) mod internals {
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
     use crate::execution::index::NodeIdx;
+    use crate::execution::resolve;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::Graph;
@@ -308,7 +310,7 @@ pub(crate) mod internals {
         pub(crate) async fn prepare_execution(&mut self, seeds: &RunSeeds) -> Result<()> {
             let compiled: &CompiledGraph = &self.compiled;
             self.planner.plan(compiled, seeds, &mut self.schedule)?;
-            self.schedule.resolve(compiled, &mut self.cache).await;
+            resolve::sweep(compiled, &mut self.schedule, &mut self.cache).await;
             Ok(())
         }
 

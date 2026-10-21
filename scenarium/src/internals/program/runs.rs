@@ -12,6 +12,7 @@ use crate::execution::error::RunError;
 use crate::execution::executor::{CollectRequest, Executor, RunRequest};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::run_reporter::internals::DiscardedReports;
+use crate::execution::resolve;
 use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
@@ -140,7 +141,7 @@ impl<'a> Runs<'a> {
         } = self;
         let program = &owner.program;
         if *resolve {
-            schedule.resolve(program, cache).await;
+            resolve::sweep(program, schedule, cache).await;
         }
         executor
             .run(

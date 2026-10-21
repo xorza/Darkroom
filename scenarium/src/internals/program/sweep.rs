@@ -4,6 +4,7 @@
 use crate::DynamicValue;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::resolve;
 use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
@@ -86,7 +87,7 @@ impl<'a> Sweep<'a> {
             cache.prime_hit(node.node_idx, values);
         }
 
-        schedule.resolve(program, &mut cache).await;
+        resolve::sweep(program, &mut schedule, &mut cache).await;
         Swept { program, schedule }
     }
 }

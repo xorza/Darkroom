@@ -42,8 +42,8 @@ impl Planner {
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
     ///
     /// Leaves `schedule` structurally complete and cache-blind:
-    /// [`RunSchedule::resolve`] is the pass that refines it, and running the two out
-    /// of order is what [`RunSchedule::validate`] catches.
+    /// [`resolve::sweep`](crate::execution::resolve::sweep) is the pass that refines it,
+    /// and running the two out of order is what [`RunSchedule::validate`] catches.
     pub(crate) fn plan(
         &mut self,
         program: &CompiledGraph,
