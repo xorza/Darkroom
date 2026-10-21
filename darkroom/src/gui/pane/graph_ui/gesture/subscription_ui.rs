@@ -64,10 +64,11 @@ impl SubscriptionUI {
         self.state.clear();
     }
 
-    /// Whether a subscription-wire gesture is in flight — feeds the
+    /// Whether a subscription wire is being dragged — the whole of this
+    /// controller's state, so it answers both the Esc policy and the
     /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
-    pub(crate) const fn is_dragging(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         self.state.get().is_some()
     }
 

@@ -225,7 +225,7 @@ impl GraphUI {
             || breaker_ui.in_flight()
             || connection_ui.in_flight()
             || preview_drag.in_flight()
-            || subscription_ui.is_dragging()
+            || subscription_ui.in_flight()
             || new_node_ui.in_flight()
             || node_menu.in_flight()
             || selection_ui.in_flight()
@@ -417,7 +417,7 @@ impl GraphUI {
         // lifecycle that depends on it — and everything a pick means goes onto
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
-        self.node_menu.apply(ui, graph_ctx, out);
+        self.node_menu.apply(ui, cx, out);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -513,7 +513,7 @@ impl GraphUI {
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
                             let set = if self.connection_ui.is_dragging()
-                                || self.subscription_ui.is_dragging()
+                                || self.subscription_ui.in_flight()
                                 || probe.is_active()
                             {
                                 WireSet::Faded

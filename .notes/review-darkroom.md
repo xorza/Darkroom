@@ -6,13 +6,6 @@ Every root cause is fixed. The batches left are local: shared machinery in the w
 
 ## Plan
 
-### 9. Gesture controller symmetry
-
-Files: `gui/pane/graph_ui/mod.rs`, `gui/pane/graph_ui/gesture/{subscription_ui.rs, new_node_ui/mod.rs, node_menu_ui/mod.rs}`.
-
-- [ ] `gui/pane/graph_ui/gesture/subscription_ui.rs`: has `is_dragging` where every sibling has `in_flight`, and `GraphUI::in_flight` asks it by the other name. Target: `in_flight`, beside the `is_dragging` that the wire fade reads.
-- [ ] `new_node_ui/mod.rs` `NewNodeUi::apply` returns intents for the caller to extend, `node_menu_ui/mod.rs` `NodeMenuUi::apply` takes a `GraphCtx`, and `NodeMenuUi::open_on` returns intents, while the other controllers take a `CanvasCtx` and push into `&mut Requests`. Target: `apply(&mut self, ui, cx: CanvasCtx<'_>, out: &mut Requests)` for all of them.
-
 ### 10. Duplicates and docs that read wrong
 
 Files: `gui/event_ref.rs` and its importers, `gui/graph_ctx/node_ctx.rs`, `gui/pane/graph_ui/node_ui/header.rs`, `core/document/tab_ref.rs`, `gui/main_window/mod.rs`, `gui/pane/image_viewer/mod.rs`, `gui/state/process_memory.rs`.
