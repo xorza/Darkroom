@@ -86,7 +86,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
-        let Some(StoredContent::Image(image)) = test.run_state.previews.entries.get(&node) else {
+        let Some(StoredContent::Image(image)) = test.run_state.previews.get(node) else {
             panic!("the landed image is the node's stored content");
         };
         image.is_full_resident()

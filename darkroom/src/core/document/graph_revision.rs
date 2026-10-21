@@ -1,21 +1,20 @@
 //! Which state of a graph its output types were worked out from.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 /// One state of a graph's node set and wiring — what a wildcard output's
-/// type is resolved from. Every open document starts at a revision no other
-/// has had, and every edit that can retype an output moves its document to a
-/// fresh one, so two equal revisions are one graph in one state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// type is resolved from. Every edit that can retype an output moves its
+/// document to the next revision, so two equal revisions of one document are
+/// one graph in one state.
+///
+/// Counted per document, so two documents can share a revision: a cache that
+/// keeps one must not outlive its document. Both that do — the window's
+/// output-type table and its node-cache sweep — live in the `MainWindow` that
+/// `Session::new` builds afresh with each document.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphRevision(u64);
 
 impl GraphRevision {
-    /// A revision no graph has had before.
-    pub(crate) fn fresh() -> Self {
-        // Process-wide rather than per document: the window's caches keep a
-        // revision and compare it alone, so a revision must not recur in
-        // another document. Relaxed: the counter orders nothing else.
-        static LAST: AtomicU64 = AtomicU64::new(0);
-        Self(LAST.fetch_add(1, Ordering::Relaxed) + 1)
+    /// The revision after this one.
+    pub(crate) const fn next(self) -> Self {
+        Self(self.0 + 1)
     }
 }

@@ -189,7 +189,10 @@ impl InspectPanel<'_> {
         } = self;
         let (theme, node) = (ncx.theme(), ncx);
         let logs = ncx.graph_ctx.run_state().logs(node.id);
-        let error = ncx.graph_ctx.run_state().error(node.id);
+        let error = match node.exec_status() {
+            ExecStatus::Errored(message) => message.as_deref(),
+            _ => None,
+        };
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -434,20 +437,20 @@ fn value_str(ui: &mut Ui, binding: Option<&Binding>) -> TextInput<'static> {
     }
 }
 
-fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
+fn status_text(ui: &mut Ui, status: &ExecStatus) -> TextInput<'static> {
     match status {
         ExecStatus::None => TextInput::Borrowed("not run"),
         ExecStatus::Cached => TextInput::Borrowed("cached"),
         ExecStatus::Executed(secs) => {
-            TextInput::Interned(fmt!(ui, "ran in {}", Elapsed::new(secs)))
+            TextInput::Interned(fmt!(ui, "ran in {}", Elapsed::new(*secs)))
         }
         ExecStatus::Running(at) => TextInput::Interned(fmt!(
             ui,
             "running… {}",
             Elapsed::new(at.elapsed().as_secs_f64())
         )),
-        ExecStatus::MissingInputs => TextInput::Borrowed("missing inputs"),
-        ExecStatus::Errored => TextInput::Borrowed("errored"),
+        ExecStatus::MissingInputs(_) => TextInput::Borrowed("missing inputs"),
+        ExecStatus::Errored(_) => TextInput::Borrowed("errored"),
     }
 }
 

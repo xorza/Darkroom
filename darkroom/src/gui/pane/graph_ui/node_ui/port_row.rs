@@ -36,7 +36,6 @@ use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::node_ui::value_editor::{ConstEdit, Field};
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::port_ref::{PortKind, PortRef};
-use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::hover::Hover;
 use crate::gui::widgets::port_glyph;
@@ -272,7 +271,7 @@ fn label_style(ui: &Ui, theme: &Theme, ink: LabelInk) -> TextStyle {
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
 fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let (ncx, dcx) = (rec.node, rec.draw);
-    let (theme, node) = (ncx.theme(), ncx);
+    let theme = ncx.theme();
     let port = input.port_ref();
     let set_aside_by = input.overridden_by();
     let ink = if set_aside_by.is_some() {
@@ -294,10 +293,8 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
-    // up; the node-level check is what stops a live re-run's stale verdict from lingering
-    // once the node reaches a new status.
-    let missing = matches!(node.exec_status(), ExecStatus::MissingInputs) && input.missing();
-    let fill = if missing {
+    // up, and only while the node's status is that verdict: a live re-run replaces it.
+    let fill = if input.missing() {
         theme.status.warning
     } else {
         Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(

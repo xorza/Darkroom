@@ -87,7 +87,7 @@ impl Default for OpenDocument {
             document: Document::default(),
             path: None,
             dirty: false,
-            revision: GraphRevision::fresh(),
+            revision: GraphRevision::default(),
             history: ActionStack::new(UNDO_HISTORY_BYTES),
             batch: Vec::new(),
         }
@@ -237,14 +237,14 @@ impl OpenDocument {
     /// Returns the one signal whose effect is a *call* rather than a stored
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
-    fn land(&mut self, signals: &StepSignals) -> Relayout {
+    const fn land(&mut self, signals: &StepSignals) -> Relayout {
         // A content edit (or an undone/redone one) leaves the doc differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.
         self.dirty |= signals.dirtied;
         if signals.retyped {
-            self.revision = GraphRevision::fresh();
+            self.revision = self.revision.next();
         }
         Relayout::needed_if(signals.geometry_stale)
     }

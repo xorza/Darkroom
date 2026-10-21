@@ -243,10 +243,11 @@ impl<'a> NodeCtx<'a> {
         !self.missing()
     }
 
-    /// Outcome of the last graph run. Drives the node's status-glow shadow
-    /// and (for `Executed`) the header time label.
-    pub(crate) fn exec_status(self) -> ExecStatus {
-        self.run.map(NodeRunState::status).unwrap_or_default()
+    /// Outcome of the last graph run, with its detail. Drives the node's
+    /// status-glow shadow, the header time label, the inspector's status and
+    /// error lines, and the highlight on the ports the run could not feed.
+    pub(crate) fn exec_status(self) -> &'a ExecStatus {
+        self.run.map_or(&ExecStatus::None, NodeRunState::status)
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).
@@ -326,6 +327,9 @@ impl<'a> NodeCtx<'a> {
     /// port wired to a disabled or itself-unfed producer counts too, not just
     /// an unbound one.
     pub(super) fn missing_inputs(self) -> &'a [usize] {
-        self.run.map_or(&[], NodeRunState::missing_inputs)
+        match self.exec_status() {
+            ExecStatus::MissingInputs(ports) => ports,
+            _ => &[],
+        }
     }
 }

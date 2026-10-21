@@ -2,30 +2,9 @@
 
 ## Proposal
 
-### Root causes
-
-- **A run verdict is three fields that must agree.** `NodeRunState` holds `status`, `error` and `missing_inputs` side by side. Live progress writes only `status`, so a stale `error` from the last run shows beside a fresh `Executed` status until the run completes.
-- **A revision counter is global state.** `GraphRevision::fresh` uses a process-wide `static AtomicU64`. Its only readers (`MainWindow::swept_at`, `OutputTypeCache`) live in the `MainWindow` that `Session::new` replaces together with the document, so a per-document counter gives the same guarantee.
-
-### Target design
-
-- **A run verdict is one value.** `ExecStatus` carries its own detail (`Errored(Option<String>)`, `MissingInputs(Vec<usize>)`), so a status and its detail cannot disagree.
-- **The graph revision is per document.** `OpenDocument` advances its own counter, as `DocumentQueue` does for `GestureId`.
+Every root cause is fixed. The batches left are local: shared machinery in the wrong module, uneven APIs, duplicates and docs that read wrong.
 
 ## Plan
-
-### 6. Per-document graph revision
-
-Files: `core/document/graph_revision.rs`, `core/document/open_document/mod.rs`.
-
-- [ ] `core/document/graph_revision.rs` `GraphRevision::fresh`: a process-wide `static AtomicU64`, which the "no mutable statics" rule refuses. Both readers live in the `MainWindow` that a document swap replaces. Target: `GraphRevision::next(self)` on a `Default` value, with `OpenDocument::land` advancing its own field, as `GestureId` does.
-
-### 7. Run verdicts as one value
-
-Files: `gui/state/run_state/mod.rs`, `gui/state/preview_store/mod.rs`, `gui/graph_ctx/node_ctx.rs`, `gui/pane/graph_ui/node_ui/{header.rs, port_row.rs, node_widget.rs}`, `gui/pane/graph_ui/paint/inspectors.rs`, `gui/pane/image_viewer/mod.rs`.
-
-- [ ] `gui/state/run_state/mod.rs` `NodeRunState`: `error` and `missing_inputs` sit beside `status`. `apply_progress` rewrites only `status`, so the inspector shows last run's error under a fresh `Executed` status until `Completed` arrives. `drop_empty_nodes` also has to know which fields imply a status. Target: `ExecStatus::Errored(Option<String>)` and `ExecStatus::MissingInputs(Vec<usize>)` (no longer `Copy`, so readers take `&ExecStatus`), and the two fields removed.
-- [ ] `gui/state/preview_store/mod.rs` `PreviewStore::entries`: `pub(crate)`, so `RunState` removes and clears entries and `ImageViewer` reads them without passing through the store. Target: a private field with `get`, `remove` and `clear` on the store.
 
 ### 8. Shared camera machinery out of the graph pane
 

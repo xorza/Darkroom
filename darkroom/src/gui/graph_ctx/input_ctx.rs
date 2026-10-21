@@ -70,7 +70,8 @@ impl<'a> InputCtx<'a> {
 
     /// The last run could not feed this port — its own verdict, so a port
     /// wired to a disabled or itself-unfed producer counts too, not just an
-    /// unbound one. Renders highlighted while the node reads `MissingInputs`.
+    /// unbound one. Only a `MissingInputs` status names ports, so this answers
+    /// `false` under any other.
     pub(crate) fn missing(self) -> bool {
         self.node.missing_inputs().contains(&self.port_idx)
     }
