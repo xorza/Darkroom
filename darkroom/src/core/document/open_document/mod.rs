@@ -257,13 +257,16 @@ impl OpenDocument {
     /// Open the document at `path`, holding each func node to the ports it was
     /// authored against in `library`: a node whose func moved its ports is
     /// refused by name, rather than loaded with its wiring on the wrong ports.
+    /// Wiring on a port or event its func does not declare is refused too.
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
         let mut document = document::load(&path)?;
-        if let Err(source) = document.graph.reconcile_signatures(library) {
-            return Err(DocumentLoadError::InvalidDocument {
-                path,
-                source: source.into(),
-            });
+        let checked = document
+            .graph
+            .reconcile_signatures(library)
+            .map_err(Into::into)
+            .and_then(|()| document.validate_declarations(library));
+        if let Err(source) = checked {
+            return Err(DocumentLoadError::InvalidDocument { path, source });
         }
         Ok(Self {
             document,

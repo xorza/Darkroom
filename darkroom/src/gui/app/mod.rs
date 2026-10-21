@@ -22,6 +22,7 @@ use crate::gui::MAIN_WINDOW;
 use crate::gui::app::app_command::prefs_command::MlModelKind;
 use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
 use crate::gui::dialogs;
 use crate::gui::frame_writes::FrameWrites;
@@ -34,6 +35,7 @@ use crate::gui::theme::Theme;
 pub(crate) mod app_command;
 pub(crate) mod app_ctx;
 mod discard_dialog;
+mod error;
 pub(crate) mod session;
 
 /// The editor shell: it owns the open document and the runtime services
@@ -342,25 +344,21 @@ impl App {
     #[must_use]
     fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
-        let value = match pick.config.mode {
-            FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
-                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
-            FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(|paths| {
-                ConstValue::FsPaths(
-                    paths
-                        .into_iter()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .collect(),
-                )
-            }),
-            FsPathMode::NewFile => dialogs::pick_new_file(&extensions)
-                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
-            FsPathMode::Directory => dialogs::pick_directory()
-                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
+        let picked = match pick.config.mode {
+            FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions).map(fs_path),
+            FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(fs_paths),
+            FsPathMode::NewFile => dialogs::pick_new_file(&extensions).map(fs_path),
+            FsPathMode::Directory => dialogs::pick_directory().map(fs_path),
         };
-        let Some(value) = value else {
-            return Relayout::NotNeeded;
+        let value = match picked {
+            None => return Relayout::NotNeeded,
+            Some(Ok(value)) => value,
+            Some(Err(error)) => {
+                self.status.error(StatusFamily::Edit, error.to_string());
+                return Relayout::NotNeeded;
+            }
         };
+        self.status.succeeded(StatusFamily::Edit);
         self.session.open.apply_edit(
             GraphIntent::SetInput {
                 input: pick.port,
@@ -406,6 +404,10 @@ impl App {
     ///
     /// The worker's disk cache repoints too, so disk-backed nodes read the new
     /// document's store rather than the old one's.
+    ///
+    /// A document failure on the status bar was about the document being
+    /// replaced, so every adoption clears it — an empty document as much as a
+    /// loaded one.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.run_state.clear();
         self.runtime.clear_program();
@@ -416,6 +418,7 @@ impl App {
         self.runtime
             .set_document_cache(self.session.open.path.as_deref());
         self.remember_document_path();
+        self.status.succeeded(StatusFamily::Document);
     }
 
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
@@ -430,7 +433,6 @@ impl App {
             }
         };
         self.adopt_document(open);
-        self.status.succeeded(StatusFamily::Document);
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -571,6 +573,27 @@ impl App {
     }
 }
 
+/// One picked path as an `FsPath` input value.
+fn fs_path(path: PathBuf) -> Result<ConstValue, NonUnicodePath> {
+    unicode(path).map(ConstValue::FsPath)
+}
+
+/// Several picked paths as an `FsPaths` input value — refused whole when any
+/// one of them is not Unicode, since a partial list is not what was picked.
+fn fs_paths(paths: Vec<PathBuf>) -> Result<ConstValue, NonUnicodePath> {
+    paths
+        .into_iter()
+        .map(unicode)
+        .collect::<Result<_, _>>()
+        .map(ConstValue::FsPaths)
+}
+
+fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
+    path.into_os_string()
+        .into_string()
+        .map_err(|path| NonUnicodePath(PathBuf::from(path)))
+}
+
 impl palantir::App for App {
     fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
         // Keep the persisted window geometry current so a save on quit
@@ -674,6 +697,36 @@ mod tests {
         // the user is about to lose the document to.
         assert_eq!(PendingTransition::Quit.prompt_tail(), "quitting");
         assert_eq!(PendingTransition::New.prompt_tail(), "closing it");
+    }
+
+    /// A Unicode pick becomes the value as it is. One byte that is not Unicode
+    /// refuses the whole pick and names that path, instead of replacing the
+    /// byte and pointing the node at a file that does not exist.
+    ///
+    /// Unix only: std builds a path that is not Unicode from bytes there, and
+    /// from unpaired UTF-16 surrogates on Windows.
+    #[cfg(unix)]
+    #[test]
+    fn a_pick_that_is_not_unicode_is_refused_whole() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let good = PathBuf::from("/data/a.fit");
+        let bad = PathBuf::from(OsString::from_vec(b"/data/\xffb.fit".to_vec()));
+
+        assert!(matches!(
+            fs_path(good.clone()),
+            Ok(ConstValue::FsPath(path)) if path == "/data/a.fit"
+        ));
+        assert!(matches!(
+            fs_paths(vec![good.clone()]),
+            Ok(ConstValue::FsPaths(paths)) if paths == ["/data/a.fit"]
+        ));
+        assert!(matches!(fs_path(bad.clone()), Err(NonUnicodePath(path)) if path == bad));
+        assert!(matches!(
+            fs_paths(vec![good, bad.clone()]),
+            Err(NonUnicodePath(path)) if path == bad
+        ));
     }
 
     /// The path rides along rather than being re-picked after the prompt, so

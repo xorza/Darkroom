@@ -6,6 +6,7 @@ use common::TempDir;
 use glam::Vec2;
 
 use crate::core::document::Document;
+use crate::core::document::error::DocumentValidationError;
 use crate::core::document::internals::DocFixture;
 use crate::core::document::open_document::{LaunchSource, OpenDocument};
 use crate::core::edit::document_queue::DocumentQueue;
@@ -16,7 +17,10 @@ use crate::core::io::document;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::preferences::Preferences;
 use crate::core::status_log::StatusLog;
-use scenarium::{DataType, FuncSignature, Graph, Library, Node, system_library};
+use scenarium::{
+    Binding, ConstValue, DataType, FuncId, FuncInput, FuncOutput, FuncSignature, Graph, InputPort,
+    Library, Node, NodeId, internals, system_library,
+};
 
 #[test]
 fn load_returns_the_document_error() {
@@ -263,4 +267,61 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
         "the two frames before it, as one entry"
     );
     assert!(!open.can_undo());
+}
+
+/// A file can carry wiring on a port or event its func does not declare — no
+/// save or graph check refuses it — so the load holds every binding and
+/// subscription to the library, the same rule the edit gate applies. Index 0
+/// of each loads; index 1, the first past the probe's one input, output and
+/// event, fails the load and names what it held.
+#[test]
+fn wiring_past_the_declaration_fails_the_load() {
+    let dir = TempDir::new("darkroom-open-document-declaration");
+    let path = dir.join("wired.darkroom");
+    let probe = internals::stub_func(FuncId::unique(), "probe")
+        .input(FuncInput::optional("a", DataType::Int))
+        .output(FuncOutput::new("out", DataType::Int))
+        .event("tick", internals::stub_event());
+    let mut library = Library::default();
+    library.add(probe.clone());
+    let load = |wire: &dyn Fn(&mut Graph, NodeId, NodeId)| {
+        let mut graph = Graph::default();
+        let (producer, consumer) = (graph.add(Node::from(&probe)), graph.add(Node::from(&probe)));
+        wire(&mut graph, producer, consumer);
+        document::save(&Document::from(graph), &path).unwrap();
+        OpenDocument::load(path.clone(), &library).map(|_| ())
+    };
+
+    load(&|graph, producer, consumer| {
+        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+        graph.subscribe(producer, 0, consumer);
+    })
+    .expect("wiring inside the declaration loads");
+
+    let refused = |error: Result<(), DocumentLoadError>| match error {
+        Err(DocumentLoadError::InvalidDocument { source, .. }) => source,
+        other => panic!("expected an invalid document, got {other:?}"),
+    };
+    let constant = load(&|graph, _, consumer| {
+        graph.set_input_binding(
+            InputPort::new(consumer, 1),
+            Binding::Const(ConstValue::from(1i64)),
+        );
+    });
+    assert!(matches!(
+        refused(constant),
+        DocumentValidationError::UndeclaredInput { port } if port.port_idx == 1
+    ));
+    let wire = load(&|graph, producer, consumer| {
+        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 1));
+    });
+    assert!(matches!(
+        refused(wire),
+        DocumentValidationError::UndeclaredOutput { port } if port.port_idx == 1
+    ));
+    let subscription = load(&|graph, producer, consumer| graph.subscribe(producer, 1, consumer));
+    assert!(matches!(
+        refused(subscription),
+        DocumentValidationError::UndeclaredEvent { subscription } if subscription.event_idx == 1
+    ));
 }

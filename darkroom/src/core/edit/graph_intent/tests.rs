@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, CacheMode, ConstValue, DataType, FuncId, FuncInput, FuncOutput,
-    InputPort, Library, Node, NodeId, NodeKind, Subscription, internals,
+    InputPort, Library, Node, NodeId, NodeKind, OutputPort, Subscription, internals,
 };
 
 use crate::core::document::Document;
@@ -985,4 +985,102 @@ fn a_wire_onto_a_const_only_input_is_refused() {
     }
     .commit(&mut doc, &fixture.library);
     assert!(matches!(constant, Ok(Some(_))), "{constant:?}");
+}
+
+/// Every index an intent writes is held to the node's declaration: the probe
+/// declares one input, one output and one event, so index 0 of each commits
+/// and index 1 — the first past the end — is refused, on an existing node and
+/// on an insertion's seed alike. Clearing an undeclared input is not a write,
+/// so it is not held to anything.
+#[test]
+fn indices_past_the_declaration_are_refused() {
+    let probe = internals::stub_func(FuncId::unique(), "probe")
+        .input(FuncInput::optional("a", DataType::Int))
+        .output(FuncOutput::new("out", DataType::Int))
+        .event("tick", internals::stub_event());
+    let mut fixture = DocFixture::default();
+    let (producer, consumer) = (fixture.add(&probe), fixture.add(&probe));
+    let mut doc = fixture.doc;
+    let library = &fixture.library;
+    let constant = || Some(Binding::Const(ConstValue::from(1i64)));
+    let set = |port_idx: usize, to: Option<Binding>| GraphIntent::SetInput {
+        input: InputPort::new(consumer, port_idx),
+        to,
+    };
+    let fresh = NodeId::unique();
+    let seeded = |port_idx: usize, binding: Binding| GraphIntent::AddNode {
+        pos: Vec2::ZERO,
+        node_id: fresh,
+        node: Node::from(&probe),
+        bindings: vec![BindingEntry {
+            port: InputPort::new(fresh, port_idx),
+            binding,
+        }],
+    };
+    let listen = |event_idx: usize| GraphIntent::SetSubscription {
+        subscription: Subscription {
+            emitter: producer,
+            event_idx,
+            subscriber: consumer,
+        },
+        subscribe: true,
+    };
+
+    let refusals = [
+        ("a constant on input 1", set(1, constant())),
+        (
+            "a wire from output 1",
+            set(0, Some(Binding::bind(producer, 1))),
+        ),
+        (
+            "a seed constant on input 1",
+            seeded(1, Binding::Const(ConstValue::from(1i64))),
+        ),
+        (
+            "a seed wire from output 1",
+            seeded(0, Binding::bind(producer, 1)),
+        ),
+        ("a subscription to event 1", listen(1)),
+    ];
+    for (what, intent) in refusals {
+        assert_eq!(refusal_leak(&mut doc, library, intent), None, "{what}");
+    }
+
+    let refused = |intent: GraphIntent, doc: &mut Document| {
+        intent
+            .commit(doc, library)
+            .expect_err("an undeclared index is refused")
+    };
+    assert!(matches!(
+        refused(set(1, constant()), &mut doc),
+        MalformedIntent::UndeclaredInput { port } if port == InputPort::new(consumer, 1)
+    ));
+    assert!(matches!(
+        refused(set(0, Some(Binding::bind(producer, 1))), &mut doc),
+        MalformedIntent::UndeclaredOutput { port } if port == OutputPort::new(producer, 1)
+    ));
+    assert!(matches!(
+        refused(listen(1), &mut doc),
+        MalformedIntent::UndeclaredEvent { subscription } if subscription.event_idx == 1
+    ));
+
+    assert!(
+        matches!(set(1, None).commit(&mut doc, library), Ok(None)),
+        "clearing an undeclared input writes nothing and refuses nothing"
+    );
+    for (what, intent) in [
+        ("a constant on input 0", set(0, constant())),
+        (
+            "a wire from output 0",
+            set(0, Some(Binding::bind(producer, 0))),
+        ),
+        ("a subscription to event 0", listen(0)),
+        (
+            "a seed wire from output 0",
+            seeded(0, Binding::bind(producer, 0)),
+        ),
+    ] {
+        let committed = intent.commit(&mut doc, library);
+        assert!(matches!(committed, Ok(Some(_))), "{what}: {committed:?}");
+    }
 }
