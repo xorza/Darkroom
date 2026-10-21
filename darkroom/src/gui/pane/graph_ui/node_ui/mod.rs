@@ -9,11 +9,11 @@ mod value_editor;
 pub(crate) mod wid;
 
 use crate::core::document::graph_view::StackedItem;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::group_drag::GroupDrag;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
-use crate::gui::requests::Requests;
 use palantir::{Track, Ui};
 use scenarium::NodeId;
 use std::mem;

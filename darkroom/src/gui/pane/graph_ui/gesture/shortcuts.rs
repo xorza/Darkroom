@@ -11,9 +11,9 @@ use palantir::{Key, Shortcut, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use crate::gui::requests::Requests;
 
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');

@@ -15,9 +15,9 @@ use scenarium::NodeId;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
-use crate::gui::requests::Requests;
 
 /// One in-flight group drag, or none.
 ///

@@ -6,8 +6,8 @@ use scenarium::{Binding, InputPort, NodeId};
 
 use crate::core::document::internals::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::RunCommand;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// Room for three nodes in a row *and* the opened menu below them.

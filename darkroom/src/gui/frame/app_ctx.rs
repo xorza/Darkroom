@@ -14,7 +14,7 @@ use crate::gui::theme::Theme;
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`WindowCtx`](crate::gui::main_window::window_ctx::WindowCtx) pairs this with the
+/// [`WindowCtx`](crate::gui::frame::window_ctx::WindowCtx) pairs this with the
 /// document being edited, [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) adds
 /// the resolved output types a canvas reads, and everything under the canvas
 /// reads the theme, the library and the run back off *that* — which is why

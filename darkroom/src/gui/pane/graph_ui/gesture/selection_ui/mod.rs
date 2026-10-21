@@ -6,11 +6,11 @@ use palantir::widget::Shape;
 use palantir::{Rect, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
-use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas

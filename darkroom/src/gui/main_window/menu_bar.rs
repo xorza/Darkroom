@@ -2,9 +2,9 @@ use palantir::prelude::*;
 use palantir::{CloseHandle, DockOperation, MenuSeparator};
 
 use crate::core::document::tab_ref::TabRef;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::file_command::FileCommand;
-use crate::gui::requests::Requests;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::FileCommand;
+use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;

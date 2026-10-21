@@ -18,11 +18,11 @@ use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview_sink;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture;
 use crate::gui::pane::graph_ui::gesture::group_drag::{Grab, GroupDrag};
 use crate::gui::pane::graph_ui::node_ui::port_row::{self, PreviewSpawn};
-use crate::gui::requests::Requests;
 
 /// The in-flight spawn-and-place drag, or none.
 #[derive(Default, Debug)]

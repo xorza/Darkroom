@@ -17,14 +17,14 @@ use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::prefs_command::PrefsCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::PrefsCommand;
+use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::GraphUI;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane};
 use crate::gui::pane::preferences::PreferencesForm;
-use crate::gui::requests::Requests;
 
 /// Everything a pane's body needs, borrowed for one record pass.
 ///

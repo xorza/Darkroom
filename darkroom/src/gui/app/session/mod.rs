@@ -17,17 +17,17 @@
 
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::relayout::Relayout;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::file_command::FileCommand;
-use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::FileCommand;
+use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
-use crate::gui::main_window::window_ctx::WindowCtx;
-use crate::gui::requests::Requests;
 use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 
-use crate::gui::app::app_ctx::AppCtx;
-use crate::gui::frame_writes::FrameWrites;
+use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::frame_writes::FrameWrites;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');

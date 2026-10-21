@@ -11,11 +11,11 @@
 use palantir::prelude::*;
 use palantir::widget::Shape;
 
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-use crate::gui::requests::Requests;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};

@@ -4,29 +4,23 @@
 
 ### Root causes
 
-- **The GUI's shared vocabulary lives at the top of the tree.** `AppCommand` and its groups (`gui::app::app_command`), `AppCtx` (`gui::app::app_ctx`), `WindowCtx` (`gui::main_window::window_ctx`) and `PathPick` (`gui::pane::graph_ui::node_ui::port_row`) are what every surface speaks, but each lives in the module that consumes it last. So `pane`, `main_window`, `requests` and `graph_ctx` import upward into `app` and `main_window`, and `app` imports down into a pane leaf for `PathPick`. Every GUI module sits in one import cycle.
 - **A run verdict is three fields that must agree.** `NodeRunState` holds `status`, `error` and `missing_inputs` side by side. Live progress writes only `status`, so a stale `error` from the last run shows beside a fresh `Executed` status until the run completes.
 - **Preview pixels are prepared on the main thread.** `PreviewStore::ingest_preview` (from `App::update`) and `PreviewImage::full` (from the record pass) both copy a planar image to interleaved and convert it to RGBA8. A full-sensor frame takes a frame hitch of hundreds of milliseconds.
 - **A revision counter is global state.** `GraphRevision::fresh` uses a process-wide `static AtomicU64`. Its only readers (`MainWindow::swept_at`, `OutputTypeCache`) live in the `MainWindow` that `Session::new` replaces together with the document, so a per-document counter gives the same guarantee.
 
 ### Target design
 
-- **`gui::frame` — the vocabulary layer.** It holds the context chain (`AppCtx` + `StatusInputs`, `WindowCtx`), `FrameWrites`, `Requests`, and `AppCommand` with its groups (`FileCommand`, `RunCommand`, `PrefsCommand`, `EditCommand`, `MlModelKind`, `PathPick`) as plain data. `gui::app` keeps the behavior: one `App::run_command(&mut self, AppCommand) -> Relayout` match replaces the five `apply` dispatchers. Then the layers read top to bottom: `app → main_window → pane → {graph_ctx, state, theme, widgets, frame} → core`.
 - **A run verdict is one value.** `ExecStatus` carries its own detail (`Errored(Option<String>)`, `MissingInputs(Vec<usize>)`), so a status and its detail cannot disagree.
 - **Preview preparation runs off the main thread.** One background converter owned by `RunState` turns a published value into a thumbnail raster, and later into a full raster on a viewer's first ask. The main thread only uploads finished rasters.
 - **The graph revision is per document.** `OpenDocument` advances its own counter, as `DocumentQueue` does for `GestureId`.
 
 ## Plan
 
-### 4. `gui::frame`: the vocabulary layer
+### 4. `OpenDocument` above the document model
 
-Files: `gui/app/app_ctx.rs`, `gui/main_window/window_ctx.rs`, `gui/frame_writes.rs`, `gui/requests/`, `gui/app/app_command/`, `gui/app/mod.rs`, all importers.
+Files: `core/document/open_document/` → `core/open_document/`, `core/document/mod.rs`, `core/mod.rs`, all importers.
 
-- [ ] `gui/app/app_ctx.rs`, `gui/main_window/window_ctx.rs`, `gui/frame_writes.rs`, `gui/requests/`: the context chain and the request queue live in the levels that use them last, so `graph_ctx` imports `main_window` and `main_window` imports `app`. Target: `gui/frame/{app_ctx.rs, window_ctx.rs, frame_writes.rs, requests/}`.
-- [ ] `gui/app/app_command/`: `AppCommand` and its groups are data that every surface raises, and `pane`, `main_window` and `requests` import `gui::app` for them. Target: `gui/frame/app_command.rs` (the groups and `MlModelKind` as satellites), data only.
-- [ ] `gui/pane/graph_ui/node_ui/port_row.rs` `PathPick`: a command payload in a pane leaf, which `gui::app` imports. Target: beside `EditCommand` in `gui/frame/app_command.rs`.
-- [ ] `gui/app/app_command/*.rs` `apply`: five dispatchers forward to `App` methods, and `RunCommand::Cancel` reaches into `app.runtime` directly. Target: one `App::run_command(&mut self, command: AppCommand) -> Relayout` in `gui/app/mod.rs`.
-- [ ] `gui/app/mod.rs`: `load_picked_document`, `new_document`, `load_document`, `save_current`, `save_preferences`, `set_confirm_unsaved` and `run_graph` are `pub(crate)` with no caller outside `gui::app`. Target: private.
+- [ ] `core/document/open_document/mod.rs`: `OpenDocument` composes the document with its history (`core::edit`) and its file (`core::io`), but lives inside `core::document`, which both of those import. That makes `core::document`, `core::edit` and `core::io` one import cycle, and `open_document` is its only back edge. Target: `core/open_document/`, a sibling above the three.
 
 ### 5. Preview preparation off the main thread
 
