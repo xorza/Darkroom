@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use common::TempFile;
 use common::internals::publication_temp_files;
+use common::{TempDir, TempFile};
 
 use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
@@ -305,4 +305,31 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     assert!(!target.covers(&expected, &codecs).await);
     assert!(read_snapshot(&codecs, &target, 1).await.is_none());
     assert!(!file.exists(), "a corrupt cache blob is removed");
+}
+
+/// A store creates its directory when, and only when, a write finds it missing:
+/// the first write under a root that does not exist yet publishes, and so does
+/// a write after the root was removed behind the store's back.
+#[tokio::test]
+async fn a_missing_store_directory_is_created_on_the_write_that_needs_it() {
+    let dir = TempDir::new("missing-store-directory");
+    let root = dir.path().join("nested").join("root");
+    let codecs = Codecs::default();
+    let snapshot = OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(3))]);
+    let blob = target(&root.join("blob"), Digest([3; 32]));
+
+    for _ in 0..2 {
+        assert!(!root.exists());
+        assert_eq!(
+            blob.store(&codecs, &snapshot, StorePolicy::KnownMiss)
+                .await
+                .unwrap(),
+            StoreOutcome::Published
+        );
+        assert_eq!(
+            read_snapshot(&codecs, &blob, 1).await.unwrap().values()[0].as_i64(),
+            Some(3)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
