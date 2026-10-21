@@ -167,12 +167,6 @@ impl RuntimeCache {
         self.slots.len()
     }
 
-    /// The slots in index order, for a walk that pairs them with the program
-    /// they belong to.
-    pub(crate) fn slots(&self) -> impl Iterator<Item = &RuntimeSlot> {
-        self.slots.iter()
-    }
-
     /// Attach the store this cache persists to and serves from. Called between
     /// runs, when a document gains or changes its cache root: every reuse
     /// verdict already given was answered from the *previous* store, so this

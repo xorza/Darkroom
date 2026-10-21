@@ -233,20 +233,16 @@ impl ExecutionEngine {
             });
         }
 
-        for (((node_id, e_node), slot), node) in program
-            .node_ids
-            .iter()
-            .zip(program.e_nodes.iter())
-            .zip(self.cache.slots())
-            .zip(self.executor.nodes.iter())
-        {
-            if let Some(output_values) = slot.output_values()
+        // Both columns span the program, as checked above, so every index reads.
+        for (node_idx, e_node) in program.e_nodes.iter_indexed() {
+            let node_id = program.node_ids[node_idx];
+            if let Some(output_values) = self.cache[node_idx].output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {
-                return Err(InstallValidationError::OutputArity { node_id: *node_id });
+                return Err(InstallValidationError::OutputArity { node_id });
             }
-            if node.owner != e_node.func_id {
-                return Err(InstallValidationError::StateOwner { node_id: *node_id });
+            if self.executor.nodes[node_idx].owner != e_node.func_id {
+                return Err(InstallValidationError::StateOwner { node_id });
             }
         }
         Ok(())
