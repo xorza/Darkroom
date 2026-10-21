@@ -29,7 +29,7 @@ use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::func_output::OutputType;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
-use crate::graph::node::{Node, NodeKind};
+use crate::graph::node::{FuncResolution, Node, NodeKind};
 use crate::graph::node_ref::NodeRef;
 use crate::graph::output_types::OutputTypeSource;
 use crate::graph::subscription::Subscription;
@@ -389,8 +389,8 @@ impl Graph {
                 return Err(GraphValidationError::NilNodeId);
             }
             match &node.kind {
-                NodeKind::Func { func_id, .. } => {
-                    if func_id.is_nil() {
+                NodeKind::Func(func_ref) => {
+                    if func_ref.id().is_nil() {
                         return Err(GraphValidationError::NilFuncId { node_id: *node_id });
                     }
                 }
@@ -459,16 +459,23 @@ impl Graph {
     /// on a `const_only` input.
     fn validate_references(&self, library: &Library) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
-            if let NodeKind::Func { func_id, .. } = &node.kind
-                && library.by_id(*func_id).is_none()
-            {
-                return Err(GraphValidationError::MissingFunc {
-                    node_id: *node_id,
-                    func_id: *func_id,
-                });
+            match node.resolve(library) {
+                FuncResolution::Found(_) => {}
+                FuncResolution::Changed(func) => {
+                    return Err(GraphValidationError::FuncChanged {
+                        node_id: *node_id,
+                        func_id: func.id(),
+                        func_name: func.name().to_owned(),
+                    });
+                }
+                FuncResolution::Missing(func_id) => {
+                    return Err(GraphValidationError::MissingFunc {
+                        node_id: *node_id,
+                        func_id,
+                    });
+                }
             }
         }
-        self.check_signatures(library)?;
 
         for (destination, binding) in &self.bindings {
             if matches!(binding, Binding::Bind(_))
@@ -480,27 +487,6 @@ impl Graph {
             }
         }
 
-        Ok(())
-    }
-
-    /// Hold every func node to the ports it was authored against: a node whose
-    /// signature differs from its func's in `library` is refused by name. A func
-    /// the library lacks is left alone, as the stub it renders as.
-    pub fn check_signatures(&self, library: &Library) -> ValidationResult<()> {
-        for (node_id, node) in &self.nodes {
-            let NodeKind::Func { func_id, signature } = &node.kind else {
-                continue;
-            };
-            if let Some(func) = library.by_id(*func_id)
-                && func.signature() != *signature
-            {
-                return Err(GraphValidationError::SignatureMismatch {
-                    node_id: *node_id,
-                    func_id: *func_id,
-                    func_name: func.name().to_owned(),
-                });
-            }
-        }
         Ok(())
     }
 }

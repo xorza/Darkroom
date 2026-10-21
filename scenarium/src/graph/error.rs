@@ -42,7 +42,7 @@ pub enum GraphValidationError {
         "node {node_id:?} was authored against other ports of \"{func_name}\" ({func_id:?}) \
          than the library declares"
     )]
-    SignatureMismatch {
+    FuncChanged {
         node_id: NodeId,
         func_id: FuncId,
         func_name: String,

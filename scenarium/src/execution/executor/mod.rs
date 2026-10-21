@@ -170,10 +170,10 @@ impl Executor {
             previous,
             &mut self.nodes,
             |node_idx, mut node| {
-                node.reown(program[node_idx].func_id);
+                node.reown(program[node_idx].func_ref);
                 node
             },
-            |node_idx| NodeRuntime::new(program[node_idx].func_id),
+            |node_idx| NodeRuntime::new(program[node_idx].func_ref),
         );
     }
 

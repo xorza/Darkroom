@@ -255,7 +255,7 @@ impl Compiler {
                 inputs: node_inputs,
                 outputs: node_outputs,
                 events: node_events,
-                func_id: func.id(),
+                func_ref: func.func_ref(),
                 lambda: func.lambda().clone(),
             });
         }

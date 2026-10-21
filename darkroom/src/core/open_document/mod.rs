@@ -254,18 +254,13 @@ impl OpenDocument {
         self.revision
     }
 
-    /// Open the document at `path`, holding each func node to the ports it was
-    /// authored against in `library`: a node whose func moved its ports is
-    /// refused by name, rather than loaded with its wiring on the wrong ports.
-    /// Wiring on a port or event its func does not declare is refused too.
+    /// Open the document at `path`. A func node resolves only against the ports
+    /// it was authored against in `library`, so a node whose func moved its
+    /// ports loads as a stub, its wiring kept but not landed on the wrong ports.
+    /// Wiring on a port or event a resolved func does not declare is refused.
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
         let document = document::load(&path)?;
-        let checked = document
-            .graph
-            .check_signatures(library)
-            .map_err(Into::into)
-            .and_then(|()| document.validate_declarations(library));
-        if let Err(source) = checked {
+        if let Err(source) = document.validate_declarations(library) {
             return Err(DocumentLoadError::InvalidDocument { path, source });
         }
         Ok(Self {

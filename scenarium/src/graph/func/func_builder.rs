@@ -10,7 +10,7 @@ use crate::graph::func::func_output::{FuncOutput, OutputType};
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncBehavior, FuncEvent, overrider_of};
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::node::CacheMode;
 
 /// A func declaration in progress. Started by [`Func::builder`] or
@@ -123,7 +123,7 @@ impl FuncBuilder {
         }
         let signature = FuncSignature::of(&self.inputs, &self.outputs, &self.events);
         Func {
-            id: self.id,
+            func_ref: FuncRef::new(self.id, signature),
             name: self.name,
             category: self.category,
             sink: self.sink,
@@ -134,7 +134,6 @@ impl FuncBuilder {
             outputs: self.outputs,
             events: self.events,
             lambda: self.lambda,
-            signature,
         }
     }
 

@@ -216,7 +216,11 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
         let node_id = compiled.node_ids[node_idx];
         out.push(format!(
             "node {node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
-            e_node.func_id, e_node.sink, e_node.disabled, e_node.cache, e_node.special,
+            e_node.func_ref.id(),
+            e_node.sink,
+            e_node.disabled,
+            e_node.cache,
+            e_node.special,
         ));
         for input in &compiled.inputs[e_node.inputs] {
             let binding = match &input.binding {

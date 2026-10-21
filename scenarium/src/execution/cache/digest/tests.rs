@@ -8,6 +8,7 @@ use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::graph::identity::FuncId;
+use crate::internals;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
 use std::fs;
@@ -95,21 +96,22 @@ fn deterministic_and_per_function_distinct() {
     assert_eq!(
         first.at(b),
         Some(Digest([
-            203, 209, 196, 64, 29, 87, 15, 39, 237, 139, 108, 20, 74, 185, 183, 136, 237, 79, 83,
-            66, 13, 210, 210, 34, 107, 230, 63, 163, 50, 87, 51, 150
+            14, 231, 179, 95, 208, 67, 137, 135, 195, 156, 40, 110, 177, 99, 75, 122, 199, 157, 35,
+            39, 157, 170, 168, 233, 24, 189, 53, 37, 221, 178, 146, 237
         ])),
         "bound-input node digest"
     );
     assert_eq!(
         first.at(c),
         Some(Digest([
-            111, 90, 52, 204, 158, 19, 228, 12, 44, 70, 26, 104, 123, 125, 211, 28, 226, 83, 68,
-            66, 38, 169, 105, 168, 35, 73, 116, 93, 104, 242, 106, 24
+            228, 196, 146, 59, 254, 102, 67, 253, 83, 70, 75, 102, 84, 29, 170, 119, 85, 108, 150,
+            234, 171, 54, 158, 95, 173, 82, 137, 77, 25, 70, 171, 167
         ])),
         "const-input node digest"
     );
 
-    p.program_mut().by_id_mut(a.node_id).func_id = FuncId::from_u128(11);
+    p.program_mut().by_id_mut(a.node_id).func_ref =
+        internals::portless_func_ref(FuncId::from_u128(11));
     let refunced = Digests::of(&p);
     assert_ne!(
         first.at(a),
@@ -311,8 +313,8 @@ fn fs_path_folds_file_identity_and_path() {
     assert_eq!(
         d_here,
         Some(Digest([
-            90, 20, 1, 68, 93, 242, 28, 198, 183, 46, 5, 40, 107, 245, 79, 96, 6, 79, 98, 240, 97,
-            154, 19, 73, 165, 22, 91, 214, 167, 168, 171, 42,
+            70, 236, 254, 227, 27, 119, 168, 214, 105, 23, 173, 142, 179, 50, 233, 237, 252, 150,
+            166, 22, 47, 236, 117, 204, 21, 10, 145, 31, 77, 205, 101, 37,
         ])),
         "the single-path digest encoding must remain stable"
     );

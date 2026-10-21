@@ -15,8 +15,7 @@ use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::CacheMode;
 
@@ -36,15 +35,15 @@ pub struct FuncEvent {
 }
 
 /// A validated func declaration: its ports, its behavior, its implementation,
-/// and the [`FuncSignature`] of its ports, computed once when
-/// [`FuncBuilder::build`] checked it.
+/// and the [`FuncRef`] a node of it is authored against — its id with the
+/// signature of its ports, computed once when [`FuncBuilder::build`] checked it.
 ///
 /// Read-only, so the signature always describes the ports beside it. To change
 /// a declaration, take it back with [`into_builder`](Self::into_builder) and
 /// build it again.
 #[derive(Clone, Debug)]
 pub struct Func {
-    id: FuncId,
+    func_ref: FuncRef,
     name: String,
     category: String,
     sink: bool,
@@ -58,7 +57,6 @@ pub struct Func {
     outputs: Vec<FuncOutput>,
     events: Vec<FuncEvent>,
     lambda: FuncLambda,
-    signature: FuncSignature,
 }
 
 impl Func {
@@ -85,7 +83,7 @@ impl Func {
     /// This declaration as a builder again, for an edit to build anew.
     pub fn into_builder(self) -> FuncBuilder {
         FuncBuilder {
-            id: self.id,
+            id: self.func_ref.id(),
             name: self.name,
             category: self.category,
             sink: self.sink,
@@ -100,7 +98,7 @@ impl Func {
     }
 
     pub const fn id(&self) -> FuncId {
-        self.id
+        self.func_ref.id()
     }
 
     pub fn name(&self) -> &str {
@@ -143,9 +141,9 @@ impl Func {
         &self.lambda
     }
 
-    /// The digest of the ports a node of this func is authored against.
-    pub const fn signature(&self) -> FuncSignature {
-        self.signature
+    /// The address a node of this func is authored against.
+    pub(crate) const fn func_ref(&self) -> FuncRef {
+        self.func_ref
     }
 
     /// Whether this func recomputes every run — it has no content digest, so

@@ -4,8 +4,8 @@
 use palantir::CloseHandle;
 use palantir::prelude::*;
 use scenarium::Func;
+use scenarium::Node;
 use scenarium::NodeId;
-use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -49,14 +49,13 @@ impl<'a> PaletteEntry<'a> {
     }
 
     /// The node a pick of this row adds. A special node's `Func` is hardcoded
-    /// rather than library-registered, so the node it spawns is a
-    /// `NodeKind::Special` — `Node::new` reads the same hardcoded func for
-    /// its name and cache mode, which is the only thing that differs from a
-    /// library row.
+    /// rather than library-registered, so the node it spawns comes from the
+    /// [`SpecialNode`](scenarium::SpecialNode) itself, which reads the same
+    /// hardcoded func for its name and cache mode.
     fn node(self) -> Node {
         match self {
             PaletteEntry::Func(f) => f.into(),
-            PaletteEntry::Special(s) => Node::new(NodeKind::Special(s)),
+            PaletteEntry::Special(s) => s.into(),
         }
     }
 

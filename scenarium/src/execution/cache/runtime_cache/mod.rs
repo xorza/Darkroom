@@ -378,7 +378,8 @@ impl RuntimeCache {
         let mut hasher = DigestHasher::new();
         hasher
             .write_bytes(DOMAIN)
-            .write_pod(e_node.func_id.as_u128());
+            .write_pod(e_node.func_ref.id().as_u128())
+            .write_bytes(e_node.func_ref.signature().bytes());
 
         let outputs = &program.outputs[e_node.outputs];
         hasher.write_pod(outputs.len() as u64);

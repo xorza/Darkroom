@@ -242,7 +242,7 @@ impl ExecutionEngine {
             {
                 return Err(InstallValidationError::OutputArity { node_id });
             }
-            if self.executor.nodes[node_idx].owner != e_node.func_id {
+            if self.executor.nodes[node_idx].owner != e_node.func_ref {
                 return Err(InstallValidationError::StateOwner { node_id });
             }
         }
