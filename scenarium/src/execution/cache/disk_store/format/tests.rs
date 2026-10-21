@@ -6,8 +6,8 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
-use crate::data::codec::error::{CodecFormatError, FrameError};
 use crate::execution::cache::digest::Digest;
+use crate::execution::cache::disk_store::error::{CodecFormatError, FrameError};
 use crate::execution::cache::disk_store::format::{
     BODY_LEN_OFFSET, BlobReader, BlobWriter, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION,
     PAYLOAD_LEN_OFFSET, header_len,

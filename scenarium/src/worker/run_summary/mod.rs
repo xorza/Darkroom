@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::RamUsage;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::log_entry::LogEntry;
 use crate::execution::report::node_status::NodeStatus;
+use crate::runtime::log_entry::LogEntry;
 use crate::worker::activity::WorkerActivity;
 
 /// One completed run: the worker's activity once it ended, the run's verdicts, one row per node

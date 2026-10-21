@@ -549,13 +549,15 @@ impl RuntimeCache {
         Ok(self.hydrate_reuse(program, node_idx, demand).await)
     }
 
-    /// Blobs are named by stable id, so they survive installs that shift indices.
+    /// The blob a disk-backed node with a digest reads and writes. Blobs are
+    /// named by stable id, so they survive installs that shift indices.
     fn blob_target(&self, program: &CompiledGraph, node_idx: NodeIdx) -> Option<BlobTarget> {
-        self.disk_store.blob_target(
-            program.node_ids[node_idx],
-            &program[node_idx],
-            self.slots[node_idx].current_digest,
-        )
+        if !program[node_idx].cache.persists_to_disk() {
+            return None;
+        }
+        let digest = self.slots[node_idx].current_digest?;
+        self.disk_store
+            .blob_target(program.node_ids[node_idx], digest)
     }
 
     /// Whether an unchanged output can satisfy this run's exact demand — the verdict alone,
@@ -567,7 +569,7 @@ impl RuntimeCache {
     /// digest-valid value is served, because a content digest attests the value produced
     /// under it — however the value came to be resident.
     /// Disk reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
-    /// [`DiskStore::blob_target`]) and is answered from the blob header alone.
+    /// [`blob_target`](Self::blob_target)) and is answered from the blob header alone.
     pub(crate) async fn probe_reuse(
         &self,
         program: &CompiledGraph,
@@ -723,8 +725,8 @@ impl RuntimeCache {
     /// Store whichever of `nodes` are disk-backed and hold a value current under
     /// their stamped digest — the shared body of the two flushes above. Both
     /// tests are [`store_node`](Self::store_node)'s own, so a node that is
-    /// neither costs one [`DiskStore::blob_target`] that answers `None` before
-    /// it reads a digest or builds a path.
+    /// neither costs one [`blob_target`](Self::blob_target) that answers `None`
+    /// before it reads a digest or builds a path.
     ///
     /// [`StorePolicy::PreserveCovering`] because a flush carries no reuse
     /// verdict: nothing here ran, so a blob that already covers the snapshot

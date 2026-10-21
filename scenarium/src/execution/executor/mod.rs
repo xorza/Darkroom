@@ -30,7 +30,6 @@ use crate::containers::column::Column;
 use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::event_trigger::EventTrigger;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::log_entry::LogLevel;
 use crate::execution::report::node_status::NodeExecutionStatus;
 use crate::execution::report::node_status::NodeStatus;
 use crate::execution::report::run_reporter::RunPhase;
@@ -39,6 +38,7 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
 use crate::runtime::context_manager::ContextManager;
+use crate::runtime::log_entry::LogLevel;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime_cache::{Restamp, ReuseOutcome, RuntimeCache};

@@ -2,8 +2,8 @@
 
 use crate::RamUsage;
 use crate::execution::report::event_trigger::EventTrigger;
-use crate::execution::report::log_entry::LogEntry;
 use crate::execution::report::node_status::NodeStatus;
+use crate::runtime::log_entry::LogEntry;
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionOutcome {

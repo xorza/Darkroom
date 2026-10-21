@@ -1,5 +1,5 @@
 //! The [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) special
-//! node: a sink event sink with no data ports. It subscribes to another
+//! node: an event sink with no data ports. It subscribes to another
 //! node's event and, when that event fires, the engine seeds the run with
 //! *every* sink node — i.e. re-runs the whole graph — rather than just its
 //! own (empty) data cone.
@@ -9,9 +9,9 @@
 //! `collect_roots` seeds runs from them). A normal sink subscriber runs its
 //! own upstream cone when its event fires; this one has no cone, so the planner
 //! promotes its firing into a full sink run instead (see
-//! `execution::schedule::RunSchedule::collect_roots`). Its lambda is a no-op — the node is a
-//! pure trigger — but it still exists so the scheduled node runs cleanly and
-//! lights up in the editor like any other sink. Wire, say, a `Frame Event` into
+//! `execution::schedule::RunSchedule::collect_roots`). Its lambda is a no-op —
+//! the node is a pure trigger — but it still exists so the scheduled node runs
+//! cleanly and lights up in the editor like any other sink. Wire, say, a `Frame Event` into
 //! it to re-evaluate the graph every frame.
 
 use std::sync::OnceLock;

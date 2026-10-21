@@ -3,16 +3,18 @@
 //!
 //! Modeling them as a [`SpecialNode`] enum variant on the node's kind (vs. a flag
 //! on every [`Func`]/`Node`) keeps the common path clean: a new special case is a
-//! new variant plus a hardcoded spec — its interface + lambda live in an
-//! `builtin/` module (e.g. [`run_sinks`](crate::builtin::run_sinks))
-//! — with no new field elsewhere. [`SpecialNode::func`] maps a variant to that
-//! interface; the engine then special-cases the node's *behavior* (e.g. the
-//! run-sinks promotion in the planner's root collection).
+//! new variant plus a hardcoded spec — its interface + lambda live in a child
+//! module here (e.g. [`run_sinks`]) — with no new field elsewhere.
+//! [`SpecialNode::func`] maps a variant to that interface; the engine then
+//! special-cases the node's *behavior* (e.g. the run-sinks promotion in the
+//! planner's root collection).
+
+pub(crate) mod run_sinks;
 
 use serde::{Deserialize, Serialize};
 
-use crate::builtin::run_sinks::run_sinks_func;
 use crate::graph::func::Func;
+use crate::graph::node::special::run_sinks::run_sinks_func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda
 /// come from [`func`](SpecialNode::func); the engine gives it special behavior.
@@ -22,7 +24,7 @@ pub enum SpecialNode {
     /// subscribes to fires, the engine seeds the run with *every* sink node
     /// (re-running the whole graph) instead of a data cone of its own — the
     /// promotion lives in the planner's root collection. Interface in
-    /// the `run_sinks` element.
+    /// [`run_sinks`].
     RunSinks,
 }
 
