@@ -4,8 +4,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::gui::HostHandle;
-use crate::gui::app::App;
+use palantir::HostHandle;
 
 #[expect(
     unsafe_code,
@@ -17,15 +16,17 @@ mod open_files;
 /// and before `run` starts driving the loop, which is exactly where
 /// [`crate::platform::route_opened_documents`] is called from.
 ///
-/// `run_on_main` is what spans the remaining gap: a document double-clicked on
-/// a *cold* app arrives before `App` exists, and the host buffers the task
-/// until it does.
-pub(super) fn route_opened_documents(handle: HostHandle, open: fn(&mut App, PathBuf)) {
+/// `run_on_main` is what spans the remaining gap: a document double-clicked to
+/// launch the editor arrives before the app exists, and the host buffers the
+/// task until it does.
+pub(super) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, PathBuf)) {
     open_files::install(move |path| {
-        let _ = handle.run_on_main(move |app: &mut App| {
-            open(app, path);
-            true
-        });
+        handle
+            .run_on_main(move |app: &mut A| {
+                open(app, path);
+                true
+            })
+            .ok();
     });
 }
 
