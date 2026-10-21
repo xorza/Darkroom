@@ -14,7 +14,7 @@ impl<T> AsyncEventFn for T where T: Fn(SharedAnyState) -> AsyncEventFuture + Sen
 pub type AsyncEvent = dyn AsyncEventFn;
 
 /// An event's implementation. Every event has one: it is an argument of
-/// [`Func::event`](crate::Func::event).
+/// [`FuncBuilder::event`](crate::FuncBuilder::event).
 #[derive(Clone)]
 pub struct EventLambda(Arc<AsyncEvent>);
 

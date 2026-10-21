@@ -18,7 +18,7 @@ pub fn system_library() -> Library {
     // print: log the input value to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
-        Func::new(
+        Func::builder(
             PRINT_FUNC_ID,
             "Print",
             async_lambda!(move |Invocation { ctx, inputs, .. }| {
@@ -33,11 +33,12 @@ pub fn system_library() -> Library {
         .input(
             FuncInput::required("Value", DataType::Any)
                 .description("Value of any type to write to the node's log (info level)."),
-        ),
+        )
+        .build(),
     );
 
     library.add(
-        Func::new(
+        Func::builder(
             TO_STRING_FUNC_ID,
             "To String",
             async_lambda!(|Invocation {
@@ -57,11 +58,12 @@ pub fn system_library() -> Library {
             FuncInput::required("Value", DataType::Any)
                 .description("Value of any type to convert to text."),
         )
-        .output(FuncOutput::new("Text", DataType::String).description("The value's string form.")),
+        .output(FuncOutput::new("Text", DataType::String).description("The value's string form."))
+        .build(),
     );
 
     library.add(
-        Func::new(
+        Func::builder(
             CONCAT_FUNC_ID,
             "Concat",
             async_lambda!(|Invocation {
@@ -88,7 +90,8 @@ pub fn system_library() -> Library {
             FuncInput::required("B", DataType::Any)
                 .description("Second value; its text is appended after A."),
         )
-        .output(FuncOutput::new("Text", DataType::String).description("A's text followed by B's.")),
+        .output(FuncOutput::new("Text", DataType::String).description("A's text followed by B's."))
+        .build(),
     );
 
     library
@@ -116,12 +119,12 @@ mod tests {
     fn concat_interface_is_two_any_inputs_to_string() {
         let library = system_library();
         let concat = library.by_name("Concat").unwrap();
-        assert_eq!(concat.category, "System");
-        assert_eq!(concat.inputs.len(), 2);
-        assert_eq!(concat.inputs[0].data_type, DataType::Any);
-        assert_eq!(concat.inputs[1].data_type, DataType::Any);
-        assert_eq!(concat.outputs.len(), 1);
-        assert_eq!(concat.outputs[0].ty.declared(), DataType::String);
+        assert_eq!(concat.category(), "System");
+        assert_eq!(concat.inputs().len(), 2);
+        assert_eq!(concat.inputs()[0].data_type, DataType::Any);
+        assert_eq!(concat.inputs()[1].data_type, DataType::Any);
+        assert_eq!(concat.outputs().len(), 1);
+        assert_eq!(concat.outputs()[0].ty.declared(), DataType::String);
     }
 
     #[tokio::test]

@@ -18,8 +18,8 @@ use crate::core::io::preferences::Preferences;
 use crate::core::open_document::{LaunchSource, OpenDocument};
 use crate::core::status_log::StatusLog;
 use scenarium::{
-    Binding, ConstValue, DataType, FuncId, FuncInput, FuncOutput, FuncSignature, Graph, InputPort,
-    Library, Node, NodeId, internals, system_library,
+    Binding, ConstValue, DataType, FuncId, FuncInput, FuncOutput, Graph, InputPort, Library, Node,
+    NodeId, internals, system_library,
 };
 
 #[test]
@@ -161,9 +161,8 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
 }
 
 /// A node keeps the ports it was authored against. Saved against `Print`, it loads against the
-/// same library and adopts nothing new; against a library whose `Print` retyped its input, the
-/// load fails and names the node and the func. A node saved before signatures were recorded
-/// loads against either and takes the library's.
+/// same library unchanged; against a library whose `Print` retyped its input, the load fails and
+/// names the node and the func.
 #[test]
 fn a_node_authored_against_other_ports_fails_the_load_by_name() {
     let dir = TempDir::new("darkroom-open-document-signature");
@@ -172,34 +171,22 @@ fn a_node_authored_against_other_ports_fails_the_load_by_name() {
     let print = library.by_name("Print").unwrap();
     let mut graph = Graph::default();
     let node = graph.add(Node::from(print));
-    let signature = graph.find(node).unwrap().signature;
+    let kind = graph.find(node).unwrap().kind.clone();
     document::save(&Document::from(graph), &path).unwrap();
 
     let open = OpenDocument::load(path.clone(), &library).unwrap();
-    assert_eq!(open.document.graph.find(node).unwrap().signature, signature);
+    assert_eq!(open.document.graph.find(node).unwrap().kind, kind);
 
-    let mut retyped = print.clone();
+    let mut retyped = print.clone().into_builder();
     retyped.inputs[0].data_type = DataType::Int;
     let mut changed = Library::default();
-    changed.add(retyped);
-    let error = OpenDocument::load(path.clone(), &changed).unwrap_err();
+    changed.add(retyped.build());
+    let error = OpenDocument::load(path, &changed).unwrap_err();
     let message = error.to_string();
     assert!(
         message.contains(&format!("{node:?}")) && message.contains("\"Print\""),
         "{message}"
     );
-
-    let mut older = OpenDocument::load(path.clone(), &library).unwrap().document;
-    older.graph.find_mut(node).unwrap().signature = None;
-    document::save(&older, &path).unwrap();
-    for library in [&library, &changed] {
-        let open = OpenDocument::load(path.clone(), library).unwrap();
-        let expected = FuncSignature::of(library.by_name("Print").unwrap());
-        assert_eq!(
-            open.document.graph.find(node).unwrap().signature,
-            Some(expected)
-        );
-    }
 }
 
 /// A drained batch whose one step is a frame of a held gesture folds into
@@ -281,7 +268,8 @@ fn wiring_past_the_declaration_fails_the_load() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
         .input(FuncInput::optional("a", DataType::Int))
         .output(FuncOutput::new("out", DataType::Int))
-        .event("tick", internals::stub_event());
+        .event("tick", internals::stub_event())
+        .build();
     let mut library = Library::default();
     library.add(probe.clone());
     let load = |wire: &dyn Fn(&mut Graph, NodeId, NodeId)| {

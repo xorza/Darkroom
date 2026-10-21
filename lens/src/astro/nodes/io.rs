@@ -32,7 +32,7 @@ pub(super) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             LOAD_ASTRO_IMAGE_FUNC_ID,
             "Load Astro Image",
             async_lambda!(move |Invocation { ctx, inputs, outputs, .. }| {
@@ -65,6 +65,7 @@ pub(crate) fn register(library: &mut Library) {
             FuncInput::required("Path", ASTRO_IMAGE_PATH_DATA_TYPE.clone())
                 .description("FITS, camera-RAW, or standard image file to load."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Decoded frame.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Decoded frame."))
+        .build(),
     );
 }

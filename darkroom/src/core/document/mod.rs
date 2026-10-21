@@ -124,7 +124,7 @@ impl Document {
         self.graph
             .find(node_id)
             .is_some_and(|node| match node.kind {
-                NodeKind::Func(func_id) => preview_sink::is_func(func_id),
+                NodeKind::Func { func_id, .. } => preview_sink::is_func(func_id),
                 NodeKind::Special(_) => false,
             })
     }

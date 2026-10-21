@@ -296,7 +296,7 @@ impl RunSchedule {
         program: &'a CompiledGraph,
         input: &'a ExecutionInput,
     ) -> Delivery<'a> {
-        // An overrider is never itself overridden (`Func::validate`), so its
+        // An overrider is never itself overridden (`FuncBuilder::validate`), so its
         // own binding is the whole answer.
         if input
             .overridden_by

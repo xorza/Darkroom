@@ -24,11 +24,11 @@ use crate::graph::binding::Binding;
 use crate::graph::detached::DetachedNode;
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
+use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
-use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node, NodeKind};
@@ -79,7 +79,9 @@ impl TestGraph {
     /// The node is seeded with its declaration's default const bindings, the
     /// way `Graph::add_func_node` does for an editor.
     pub fn add(&mut self, name: &str, spec: impl FnOnce(NodeSpec) -> NodeSpec) -> NodeId {
-        let func = spec(NodeSpec::new(name, FuncId::from_u128(self.mint()))).func;
+        let func = spec(NodeSpec::new(name, FuncId::from_u128(self.mint())))
+            .func
+            .build();
         self.library.add(func.clone());
         let node_id = self.place(&func);
         self.bind_name(name, node_id);
@@ -261,36 +263,39 @@ impl TestGraph {
     /// Edit the declaration `name` instantiates, in place.
     ///
     /// The library is a registry keyed by id, so this is remove-edit-re-add —
-    /// which also re-runs `Func::validate`, so an edit that breaks the
-    /// declaration fails here rather than at the next compile. Under
+    /// which also re-runs [`FuncBuilder::build`]'s checks, so an edit that
+    /// breaks the declaration fails here rather than at the next compile. Under
     /// [`instance`](Self::instance) the edit reaches every node of that func,
     /// which is what sharing a declaration means.
-    pub fn edit_func(&mut self, name: &str, edit: impl FnOnce(&mut Func)) {
+    pub fn edit_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
         let func_id = self.func_id(name);
-        let mut func = self
+        let mut builder = self
             .library
             .remove(func_id)
-            .expect("the named node's func is registered");
-        edit(&mut func);
-        self.library.add(func);
+            .expect("the named node's func is registered")
+            .into_builder();
+        edit(&mut builder);
+        self.library.add(builder.build());
     }
 
     /// [`edit_func`](Self::edit_func) for an edit that moves ports, with the
     /// graph adopting the new ones: every node of the func records the new
     /// signature, as an author who accepted the change would leave it. Without
     /// that, the guard refuses the nodes the edit left behind.
-    pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut Func)) {
+    pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
         self.edit_func(name, edit);
         let func_id = self.func_id(name);
-        let signature = FuncSignature::of(self.library.by_id(func_id).unwrap());
+        let current = self.library.by_id(func_id).unwrap().signature();
         let nodes: Vec<NodeId> = self
             .graph
             .iter()
-            .filter(|node| node.kind == NodeKind::Func(func_id))
+            .filter(|node| matches!(node.kind, NodeKind::Func { func_id: id, .. } if id == func_id))
             .map(|node| node.id)
             .collect();
         for node in nodes {
-            self.graph.find_mut(node).unwrap().signature = Some(signature);
+            if let NodeKind::Func { signature, .. } = &mut self.graph.find_mut(node).unwrap().kind {
+                *signature = current;
+            }
         }
     }
 
@@ -329,7 +334,7 @@ impl TestGraph {
 
     fn func_id(&self, name: &str) -> FuncId {
         match self.node(name).kind {
-            NodeKind::Func(func_id) => func_id,
+            NodeKind::Func { func_id, .. } => func_id,
             NodeKind::Special(_) => {
                 panic!("{name:?} is a special node, whose declaration is hardcoded")
             }
@@ -411,7 +416,7 @@ impl<'a> From<(&'a str, usize)> for NamedPort<'a> {
 /// port's *name* is testing the editor's rendering, which builds its own funcs.
 #[derive(Debug)]
 pub struct NodeSpec {
-    func: Func,
+    func: FuncBuilder,
 }
 
 impl NodeSpec {
@@ -419,7 +424,7 @@ impl NodeSpec {
         // A stub body by default, because `Library::add` rejects a func with
         // no implementation and most fixtures never invoke one.
         Self {
-            func: Func::new(func_id, name, FuncLambda::stub()),
+            func: Func::builder(func_id, name, FuncLambda::stub()),
         }
     }
 

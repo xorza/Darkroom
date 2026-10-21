@@ -5,8 +5,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::DataType;
-use crate::graph::func::Func;
-use crate::graph::func::func_output::OutputType;
+use crate::graph::func::FuncEvent;
+use crate::graph::func::func_input::FuncInput;
+use crate::graph::func::func_output::{FuncOutput, OutputType};
 
 /// A digest of a func's ports: its inputs' names and types, its outputs' names and types, and
 /// its events' names, in order.
@@ -22,7 +23,10 @@ impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
     const DOMAIN: &'static [u8] = b"scenarium-func-signature-v1";
 
-    pub fn of(func: &Func) -> Self {
+    /// The signature of `inputs`, `outputs` and `events`, in order — what
+    /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
+    /// seals into a [`Func`](crate::graph::func::Func).
+    pub(crate) fn of(inputs: &[FuncInput], outputs: &[FuncOutput], events: &[FuncEvent]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(Self::DOMAIN);
         let count = |hasher: &mut blake3::Hasher, count: usize| {
@@ -32,13 +36,13 @@ impl FuncSignature {
             hasher.update(&(name.len() as u64).to_le_bytes());
             hasher.update(name.as_bytes());
         };
-        count(&mut hasher, func.inputs.len());
-        for input in &func.inputs {
+        count(&mut hasher, inputs.len());
+        for input in inputs {
             name(&mut hasher, &input.name);
             write_type(&mut hasher, &input.data_type);
         }
-        count(&mut hasher, func.outputs.len());
-        for output in &func.outputs {
+        count(&mut hasher, outputs.len());
+        for output in outputs {
             name(&mut hasher, &output.name);
             match &output.ty {
                 OutputType::Fixed(data_type) => {
@@ -51,8 +55,8 @@ impl FuncSignature {
                 }
             }
         }
-        count(&mut hasher, func.events.len());
-        for event in &func.events {
+        count(&mut hasher, events.len());
+        for event in events {
             name(&mut hasher, &event.name);
         }
         Self(*hasher.finalize().as_bytes())
@@ -96,8 +100,6 @@ mod tests {
     use crate::DataType;
     use crate::graph::func::func_input::FuncInput;
     use crate::graph::func::func_output::FuncOutput;
-    use crate::graph::func::signature::FuncSignature;
-    use crate::graph::func::{Func, FuncEvent};
     use crate::graph::identity::FuncId;
     use crate::internals;
 
@@ -108,15 +110,11 @@ mod tests {
     /// other failure here is drift that would refuse every saved node.
     #[test]
     fn a_small_func_has_the_pinned_signature() {
-        let func = Func {
-            inputs: vec![FuncInput::required("value", DataType::Int)],
-            outputs: vec![FuncOutput::new("out", DataType::Float)],
-            events: vec![FuncEvent {
-                name: "tick".into(),
-                event_lambda: internals::stub_event(),
-            }],
-            ..internals::stub_func(FuncId::from_u128(1), "pinned")
-        };
+        let func = internals::stub_func(FuncId::from_u128(1), "pinned")
+            .input(FuncInput::required("value", DataType::Int))
+            .output(FuncOutput::new("out", DataType::Float))
+            .event("tick", internals::stub_event())
+            .build();
         let count = |n: u64| n.to_le_bytes().to_vec();
         let name = |text: &str| [count(text.len() as u64), text.as_bytes().to_vec()].concat();
         let layout = [
@@ -131,7 +129,7 @@ mod tests {
             name("tick"),
         ]
         .concat();
-        let signature = FuncSignature::of(&func);
+        let signature = func.signature();
         assert_eq!(signature.0, *blake3::hash(&layout).as_bytes());
         let hex = signature.0.iter().fold(String::new(), |mut hex, byte| {
             write!(hex, "{byte:02x}").unwrap();

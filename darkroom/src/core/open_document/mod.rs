@@ -259,10 +259,10 @@ impl OpenDocument {
     /// refused by name, rather than loaded with its wiring on the wrong ports.
     /// Wiring on a port or event its func does not declare is refused too.
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
-        let mut document = document::load(&path)?;
+        let document = document::load(&path)?;
         let checked = document
             .graph
-            .reconcile_signatures(library)
+            .check_signatures(library)
             .map_err(Into::into)
             .and_then(|()| document.validate_declarations(library));
         if let Err(source) = checked {

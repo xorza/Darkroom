@@ -46,13 +46,13 @@ pub(super) fn validate(
             node_id: *node_id,
             pool,
         };
-        if e_node.inputs.len as usize != func.inputs.len() {
+        if e_node.inputs.len as usize != func.inputs().len() {
             return Err(arity(PortPool::Input));
         }
-        if e_node.outputs.len as usize != func.outputs.len() {
+        if e_node.outputs.len as usize != func.outputs().len() {
             return Err(arity(PortPool::Output));
         }
-        if e_node.events.len as usize != func.events.len() {
+        if e_node.events.len as usize != func.events().len() {
             return Err(arity(PortPool::Event));
         }
         let inputs = compiled

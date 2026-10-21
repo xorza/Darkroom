@@ -34,13 +34,13 @@ pub struct Library {
 
 impl Library {
     /// The func with `id`, or `None` — which is the answer for the nil id,
-    /// as [`add`](Self::add) refuses it.
+    /// as [`FuncBuilder::build`](crate::FuncBuilder::build) refuses it.
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
-        self.iter().find(|func| func.name == name)
+        self.iter().find(|func| func.name() == name)
     }
 
     /// The registered funcs, in no particular order.
@@ -49,9 +49,8 @@ impl Library {
     }
 
     pub fn add(&mut self, func: Func) {
-        func.validate().expect("invalid function declaration");
         assert!(
-            !self.funcs.contains_key(&func.id),
+            !self.funcs.contains_key(&func.id()),
             "duplicate function registration"
         );
         assert_enum_defaults(&func, |type_id| self.enum_variants(type_id));
@@ -60,10 +59,10 @@ impl Library {
                 !self.is_registered_custom(type_id),
                 "function {:?} declares {type_id:?} as an enum, but it is registered as a \
                  custom type",
-                func.name,
+                func.name(),
             );
         }
-        self.funcs.insert(func.id, func);
+        self.funcs.insert(func.id(), func);
     }
 
     /// Register a nominal type. Registering an identical entry again does
@@ -118,7 +117,7 @@ impl Library {
                         !declared_enum_types(func).any(|declared| declared == type_id),
                         "{type_id:?} is being registered as a custom type, but function {:?} \
                          declares it as an enum",
-                        func.name,
+                        func.name(),
                     );
                 }
             }
@@ -219,10 +218,10 @@ fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
         _ => None,
     };
     let inputs = func
-        .inputs
+        .inputs()
         .iter()
         .filter_map(move |i| enum_id(&i.data_type));
-    let outputs = func.outputs.iter().filter_map(move |o| match &o.ty {
+    let outputs = func.outputs().iter().filter_map(move |o| match &o.ty {
         OutputType::Fixed(ty) => enum_id(ty),
         OutputType::Wildcard { .. } => None,
     });
@@ -231,7 +230,7 @@ fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
 
 /// Panic when `func` declares an `Enum` default whose name isn't among
 /// its type's registered variants. Variant-kind and picker-membership
-/// checks already ran in `Func::validate`; this closes the half that
+/// checks already ran in `FuncBuilder::build`; this closes the half that
 /// needs the registry. A default on a type `variants_of` doesn't
 /// resolve passes — `register_type` re-checks when the entry arrives.
 ///
@@ -239,7 +238,7 @@ fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
 /// because [`Library::register_type`] has to run this *before* its entry
 /// is installed, so the type under test isn't in the map yet.
 fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<&'a [String]>) {
-    for input in &func.inputs {
+    for input in func.inputs() {
         if !input.value_variants.is_empty() {
             continue;
         }
@@ -253,7 +252,7 @@ fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<
                 variants.iter().any(|variant| variant == name),
                 "function {:?} input {:?} defaults to {name:?}, which is not a registered \
                  variant of its enum type",
-                func.name,
+                func.name(),
                 input.name,
             );
         }

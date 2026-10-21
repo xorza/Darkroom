@@ -232,9 +232,10 @@ where
 }
 
 fn processing_func(spec: NodeSpec, inputs: Vec<FuncInput>, lambda: FuncLambda) -> Func {
-    spec.func(lambda)
+    spec.builder(lambda)
         .category("Astro")
         .pure()
         .inputs(inputs)
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
+        .build()
 }

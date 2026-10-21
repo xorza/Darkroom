@@ -1,7 +1,7 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
+    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, internals,
 };
 
 use crate::core::document::internals::DocFixture;
@@ -44,7 +44,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
-    let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+    let ghost = g.graph.add(internals::unresolved_node(FuncId::unique()));
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
@@ -72,9 +72,8 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut graph = Graph::default();
     let mut known: Node = library.by_name("Add").unwrap().into();
     known.disabled = true;
-    let mut ghost = Node::new(NodeKind::Func(FuncId::literal(
-        "7a0265e1-9631-45bd-8ecd-1e923b67a58c",
-    )));
+    let mut ghost =
+        internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);

@@ -149,15 +149,13 @@ impl<'a> NodeCtx<'a> {
     /// Human-readable type identity: the func's name, or "missing func" for a
     /// stub. Shown by the inspection panel.
     pub(crate) fn kind_label(self) -> &'a str {
-        self.func.map_or(MISSING_FUNC_LABEL, |f| f.name.as_str())
+        self.func.map_or(MISSING_FUNC_LABEL, |f| f.name())
     }
 
     /// The func's description, empty for a stub or a func that declares none.
     /// Shown by the inspection panel and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
-        self.func
-            .and_then(|f| f.description.as_deref())
-            .unwrap_or_default()
+        self.func.and_then(|f| f.description()).unwrap_or_default()
     }
 
     /// The node's func is absent from the library (e.g. a document saved
@@ -189,7 +187,7 @@ impl<'a> NodeCtx<'a> {
     /// lets the affordances it gates — the disable toggle, the subscription
     /// pin — render before the first compile.
     pub(crate) fn sink(self) -> bool {
-        self.func.is_some_and(|f| f.sink)
+        self.func.is_some_and(Func::sink)
     }
 
     /// The node holds work that recomputes every run. An impure node has no
@@ -205,7 +203,10 @@ impl<'a> NodeCtx<'a> {
     /// stub rather than an empty card.
     pub(crate) fn preview(self) -> bool {
         self.func.is_some()
-            && matches!(self.node.kind, NodeKind::Func(func_id) if preview_sink::is_func(func_id))
+            && matches!(
+                self.node.kind,
+                NodeKind::Func { func_id, .. } if preview_sink::is_func(func_id)
+            )
     }
 
     /// Whether the node has an output a cache can key: the one rule behind
@@ -215,7 +216,7 @@ impl<'a> NodeCtx<'a> {
     /// once.
     pub(crate) fn cacheable(self) -> bool {
         self.func
-            .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
+            .is_some_and(|f| !f.outputs().is_empty() && !f.impure())
     }
 
     /// Whether Darkroom exposes the disable toggle. Limiting it to runnable
@@ -255,7 +256,7 @@ impl<'a> NodeCtx<'a> {
     /// This node's input ports, in declaration order. Empty for a stub, which
     /// declares nothing.
     pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputCtx<'a>> {
-        let declared = self.func.map_or(&[][..], |f| f.inputs.as_slice());
+        let declared = self.func.map_or(&[][..], |f| f.inputs());
         declared
             .iter()
             .enumerate()
@@ -269,13 +270,13 @@ impl<'a> NodeCtx<'a> {
 
     /// One input port by index.
     pub(crate) fn input(self, port_idx: usize) -> Option<InputCtx<'a>> {
-        let declared = self.func?.inputs.get(port_idx)?;
+        let declared = self.func?.inputs().get(port_idx)?;
         Some(InputCtx::new(self, port_idx, declared))
     }
 
     /// This node's output ports, in declaration order.
     pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputCtx<'a>> {
-        let declared = self.func.map_or(&[][..], |f| f.outputs.as_slice());
+        let declared = self.func.map_or(&[][..], |f| f.outputs());
         declared
             .iter()
             .enumerate()
@@ -286,14 +287,14 @@ impl<'a> NodeCtx<'a> {
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
     pub(crate) fn events(self) -> &'a [FuncEvent] {
-        self.func.map_or(&[][..], |f| f.events.as_slice())
+        self.func.map_or(&[][..], |f| f.events())
     }
 
     /// How many ports this node declares on `kind`'s side.
     pub(crate) fn port_count(self, kind: PortKind) -> usize {
         match kind {
-            PortKind::Input => self.func.map_or(0, |f| f.inputs.len()),
-            PortKind::Output => self.func.map_or(0, |f| f.outputs.len()),
+            PortKind::Input => self.func.map_or(0, |f| f.inputs().len()),
+            PortKind::Output => self.func.map_or(0, |f| f.outputs().len()),
         }
     }
 

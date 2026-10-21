@@ -41,6 +41,7 @@ pub use graph::detached::{DetachedNode, DetachedNodeParts};
 pub use graph::error::{DetachedNodeError, GraphValidationError};
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult, OverrideRule};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
+pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::func_input::FuncInput;
 pub use graph::func::func_output::FuncOutput;
 pub use graph::func::func_output::OutputType;

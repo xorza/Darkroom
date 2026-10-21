@@ -56,10 +56,10 @@ impl PreviewSink {
 ///
 /// `sink()` so an ambient sinks run reaches it — that is what makes a preview
 /// refresh without the editor naming it as a seed. It stays `Impure` (the
-/// default) because `Func::validate` refuses an outputless func that claims to
+/// default) because `FuncBuilder::build` refuses an outputless func that claims to
 /// be pure.
 pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
-    Func::new(
+    Func::builder(
         PREVIEW_FUNC_ID,
         "Preview",
         async_lambda!(
@@ -82,6 +82,7 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
         FuncInput::optional("Value", DataType::Any)
             .description("The value to show. Anything can be wired here."),
     )
+    .build()
 }
 
 /// The preview func as the current library registered it, or `None` when the

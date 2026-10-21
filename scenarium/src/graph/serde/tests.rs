@@ -10,8 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::identity::{FuncId, InputPort, NodeId};
-use crate::graph::node::{Node, NodeKind};
+use crate::graph::node::Node;
 use crate::graph::serde::{deserialize_bindings, deserialize_nodes};
+use crate::internals;
 
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
@@ -76,9 +77,9 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let node_id = NodeId::unique();
     let key = ser::to_string(&node_id).expect("a node id is a string");
     let first =
-        ser::to_string(&Node::new(NodeKind::Func(FuncId::unique()))).expect("a node serializes");
+        ser::to_string(&internals::unresolved_node(FuncId::unique())).expect("a node serializes");
     let second =
-        ser::to_string(&Node::new(NodeKind::Func(FuncId::unique()))).expect("a node serializes");
+        ser::to_string(&internals::unresolved_node(FuncId::unique())).expect("a node serializes");
 
     // The derived `HashMap` decode keeps the last entry and reports success;
     // pinning that here is what makes the refusal below a behaviour rather

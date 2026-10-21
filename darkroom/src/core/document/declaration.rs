@@ -11,22 +11,22 @@ use scenarium::{Library, Node};
 
 pub(crate) fn admits_input(node: &Node, library: &Library, port_idx: usize) -> bool {
     node.func(library)
-        .is_none_or(|func| port_idx < func.inputs.len())
+        .is_none_or(|func| port_idx < func.inputs().len())
 }
 
 pub(crate) fn admits_output(node: &Node, library: &Library, port_idx: usize) -> bool {
     node.func(library)
-        .is_none_or(|func| port_idx < func.outputs.len())
+        .is_none_or(|func| port_idx < func.outputs().len())
 }
 
 pub(crate) fn admits_event(node: &Node, library: &Library, event_idx: usize) -> bool {
     node.func(library)
-        .is_none_or(|func| event_idx < func.events.len())
+        .is_none_or(|func| event_idx < func.events().len())
 }
 
 /// Whether input `port_idx` is declared const-only, so no wire may land on it.
 pub(crate) fn const_only(node: &Node, library: &Library, port_idx: usize) -> bool {
     node.func(library)
-        .and_then(|func| func.inputs.get(port_idx))
+        .and_then(|func| func.inputs().get(port_idx))
         .is_some_and(|input| input.const_only)
 }

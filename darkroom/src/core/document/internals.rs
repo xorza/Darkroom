@@ -8,8 +8,7 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind,
-    internals,
+    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, internals,
 };
 
 use palantir::DockOperation;
@@ -91,7 +90,8 @@ impl DocFixture {
         let probe = internals::stub_func(FuncId::unique(), "probe")
             .pure()
             .input(FuncInput::optional("a", DataType::Int))
-            .output(FuncOutput::new("out", DataType::Int));
+            .output(FuncOutput::new("out", DataType::Int))
+            .build();
         let mut fixture = Self::default();
         for _ in 0..n {
             fixture.add(&probe);
@@ -103,7 +103,7 @@ impl DocFixture {
     /// declare `func` in the library unless it is already there — so the node
     /// resolves rather than reading as a stub.
     pub(crate) fn add(&mut self, func: &Func) -> NodeId {
-        if self.library.by_id(func.id).is_none() {
+        if self.library.by_id(func.id()).is_none() {
             self.library.add(func.clone());
         }
         let node_id = self.doc.graph.add_func_node(func);
@@ -124,7 +124,7 @@ impl DocFixture {
     /// A `Func`-kind node naming a func no library holds — what
     /// [`Self::stub_at`] places, for a test that adds it itself.
     pub(crate) fn stub_node() -> Node {
-        Node::new(NodeKind::Func(FuncId::unique()))
+        internals::unresolved_node(FuncId::unique())
     }
 
     /// The `i`th node in placement order — the order the constructors add in,

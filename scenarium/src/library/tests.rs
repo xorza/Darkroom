@@ -49,12 +49,12 @@ impl CustomValueCodec for StubCodec {
 fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
-    library.add(internals::stub_func(func_id, "Before"));
+    library.add(internals::stub_func(func_id, "Before").build());
     let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.add(internals::stub_func(func_id, "After"));
+        library.add(internals::stub_func(func_id, "After").build());
     }));
     assert!(duplicate_func.is_err());
-    assert_eq!(library.by_id(func_id).unwrap().name, "Before");
+    assert_eq!(library.by_id(func_id).unwrap().name(), "Before");
 
     let type_id = TypeId::unique();
     library.register_type(type_id, TypeEntry::custom("Before"));
@@ -143,14 +143,6 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
     );
 }
 
-/// `add` refuses what `Func::validate` refuses, naming the rule; the rules
-/// themselves are `validate`'s tests.
-#[test]
-#[should_panic(expected = "invalid function declaration: NilId")]
-fn add_refuses_a_declaration_validate_refuses() {
-    Library::default().add(internals::stub_func(FuncId::nil(), "nil"));
-}
-
 /// A func declaring a type as an enum while that type is registered
 /// as a *custom* one is a wiring bug, and it is refused whichever of
 /// the two arrives first.
@@ -207,7 +199,8 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
     let mut library = Library::default();
     library.add(
         internals::stub_func(FuncId::unique(), "emit")
-            .output(FuncOutput::new("mode", DataType::Enum(type_id))),
+            .output(FuncOutput::new("mode", DataType::Enum(type_id)))
+            .build(),
     );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
 }
@@ -216,19 +209,21 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
 fn a_library_iterates_exactly_its_funcs() {
     let ids = [FuncId::unique(), FuncId::unique()];
     let mut library = Library::default();
-    library.add(internals::stub_func(ids[0], "first"));
-    library.add(internals::stub_func(ids[1], "second"));
+    library.add(internals::stub_func(ids[0], "first").build());
+    library.add(internals::stub_func(ids[1], "second").build());
     assert_eq!(library.iter().len(), 2);
-    assert!((&library).into_iter().all(|func| ids.contains(&func.id)));
+    assert!((&library).into_iter().all(|func| ids.contains(&func.id())));
     assert!(ids.iter().all(|&id| library.by_id(id).is_some()));
 }
 
 /// A func whose `mode` input defaults to the enum variant `default`.
 fn modal_func(type_id: TypeId, default: &str) -> Func {
-    internals::stub_func(FuncId::unique(), "modal").input(
-        FuncInput::optional("mode", DataType::Enum(type_id))
-            .default(ConstValue::Enum(default.into())),
-    )
+    internals::stub_func(FuncId::unique(), "modal")
+        .input(
+            FuncInput::optional("mode", DataType::Enum(type_id))
+                .default(ConstValue::Enum(default.into())),
+        )
+        .build()
 }
 
 fn mode_entry() -> TypeEntry {
@@ -332,7 +327,7 @@ async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), Invo
     // what the second call below reads back.
     let mut library = Library::default();
     library.add(
-        Func::new(
+        Func::builder(
             FuncId::unique(),
             "sum",
             async_lambda!(|Invocation {
@@ -350,7 +345,8 @@ async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), Invo
         .pure()
         .input(FuncInput::required("A", DataType::Int))
         .input(FuncInput::required("B", DataType::Int))
-        .output(FuncOutput::new("Sum", DataType::Int)),
+        .output(FuncOutput::new("Sum", DataType::Int))
+        .build(),
     );
     let sum = library.by_name("sum").unwrap();
     let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));

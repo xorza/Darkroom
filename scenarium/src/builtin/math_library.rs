@@ -62,12 +62,13 @@ struct FloatFunc<const N: usize> {
 
 impl<const N: usize> FloatFunc<N> {
     fn declare(self, lambda: FuncLambda) -> Func {
-        Func::new(self.id, self.name, lambda)
+        Func::builder(self.id, self.name, lambda)
             .description(self.description)
             .category("Math")
             .pure()
             .inputs(self.inputs.map(FloatInputSpec::declare))
             .output(self.output.declare())
+            .build()
     }
 }
 
@@ -343,7 +344,7 @@ fn trigonometry_funcs() -> [Func; 6] {
 }
 
 fn divide_func() -> Func {
-    Func::new(
+    Func::builder(
         DIVIDE_FUNC_ID,
         "Divide",
         async_lambda!(move |Invocation {
@@ -391,6 +392,7 @@ fn divide_func() -> Func {
         }
         .declare(),
     )
+    .build()
 }
 
 #[cfg(test)]

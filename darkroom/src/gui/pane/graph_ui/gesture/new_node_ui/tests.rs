@@ -18,7 +18,11 @@ fn enlarge(t: &mut palantir::Theme) {
 fn bulk_library(n: usize) -> Library {
     let mut library = Library::default();
     for i in 0..n {
-        library.add(internals::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
+        library.add(
+            internals::stub_func(FuncId::unique(), format!("func{i:02}"))
+                .category("Bulk")
+                .build(),
+        );
     }
     library
 }

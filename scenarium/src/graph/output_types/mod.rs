@@ -69,7 +69,7 @@ impl OutputTypes {
             let Some(ports) = node.func(library) else {
                 continue;
             };
-            for port_idx in 0..ports.outputs.len() {
+            for port_idx in 0..ports.outputs().len() {
                 self.resolve(graph, library, OutputPort::new(node.id, port_idx));
             }
         }

@@ -112,6 +112,8 @@ fn add_builder<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static>(
     library: &mut Library,
     spec: NodeSpec,
 ) {
-    let func = ConfigValue::<T>::builder(library, spec).category("Astro");
+    let func = ConfigValue::<T>::builder(library, spec)
+        .category("Astro")
+        .build();
     library.add(func);
 }

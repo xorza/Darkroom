@@ -84,7 +84,12 @@ impl CacheMode {
 /// declaration comes from.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
-    Func(FuncId),
+    /// An instance of the library func `func_id`, authored against the ports
+    /// `signature` digests — which its bindings and subscriptions are indexed by.
+    Func {
+        func_id: FuncId,
+        signature: FuncSignature,
+    },
     /// A built-in special node; its interface comes from
     /// [`SpecialNode::func`].
     Special(SpecialNode),
@@ -104,12 +109,6 @@ pub struct Node {
     /// excludes them. A binding from one behaves like an unbound input unless
     /// the disabled producer is explicitly included in that run's node seeds.
     pub disabled: bool,
-    /// The port signature of the func this node was authored against, which its bindings and
-    /// subscriptions are indexed by. `None` for a special node, whose declaration is built in,
-    /// and for a func node no declaration was in hand for — until
-    /// [`Graph::reconcile_signatures`](crate::Graph::reconcile_signatures) adopts the library's.
-    #[serde(default)]
-    pub signature: Option<FuncSignature>,
 }
 
 impl Node {
@@ -119,7 +118,7 @@ impl Node {
     /// renders a stub) or a node to skip (lowering).
     pub fn func<'a>(&self, library: &'a Library) -> Option<&'a Func> {
         match &self.kind {
-            NodeKind::Func(func_id) => library.by_id(*func_id),
+            NodeKind::Func { func_id, .. } => library.by_id(*func_id),
             NodeKind::Special(special) => Some(special.func()),
         }
     }
@@ -128,7 +127,7 @@ impl Node {
     pub const fn special(&self) -> Option<SpecialNode> {
         match self.kind {
             NodeKind::Special(special) => Some(special),
-            NodeKind::Func(_) => None,
+            NodeKind::Func { .. } => None,
         }
     }
 
@@ -137,10 +136,10 @@ impl Node {
     ///
     /// **A node takes what its declaration says, wherever one is reachable.** A
     /// `Special` node's is hardcoded, so both its name and its cache mode come
-    /// straight off [`SpecialNode::func`]. A `Func` node names only an id, and
-    /// resolving one takes a [`Library`] this does not
-    /// have — so it starts unnamed and on `CacheMode::None`, and `From<&Func>`
-    /// is the constructor for when the declaration *is* in hand.
+    /// straight off [`SpecialNode::func`]. A `Func` node names an id and the
+    /// ports it was authored against, and resolving it takes a [`Library`] this
+    /// does not have — so it starts unnamed and on `CacheMode::None`, and
+    /// `From<&Func>` is the constructor for when the declaration *is* in hand.
     ///
     /// An empty name is therefore exactly one thing: a node whose func nothing
     /// has resolved. That is a real state — a document saved against a library
@@ -149,16 +148,15 @@ impl Node {
         let (name, cache) = match &kind {
             NodeKind::Special(special) => {
                 let func = special.func();
-                (func.name.clone(), func.default_cache_mode)
+                (func.name().to_owned(), func.default_cache_mode())
             }
-            NodeKind::Func(_) => (String::new(), CacheMode::None),
+            NodeKind::Func { .. } => (String::new(), CacheMode::None),
         };
         Self {
             kind,
             name,
             cache,
             disabled: false,
-            signature: None,
         }
     }
 }
@@ -168,11 +166,13 @@ impl From<&Func> for Node {
     /// `cache`. Default input bindings are seeded by `Graph::add_func_node`.
     fn from(func: &Func) -> Self {
         Self {
-            kind: NodeKind::Func(func.id),
-            name: func.name.clone(),
-            cache: func.default_cache_mode,
+            kind: NodeKind::Func {
+                func_id: func.id(),
+                signature: func.signature(),
+            },
+            name: func.name().to_owned(),
+            cache: func.default_cache_mode(),
             disabled: false,
-            signature: Some(FuncSignature::of(func)),
         }
     }
 }

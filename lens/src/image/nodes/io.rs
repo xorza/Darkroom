@@ -25,7 +25,7 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_load(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             LOAD_IMAGE_FUNC_ID,
             "Load Image",
             async_lambda!(move |Invocation {
@@ -50,13 +50,14 @@ fn register_load(library: &mut Library) {
             FuncInput::required("Path", image_fs_path(FsPathMode::ExistingFile))
                 .description("Image file to load."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Loaded image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Loaded image."))
+        .build(),
     );
 }
 
 fn register_save(library: &mut Library) {
     library.add(
-        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image", async_lambda!(move |Invocation { inputs, .. }| {
+        Func::builder(SAVE_IMAGE_FUNC_ID, "Save Image", async_lambda!(move |Invocation { inputs, .. }| {
                     debug_assert_eq!(inputs.len(), 3);
                     let value = mem::take(&mut inputs[0]);
                     let path = PathBuf::from(
@@ -94,7 +95,8 @@ fn register_save(library: &mut Library) {
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),
-            ),
+            )
+            .build(),
     );
 }
 

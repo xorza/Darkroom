@@ -9,7 +9,11 @@ fn library() -> Library {
     let mut library = Library::default();
     for spec in ["Zoom/crop", "blur/Sharpen", "Blur/gaussian", "blur/box"] {
         let (category, name) = spec.split_once('/').unwrap();
-        library.add(internals::stub_func(FuncId::unique(), name).category(category));
+        library.add(
+            internals::stub_func(FuncId::unique(), name)
+                .category(category)
+                .build(),
+        );
     }
     library
 }

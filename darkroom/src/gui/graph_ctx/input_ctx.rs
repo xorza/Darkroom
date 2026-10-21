@@ -86,7 +86,7 @@ impl<'a> InputCtx<'a> {
             return None;
         }
         func.overrider_of(self.port_idx)
-            .map(|by| func.inputs[by].name.as_str())
+            .map(|by| func.inputs()[by].name.as_str())
     }
 
     /// The literal this port falls back to when given a const binding: its

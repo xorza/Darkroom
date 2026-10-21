@@ -72,7 +72,7 @@ pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), Malfor
 /// stub, as a loaded one does.
 pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
     match &node.kind {
-        NodeKind::Func(func_id) => {
+        NodeKind::Func { func_id, .. } => {
             if func_id.is_nil() {
                 return Err(MalformedIntent::NilFuncId);
             }

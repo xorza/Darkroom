@@ -53,7 +53,7 @@ pub(crate) fn register(library: &mut Library) {
     RegistrationPreset::register(library);
     CombineMethodChoice::register(library);
     library.add(
-        Func::new(
+        Func::builder(
             STACK_LIGHTS_FUNC_ID,
             "Stack Lights",
             async_lambda!(move |Invocation { ctx, inputs, demand, outputs, .. }| {
@@ -139,7 +139,8 @@ pub(crate) fn register(library: &mut Library) {
         .output(
             FuncOutput::new("Weight", IMAGE_DATA_TYPE)
                 .description("Per-pixel accumulated weight map."),
-        ),
+        )
+        .build(),
     );
 }
 

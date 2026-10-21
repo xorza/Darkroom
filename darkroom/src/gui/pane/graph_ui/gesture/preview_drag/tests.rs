@@ -62,7 +62,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         unreachable!("filtered to AddNode");
     };
     assert!(
-        matches!(node.kind, NodeKind::Func(id) if preview_sink::is_func(id)),
+        matches!(node.kind, NodeKind::Func { func_id, .. } if preview_sink::is_func(func_id)),
         "the spawned node is a preview"
     );
     assert!(

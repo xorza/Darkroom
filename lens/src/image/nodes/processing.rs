@@ -27,7 +27,7 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_brightness(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             BRIGHTNESS_CONTRAST_FUNC_ID,
             "Brightness / Contrast",
             async_lambda!(move |Invocation {
@@ -57,13 +57,14 @@ fn register_brightness(library: &mut Library) {
                 .description("Contrast multiplier. 1 leaves it unchanged.")
                 .default(1.0),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Adjusted image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Adjusted image."))
+        .build(),
     );
 }
 
 fn register_convert(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             CONVERT_FUNC_ID,
             "Convert",
             async_lambda!(move |Invocation {
@@ -95,13 +96,14 @@ fn register_convert(library: &mut Library) {
                 .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
                 .description("Target color format."),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Converted image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Converted image."))
+        .build(),
     );
 }
 
 fn register_blend(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             BLEND_FUNC_ID,
             "Blend",
             async_lambda!(move |Invocation {
@@ -156,13 +158,14 @@ fn register_blend(library: &mut Library) {
                 .description("Blend strength in [0, 1]. 1 is full source.")
                 .default(1.0),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Blended image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Blended image."))
+        .build(),
     );
 }
 
 fn register_transform(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             TRANSFORM_FUNC_ID,
             "Transform",
             async_lambda!(move |Invocation {
@@ -224,7 +227,8 @@ fn register_transform(library: &mut Library) {
                 .description("Vertical shift in pixels.")
                 .default(0.0),
         )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Transformed image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Transformed image."))
+        .build(),
     );
 }
 
