@@ -47,7 +47,7 @@ use crate::execution::cache::runtime_slot::OutputRead;
 use crate::execution::cache::stamp_job::error::StampError;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
-use crate::execution::schedule::{NodeState, RunSchedule};
+use crate::execution::schedule::{Delivery, NodeState, RunSchedule};
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -438,7 +438,7 @@ impl ExecutionFrame<'_, '_> {
             .cache
             .restamp_and_hydrate(Restamp {
                 program,
-                states: &self.schedule.states,
+                schedule: self.schedule,
                 node_idx,
                 demand,
                 cancel: self.ctx.cancel.clone(),
@@ -637,23 +637,18 @@ impl ExecutionFrame<'_, '_> {
     fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
         for input in &self.program.inputs[self.program[node_idx].inputs] {
-            let binding = &input.binding;
-            let value = match binding {
-                // A const-only target, so no read was planned for it.
-                _ if self.program.overridden(input, &self.schedule.states) => DynamicValue::Unbound,
-                ExecutionBinding::None => DynamicValue::Unbound,
-                ExecutionBinding::Const(value) => value.into(),
-                ExecutionBinding::Bind(addr) if !self.producer_runs(*addr) => {
-                    // Nothing will produce this. Only an *optional* input
-                    // can reach here — `input_missing` turns a required
-                    // one into a `MissingInputs` verdict, so this node
-                    // would not be running at all — and unbound is
-                    // precisely what optional means. The sweep planned
-                    // no read for it either, so none is completed.
-                    DynamicValue::Unbound
+            let value = match self.schedule.delivery(self.program, input) {
+                // No read was planned for either: a set-aside input is a
+                // const-only target, and a bound input reads as unbound only
+                // when the run skips its producer.
+                Delivery::Unbound | Delivery::SetAside => DynamicValue::Unbound,
+                Delivery::Blocked => {
+                    unreachable!(
+                        "a node with a blocked input is verdicted missing, so it does not run"
+                    )
                 }
-                ExecutionBinding::Bind(addr) => {
-                    let address = *addr;
+                Delivery::Const(value) => value.into(),
+                Delivery::Bind(address) => {
                     let output_idx = self.program.output_idx(address);
                     let read = if self.remaining_reads.is_last(output_idx)
                         && !self.program[address.node_idx].cache.caches_in_ram()
@@ -674,21 +669,12 @@ impl ExecutionFrame<'_, '_> {
         }
     }
 
-    /// Whether the plan will run `addr`'s producer — the same predicate the
-    /// sweep registers reader counts by, so a read is completed exactly
-    /// when one was planned.
-    fn producer_runs(&self, addr: OutputAddr) -> bool {
-        self.schedule.states[addr.node_idx].is_runnable()
-    }
-
     /// Abandons every bound-input read owned by a consumer that will not invoke, allowing
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
     fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
-            if let ExecutionBinding::Bind(address) = &input.binding
-                && self.producer_runs(*address)
-            {
-                self.complete_planned_read(*address);
+            if let Delivery::Bind(address) = self.schedule.delivery(self.program, input) {
+                self.complete_planned_read(address);
             }
         }
     }

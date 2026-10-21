@@ -1,13 +1,12 @@
 use super::*;
 use common::TempFile;
 
-use crate::containers::column::Column;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::index::{NodeIdx, OutputAddr};
-use crate::execution::schedule::NodeState;
+use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::graph::identity::FuncId;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
@@ -22,10 +21,10 @@ fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> 
 }
 
 /// Every node of `program` running this run, so every bound producer's stamp folds.
-fn running(program: &CompiledGraph) -> Column<NodeIdx, NodeState> {
-    let mut states = Column::default();
-    states.reset(program.e_nodes.len(), NodeState::Run);
-    states
+fn running(program: &CompiledGraph) -> RunSchedule {
+    let mut schedule = RunSchedule::default();
+    schedule.states.reset(program.e_nodes.len(), NodeState::Run);
+    schedule
 }
 
 /// [`pure`] with explicit output types, for the signature-folding cases.
@@ -708,7 +707,7 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
     );
 }
 
-/// A bound input whose producer does not run this run folds as unbound, which is what the
+/// A bound input whose producer is disabled this run folds as unbound, which is what the
 /// executor delivers there: the consumer keys exactly as its unbound twin does. With the producer
 /// running, it folds the producer's stamp instead.
 #[test]
@@ -721,21 +720,18 @@ fn a_skipped_producer_folds_its_consumer_as_unbound() {
     let mut cache = RuntimeCache::default();
     cache.install_for_test(program);
 
-    let mut states = running(program);
-    cache.stamp_digest(program, &states, producer.node_idx);
-    let digest = |cache: &RuntimeCache, states: &Column<NodeIdx, NodeState>, node: Placed| {
-        cache.node_digest(program, states, node.node_idx)
+    let mut schedule = running(program);
+    cache.stamp_digest(program, &schedule, producer.node_idx);
+    let digest = |cache: &RuntimeCache, schedule: &RunSchedule, node: Placed| {
+        cache.node_digest(program, schedule, node.node_idx)
     };
     assert_ne!(
-        digest(&cache, &states, bound),
-        digest(&cache, &states, unbound)
+        digest(&cache, &schedule, bound),
+        digest(&cache, &schedule, unbound)
     );
-    for skipped in [NodeState::Disabled, NodeState::MissingInputs] {
-        states[producer.node_idx] = skipped;
-        assert_eq!(
-            digest(&cache, &states, bound),
-            digest(&cache, &states, unbound),
-            "{skipped:?}"
-        );
-    }
+    schedule.states[producer.node_idx] = NodeState::Disabled;
+    assert_eq!(
+        digest(&cache, &schedule, bound),
+        digest(&cache, &schedule, unbound)
+    );
 }

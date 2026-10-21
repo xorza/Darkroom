@@ -3,11 +3,12 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
+    use crate::data::const_value::ConstValue;
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::error::Error;
-    use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
+    use crate::execution::index::{InputIdx, NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
-    use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
+    use crate::execution::schedule::{Delivery, NodeState, RootFlags, RunSchedule};
     use crate::execution::seeds::RunSeeds;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::{EventPort, NodeId};
@@ -167,6 +168,96 @@ mod planning {
             ))
             .is_err(),
             "an unvisited producer is a broken schedule, not an unsatisfied input"
+        );
+    }
+
+    /// What an input delivers is decided by its binding, its producer's state
+    /// and its overrider, and `input_missing` reads the same answer: a bound
+    /// input follows its producer, a disabled producer leaves it unbound, a
+    /// blocked one blocks it, and an overrider that delivers sets its target
+    /// aside — never missing, though the target is required.
+    #[test]
+    fn delivery_follows_binding_producer_state_and_override() {
+        fn answer<'a>(
+            prog: &'a ProgramBuilder,
+            schedule: &RunSchedule,
+            port: InputIdx,
+        ) -> (Delivery<'a>, bool) {
+            let input = &prog.program().inputs[port];
+            (
+                schedule.delivery(prog.program(), input),
+                schedule.input_missing(prog.program(), input),
+            )
+        }
+
+        let mut prog = ProgramBuilder::default();
+        let producer = prog.node().outputs(1).add();
+        let consumer = prog
+            .node()
+            .required(producer.out(0))
+            .required(ExecutionBinding::Const(5i64.into()))
+            .input(ExecutionBinding::None)
+            .required(ExecutionBinding::None)
+            .outputs(1)
+            .add();
+        let ports = prog.program()[consumer.node_idx].inputs;
+        prog.program_mut().inputs[ports.nth(1)].overridden_by = Some(ports.nth(2));
+        let addr = OutputAddr {
+            node_idx: producer.node_idx,
+            port_idx: 0,
+        };
+        let five = ConstValue::Int(5);
+
+        let mut schedule = RunSchedule::default();
+        schedule.reset_for_program(prog.program());
+
+        // The bound input against each settled producer state.
+        for (state, expected) in [
+            (NodeState::Cut, (Delivery::Bind(addr), false)),
+            (NodeState::Reuse, (Delivery::Bind(addr), false)),
+            (NodeState::Run, (Delivery::Bind(addr), false)),
+            (NodeState::Disabled, (Delivery::Unbound, true)),
+            (NodeState::MissingInputs, (Delivery::Blocked, true)),
+        ] {
+            schedule.states[producer.node_idx] = state;
+            assert_eq!(
+                answer(&prog, &schedule, ports.nth(0)),
+                expected,
+                "{state:?}"
+            );
+        }
+        assert_eq!(
+            answer(&prog, &schedule, ports.nth(3)),
+            (Delivery::Unbound, true)
+        );
+
+        // The target against each overrider: only a delivered value sets it
+        // aside — an explicit `Null`, or a producer the run skips, does not.
+        schedule.states[producer.node_idx] = NodeState::Run;
+        for (overrider, expected) in [
+            (ExecutionBinding::None, Delivery::Const(&five)),
+            (
+                ExecutionBinding::Const(ConstValue::Null),
+                Delivery::Const(&five),
+            ),
+            (
+                ExecutionBinding::Const(ConstValue::Int(1)),
+                Delivery::SetAside,
+            ),
+            (producer.out(0), Delivery::SetAside),
+        ] {
+            prog.program_mut().inputs[ports.nth(2)].binding = overrider.clone();
+            assert_eq!(
+                answer(&prog, &schedule, ports.nth(1)),
+                (expected, false),
+                "{overrider:?}"
+            );
+        }
+        schedule.states[producer.node_idx] = NodeState::Disabled;
+        assert_eq!(
+            answer(&prog, &schedule, ports.nth(1)),
+            (Delivery::Const(&five), false),
+            "a disabled overrider delivers nothing"
         );
     }
 

@@ -43,10 +43,11 @@ use common::is_debug;
 
 use crate::containers::column::Column;
 use crate::containers::idx_set::IdxSet;
+use crate::data::const_value::ConstValue;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
-use crate::execution::index::{NodeIdx, OutputIdx};
+use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::schedule::error::{RunScheduleValidationError, ScheduleColumn};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
@@ -253,36 +254,87 @@ impl RootFlags {
     }
 }
 
-impl RunSchedule {
-    /// Whether one input is unsatisfied: an unbound *required* port, or a bind to a
-    /// producer that itself can't run (missing propagates only through non-runnable
-    /// producers — a cached or executing one delivers a value, optional or not).
-    /// This schedule must already hold the producer's state, which the planner's
-    /// post-order forward pass guarantees. Shared by that pass and the executor's
-    /// outcome so the two can't drift — and it reads the same in both, since every
-    /// state the sweep writes is one that delivers a value.
-    ///
-    /// An input set aside by its override is never missing: the node reads the
-    /// overriding input instead.
-    pub(crate) fn input_missing(&self, program: &CompiledGraph, input: &ExecutionInput) -> bool {
-        if program.overridden(input, &self.states) {
-            return false;
+/// What one input hands its node this run — the one rule the planner's
+/// missing-input verdict, the digest fold, and the run loop's input read all
+/// answer from, so the value a node is keyed by is the value it is handed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Delivery<'a> {
+    /// Nothing: no binding, or a bind to a producer disabled for this run.
+    Unbound,
+    /// Nothing, because the input that overrides this one delivers. Never
+    /// missing, required or not: the node reads the overriding input instead.
+    SetAside,
+    /// Nothing, because the producer cannot run for want of an input of its
+    /// own — which makes this input missing, optional or not. Only a node the
+    /// planner verdicted `MissingInputs` has one, so a node that runs never
+    /// reads it.
+    Blocked,
+    Const(&'a ConstValue),
+    /// The producer port, whose producer runs or is served this run.
+    Bind(OutputAddr),
+}
+
+impl Delivery<'_> {
+    /// Whether the node is handed a value: a constant other than the explicit
+    /// `Null`, or a producer's output.
+    const fn delivers(self) -> bool {
+        match self {
+            Self::Const(value) => !matches!(value, ConstValue::Null),
+            Self::Bind(_) => true,
+            Self::Unbound | Self::SetAside | Self::Blocked => false,
         }
+    }
+}
+
+impl RunSchedule {
+    /// What `input` delivers this run. This schedule must already hold the
+    /// state of `input`'s producer and of its overrider's producer, which the
+    /// planner's post-order walk guarantees.
+    pub(crate) fn delivery<'a>(
+        &self,
+        program: &'a CompiledGraph,
+        input: &'a ExecutionInput,
+    ) -> Delivery<'a> {
+        // An overrider is never itself overridden (`Func::validate`), so its
+        // own binding is the whole answer.
+        if input
+            .overridden_by
+            .is_some_and(|by| self.binding_delivery(&program.inputs[by]).delivers())
+        {
+            return Delivery::SetAside;
+        }
+        self.binding_delivery(input)
+    }
+
+    /// [`delivery`](Self::delivery) without the override.
+    fn binding_delivery<'a>(&self, input: &'a ExecutionInput) -> Delivery<'a> {
         match &input.binding {
-            ExecutionBinding::None => input.required,
-            ExecutionBinding::Const(_) => false,
+            ExecutionBinding::None => Delivery::Unbound,
+            ExecutionBinding::Const(value) => Delivery::Const(value),
             ExecutionBinding::Bind(addr) => match self.states[addr.node_idx] {
                 // The walk pushes every `Bind` producer before settling its
                 // consumer, so an unvisited producer here means the schedule is
-                // broken — not an input to answer for. Free to state: the arm
-                // exists either way.
+                // broken — not an input to answer for.
                 NodeState::Unvisited => {
-                    unreachable!("post-order settles a producer before its consumer is verdicted")
+                    unreachable!("post-order settles a producer before its consumer is read")
                 }
-                NodeState::Disabled => input.required,
-                NodeState::MissingInputs => true,
-                NodeState::Cut | NodeState::Reuse | NodeState::Run => false,
+                NodeState::Disabled => Delivery::Unbound,
+                NodeState::MissingInputs => Delivery::Blocked,
+                NodeState::Cut | NodeState::Reuse | NodeState::Run => Delivery::Bind(*addr),
             },
+        }
+    }
+
+    /// Whether one input is unsatisfied: an unbound *required* port, or a bind to a
+    /// producer that itself can't run for a missing input (missing propagates only
+    /// through those — a cached or executing producer delivers a value, and a
+    /// disabled one leaves the input unbound). Shared by the planner's verdict and
+    /// the executor's outcome so the two can't drift.
+    pub(crate) fn input_missing(&self, program: &CompiledGraph, input: &ExecutionInput) -> bool {
+        match self.delivery(program, input) {
+            Delivery::Unbound => input.required,
+            Delivery::Blocked => true,
+            Delivery::SetAside | Delivery::Const(_) | Delivery::Bind(_) => false,
         }
     }
 
@@ -526,25 +578,15 @@ impl RunSchedule {
     pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
         // The cache holds no program of its own, so every question below names
         // the one `program` this schedule was planned against.
-        cache.stamp_digests(program, &self.states, self.executing());
+        cache.stamp_digests(program, self);
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
         self.outputs.reset(program.outputs.len());
 
-        // Destructured so the sweep can read the schedule and the seed sets
-        // while writing the state and output columns — disjoint fields of the
-        // one buffer.
-        let Self {
-            process_order,
-            states,
-            root_flags,
-            outputs,
-        } = &mut *self;
-
         // Liveness starts at what the run was asked for.
-        for (node_idx, flags) in root_flags.iter_indexed() {
+        for (node_idx, flags) in self.root_flags.iter_indexed() {
             if flags.is_root() {
-                states[node_idx].promote_to_run();
+                self.states[node_idx].promote_to_run();
             }
         }
 
@@ -554,37 +596,36 @@ impl RunSchedule {
         // asked whether a cache covers what was actually demanded. That also
         // means a promotion can only overwrite the planner's `Cut` or an
         // earlier consumer's `Run`, never a `Reuse` this sweep settled.
-        for &node_idx in process_order.iter().rev() {
+        for &node_idx in self.process_order.iter().rev() {
             // Reaching this body means the planner cleared the node and some
             // consumer (or a root) promoted it — `Run` is written no other way.
-            if states[node_idx] != NodeState::Run {
+            if self.states[node_idx] != NodeState::Run {
                 continue;
             }
             let e_node = &program[node_idx];
 
-            let flags = root_flags[node_idx];
-            let demand = &mut outputs.demand[e_node.outputs];
+            let flags = self.root_flags[node_idx];
+            let demand = &mut self.outputs.demand[e_node.outputs];
             // A node seed ("run to this node") demands every output the node has:
             // the host asked for the node itself, not for what a consumer reads.
             if flags.is_seeded() {
                 demand.fill(OutputDemand::Produce);
             }
             if !flags.is_event_source() && cache.probe_reuse(program, node_idx, demand).await {
-                states[node_idx] = NodeState::Reuse;
+                self.states[node_idx] = NodeState::Reuse;
                 continue;
             }
 
+            // A read is planned exactly where the run loop will take one: on a
+            // `Bind` delivery, whose producer the plan runs. A **disabled**
+            // producer feeding an *optional* input leaves the consumer
+            // schedulable, but never enters `process_order`, so it delivers
+            // nothing and is not promoted.
             for input in &program.inputs[e_node.inputs] {
-                let ExecutionBinding::Bind(addr) = &input.binding else {
-                    continue;
-                };
-                // Only a producer the plan will actually run can deliver a
-                // value. A **disabled** producer feeding an *optional* input
-                // leaves the consumer schedulable — `input_missing` treats
-                // that port as satisfied — but never enters `process_order`,
-                // so it is not promoted and the consumer plans no read of it.
-                if states[addr.node_idx].promote_to_run() {
-                    outputs.add_reader(program.output_idx(*addr));
+                if let Delivery::Bind(addr) = self.delivery(program, input) {
+                    let promoted = self.states[addr.node_idx].promote_to_run();
+                    debug_assert!(promoted, "a delivering producer is runnable");
+                    self.outputs.add_reader(program.output_idx(addr));
                 }
             }
         }
