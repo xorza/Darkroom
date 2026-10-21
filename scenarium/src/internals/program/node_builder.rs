@@ -55,7 +55,7 @@ impl<'a> NodeBuilder<'a> {
     /// gives each node a distinct one; a test names it only when reinstalling
     /// a node under the *same* implementation, which is what keeps its state.
     pub(crate) fn func(mut self, func_id: FuncId) -> Self {
-        self.e_node.func_id = func_id;
+        self.e_node.func_ref = internals::portless_func_ref(func_id);
         self
     }
 
@@ -159,13 +159,13 @@ impl<'a> NodeBuilder<'a> {
         // ascend from 1 with the placement, so `node_ids` stays sorted (which
         // `CompiledGraph::node` binary-searches) and index 0 is not the nil id.
         let node_id = node_id.unwrap_or_else(|| NodeId::from_u128(position as u128 + 1));
-        if e_node.func_id.is_nil() {
+        if e_node.func_ref.id().is_nil() {
             // Keyed to the *node's* id, not its position: one implementation per
             // node (the authoring default), and stable across a reinstall that
             // shifts the index space — where a func id that moved with the
             // position would read as a changed implementation and drop the
             // node's state.
-            e_node.func_id = FuncId::from_u128(node_id.as_u128());
+            e_node.func_ref = internals::portless_func_ref(FuncId::from_u128(node_id.as_u128()));
         }
         e_node.inputs = owner.program.inputs.append(inputs);
         e_node.outputs = owner.program.outputs.append(outputs);

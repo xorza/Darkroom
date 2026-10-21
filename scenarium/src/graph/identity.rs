@@ -1,6 +1,7 @@
 //! How an authored graph names things: the uuid identities ([`NodeId`],
-//! [`FuncId`]) and the addresses that pair one with a port index
-//! ([`InputPort`], [`OutputPort`], [`EventPort`]).
+//! [`FuncId`]), the addresses that pair one with a port index ([`InputPort`],
+//! [`OutputPort`], [`EventPort`]), and the crate-internal [`FuncRef`] that pairs
+//! a func's id with the signature of its ports.
 //!
 //! Gathered here rather than each sitting with the type it names, so "what
 //! can this model address?" is one file. They carry no authoring state, so
@@ -19,12 +20,39 @@ use ::serde::{Deserialize, Serialize};
 use common::Id;
 
 use crate::graph::func::Func;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::node::Node;
 
 /// A node's id, unique across a whole document, so a bare one is an unambiguous address.
 pub type NodeId = Id<Node>;
 /// A declaration's id in the library, not anything in a document.
 pub type FuncId = Id<Func>;
+
+/// The func a node is authored against: the declaration's id, and the
+/// signature of the ports the node's wiring is indexed by.
+///
+/// A func answers to a node only when both match, so a func whose ports moved
+/// under a saved node reads as absent rather than as the one it was wired to.
+/// Internal to the crate: hosts name a func by its [`FuncId`] alone.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub(crate) struct FuncRef {
+    id: FuncId,
+    signature: FuncSignature,
+}
+
+impl FuncRef {
+    pub(crate) const fn new(id: FuncId, signature: FuncSignature) -> Self {
+        Self { id, signature }
+    }
+
+    pub(crate) const fn id(self) -> FuncId {
+        self.id
+    }
+
+    pub(crate) const fn signature(self) -> FuncSignature {
+        self.signature
+    }
+}
 
 /// Address of a producer node's output port — the source side of a data
 /// binding (`Binding::Bind`).

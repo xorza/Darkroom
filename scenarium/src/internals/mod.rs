@@ -29,8 +29,8 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
-use crate::graph::identity::FuncId;
-use crate::graph::node::{Node, NodeKind};
+use crate::graph::identity::{FuncId, FuncRef};
+use crate::graph::node::Node;
 
 /// A func declaration whose body does nothing, for a fixture that never runs it.
 pub fn stub_func(id: FuncId, name: impl Into<String>) -> FuncBuilder {
@@ -45,8 +45,11 @@ pub fn stub_event() -> EventLambda {
 /// A node of func `func_id`, authored against a func with no ports — for a
 /// fixture whose library holds no such func, the stub a stale document leaves.
 pub fn unresolved_node(func_id: FuncId) -> Node {
-    Node::new(NodeKind::Func {
-        func_id,
-        signature: FuncSignature::of(&[], &[], &[]),
-    })
+    Node::unresolved(portless_func_ref(func_id))
+}
+
+/// The address of func `func_id` declared with no ports, for a fixture that
+/// names a func without declaring one.
+pub(crate) fn portless_func_ref(func_id: FuncId) -> FuncRef {
+    FuncRef::new(func_id, FuncSignature::of(&[], &[], &[]))
 }

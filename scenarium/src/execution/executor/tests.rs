@@ -547,7 +547,7 @@ async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
         Some(&23)
     );
     assert!(executor.nodes[NodeIdx(1)].state.is_none());
-    assert_eq!(executor.nodes[NodeIdx(1)].owner, FuncId::from_u128(30));
+    assert_eq!(executor.nodes[NodeIdx(1)].owner.id(), FuncId::from_u128(30));
 
     // Node 2's func changes, so both of its states drop.
     let third = build(&[(2, 21), (3, 30)]);
@@ -560,5 +560,5 @@ async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
             .await
             .is_none()
     );
-    assert_eq!(executor.nodes[NodeIdx(0)].owner, FuncId::from_u128(21));
+    assert_eq!(executor.nodes[NodeIdx(0)].owner.id(), FuncId::from_u128(21));
 }

@@ -121,7 +121,7 @@ impl TestGraph {
     /// Place a built-in [`SpecialNode`], whose declaration is hardcoded rather
     /// than registered.
     pub fn add_special(&mut self, name: &str, special: SpecialNode) -> NodeId {
-        let mut node = Node::new(NodeKind::Special(special));
+        let mut node = Node::from(special);
         name.clone_into(&mut node.name);
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, node);
@@ -285,17 +285,15 @@ impl TestGraph {
     pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
         self.edit_func(name, edit);
         let func_id = self.func_id(name);
-        let current = self.library.by_id(func_id).unwrap().signature();
+        let current = self.library.by_id(func_id).unwrap().func_ref();
         let nodes: Vec<NodeId> = self
             .graph
             .iter()
-            .filter(|node| matches!(node.kind, NodeKind::Func { func_id: id, .. } if id == func_id))
+            .filter(|node| node.func_id() == Some(func_id))
             .map(|node| node.id)
             .collect();
         for node in nodes {
-            if let NodeKind::Func { signature, .. } = &mut self.graph.find_mut(node).unwrap().kind {
-                *signature = current;
-            }
+            self.graph.find_mut(node).unwrap().kind = NodeKind::Func(current);
         }
     }
 
@@ -333,9 +331,9 @@ impl TestGraph {
     }
 
     fn func_id(&self, name: &str) -> FuncId {
-        match self.node(name).kind {
-            NodeKind::Func { func_id, .. } => func_id,
-            NodeKind::Special(_) => {
+        match self.node(name).func_id() {
+            Some(func_id) => func_id,
+            None => {
                 panic!("{name:?} is a special node, whose declaration is hardcoded")
             }
         }

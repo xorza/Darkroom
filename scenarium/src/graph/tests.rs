@@ -10,7 +10,7 @@ use crate::graph::binding_entry::BindingEntry;
 use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::identity::FuncId;
-use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::node::{CacheMode, FuncResolution, Node, NodeKind};
 use crate::graph::subscription::Subscription;
 use crate::graph::{InputPort, NodeId, OutputPort};
 use crate::internals;
@@ -106,10 +106,10 @@ fn a_new_node_takes_what_its_declaration_says() {
         "and the func's name, so a placed node is labelled without a second lookup"
     );
 
-    // A special node's declaration is hardcoded, so `Node::new` reaches it and
-    // takes both halves — no caller has to name the node afterwards.
+    // A special node's declaration is hardcoded, so `From<SpecialNode>` reaches
+    // it and takes both halves — no caller has to name the node afterwards.
     let special = SpecialNode::RunSinks;
-    let node = Node::new(NodeKind::Special(special));
+    let node = Node::from(special);
     assert_eq!(node.name, special.func().name());
     assert!(
         !node.name.is_empty(),
@@ -627,10 +627,7 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
     let func = g.library.by_name("withdefault").unwrap();
     assert_eq!(
         g.graph.find(id).unwrap().kind,
-        NodeKind::Func {
-            func_id: func.id(),
-            signature: func.signature(),
-        }
+        NodeKind::Func(func.func_ref())
     );
     assert_eq!(
         g.graph.bindings.get(&InputPort::new(id, 0)),
@@ -828,11 +825,11 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
-    let signature = signed_func().build().signature();
+    let signature = signed_func().build().func_ref();
     let edited = |edit: fn(&mut FuncBuilder)| {
         let mut func = signed_func();
         edit(&mut func);
-        func.build().signature()
+        func.build().func_ref()
     };
     let moves: [FuncEdit; 7] = [
         ("an input renamed", |f| f.inputs[0].name = "x".into()),
@@ -869,43 +866,52 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     let path = |mode| {
         let mut func = signed_func();
         func.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
-        func.build().signature()
+        func.build().func_ref()
     };
     assert_eq!(path(FsPathMode::Directory), path(FsPathMode::NewFile));
 }
 
-/// A node holds the signature of the func it was made from. Once the library's func moves its
-/// ports, validating and checking both refuse the node by name, and a func the library lacks is
-/// left to render as a stub.
+/// A node holds the address of the func it was made from — its id and the signature of its
+/// ports. Once the library's func moves its ports, the node resolves to nothing, as a stub, and a
+/// compile refuses it as changed rather than missing; a func the library lacks is refused as
+/// missing.
 #[test]
-fn a_node_authored_against_other_ports_is_refused_by_name() {
+fn a_node_authored_against_other_ports_resolves_to_nothing() {
     let mut g = TestGraph::new();
     g.add("f", |n| n.pure().input(DataType::Int).output(DataType::Int));
     let id = g.id("f");
-    let NodeKind::Func { func_id, signature } = g.graph.find(id).unwrap().kind else {
-        unreachable!("the fixture adds a func node");
-    };
-    assert_eq!(signature, g.library.by_id(func_id).unwrap().signature());
-    assert!(g.graph.check_signatures(&g.library).is_ok());
+    let func_id = g.graph.find(id).unwrap().func_id().unwrap();
+    assert!(matches!(
+        g.graph.find(id).unwrap().resolve(&g.library),
+        FuncResolution::Found(func) if func.id() == func_id
+    ));
+    assert!(g.graph.find(id).unwrap().func(&g.library).is_some());
 
     g.edit_func("f", |func| func.inputs[0].data_type = DataType::String);
-    assert_ne!(g.library.by_id(func_id).unwrap().signature(), signature);
-    for error in [
-        g.graph.validate_with(&g.library).unwrap_err(),
-        g.graph.check_signatures(&g.library).unwrap_err(),
-    ] {
-        assert!(
-            matches!(&error, GraphValidationError::SignatureMismatch { node_id, func_id: f, .. }
-                if *node_id == id && *f == func_id),
-            "{error}"
-        );
-    }
+    assert!(matches!(
+        g.graph.find(id).unwrap().resolve(&g.library),
+        FuncResolution::Changed(func) if func.id() == func_id
+    ));
+    assert!(g.graph.find(id).unwrap().func(&g.library).is_none());
+    let error = g.graph.validate_with(&g.library).unwrap_err();
+    assert!(
+        matches!(&error, GraphValidationError::FuncChanged { node_id, func_id: f, .. }
+            if *node_id == id && *f == func_id),
+        "{error}"
+    );
 
     let mut stubbed = TestGraph::new();
-    stubbed
+    let stub = stubbed
         .graph
         .add(internals::unresolved_node(FuncId::from_u128(99)));
-    assert!(stubbed.graph.check_signatures(&stubbed.library).is_ok());
+    assert!(matches!(
+        stubbed.graph.find(stub).unwrap().resolve(&stubbed.library),
+        FuncResolution::Missing(id) if id == FuncId::from_u128(99)
+    ));
+    assert!(matches!(
+        stubbed.graph.validate_with(&stubbed.library).unwrap_err(),
+        GraphValidationError::MissingFunc { node_id, .. } if node_id == stub
+    ));
 }
 
 /// A node's signature survives the document round trip.

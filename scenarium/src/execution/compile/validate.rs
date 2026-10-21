@@ -22,20 +22,20 @@ pub(super) fn validate(
     library: &Library,
 ) -> Result<(), CompiledGraphValidationError> {
     for (node_id, e_node) in compiled.node_ids.iter().zip(compiled.e_nodes.iter()) {
-        if e_node.func_id.is_nil() {
+        let func_id = e_node.func_ref.id();
+        if func_id.is_nil() {
             return Err(CompiledGraphValidationError::NilFuncId { node_id: *node_id });
         }
         // A special node's interface is its hardcoded spec, not a library func.
-        let func =
-            match e_node.special {
-                Some(special) => special.func(),
-                None => library.by_id(e_node.func_id).ok_or(
-                    CompiledGraphValidationError::MissingFunc {
-                        node_id: *node_id,
-                        func_id: e_node.func_id,
-                    },
-                )?,
-            };
+        let func = match e_node.special {
+            Some(special) => special.func(),
+            None => library
+                .by_id(func_id)
+                .ok_or(CompiledGraphValidationError::MissingFunc {
+                    node_id: *node_id,
+                    func_id,
+                })?,
+        };
         // The same two questions asked of each of the three pools, so the pool
         // is the only thing each call spells out.
         let arity = |pool| CompiledGraphValidationError::Arity {

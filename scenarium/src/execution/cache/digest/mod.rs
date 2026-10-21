@@ -19,13 +19,13 @@
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):
-//! - **A [`FuncId`](crate::FuncId) is the implementation contract.** The fold reads the func
-//!   identity and interface, never the lambda behind it, so rewriting a lambda to return
-//!   different values for the same inputs reuses every digest it already produced. Give the
-//!   changed implementation a new id — that also drops the node's persistent
-//!   `state`/`event_state` at the next install
-//!   ([`Executor::reconcile`](crate::execution::executor::Executor::reconcile)),
-//!   so a new implementation never inherits its predecessor's state.
+//! - **A func's id is the implementation contract.** The fold reads the func's
+//!   [`FuncRef`](crate::graph::identity::FuncRef) — its id and the signature of its ports —
+//!   never the lambda behind it, so rewriting a lambda to return different values for the
+//!   same inputs reuses every digest it already produced. Give the changed implementation a
+//!   new id — that also drops the node's persistent `state`/`event_state` at the next install
+//!   ([`Executor::reconcile`](crate::execution::executor::Executor::reconcile)), as a change
+//!   of ports does, so a new implementation never inherits its predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
@@ -51,7 +51,7 @@ use crate::{ConstValue, DataType};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v6";
+pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v7";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same function identity, params, upstream outputs, and file inputs.

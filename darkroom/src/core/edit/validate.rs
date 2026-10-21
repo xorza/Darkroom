@@ -22,8 +22,7 @@
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, NodeKind, OutputPort,
-    Subscription,
+    Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, OutputPort, Subscription,
 };
 
 use crate::core::document::declaration;
@@ -71,13 +70,10 @@ pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), Malfor
 /// a built-in special. The func need not resolve — a duplicated stub stays a
 /// stub, as a loaded one does.
 pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
-    match &node.kind {
-        NodeKind::Func { func_id, .. } => {
-            if func_id.is_nil() {
-                return Err(MalformedIntent::NilFuncId);
-            }
-        }
-        NodeKind::Special(_) => {}
+    if let Some(func_id) = node.func_id()
+        && func_id.is_nil()
+    {
+        return Err(MalformedIntent::NilFuncId);
     }
     Ok(())
 }

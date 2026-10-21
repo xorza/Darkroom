@@ -3,7 +3,7 @@ use palantir::internals::ui_harness::UiHarness;
 use std::sync::Arc;
 
 use imaginarium::Image as RawImage;
-use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
+use scenarium::{ConstValue, Node, SpecialNode};
 
 use crate::core::document::internals::DocFixture;
 use crate::core::preview_sink;
@@ -197,9 +197,7 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
     let mut document = document_with_preview(node);
-    let other = document
-        .graph
-        .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));
+    let other = document.graph.add(Node::from(SpecialNode::RunSinks));
     let int = |value| DynamicValue::Static(ConstValue::Int(value));
     let shown = |store: &PreviewStore| match store.entries.get(&node) {
         Some(StoredContent::Text(text)) => Some(text.clone()),

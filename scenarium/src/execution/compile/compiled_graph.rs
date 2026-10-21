@@ -26,7 +26,7 @@ use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::FuncId;
+use crate::graph::identity::FuncRef;
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
@@ -97,7 +97,7 @@ pub(crate) struct ExecutionNode {
     pub(crate) outputs: Span<OutputIdx>,
     pub(crate) events: Span<EventIdx>,
 
-    pub(crate) func_id: FuncId,
+    pub(crate) func_ref: FuncRef,
 
     pub(crate) lambda: FuncLambda,
 }
@@ -237,6 +237,7 @@ pub(crate) mod internals {
     use crate::graph::func::lambda::FuncLambda;
     use crate::graph::identity::{FuncId, NodeId};
     use crate::graph::node::CacheMode;
+    use crate::internals::portless_func_ref;
 
     impl ExecutionNode {
         /// An enabled, impure, uncached node with no ports, no func id yet and
@@ -251,7 +252,7 @@ pub(crate) mod internals {
                 inputs: Span::default(),
                 outputs: Span::default(),
                 events: Span::default(),
-                func_id: FuncId::nil(),
+                func_ref: portless_func_ref(FuncId::nil()),
                 lambda: FuncLambda::stub(),
             }
         }

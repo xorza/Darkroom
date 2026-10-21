@@ -17,7 +17,7 @@ use crate::graph::func::func_output::{FuncOutput, OutputType};
 /// node records the signature of the func it was authored against, and a mismatch with the
 /// library is refused by name rather than lowered into a wrong graph.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FuncSignature([u8; 32]);
+pub(crate) struct FuncSignature([u8; 32]);
 
 impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
@@ -83,6 +83,13 @@ fn write_type(hasher: &mut blake3::Hasher, data_type: &DataType) {
     }
 }
 
+impl FuncSignature {
+    /// The digest's bytes, for a fold that keys on the signature.
+    pub(crate) const fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 impl fmt::Debug for FuncSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FuncSignature(")?;
@@ -129,7 +136,7 @@ mod tests {
             name("tick"),
         ]
         .concat();
-        let signature = func.signature();
+        let signature = func.func_ref().signature();
         assert_eq!(signature.0, *blake3::hash(&layout).as_bytes());
         let hex = signature.0.iter().fold(String::new(), |mut hex, byte| {
             write!(hex, "{byte:02x}").unwrap();

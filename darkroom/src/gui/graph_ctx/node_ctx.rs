@@ -1,7 +1,7 @@
 //! One node of the graph, with its declaration resolved.
 
 use glam::Vec2;
-use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
+use scenarium::{CacheMode, Func, FuncEvent, FuncResolution, Node, NodeId, RamUsage};
 
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
@@ -14,9 +14,13 @@ use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::widgets::hover::Hover;
 use scenarium::EventPort;
 
-/// The `kind_label` a node reports when the library holds no func for it —
-/// see [`NodeCtx::missing`].
+/// The `kind_label` a stub reports when the library holds no func under its
+/// id — see [`NodeCtx::missing`].
 const MISSING_FUNC_LABEL: &str = "missing func";
+
+/// The `kind_label` a stub reports when the library holds its func with other
+/// ports than the node was authored against.
+const CHANGED_FUNC_LABEL: &str = "changed func";
 
 /// One node of the graph: its authoring record, its position in the paint
 /// stack, and the declaration the library resolves for it.
@@ -92,8 +96,8 @@ impl<'a> NodeCtx<'a> {
             .body()
             .find(node_id)
             .expect("every placement names a node the graph holds");
-        // `None` has exactly one meaning: a `NodeKind::Func` whose id the
-        // library no longer holds. A special node's declaration is hardcoded,
+        // `None` is a func node the library cannot resolve: its id is gone, or
+        // its func moved its ports. A special node's declaration is hardcoded,
         // so `Node::func` resolves it unconditionally.
         let func = node.func(graph_ctx.library());
         Self {
@@ -146,10 +150,14 @@ impl<'a> NodeCtx<'a> {
         &self.node.name
     }
 
-    /// Human-readable type identity: the func's name, or "missing func" for a
-    /// stub. Shown by the inspection panel.
+    /// Human-readable type identity: the func's name, or for a stub whether its
+    /// func is gone or changed its ports. Shown by the inspection panel.
     pub(crate) fn kind_label(self) -> &'a str {
-        self.func.map_or(MISSING_FUNC_LABEL, |f| f.name())
+        match self.node.resolve(self.graph_ctx.library()) {
+            FuncResolution::Found(func) => func.name(),
+            FuncResolution::Changed(_) => CHANGED_FUNC_LABEL,
+            FuncResolution::Missing(_) => MISSING_FUNC_LABEL,
+        }
     }
 
     /// The func's description, empty for a stub or a func that declares none.
@@ -158,8 +166,9 @@ impl<'a> NodeCtx<'a> {
         self.func.and_then(|f| f.description()).unwrap_or_default()
     }
 
-    /// The node's func is absent from the library (e.g. a document saved
-    /// against an older library), so its interface can't be resolved.
+    /// The node's func is absent from the library, or present with other ports
+    /// than the node was authored against (a document saved against another
+    /// library), so its interface can't be resolved.
     /// Rendered as a portless error stub the user can still select and
     /// delete — never silently dropped.
     pub(crate) const fn missing(self) -> bool {
@@ -202,11 +211,7 @@ impl<'a> NodeCtx<'a> {
     /// document whose library lost the func degrades to an ordinary missing
     /// stub rather than an empty card.
     pub(crate) fn preview(self) -> bool {
-        self.func.is_some()
-            && matches!(
-                self.node.kind,
-                NodeKind::Func { func_id, .. } if preview_sink::is_func(func_id)
-            )
+        self.func.is_some() && self.node.func_id().is_some_and(preview_sink::is_func)
     }
 
     /// Whether the node has an output a cache can key: the one rule behind

@@ -75,15 +75,18 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut ghost =
         internals::unresolved_node(FuncId::literal("7a0265e1-9631-45bd-8ecd-1e923b67a58c"));
     ghost.name = "astro_to_image".into();
+    // And one authored against other ports of a func the library does hold.
+    let add_id = library.by_name("Add").unwrap().id();
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);
+    let changed_id = graph.add(internals::unresolved_node(add_id));
 
     let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     // Both nodes resolve, not silently dropped — so the unresolvable one
     // stays selectable and deletable to repair the document.
-    assert_eq!(graph_ctx.nodes().count(), 2, "every placed node resolves");
+    assert_eq!(graph_ctx.nodes().count(), 3, "every placed node resolves");
     let known_node = graph_ctx.node(known_id).unwrap();
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
@@ -91,6 +94,12 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     assert!(!known_node.missing(), "a resolved func is not a stub");
     assert!(ghost_node.missing());
     assert_eq!(ghost_node.kind_label(), "missing func");
+    let changed_node = graph_ctx.node(changed_id).unwrap();
+    assert!(
+        changed_node.missing(),
+        "a func that moved its ports is a stub too"
+    );
+    assert_eq!(changed_node.kind_label(), "changed func");
 
     // The stub keeps its saved name and carries no ports.
     assert_eq!(ghost_node.name(), "astro_to_image");

@@ -8,7 +8,7 @@ pub(crate) mod viewport;
 use std::mem;
 
 use palantir::DockState;
-use scenarium::{Binding, DetachedNode, Graph as CoreGraph, Library, NodeId, NodeKind};
+use scenarium::{Binding, DetachedNode, Graph as CoreGraph, Library, Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::DocumentValidationError;
@@ -123,10 +123,8 @@ impl Document {
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
         self.graph
             .find(node_id)
-            .is_some_and(|node| match node.kind {
-                NodeKind::Func { func_id, .. } => preview_sink::is_func(func_id),
-                NodeKind::Special(_) => false,
-            })
+            .and_then(Node::func_id)
+            .is_some_and(preview_sink::is_func)
     }
 
     /// Bring the editor's derived state back in line with the graph: drop
@@ -241,7 +239,6 @@ mod tests {
     use common::SerdeFormat;
     use glam::Vec2;
     use palantir::DockOperation;
-    use scenarium::Node;
 
     use super::*;
     use crate::core::document::internals::DocFixture;

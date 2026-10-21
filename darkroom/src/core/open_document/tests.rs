@@ -161,32 +161,33 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
 }
 
 /// A node keeps the ports it was authored against. Saved against `Print`, it loads against the
-/// same library unchanged; against a library whose `Print` retyped its input, the load fails and
-/// names the node and the func.
+/// same library and resolves; against a library whose `Print` retyped its input, it still loads,
+/// with its wiring, but resolves to nothing — the stub the editor shows — rather than to the
+/// retyped func.
 #[test]
-fn a_node_authored_against_other_ports_fails_the_load_by_name() {
+fn a_node_authored_against_other_ports_loads_as_a_stub() {
     let dir = TempDir::new("darkroom-open-document-signature");
     let path = dir.join("signed.darkroom");
     let library = system_library();
     let print = library.by_name("Print").unwrap();
     let mut graph = Graph::default();
     let node = graph.add(Node::from(print));
-    let kind = graph.find(node).unwrap().kind.clone();
+    let saved = graph.find(node).unwrap().clone();
     document::save(&Document::from(graph), &path).unwrap();
 
     let open = OpenDocument::load(path.clone(), &library).unwrap();
-    assert_eq!(open.document.graph.find(node).unwrap().kind, kind);
+    let loaded = open.document.graph.find(node).unwrap();
+    assert_eq!(*loaded, saved);
+    assert!(loaded.func(&library).is_some());
 
     let mut retyped = print.clone().into_builder();
     retyped.inputs[0].data_type = DataType::Int;
     let mut changed = Library::default();
     changed.add(retyped.build());
-    let error = OpenDocument::load(path, &changed).unwrap_err();
-    let message = error.to_string();
-    assert!(
-        message.contains(&format!("{node:?}")) && message.contains("\"Print\""),
-        "{message}"
-    );
+    let open = OpenDocument::load(path, &changed).unwrap();
+    let loaded = open.document.graph.find(node).unwrap();
+    assert_eq!(*loaded, saved, "the node loads as it was saved");
+    assert!(loaded.func(&changed).is_none(), "and resolves to nothing");
 }
 
 /// A drained batch whose one step is a frame of a held gesture folds into

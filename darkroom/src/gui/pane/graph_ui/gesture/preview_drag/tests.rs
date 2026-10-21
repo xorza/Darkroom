@@ -1,5 +1,5 @@
 use glam::Vec2;
-use scenarium::{Binding, NodeKind};
+use scenarium::Binding;
 
 use crate::core::document::internals::DocFixture;
 use crate::core::preview_sink;
@@ -62,7 +62,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         unreachable!("filtered to AddNode");
     };
     assert!(
-        matches!(node.kind, NodeKind::Func { func_id, .. } if preview_sink::is_func(func_id)),
+        node.func_id().is_some_and(preview_sink::is_func),
         "the spawned node is a preview"
     );
     assert!(
