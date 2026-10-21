@@ -57,7 +57,7 @@ const MIN_PANE: f32 = 220.0;
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
     /// One image-viewer navigation state per rendered viewer tab
-    /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
+    /// ([`TabRef::ImageViewer`]), keyed by the preview node it shows. Textures remain
     /// centralized in the preview store.
     pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
     /// The dock's op sink for one frame. A field so the two phases that

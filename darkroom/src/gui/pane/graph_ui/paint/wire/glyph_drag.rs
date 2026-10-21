@@ -14,7 +14,7 @@ use crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer;
 /// every frame, so a drag survives node moves and relayouts. The direction of
 /// an event drag flips the two domains, which is why `A` and `B` are separate
 /// parameters rather than one: a subscriber-started drag is a
-/// `GlyphDrag<NodeId, EventRef>` and an emitter-started one the reverse.
+/// `GlyphDrag<NodeId, EventPort>` and an emitter-started one the reverse.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct GlyphDrag<A, B> {
     /// The glyph the press latched. Fixed for the drag's whole life.

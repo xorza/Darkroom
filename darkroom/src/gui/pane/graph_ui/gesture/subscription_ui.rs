@@ -3,7 +3,6 @@ use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::event_ref::EventRef;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
@@ -14,6 +13,7 @@ use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
+use scenarium::EventPort;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -42,9 +42,9 @@ pub(crate) struct SubscriptionUI {
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
-    FromEmitter(GlyphDrag<EventRef, NodeId>),
+    FromEmitter(GlyphDrag<EventPort, NodeId>),
     /// Started on a subscription pin; snapping to an emitter event glyph.
-    FromSubscriber(GlyphDrag<NodeId, EventRef>),
+    FromSubscriber(GlyphDrag<NodeId, EventPort>),
 }
 
 impl InFlight {
@@ -216,10 +216,7 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (theme, graph_ctx, geometry) =
         (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
     for s in graph_ctx.subscriptions() {
-        let emitter = EventRef {
-            node_id: s.emitter,
-            event_idx: s.event_idx,
-        };
+        let emitter = EventPort::new(s.emitter, s.event_idx);
         let (Some(p0), Some(p3)) = (
             geometry.events.center(emitter),
             geometry.subs.center(s.subscriber),
@@ -246,7 +243,7 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// sink node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
-fn scan_sub_target(ui: &mut Ui, cx: CanvasCtx<'_>, emitter: EventRef) -> Option<NodeId> {
+fn scan_sub_target(ui: &mut Ui, cx: CanvasCtx<'_>, emitter: EventPort) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
     let candidates = cx
         .graph_ctx()
@@ -260,12 +257,12 @@ fn scan_sub_target(ui: &mut Ui, cx: CanvasCtx<'_>, emitter: EventRef) -> Option<
 /// dragged from `subscriber`'s pin: any node's event other than the
 /// subscriber's own (a node can't subscribe to itself). Mirror of
 /// [`scan_sub_target`] for the reverse drag.
-fn scan_emitter_target(ui: &mut Ui, cx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventRef> {
+fn scan_emitter_target(ui: &mut Ui, cx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventPort> {
     let pointer = ui.pointer_pos()?;
     let candidates = cx
         .graph_ctx()
         .nodes()
         .filter(|n| n.id != subscriber)
-        .flat_map(NodeCtx::event_refs);
+        .flat_map(NodeCtx::event_ports);
     cx.geometry().events.first_containing(pointer, candidates)
 }

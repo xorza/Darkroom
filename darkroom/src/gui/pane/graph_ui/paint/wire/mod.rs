@@ -11,8 +11,8 @@
 //! **The gesture.** [`GlyphDrag`](glyph_drag::GlyphDrag) is one drag from a latched glyph to
 //! whatever compatible glyph the pointer is over, generic over the two
 //! [`PortLayer`](crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer) key domains it
-//! spans: a data connection drags `PortRef → PortRef`, an event wire drags `EventRef → NodeId` or —
-//! started from the other end — `NodeId → EventRef`. Latching, the release edge, the fixed end's
+//! spans: a data connection drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
+//! started from the other end — `NodeId → EventPort`. Latching, the release edge, the fixed end's
 //! node, and where the preview's free end sits are stated once here; each family still owns which
 //! glyphs are candidates and what a release commits.
 

@@ -5,7 +5,6 @@ use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
-use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::node_key::NodeKey;
@@ -13,6 +12,7 @@ use crate::gui::pane::graph_ui::node_ui::header;
 use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::port_ref::{PortKind, PortRef};
+use scenarium::EventPort;
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every port-ish glyph plus the
 /// cross-frame node-size cache, all filled by one [`Self::rebuild`] pass polling
@@ -49,8 +49,8 @@ pub(crate) struct CanvasGeometry {
     /// Data-port circles, keyed by [`PortRef`].
     pub(crate) ports: PortLayer<PortRef>,
     /// Emitter event glyphs (the white triangles under a node's outputs),
-    /// keyed by [`EventRef`]. The drag source for subscription wires.
-    pub(crate) events: PortLayer<EventRef>,
+    /// keyed by [`EventPort`]. The drag source for subscription wires.
+    pub(crate) events: PortLayer<EventPort>,
     /// Subscription pins (the top-left triangle on sink nodes), keyed
     /// by node — a subscription is whole-node, so one pin per node. The
     /// drop target for subscription wires.
@@ -355,7 +355,7 @@ impl CanvasGeometry {
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
-            for ev in n.event_refs() {
+            for ev in n.event_ports() {
                 let r = ui.response_for(port_row::event_glyph_wid(ev));
                 self.events.record(ev, r, place);
             }
@@ -379,7 +379,7 @@ impl CanvasGeometry {
                 self.ports.replay(port, n.pos);
             }
         }
-        for ev in n.event_refs() {
+        for ev in n.event_ports() {
             self.events.replay(ev, n.pos);
         }
         if n.sink() {

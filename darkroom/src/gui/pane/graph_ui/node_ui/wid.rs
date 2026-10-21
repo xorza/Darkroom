@@ -15,8 +15,8 @@
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
-use crate::gui::event_ref::EventRef;
 use crate::gui::port_ref::PortRef;
+use scenarium::EventPort;
 
 use crate::gui::widgets::hover::Hover;
 
@@ -39,7 +39,7 @@ pub(super) fn port(tag: &'static str, port: PortRef) -> WidgetId {
 
 /// An event-keyed widget id — [`node`] for the per-event widgets, keyed by
 /// the event's index as well.
-pub(super) fn event(tag: &'static str, event: EventRef) -> WidgetId {
+pub(super) fn event(tag: &'static str, event: EventPort) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, event.node_id, event.event_idx))
 }
 

@@ -261,7 +261,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                 }
                 .show(ui, rec);
             }
-            if node.can_evict_cache()
+            if node.cacheable()
                 && Badge::control(
                     BadgeFace::text(
                         "↻",
@@ -287,9 +287,9 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
             // ports and the status glow keep the stage.
             //
             // Shown only where direct storage controls can apply — see
-            // `NodeCtx::cache_controls`.
+            // `NodeCtx::cacheable`.
             // (An impure node still paints the `~` marker below to say why.)
-            if node.cache_controls() {
+            if node.cacheable() {
                 let ram = node.cache().caches_in_ram();
                 let disk = node.cache().persists_to_disk();
                 // The two bits are the same chip twice — only which one the

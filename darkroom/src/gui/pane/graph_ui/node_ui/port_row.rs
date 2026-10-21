@@ -25,7 +25,6 @@ use scenarium::{ConstValue, DataType, FsPathMode, Func};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
-use crate::gui::event_ref::EventRef;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{EditCommand, PathPick};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
@@ -42,6 +41,7 @@ use crate::gui::widgets::port_glyph;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
 use crate::gui::widgets::support;
 use crate::gui::widgets::support::ROW_GAP;
+use scenarium::EventPort;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -617,10 +617,7 @@ impl EventRow<'_> {
         let theme = ncx.theme();
         let node_id = ncx.id;
         let overhang = theme.port_overhang();
-        let ev = EventRef {
-            node_id,
-            event_idx: index,
-        };
+        let ev = EventPort::new(node_id, index);
         let wid = event_glyph_wid(ev);
         let fill = Hover::from(dcx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
         let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
@@ -646,7 +643,7 @@ impl EventRow<'_> {
 
 /// An event port glyph. A separate id space from data ports
 /// ([`port_circle_wid`]) because events are indexed independently of outputs.
-pub(crate) fn event_glyph_wid(event: EventRef) -> WidgetId {
+pub(crate) fn event_glyph_wid(event: EventPort) -> WidgetId {
     wid::event("event_glyph", event)
 }
 
