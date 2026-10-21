@@ -12,7 +12,7 @@ async fn each_frame_event_runs_the_subscribed_cone() {
             w.send(w.fire("Frame Event", 0));
         }
         let run = w.run().await;
-        assert_eq!(run.ran_node_count, 3);
+        assert_eq!(run.executed_node_count, 3);
         assert_eq!(run.logs(), [expected]);
     }
 }
@@ -37,7 +37,7 @@ async fn sink_seeds_run_the_sink() {
 
     let run = w.run().await;
 
-    assert_eq!(run.ran_node_count, 1);
+    assert_eq!(run.executed_node_count, 1);
     assert_eq!(run.logs(), ["hello"]);
 }
 
@@ -79,7 +79,7 @@ async fn a_disabled_sink_stays_out_of_sink_runs() {
     w.send_many([w.update(), TestWorker::sinks()]);
 
     let run = w.run().await;
-    assert_eq!(run.ran_node_count, 0);
+    assert_eq!(run.executed_node_count, 0);
     assert!(run.missing_inputs().is_empty());
 }
 
@@ -92,7 +92,7 @@ async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
 
     let run = w.run().await;
     assert!(!run.cancelled, "an idle cancel affected the next run");
-    assert_eq!(run.ran_node_count, 1, "the run completed in full");
+    assert_eq!(run.executed_node_count, 1, "the run completed in full");
 }
 
 /// A `Sync` sent behind a run is acknowledged only after the run reported:

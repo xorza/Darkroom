@@ -14,7 +14,7 @@ use std::fmt;
 
 use ::serde::de::Error as _;
 use ::serde::de::{MapAccess, Visitor};
-use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
+use ::serde::{Deserialize, Deserializer, Serializer};
 use hashbrown::HashMap;
 
 use crate::graph::binding::Binding;
@@ -27,7 +27,7 @@ pub(super) fn serialize_bindings<S: Serializer>(
     map: &BTreeMap<InputPort, Binding>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    map.iter().collect::<Vec<_>>().serialize(serializer)
+    serializer.collect_seq(map)
 }
 
 pub(super) fn deserialize_bindings<'de, D: Deserializer<'de>>(

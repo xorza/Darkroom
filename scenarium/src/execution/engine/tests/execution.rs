@@ -142,7 +142,7 @@ async fn executed_nodes_reported() {
     let run = e.run_sinks().await;
 
     assert_eq!(run.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
-    assert_eq!(run.ran_node_count, 5);
+    assert_eq!(run.executed_node_count, 5);
     assert!(run.errored().is_empty());
     assert!(run.missing_inputs().is_empty());
 

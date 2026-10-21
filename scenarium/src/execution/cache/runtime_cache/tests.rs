@@ -2,6 +2,10 @@ use crate::graph::identity::{FuncId, NodeId};
 use std::panic;
 use std::sync::Arc;
 
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
+use crate::data::dynamic_value::DynamicValue;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
@@ -11,7 +15,6 @@ use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
 use crate::internals::program::ProgramBuilder;
-use crate::{ConstValue, DataType, DynamicValue, RamUsage};
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(ConstValue::Int(1))]
@@ -472,7 +475,8 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
     use std::fmt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::{CustomValue, TypeId};
+    use crate::data::data_type::TypeId;
+    use crate::data::dynamic_value::CustomValue;
 
     #[derive(Debug)]
     struct Payload {

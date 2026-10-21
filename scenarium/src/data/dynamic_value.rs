@@ -7,7 +7,9 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{ConstValue, RamUsage, TypeId};
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::TypeId;
+use crate::data::ram_usage::RamUsage;
 
 pub trait CustomValue: Send + Sync + Display + 'static {
     fn type_id(&self) -> TypeId;

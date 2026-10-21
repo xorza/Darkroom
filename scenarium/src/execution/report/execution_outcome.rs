@@ -1,6 +1,6 @@
 //! [`ExecutionOutcome`]: what a completed run hands back.
 
-use crate::RamUsage;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::report::event_trigger::EventTrigger;
 use crate::execution::report::node_status::NodeStatus;
 use crate::runtime::log_entry::LogEntry;
@@ -13,7 +13,7 @@ pub(crate) struct ExecutionOutcome {
     /// How many nodes invoked their lambda, successes and failures alike. Counted while
     /// the rows are built rather than derived from them, since a failed node's row no
     /// longer says "executed" separately.
-    pub(crate) ran_node_count: usize,
+    pub(crate) executed_node_count: usize,
     pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
@@ -23,7 +23,7 @@ pub(crate) struct ExecutionOutcome {
 impl ExecutionOutcome {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
-        self.ran_node_count = 0;
+        self.executed_node_count = 0;
         self.event_triggers.clear();
         self.logs.clear();
         self.cancelled = false;

@@ -41,7 +41,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
     ];
     let mut outcome = ExecutionOutcome {
         nodes: rows.clone(),
-        ran_node_count: 2,
+        executed_node_count: 2,
         logs: vec![LogEntry {
             node_id: executed,
             level: LogLevel::Warn,

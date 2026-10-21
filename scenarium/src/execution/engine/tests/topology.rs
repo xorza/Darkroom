@@ -31,7 +31,7 @@ async fn empty_graph_executes_cleanly() {
 
     let run = e.run_sinks().await;
 
-    assert_eq!(run.ran_node_count, 0);
+    assert_eq!(run.executed_node_count, 0);
     assert!(run.ran().is_empty());
     assert!(run.errored().is_empty());
     assert!(run.missing_inputs().is_empty());
@@ -53,7 +53,7 @@ async fn cached_output_survives_node_removal() {
 
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
-    assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
+    assert_eq!(run.executed_node_count, 4, "both sinks and both sources");
     let mut ran = run.ran();
     ran.sort_unstable();
     assert_eq!(

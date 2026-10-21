@@ -3,7 +3,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{ConstValue, DynamicValue};
+use crate::data::const_value::ConstValue;
+use crate::data::dynamic_value::DynamicValue;
 
 /// A shared count of how often the body it wraps was invoked.
 ///

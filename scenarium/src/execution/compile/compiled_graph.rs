@@ -21,16 +21,16 @@ use std::sync::Arc;
 
 use crate::containers::column::{Column, Span};
 use crate::data::codec::Codecs;
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::FuncRef;
-use crate::graph::identity::NodeId;
+use crate::graph::identity::{FuncRef, NodeId};
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
-use crate::{ConstValue, DataType};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {

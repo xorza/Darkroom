@@ -31,7 +31,10 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     );
 
     let run = e.run_sinks().await;
-    assert_eq!(run.ran_node_count, 1, "only print runs the second time");
+    assert_eq!(
+        run.executed_node_count, 1,
+        "only print runs the second time"
+    );
     assert_eq!(
         e.output_i64("sum", 0),
         Some(2),

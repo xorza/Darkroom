@@ -5,12 +5,12 @@
 //! would be asserting on something it never said.
 
 use super::*;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::func::lambda::internals;
+use crate::async_lambda;
+use crate::data::const_value::ConstValue;
+use crate::graph::func::lambda::{FuncLambda, internals};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals::program::ProgramBuilder;
-use crate::{ConstValue, async_lambda};
 
 fn producer() -> FuncLambda {
     async_lambda!(|Invocation { outputs, .. }| {

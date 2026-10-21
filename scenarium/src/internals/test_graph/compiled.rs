@@ -6,7 +6,7 @@
 
 use hashbrown::HashMap;
 
-use crate::DataType;
+use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionNode};
 use crate::execution::index::NodeIdx;
 use crate::graph::identity::NodeId;

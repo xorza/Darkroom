@@ -19,7 +19,7 @@ async fn start_then_stop() {
     // loop's first firing then runs the whole cone.
     assert!(w.run().await.logs().is_empty());
     let fired = w.run().await;
-    assert_eq!(fired.ran_node_count, 3);
+    assert_eq!(fired.executed_node_count, 3);
     assert_eq!(fired.logs().len(), 1);
 
     w.drain();
@@ -75,7 +75,7 @@ async fn update_or_a_second_start_rebuilds_a_running_loop() {
         w.settle([restart]).await;
         w.drain();
         assert_eq!(
-            w.run().await.ran_node_count,
+            w.run().await.executed_node_count,
             3,
             "the loop rebuilt by_update={by_update} still runs the whole cone"
         );

@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
-use crate::{CustomValueCodec, EnumVariants};
+use crate::data::codec::CustomValueCodec;
+use crate::data::data_type::EnumVariants;
 
+/// What a registered type is: a custom value with an optional disk codec, or
+/// an enum with its variant names.
 #[derive(Clone, Debug)]
-enum TypeEntryKind {
+enum TypeKind {
     Custom {
-        display_name: String,
         codec: Option<Arc<dyn CustomValueCodec>>,
     },
     Enum {
-        display_name: String,
         variants: Vec<String>,
     },
 }
@@ -18,25 +19,17 @@ enum TypeEntryKind {
 /// carries only its display metadata and variants.
 #[derive(Clone, Debug)]
 pub struct TypeEntry {
-    kind: TypeEntryKind,
+    display_name: String,
+    kind: TypeKind,
 }
 
 impl TypeEntry {
-    fn custom_entry(
-        display_name: impl Into<String>,
-        codec: Option<Arc<dyn CustomValueCodec>>,
-    ) -> Self {
-        Self {
-            kind: TypeEntryKind::Custom {
-                display_name: display_name.into(),
-                codec,
-            },
-        }
-    }
-
     /// A custom type with no disk codec (not cacheable).
     pub fn custom(display_name: impl Into<String>) -> Self {
-        Self::custom_entry(display_name, None)
+        Self {
+            display_name: display_name.into(),
+            kind: TypeKind::Custom { codec: None },
+        }
     }
 
     /// A custom type with a disk codec.
@@ -44,7 +37,10 @@ impl TypeEntry {
         display_name: impl Into<String>,
         codec: Arc<dyn CustomValueCodec>,
     ) -> Self {
-        Self::custom_entry(display_name, Some(codec))
+        Self {
+            display_name: display_name.into(),
+            kind: TypeKind::Custom { codec: Some(codec) },
+        }
     }
 
     /// An enum type with the variant names taken from `E` (via strum).
@@ -56,67 +52,46 @@ impl TypeEntry {
     /// where the concrete type isn't available — see `lens`'s config builders).
     pub fn enum_with_variants(display_name: impl Into<String>, variants: Vec<String>) -> Self {
         Self {
-            kind: TypeEntryKind::Enum {
-                display_name: display_name.into(),
-                variants,
-            },
+            display_name: display_name.into(),
+            kind: TypeKind::Enum { variants },
         }
     }
 
     pub fn display_name(&self) -> &str {
-        match &self.kind {
-            TypeEntryKind::Custom { display_name, .. }
-            | TypeEntryKind::Enum { display_name, .. } => display_name,
-        }
+        &self.display_name
     }
 
     /// The variant names for an enum entry; `None` for a custom type.
     pub fn variants(&self) -> Option<&[String]> {
         match &self.kind {
-            TypeEntryKind::Enum { variants, .. } => Some(variants),
-            TypeEntryKind::Custom { .. } => None,
+            TypeKind::Enum { variants } => Some(variants),
+            TypeKind::Custom { .. } => None,
         }
     }
 
     /// Whether `other` declares this same type: the same name, the same
     /// variants, and the same codec instance.
     pub(super) fn same_as(&self, other: &Self) -> bool {
-        match (&self.kind, &other.kind) {
-            (
-                TypeEntryKind::Custom {
-                    display_name,
-                    codec,
-                },
-                TypeEntryKind::Custom {
-                    display_name: other_name,
-                    codec: other_codec,
-                },
-            ) => {
-                display_name == other_name
-                    && match (codec, other_codec) {
+        self.display_name == other.display_name
+            && match (&self.kind, &other.kind) {
+                (TypeKind::Custom { codec }, TypeKind::Custom { codec: other }) => {
+                    match (codec, other) {
                         (None, None) => true,
                         (Some(codec), Some(other)) => Arc::ptr_eq(codec, other),
                         _ => false,
                     }
+                }
+                (TypeKind::Enum { variants }, TypeKind::Enum { variants: other }) => {
+                    variants == other
+                }
+                _ => false,
             }
-            (
-                TypeEntryKind::Enum {
-                    display_name,
-                    variants,
-                },
-                TypeEntryKind::Enum {
-                    display_name: other_name,
-                    variants: other_variants,
-                },
-            ) => display_name == other_name && variants == other_variants,
-            _ => false,
-        }
     }
 
     pub(super) fn codec(&self) -> Option<&Arc<dyn CustomValueCodec>> {
         match &self.kind {
-            TypeEntryKind::Custom { codec, .. } => codec.as_ref(),
-            TypeEntryKind::Enum { .. } => None,
+            TypeKind::Custom { codec } => codec.as_ref(),
+            TypeKind::Enum { .. } => None,
         }
     }
 }

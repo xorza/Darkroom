@@ -6,6 +6,8 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
+use crate::data::const_value::ConstValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::{CodecFormatError, FrameError};
 use crate::execution::cache::disk_store::format::{
@@ -16,7 +18,6 @@ use crate::graph::func::lambda::OutputDemand;
 use crate::internals::blob::{Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
 use crate::library::Library;
-use crate::{ConstValue, DynamicValue};
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
 /// skipped — the shape the run loop hands the decoder.

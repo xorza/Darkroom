@@ -20,6 +20,8 @@ use std::sync::Arc;
 use common::CancelToken;
 
 use crate::containers::column::Column;
+use crate::data::dynamic_value::DynamicValue;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::blob_target::BlobTarget;
 use crate::execution::cache::disk_store::error::StoreResult;
@@ -37,7 +39,6 @@ use crate::execution::schedule::{Delivery, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
-use crate::{DynamicValue, RamUsage};
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a
 /// [`Column`] aligned to the installed program, so every run-loop access is
@@ -789,7 +790,7 @@ impl RuntimeCache {
 pub(crate) mod internals {
     use common::CancelToken;
 
-    use crate::DynamicValue;
+    use crate::data::dynamic_value::DynamicValue;
 
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::DiskStore;

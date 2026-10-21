@@ -19,6 +19,9 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::async_lambda;
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
+use crate::data::dynamic_value::DynamicValue;
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::detached::DetachedNode;
@@ -34,7 +37,6 @@ use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::internals::calls::Calls;
 use crate::library::Library;
-use crate::{ConstValue, DataType, DynamicValue};
 
 /// A graph, the library it resolves against, and the names its nodes answer to.
 ///
@@ -651,7 +653,7 @@ pub(crate) mod compiled;
 mod internals {
     use std::sync::Arc;
 
-    use crate::DataType;
+    use crate::data::data_type::DataType;
     use crate::execution::compile::Compiler;
     use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::compile::error::CompileError;

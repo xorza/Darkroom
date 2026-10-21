@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::{DataType, FsPathConfig, FsPathMode, TypeId};
 use crate::graph::func::Func;
 use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::func_input::FuncInput;
@@ -9,7 +11,6 @@ use crate::graph::func::value_variant::ValueVariant;
 use crate::graph::identity::FuncId;
 use crate::graph::node::CacheMode;
 use crate::internals;
-use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
 
 #[test]
 fn validate_rejects_invalid_identities_wildcards_and_defaults() {

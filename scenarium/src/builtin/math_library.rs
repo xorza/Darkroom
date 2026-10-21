@@ -1,5 +1,5 @@
-use crate::DataType;
 use crate::async_lambda;
+use crate::data::data_type::DataType;
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
@@ -398,9 +398,10 @@ fn divide_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::const_value::ConstValue;
+    use crate::data::dynamic_value::DynamicValue;
     use crate::graph::func::error::InvokeError;
     use crate::internals::func_invoker::FuncInvoker;
-    use crate::{ConstValue, DynamicValue};
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
         let library = math_library();

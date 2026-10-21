@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use common::{CancelToken, is_debug};
 
-use crate::RamUsage;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_cache::cache_flush_report::CacheFlushReport;
@@ -262,7 +262,7 @@ impl ExecutionEngine {
 pub(crate) mod internals {
     use std::result;
 
-    use crate::DynamicValue;
+    use crate::data::dynamic_value::DynamicValue;
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;

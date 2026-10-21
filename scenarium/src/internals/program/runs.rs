@@ -3,9 +3,9 @@
 
 use common::CancelToken;
 
-use crate::DynamicValue;
-use crate::RamUsage;
 use crate::containers::column::Column;
+use crate::data::dynamic_value::DynamicValue;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::RunError;
@@ -200,7 +200,7 @@ impl<'a> Runs<'a> {
     }
 
     pub(crate) fn ran_count(&self) -> usize {
-        self.outcome.ran_node_count
+        self.outcome.executed_node_count
     }
 
     pub(crate) fn cancelled(&self) -> bool {

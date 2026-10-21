@@ -8,8 +8,9 @@ use std::mem;
 use std::sync::Mutex;
 
 use crate::async_lambda;
+use crate::data::data_type::TypeId;
+use crate::data::dynamic_value::CustomValue;
 use crate::library::type_entry::TypeEntry;
-use crate::{CustomValue, TypeId};
 
 const TRACKED_TYPE: TypeId = TypeId::literal("7266406a-8083-4e46-b661-de4308bcec96");
 
