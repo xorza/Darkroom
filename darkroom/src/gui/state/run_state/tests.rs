@@ -309,3 +309,31 @@ fn completed_snapshot_replaces_the_previous_run() {
     assert_eq!(rs.status(executed), ExecStatus::MissingInputs(vec![1]));
     assert_eq!(rs.status(errored), ExecStatus::None);
 }
+
+/// A failed run leaves no results to show, so an execution error clears the
+/// last run's statuses. A panicking event lambda stops the loop but fails no
+/// run, so the statuses the last completed run left stand.
+#[test]
+fn only_a_failed_run_clears_the_last_run_statuses() {
+    let node = nid(1);
+    let mut rs = run_state([node]);
+    let mut log = StatusLog::default();
+    rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);
+
+    rs.apply_report(
+        WorkerReport::Error(WorkerError::EventLambdaPanic {
+            node_id: node,
+            message: "boom".to_owned(),
+        }),
+        &mut log,
+    );
+    assert_eq!(rs.status(node), ExecStatus::Executed(1.0));
+
+    rs.apply_report(
+        WorkerReport::Error(WorkerError::Execution {
+            error: scenarium::Error::CycleDetected { node_id: node },
+        }),
+        &mut log,
+    );
+    assert_eq!(rs.status(node), ExecStatus::None);
+}

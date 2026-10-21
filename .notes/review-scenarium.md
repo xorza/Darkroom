@@ -74,17 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 9. Error placement
-
-Files: `src/execution/error.rs`, `src/worker/error.rs`,
-`src/worker/worker_task/mod.rs`.
-
-- [ ] `execution/error.rs:32` `Error::EventLambdaPanic` — an event-loop
-  failure that only the worker produces (`worker_task/mod.rs:411`), carried
-  in the engine's run error and wrapped as `WorkerError::Execution`
-  ("execution failed"). Target: `WorkerError::EventLambdaPanic { node_id,
-  message }`, and remove the variant and its doc mention from `Error`.
-
 ### 10. Cleanup
 
 Files: about 30 files that use root paths, plus the files named per item.

@@ -10,7 +10,6 @@ use common::CancelToken;
 
 use crate::execution::cache::runtime_cache::cache_flush_report::CacheFlushReport;
 use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
-use crate::execution::error::Error;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::run_reporter::RunPhase;
 use crate::execution::report::run_reporter::RunReporter;
@@ -407,11 +406,9 @@ where
             (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
         for panic in panics {
-            (self.callback)(WorkerReport::Error(WorkerError::Execution {
-                error: Error::EventLambdaPanic {
-                    node_id: panic.node_id,
-                    message: panic.message,
-                },
+            (self.callback)(WorkerReport::Error(WorkerError::EventLambdaPanic {
+                node_id: panic.node_id,
+                message: panic.message,
             }));
         }
     }
