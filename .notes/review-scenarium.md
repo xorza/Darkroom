@@ -74,18 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 8. Blob store I/O
-
-Files: `src/execution/cache/disk_store/blob_target/mod.rs`,
-`src/execution/cache/disk_store/mod.rs`.
-
-- [ ] `blob_target/mod.rs:169` `BlobTarget::store` — runs
-  `fs::create_dir_all(parent)` before every write, which is one or more
-  syscalls per stored node per run under an event loop. The parent is always
-  the store root. Target: create the root once when the store is attached,
-  and on a `NotFound` from `AtomicFile::new` (the root was deleted) create it
-  and try once more.
-
 ### 9. Error placement
 
 Files: `src/execution/error.rs`, `src/worker/error.rs`,

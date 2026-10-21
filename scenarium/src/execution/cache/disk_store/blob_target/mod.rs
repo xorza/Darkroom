@@ -67,6 +67,23 @@ impl BlobTarget {
         }
     }
 
+    /// Create the directory the blob lives in.
+    async fn create_directory(&self) -> Result<(), StoreError> {
+        let Some(parent) = self
+            .path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        else {
+            return Ok(());
+        };
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|source| StoreError::Directory {
+                path: self.path.clone(),
+                source,
+            })
+    }
+
     /// Open the blob and measure it, the one way all three readers below start.
     ///
     /// The two `None`s are different answers, which is why this is not a bare
@@ -161,25 +178,20 @@ impl BlobTarget {
             return Ok(StoreOutcome::AlreadyCovered);
         }
         let path = || self.path.clone();
-        if let Some(parent) = self
-            .path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|source| StoreError::Directory {
-                    path: path(),
-                    source,
-                })?;
+        // The store's directory is created only when a write finds it missing:
+        // the first write under a new root, or one after the root was removed.
+        // Every other write costs no directory syscall.
+        let file = match AtomicFile::new(&self.path, PublicationMode::Cache).await {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.create_directory().await?;
+                AtomicFile::new(&self.path, PublicationMode::Cache).await
+            }
+            opened => opened,
         }
-
-        let file = AtomicFile::new(&self.path, PublicationMode::Cache)
-            .await
-            .map_err(|source| StoreError::Begin {
-                path: path(),
-                source,
-            })?;
+        .map_err(|source| StoreError::Begin {
+            path: path(),
+            source,
+        })?;
         let mut writer = BufWriter::new(file);
         BlobWriter {
             writer: &mut writer,
