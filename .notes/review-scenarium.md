@@ -74,34 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 6. Layer edges
-
-Files: `src/runtime/context_manager.rs`, `src/execution/report/log_entry.rs`
-(moves to `src/runtime/log_entry.rs`), `src/graph/node/special.rs`,
-`src/builtin/run_sinks.rs` (moves under `src/graph/node/special/`),
-`src/execution/cache/disk_store/mod.rs`,
-`src/execution/cache/runtime_cache/mod.rs`, `src/data/codec/error.rs`,
-`src/execution/cache/disk_store/format/mod.rs`,
-`src/execution/cache/disk_store/error.rs`, `src/lib.rs`.
-
-- [ ] `context_manager.rs:3` — `runtime` imports
-  `execution::report::log_entry` (cycle `runtime` → `execution` → `runtime`,
-  edge to cut: this one). Target: `LogEntry` and `LogLevel` live in
-  `runtime/log_entry.rs`, and `execution::report` imports them.
-- [ ] `special.rs:14` — the authoring model imports
-  `builtin::run_sinks::run_sinks_func`, while `builtin` imports `graph`
-  (cycle, edge to cut: this one). Target: the `RunSinks` spec moves to
-  `graph/node/special/run_sinks.rs`, beside the enum that names it.
-- [ ] `disk_store/mod.rs:41` `DiskStore::blob_target` takes a whole
-  `ExecutionNode` to read `cache.persists_to_disk()`, so the blob store
-  imports the compile artifact (`disk_store/mod.rs:16`). Target: the caller
-  `RuntimeCache::blob_target` checks the cache mode, and the store takes only
-  `(NodeId, Digest)`.
-- [ ] `data/codec/error.rs` `CodecFormatError`, `FrameError` and the
-  `Result` alias — produced only by `disk_store/format`. Target: move them
-  to `disk_store/format/error.rs`. `CodecError` (the codec contract) stays in
-  `data::codec`. Re-point the `lib.rs` exports.
-
 ### 7. Event addressing
 
 Files: `src/graph/identity.rs`, `src/graph/subscription.rs`,

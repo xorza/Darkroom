@@ -5,9 +5,9 @@
 //! [`RunReporter`](run_reporter::RunReporter) is called on the run's own thread as each lambda
 //! starts and finishes, so a host sees progress as it happens;
 //! [`ExecutionOutcome`](execution_outcome::ExecutionOutcome) is what the run leaves behind — one
-//! [`NodeStatus`](node_status::NodeStatus) row per node, the [`LogEntry`](log_entry::LogEntry)s
-//! written along the way, and the [`EventTrigger`](event_trigger::EventTrigger)s a successful event
-//! source armed.
+//! [`NodeStatus`](node_status::NodeStatus) row per node, the
+//! [`LogEntry`](crate::runtime::log_entry::LogEntry)s written along the way, and the
+//! [`EventTrigger`](event_trigger::EventTrigger)s a successful event source armed.
 //!
 //! [`NodeStatus`](node_status::NodeStatus) is the row the executor emits *and* the row the host
 //! consumes — [`RunSummary`](crate::worker::run_summary::RunSummary) publishes it verbatim. A node
@@ -16,6 +16,5 @@
 
 pub(crate) mod event_trigger;
 pub(crate) mod execution_outcome;
-pub(crate) mod log_entry;
 pub(crate) mod node_status;
 pub(crate) mod run_reporter;

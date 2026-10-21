@@ -13,7 +13,6 @@ use tokio::fs;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::blob_target::BlobTarget;
 use crate::execution::cache::disk_store::error::RemovalError;
-use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::identity::NodeId;
 
 /// Where the node-output cache persists: a directory of blobs named by node
@@ -38,16 +37,9 @@ impl DiskStore {
         Self { root }
     }
 
-    pub(super) fn blob_target(
-        &self,
-        node_id: NodeId,
-        e_node: &ExecutionNode,
-        digest: Option<Digest>,
-    ) -> Option<BlobTarget> {
-        if !e_node.cache.persists_to_disk() {
-            return None;
-        }
-        let digest = digest?;
+    /// Where `node_id`'s blob under `digest` lives, or `None` for a
+    /// memory-only store.
+    pub(super) fn blob_target(&self, node_id: NodeId, digest: Digest) -> Option<BlobTarget> {
         let path = self.node_path(node_id)?;
         Some(BlobTarget { path, digest })
     }

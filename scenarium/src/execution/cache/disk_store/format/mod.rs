@@ -7,10 +7,9 @@ use tokio::io::{
     AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
 };
 
-use crate::data::codec;
 use crate::data::codec::Codecs;
-use crate::data::codec::error::{CodecFormatError, FrameError};
 use crate::execution::cache::digest::Digest;
+use crate::execution::cache::disk_store::error::{CodecFormatError, FormatResult, FrameError};
 use crate::graph::func::lambda::OutputDemand;
 use crate::{ConstValue, DynamicValue, TypeId};
 
@@ -68,7 +67,7 @@ impl<W> BlobWriter<'_, W>
 where
     W: AsyncWrite + AsyncSeek + Unpin + Send,
 {
-    pub(super) async fn write(self, outputs: &[DynamicValue]) -> codec::error::Result<()> {
+    pub(super) async fn write(self, outputs: &[DynamicValue]) -> FormatResult<()> {
         let Self {
             writer,
             digest,
@@ -147,10 +146,7 @@ impl<R> BlobReader<'_, R>
 where
     R: AsyncRead + Unpin + Send,
 {
-    pub(super) async fn covers_outputs(
-        &mut self,
-        outputs: &[DynamicValue],
-    ) -> codec::error::Result<bool> {
+    pub(super) async fn covers_outputs(&mut self, outputs: &[DynamicValue]) -> FormatResult<bool> {
         let prefix = self
             .scan_header(|index, descriptor| {
                 outputs
@@ -165,17 +161,14 @@ where
     /// after its header check. Reads the fixed prefix plus one descriptor per output and stops,
     /// so a reuse verdict costs one small sequential read instead of decoding the body. Sharing
     /// `read_header` is what keeps a probe's verdict and the later read's from drifting apart.
-    pub(super) async fn covers_demand(
-        &mut self,
-        demand: &[OutputDemand],
-    ) -> codec::error::Result<bool> {
+    pub(super) async fn covers_demand(&mut self, demand: &[OutputDemand]) -> FormatResult<bool> {
         Ok(self.read_header(demand).await?.is_some())
     }
 
     pub(super) async fn read(
         &mut self,
         demand: &[OutputDemand],
-    ) -> codec::error::Result<Option<Vec<DynamicValue>>> {
+    ) -> FormatResult<Option<Vec<DynamicValue>>> {
         let Some(header) = self.read_header(demand).await? else {
             return Ok(None);
         };
@@ -212,10 +205,7 @@ where
     /// different arity, a codec version the library no longer has, or a demanded output the
     /// blob left `Unbound`. Undemanded outputs may be missing; that is what makes a narrow
     /// snapshot reusable by a run that wants less than the one which wrote it.
-    async fn read_header(
-        &mut self,
-        demand: &[OutputDemand],
-    ) -> codec::error::Result<Option<BlobHeader>> {
+    async fn read_header(&mut self, demand: &[OutputDemand]) -> FormatResult<Option<BlobHeader>> {
         let mut descriptors = Vec::new();
         let prefix = self
             .scan_header(|index, descriptor| {
@@ -237,7 +227,7 @@ where
     async fn scan_header(
         &mut self,
         mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
-    ) -> codec::error::Result<Option<HeaderPrefix>> {
+    ) -> FormatResult<Option<HeaderPrefix>> {
         let Some(prefix) = self.read_prefix().await? else {
             return Ok(None);
         };
@@ -265,7 +255,7 @@ where
         Ok(Some(prefix))
     }
 
-    async fn read_prefix(&mut self) -> codec::error::Result<Option<HeaderPrefix>> {
+    async fn read_prefix(&mut self) -> FormatResult<Option<HeaderPrefix>> {
         let mut bytes = [0; FIXED_LEN];
         self.reader.read_exact(&mut bytes).await?;
         if &bytes[..8] != MAGIC {
@@ -307,7 +297,7 @@ pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Opt
     })
 }
 
-fn descriptor_for(value: &DynamicValue, codecs: &Codecs) -> codec::error::Result<OutputDescriptor> {
+fn descriptor_for(value: &DynamicValue, codecs: &Codecs) -> FormatResult<OutputDescriptor> {
     let kind = match value {
         DynamicValue::Unbound => OutputKind::Unbound,
         DynamicValue::Static(_) => OutputKind::Static,
@@ -353,9 +343,7 @@ async fn write_descriptor(
     writer.write_all(&bytes).await
 }
 
-async fn read_descriptor(
-    reader: &mut (impl AsyncRead + Unpin),
-) -> codec::error::Result<OutputDescriptor> {
+async fn read_descriptor(reader: &mut (impl AsyncRead + Unpin)) -> FormatResult<OutputDescriptor> {
     let mut bytes = [0; DESCRIPTOR_LEN];
     reader.read_exact(&mut bytes).await?;
     if bytes[1..4] != [0; 3] {
@@ -441,7 +429,7 @@ async fn write_strings(
 async fn read_static(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,
-) -> codec::error::Result<ConstValue> {
+) -> FormatResult<ConstValue> {
     let tag = read_u8(reader).await?;
     match tag {
         0 => {
@@ -479,7 +467,7 @@ async fn read_static(
 async fn read_string(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,
-) -> codec::error::Result<String> {
+) -> FormatResult<String> {
     let byte_len = read_u64(reader).await?;
     let expected_len = 1u64
         .checked_add(8)
@@ -495,7 +483,7 @@ async fn read_string(
 async fn read_strings(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,
-) -> codec::error::Result<Vec<String>> {
+) -> FormatResult<Vec<String>> {
     let value_count = read_u64(reader).await?;
     let minimum_len = 1u64
         .checked_add(8)
@@ -538,7 +526,7 @@ async fn read_array<const N: usize>(reader: &mut (impl AsyncRead + Unpin)) -> io
     Ok(bytes)
 }
 
-fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> codec::error::Result<()> {
+fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> FormatResult<()> {
     if reader.limit() == 0 {
         Ok(())
     } else {
@@ -546,7 +534,7 @@ fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> codec::error::Result<()> 
     }
 }
 
-fn require_payload_len(actual: u64, expected: u64) -> codec::error::Result<()> {
+fn require_payload_len(actual: u64, expected: u64) -> FormatResult<()> {
     if actual == expected {
         Ok(())
     } else {

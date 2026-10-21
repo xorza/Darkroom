@@ -1,8 +1,7 @@
 use common::CancelToken;
 
-use crate::execution::report::log_entry::LogEntry;
-use crate::execution::report::log_entry::LogLevel;
 use crate::graph::identity::NodeId;
+use crate::runtime::log_entry::{LogEntry, LogLevel};
 
 #[derive(Debug, Default)]
 pub struct ContextManager {
