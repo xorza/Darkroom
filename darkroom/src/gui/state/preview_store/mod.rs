@@ -37,7 +37,7 @@ const PREVIEW_TEXTURE_DIM: NonZeroU32 = NonZeroU32::new(256).unwrap();
 pub(crate) struct PreviewStore {
     /// Each preview node's current value, keyed by the node that published it —
     /// a preview *is* the thing on screen, so its identity is the widget's.
-    pub(crate) entries: HashMap<NodeId, StoredContent>,
+    entries: HashMap<NodeId, StoredContent>,
     /// The publishes of each node still converting for its card.
     converting: HashMap<NodeId, Converting>,
     last_ticket: Ticket,
@@ -190,6 +190,12 @@ impl PreviewStore {
             last_ticket: Ticket::default(),
             converter: PreviewConverter::new(wake),
         }
+    }
+
+    /// What `node_id` shows now, or `None` when nothing it published has
+    /// landed.
+    pub(crate) fn get(&self, node_id: NodeId) -> Option<&StoredContent> {
+        self.entries.get(&node_id)
     }
 
     /// Queue one preview node's freshly published value for conversion. The
@@ -493,6 +499,18 @@ pub(crate) mod internals {
                 ui,
                 converted,
             );
+        }
+
+        /// Show `content` for `node_id`, as a landed conversion would.
+        #[cfg(test)]
+        pub(crate) fn seed(&mut self, node_id: NodeId, content: StoredContent) {
+            self.entries.insert(node_id, content);
+        }
+
+        /// Whether no node shows anything.
+        #[cfg(test)]
+        pub(crate) fn is_empty(&self) -> bool {
+            self.entries.is_empty()
         }
 
         /// Whether a card or a full raster is still converting.

@@ -4,6 +4,7 @@ use std::io;
 
 use scenarium::InvokeError;
 use scenarium::NodeStatus;
+use scenarium::RunError;
 
 use crate::core::wake;
 use crate::gui::state::preview_store::StoredContent;
@@ -66,12 +67,10 @@ fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else()
     state.cache_ram = RamUsage { cpu: 24, gpu: 0 };
     state
         .previews
-        .entries
-        .insert(evicted_node, StoredContent::Text("shown".into()));
+        .seed(evicted_node, StoredContent::Text("shown".into()));
     state
         .previews
-        .entries
-        .insert(remaining_node, StoredContent::Text("kept".into()));
+        .seed(remaining_node, StoredContent::Text("kept".into()));
 
     state.clear_cache_projections(&[evicted_node]);
 
@@ -87,12 +86,12 @@ fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else()
     assert_eq!(state.status(evicted_node), ExecStatus::Cached);
     assert_eq!(state.nodes[&remaining_node].logs[0].message, "kept");
     assert!(
-        !state.previews.entries.contains_key(&evicted_node),
+        state.previews.get(evicted_node).is_none(),
         "an evicted preview can no longer be re-derived without another run"
     );
     assert!(
         matches!(
-            state.previews.entries.get(&remaining_node),
+            state.previews.get(remaining_node),
             Some(StoredContent::Text(text)) if text == "kept"
         ),
         "a preview outside the cone is still backed by a cached value"
@@ -120,8 +119,7 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     });
     state
         .previews
-        .entries
-        .insert(node, StoredContent::Text("stale".into()));
+        .seed(node, StoredContent::Text("stale".into()));
     state.cache_ram = RamUsage { cpu: 24, gpu: 0 };
     state.activity = WorkerActivity::Executing;
 
@@ -130,7 +128,7 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     // The document half: nothing survives to reattach to a reopened file.
     assert_eq!(state.status(node), ExecStatus::None);
     assert!(state.logs(node).is_empty());
-    assert!(state.previews.entries.is_empty());
+    assert!(state.previews.is_empty());
 
     // The worker half: the acknowledged program still resolves later reports,
     // the run is still reported as in flight, and the cache still holds what
@@ -173,8 +171,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
     state.nodes.entry(node).or_default().status = ExecStatus::Cached;
     state
         .previews
-        .entries
-        .insert(node, StoredContent::Text("stale".into()));
+        .seed(node, StoredContent::Text("stale".into()));
 
     // An install that dropped every cached node reports an empty cache, and
     // the readout follows it down.
@@ -216,7 +213,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
     assert_eq!(state.cache_ram, RamUsage::default());
     assert!(state.compiled.is_none());
     assert_eq!(state.status(node), ExecStatus::None);
-    assert!(state.previews.entries.is_empty());
+    assert!(state.previews.is_empty());
 }
 
 /// Progress marks a node running, then executed or errored as its lambda finishes, and the
@@ -243,7 +240,11 @@ fn progress_marks_the_attributed_node_running_then_finished() {
 
     progress(&mut rs, fails, RunPhase::Started { at });
     progress(&mut rs, fails, RunPhase::Failed { elapsed_secs: 0.25 });
-    assert_eq!(rs.status(fails), ExecStatus::Errored);
+    assert_eq!(
+        rs.status(fails),
+        ExecStatus::Errored(None),
+        "progress reports the failure before its message"
+    );
 
     // A node no event mentioned stays None.
     assert_eq!(rs.status(nid(99)), ExecStatus::None);
@@ -251,8 +252,9 @@ fn progress_marks_the_attributed_node_running_then_finished() {
 
 /// The completed snapshot is the authority: it clears the previous run
 /// before writing, so a node the new run says nothing about loses the
-/// status the old one gave it, and one it does report carries the failure
-/// message alongside the status.
+/// status the old one gave it, and one it does report carries its detail —
+/// the failure message, the unfed ports — inside the status. So live
+/// progress that replaces the status replaces the detail with it.
 #[test]
 fn completed_snapshot_replaces_the_previous_run() {
     let executed = nid(1);
@@ -266,17 +268,44 @@ fn completed_snapshot_replaces_the_previous_run() {
     );
     assert_eq!(rs.status(executed), ExecStatus::Executed(1.0));
     assert_eq!(rs.status(errored), ExecStatus::Executed(0.25));
-    assert_eq!(rs.error(errored), None);
 
     // Second run: only `errored` is reported, and it failed.
     rs.apply_report(completed_status(&[], &[nid(2)]), &mut log);
-    assert_eq!(rs.status(errored), ExecStatus::Errored);
     // The failure message rides along with the status — the inspector
     // shows it instead of a bare "errored".
-    assert_eq!(rs.error(errored), Some("test error"));
+    assert_eq!(
+        rs.status(errored),
+        ExecStatus::Errored(Some("test error".to_owned()))
+    );
     assert_eq!(
         rs.status(executed),
         ExecStatus::None,
         "the previous run's verdict does not survive a snapshot that omits the node"
     );
+
+    // A live re-run succeeds before any snapshot: the message goes with the
+    // status it belonged to, rather than lingering under the new one.
+    rs.apply_report(
+        WorkerReport::Progress {
+            node_id: errored,
+            phase: RunPhase::Succeeded { elapsed_secs: 0.5 },
+        },
+        &mut log,
+    );
+    assert_eq!(rs.status(errored), ExecStatus::Executed(0.5));
+
+    // Third run: `executed` went unfed on its second input.
+    rs.apply_report(
+        WorkerReport::Completed(Arc::new(RunSummary {
+            nodes: vec![NodeStatus {
+                node_id: executed,
+                status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1] }),
+                ram: RamUsage::default(),
+            }],
+            ..RunSummary::default()
+        })),
+        &mut log,
+    );
+    assert_eq!(rs.status(executed), ExecStatus::MissingInputs(vec![1]));
+    assert_eq!(rs.status(errored), ExecStatus::None);
 }

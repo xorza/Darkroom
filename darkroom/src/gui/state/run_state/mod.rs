@@ -48,7 +48,6 @@ use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
 use scenarium::RamUsage;
-use scenarium::RunError;
 use scenarium::WorkerActivity;
 use scenarium::{RunPhase, RunSummary};
 use scenarium::{WorkerError, WorkerReport};
@@ -65,19 +64,26 @@ fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
     );
 }
 
-/// Per-node execution outcome of the last run. `Executed` carries the node's
-/// wall-clock run time (seconds). `Running` is the transient live state while a
-/// node computes; it carries the instant the node started so the UI can show
-/// live elapsed-so-far.
-#[derive(Clone, Copy, PartialEq, Default, Debug)]
+/// Per-node execution outcome of the last run, with the detail that belongs
+/// to it — so a status and its detail are one value, and cannot disagree.
+#[derive(Clone, PartialEq, Default, Debug)]
 pub(crate) enum ExecStatus {
     #[default]
     None,
     Cached,
+    /// The node's wall-clock run time, in seconds.
     Executed(f64),
+    /// The transient live state while the node computes: the instant it
+    /// started, so the UI can show live elapsed-so-far.
     Running(Instant),
-    MissingInputs,
-    Errored,
+    /// The input ports the run could not satisfy, by index on the node — the
+    /// run's own verdict, so a port bound to a disabled or missing producer
+    /// counts too.
+    MissingInputs(Vec<usize>),
+    /// The failure's message, so a failed node reads e.g. "no light frames
+    /// provided", not just "errored". `None` while only live progress has
+    /// reported the failure: its message arrives with the completed summary.
+    Errored(Option<String>),
 }
 
 /// Everything the editor knows about one node from the last run.
@@ -85,30 +91,19 @@ pub(crate) enum ExecStatus {
 pub(crate) struct NodeRunState {
     status: ExecStatus,
     logs: Vec<NodeLog>,
-    /// Human-readable message for this run's failure. `None` unless the node
-    /// errored; drives the inspector's error detail so a failed node reads e.g.
-    /// "no light frames provided", not just "errored".
-    error: Option<String>,
     /// RAM this node's cached output holds after the last run (system vs GPU).
     /// Zero unless the node retains a value; drives the node body's memory
     /// readout.
     ram: RamUsage,
-    /// Input ports the last run could not satisfy, by index on this node — the run's
-    /// own verdict, so a port bound to a disabled or missing producer counts too.
-    missing_inputs: Vec<usize>,
 }
 
 impl NodeRunState {
-    pub(crate) const fn status(&self) -> ExecStatus {
-        self.status
+    pub(crate) const fn status(&self) -> &ExecStatus {
+        &self.status
     }
 
     pub(crate) const fn ram(&self) -> RamUsage {
         self.ram
-    }
-
-    pub(crate) fn missing_inputs(&self) -> &[usize] {
-        &self.missing_inputs
     }
 }
 
@@ -287,11 +282,6 @@ impl RunState {
         self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
 
-    /// This run's failure message for a node. `None` unless it errored.
-    pub(crate) fn error(&self, id: NodeId) -> Option<&str> {
-        self.nodes.get(&id)?.error.as_deref()
-    }
-
     /// Live progress: assign the node's status as it arrives, overwriting
     /// whatever the last report said — a node's newest status is its status,
     /// and `Running` has to be replaceable by the finish that follows it. A
@@ -305,7 +295,7 @@ impl RunState {
         self.nodes.entry(node_id).or_default().status = match phase {
             RunPhase::Started { at } => ExecStatus::Running(at),
             RunPhase::Succeeded { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
-            RunPhase::Failed { .. } => ExecStatus::Errored,
+            RunPhase::Failed { .. } => ExecStatus::Errored(None),
         };
     }
 
@@ -324,9 +314,7 @@ impl RunState {
         for node in self.nodes.values_mut() {
             node.status = ExecStatus::None;
             node.logs.clear();
-            node.error = None;
             node.ram = RamUsage::default();
-            node.missing_inputs.clear();
         }
         for node in &update.nodes {
             assert_reported(&compiled, node.node_id);
@@ -337,12 +325,10 @@ impl RunState {
                         ExecStatus::Executed(*elapsed_secs)
                     }
                     NodeExecutionStatus::MissingInputs { ports } => {
-                        self.record_missing_inputs(node.node_id, ports);
-                        ExecStatus::MissingInputs
+                        ExecStatus::MissingInputs(ports.clone())
                     }
                     NodeExecutionStatus::Errored { error } => {
-                        self.record_error(node.node_id, error);
-                        ExecStatus::Errored
+                        ExecStatus::Errored(Some(error.to_string()))
                     }
                 };
                 self.nodes.entry(node.node_id).or_default().status = status;
@@ -405,20 +391,6 @@ impl RunState {
         self.drop_empty_nodes();
     }
 
-    /// Record the ports one node went unfed on. The run's own verdict is the
-    /// whole list, so it replaces rather than unions.
-    fn record_missing_inputs(&mut self, node_id: NodeId, ports: &[usize]) {
-        let slot = self.nodes.entry(node_id).or_default();
-        slot.missing_inputs.clear();
-        slot.missing_inputs.extend_from_slice(ports);
-    }
-
-    /// Record one run error's message against the node that failed, so the
-    /// inspector can show the actual cause instead of a bare "errored".
-    fn record_error(&mut self, node_id: NodeId, error: &RunError) {
-        self.nodes.entry(node_id).or_default().error = Some(error.to_string());
-    }
-
     /// The preview store's whole per-frame upkeep: queue what nodes published,
     /// land the conversions that finished, then sweep what the document no
     /// longer holds.
@@ -476,7 +448,8 @@ pub(crate) mod internals {
 
     impl RunState {
         pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
-            self.node(id).map(NodeRunState::status).unwrap_or_default()
+            self.node(id)
+                .map_or(ExecStatus::None, |node| node.status().clone())
         }
 
         pub(crate) fn ram(&self, id: NodeId) -> RamUsage {

@@ -234,7 +234,7 @@ impl ImageViewer {
         // Resolving is also what queues a not-yet-converted full-resolution
         // texture. The thumbnail stands in until it lands, and the converter
         // wakes the host when it does, so the pane owes itself no later frame.
-        let source = ShownSource::resolve(previews.entries.get(&self.node_id), ui);
+        let source = ShownSource::resolve(previews.get(self.node_id), ui);
         self.sync_source(source.image().map(|view| view.image().texels));
         self.apply_gestures(ui, source.image().map(FullView::image), pane);
 

@@ -218,7 +218,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
             // running (`App::record` repaints so it ticks). Mono/tabular so it
             // holds a column across a stack of nodes.
             let elapsed = match node.exec_status() {
-                ExecStatus::Executed(secs) => Some(secs),
+                ExecStatus::Executed(secs) => Some(*secs),
                 ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
                 _ => None,
             };

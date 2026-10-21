@@ -55,7 +55,7 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     let ncx = rec.node;
     let theme = ncx.theme();
     let node = ncx;
-    let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
+    let stored = ncx.graph_ctx.run_state().previews.get(node.id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
         .id(preview_image_wid(node.id))
