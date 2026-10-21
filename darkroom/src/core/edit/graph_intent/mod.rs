@@ -398,17 +398,26 @@ impl GraphIntent {
                 })
             }
             Self::SetInput { input, to } => {
-                if validate::live_node(graph, input.node_id, Role::SetInputDestination)?.is_none() {
+                let Some(destination) =
+                    validate::live_node(graph, input.node_id, Role::SetInputDestination)?
+                else {
                     return Ok(None);
+                };
+                // Only a write is held to the declaration: clearing removes a
+                // binding wherever it sits, which is never worse than keeping it.
+                if to.is_some() {
+                    validate::declared_input(destination, library, input)?;
                 }
                 if let Some(Binding::Bind(source)) = &to {
-                    validate::wirable(graph, library, input)?;
+                    validate::wirable(destination, library, input)?;
                     // A wire held across frames can outlive its producer, and
                     // the bind would leave the graph with a dangling edge.
-                    if validate::live_node(graph, source.node_id, Role::SetInputProducer)?.is_none()
-                    {
+                    let Some(producer) =
+                        validate::live_node(graph, source.node_id, Role::SetInputProducer)?
+                    else {
                         return Ok(None);
-                    }
+                    };
+                    validate::declared_output(producer, library, *source)?;
                     // Reject a bind that would close a data cycle: the planner
                     // rejects a cyclic graph outright (`Error::CycleDetected`),
                     // so the edit must never land. The GUI snap filter normally
@@ -496,9 +505,13 @@ impl GraphIntent {
                 // subscription. An unsubscribe of a vanished node no-ops
                 // naturally (nothing is subscribed → from == to == false), so
                 // it needs no existence check.
-                if subscribe && (graph.find(emitter).is_none() || graph.find(subscriber).is_none())
-                {
-                    return Ok(None);
+                if subscribe {
+                    let (Some(emitter_node), Some(_)) =
+                        (graph.find(emitter), graph.find(subscriber))
+                    else {
+                        return Ok(None);
+                    };
+                    validate::declared_event(emitter_node, library, subscription)?;
                 }
                 UndoStep::SetSubscription(SetSubscription {
                     subscription,

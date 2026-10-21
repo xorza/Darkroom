@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use glam::Vec2;
-use scenarium::{DetachedNodeError, InputPort, NodeId};
+use scenarium::{DetachedNodeError, InputPort, NodeId, OutputPort, Subscription};
 use thiserror::Error;
 
 /// A payload no widget could legitimately have raised: a nil or colliding
@@ -67,6 +67,16 @@ pub(crate) enum MalformedIntent {
     /// Same corruption path as [`Self::NonFinitePosition`], one level up.
     #[error("viewport needs finite pan and positive finite zoom")]
     InvalidViewport,
+    #[error("input {port:?} is not one its node declares")]
+    UndeclaredInput { port: InputPort },
+    #[error("output {port:?} is not one its node declares")]
+    UndeclaredOutput { port: OutputPort },
+    #[error(
+        "event {} is not one node {:?} declares",
+        .subscription.event_idx,
+        .subscription.emitter
+    )]
+    UndeclaredEvent { subscription: Subscription },
 }
 
 /// Which identity or position of an intent a check was holding to — what a

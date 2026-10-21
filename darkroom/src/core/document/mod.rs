@@ -1,3 +1,4 @@
+pub(crate) mod declaration;
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
@@ -10,7 +11,7 @@ pub(crate) mod viewport;
 use std::mem;
 
 use palantir::DockState;
-use scenarium::{DetachedNode, Graph as CoreGraph, NodeId, NodeKind};
+use scenarium::{Binding, DetachedNode, Graph as CoreGraph, Library, NodeId, NodeKind};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::DocumentValidationError;
@@ -178,6 +179,38 @@ impl Document {
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
                 return Err(DocumentValidationError::MissingTab { tab });
+            }
+        }
+        Ok(())
+    }
+
+    /// Hold every binding and subscription to the ports and events its nodes'
+    /// funcs declare in `library` — the half of validation [`Self::validate`]
+    /// cannot do, having no library. Same rule as the edit gate's, in
+    /// [`declaration`].
+    pub(crate) fn validate_declarations(
+        &self,
+        library: &Library,
+    ) -> Result<(), DocumentValidationError> {
+        let graph = &self.graph;
+        for (&port, binding) in &graph.bindings {
+            if let Some(node) = graph.find(port.node_id)
+                && !declaration::admits_input(node, library, port.port_idx)
+            {
+                return Err(DocumentValidationError::UndeclaredInput { port });
+            }
+            if let Binding::Bind(source) = binding
+                && let Some(producer) = graph.find(source.node_id)
+                && !declaration::admits_output(producer, library, source.port_idx)
+            {
+                return Err(DocumentValidationError::UndeclaredOutput { port: *source });
+            }
+        }
+        for subscription in graph.subscriptions() {
+            if let Some(emitter) = graph.find(subscription.emitter)
+                && !declaration::admits_event(emitter, library, subscription.event_idx)
+            {
+                return Err(DocumentValidationError::UndeclaredEvent { subscription });
             }
         }
         Ok(())

@@ -19,6 +19,8 @@ pub(crate) enum StatusFamily {
     Document,
     /// Reading and writing the preferences file.
     Preferences,
+    /// Setting a node input from a dialog's pick.
+    Edit,
 }
 
 #[derive(Debug, Default)]

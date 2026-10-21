@@ -1,6 +1,6 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{GraphValidationError, NodeId};
+use scenarium::{GraphValidationError, InputPort, NodeId, OutputPort, Subscription};
 
 use crate::core::document::tab_ref::TabRef;
 
@@ -37,4 +37,14 @@ pub(crate) enum DocumentValidationError {
     /// widget ids would be this editor's.
     #[error("the layout belongs to another dock")]
     ForeignDock,
+    #[error("a binding sits on input {port:?}, which its node does not declare")]
+    UndeclaredInput { port: InputPort },
+    #[error("a wire reads output {port:?}, which its node does not declare")]
+    UndeclaredOutput { port: OutputPort },
+    #[error(
+        "a subscription listens to event {} of node {:?}, which it does not declare",
+        .subscription.event_idx,
+        .subscription.emitter
+    )]
+    UndeclaredEvent { subscription: Subscription },
 }
