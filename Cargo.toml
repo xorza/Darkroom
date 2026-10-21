@@ -17,7 +17,7 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 
-# The driver's lanes (drive/src/main.rs). The tests leave out the data bundle a fresh clone lacks,
+# The driver's lanes. The tests leave out the data bundle a fresh clone lacks,
 # and Tracy, which makes each test wait on its profiler. `cargo test` ran the suite in 2.2 s where
 # nextest took 3.5 s.
 [workspace.metadata.drive]
