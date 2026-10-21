@@ -9,7 +9,6 @@ use glam::Vec2;
 use palantir::widget::domain;
 use palantir::{Ui, WidgetId};
 
-use crate::core::document::port_ref::PortRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -17,6 +16,7 @@ use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
 use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape};
+use crate::gui::port_ref::PortRef;
 
 /// Right-click or double-click on empty canvas → popup that lists every
 /// `Func` the context's library holds plus the built-in specials, grouped by

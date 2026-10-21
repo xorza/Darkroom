@@ -32,10 +32,10 @@ use scenarium::{
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedItem};
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::document::viewport::Viewport;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::main_window::window_ctx::WindowCtx;
+use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -174,9 +174,7 @@ impl<'a> GraphCtx<'a> {
                 .inputs
                 .get(port.port_idx)
                 .map(|input| &input.data_type),
-            PortKind::Output => self
-                .output_types
-                .get(OutputPort::new(port.node_id, port.port_idx)),
+            PortKind::Output => self.output_types.get(port.output_port()?),
         }
     }
 

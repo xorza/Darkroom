@@ -17,7 +17,7 @@
 use palantir::RgbaF32;
 use scenarium::DataType;
 
-use crate::core::document::port_ref::PortKind;
+use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::theme::type_colors::TypeColors;
 

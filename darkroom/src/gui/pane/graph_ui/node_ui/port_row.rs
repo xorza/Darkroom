@@ -20,9 +20,9 @@ use scenarium::FuncEvent;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
+use scenarium::OutputPort;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
 
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
 use crate::gui::app::app_command::AppCommand;
@@ -35,6 +35,7 @@ use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::node_ui::value_editor::{ConstEdit, Field};
 use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::hover::Hover;
@@ -389,11 +390,15 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    rec.out
-                        .push_graph(GraphIntent::set_input(port, Binding::Const(default)));
+                    rec.out.push_graph(GraphIntent::set_input(
+                        input.port(),
+                        Binding::Const(default),
+                    ));
                 }
             }
-            Some(_) => rec.out.push_graph(GraphIntent::set_input(port, None)),
+            Some(_) => rec
+                .out
+                .push_graph(GraphIntent::set_input(input.port(), None)),
         }
     }
     ContextMenu::for_id(menu_id)
@@ -411,7 +416,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
                 && let Some(value) = default
             {
                 rec.out
-                    .push_graph(GraphIntent::set_input(port, Binding::Const(value)));
+                    .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .disabled(input.binding().is_none())
@@ -419,7 +424,8 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
                 .left
                 .clicked()
             {
-                rec.out.push_graph(GraphIntent::set_input(port, None));
+                rec.out
+                    .push_graph(GraphIntent::set_input(input.port(), None));
             }
         });
 }
@@ -433,10 +439,10 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let Some(Binding::Const(value)) = input.binding() else {
         return;
     };
-    let port = input.port_ref();
+    let port = input.port();
     let data_type = input.ty();
     let value_variants = input.value_variants();
-    let editor_id = const_editor_wid(input.port());
+    let editor_id = const_editor_wid(port);
     // An `FsPath` editor draws a pick button; clicking it raises a blocking
     // file dialog, which only `App` can run — so this is the app tier.
     //
@@ -451,7 +457,7 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     {
         rec.out
             .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
-                port: input.port(),
+                port,
                 config: Arc::clone(config),
             })));
     }
@@ -540,10 +546,8 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
         rec.out.extend_graph(
             ncx.graph_ctx
                 .connections()
-                .filter(|(_, producer)| {
-                    producer.node_id == port.node_id && producer.port_idx == port.port_idx
-                })
-                .map(|(consumer, _)| GraphIntent::set_input(consumer.into(), None)),
+                .filter(|(_, producer)| *producer == output.port())
+                .map(|(consumer, _)| GraphIntent::set_input(consumer, None)),
         );
     }
     if cell_secondary || glyph.secondary_clicked {
@@ -568,7 +572,7 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
                     .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
                 rec.out.extend_graph(
                     PreviewSpawn {
-                        port,
+                        port: output.port(),
                         pos,
                         node_id: NodeId::unique(),
                     }
@@ -585,7 +589,7 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 /// A preview node `node_id` to spawn at `pos`, already reading `port`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PreviewSpawn {
-    pub(crate) port: PortRef,
+    pub(crate) port: OutputPort,
     pub(crate) pos: Vec2,
     pub(crate) node_id: NodeId,
 }
@@ -604,7 +608,7 @@ impl PreviewSpawn {
             },
             GraphIntent::SetInput {
                 input: InputPort::new(node_id, 0),
-                to: Some(Binding::bind(port.node_id, port.port_idx)),
+                to: Some(Binding::Bind(port)),
             },
         ]
     }
@@ -707,7 +711,7 @@ impl Display for TypeLabel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::{NodeKind, OutputPort};
+    use scenarium::NodeKind;
 
     /// The type line of a port tooltip. A path spells out its picker mode and
     /// the extensions it accepts; everything else defers to the library's own
@@ -757,7 +761,7 @@ mod tests {
     fn add_preview_spawns_a_node_already_wired_to_the_port() {
         let func = preview_sink::func(Arc::default());
         let producer = NodeId::unique();
-        let port = PortRef::output(producer, 2);
+        let port = OutputPort::new(producer, 2);
         let center = Vec2::new(100.0, 40.0);
 
         let node_id = NodeId::unique();

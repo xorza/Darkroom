@@ -3,12 +3,12 @@
 use glam::Vec2;
 use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::preview_sink;
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
+use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;

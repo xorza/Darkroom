@@ -2,8 +2,8 @@ use glam::Vec2;
 use scenarium::{Binding, InputPort};
 
 use crate::core::document::internals::DocFixture;
-use crate::core::document::port_ref::PortRef;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
+use crate::gui::port_ref::PortRef;
 
 /// A node scrolled off-screen keeps resolvable port centers — and loses them
 /// once the *document* stops holding it.

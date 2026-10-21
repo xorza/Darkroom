@@ -16,7 +16,6 @@ use std::sync::Arc;
 use palantir::Ui;
 use scenarium::NodeId;
 
-use crate::core::document::port_ref::PortKind;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview_sink;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -52,11 +51,10 @@ impl PreviewDrag {
         if self.drag.advance(ui, cx.prepass(), out) || !canvas_gesture::preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = geometry
-            .ports
-            .started_drag()
-            .filter(|port| port.kind == PortKind::Output)
-        else {
+        let Some(port) = geometry.ports.started_drag() else {
+            return;
+        };
+        let Some(output) = port.output_port() else {
             return;
         };
         if !graph_ctx.contains(port.node_id) {
@@ -79,7 +77,7 @@ impl PreviewDrag {
         // the drag below carries it from there.
         out.extend_graph(
             PreviewSpawn {
-                port,
+                port: output,
                 pos: center,
                 node_id,
             }

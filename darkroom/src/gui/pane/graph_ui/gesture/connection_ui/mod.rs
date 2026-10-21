@@ -1,9 +1,8 @@
 use glam::Vec2;
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
+use scenarium::Binding;
 use scenarium::DataType;
-use scenarium::{Binding, InputPort};
 
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
@@ -15,6 +14,7 @@ use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
+use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::requests::Requests;
 use crate::gui::widgets::hover::Hover;
 
@@ -324,12 +324,8 @@ fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
 /// dragged wire must never snap to it or start a bind from it.
 fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
-    if port.kind != PortKind::Input {
-        return false;
-    }
-    graph_ctx
-        .node(port.node_id)
-        .and_then(|n| n.input(port.port_idx))
+    port.input_port()
+        .and_then(|input| graph_ctx.node(input.node_id)?.input(input.port_idx))
         .is_some_and(InputCtx::const_only)
 }
 
@@ -392,20 +388,18 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
 /// or the input is already a const (don't clobber the value).
 fn const_drop(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIntent> {
     let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
-    if start.kind != PortKind::Input {
-        return None;
-    }
+    let port = start.input_port()?;
     let pointer = ui.pointer_pos()?;
-    if !geometry.node_screen_rect(start.node_id)?.contains(pointer) {
+    if !geometry.node_screen_rect(port.node_id)?.contains(pointer) {
         return None;
     }
     // Don't overwrite an existing const value.
-    let input = graph_ctx.node(start.node_id)?.input(start.port_idx)?;
+    let input = graph_ctx.node(port.node_id)?.input(port.port_idx)?;
     if matches!(input.binding(), Some(Binding::Const(_))) {
         return None;
     }
     let default = input.default()?;
-    Some(GraphIntent::set_input(start, Binding::Const(default)))
+    Some(GraphIntent::set_input(port, Binding::Const(default)))
 }
 
 /// Whether the pointer is over the canvas but not over any node body —
@@ -433,19 +427,21 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
 /// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
 /// the warning color, and lowers as unbound.
 fn connection(start: PortRef, end: PortRef) -> GraphIntent {
-    let (input, output) = match (start.kind, end.kind) {
-        (PortKind::Input, PortKind::Output) => (start, end),
-        (PortKind::Output, PortKind::Input) => (end, start),
-        // Both entries into a commit snap through `scan_snap_target`, which
-        // only ever offers `start.kind.opposite()`. A same-kind pair means
-        // that invariant broke upstream — not that the user did something
-        // odd — and silently dropping it would hide the break behind a wire
-        // that just doesn't land.
-        (a, b) => unreachable!("a wire committed a {a:?} → {b:?} pair"),
+    let pair = start
+        .input_port()
+        .zip(end.output_port())
+        .or_else(|| end.input_port().zip(start.output_port()));
+    // Both entries into a commit snap through `scan_snap_target`, which only
+    // ever offers `start.kind.opposite()`. A same-kind pair means that
+    // invariant broke upstream — not that the user did something odd — and
+    // silently dropping it would hide the break behind a wire that just
+    // doesn't land.
+    let Some((input, output)) = pair else {
+        unreachable!("a wire committed a {:?} → {:?} pair", start.kind, end.kind);
     };
     GraphIntent::SetInput {
-        input: InputPort::new(input.node_id, input.port_idx),
-        to: Some(Binding::bind(output.node_id, output.port_idx)),
+        input,
+        to: Some(Binding::Bind(output)),
     }
 }
 

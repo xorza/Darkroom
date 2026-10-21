@@ -5,10 +5,10 @@ use scenarium::{
 };
 
 use crate::core::document::internals::DocFixture;
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
+use crate::gui::port_ref::{PortKind, PortRef};
 
 /// Composing a context does not ask whether anyone is looking — the document,
 /// the library and the run resolve either way — so visibility rides along as a

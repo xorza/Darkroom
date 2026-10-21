@@ -579,11 +579,11 @@ mod tests {
 
     use super::*;
     use crate::core::document::internals::DocFixture;
-    use crate::core::document::port_ref::PortRef;
     use crate::core::document::tab_ref::TabRef;
     use crate::core::preview_sink;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
     use crate::gui::pane::graph_ui::node_ui::{port_row, preview_row};
+    use crate::gui::port_ref::PortRef;
     use crate::gui::state::preview_store;
 
     /// Clicking a preview card's image asks the dock for that node's viewer
