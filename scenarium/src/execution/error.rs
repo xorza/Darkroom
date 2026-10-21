@@ -8,11 +8,10 @@ use crate::graph::identity::{EventPort, NodeId};
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a cycle
 /// ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
-/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), an event seed had no port
-/// ([`EventSeedNotFound`](Error::EventSeedNotFound)), or the event loop's lambda panicked
-/// ([`EventLambdaPanic`](Error::EventLambdaPanic)). It's the error type of the `Result`-returning
-/// entry points on both sides of the worker boundary — the engine's plan/execute, and the worker
-/// operations around them, which is where the event-loop panic is caught. A *single node's* run
+/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or an event seed had no port
+/// ([`EventSeedNotFound`](Error::EventSeedNotFound)). It's the error type of the engine's
+/// plan/execute, which the worker reports as
+/// [`WorkerError::Execution`](crate::worker::error::WorkerError::Execution). A *single node's* run
 /// failure is a [`RunError`], carried by that node's
 /// [`NodeStatus`](crate::execution::report::node_status::NodeStatus) row, never one of these; a
 /// graph that won't compile is a [`CompileError`](crate::execution::compile::error::CompileError),
@@ -28,8 +27,6 @@ pub enum Error {
     NodeSeedNotFound { node_id: NodeId },
     #[error("event seed {event:?} not found in the compiled program")]
     EventSeedNotFound { event: EventPort },
-    #[error("event lambda for node {node_id:?} panicked: {message}")]
-    EventLambdaPanic { node_id: NodeId, message: String },
 }
 
 /// A **single node's** run-time failure, reported in that node's one
