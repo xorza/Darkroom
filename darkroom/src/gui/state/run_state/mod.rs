@@ -41,6 +41,7 @@ use palantir::Ui;
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
+use crate::core::wake::Wake;
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
@@ -118,7 +119,7 @@ pub(crate) struct NodeLog {
 }
 
 /// Central runtime state for the current editor. Off the serialized state.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct RunState {
     /// What the last run said about each node, keyed by the node that produced
     /// it — a **record of that run**, not a cache swept against the document.
@@ -172,6 +173,19 @@ pub(crate) struct RunFeed<'a> {
 }
 
 impl RunState {
+    /// An empty projection, whose preview conversions wake the host through
+    /// `wake` as each one finishes.
+    pub(crate) fn new(wake: Wake) -> Self {
+        Self {
+            nodes: HashMap::new(),
+            previews: PreviewStore::new(wake),
+            compiled: None,
+            activity: WorkerActivity::default(),
+            cache_ram: RamUsage::default(),
+            published: HashMap::new(),
+        }
+    }
+
     /// Bring this projection up to date with everything that has happened
     /// since the last frame: fold the worker's reports, take in the values
     /// preview nodes published, and sweep the store against `document`.
@@ -198,10 +212,9 @@ impl RunState {
     ///
     /// A completed run reprojects per-node `ExecStatus` (the status glow) and
     /// per-node logs (the inspector's Log section); a failed run clears both
-    /// and surfaces in the status bar. A preview node's published value lands
-    /// in the centralized preview store, which uploads its small thumbnail;
-    /// visible cards and viewers read the new value during the frame already
-    /// scheduled by the worker's wake callback.
+    /// and surfaces in the status bar. Published preview values are not
+    /// reports: [`Self::sync_previews`] queues them for conversion, and each
+    /// lands on the frame the converter's wake schedules.
     ///
     /// Pulls rather than being pushed to: the worker is headless
     /// ([`RuntimeHost`] names no GUI type), so reading across the boundary in
@@ -384,7 +397,7 @@ impl RunState {
             // evicted, what it shows can no longer be re-derived without
             // another run. A preview *outside* the cone still can — its value
             // is still cached — so it stays on screen.
-            self.previews.entries.remove(node_id);
+            self.previews.remove(*node_id);
         }
         // An evicted node's RAM was just zeroed, so what survives here is
         // exactly the nodes still carrying a status or a log — the run results
@@ -406,14 +419,15 @@ impl RunState {
         self.nodes.entry(node_id).or_default().error = Some(error.to_string());
     }
 
-    /// The preview store's whole per-frame upkeep: take in what nodes
-    /// published, then sweep what the document no longer holds and upload the
-    /// textures the visible viewers need.
+    /// The preview store's whole per-frame upkeep: queue what nodes published,
+    /// land the conversions that finished, then sweep what the document no
+    /// longer holds.
     ///
-    /// One pass because the two halves are ordered — a value published this
-    /// frame has to be in the store before the sweep decides what to keep and
-    /// what to upload, or it is taken in and immediately reconsidered against
-    /// a document that has already been walked.
+    /// One pass because the steps are ordered. A value published this frame
+    /// queues before the landing, so a conversion of an older publish of the
+    /// same node finds itself superseded and is dropped. And both come before
+    /// the sweep, or what they wrote is reconsidered against a document that
+    /// has already been walked.
     ///
     /// Nothing to resolve on the way in: a preview is entry-only, so its
     /// execution id attributes to exactly one authored node and that node is
@@ -434,9 +448,10 @@ impl RunState {
                 .as_ref()
                 .is_some_and(|compiled| compiled.contains(node_id))
             {
-                self.previews.ingest_preview(ui, node_id, value);
+                self.previews.publish(node_id, value);
             }
         }
+        self.previews.land(ui);
         self.previews.reconcile(document);
     }
 
@@ -449,7 +464,7 @@ impl RunState {
     /// no longer open.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
-        self.previews.entries.clear();
+        self.previews.clear();
     }
 }
 

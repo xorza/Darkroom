@@ -48,11 +48,10 @@ fn a_settled_frame_records_without_allocating() {
     let mut fixture = DocFixture::probes(6);
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    test.run_state.previews.ingest_preview(
-        test.ui.ui(),
-        node,
-        preview_store::internals::opaque_image_value(),
-    );
+    test.run_state
+        .previews
+        .publish(node, preview_store::internals::opaque_image_value());
+    test.run_state.previews.settle(test.ui.ui());
     // A reading, so the memory readout renders its longest form rather
     // than the absent-figure path.
     test.process_memory = 3 * 1024 * 1024;
@@ -71,24 +70,24 @@ fn a_settled_frame_records_without_allocating() {
 
 /// Opening a viewer by clicking a preview card lands its tab *inside* the
 /// record that read the click. The tab is drawn by the pass after that one
-/// — a click makes the frame record twice — and a viewer uploads its
-/// full-resolution texture as it draws, so the image is on screen in the
-/// same frame the click opened it.
+/// — a click makes the frame record twice — and a viewer queues its
+/// full-resolution conversion as it draws, so the conversion starts in the
+/// same frame the click opened it, with the thumbnail standing in until it
+/// lands.
 #[test]
-fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
+fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     let mut fixture = DocFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
-    test.run_state.previews.ingest_preview(
-        test.ui.ui(),
-        node,
-        preview_store::internals::opaque_image_value(),
-    );
+    test.run_state
+        .previews
+        .publish(node, preview_store::internals::opaque_image_value());
+    test.run_state.previews.settle(test.ui.ui());
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
         let Some(StoredContent::Image(image)) = test.run_state.previews.entries.get(&node) else {
-            panic!("the ingested image is the node's stored content");
+            panic!("the landed image is the node's stored content");
         };
         image.is_full_resident()
     };
@@ -109,9 +108,16 @@ fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
         "the click opened the viewer tab within that same frame"
     );
     assert!(
+        !resident(&test),
+        "the conversion runs off the frame, so the click frame draws the \
+         thumbnail in its place"
+    );
+    // Nothing between the click frame and the settle asks again, so a
+    // conversion that lands is one that frame queued.
+    test.run_state.previews.settle(test.ui.ui());
+    assert!(
         resident(&test),
-        "and the pass that drew the new tab uploaded its texture — no \
-         placeholder, and no waiting for the next frame"
+        "the pass that drew the new tab queued its conversion"
     );
 }
 

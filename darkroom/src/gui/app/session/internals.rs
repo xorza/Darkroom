@@ -26,6 +26,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
+use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
@@ -77,7 +78,7 @@ impl SessionHarness {
             session: Session::new(OpenDocument::over(fixture.doc)),
             library: Arc::new(fixture.library),
             theme,
-            run_state: RunState::default(),
+            run_state: RunState::new(wake::internals::noop()),
             preferences: Preferences::default(),
             process_memory: 0,
             requests: Requests::default(),

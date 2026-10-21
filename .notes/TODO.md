@@ -2,8 +2,5 @@
 - stacking frames (outer, inner, reference)
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
-- mesh once registrations
 - image buffer and lens image interleaved/planar formats
-- custom panels
-- custom renderer backends
-- wgpu features and limits request public api
+- centralize threading/io

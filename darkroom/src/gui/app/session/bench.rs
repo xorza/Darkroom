@@ -48,11 +48,13 @@ use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
+use crate::core::wake;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::state::preview_store::preview_converter::{self, Card};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -120,8 +122,10 @@ struct Editor {
     /// What the `drag` scenario moves, from where it starts: the second chain's blend, on screen
     /// at the camera's zoom, which three wires reach.
     dragged: Arc<[DragStart]>,
-    /// The two images the `preview` scenario publishes in turn.
-    published: [DynamicValue; 2],
+    /// The two images the `preview` scenario lands in turn, each converted once
+    /// up front: in production the converter's thread does that, off every
+    /// frame, so a frame here times the landing alone.
+    converted: [Card; 2],
 }
 
 impl Editor {
@@ -165,7 +169,7 @@ impl Editor {
             session: Session::new(OpenDocument::over(document)),
             library,
             theme: Theme::default(),
-            run_state: RunState::default(),
+            run_state: RunState::new(wake::internals::noop()),
             preferences: Preferences::default(),
             requests: Requests::default(),
             dragged: Arc::new([DragStart {
@@ -174,17 +178,19 @@ impl Editor {
             }]),
             chains,
             laid_out: false,
-            published: [0.2, 0.4].map(stacked_frame),
+            converted: [0.2, 0.4]
+                .map(|level| preview_converter::internals::convert_here(stacked_frame(level))),
         }
     }
 
-    /// Publish an image on every preview node, as a finished run does.
+    /// Land an image on every preview node, as a finished run does once its
+    /// conversions finish.
     fn publish_previews(&mut self, ui: &Ui) {
         for (index, chain) in self.chains.iter().enumerate() {
-            let value = self.published[index % 2].clone();
+            let card = self.converted[index % 2].clone();
             self.run_state
                 .previews
-                .ingest_preview(ui, chain[PREVIEW], value);
+                .land_converted(ui, chain[PREVIEW], card);
         }
     }
 
@@ -230,10 +236,10 @@ impl Editor {
         let intent = match scenario {
             Scenario::Cached => return,
             Scenario::Preview => {
-                let value = self.published[(n % 2) as usize].clone();
+                let card = self.converted[(n % 2) as usize].clone();
                 self.run_state
                     .previews
-                    .ingest_preview(ui, self.chains[0][PREVIEW], value);
+                    .land_converted(ui, self.chains[0][PREVIEW], card);
                 return;
             }
             Scenario::Pan => {

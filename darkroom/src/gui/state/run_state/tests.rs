@@ -5,6 +5,7 @@ use std::io;
 use scenarium::InvokeError;
 use scenarium::NodeStatus;
 
+use crate::core::wake;
 use crate::gui::state::preview_store::StoredContent;
 
 fn nid(n: u128) -> NodeId {
@@ -39,7 +40,7 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerRep
 fn run_state(nodes: impl IntoIterator<Item = NodeId>) -> RunState {
     RunState {
         compiled: Some(Arc::new(CompiledGraph::bare(nodes))),
-        ..RunState::default()
+        ..RunState::new(wake::internals::noop())
     }
 }
 

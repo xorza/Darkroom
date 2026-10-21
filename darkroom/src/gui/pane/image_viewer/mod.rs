@@ -4,12 +4,13 @@
 //! store and keeps only navigation state. Opening or restoring a tab therefore
 //! shows an already-received value without an editor-driven notification path.
 //!
-//! The full RGBA8 texture is uploaded by the store on demand, the first time a
-//! viewer asks for it while recording, and the source value is released as it
-//! goes. Asking is what scopes it: a pane records only while its tab is the
-//! visible one, so a viewer stacked behind another holds no full-resolution
-//! texture until it is activated — and one activated mid-record draws at full
-//! resolution in the pass that puts it on screen, never a frame later.
+//! The full RGBA8 texture is converted by the store on demand, the first time a
+//! viewer asks for it while recording, and the image gives its source up to
+//! the conversion. Asking is what scopes it: a pane records only while its tab
+//! is the visible one, so a viewer stacked behind another holds no
+//! full-resolution texture until it is activated. One activated mid-record
+//! frames itself at full size in the pass that puts it on screen, with the
+//! thumbnail standing in until the conversion lands.
 //!
 //! Split the way the graph pane is, by what each part does rather than by what
 //! it draws: [`camera`] is the affine algebra between texels, logical px and
@@ -43,7 +44,7 @@ use crate::gui::pane::image_viewer::glyph::Swatch;
 use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
 use crate::gui::state::preview_store::error::PreviewImageError;
 use crate::gui::state::preview_store::{
-    DrawableImage, PreviewMessage, PreviewStore, StoredContent,
+    DrawableImage, FullView, PreviewMessage, PreviewStore, StoredContent,
 };
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
@@ -91,7 +92,7 @@ const NOTHING_YET_HINT: &str = "the port's image appears here after the next gra
 #[derive(Clone, Debug)]
 enum ShownSource {
     Nothing,
-    Image(DrawableImage),
+    Image(FullView),
     /// Why this value has no picture. Carries the reason rather than its
     /// wording, so the pane decides how to say it — including for a perfectly
     /// good non-image value, which is [`PreviewImageError::NotAnImage`] and
@@ -100,19 +101,18 @@ enum ShownSource {
 }
 
 impl ShownSource {
-    /// Read the store's entry for this viewer's node, uploading its
-    /// full-resolution texture if this is the first pass to ask.
+    /// Read the store's entry for this viewer's node, queueing its
+    /// full-resolution conversion if this is the first pass to ask.
     ///
-    /// Asking here is what scopes the upload: this runs from the record of a
-    /// pane that is being drawn, so only a viewer actually on screen ever
-    /// costs one — and it costs it *now*, in the pass that draws it, rather
-    /// than a frame later. The preview card never asks; its thumbnail is
-    /// already resident.
+    /// Asking here is what scopes the conversion: this runs from the record of
+    /// a pane that is being drawn, so only a viewer actually on screen ever
+    /// costs one. The preview card never asks; its thumbnail is already
+    /// resident, and stands in until the full texture lands.
     fn resolve(source: Option<&StoredContent>, ui: &Ui) -> Self {
         match source {
             None => Self::Nothing,
             Some(StoredContent::Image(image)) => match image.full(ui) {
-                Ok(drawable) => Self::Image(drawable),
+                Ok(view) => Self::Image(view),
                 Err(error) => Self::NoImage(error),
             },
             // A stored failure keeps its own reason. A perfectly good
@@ -123,9 +123,9 @@ impl ShownSource {
         }
     }
 
-    const fn image(&self) -> Option<&DrawableImage> {
+    const fn image(&self) -> Option<&FullView> {
         match self {
-            Self::Image(image) => Some(image),
+            Self::Image(view) => Some(view),
             Self::Nothing | Self::NoImage(_) => None,
         }
     }
@@ -154,7 +154,7 @@ pub(crate) struct ViewerPane<'a> {
 #[derive(Debug, Clone, Copy)]
 struct Shown<'a> {
     pane: ViewerPane<'a>,
-    image: &'a DrawableImage,
+    view: &'a FullView,
 }
 
 impl ImageViewer {
@@ -218,7 +218,7 @@ impl ImageViewer {
     pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
-        view: ViewerPane<'_>,
+        pane_view: ViewerPane<'_>,
         prefs: &mut ViewerPreferences,
     ) -> bool {
         let ViewerPane {
@@ -226,17 +226,17 @@ impl ImageViewer {
             previews,
             size: pane,
             ..
-        } = view;
+        } = pane_view;
         // The store rather than the entry: this viewer *is* its node, so
         // handing it the whole store is one lookup by an id that cannot
         // disagree with the one keying the pane's widgets.
         //
-        // Resolving is also what uploads a not-yet-registered full-resolution
-        // texture, so this pass draws it — there is no state where the pane
-        // owes itself a later frame.
+        // Resolving is also what queues a not-yet-converted full-resolution
+        // texture. The thumbnail stands in until it lands, and the converter
+        // wakes the host when it does, so the pane owes itself no later frame.
         let source = ShownSource::resolve(previews.entries.get(&self.node_id), ui);
-        self.sync_source(source.image().map(|image| image.handle.size()));
-        self.apply_gestures(ui, source.image(), pane);
+        self.sync_source(source.image().map(|view| view.image().texels));
+        self.apply_gestures(ui, source.image().map(FullView::image), pane);
 
         // The checker draws over the theme's backdrop.
         let fill = glyph::flat_fill(theme, prefs.background).unwrap_or(theme.canvas.bg);
@@ -253,7 +253,8 @@ impl ImageViewer {
                 {
                     self.draw_checker(ui, pane);
                 }
-                if let Some(shown) = source.image() {
+                if let Some(view) = source.image() {
+                    let shown = view.image();
                     let image = Shape::image(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
                         .mag_filter(prefs.mag_filter)
@@ -269,8 +270,8 @@ impl ImageViewer {
                         None => image.fit(ImageFit::Contain),
                     });
                     let shown = Shown {
-                        pane: view,
-                        image: shown,
+                        pane: pane_view,
+                        view,
                     };
                     self.header(ui, shown);
                     prefs_changed = self.controls(ui, shown, prefs);
@@ -313,13 +314,14 @@ impl ImageViewer {
     }
 
     /// The top-left readout: source node, native dimensions and pixel
-    /// format, whether the view is texture-capped, and the current zoom.
+    /// format, whether the view is texture-capped or still converting, and the
+    /// current zoom.
     fn header(&self, ui: &mut Ui, shown: Shown<'_>) {
         let readout = HeaderReadout {
             title: shown.pane.title,
-            shown: shown.image,
+            shown: shown.view,
             zoom: self
-                .effective_view(ui, shown.image, shown.pane.size)
+                .effective_view(ui, shown.view.image(), shown.pane.size)
                 .map(|v| v.zoom),
         };
         Readout {
@@ -369,7 +371,7 @@ impl ImageViewer {
                         theme,
                         glyph::draw_100,
                     ) && let Some(pane) = pane
-                        && let Some(v) = self.effective_view(ui, shown.image, Some(pane))
+                        && let Some(v) = self.effective_view(ui, shown.view.image(), Some(pane))
                     {
                         self.view = Some(camera::zoom_about_pane_center(v, 1.0, pane));
                     }
@@ -429,8 +431,8 @@ impl ImageViewer {
 }
 
 /// The viewer's top-left readout: source node, native dimensions and pixel
-/// format, then the two conditional clauses — whether the texture is capped
-/// below the source, and the current zoom.
+/// format, then the conditional clauses — whether the texture is capped below
+/// the source, whether the full texture is still converting, and the zoom.
 ///
 /// Rendered on demand rather than assembled into a `String`: the header
 /// records every frame the pane does, and `fmt!` puts the finished line
@@ -439,7 +441,7 @@ impl ImageViewer {
 struct HeaderReadout<'a> {
     /// Never empty — [`node_label`] supplies the fallback.
     title: &'a str,
-    shown: &'a DrawableImage,
+    shown: &'a FullView,
     /// `None` only while a fit-mode viewer waits for its first arranged
     /// pane — there is no fit zoom to report yet.
     zoom: Option<f32>,
@@ -448,17 +450,21 @@ struct HeaderReadout<'a> {
 impl Display for HeaderReadout<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DrawableImage {
-            handle,
+            texels,
             native_size,
             native_format,
-        } = self.shown;
+            ..
+        } = self.shown.image();
         write!(
             f,
             "{} · {} × {} · {native_format}",
             self.title, native_size.x, native_size.y
         )?;
-        if handle.size() != *native_size {
+        if texels != native_size {
             f.write_str(" · downscaled view")?;
+        }
+        if matches!(self.shown, FullView::Converting(_)) {
+            f.write_str(" · preparing full resolution")?;
         }
         if let Some(zoom) = self.zoom {
             write!(f, " · {:.0}%", zoom * 100.0)?;
@@ -488,7 +494,7 @@ pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
 /// physical pixel, which is the space every viewport in this module is
 /// expressed in, so the framing math never sees raw texels.
 fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
-    image.handle.size().as_vec2() / ui.display().scale_factor()
+    image.texels.as_vec2() / ui.display().scale_factor()
 }
 
 /// Stable id for a viewer's pane — keyed by node so switching between two
