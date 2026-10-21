@@ -6,7 +6,7 @@ use std::sync::Arc;
 use scenarium::{Library, OutputTypes};
 
 use crate::core::document::graph_revision::GraphRevision;
-use crate::core::document::open_document::OpenDocument;
+use crate::core::open_document::OpenDocument;
 
 /// The open document's resolved output types, kept across frames.
 ///

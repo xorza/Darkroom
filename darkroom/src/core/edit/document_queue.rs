@@ -9,7 +9,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 
 /// The requests raised against the open document, in the order raised.
 ///
-/// [`OpenDocument::drain_requests`](crate::core::document::open_document::OpenDocument::drain_requests)
+/// [`OpenDocument::drain_requests`](crate::core::open_document::OpenDocument::drain_requests)
 /// takes them, three times a frame, so a request raised in one phase lands before the next reads
 /// the document. The queue keeps its capacity, so a frame's pushes allocate nothing once it has
 /// grown.

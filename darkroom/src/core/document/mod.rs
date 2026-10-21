@@ -2,7 +2,6 @@ pub(crate) mod declaration;
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
-pub(crate) mod open_document;
 pub(crate) mod tab_ref;
 pub(crate) mod viewport;
 

@@ -15,8 +15,8 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::relayout::Relayout;
+use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;

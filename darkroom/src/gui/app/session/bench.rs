@@ -40,12 +40,12 @@ use palantir::{FramePaint, Ui};
 use scenarium::{Binding, DynamicValue, Func, Graph, InputPort, Library, NodeId};
 
 use crate::core::document::Document;
-use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
+use crate::core::open_document::OpenDocument;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::gui::app::session::Session;

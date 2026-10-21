@@ -5,9 +5,9 @@ use scenarium::internals::test_graph::{NodeSpec, TestGraph};
 use scenarium::{Binding, ConstValue, DataType, InputPort, Library, OutputPort};
 
 use crate::core::document::internals::DocFixture;
-use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
+use crate::core::open_document::OpenDocument;
 use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 
 /// The table follows the graph's revision and the library, and nothing

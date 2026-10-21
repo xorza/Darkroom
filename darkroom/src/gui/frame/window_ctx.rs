@@ -1,7 +1,7 @@
 //! The window level of the UI's context chain.
 
 use crate::core::document::Document;
-use crate::core::document::open_document::OpenDocument;
+use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_ctx::AppCtx;
 
 /// The frame's read-only world *and* the open document it is showing — what

@@ -16,12 +16,6 @@
 
 ## Plan
 
-### 4. `OpenDocument` above the document model
-
-Files: `core/document/open_document/` → `core/open_document/`, `core/document/mod.rs`, `core/mod.rs`, all importers.
-
-- [ ] `core/document/open_document/mod.rs`: `OpenDocument` composes the document with its history (`core::edit`) and its file (`core::io`), but lives inside `core::document`, which both of those import. That makes `core::document`, `core::edit` and `core::io` one import cycle, and `open_document` is its only back edge. Target: `core/open_document/`, a sibling above the three.
-
 ### 5. Preview preparation off the main thread
 
 Files: `gui/state/preview_store/mod.rs`, `gui/state/run_state/mod.rs`, `gui/pane/image_viewer/mod.rs`, `gui/app/mod.rs` (wake wiring).
