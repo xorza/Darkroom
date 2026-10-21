@@ -6,7 +6,7 @@
 //! node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** The loop reads a schedule
-//! [`resolve`](crate::execution::schedule::RunSchedule::resolve) has already swept, so
+//! [`resolve::sweep`](crate::execution::resolve::sweep) has already swept, so
 //! the disposition, output demand,
 //! and reader counts it reads were derived together and are authoritative for the whole run. A
 //! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
@@ -373,7 +373,7 @@ struct ExecutionFrame<'a, 'r> {
 impl ExecutionFrame<'_, '_> {
     /// One node's turn. The resolved disposition decides which of the four things happens, and it
     /// is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its producers may
-    /// already be pruned (see [`resolve`](crate::execution::schedule::RunSchedule::resolve)).
+    /// already be pruned (see [`resolve::sweep`](crate::execution::resolve::sweep)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
         let demand = &self.schedule.outputs.demand[e_node.outputs];

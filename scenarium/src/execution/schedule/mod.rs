@@ -6,8 +6,10 @@
 //! event reaches a [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers) and each node's [`NodeState`]
 //! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
-//! state. [`RunSchedule::resolve`] then refines that same column against the
-//! cache and fills the schedule's per-output half, and the executor reads both.
+//! state. [`resolve::sweep`](crate::execution::resolve::sweep) then refines that same
+//! column against the cache and fills the schedule's per-output half, and the executor
+//! reads both. The sweep lives in its own module: it reads the cache, and this one does
+//! not.
 //!
 //! Two passes rather than two pieces of state: this is the split a build system draws
 //! between its dependency graph and its dirty / up-to-date analysis (Ninja/Bazel), or a
@@ -23,7 +25,7 @@
 //! consecutive statements:
 //!
 //! ```text
-//! Planner::plan ──▶ RunSchedule::resolve ──▶ Executor::run
+//! Planner::plan ──▶ resolve::sweep ──▶ Executor::run
 //! ```
 //!
 //! Every step names the `CompiledGraph` its `NodeIdx` columns are aligned to, and
@@ -31,9 +33,10 @@
 //! catches a schedule spanning a different program than the one it is being read
 //! against.
 //!
-//! Every method that reads or writes the schedule lives on it, here; the DFS scratch
-//! the structural pass walks with is the one thing that isn't part of the answer, so it
-//! is its own type in [`planner`]. The schedule is reused via a buffer on the engine and
+//! Every method of the schedule lives on it, here — the cache-aware sweep is a function
+//! over the schedule and the cache, not a method of either. The DFS scratch the
+//! structural pass walks with is the one thing that isn't part of the answer, so it is
+//! its own type in [`planner`]. The schedule is reused via a buffer on the engine and
 //! the planner keeps its scratch across runs, so a repeated plan on an unchanged graph
 //! allocates nothing.
 
@@ -44,7 +47,6 @@ use common::is_debug;
 use crate::containers::column::Column;
 use crate::containers::idx_set::IdxSet;
 use crate::data::const_value::ConstValue;
-use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
 use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
@@ -60,12 +62,11 @@ pub(crate) mod planner;
 ///
 /// The planner establishes the structural three: `Disabled`, `MissingInputs`,
 /// and `Cut`, its positive verdict. The cache-aware sweep
-/// ([`RunSchedule::resolve`])
-/// then refines only the runnable ones, promoting what a running consumer
-/// reads to `Run` or `Reuse` and leaving the rest where the
-/// planner put them. That is why "the planner cleared it" and "the cut pruned
-/// it" are one state rather than two: a node that could run and that nothing
-/// this run reads *is* a cut node.
+/// ([`resolve::sweep`](crate::execution::resolve::sweep)) then refines only the
+/// runnable ones, promoting what a running consumer reads to `Run` or `Reuse` and
+/// leaving the rest where the planner put them. That is why "the planner cleared
+/// it" and "the cut pruned it" are one state rather than two: a node that could
+/// run and that nothing this run reads *is* a cut node.
 ///
 /// Authoritative once resolved: a `Reuse` is never re-derived after the cut may
 /// have pruned its producers. The safe direction is allowed once — the run loop
@@ -129,7 +130,7 @@ impl NodeState {
     /// `Disabled` or `MissingInputs` node would overwrite the verdict the run's
     /// outcome reports it by, and — for a disabled producer feeding an optional
     /// input — claim a node `process_order` does not even contain.
-    fn promote_to_run(&mut self) -> bool {
+    pub(super) fn promote_to_run(&mut self) -> bool {
         let cleared = self.is_runnable();
         if cleared {
             *self = Self::Run;
@@ -196,7 +197,7 @@ pub(crate) struct RunSchedule {
     /// seeds — aligned to the program's dense node vector. The schedule's "must
     /// be available" set: the sweep seeds liveness from these and prunes any
     /// cone reachable only through cache-hit consumers (see
-    /// [`resolve`](Self::resolve)).
+    /// [`resolve::sweep`](crate::execution::resolve::sweep)).
     ///
     /// The only record of the roots: [`roots`](Self::roots) reads the list off
     /// it, so the list is ascending whatever order the seeds named them in.
@@ -381,6 +382,16 @@ impl RunSchedule {
         self.root_flags[node_idx] = self.root_flags[node_idx].union(flags);
     }
 
+    /// Clear every root to run — where the sweep's liveness starts: what the run
+    /// was asked for.
+    pub(super) fn promote_roots(&mut self) {
+        for (node_idx, flags) in self.root_flags.iter_indexed() {
+            if flags.is_root() {
+                self.states[node_idx].promote_to_run();
+            }
+        }
+    }
+
     /// Collect the run's walk roots into `self.root_flags` — the seeds for both the backward
     /// walk and the executor's cut: exact execution-node seeds, every
     /// event subscriber, every sink node, and (for the event loop) every node owning a
@@ -550,87 +561,6 @@ impl RunSchedule {
         }
         self.validate(program)
             .expect("run schedule invariant violated");
-    }
-
-    /// Stamp the planned schedule, then sweep it in reverse for exact liveness and
-    /// cache reuse, writing the result into that same buffer: the [`NodeState`] column
-    /// the planner opened, plus the `outputs` half beside it. The cache-aware
-    /// "up-to-date check" between [`plan`](planner::Planner::plan) and
-    /// [`execute`](crate::execution::executor) — the planner's answer is *what could
-    /// run*, this one is *what will*.
-    ///
-    /// **Mutates `cache`** only to stamp each runnable node's `current_digest`: a live
-    /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
-    /// run loop, when it reaches the node.
-    ///
-    /// In the sweep, a running consumer marks exactly the producer ports it reads; reuse,
-    /// missing-input nodes, and missing lambdas stop the walk. Producer classification
-    /// happens only after every downstream consumer has contributed, so cache coverage is
-    /// checked against exact demand rather than the planner's structural
-    /// over-approximation.
-    ///
-    /// Every node's digest is structural (a fold of its inputs and the run's prepared
-    /// filesystem snapshot), so this stamps the *whole* graph ahead of the run. The one
-    /// stamp it can leave imprecise is a digest folding a Bind-delivered path value it
-    /// can't read yet: that folds to `None` here — "uncacheable, must run", which keeps
-    /// the node's cone alive — and the run loop prepares the identity and re-stamps at
-    /// reach time once its producers have settled, possibly improving `Run` to a reuse.
-    pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
-        // The cache holds no program of its own, so every question below names
-        // the one `program` this schedule was planned against.
-        cache.stamp_digests(program, self);
-        // The sweep *accumulates* demand and readers, so it starts from zero of
-        // its own accord rather than trusting whoever opened the schedule.
-        self.outputs.reset(program.outputs.len());
-
-        // Liveness starts at what the run was asked for.
-        for (node_idx, flags) in self.root_flags.iter_indexed() {
-            if flags.is_root() {
-                self.states[node_idx].promote_to_run();
-            }
-        }
-
-        // Reverse process order, so every consumer of a node has contributed
-        // its demand before the node is classified: a producer is promoted and
-        // read-counted by each live consumer on the way past, and only then
-        // asked whether a cache covers what was actually demanded. That also
-        // means a promotion can only overwrite the planner's `Cut` or an
-        // earlier consumer's `Run`, never a `Reuse` this sweep settled.
-        for &node_idx in self.process_order.iter().rev() {
-            // Reaching this body means the planner cleared the node and some
-            // consumer (or a root) promoted it — `Run` is written no other way.
-            if self.states[node_idx] != NodeState::Run {
-                continue;
-            }
-            let e_node = &program[node_idx];
-
-            let flags = self.root_flags[node_idx];
-            let demand = &mut self.outputs.demand[e_node.outputs];
-            // A node seed ("run to this node") demands every output the node has:
-            // the host asked for the node itself, not for what a consumer reads.
-            if flags.is_seeded() {
-                demand.fill(OutputDemand::Produce);
-            }
-            if !flags.is_event_source() && cache.probe_reuse(program, node_idx, demand).await {
-                self.states[node_idx] = NodeState::Reuse;
-                continue;
-            }
-
-            // A read is planned exactly where the run loop will take one: on a
-            // `Bind` delivery, whose producer the plan runs. A **disabled**
-            // producer feeding an *optional* input leaves the consumer
-            // schedulable, but never enters `process_order`, so it delivers
-            // nothing and is not promoted.
-            for input in &program.inputs[e_node.inputs] {
-                if let Delivery::Bind(addr) = self.delivery(program, input) {
-                    let promoted = self.states[addr.node_idx].promote_to_run();
-                    debug_assert!(promoted, "a delivering producer is runnable");
-                    self.outputs.add_reader(program.output_idx(addr));
-                }
-            }
-        }
-
-        self.validate_debug(program);
     }
 }
 
