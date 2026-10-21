@@ -7,6 +7,7 @@ use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::internals::DocFixture;
 use crate::core::preview_sink;
+use crate::core::wake;
 
 /// A document holding one preview node at `node`. The id is the caller's, so a
 /// test can build the same node's document twice and have the store recognise
@@ -80,39 +81,6 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     );
 }
 
-/// What a pane reads off a registered image: the texture at the size it was
-/// prepared to, and the *source's* dimensions and format beside it — the pair
-/// the viewer header compares to say "downscaled view".
-#[test]
-fn a_drawable_reports_its_source_alongside_the_capped_texture() {
-    let mut arena = UiHarness::arena();
-    let value = internals::image_value(1024, 512, ColorFormat::RGB_F32);
-    let image = value.as_custom::<LensImage>().unwrap();
-
-    // The viewer names no ceiling of its own, so the device's is the only one
-    // — and a deviceless harness has none at all.
-    assert_eq!(
-        arena.ui().max_image_dimension(),
-        None,
-        "a deviceless harness imposes no ceiling"
-    );
-    let full = prepare_drawable(arena.ui(), image, None).unwrap();
-    assert_eq!(
-        full.handle.size(),
-        UVec2::new(1024, 512),
-        "the source's own resolution"
-    );
-    assert_eq!(full.native_size, UVec2::new(1024, 512));
-    assert_eq!(full.native_format, ColorFormat::RGB_F32);
-
-    // The thumbnail caps the longest side at 256, and still reports the source
-    // it was made from rather than what it was reduced to.
-    let thumb = prepare_drawable(arena.ui(), image, Some(PREVIEW_TEXTURE_DIM)).unwrap();
-    assert_eq!(thumb.handle.size(), UVec2::new(256, 128));
-    assert_eq!(thumb.native_size, UVec2::new(1024, 512));
-    assert_eq!(thumb.native_format, ColorFormat::RGB_F32);
-}
-
 /// An edge one past `u32::MAX` is refused, not wrapped to a 0-wide texture, on either
 /// axis; `u32::MAX` itself fits, and a zero edge is empty. Descriptions only: no image
 /// that wide fits in memory.
@@ -134,35 +102,62 @@ fn native_size_refuses_an_edge_no_texture_holds() {
 }
 
 /// An image's source becomes a full-resolution texture only when a viewer
-/// asks for one — the card itself needs the thumbnail alone — and the ask is
-/// answered on the spot rather than scheduled.
+/// asks for one — the card itself needs the thumbnail alone — and neither
+/// conversion runs on the thread that asks. The card lands once its thumbnail
+/// is converted; until the full texture lands, the thumbnail stands in for it
+/// at the full texture's size, so the viewer's framing never moves.
 #[test]
-fn the_full_texture_is_uploaded_on_the_first_ask_and_reused_after() {
+fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
     let mut arena = UiHarness::arena();
-    let mut store = PreviewStore::default();
+    let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
 
-    store.ingest_preview(
-        arena.ui(),
+    store.publish(
         node,
-        internals::image_value(512, 256, ColorFormat::RGBA_U8),
+        internals::image_value(1024, 512, ColorFormat::RGB_F32),
     );
+    assert!(
+        store.entries.is_empty(),
+        "publishing converts nothing on the calling thread"
+    );
+    store.settle(arena.ui());
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("an image value must create an image resource");
     };
+    // The thumbnail caps the longest side at 256 — 1024 → 256 is a quarter,
+    // so 512 → 128 — and reports the source it was cut from.
     assert_eq!(image.preview.handle.size(), UVec2::new(256, 128));
-    assert_eq!(image.preview.native_size, UVec2::new(512, 256));
-    assert_eq!(image.preview.native_format, ColorFormat::RGBA_U8);
-    assert_eq!(image.source_bytes, 512 * 256 * 4);
+    assert_eq!(image.preview.texels, UVec2::new(256, 128));
+    assert_eq!(image.preview.native_size, UVec2::new(1024, 512));
+    assert_eq!(image.preview.native_format, ColorFormat::RGB_F32);
+    // Three f32 channels: 12 bytes a pixel.
+    assert_eq!(image.source_bytes, 1024 * 512 * 12);
     assert!(
         !image.is_full_resident(),
-        "ingesting a value uploads the thumbnail and nothing else"
+        "landing a value uploads the thumbnail and nothing else"
     );
 
-    // The full texture keeps the source's own dimensions — twice the
-    // thumbnail's on each axis.
-    let full = image.full(arena.ui()).expect("a valid image uploads");
-    assert_eq!(full.handle.size(), UVec2::new(512, 256));
+    // A deviceless harness imposes no texture ceiling, so the full texture is
+    // the source's own size — and until it lands, the thumbnail is drawn
+    // there.
+    assert_eq!(arena.ui().max_image_dimension(), None);
+    let FullView::Converting(stand_in) = image.full(arena.ui()).expect("a valid image converts")
+    else {
+        panic!("the first ask queues the conversion");
+    };
+    assert_eq!(stand_in.handle.size(), UVec2::new(256, 128));
+    assert_eq!(stand_in.texels, UVec2::new(1024, 512));
+    assert!(!image.is_full_resident());
+
+    store.settle(arena.ui());
+    let StoredContent::Image(image) = &store.entries[&node] else {
+        panic!("the image stays the same entry");
+    };
+    let FullView::Ready(full) = image.full(arena.ui()).expect("the conversion landed") else {
+        panic!("a landed raster is resident");
+    };
+    assert_eq!(full.handle.size(), UVec2::new(1024, 512));
+    assert_eq!(full.texels, UVec2::new(1024, 512));
     assert_eq!(
         (full.native_size, full.native_format),
         (image.preview.native_size, image.preview.native_format),
@@ -170,12 +165,12 @@ fn the_full_texture_is_uploaded_on_the_first_ask_and_reused_after() {
     );
     assert!(image.is_full_resident());
 
-    // Asking again answers from the stored texture. It cannot re-upload even
-    // in principle: the source was dropped as it became one, so a second
-    // upload would have nothing to read.
-    let again = image.full(arena.ui()).expect("still uploaded");
+    // Asking again answers from the stored texture. It cannot convert again
+    // even in principle: the image gave its source up to the conversion.
+    let FullView::Ready(again) = image.full(arena.ui()).expect("still uploaded") else {
+        panic!("a resident texture stays resident");
+    };
     assert_eq!(again.handle.size(), full.handle.size());
-    assert!(image.is_full_resident());
 
     // Both textures are the store's to release, and a node that has gone
     // retains neither.
@@ -191,28 +186,62 @@ fn the_full_texture_is_uploaded_on_the_first_ask_and_reused_after() {
     );
 }
 
-/// A preview's value lives exactly as long as its node: re-publishing
-/// replaces in place, and deleting the node releases it.
+/// A preview's value lives exactly as long as its node, and its publishes land
+/// in order: the card keeps showing what it showed while a newer value
+/// converts, each finished conversion shows even while a newer one is still
+/// converting — so a node that publishes faster than its frames convert still
+/// updates — and removing the node's value voids its conversions in flight.
 #[test]
 fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let mut arena = UiHarness::arena();
-    let mut store = PreviewStore::default();
+    let mut store = PreviewStore::new(wake::internals::noop());
     let node = NodeId::unique();
     let mut document = document_with_preview(node);
     let other = document
         .graph
         .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));
+    let int = |value| DynamicValue::Static(ConstValue::Int(value));
+    let shown = |store: &PreviewStore| match store.entries.get(&node) {
+        Some(StoredContent::Text(text)) => Some(text.clone()),
+        Some(content) => panic!("a number formats as text, not {content:?}"),
+        None => None,
+    };
 
-    store.ingest_preview(arena.ui(), node, DynamicValue::Static(ConstValue::Int(7)));
-    store.ingest_preview(arena.ui(), other, DynamicValue::Static(ConstValue::Int(9)));
-    assert!(
-        matches!(&store.entries[&node], StoredContent::Text(t) if t == "7"),
-        "the published value is formatted on receipt"
+    store.publish(node, int(7));
+    store.publish(other, int(9));
+    store.settle(arena.ui());
+    assert_eq!(shown(&store).as_deref(), Some("7"), "formatted on landing");
+
+    store.publish(node, int(8));
+    store.publish(node, int(10));
+    assert_eq!(
+        shown(&store).as_deref(),
+        Some("7"),
+        "the card keeps its value while the next converts"
     );
-
-    store.ingest_preview(arena.ui(), node, DynamicValue::Static(ConstValue::Int(8)));
+    store.land_next(arena.ui());
+    assert_eq!(
+        shown(&store).as_deref(),
+        Some("8"),
+        "a finished publish lands though a newer one is still converting"
+    );
+    store.land_next(arena.ui());
+    assert_eq!(shown(&store).as_deref(), Some("10"));
     assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
-    assert!(matches!(&store.entries[&node], StoredContent::Text(t) if t == "8"));
+
+    // Removed while converting, then published again: the first conversion
+    // lands first, on the one thread, and is void.
+    store.publish(node, int(11));
+    store.remove(node);
+    store.publish(node, int(13));
+    store.land_next(arena.ui());
+    assert_eq!(
+        shown(&store),
+        None,
+        "a removed value's conversion lands nowhere"
+    );
+    store.land_next(arena.ui());
+    assert_eq!(shown(&store).as_deref(), Some("13"));
 
     store.reconcile(&document);
     assert!(

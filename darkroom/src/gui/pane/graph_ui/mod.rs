@@ -595,11 +595,11 @@ mod tests {
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
         // without a value the card records `Sense::NONE` and swallows the click.
-        h.ctx.run_state.previews.ingest_preview(
-            h.ui.ui(),
-            node,
-            preview_store::internals::opaque_image_value(),
-        );
+        h.ctx
+            .run_state
+            .previews
+            .publish(node, preview_store::internals::opaque_image_value());
+        h.ctx.run_state.previews.settle(h.ui.ui());
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
 

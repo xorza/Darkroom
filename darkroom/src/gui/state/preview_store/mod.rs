@@ -1,12 +1,15 @@
 //! Runtime presentation resources for the values preview nodes publish.
 //!
-//! The store is the sole owner of preview-card and viewer textures. An image
-//! uploads a small thumbnail immediately and holds its source until a viewer
-//! first asks for the full texture — [`PreviewImage::full`] uploads it there
-//! and then, in the pass that draws it, and drops the source as it goes.
-//! Non-image values are formatted on receipt and dropped immediately.
+//! The store is the sole owner of preview-card and viewer textures. A
+//! published value goes to the [`PreviewConverter`]'s thread, and what comes
+//! back lands on a later frame: an image as a small thumbnail, with its source
+//! held until a viewer first asks for the full texture; a non-image as its
+//! formatted text. Until then the card keeps showing what it showed before.
+//!
+//! [`PreviewConverter`]: preview_converter::PreviewConverter
 
 pub(crate) mod error;
+pub(crate) mod preview_converter;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,23 +18,30 @@ use std::num::NonZeroU32;
 
 use glam::UVec2;
 use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, Preview};
-use lens::Image as LensImage;
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
+use crate::core::wake::Wake;
 use crate::gui::state::preview_store::error::PreviewImageError;
+use crate::gui::state::preview_store::preview_converter::{
+    Card, Converted, Job, Jobs, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
+};
 
 /// Longest edge of a preview card's thumbnail — the one size darkroom picks
-/// for itself. A viewer's texture names no figure at all; see
-/// [`prepare_drawable`].
+/// for itself. A viewer's texture names no figure at all: it takes the
+/// source's own size, capped only by the device's texture limit.
 const PREVIEW_TEXTURE_DIM: NonZeroU32 = NonZeroU32::new(256).unwrap();
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct PreviewStore {
     /// Each preview node's current value, keyed by the node that published it —
     /// a preview *is* the thing on screen, so its identity is the widget's.
     pub(crate) entries: HashMap<NodeId, StoredContent>,
+    /// The publishes of each node still converting for its card.
+    converting: HashMap<NodeId, Converting>,
+    last_ticket: Ticket,
+    converter: PreviewConverter,
 }
 
 #[derive(Debug)]
@@ -98,19 +108,59 @@ pub(crate) struct PreviewImage {
     /// prepared from the same source and so is described by the same figures.
     pub(crate) preview: DrawableImage,
     /// The full-resolution texture, or the source still waiting to become one.
-    /// Read only through [`Self::full`], which is what resolves the wait.
+    /// Read only through [`Self::full`], which is what starts the conversion.
     full: RefCell<FullImage>,
     pub(crate) source_bytes: usize,
+    /// The node and the publish this image came from — what a full raster
+    /// converted from it is addressed to.
+    node_id: NodeId,
+    ticket: Ticket,
+    /// Where [`Self::full`] queues the full-resolution conversion. The record
+    /// pass asks with `&self`, so the image carries its own sender rather than
+    /// reaching for the store's.
+    jobs: Jobs,
+}
+
+/// The publishes of one node still converting: every ticket from `oldest` to
+/// `newest`.
+///
+/// A node's results arrive in the order it published — one thread, one
+/// queue — so a result in this span is newer than what the card shows, and
+/// lands even while a newer publish converts. Waiting for the newest alone
+/// would starve a node that publishes faster than its frames convert: each
+/// publish would void the one before, and the card would never change.
+#[derive(Debug, Clone, Copy)]
+struct Converting {
+    oldest: Ticket,
+    newest: Ticket,
 }
 
 /// What a stored image holds for a viewer: the published value until one asks
-/// for it at full resolution, the texture from then on, or why there will
-/// never be one.
+/// for it at full resolution, the raster being converted at `texels`, the
+/// texture from then on, or why there will never be one.
 #[derive(Debug)]
 enum FullImage {
     Pending(DynamicValue),
+    Converting { texels: UVec2 },
     Resident(ImageHandle),
     Failed(PreviewImageError),
+}
+
+/// What a viewer draws for a stored image: the full-resolution texture, or,
+/// while that converts, the thumbnail standing in for it at the same `texels`,
+/// so the framing does not move when the texture arrives.
+#[derive(Clone, Debug)]
+pub(crate) enum FullView {
+    Ready(DrawableImage),
+    Converting(DrawableImage),
+}
+
+impl FullView {
+    pub(crate) const fn image(&self) -> &DrawableImage {
+        match self {
+            Self::Ready(image) | Self::Converting(image) => image,
+        }
+    }
 }
 
 /// A registered texture plus what its source looked like before the
@@ -122,6 +172,9 @@ enum FullImage {
 #[derive(Clone, Debug)]
 pub(crate) struct DrawableImage {
     pub(crate) handle: ImageHandle,
+    /// The texture size this image is framed at: the handle's own, except for a
+    /// thumbnail standing in for a full texture still converting.
+    pub(crate) texels: UVec2,
     /// Source dimensions before the downscale that sized the texture — the
     /// thumbnail's own cap, or the device's texture limit for a viewer's.
     pub(crate) native_size: UVec2,
@@ -130,14 +183,74 @@ pub(crate) struct DrawableImage {
 }
 
 impl PreviewStore {
-    /// Store one preview node's freshly published value, replacing whatever it
-    /// was showing.
+    pub(crate) fn new(wake: Wake) -> Self {
+        Self {
+            entries: HashMap::new(),
+            converting: HashMap::new(),
+            last_ticket: Ticket::default(),
+            converter: PreviewConverter::new(wake),
+        }
+    }
+
+    /// Queue one preview node's freshly published value for conversion. The
+    /// card keeps what it shows until the result lands, in a later
+    /// [`Self::land`].
     ///
     /// No retention filter on the way in: a value arrives keyed by the node
     /// that published it, and a node that published exists. `reconcile`
     /// drops it once that stops being true.
-    pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {
-        self.entries.insert(node_id, prepare_content(ui, value));
+    pub(crate) fn publish(&mut self, node_id: NodeId, value: DynamicValue) {
+        let ticket = self.last_ticket.next();
+        self.last_ticket = ticket;
+        self.converting
+            .entry(node_id)
+            .and_modify(|span| span.newest = ticket)
+            .or_insert(Converting {
+                oldest: ticket,
+                newest: ticket,
+            });
+        self.converter.jobs().send(Job {
+            node_id,
+            ticket,
+            work: Work::Thumbnail(value),
+        });
+    }
+
+    /// Register every conversion finished since the last frame. A card
+    /// replaces what the node showed, unless its value was removed since it
+    /// was published; a full raster goes to the image that asked for it,
+    /// unless that image was replaced meanwhile.
+    pub(crate) fn land(&mut self, ui: &Ui) {
+        let Self {
+            entries,
+            converting,
+            converter,
+            ..
+        } = self;
+        for converted in converter.ready() {
+            accept(
+                Landing {
+                    entries,
+                    converting,
+                    converter,
+                },
+                ui,
+                converted,
+            );
+        }
+    }
+
+    /// Drop `node_id`'s value, and void every conversion of it still in
+    /// flight.
+    pub(crate) fn remove(&mut self, node_id: NodeId) {
+        self.entries.remove(&node_id);
+        self.converting.remove(&node_id);
+    }
+
+    /// Drop every value, and every conversion still in flight.
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.converting.clear();
     }
 
     /// Release every presentation resource the document no longer retains.
@@ -145,10 +258,9 @@ impl PreviewStore {
     /// Run unconditionally once a frame: the retain is a lookup per stored
     /// value, over the handful of nodes holding one. That is cheaper than the
     /// bookkeeping a dirty flag needed — the store is written *outside* the
-    /// frame too (`ingest_preview` runs from the worker drain), so a flag had
-    /// to survive until the next frame rather than resetting with it, and
-    /// every edit path that moved the retained set had to remember to raise
-    /// it.
+    /// frame too (`land` runs from the worker drain), so a flag had to survive
+    /// until the next frame rather than resetting with it, and every edit path
+    /// that moved the retained set had to remember to raise it.
     ///
     /// A preview's own node is its retention: delete the node and the value it
     /// was showing has nothing left to draw it. The shared liveness rule
@@ -157,108 +269,149 @@ impl PreviewStore {
     pub(crate) fn reconcile(&mut self, document: &Document) {
         self.entries
             .retain(|node_id, _| document.holds_preview_node(*node_id));
+        self.converting
+            .retain(|node_id, _| document.holds_preview_node(*node_id));
     }
 }
 
+/// The store's fields a landing writes, borrowed apart from the converter's
+/// result queue that drives it.
+#[derive(Debug)]
+struct Landing<'a> {
+    entries: &'a mut HashMap<NodeId, StoredContent>,
+    converting: &'a mut HashMap<NodeId, Converting>,
+    converter: &'a PreviewConverter,
+}
+
+/// Land one finished conversion, or drop it when it no longer has a place.
+fn accept(landing: Landing<'_>, ui: &Ui, converted: Converted) {
+    let Converted {
+        node_id,
+        ticket,
+        outcome,
+    } = converted;
+    match outcome {
+        Outcome::Card(card) => land_card(landing, ui, node_id, ticket, card),
+        Outcome::Full(raster) => {
+            if let Some(StoredContent::Image(image)) = landing.entries.get(&node_id)
+                && image.ticket == ticket
+            {
+                image.land_full(ui, &raster);
+            }
+        }
+    }
+}
+
+/// Land `node_id`'s card from publish `ticket`, unless no conversion of the
+/// node is pending — its value was removed or swept — or this one was
+/// published before a removal voided it.
+fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, card: Card) {
+    let Landing {
+        entries,
+        converting,
+        converter,
+    } = landing;
+    let Some(span) = converting.get_mut(&node_id) else {
+        return;
+    };
+    if ticket < span.oldest {
+        return;
+    }
+    if ticket == span.newest {
+        converting.remove(&node_id);
+    } else {
+        span.oldest = ticket.next();
+    }
+    let content = match card {
+        Card::Text(text) => StoredContent::Text(text),
+        Card::Failed(error) => StoredContent::Error(error),
+        Card::Image { thumbnail, source } => {
+            let Thumbnail {
+                raster,
+                native_size,
+                native_format,
+            } = thumbnail;
+            match ui.load_image(&raster) {
+                Ok(handle) => StoredContent::Image(PreviewImage {
+                    preview: DrawableImage {
+                        texels: handle.size(),
+                        handle,
+                        native_size,
+                        native_format,
+                    },
+                    source_bytes: source.ram_usage().total(),
+                    full: RefCell::new(FullImage::Pending(source)),
+                    node_id,
+                    ticket,
+                    jobs: converter.jobs().clone(),
+                }),
+                Err(error) => StoredContent::Error(error.into()),
+            }
+        }
+    };
+    entries.insert(node_id, content);
+}
+
 impl PreviewImage {
-    /// The full-resolution texture, uploading the published value on the first
-    /// ask and reusing the result from then on. The source is dropped as it
-    /// becomes a texture, so an image is never held twice.
+    /// What a viewer draws for this image. The first ask queues the
+    /// full-resolution conversion, and until it lands the thumbnail stands in
+    /// at the full texture's size.
     ///
-    /// **Lazy, not deferred.** The upload is the source's own resolution — a
+    /// **Lazy.** The full raster is the source's own resolution — a
     /// full-sensor frame is hundreds of MB of RGBA8 — and only a viewer pane
-    /// ever wants one; a preview card draws the
-    /// thumbnail. Asking is therefore the whole scoping rule: a pane records
-    /// only when its tab is the visible one, so a viewer stacked behind
-    /// another uploads nothing, and one that becomes visible mid-record gets
-    /// its texture in the pass that draws it rather than a frame later.
+    /// ever wants one; a preview card draws the thumbnail. Asking is therefore
+    /// the whole scoping rule: a pane records only when its tab is the visible
+    /// one, so a viewer stacked behind another converts nothing.
     ///
     /// `&self` because that ask comes from the record pass, which holds the
     /// run projection immutably (see [`AppCtx`](crate::gui::frame::app_ctx::AppCtx)).
     /// The borrow is taken, resolved and dropped inside this call, so nothing
-    /// can observe the cell mid-upload or hold it across a frame — and both
-    /// answers are read *out* of it rather than borrowed from, the handle as a
-    /// refcount bump on the texture the store still owns.
+    /// can observe the cell mid-change or hold it across a frame.
     ///
     /// A failure is stored, not just returned: it is terminal, so a broken
     /// image is diagnosed once rather than retried on every frame that draws
     /// it.
-    pub(crate) fn full(&self, ui: &Ui) -> Result<DrawableImage, PreviewImageError> {
+    pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, PreviewImageError> {
         let mut full = self.full.borrow_mut();
-        if let FullImage::Pending(value) = &*full {
-            *full = match upload(ui, value) {
-                Ok(handle) => FullImage::Resident(handle),
-                Err(error) => FullImage::Failed(error),
-            };
+        if let FullImage::Pending(source) = &*full {
+            let texels = capped_target(self.preview.native_size, ui.max_image_dimension());
+            self.jobs.send(Job {
+                node_id: self.node_id,
+                ticket: self.ticket,
+                work: Work::Full {
+                    source: source.clone(),
+                    texels,
+                },
+            });
+            *full = FullImage::Converting { texels };
         }
         match &*full {
-            // The thumbnail's metadata, because both textures come off the
-            // same source — only the handle differs between the two sizes.
-            FullImage::Resident(handle) => Ok(DrawableImage {
+            FullImage::Resident(handle) => Ok(FullView::Ready(DrawableImage {
                 handle: handle.clone(),
+                texels: handle.size(),
                 ..self.preview.clone()
-            }),
+            })),
+            FullImage::Converting { texels } => Ok(FullView::Converting(DrawableImage {
+                texels: *texels,
+                ..self.preview.clone()
+            })),
             FullImage::Failed(error) => Err(error.clone()),
-            FullImage::Pending(_) => unreachable!("the pending source was just uploaded"),
+            FullImage::Pending(_) => unreachable!("the pending source was just queued"),
         }
     }
-}
 
-fn upload(ui: &Ui, value: &DynamicValue) -> Result<ImageHandle, PreviewImageError> {
-    // Not a fallible step here, unlike in `prepare_content`: a
-    // `PreviewImage` is only ever built over a value that already
-    // downcast, and `Pending` holds that same value.
-    let image = value
-        .as_custom::<LensImage>()
-        .expect("a stored preview image is only built over an image value");
-    Ok(prepare_drawable(ui, image, None)?.handle)
-}
-
-fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
-    // One downcast serves both the "is this an image at all?" test and the
-    // conversion — a non-image renders as text, an image that fails to convert
-    // as an error, and those are different outcomes. The borrow it hands out
-    // is dead by the time `value` moves into `Pending` below.
-    let Some(image) = value.as_custom::<LensImage>() else {
-        return StoredContent::Text(value.to_string());
-    };
-    match prepare_drawable(ui, image, Some(PREVIEW_TEXTURE_DIM)) {
-        Ok(preview) => StoredContent::Image(PreviewImage {
-            preview,
-            source_bytes: value.ram_usage().total(),
-            full: RefCell::new(FullImage::Pending(value)),
-        }),
-        Err(error) => StoredContent::Error(error),
+    /// Register the full raster converted for this image.
+    fn land_full(&self, ui: &Ui, raster: &Raster) {
+        let mut full = self.full.borrow_mut();
+        debug_assert!(
+            matches!(*full, FullImage::Converting { .. }),
+            "a full raster lands only on the image that asked for it"
+        );
+        *full = match ui.load_image(raster) {
+            Ok(handle) => FullImage::Resident(handle),
+            Err(error) => FullImage::Failed(error.into()),
+        };
     }
-}
-
-/// Read a published image back to the CPU, fit it to `max_dim`, and hand
-/// the pixels to the renderer — the one path from a pipeline value to
-/// something a pane can draw, at whichever of the two sizes is asked for.
-///
-/// `max_dim` is the caller's *own* ceiling on the longest edge, or `None` to
-/// take as many texels as the machine will hold — which is what a viewer
-/// wants. The device's limit is read here and always binds on top of it, since
-/// registration rejects an over-limit image rather than shrinking it, and a
-/// mosaic wider than the GPU allows would otherwise have nothing to show at
-/// all.
-fn prepare_drawable(
-    ui: &Ui,
-    image: &LensImage,
-    max_dim: Option<NonZeroU32>,
-) -> Result<DrawableImage, PreviewImageError> {
-    let cpu = image.interleaved();
-    let native_size = native_size(cpu.desc())?;
-    let ceiling = [max_dim, ui.max_image_dimension()]
-        .into_iter()
-        .flatten()
-        .min();
-    let raster = rgba8_raster(&cpu, capped_target(native_size, ceiling));
-    Ok(DrawableImage {
-        handle: ui.load_image(&raster)?,
-        native_size,
-        native_format: cpu.desc().color_format,
-    })
 }
 
 /// The texel size of an image `desc` describes, or why no texture holds it.
@@ -302,23 +455,103 @@ fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
     )
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
+    #[cfg(test)]
     use imaginarium::Image as RawImage;
+    #[cfg(test)]
+    use lens::Image as LensImage;
 
     use super::*;
 
+    impl PreviewStore {
+        /// Wait for every conversion in flight, and land each — what a test
+        /// does where production waits for the next frame.
+        #[cfg(test)]
+        pub(crate) fn settle(&mut self, ui: &Ui) {
+            while self.in_flight() {
+                self.land_next(ui);
+            }
+        }
+
+        /// Wait for the next finished conversion, and land it alone.
+        #[cfg(test)]
+        pub(crate) fn land_next(&mut self, ui: &Ui) {
+            let converted = self.converter.wait();
+            let Self {
+                entries,
+                converting,
+                converter,
+                ..
+            } = self;
+            accept(
+                Landing {
+                    entries,
+                    converting,
+                    converter,
+                },
+                ui,
+                converted,
+            );
+        }
+
+        /// Whether a card or a full raster is still converting.
+        #[cfg(test)]
+        fn in_flight(&self) -> bool {
+            !self.converting.is_empty()
+                || self.entries.values().any(|content| {
+                    content.image().is_some_and(|image| {
+                        matches!(*image.full.borrow(), FullImage::Converting { .. })
+                    })
+                })
+        }
+
+        /// Land `card` as `node_id`'s newest publish, on the calling thread —
+        /// for a bench that lands one conversion every frame and times the
+        /// landing alone.
+        pub(crate) fn land_converted(&mut self, ui: &Ui, node_id: NodeId, card: Card) {
+            let ticket = self.last_ticket.next();
+            self.last_ticket = ticket;
+            self.converting.insert(
+                node_id,
+                Converting {
+                    oldest: ticket,
+                    newest: ticket,
+                },
+            );
+            let Self {
+                entries,
+                converting,
+                converter,
+                ..
+            } = self;
+            land_card(
+                Landing {
+                    entries,
+                    converting,
+                    converter,
+                },
+                ui,
+                node_id,
+                ticket,
+                card,
+            );
+        }
+    }
+
+    #[cfg(test)]
     impl PreviewImage {
         /// Whether the full-resolution texture has been uploaded yet.
         ///
         /// The one question a test can't ask through [`PreviewImage::full`],
-        /// since asking that *is* what uploads it.
+        /// since asking that *is* what queues it.
         pub(crate) fn is_full_resident(&self) -> bool {
             matches!(&*self.full.borrow(), FullImage::Resident(_))
         }
     }
 
     /// A black `width`×`height` image in `format`, as a node would publish it.
+    #[cfg(test)]
     pub(crate) fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
         let raw = RawImage::new_black(ImageDesc::new(width, height, format)).unwrap();
         DynamicValue::from_custom(LensImage::from(raw))
@@ -329,7 +562,8 @@ pub(crate) mod internals {
     ///
     /// Publishing a value is what makes a card clickable at all (it records
     /// `Sense::NONE` without one), so every test about that chip, or about the
-    /// viewer tab it opens, starts by ingesting this.
+    /// viewer tab it opens, starts by publishing and settling this.
+    #[cfg(test)]
     pub(crate) fn opaque_image_value() -> DynamicValue {
         image_value(2, 1, ColorFormat::RGB_U8)
     }

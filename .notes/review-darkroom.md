@@ -5,23 +5,14 @@
 ### Root causes
 
 - **A run verdict is three fields that must agree.** `NodeRunState` holds `status`, `error` and `missing_inputs` side by side. Live progress writes only `status`, so a stale `error` from the last run shows beside a fresh `Executed` status until the run completes.
-- **Preview pixels are prepared on the main thread.** `PreviewStore::ingest_preview` (from `App::update`) and `PreviewImage::full` (from the record pass) both copy a planar image to interleaved and convert it to RGBA8. A full-sensor frame takes a frame hitch of hundreds of milliseconds.
 - **A revision counter is global state.** `GraphRevision::fresh` uses a process-wide `static AtomicU64`. Its only readers (`MainWindow::swept_at`, `OutputTypeCache`) live in the `MainWindow` that `Session::new` replaces together with the document, so a per-document counter gives the same guarantee.
 
 ### Target design
 
 - **A run verdict is one value.** `ExecStatus` carries its own detail (`Errored(Option<String>)`, `MissingInputs(Vec<usize>)`), so a status and its detail cannot disagree.
-- **Preview preparation runs off the main thread.** One background converter owned by `RunState` turns a published value into a thumbnail raster, and later into a full raster on a viewer's first ask. The main thread only uploads finished rasters.
 - **The graph revision is per document.** `OpenDocument` advances its own counter, as `DocumentQueue` does for `GestureId`.
 
 ## Plan
-
-### 5. Preview preparation off the main thread
-
-Files: `gui/state/preview_store/mod.rs`, `gui/state/run_state/mod.rs`, `gui/pane/image_viewer/mod.rs`, `gui/app/mod.rs` (wake wiring).
-
-- [ ] `gui/state/preview_store/mod.rs` `prepare_content` (called from `App::update`): `LensImage::interleaved` copies a planar image whole, then `Preview::to_rgba8` downsamples it, on the main thread for every published image. Target: a `PreviewConverter` owned by `RunState` (one background thread, a job channel, and a result channel woken through the existing `Wake`). `RunState::sync` sends the published values and takes the finished thumbnail rasters. The main thread only calls `ui.load_image`.
-- [ ] `gui/state/preview_store/mod.rs` `PreviewImage::full` (called from the record pass): the full-resolution copy and RGBA8 conversion run inside the frame that first shows a viewer. Target: the first ask queues a full-raster job with the device's `max_image_dimension`. `FullImage` gains `Converting`, the viewer draws the thumbnail stretched to `native_size` until the raster arrives, and the upload happens in the next `sync`.
 
 ### 6. Per-document graph revision
 

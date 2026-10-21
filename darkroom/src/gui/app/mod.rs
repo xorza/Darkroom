@@ -144,8 +144,8 @@ impl App {
             preferences,
             document,
         } = launch;
-        // The worker wakes the winit loop via the host handle (see
-        // `crate::core::wake`).
+        // The worker and the preview converter wake the winit loop via the
+        // host handle (see `crate::core::wake`).
         let wake: Wake = {
             let handle = handle.clone();
             Arc::new(move || handle.request_repaint(MAIN_WINDOW))
@@ -161,6 +161,7 @@ impl App {
             );
             Preferences::default()
         });
+        let run_state = RunState::new(Arc::clone(&wake));
         let mut runtime = RuntimeHost::new(wake, &preferences);
         let remembered = preferences.document_path.clone();
         let open = OpenDocument::open_at_launch(
@@ -175,7 +176,7 @@ impl App {
         let mut app = Self {
             session: Session::new(open),
             runtime,
-            run_state: RunState::default(),
+            run_state,
             status,
             theme: Theme::default(),
             host_handle: handle,

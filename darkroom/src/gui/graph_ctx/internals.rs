@@ -11,6 +11,7 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use crate::core::document::internals::{self, DocFixture};
 use crate::core::open_document::OpenDocument;
+use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
@@ -29,13 +30,25 @@ use crate::gui::theme::Theme;
 /// The output-type table starts empty: [`Self::graph_ctx`] resolves it, the
 /// same way composing one does anywhere else — which is why that method takes
 /// `&mut self`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct GraphCtxFixture {
     pub(crate) open: OpenDocument,
     pub(crate) library: Arc<Library>,
     pub(crate) run_state: RunState,
     pub(crate) theme: Theme,
     output_types: OutputTypes,
+}
+
+impl Default for GraphCtxFixture {
+    fn default() -> Self {
+        Self {
+            open: OpenDocument::default(),
+            library: Arc::default(),
+            run_state: RunState::new(wake::internals::noop()),
+            theme: Theme::default(),
+            output_types: OutputTypes::default(),
+        }
+    }
 }
 
 impl GraphCtxFixture {
