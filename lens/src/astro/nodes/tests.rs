@@ -36,40 +36,40 @@ fn astro_raw_paths_are_a_filtered_multi_file_picker() {
 fn load_astro_image_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = lib.by_name("Load Astro Image").unwrap();
-    assert_eq!(f.category, "Astro");
-    assert_eq!(f.inputs.len(), 1);
-    assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.inputs[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
+    assert_eq!(f.category(), "Astro");
+    assert_eq!(f.inputs().len(), 1);
+    assert_eq!(f.outputs().len(), 1);
+    assert_eq!(f.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
+    assert_eq!(f.outputs()[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
 fn build_masters_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = lib.by_name("Build Masters").unwrap();
-    assert_eq!(f.category, "Astro");
+    assert_eq!(f.category(), "Astro");
     // Pure: the digest folds each selected calibration file's identity.
-    assert_eq!(f.behavior, FuncBehavior::Pure);
-    assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].ty.declared(), MASTERS_DATA_TYPE);
+    assert_eq!(f.behavior(), FuncBehavior::Pure);
+    assert_eq!(f.outputs().len(), 1);
+    assert_eq!(f.outputs()[0].ty.declared(), MASTERS_DATA_TYPE);
 
     // Four optional calibration-frame sets, then sigma and cache.
-    assert_eq!(f.inputs.len(), 6);
-    let frame_names: Vec<&str> = f.inputs[..4].iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(f.inputs().len(), 6);
+    let frame_names: Vec<&str> = f.inputs()[..4].iter().map(|i| i.name.as_str()).collect();
     assert_eq!(frame_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
-    for input in &f.inputs[..4] {
+    for input in &f.inputs()[..4] {
         assert!(!input.required, "calibration frame sets are optional");
         assert_eq!(input.data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
     }
-    assert_eq!(f.inputs[4].name, "Sigma");
-    assert_eq!(f.inputs[4].data_type, DataType::Float);
+    assert_eq!(f.inputs()[4].name, "Sigma");
+    assert_eq!(f.inputs()[4].data_type, DataType::Float);
     assert_eq!(
-        f.inputs[4].default_value,
+        f.inputs()[4].default_value,
         Some(ConstValue::Float(f64::from(SigmaThreshold::DEFAULT.get()))),
     );
-    assert_eq!(f.inputs[5].name, "Cache");
-    assert_eq!(f.inputs[5].data_type, DataType::Bool);
-    assert_eq!(f.inputs[5].default_value, Some(ConstValue::Bool(true)));
+    assert_eq!(f.inputs()[5].name, "Cache");
+    assert_eq!(f.inputs()[5].data_type, DataType::Bool);
+    assert_eq!(f.inputs()[5].default_value, Some(ConstValue::Bool(true)));
 }
 
 /// Every quick knob is one const-only input beside a detailed config declared
@@ -148,27 +148,27 @@ fn every_quick_knob_has_a_config_that_overrides_it() {
     ];
     for (node, knob_idx, knob_name, config_idx, config_name, builder) in cases {
         let f = lib.by_name(node).unwrap();
-        let knob = &f.inputs[knob_idx];
+        let knob = &f.inputs()[knob_idx];
         assert_eq!(knob.name, knob_name, "{node}");
         assert!(knob.const_only && knob.required, "{node} {knob_name}");
         assert!(
             knob.default_value.is_some(),
             "{node} {knob_name} starts set"
         );
-        let config = &f.inputs[config_idx];
+        let config = &f.inputs()[config_idx];
         assert_eq!(config.name, config_name, "{node}");
         assert!(!config.required, "{node} {config_name} is optional");
         assert_eq!(config.overrides, Some(knob_idx), "{node} {config_name}");
         let built = lib.by_name(builder).unwrap();
         assert_eq!(
-            built.outputs[0].ty.declared(),
+            built.outputs()[0].ty.declared(),
             config.data_type,
             "{builder}"
         );
     }
 
     // A strength knob starts where the op's own default does.
-    let strength = |node: &str| lib.by_name(node).unwrap().inputs[1].default_value.clone();
+    let strength = |node: &str| lib.by_name(node).unwrap().inputs()[1].default_value.clone();
     assert_eq!(
         strength("Denoise"),
         Some(ConstValue::Float(f64::from(Denoise::default().strength)))
@@ -189,10 +189,10 @@ fn every_quick_knob_has_a_config_that_overrides_it() {
 fn stack_lights_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = lib.by_name("Stack Lights").unwrap();
-    assert_eq!(f.category, "Astro");
+    assert_eq!(f.category(), "Astro");
     // Pure: the digest folds exactly the selected light files.
-    assert_eq!(f.behavior, FuncBehavior::Pure);
-    let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(f.behavior(), FuncBehavior::Pure);
+    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
     assert_eq!(
         names,
         [
@@ -207,17 +207,17 @@ fn stack_lights_node_is_registered() {
             "Reference"
         ]
     );
-    assert_eq!(f.inputs[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
-    assert!(f.inputs[0].required, "light frames are required");
-    assert_eq!(f.inputs[1].data_type, MASTERS_DATA_TYPE);
-    assert!(!f.inputs[1].required, "masters are genuinely optional");
+    assert_eq!(f.inputs()[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+    assert!(f.inputs()[0].required, "light frames are required");
+    assert_eq!(f.inputs()[1].data_type, MASTERS_DATA_TYPE);
+    assert!(!f.inputs()[1].required, "masters are genuinely optional");
     // Unset picks the sharpest frame with enough stars; no sentinel stands in for it.
-    assert!(!f.inputs[8].required);
-    assert_eq!(f.inputs[8].default_value, None);
+    assert!(!f.inputs()[8].required);
+    assert_eq!(f.inputs()[8].default_value, None);
 
-    let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
+    let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
-    for out in &f.outputs {
+    for out in f.outputs() {
         assert_eq!(out.ty.declared(), IMAGE_DATA_TYPE);
     }
 }
@@ -235,13 +235,13 @@ fn processing_nodes_are_registered() {
         "Local Contrast",
     ] {
         let f = lib.by_name(name).unwrap();
-        assert_eq!(f.category, "Astro", "{name} category");
-        assert_eq!(f.inputs[0].name, "Image", "{name} first input");
-        assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE, "{name} in type");
-        assert!(f.inputs[0].required, "{name} image required");
-        assert_eq!(f.outputs.len(), 1, "{name} one output");
+        assert_eq!(f.category(), "Astro", "{name} category");
+        assert_eq!(f.inputs()[0].name, "Image", "{name} first input");
+        assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE, "{name} in type");
+        assert!(f.inputs()[0].required, "{name} image required");
+        assert_eq!(f.outputs().len(), 1, "{name} one output");
         assert_eq!(
-            f.outputs[0].ty.declared(),
+            f.outputs()[0].ty.declared(),
             IMAGE_DATA_TYPE,
             "{name} out type"
         );
@@ -254,8 +254,8 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     // The builder exposes one labeled input per BackgroundConfig field, in
     // struct order; all required (none are `Option`s).
     let builder = lib.by_name("Build Background Config").unwrap();
-    assert_eq!(builder.category, "Astro");
-    let labels: Vec<&str> = builder.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(builder.category(), "Astro");
+    let labels: Vec<&str> = builder.inputs().iter().map(|i| i.name.as_str()).collect();
     assert_eq!(
         labels,
         [
@@ -267,15 +267,15 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
             "Divide Floor"
         ]
     );
-    assert!(builder.inputs.iter().all(|i| i.required));
-    assert_eq!(builder.outputs[0].name, "Config");
+    assert!(builder.inputs().iter().all(|i| i.required));
+    assert_eq!(builder.outputs()[0].name, "Config");
     assert_eq!(
-        builder.outputs[0].ty.declared(),
+        builder.outputs()[0].ty.declared(),
         config_data_type::<ExtractBackground>()
     );
 
     let mut inputs: Vec<DynamicValue> = builder
-        .inputs
+        .inputs()
         .iter()
         .map(|input| input.default_value.clone().unwrap().into())
         .collect();
@@ -294,39 +294,39 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
 fn ml_denoise_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
     let f = lib.by_name("ML Denoise").unwrap();
-    assert_eq!(f.category, "Astro");
-    let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(f.category(), "Astro");
+    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
-    let DataType::FsPath(model) = &f.inputs[1].data_type else {
+    assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE);
+    let DataType::FsPath(model) = &f.inputs()[1].data_type else {
         panic!("model is a file path");
     };
     assert_eq!(model.mode, FsPathMode::ExistingFile);
     assert_eq!(model.extensions, ["onnx"]);
     assert_eq!(
-        f.inputs[1].default_value,
+        f.inputs()[1].default_value,
         Some(ConstValue::FsPath("DeepSNR_weights_v2.onnx".to_string()))
     );
-    assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].name, "Image");
-    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs().len(), 1);
+    assert_eq!(f.outputs()[0].name, "Image");
+    assert_eq!(f.outputs()[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
 fn remove_stars_node_has_starless_and_stars_outputs() {
     let lib = astro_library(&MlModelPaths::default());
     let f = lib.by_name("ML Star Removal").unwrap();
-    assert_eq!(f.category, "Astro");
-    let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(f.category(), "Astro");
+    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
+    assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE);
     assert_eq!(
-        f.inputs[1].default_value,
+        f.inputs()[1].default_value,
         Some(ConstValue::FsPath("StarNet2_weights.onnx".to_string()))
     );
-    let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
+    let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Starless", "Stars"]);
-    for o in &f.outputs {
+    for o in f.outputs() {
         assert_eq!(o.ty.declared(), IMAGE_DATA_TYPE);
     }
 }

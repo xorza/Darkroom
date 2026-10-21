@@ -171,7 +171,7 @@ impl<'a> GraphCtx<'a> {
                 .body()
                 .find(port.node_id)?
                 .func(self.library())?
-                .inputs
+                .inputs()
                 .get(port.port_idx)
                 .map(|input| &input.data_type),
             PortKind::Output => self.output_types.get(port.output_port()?),

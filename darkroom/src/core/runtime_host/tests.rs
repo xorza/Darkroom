@@ -13,7 +13,7 @@ use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 /// The default value seeded into `func`'s model-path input (index 1),
 /// read back through the published library.
 fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
-    host.library.current().by_name(func).unwrap().inputs[1]
+    host.library.current().by_name(func).unwrap().inputs()[1]
         .default_value
         .clone()
 }

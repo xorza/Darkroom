@@ -74,26 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 5. Func signatures
-
-Files: `src/graph/node/mod.rs`, `src/graph/mod.rs`,
-`src/graph/func/signature.rs`, `src/library/mod.rs`,
-`src/graph/node/special.rs`, `src/execution/compile/mod.rs`, plus the
-`NodeKind::Func` and `.signature` sites in `darkroom` (about 10 files).
-
-- [ ] `node/mod.rs:112` `Node.signature: Option<FuncSignature>` with
-  `#[serde(default)]` — optional on every node, `None` for specials and for
-  legacy documents. Target: `NodeKind::Func { func_id, signature }`, and
-  `NodeKind::Special(SpecialNode)` without one. `Node::new` for a func kind
-  takes the signature. `Graph::reconcile_signatures` (`graph/mod.rs:494`)
-  loses its adopt path and becomes a check only.
-- [ ] `graph/mod.rs:512` `check_signature` calls `FuncSignature::of(func)`
-  for every func node on each `validate_with`, each compile and each load —
-  a BLAKE3 over every port name, per node, per edit. Target: `Library::add`
-  computes the signature once and stores it beside the func
-  (`Library::signature(func_id)`). The `RunSinks` spec computes its
-  signature once beside its `OnceLock`.
-
 ### 6. Layer edges
 
 Files: `src/runtime/context_manager.rs`, `src/execution/report/log_entry.rs`

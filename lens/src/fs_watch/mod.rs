@@ -144,7 +144,7 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
+        Func::builder(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
@@ -252,7 +252,8 @@ pub fn fs_watch_library() -> Library {
                         }
                     })
                 }),
-            ),
+            )
+            .build(),
     );
 
     library

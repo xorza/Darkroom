@@ -7,11 +7,11 @@ use crate::random::{random_library, scale_random};
 fn registers_random_func_and_scales_unit_values() {
     let library = random_library();
     let function = library.by_name("Random").unwrap();
-    assert_eq!(function.inputs.len(), 2);
-    assert_eq!(function.inputs[0].name, "Min");
-    assert_eq!(function.inputs[1].name, "Max");
-    assert_eq!(function.outputs.len(), 1);
-    assert_eq!(function.outputs[0].name, "Value");
+    assert_eq!(function.inputs().len(), 2);
+    assert_eq!(function.inputs()[0].name, "Min");
+    assert_eq!(function.inputs()[1].name, "Max");
+    assert_eq!(function.outputs().len(), 1);
+    assert_eq!(function.outputs()[0].name, "Value");
 
     let lower_quarter = scale_random(0.25, 2.0, 6.0);
     let shifted = scale_random(0.25, 6.0, 10.0);

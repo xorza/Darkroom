@@ -23,7 +23,7 @@ pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
 
 fn register_denoise(library: &mut Library, model_path: &Path) {
     library.add(
-        Func::new(
+        Func::builder(
             DENOISE_FUNC_ID,
             "ML Denoise",
             async_lambda!(move |Invocation {
@@ -46,13 +46,14 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
         .pure()
         .input(Image::input("Image"))
         .input(model_input("Model", model_path))
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image.")),
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
+        .build(),
     );
 }
 
 fn register_star_removal(library: &mut Library, model_path: &Path) {
     library.add(
-        Func::new(
+        Func::builder(
             STAR_REMOVAL_FUNC_ID,
             "ML Star Removal",
             async_lambda!(move |Invocation { inputs, demand: output_demand, outputs, .. }| {
@@ -92,7 +93,8 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
             FuncOutput::new("Starless", IMAGE_DATA_TYPE)
                 .description("The image with stars removed."),
         )
-        .output(FuncOutput::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer.")),
+        .output(FuncOutput::new("Stars", IMAGE_DATA_TYPE).description("The recovered star layer."))
+        .build(),
     );
 }
 

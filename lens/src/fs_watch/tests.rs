@@ -67,19 +67,19 @@ fn registers_watch_directory_func() {
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").expect("func registered");
 
-    assert_eq!(func.id, WATCH_DIRECTORY_FUNC_ID);
-    assert_eq!(func.inputs.len(), 3);
-    assert_eq!(func.inputs[0].name, "Directory");
-    assert_eq!(func.inputs[1].name, "Recursive");
-    assert_eq!(func.inputs[1].default_value, Some(ConstValue::Bool(true)));
-    assert_eq!(func.inputs[2].name, "Debounce (ms)");
-    assert_eq!(func.inputs[2].default_value, Some(ConstValue::Int(1000)));
-    assert_eq!(func.outputs.len(), 1);
-    assert_eq!(func.outputs[0].name, "Directory");
-    assert_eq!(func.events.len(), 1);
-    assert_eq!(func.events[0].name, "Changed");
+    assert_eq!(func.id(), WATCH_DIRECTORY_FUNC_ID);
+    assert_eq!(func.inputs().len(), 3);
+    assert_eq!(func.inputs()[0].name, "Directory");
+    assert_eq!(func.inputs()[1].name, "Recursive");
+    assert_eq!(func.inputs()[1].default_value, Some(ConstValue::Bool(true)));
+    assert_eq!(func.inputs()[2].name, "Debounce (ms)");
+    assert_eq!(func.inputs()[2].default_value, Some(ConstValue::Int(1000)));
+    assert_eq!(func.outputs().len(), 1);
+    assert_eq!(func.outputs()[0].name, "Directory");
+    assert_eq!(func.events().len(), 1);
+    assert_eq!(func.events()[0].name, "Changed");
     // Impure so it re-executes (and re-emits the passthrough) on every fire.
-    assert!(matches!(func.behavior, FuncBehavior::Impure));
+    assert!(matches!(func.behavior(), FuncBehavior::Impure));
 }
 
 #[test]
@@ -208,7 +208,9 @@ async fn empty_path_skips_watcher_and_event_parks() {
     // Without a watcher the `changed` event must park forever, not panic.
     let fired = timeout(
         Duration::from_millis(200),
-        node.func.events[0].event_lambda.invoke(event_state.clone()),
+        node.func.events()[0]
+            .event_lambda
+            .invoke(event_state.clone()),
     )
     .await;
     assert!(fired.is_err(), "event must not fire without a watcher");
@@ -304,7 +306,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     let signal = Arc::clone(&ws.signal);
     event_state.lock().await.set(ws);
 
-    let lambda = func.events[0].event_lambda.clone();
+    let lambda = func.events()[0].event_lambda.clone();
     let es = event_state.clone();
     let start = Instant::now();
     let handle = tokio::spawn(async move { lambda.invoke(es).await });

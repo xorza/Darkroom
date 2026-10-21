@@ -122,7 +122,7 @@ impl RoleCachePaths {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new(
+        Func::builder(
             BUILD_MASTERS_FUNC_ID,
             "Build Masters",
             async_lambda!(move |Invocation { ctx, inputs, outputs, .. }| {
@@ -195,7 +195,8 @@ pub(crate) fn register(library: &mut Library) {
         .output(
             FuncOutput::new("Masters", MASTERS_DATA_TYPE)
                 .description("Calibration masters for the wired roles."),
-        ),
+        )
+        .build(),
     );
 }
 

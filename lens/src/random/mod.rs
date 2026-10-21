@@ -12,7 +12,7 @@ fn scale_random(unit: f64, min: f64, max: f64) -> f64 {
 }
 
 fn random_func() -> Func {
-    Func::new(
+    Func::builder(
         RANDOM_FUNC_ID,
         "Random",
         async_lambda!(move |Invocation {
@@ -43,6 +43,7 @@ fn random_func() -> Func {
             .default(1.0),
     )
     .output(FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."))
+    .build()
 }
 
 pub fn random_library() -> Library {

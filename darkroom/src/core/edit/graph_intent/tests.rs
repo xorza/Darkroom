@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, CacheMode, ConstValue, DataType, FuncId, FuncInput, FuncOutput,
-    InputPort, Library, Node, NodeId, NodeKind, OutputPort, Subscription, internals,
+    InputPort, Library, Node, NodeId, OutputPort, Subscription, internals,
 };
 
 use crate::core::document::Document;
@@ -708,8 +708,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     let ghost = NodeId::unique();
     let nan = Vec2::new(f32::NAN, 0.0);
 
-    let mut nil_func = DocFixture::stub_node();
-    nil_func.kind = NodeKind::Func(FuncId::nil());
+    let nil_func = internals::unresolved_node(FuncId::nil());
 
     let fresh = NodeId::unique();
     let seeded = |bindings: Vec<(InputPort, Binding)>| GraphIntent::AddNode {
@@ -939,9 +938,11 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
 #[test]
 fn a_wire_onto_a_const_only_input_is_refused() {
     let knob_func = internals::stub_func(FuncId::unique(), "knob")
-        .input(FuncInput::required("strength", DataType::Float).const_only());
+        .input(FuncInput::required("strength", DataType::Float).const_only())
+        .build();
     let feed_func = internals::stub_func(FuncId::unique(), "feed")
-        .output(FuncOutput::new("value", DataType::Float));
+        .output(FuncOutput::new("value", DataType::Float))
+        .build();
     let mut fixture = DocFixture::default();
     let knob = fixture.add(&knob_func);
     let feed = fixture.add(&feed_func);
@@ -997,7 +998,8 @@ fn indices_past_the_declaration_are_refused() {
     let probe = internals::stub_func(FuncId::unique(), "probe")
         .input(FuncInput::optional("a", DataType::Int))
         .output(FuncOutput::new("out", DataType::Int))
-        .event("tick", internals::stub_event());
+        .event("tick", internals::stub_event())
+        .build();
     let mut fixture = DocFixture::default();
     let (producer, consumer) = (fixture.add(&probe), fixture.add(&probe));
     let mut doc = fixture.doc;

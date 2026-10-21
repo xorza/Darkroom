@@ -12,29 +12,29 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 fn enum_defaults_are_exact() {
     let library = image_library();
     let convert = library.by_name("Convert").unwrap();
-    assert_eq!(convert.inputs[0].data_type, IMAGE_DATA_TYPE);
-    assert_eq!(convert.inputs[1].data_type, CONVERSION_FORMAT_DATATYPE);
+    assert_eq!(convert.inputs()[0].data_type, IMAGE_DATA_TYPE);
+    assert_eq!(convert.inputs()[1].data_type, CONVERSION_FORMAT_DATATYPE);
     assert_eq!(
-        convert.inputs[1].default_value,
+        convert.inputs()[1].default_value,
         Some(ConstValue::Enum("RGB u8".to_string())),
     );
 
     let save = library.by_name("Save Image").unwrap();
     let names: Vec<&str> = save
-        .inputs
+        .inputs()
         .iter()
         .map(|input| input.name.as_str())
         .collect();
     assert_eq!(names, ["Image", "Path", "Format"]);
     assert_eq!(
-        save.inputs[2].default_value,
+        save.inputs()[2].default_value,
         Some(ConstValue::Enum(AS_IS.to_string())),
     );
 
     let blend = library.by_name("Blend").unwrap();
-    assert_eq!(blend.inputs[2].name, "Mode");
+    assert_eq!(blend.inputs()[2].name, "Mode");
     assert_eq!(
-        blend.inputs[2].default_value,
+        blend.inputs()[2].default_value,
         Some(ConstValue::Enum("Normal".to_string())),
     );
 }

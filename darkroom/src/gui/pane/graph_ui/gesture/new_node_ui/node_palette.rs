@@ -28,15 +28,15 @@ impl<'a> PaletteEntry<'a> {
     /// name outlives any borrow of the row that yielded it.
     pub(super) fn name(self) -> &'a str {
         match self {
-            PaletteEntry::Func(f) => &f.name,
-            PaletteEntry::Special(s) => &s.func().name,
+            PaletteEntry::Func(f) => f.name(),
+            PaletteEntry::Special(s) => s.func().name(),
         }
     }
 
     pub(super) fn category(self) -> &'a str {
         match self {
-            PaletteEntry::Func(f) => &f.category,
-            PaletteEntry::Special(s) => &s.func().category,
+            PaletteEntry::Func(f) => f.category(),
+            PaletteEntry::Special(s) => s.func().category(),
         }
     }
 
@@ -65,7 +65,7 @@ impl<'a> PaletteEntry<'a> {
     /// keeps for this entry.
     pub(super) const fn row(self) -> PaletteRow {
         match self {
-            PaletteEntry::Func(f) => PaletteRow::Func(f.id),
+            PaletteEntry::Func(f) => PaletteRow::Func(f.id()),
             PaletteEntry::Special(s) => PaletteRow::Special(s),
         }
     }
@@ -247,9 +247,9 @@ impl PaletteEntry<'_> {
 /// tooltip has to record whether or not the row was clicked, so the click is
 /// latched first.
 fn menu_row(ui: &mut Ui, popup: &CloseHandle, func: &Func) -> bool {
-    let resp = MenuItem::new(&func.name).show(ui, popup);
+    let resp = MenuItem::new(func.name()).show(ui, popup);
     let clicked = resp.left.clicked();
-    if let Some(desc) = &func.description {
+    if let Some(desc) = func.description() {
         Tooltip::on(&resp.snapshot(), desc).show(ui);
     }
     clicked

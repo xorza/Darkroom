@@ -85,7 +85,7 @@ pub fn worker_events_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(
+        Func::builder(
             FRAME_EVENT_FUNC_ID,
             "Frame Event",
             FuncLambda::new(
@@ -157,7 +157,8 @@ pub fn worker_events_library() -> Library {
         .event(
             "FPS",
             EventLambda::new(|state| Box::pin(wait_for_fps_event(state))),
-        ),
+        )
+        .build(),
     );
 
     library

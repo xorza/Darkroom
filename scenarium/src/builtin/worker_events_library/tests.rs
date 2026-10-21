@@ -46,7 +46,7 @@ impl FrameSource {
     /// A task awaiting the FPS event, over the state this source's executions
     /// write.
     fn fps_event(&self) -> JoinHandle<()> {
-        let event = self.func.events[1].event_lambda.clone();
+        let event = self.func.events()[1].event_lambda.clone();
         let state = self.node.event_state();
         tokio::spawn(async move { event.invoke(state).await })
     }
@@ -55,7 +55,7 @@ impl FrameSource {
 #[tokio::test(start_paused = true)]
 async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_clock() {
     let mut source = FrameSource::new();
-    assert!(source.func.inputs[0].const_only);
+    assert!(source.func.inputs()[0].const_only);
     let initial = source.tick(2.0).await.unwrap();
     assert_eq!(initial.delta, 0.5);
     assert_eq!(initial.frame_no, 1);

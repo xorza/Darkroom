@@ -134,7 +134,7 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
         ),
     ];
     for (inputs, input_idx, target, rule) in override_rows {
-        let func = Func::new(FuncId::unique(), "override", FuncLambda::stub()).inputs(inputs);
+        let func = Func::builder(FuncId::unique(), "override", FuncLambda::stub()).inputs(inputs);
         assert_eq!(
             func.validate(),
             Err(FuncValidationError::InvalidOverride {
@@ -150,7 +150,7 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
     // Well-formed declarations: exact kinds, a variant member, Null on an
     // optional input, `Any` accepting any literal, a valid wildcard and a
     // valid override.
-    let ok = Func::new(FuncId::unique(), "ok", FuncLambda::stub())
+    let ok = Func::builder(FuncId::unique(), "ok", FuncLambda::stub())
         .input(FuncInput::optional("int", DataType::Int).default(2i64))
         .input(FuncInput::optional("any", DataType::Any).default("text"))
         .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))
@@ -168,8 +168,8 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
         )
         .input(preset())
         .input(config(5))
-        .wildcard_output("value", 0);
-    ok.validate().unwrap();
+        .wildcard_output("value", 0)
+        .build();
     // `config` (input 6) overrides `preset` (input 5); nothing overrides `config`.
     assert_eq!(ok.overrider_of(5), Some(6));
     assert_eq!(ok.overrider_of(6), None);
@@ -214,4 +214,12 @@ fn node_events_expose_names_and_arity() {
 
     let silent = internals::stub_func(FuncId::unique(), "silent");
     assert!(silent.events.is_empty());
+}
+
+/// `build` refuses what `validate` refuses, naming the declaration and the rule;
+/// the rules themselves are `validate`'s tests.
+#[test]
+#[should_panic(expected = "invalid function declaration \"nil\": function id must not be nil")]
+fn build_refuses_a_declaration_validate_refuses() {
+    internals::stub_func(FuncId::nil(), "nil").build();
 }

@@ -36,9 +36,9 @@ impl FuncInvoker {
         inputs: impl IntoIterator<Item = DynamicValue>,
     ) -> InvokeResult<Vec<DynamicValue>> {
         let mut inputs: Vec<DynamicValue> = inputs.into_iter().collect();
-        let demand = vec![OutputDemand::Produce; func.outputs.len()];
-        let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
-        func.lambda
+        let demand = vec![OutputDemand::Produce; func.outputs().len()];
+        let mut outputs = vec![DynamicValue::Unbound; func.outputs().len()];
+        func.lambda()
             .invoke(Invocation {
                 ctx: &mut self.ctx,
                 state: &mut self.state,

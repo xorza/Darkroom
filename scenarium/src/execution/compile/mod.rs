@@ -189,7 +189,7 @@ impl Compiler {
             // Each input is resolved as it is appended, so it is whole the moment
             // it enters the pool rather than being revisited by index afterwards.
             let base = compiled.inputs.len();
-            let node_inputs = compiled.inputs.append(func.inputs.iter().enumerate().map(
+            let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
                 |(port_idx, func_input)| {
                     ExecutionInput {
                         required: func_input.required,
@@ -213,7 +213,7 @@ impl Compiler {
             // drift, and `Any` is the right answer for one.
             let node_outputs = compiled
                 .outputs
-                .append((0..func.outputs.len()).map(|port_idx| {
+                .append((0..func.outputs().len()).map(|port_idx| {
                     self.output_types
                         .get(OutputPort::new(node_id, port_idx))
                         .cloned()
@@ -225,42 +225,38 @@ impl Compiler {
             // A subscription to an event the func has since dropped sorts
             // before the next node's and is passed over — the same drift
             // tolerance the type gate applies to data edges.
-            let node_events =
-                compiled
-                    .events
-                    .append(func.events.iter().enumerate().map(|(event_idx, event)| {
-                        while subscriptions
-                            .next_if(|sub| (sub.emitter, sub.event_idx) < (node_id, event_idx))
-                            .is_some()
-                        {}
-                        let subscribers = compiled.subscribers.append(
-                            iter::from_fn(|| {
-                                subscriptions.next_if(|sub| {
-                                    sub.emitter == node_id && sub.event_idx == event_idx
-                                })
-                            })
-                            .filter(|sub| {
-                                !node.disabled && !self.placement(sub.subscriber).disabled
-                            })
-                            .map(|sub| self.idx(sub.subscriber)),
-                        );
-                        ExecutionEvent {
-                            subscribers,
-                            lambda: event.event_lambda.clone(),
-                        }
-                    }));
+            let node_events = compiled.events.append(func.events().iter().enumerate().map(
+                |(event_idx, event)| {
+                    while subscriptions
+                        .next_if(|sub| (sub.emitter, sub.event_idx) < (node_id, event_idx))
+                        .is_some()
+                    {}
+                    let subscribers = compiled.subscribers.append(
+                        iter::from_fn(|| {
+                            subscriptions
+                                .next_if(|sub| sub.emitter == node_id && sub.event_idx == event_idx)
+                        })
+                        .filter(|sub| !node.disabled && !self.placement(sub.subscriber).disabled)
+                        .map(|sub| self.idx(sub.subscriber)),
+                    );
+                    ExecutionEvent {
+                        subscribers,
+                        lambda: event.event_lambda.clone(),
+                    }
+                },
+            ));
 
             compiled.e_nodes.push(ExecutionNode {
-                sink: func.sink,
+                sink: func.sink(),
                 disabled: node.disabled,
-                behavior: func.behavior,
+                behavior: func.behavior(),
                 cache: node.cache,
                 special,
                 inputs: node_inputs,
                 outputs: node_outputs,
                 events: node_events,
-                func_id: func.id,
-                lambda: func.lambda.clone(),
+                func_id: func.id(),
+                lambda: func.lambda().clone(),
             });
         }
 
@@ -295,12 +291,12 @@ impl Compiler {
         let mut totals = PortTotals::default();
         for node in graph.iter() {
             let func = node.func(library).expect("func resolved by validate_with");
-            totals.inputs += func.inputs.len();
-            totals.outputs += func.outputs.len();
-            totals.events += func.events.len();
+            totals.inputs += func.inputs().len();
+            totals.outputs += func.outputs().len();
+            totals.events += func.events().len();
             placed.push(PendingNode {
                 node_id: node.id,
-                outputs: u32::try_from(func.outputs.len())
+                outputs: u32::try_from(func.outputs().len())
                     .expect("a func's output count must fit in u32"),
                 disabled: node.disabled,
             });

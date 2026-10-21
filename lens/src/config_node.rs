@@ -22,7 +22,7 @@ use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, TypeId};
-use scenarium::{Func, FuncInput, FuncOutput};
+use scenarium::{FuncBuilder, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
 
 use crate::node_spec::NodeSpec;
@@ -77,7 +77,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
     /// and a single `Config` output of [`config_data_type::<T>`]. Registers
     /// `T`'s output type and its fields' enum types on `library`, so the editor
     /// can render them. The caller adds the node, under its own category.
-    pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> Func {
+    pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> FuncBuilder {
         let fields = T::fields();
         library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
         for field in &fields {
@@ -96,7 +96,7 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> 
             outputs[0] = DynamicValue::from_custom(Self(config));
             Ok(())
         });
-        let mut func = spec.func(lambda).pure();
+        let mut func = spec.builder(lambda).pure();
         for field in &fields {
             let data_type = data_type(&field.kind);
             let input = if field.required {

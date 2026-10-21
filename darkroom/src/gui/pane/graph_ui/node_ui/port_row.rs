@@ -691,7 +691,7 @@ impl Display for TypeLabel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::{FsPathConfig, NodeKind};
+    use scenarium::{FsPathConfig, Node};
 
     /// The type line of a port tooltip. A path spells out its picker mode and
     /// the extensions it accepts; everything else defers to the library's own
@@ -759,7 +759,7 @@ mod tests {
             panic!("first intent adds the node, got {add:?}");
         };
         assert_eq!(pos, Vec2::new(180.0, -20.0), "offset clear of the port");
-        assert_eq!(node.kind, NodeKind::Func(func.id));
+        assert_eq!(node.kind, Node::from(&func).kind);
         assert!(matches!(
             bind,
             GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }

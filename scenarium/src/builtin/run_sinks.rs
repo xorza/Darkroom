@@ -34,7 +34,7 @@ pub(crate) fn run_sinks_func() -> &'static Func {
 }
 
 fn build_func() -> Func {
-    Func::new(
+    Func::builder(
         RUN_SINKS_FUNC_ID,
         "Run on Event",
         async_lambda!(|_| { Ok(()) }),
@@ -46,6 +46,7 @@ fn build_func() -> Func {
              node — re-evaluating the whole graph. Has no inputs or outputs; \
              wire an event (e.g. a Frame Event) into it to drive periodic runs.",
     )
+    .build()
 }
 
 #[cfg(test)]
@@ -55,11 +56,11 @@ mod tests {
     #[test]
     fn interface_is_a_portless_sink() {
         let func = SpecialNode::RunSinks.func();
-        assert!(func.inputs.is_empty());
-        assert!(func.outputs.is_empty());
-        assert!(func.events.is_empty());
+        assert!(func.inputs().is_empty());
+        assert!(func.outputs().is_empty());
+        assert!(func.events().is_empty());
         // Sink so the editor renders a subscription pin (only sinks
         // subscribe).
-        assert!(func.sink);
+        assert!(func.sink());
     }
 }

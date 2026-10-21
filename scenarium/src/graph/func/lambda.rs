@@ -61,7 +61,7 @@ impl<T> AsyncLambdaFn for T where
 pub type AsyncLambda = dyn AsyncLambdaFn;
 
 /// A func's implementation. Every func has one: it is an argument of
-/// [`Func::new`](crate::Func::new), so no declaration can lack it.
+/// [`Func::builder`](crate::Func::builder), so no declaration can lack it.
 #[derive(Clone)]
 pub struct FuncLambda(Arc<AsyncLambda>);
 
