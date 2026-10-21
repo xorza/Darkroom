@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::DataType;
+use crate::data::data_type::DataType;
 use crate::graph::func::FuncEvent;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::{FuncOutput, OutputType};
@@ -104,7 +104,7 @@ impl fmt::Debug for FuncSignature {
 mod tests {
     use std::fmt::Write as _;
 
-    use crate::DataType;
+    use crate::data::data_type::DataType;
     use crate::graph::func::func_input::FuncInput;
     use crate::graph::func::func_output::FuncOutput;
     use crate::graph::identity::FuncId;

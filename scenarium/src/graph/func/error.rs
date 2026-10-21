@@ -15,10 +15,12 @@ use crate::graph::identity::FuncId;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FuncValidationError {
+    /// The id is nil, so it names nothing; [`FuncBuilder::build`](crate::FuncBuilder::build)
+    /// names the declaration by its name instead.
     #[error("function id must not be nil")]
     NilId,
-    #[error("Function with no outputs should be impure")]
-    PureWithoutOutputs,
+    #[error("function {func_id:?} has no outputs, so it must be impure")]
+    PureWithoutOutputs { func_id: FuncId },
     #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
     NilInputType { func_id: FuncId, input_idx: usize },
     #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]

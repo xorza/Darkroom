@@ -1,6 +1,6 @@
 //! [`FuncInvoker`]: one func's lambda called on its own, outside any graph.
 
-use crate::DynamicValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::graph::func::Func;
 use crate::graph::func::error::InvokeResult;
 use crate::graph::func::lambda::{Invocation, OutputDemand};

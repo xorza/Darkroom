@@ -26,6 +26,8 @@ pub(crate) mod node_builder;
 pub(crate) mod runs;
 pub(crate) mod sweep;
 
+use crate::data::const_value::ConstValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::Result;
 use crate::execution::index::{NodeIdx, OutputAddr};
@@ -36,7 +38,6 @@ use crate::graph::identity::NodeId;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::runs::Runs;
 use crate::internals::program::sweep::Sweep;
-use crate::{ConstValue, DynamicValue};
 
 /// Where one node landed: the stable id a host names it by, and the dense
 /// index every per-run column is keyed on.

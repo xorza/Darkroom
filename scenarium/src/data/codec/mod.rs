@@ -9,7 +9,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::data::codec::error::CodecError;
-use crate::{CustomValue, TypeId};
+use crate::data::data_type::TypeId;
+use crate::data::dynamic_value::CustomValue;
 
 #[async_trait::async_trait]
 pub trait CustomValueCodec: Send + Sync + Debug {

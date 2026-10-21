@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::worker::error::WorkerError;
 use tokio::sync::oneshot;
 
-use crate::RamUsage;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::report::run_reporter::RunPhase;

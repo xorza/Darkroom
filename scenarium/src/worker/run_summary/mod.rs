@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::RamUsage;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::node_status::NodeStatus;
 use crate::runtime::log_entry::LogEntry;
@@ -46,7 +46,7 @@ impl RunSummaryPublisher {
         let summary = Arc::get_mut(&mut self.summary)
             .expect("the summary allocation is uniquely held after the swap above");
         summary.activity = activity;
-        summary.executed_node_count = outcome.ran_node_count;
+        summary.executed_node_count = outcome.executed_node_count;
         summary.cancelled = outcome.cancelled;
         summary.nodes.clear();
         summary.nodes.append(&mut outcome.nodes);

@@ -1,5 +1,7 @@
 //! [`NodeBuilder`]: one node of a hand-built program, under construction.
 
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
@@ -9,7 +11,6 @@ use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
-use crate::{ConstValue, DataType};
 
 /// One node under construction. Ports are accumulated here and packed into the
 /// program's columns by [`add`](Self::add), so a node's runs are contiguous the

@@ -4,7 +4,7 @@ use strum::VariantNames;
 
 use common::Id;
 
-use crate::ConstValue;
+use crate::data::const_value::ConstValue;
 
 pub trait EnumVariants {
     fn variant_names() -> Vec<String>;

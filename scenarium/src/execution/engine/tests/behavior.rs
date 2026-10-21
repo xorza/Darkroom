@@ -33,7 +33,7 @@ async fn execute_emits_started_then_succeeded_progress_per_node() {
     // The progressed order equals the run's own order, and covers exactly
     // the nodes that finally executed.
     assert_eq!(started, run.ran());
-    assert_eq!(started.len(), run.ran_node_count);
+    assert_eq!(started.len(), run.executed_node_count);
 }
 
 /// A lambda that fails reports its finish as a failure, so a host never paints it executed; the
@@ -70,7 +70,10 @@ async fn execute_honors_cancel_flag_and_marks_cancelled() {
     tripped.cancel();
     let run = e.run_cancellable(RunSeeds::sinks(), tripped).await;
     assert!(run.cancelled, "pre-tripped run is cancelled");
-    assert_eq!(run.ran_node_count, 0, "no node runs when cancel is set");
+    assert_eq!(
+        run.executed_node_count, 0,
+        "no node runs when cancel is set"
+    );
 
     // A fresh token runs the whole graph — nothing was cached by the run
     // that aborted above.
@@ -78,7 +81,10 @@ async fn execute_honors_cancel_flag_and_marks_cancelled() {
         .run_cancellable(RunSeeds::sinks(), CancelToken::new())
         .await;
     assert!(!run.cancelled);
-    assert_eq!(run.ran_node_count, 5, "all nodes run when not cancelled");
+    assert_eq!(
+        run.executed_node_count, 5,
+        "all nodes run when not cancelled"
+    );
 }
 
 /// A node cancelled *mid-invoke* (the run is cancelled while its lambda
@@ -113,7 +119,7 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
         .await;
     assert!(run.cancelled, "the node cancelled the run mid-invoke");
     assert_eq!(
-        run.ran_node_count, 0,
+        run.executed_node_count, 0,
         "an in-flight cancelled node is not reported executed (no green glow)"
     );
     assert!(
@@ -129,7 +135,7 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
         .await;
     assert!(!run.cancelled);
     assert_eq!(
-        run.ran_node_count, 1,
+        run.executed_node_count, 1,
         "it re-runs; its output was not cached"
     );
     assert!(
@@ -159,7 +165,7 @@ async fn lambda_cancelled_error_maps_to_error_cancelled() {
     let run = e.run_sinks().await;
 
     assert_eq!(
-        run.ran_node_count, 0,
+        run.executed_node_count, 0,
         "a cancelled lambda is not reported executed"
     );
     assert!(

@@ -3,8 +3,7 @@ use common::TempFile;
 
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
-use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::compile::compiled_graph::ExecutionBinding;
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::graph::identity::FuncId;
@@ -326,7 +325,7 @@ fn fs_path_folds_file_identity_and_path() {
 /// the taint the run loop's reach-time re-stamp resolves).
 #[test]
 fn bound_fs_path_folds_delivered_file_identity() {
-    use crate::DynamicValue;
+    use crate::data::dynamic_value::DynamicValue;
 
     let delivered = TempFile::with_extension("scenarium-digest-bound-fs", "bin");
     let file = delivered.path();
@@ -504,7 +503,7 @@ fn output_ports_are_disambiguated() {
 /// type.
 #[test]
 fn output_signature_folds_into_digest_and_propagates() {
-    use crate::TypeId;
+    use crate::data::data_type::TypeId;
 
     // One func declaring two different signatures: the digests must diverge on
     // the type, on the arity, and on a custom type's identity.

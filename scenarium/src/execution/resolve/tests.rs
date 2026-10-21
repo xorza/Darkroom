@@ -1,7 +1,7 @@
 //! The cache-aware sweep over planned schedules, each primed through the
 //! [`Sweep`](crate::internals::program::sweep::Sweep) fixture.
 
-use crate::DynamicValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::schedule::NodeState;
 use crate::graph::func::lambda::OutputDemand;

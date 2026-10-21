@@ -1,4 +1,4 @@
-use crate::DynamicValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::StoreResult;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
@@ -332,7 +332,7 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use crate::TypeId;
+    use crate::data::data_type::TypeId;
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::error::{StoreError, StoreResult};
     use crate::execution::cache::disk_store::store_outcome::StoreOutcome;

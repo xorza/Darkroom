@@ -21,7 +21,7 @@ async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
     let run = e.run_nodes(["sum"]).await;
 
     assert_eq!(run.ran(), ["get_b", "get_a", "sum"], "only sum's cone runs");
-    assert_eq!(run.ran_node_count, 3);
+    assert_eq!(run.executed_node_count, 3);
     assert!(run.holding_ram().is_empty());
     assert_eq!(run.cache_ram.total(), 0);
     assert!(
@@ -59,7 +59,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
         4,
         "nothing was retained, so both sources ran again"
     );
-    assert_eq!(run.ran_node_count, 3);
+    assert_eq!(run.executed_node_count, 3);
     assert!(run.cached().is_empty());
     assert!(run.holding_ram().is_empty());
 }

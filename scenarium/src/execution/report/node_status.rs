@@ -1,6 +1,6 @@
 //! [`NodeStatus`]: one node's whole result for one run, and its [`NodeExecutionStatus`].
 
-use crate::RamUsage;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::error::RunError;
 use crate::graph::identity::NodeId;
 

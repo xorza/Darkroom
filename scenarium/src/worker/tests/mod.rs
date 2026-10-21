@@ -6,6 +6,10 @@ use common::TempDir;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+use crate::async_lambda;
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::error::StoreError;
 use crate::execution::cache::runtime_cache::error::CacheNodeError;
 use crate::execution::error::Error;
@@ -17,13 +21,11 @@ use crate::graph::identity::{EventPort, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals::calls::Calls;
 use crate::internals::test_graph::TestGraph;
-use crate::internals::worker::PATIENCE;
-use crate::internals::worker::TestWorker;
+use crate::internals::worker::{PATIENCE, TestWorker};
 use crate::worker::Worker;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::error::WorkerError;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::{ConstValue, DataType, RamUsage, async_lambda};
 
 mod batching;
 mod cache;

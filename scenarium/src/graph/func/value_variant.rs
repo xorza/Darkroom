@@ -1,6 +1,6 @@
 //! [`ValueVariant`]: one entry of an input's editor picker.
 
-use crate::ConstValue;
+use crate::data::const_value::ConstValue;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueVariant {

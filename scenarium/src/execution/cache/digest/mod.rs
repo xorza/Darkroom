@@ -47,7 +47,8 @@
 use blake3::Hasher;
 use common::FileIdentity;
 
-use crate::{ConstValue, DataType};
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::DataType;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.

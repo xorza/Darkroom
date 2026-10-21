@@ -24,16 +24,14 @@ use tokio::task;
 
 use common::CancelToken;
 
-use crate::DynamicValue;
-use crate::RamUsage;
 use crate::containers::column::Column;
+use crate::data::dynamic_value::DynamicValue;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::event_trigger::EventTrigger;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::node_status::NodeExecutionStatus;
-use crate::execution::report::node_status::NodeStatus;
-use crate::execution::report::run_reporter::RunPhase;
-use crate::execution::report::run_reporter::RunReporter;
+use crate::execution::report::node_status::{NodeExecutionStatus, NodeStatus};
+use crate::execution::report::run_reporter::{RunPhase, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
@@ -274,7 +272,7 @@ impl Executor {
                     Some(NodeExecutionStatus::Cached)
                 }
                 NodeOutcome::Ran { secs } => {
-                    outcome.ran_node_count += 1;
+                    outcome.executed_node_count += 1;
                     Some(NodeExecutionStatus::Executed {
                         elapsed_secs: *secs,
                     })
@@ -294,7 +292,7 @@ impl Executor {
                 | NodeOutcome::Cut { cached: false } => None,
                 // A genuine failure did run, so it counts among the executed.
                 NodeOutcome::Failed { error } => {
-                    outcome.ran_node_count += 1;
+                    outcome.executed_node_count += 1;
                     Some(NodeExecutionStatus::Errored {
                         error: error.clone(),
                     })

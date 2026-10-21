@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use common::{TempDir, TempFile};
 
 use crate::async_lambda;
-use crate::{FsPathConfig, FsPathMode};
+use crate::data::data_type::{FsPathConfig, FsPathMode};
 
 /// How often each counted node ran, and what the sink last saw.
 #[derive(Debug, Default, Clone)]

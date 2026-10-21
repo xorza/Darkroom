@@ -22,7 +22,7 @@ async fn clear_then_update_in_one_batch_applies_the_update() {
     w.send_many([WorkerMessage::Clear, w.update(), w.fire("Frame Event", 0)]);
 
     let run = w.run().await;
-    assert_eq!(run.ran_node_count, 3);
+    assert_eq!(run.executed_node_count, 3);
     assert_eq!(run.logs(), ["1"]);
 }
 

@@ -19,24 +19,23 @@ use hashbrown::HashMap;
 
 use common::CancelToken;
 
+use crate::data::dynamic_value::DynamicValue;
+use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime_cache::error::CacheNodeFailure;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
 use crate::execution::error::{Result, RunError};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::node_status::NodeExecutionStatus;
-use crate::execution::report::node_status::NodeStatus;
-use crate::execution::report::run_reporter::RunPhase;
-use crate::execution::report::run_reporter::RunReporter;
+use crate::execution::report::node_status::{NodeExecutionStatus, NodeStatus};
 use crate::execution::report::run_reporter::internals::{CollectingReporter, DiscardedReports};
+use crate::execution::report::run_reporter::{RunPhase, RunReporter};
 use crate::execution::schedule::NodeState;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::internals::test_graph::TestGraph;
 use crate::worker::run_summary::RunSummary;
-use crate::{DynamicValue, RamUsage};
 
 /// A [`TestGraph`] with a live engine over it.
 ///
@@ -376,7 +375,7 @@ pub(crate) struct RunOutcome {
     /// Every row the run reported, in the program's node order.
     rows: Vec<(String, NodeStatus)>,
     logs: Vec<String>,
-    pub(crate) ran_node_count: usize,
+    pub(crate) executed_node_count: usize,
     pub(crate) cancelled: bool,
     /// The events a successful event source armed for the loop to spawn.
     pub(crate) armed_events: Vec<EventPort>,
@@ -403,7 +402,7 @@ impl RunOutcome {
                 .iter()
                 .map(|entry| entry.message.clone())
                 .collect(),
-            ran_node_count: outcome.ran_node_count,
+            executed_node_count: outcome.executed_node_count,
             cancelled: outcome.cancelled,
             armed_events: outcome
                 .event_triggers
@@ -437,7 +436,7 @@ impl RunOutcome {
                 .iter()
                 .map(|entry| entry.message.clone())
                 .collect(),
-            ran_node_count: status.executed_node_count,
+            executed_node_count: status.executed_node_count,
             cancelled: status.cancelled,
             armed_events: Vec::new(),
             cache_ram: status.cache_ram,

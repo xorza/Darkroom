@@ -2,7 +2,7 @@
 
 use ::serde::{Deserialize, Serialize};
 
-use crate::ConstValue;
+use crate::data::const_value::ConstValue;
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 
 /// What a consumer input port is wired to. Stored sparsely: `Graph.bindings`

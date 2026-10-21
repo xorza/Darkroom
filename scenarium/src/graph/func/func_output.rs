@@ -1,6 +1,6 @@
 //! [`FuncOutput`]: one output port a func declares, and its [`OutputType`].
 
-use crate::DataType;
+use crate::data::data_type::DataType;
 
 /// An output port's type: either a fixed [`DataType`], or a *wildcard* that
 /// mirrors an input. A sum type (rather than a `DataType` + an

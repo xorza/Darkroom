@@ -5,6 +5,8 @@ use common::internals::publication_temp_files;
 use common::{TempDir, TempFile};
 
 use crate::data::codec::Codecs;
+use crate::data::const_value::ConstValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::disk_store::blob_target::BlobTarget;
@@ -14,7 +16,6 @@ use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec, BlobFault};
 use crate::internals::calls::Calls;
-use crate::{ConstValue, DynamicValue};
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
     BlobTarget {

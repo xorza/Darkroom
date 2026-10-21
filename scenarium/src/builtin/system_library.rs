@@ -1,5 +1,5 @@
-use crate::DataType;
 use crate::async_lambda;
+use crate::data::data_type::DataType;
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
@@ -100,7 +100,7 @@ pub fn system_library() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DynamicValue;
+    use crate::data::dynamic_value::DynamicValue;
     use crate::internals::func_invoker::FuncInvoker;
 
     /// Invoke the `Concat` node's lambda with two runtime values and return its

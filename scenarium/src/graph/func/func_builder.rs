@@ -1,8 +1,7 @@
 //! [`FuncBuilder`]: a func declaration in progress, checked and sealed into a
 //! [`Func`] by [`build`](FuncBuilder::build).
 
-use crate::DataType;
-use crate::data::data_type::Strictness;
+use crate::data::data_type::{DataType, Strictness};
 use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_input::FuncInput;
@@ -144,7 +143,7 @@ impl FuncBuilder {
             return Err(FuncValidationError::NilId);
         }
         if self.outputs.is_empty() && self.behavior != FuncBehavior::Impure {
-            return Err(FuncValidationError::PureWithoutOutputs);
+            return Err(FuncValidationError::PureWithoutOutputs { func_id: self.id });
         }
         for (input_idx, input) in self.inputs.iter().enumerate() {
             if let DataType::Custom(type_id) | DataType::Enum(type_id) = &input.data_type

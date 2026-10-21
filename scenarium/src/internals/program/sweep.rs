@@ -1,7 +1,7 @@
 //! [`Sweep`]: the cache-aware pass over a schedule a fixture stated by hand,
 //! and [`Swept`], what it leaves behind.
 
-use crate::DynamicValue;
+use crate::data::dynamic_value::DynamicValue;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::resolve;

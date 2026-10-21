@@ -6,13 +6,13 @@ use std::collections::hash_map::Values;
 use std::sync::Arc;
 
 use crate::data::codec::Codecs;
-use crate::data::data_type::Strictness;
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::{DataType, Strictness, TypeId};
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::OutputType;
 use crate::graph::identity::FuncId;
 use crate::library::type_entry::TypeEntry;
-use crate::{ConstValue, DataType, TypeId};
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
 /// nominal types (with their disk codecs). This is runtime registry state, not a persistence

@@ -3,19 +3,20 @@ use std::error::Error;
 use ron::ser;
 use ron::value::RawValue;
 
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::{DataType, TypeId};
 use crate::execution::compile::compiled_graph::ExecutionBinding;
-use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
+use crate::graph::detached::{DetachedNode, DetachedNodeParts};
 use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::identity::{EventPort, FuncId};
 use crate::graph::node::{CacheMode, FuncResolution, Node, NodeKind};
 use crate::graph::subscription::Subscription;
-use crate::graph::{InputPort, NodeId, OutputPort};
+use crate::graph::{Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
 use crate::internals::test_graph::{NodeSpec, TestGraph};
-use crate::{ConstValue, DataType, DetachedNode, DetachedNodeParts};
 use common::SerdeFormat;
 use std::panic;
 use std::panic::AssertUnwindSafe;
@@ -155,7 +156,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 
 #[test]
 fn type_mismatches_degrade_at_lowering_not_at_validation() {
-    use crate::{FsPathConfig, FsPathMode};
+    use crate::data::data_type::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
     // Int and String never coerce (numerics coerce among themselves, but a
@@ -262,7 +263,7 @@ fn resolve_output_type_follows_passthrough_chain() {
 
 #[test]
 fn resolve_output_type_uses_declared_type_for_typed_const_input() {
-    use crate::{FsPathConfig, FsPathMode, TypeId};
+    use crate::data::data_type::{FsPathConfig, FsPathMode, TypeId};
     use std::sync::Arc;
 
     // A reroute node with *typed* inputs, each mirrored by a wildcard output.
@@ -805,8 +806,8 @@ fn signed_func() -> FuncBuilder {
 /// order, and the events' names — and nothing a binding does not land by.
 #[test]
 fn a_signature_covers_the_ports_and_nothing_else() {
+    use crate::data::data_type::{FsPathConfig, FsPathMode};
     use crate::graph::func::func_output::OutputType;
-    use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
     let signature = signed_func().build().func_ref();
@@ -827,7 +828,7 @@ fn a_signature_covers_the_ports_and_nothing_else() {
         }),
         ("an event renamed", |f| f.events[0].name = "tock".into()),
         ("a custom type swapped", |f| {
-            f.inputs[1].data_type = DataType::Custom(crate::TypeId::from_u128(1));
+            f.inputs[1].data_type = DataType::Custom(TypeId::from_u128(1));
         }),
     ];
     for (what, edit) in moves {

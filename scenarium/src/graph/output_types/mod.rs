@@ -3,7 +3,7 @@
 
 use hashbrown::HashMap;
 
-use crate::DataType;
+use crate::data::data_type::DataType;
 use crate::graph::Graph;
 use crate::graph::identity::OutputPort;
 use crate::library::Library;

@@ -1,10 +1,9 @@
 use std::future;
 use std::time::Duration;
 
-use crate::DataType;
+use crate::data::data_type::DataType;
 use crate::graph::func::Func;
-use crate::graph::func::error::InvokeError;
-use crate::graph::func::error::InvokeResult;
+use crate::graph::func::error::{InvokeError, InvokeResult};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;

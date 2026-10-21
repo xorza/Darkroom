@@ -1,8 +1,8 @@
 //! [`FuncInput`]: one input port a func declares.
 
-use crate::data::data_type::Strictness;
+use crate::data::const_value::ConstValue;
+use crate::data::data_type::{DataType, Strictness, TypeId};
 use crate::graph::func::value_variant::ValueVariant;
-use crate::{ConstValue, DataType, TypeId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncInput {

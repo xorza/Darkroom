@@ -1,5 +1,6 @@
 //! Downstream cones over a program's data edges.
 
+use crate::containers::column::Idx;
 use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::index::NodeIdx;
@@ -74,7 +75,7 @@ impl ConsumerCone {
         for e_node in &program.e_nodes {
             for input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
-                    starts[address.node_idx.0 as usize + 1] += 1;
+                    starts[address.node_idx.idx() + 1] += 1;
                 }
             }
         }
@@ -89,7 +90,7 @@ impl ConsumerCone {
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             for input in &program.inputs[e_node.inputs] {
                 if let ExecutionBinding::Bind(address) = &input.binding {
-                    let at = &mut filled[address.node_idx.0 as usize];
+                    let at = &mut filled[address.node_idx.idx()];
                     readers[*at as usize] = node_idx;
                     *at += 1;
                 }
@@ -116,7 +117,7 @@ impl ConsumerCone {
             }
         }
         while let Some(node_idx) = pending.pop() {
-            let at = node_idx.0 as usize;
+            let at = node_idx.idx();
             for &consumer_idx in &readers[starts[at] as usize..starts[at + 1] as usize] {
                 if !reached.contains(consumer_idx) {
                     reached.insert(consumer_idx);

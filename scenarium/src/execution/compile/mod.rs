@@ -36,8 +36,8 @@ mod validate;
 use std::iter;
 use std::sync::Arc;
 
-use crate::DataType;
 use crate::containers::column::{Column, Idx};
+use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
@@ -321,7 +321,7 @@ impl Compiler {
     }
 
     fn placement(&self, node_id: NodeId) -> &PendingNode {
-        &self.placed[self.idx(node_id).0 as usize]
+        &self.placed[self.idx(node_id).idx()]
     }
 
     /// [`Self::resolve`] behind the type gate: a wire whose resolved source type
@@ -371,7 +371,7 @@ impl Compiler {
     fn resolve(&self, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
         let node_idx = self.idx(node_id);
-        if port_idx >= self.placed[node_idx.0 as usize].outputs as usize {
+        if port_idx >= self.placed[node_idx.idx()].outputs as usize {
             return ExecutionBinding::None;
         }
         ExecutionBinding::Bind(OutputAddr {
