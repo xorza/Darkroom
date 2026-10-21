@@ -1,6 +1,6 @@
 #[cfg(unix)]
 use common::Unreadable;
-use common::{CancelToken, TempDir};
+use common::{CancelToken, FileId, FileIdentity, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::runtime_cache::RuntimeCache;
@@ -269,21 +269,80 @@ fn directory_identity_separates_non_utf8_names() {
     );
 }
 
-/// Files that differ only in an mtime before, at or after the epoch digest apart. Same length
-/// throughout, so mtime is the only field in play; the signed conversion itself is
-/// `common::FileIdentity`'s to test.
+/// A file identity folds every field `common::FileIdentity` states: identities that differ
+/// in one field alone — an mtime before, at or after the epoch, a file id, a change time —
+/// digest apart. The id and the change time are what catch a rewrite that restores the
+/// mtime (`cp -p`, `rsync -t`), so a fold that dropped them would serve a stale value.
 #[test]
-fn file_identity_separates_pre_epoch_mtimes() {
-    let digest_of = |mtime_ns| {
+fn file_identity_folds_every_field() {
+    let base = FileIdentity {
+        len: 4,
+        mtime_ns: 0,
+        file_id: None,
+        changed_ns: None,
+    };
+    let digest_of = |file: FileIdentity| {
         let mut hasher = DigestHasher::new();
-        FsPathId::file(4, mtime_ns).hash(&mut hasher);
+        FsPathId::File(file).hash(&mut hasher);
         hasher.finish()
     };
+
+    // Tag 0, then `write_to`'s layout: len (u64 LE), mtime (i128 LE), and a 0 byte for
+    // each of the two fields the system did not state.
+    let layout = [
+        vec![0],
+        4u64.to_le_bytes().to_vec(),
+        0i128.to_le_bytes().to_vec(),
+        vec![0, 0],
+    ]
+    .concat();
+    assert_eq!(digest_of(base).0, *blake3::hash(&layout).as_bytes());
+
+    let id = |file| Some(FileId { volume: 1, file });
     let all = [
-        ("1s before epoch", digest_of(-1_000_000_000)),
-        ("2s before epoch", digest_of(-2_000_000_000)),
-        ("epoch", digest_of(0)),
-        ("1s after epoch", digest_of(1_000_000_000)),
+        ("epoch", digest_of(base)),
+        (
+            "1s before epoch",
+            digest_of(FileIdentity {
+                mtime_ns: -1_000_000_000,
+                ..base
+            }),
+        ),
+        (
+            "2s before epoch",
+            digest_of(FileIdentity {
+                mtime_ns: -2_000_000_000,
+                ..base
+            }),
+        ),
+        (
+            "1s after epoch",
+            digest_of(FileIdentity {
+                mtime_ns: 1_000_000_000,
+                ..base
+            }),
+        ),
+        (
+            "file id 1",
+            digest_of(FileIdentity {
+                file_id: id(1),
+                ..base
+            }),
+        ),
+        (
+            "file id 2",
+            digest_of(FileIdentity {
+                file_id: id(2),
+                ..base
+            }),
+        ),
+        (
+            "change time",
+            digest_of(FileIdentity {
+                changed_ns: Some(0),
+                ..base
+            }),
+        ),
     ];
     for (i, (left_name, left)) in all.iter().enumerate() {
         for (right_name, right) in &all[i + 1..] {
