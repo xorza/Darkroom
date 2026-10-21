@@ -73,8 +73,8 @@ pub(crate) enum MalformedIntent {
     UndeclaredOutput { port: OutputPort },
     #[error(
         "event {} is not one node {:?} declares",
-        .subscription.event_idx,
-        .subscription.emitter
+        .subscription.event.event_idx,
+        .subscription.event.node_id
     )]
     UndeclaredEvent { subscription: Subscription },
 }

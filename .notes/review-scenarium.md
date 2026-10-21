@@ -74,27 +74,6 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 7. Event addressing
-
-Files: `src/graph/identity.rs`, `src/graph/subscription.rs`,
-`src/graph/mod.rs`, `src/execution/compile/mod.rs`, plus the subscription
-sites in `darkroom` (`core/edit/graph_intent`, `core/edit/step/
-set_subscription.rs`, `core/edit/validate.rs`, `gui/pane/graph_ui/gesture/
-subscription_ui.rs`).
-
-- [ ] `identity.rs:53` `EventPort` — misses `Serialize` and `Deserialize`,
-  which breaks the module's own "one derive list, in one order" rule for the
-  three port addresses. Target: the same derive list as `OutputPort` and
-  `InputPort`.
-- [ ] `subscription.rs:12` `Subscription { emitter, event_idx, subscriber }`
-  and `graph/mod.rs:251`, `:361`, `:368` (`is_subscribed`, `subscribe`,
-  `unsubscribe` with three loose arguments) — event edges do not use the
-  event address, unlike `Binding::Bind(OutputPort)`. Target: `Subscription {
-  event: EventPort, subscriber: NodeId }`, ordered by `event` then
-  `subscriber`, and the three methods take `(EventPort, NodeId)`. The
-  compile walk's subscriber merge compares `sub.event` with
-  `EventPort::new(node_id, event_idx)`.
-
 ### 8. Blob store I/O
 
 Files: `src/execution/cache/disk_store/blob_target/mod.rs`,

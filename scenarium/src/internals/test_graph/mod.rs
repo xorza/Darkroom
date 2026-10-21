@@ -29,7 +29,7 @@ use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
-use crate::graph::identity::{FuncId, InputPort, NodeId};
+use crate::graph::identity::{EventPort, FuncId, InputPort, NodeId};
 use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::internals::calls::Calls;
@@ -228,13 +228,13 @@ impl TestGraph {
     }
 
     pub fn subscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
-        let (emitter, subscriber) = (self.id(emitter), self.id(subscriber));
-        self.graph.subscribe(emitter, event_idx, subscriber);
+        let event = EventPort::new(self.id(emitter), event_idx);
+        self.graph.subscribe(event, self.id(subscriber));
     }
 
     pub fn unsubscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
-        let (emitter, subscriber) = (self.id(emitter), self.id(subscriber));
-        self.graph.unsubscribe(emitter, event_idx, subscriber);
+        let event = EventPort::new(self.id(emitter), event_idx);
+        self.graph.unsubscribe(event, self.id(subscriber));
     }
 
     pub fn disable(&mut self, name: &str) {

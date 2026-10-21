@@ -20,15 +20,11 @@ pub(crate) struct SetSubscription {
 
 impl Reversible for SetSubscription {
     fn write(&self, doc: &mut Document, dir: Direction) {
-        let Subscription {
-            emitter,
-            event_idx,
-            subscriber,
-        } = self.subscription;
+        let Subscription { event, subscriber } = self.subscription;
         if *self.subscribed.half(dir) {
-            doc.graph.subscribe(emitter, event_idx, subscriber);
+            doc.graph.subscribe(event, subscriber);
         } else {
-            doc.graph.unsubscribe(emitter, event_idx, subscriber);
+            doc.graph.unsubscribe(event, subscriber);
         }
     }
 

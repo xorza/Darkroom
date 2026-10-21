@@ -28,7 +28,7 @@ use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::func_output::OutputType;
 use crate::graph::identity::NodeId;
-use crate::graph::identity::{InputPort, OutputPort};
+use crate::graph::identity::{EventPort, InputPort, OutputPort};
 use crate::graph::node::{FuncResolution, Node, NodeKind};
 use crate::graph::node_ref::NodeRef;
 use crate::graph::output_types::OutputTypeSource;
@@ -247,12 +247,9 @@ impl Graph {
                 .collect(),
         })
     }
-    pub fn is_subscribed(&self, emitter: NodeId, event_idx: usize, subscriber: NodeId) -> bool {
-        self.subscriptions.contains(&Subscription {
-            emitter,
-            event_idx,
-            subscriber,
-        })
+    pub fn is_subscribed(&self, event: EventPort, subscriber: NodeId) -> bool {
+        self.subscriptions
+            .contains(&Subscription::new(event, subscriber))
     }
     fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
         self.bindings
@@ -357,19 +354,13 @@ impl Graph {
             }
         }
     }
-    pub fn subscribe(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {
-        self.subscriptions.insert(Subscription {
-            emitter,
-            event_idx,
-            subscriber,
-        });
+    pub fn subscribe(&mut self, event: EventPort, subscriber: NodeId) {
+        self.subscriptions
+            .insert(Subscription::new(event, subscriber));
     }
-    pub fn unsubscribe(&mut self, emitter: NodeId, event_idx: usize, subscriber: NodeId) {
-        self.subscriptions.remove(&Subscription {
-            emitter,
-            event_idx,
-            subscriber,
-        });
+    pub fn unsubscribe(&mut self, event: EventPort, subscriber: NodeId) {
+        self.subscriptions
+            .remove(&Subscription::new(event, subscriber));
     }
 
     /// Validate this graph structurally: everything a document must satisfy to
@@ -422,15 +413,14 @@ impl Graph {
         }
 
         for subscription in &self.subscriptions {
-            if !self.nodes.contains_key(&subscription.emitter) {
+            if !self.nodes.contains_key(&subscription.event.node_id) {
                 return Err(GraphValidationError::MissingSubscriptionEmitter {
-                    node_id: subscription.emitter,
+                    event: subscription.event,
                 });
             }
             if !self.nodes.contains_key(&subscription.subscriber) {
                 return Err(GraphValidationError::MissingSubscriber {
-                    emitter: subscription.emitter,
-                    event_idx: subscription.event_idx,
+                    event: subscription.event,
                     subscriber: subscription.subscriber,
                 });
             }

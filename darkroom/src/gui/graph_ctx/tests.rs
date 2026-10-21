@@ -1,7 +1,8 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, internals,
+    Binding, CacheMode, ConstValue, DataType, EventPort, FuncId, Graph, InputPort, Node, NodeId,
+    internals,
 };
 
 use crate::core::document::internals::DocFixture;
@@ -164,14 +165,13 @@ fn subscriptions_read_from_the_graph() {
     let emitter_id = graph.add(emitter);
     let subscriber: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let subscriber_id = graph.add(subscriber);
-    graph.subscribe(emitter_id, 1, subscriber_id);
+    graph.subscribe(EventPort::new(emitter_id, 1), subscriber_id);
 
     let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
-    assert_eq!(subs[0].emitter, emitter_id);
-    assert_eq!(subs[0].event_idx, 1);
+    assert_eq!(subs[0].event, EventPort::new(emitter_id, 1));
     assert_eq!(subs[0].subscriber, subscriber_id);
 }
 

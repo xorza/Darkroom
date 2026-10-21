@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
-use crate::graph::identity::{InputPort, OutputPort};
+use crate::graph::identity::{EventPort, InputPort, OutputPort};
 use crate::graph::subscription::Subscription;
 
 /// Every graph validation returns this.
@@ -65,12 +65,11 @@ pub enum GraphValidationError {
         destination: InputPort,
         producer: OutputPort,
     },
-    #[error("subscription from missing emitter {node_id:?}")]
-    MissingSubscriptionEmitter { node_id: NodeId },
-    #[error("node {emitter:?} event {event_idx} has missing subscriber {subscriber:?}")]
+    #[error("subscription from missing emitter {event:?}")]
+    MissingSubscriptionEmitter { event: EventPort },
+    #[error("event {event:?} has missing subscriber {subscriber:?}")]
     MissingSubscriber {
-        emitter: NodeId,
-        event_idx: usize,
+        event: EventPort,
         subscriber: NodeId,
     },
 }

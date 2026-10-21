@@ -1,4 +1,5 @@
 use palantir::Size;
+use scenarium::EventPort;
 
 use super::*;
 
@@ -20,11 +21,8 @@ fn begin_frame_clears_every_broken_collection() {
     let node = NodeId::from_u128(1);
     b.broken.push(InputPort::new(node, 0));
     b.broken_nodes.push(node);
-    b.broken_subscriptions.push(Subscription {
-        emitter: node,
-        event_idx: 0,
-        subscriber: node,
-    });
+    b.broken_subscriptions
+        .push(Subscription::new(EventPort::new(node, 0), node));
 
     b.begin_frame();
 

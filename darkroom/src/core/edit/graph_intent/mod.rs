@@ -28,8 +28,8 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, InputPort, Library, Node, NodeId,
-    Subscription,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, InputPort, Library, Node,
+    NodeId, Subscription,
 };
 
 use crate::core::document::Document;
@@ -277,15 +277,14 @@ impl GraphIntent {
         intents.extend(internal);
         for subscription in graph.subscriptions() {
             if let (Some(&emitter), Some(&subscriber)) = (
-                clones.get(&subscription.emitter),
+                clones.get(&subscription.event.node_id),
                 clones.get(&subscription.subscriber),
             ) {
                 intents.push(Self::SetSubscription {
-                    subscription: Subscription {
-                        emitter,
-                        event_idx: subscription.event_idx,
+                    subscription: Subscription::new(
+                        EventPort::new(emitter, subscription.event.event_idx),
                         subscriber,
-                    },
+                    ),
                     subscribe: true,
                 });
             }
@@ -490,12 +489,8 @@ impl GraphIntent {
                 subscription,
                 subscribe,
             } => {
-                let Subscription {
-                    emitter,
-                    event_idx,
-                    subscriber,
-                } = subscription;
-                validate::non_nil_node(emitter, Role::SetSubscriptionEmitter)?;
+                let Subscription { event, subscriber } = subscription;
+                validate::non_nil_node(event.node_id, Role::SetSubscriptionEmitter)?;
                 validate::non_nil_node(subscriber, Role::SetSubscriptionSubscriber)?;
                 // A subscribe needs both endpoints present; a stale drag onto a
                 // vanished node drops rather than recording a dangling
@@ -504,7 +499,7 @@ impl GraphIntent {
                 // it needs no existence check.
                 if subscribe {
                     let (Some(emitter_node), Some(_)) =
-                        (graph.find(emitter), graph.find(subscriber))
+                        (graph.find(event.node_id), graph.find(subscriber))
                     else {
                         return Ok(None);
                     };
@@ -513,7 +508,7 @@ impl GraphIntent {
                 UndoStep::SetSubscription(SetSubscription {
                     subscription,
                     subscribed: Change {
-                        from: graph.is_subscribed(emitter, event_idx, subscriber),
+                        from: graph.is_subscribed(event, subscriber),
                         to: subscribe,
                     },
                 })
