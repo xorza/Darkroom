@@ -17,14 +17,14 @@ use crate::core::document::internals::DocFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::app::app_command::AppCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUI;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::port_ref::PortRef;
-use crate::gui::requests::Requests;
 use std::iter;
 
 impl GraphUI {

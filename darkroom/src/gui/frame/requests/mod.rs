@@ -9,7 +9,7 @@ use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::app::app_command::AppCommand;
+use crate::gui::frame::app_command::AppCommand;
 
 /// A frame's requests, in the order they were raised.
 ///

@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use glam::Vec2;
 
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::{
     CameraGesture, SCROLL_RUN_GAP,
 };
-use crate::gui::requests::Requests;
 
 /// The pan gesture's three edges: an unlatched camera ignores everything,
 /// a latched one measures from the latch rather than integrating and

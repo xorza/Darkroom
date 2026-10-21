@@ -2,7 +2,7 @@
 
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
-use crate::gui::app::app_ctx::AppCtx;
+use crate::gui::frame::app_ctx::AppCtx;
 
 /// The frame's read-only world *and* the open document it is showing — what
 /// every surface at window level reads. `Copy` (an [`AppCtx`], itself shared

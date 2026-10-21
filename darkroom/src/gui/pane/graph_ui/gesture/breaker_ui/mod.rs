@@ -5,13 +5,13 @@ use palantir::widget::{LineCap, LineJoin, Shape};
 use palantir::{PointerButton, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::Scribble;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
-use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Owns the active connection-breaker gesture (RMB / Ctrl+LMB drag on

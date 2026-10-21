@@ -1,7 +1,6 @@
 pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
-pub(crate) mod window_ctx;
 
 use std::collections::HashMap;
 
@@ -13,14 +12,14 @@ use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::relayout::Relayout;
-use crate::gui::frame_writes::FrameWrites;
+use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::requests::Requests;
+use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 use crate::gui::main_window::dock_panes::DockPanes;
-use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::pane::graph_ui::GraphUI;
 use crate::gui::pane::image_viewer::ImageViewer;
-use crate::gui::requests::Requests;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
 /// rather than an auto one because the scope is the thing darkroom's

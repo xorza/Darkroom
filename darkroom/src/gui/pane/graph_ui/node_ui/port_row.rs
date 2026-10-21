@@ -21,13 +21,13 @@ use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::OutputPort;
-use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
+use scenarium::{ConstValue, DataType, FsPathMode, Func};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::edit_command::EditCommand;
 use crate::gui::event_ref::EventRef;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::{EditCommand, PathPick};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -230,20 +230,6 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 /// button).
 fn const_editor_wid(input: InputPort) -> WidgetId {
     wid::port("const_editor", input.into())
-}
-
-/// A click on an `FsPath` input's inline pick button: the port to set, and the
-/// picker config to open the dialog with.
-///
-/// A named payload rather than the two values loose, because it travels as an
-/// `AppCommand` through `App` and back — the dialog can only run once the
-/// record pass is over, so the click and the effect are frames apart.
-#[derive(Clone, Debug)]
-pub(crate) struct PathPick {
-    pub(crate) port: InputPort,
-    /// Type-level metadata, taken from the port's `DataType` — the value
-    /// carries only the selected path strings.
-    pub(crate) config: Arc<FsPathConfig>,
 }
 
 /// An input port's cell (circle + label). Answers a double-click on the
@@ -711,7 +697,7 @@ impl Display for TypeLabel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenarium::NodeKind;
+    use scenarium::{FsPathConfig, NodeKind};
 
     /// The type line of a port tooltip. A path spells out its picker mode and
     /// the extensions it accepts; everything else defers to the library's own

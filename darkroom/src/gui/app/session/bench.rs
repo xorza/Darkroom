@@ -48,11 +48,11 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::gui::app::app_ctx::AppCtx;
 use crate::gui::app::session::Session;
-use crate::gui::frame_writes::FrameWrites;
+use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 

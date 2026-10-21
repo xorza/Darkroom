@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use palantir::Ui;
+use palantir::{HostHandle, Ui};
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
@@ -17,23 +17,21 @@ use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
-use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
-use crate::gui::app::app_command::prefs_command::MlModelKind;
-use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
 use crate::gui::dialogs;
-use crate::gui::frame_writes::FrameWrites;
-use crate::gui::pane::graph_ui::node_ui::port_row::PathPick;
-use crate::gui::requests::Requests;
+use crate::gui::frame::app_command::{
+    AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PrefsCommand, RunCommand,
+};
+use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
+use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
 
-pub(crate) mod app_command;
-pub(crate) mod app_ctx;
 mod discard_dialog;
 mod error;
 pub(crate) mod session;
@@ -66,7 +64,7 @@ pub(crate) struct App {
     /// reporting.
     status: StatusLog,
     theme: Theme,
-    host_handle: HostHandle,
+    host_handle: HostHandle<Self>,
     /// Persisted session state: the last document, the window, the viewer
     /// and model choices. Written on every change through
     /// [`Self::save_preferences`], so the next launch reopens where the user
@@ -141,7 +139,7 @@ impl App {
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, launch: LaunchInputs) -> Self {
+    pub(crate) fn new(ui: &mut Ui, handle: HostHandle<Self>, launch: LaunchInputs) -> Self {
         let LaunchInputs {
             preferences,
             document,
@@ -195,6 +193,41 @@ impl App {
             app.save_preferences();
         }
         app
+    }
+
+    /// Run a command the frame raised, once the pass that raised it is over:
+    /// every one needs `&mut App`, a blocking dialog, or both.
+    ///
+    /// Returns whether it stranded the canvas's cached geometry. Only an edit
+    /// can — the rest touch state no canvas measures against — but it is
+    /// reported rather than requested here, so that `App::record` stays the one
+    /// place in the app that asks for a relayout.
+    #[must_use]
+    fn run_command(&mut self, command: AppCommand) -> Relayout {
+        match command {
+            // Both replace the open document, so they clear the
+            // unsaved-changes guard before doing anything.
+            AppCommand::File(FileCommand::New) => self.guard_discard(PendingTransition::New),
+            AppCommand::File(FileCommand::Open) => {
+                self.guard_discard(PendingTransition::OpenPicked);
+            }
+            AppCommand::File(FileCommand::Save) => self.save_current(),
+            AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
+            AppCommand::Run(RunCommand::Once) => self.run_graph(),
+            AppCommand::Run(RunCommand::Node(node_id)) => self.run_node(node_id),
+            AppCommand::Run(RunCommand::EvictCache(node_id)) => self.evict_cache(node_id),
+            AppCommand::Run(RunCommand::FlushCache(node_id)) => self.flush_cache(node_id),
+            AppCommand::Run(RunCommand::Cancel) => self.runtime.cancel_run(),
+            AppCommand::Run(RunCommand::StartEvents) => self.start_events(),
+            AppCommand::Run(RunCommand::StopEvents) => self.stop_events(),
+            AppCommand::Prefs(PrefsCommand::Changed) => self.apply_preferences(),
+            AppCommand::Prefs(PrefsCommand::PickMlModel(kind)) => self.pick_ml_model(kind),
+            AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
+                return self.pick_input_path(&pick);
+            }
+            AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
+        }
+        Relayout::NotNeeded
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -372,14 +405,14 @@ impl App {
     /// [`PendingTransition::OpenPicked`] body: the picker runs here, *after*
     /// the guard cleared, so cancelling the unsaved-changes prompt never costs
     /// the user a file choice.
-    pub(crate) fn load_picked_document(&mut self) {
+    fn load_picked_document(&mut self) {
         if let Some(path) = dialogs::pick_project_open_path(self.session.open.path.as_deref()) {
             self.load_document(&path);
         }
     }
 
     /// Replace the document with an empty one.
-    pub(crate) fn new_document(&mut self) {
+    fn new_document(&mut self) {
         self.adopt_document(OpenDocument::default());
     }
 
@@ -423,7 +456,7 @@ impl App {
 
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
-    pub(crate) fn load_document(&mut self, path: &Path) {
+    fn load_document(&mut self, path: &Path) {
         let open = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
             Ok(open) => open,
             Err(err) => {
@@ -437,7 +470,7 @@ impl App {
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
-    pub(crate) fn save_current(&mut self) {
+    fn save_current(&mut self) {
         match self.session.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
@@ -486,7 +519,7 @@ impl App {
     /// Persist the preferences, surfacing a failed write in the status
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
-    pub(crate) fn save_preferences(&mut self) {
+    fn save_preferences(&mut self) {
         if !self.preferences_writable {
             return;
         }
@@ -512,7 +545,7 @@ impl App {
     /// Persist whether discarding unsaved changes prompts to save.
     /// Shared by the Preferences checkbox (via `Changed`) and the prompt's
     /// "Don't ask again", which calls this directly.
-    pub(crate) fn set_confirm_unsaved(&mut self, on: bool) {
+    fn set_confirm_unsaved(&mut self, on: bool) {
         self.preferences.confirm_unsaved_changes = on;
         self.save_preferences();
     }
@@ -522,7 +555,7 @@ impl App {
     /// synchronously — no run starts, so the prior run's status stays
     /// untouched. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
-    pub(crate) fn run_graph(&mut self) {
+    fn run_graph(&mut self) {
         self.runtime
             .run_once(self.session.graph(), &mut self.status);
     }
@@ -663,10 +696,10 @@ impl palantir::App for App {
         // What the session left behind: every command the frame raised, in the
         // order it raised them — a keyboard chord and a click on the same
         // frame both land. Popped one at a time so the queue is not borrowed
-        // while a command runs, which is what lets `AppCommand::apply` take all
+        // while a command runs, which is what lets `App::run_command` take all
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
-            needs_relayout |= command.apply(self);
+            needs_relayout |= self.run_command(command);
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,

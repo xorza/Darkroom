@@ -4,14 +4,14 @@ use palantir::{MenuItem, MenuSeparator, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::RunCommand;
 use scenarium::NodeId;
 
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::paint::node_context_menu::NodeContextMenu;
-use crate::gui::requests::Requests;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all

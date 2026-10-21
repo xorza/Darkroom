@@ -17,9 +17,9 @@ use palantir::FontWeight;
 use palantir::prelude::*;
 
 use crate::core::io::preferences::Preferences;
-use crate::gui::app::app_command::AppCommand;
-use crate::gui::app::app_command::prefs_command::{MlModelKind, PrefsCommand};
-use crate::gui::requests::Requests;
+use crate::gui::frame::app_command::AppCommand;
+use crate::gui::frame::app_command::{MlModelKind, PrefsCommand};
+use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 use crate::platform;

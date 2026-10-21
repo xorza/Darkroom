@@ -11,9 +11,9 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use crate::core::document::internals::{self, DocFixture};
 use crate::core::document::open_document::OpenDocument;
-use crate::gui::app::app_ctx::AppCtx;
+use crate::gui::frame::app_ctx::AppCtx;
+use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 

@@ -4,6 +4,7 @@ use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::event_ref::EventRef;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -12,7 +13,6 @@ use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
-use crate::gui::requests::Requests;
 use crate::gui::widgets::hover::Hover;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.

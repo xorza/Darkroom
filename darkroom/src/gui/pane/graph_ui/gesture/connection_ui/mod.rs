@@ -4,6 +4,7 @@ use scenarium::Binding;
 use scenarium::DataType;
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph_ui::canvas;
@@ -15,7 +16,6 @@ use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::port_ref::{PortKind, PortRef};
-use crate::gui::requests::Requests;
 use crate::gui::widgets::hover::Hover;
 
 /// Owns the in-flight new-connection wire — a held drag or a free-floating

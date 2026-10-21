@@ -1,8 +1,8 @@
 //! [`NodeRecord`]: one node body's record pass.
 
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
-use crate::gui::requests::Requests;
 
 /// One node body as the record pass draws it: the node, the canvas pass it
 /// sits in, and the queue its widgets raise edits into.

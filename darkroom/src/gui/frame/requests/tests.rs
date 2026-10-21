@@ -3,7 +3,7 @@ use std::iter;
 
 use super::*;
 use crate::core::edit::document_request::DocumentRequest;
-use crate::gui::app::app_command::run_command::RunCommand;
+use crate::gui::frame::app_command::RunCommand;
 
 fn remove_node() -> GraphIntent {
     GraphIntent::RemoveNode {

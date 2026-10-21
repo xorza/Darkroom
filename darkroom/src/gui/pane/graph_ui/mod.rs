@@ -30,6 +30,7 @@ use palantir::prelude::*;
 use crate::core::document::Document;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
+use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_background::CanvasBackground;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
@@ -50,7 +51,6 @@ use crate::gui::pane::graph_ui::node_ui::{NodeDrawOutcome, NodePass, NodeUI};
 use crate::gui::pane::graph_ui::paint::inspectors::Inspectors;
 use crate::gui::pane::graph_ui::paint::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, Escape, PrepassCtx};
-use crate::gui::requests::Requests;
 
 /// The graph pane's UI state: the cross-frame geometry, the `NodeUI` that
 /// renders graph nodes, the inspection panels, and the in-flight gesture
@@ -379,7 +379,7 @@ impl GraphUI {
 
     /// The record pass's non-drawing half: each controller's record-phase
     /// `apply`, then the chip clicks that mean an
-    /// [`AppCommand`](crate::gui::app::app_command::AppCommand). Everything
+    /// [`AppCommand`](crate::gui::frame::app_command::AppCommand). Everything
     /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let cx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);

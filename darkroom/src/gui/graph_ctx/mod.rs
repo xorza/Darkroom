@@ -33,8 +33,8 @@ use scenarium::{
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedItem};
 use crate::core::document::viewport::Viewport;
+use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::main_window::window_ctx::WindowCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;

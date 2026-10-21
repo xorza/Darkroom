@@ -1,7 +1,7 @@
 //! [`FrameWrites`]: what one frame's record may change.
 
 use crate::core::io::preferences::Preferences;
-use crate::gui::requests::Requests;
+use crate::gui::frame::requests::Requests;
 
 /// What a frame may write: the preferences its forms edit in place, and the
 /// requests its surfaces raise. Both outlive the frame; the record borrows them
