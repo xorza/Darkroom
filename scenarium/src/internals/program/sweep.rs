@@ -81,7 +81,7 @@ impl<'a> Sweep<'a> {
 
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
-        cache.stamp_digests(program, &schedule.states, schedule.executing());
+        cache.stamp_digests(program, &schedule);
         for (node, values) in cached {
             cache.prime_hit(node.node_idx, values);
         }

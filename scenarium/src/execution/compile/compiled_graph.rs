@@ -22,7 +22,6 @@ use crate::containers::column::{Column, Span};
 use crate::data::codec::Codecs;
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
-use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
@@ -50,18 +49,6 @@ pub(crate) struct ExecutionInput {
     /// ([`FuncInput::overrides`](crate::FuncInput::overrides)), resolved to its
     /// place in the input column.
     pub(crate) overridden_by: Option<InputIdx>,
-}
-
-impl ExecutionInput {
-    /// Whether this input hands its node a value this run: a constant other
-    /// than the explicit `Null`, or a bind to a producer that runs.
-    pub(crate) fn delivers(&self, states: &Column<NodeIdx, NodeState>) -> bool {
-        match &self.binding {
-            ExecutionBinding::None | ExecutionBinding::Const(ConstValue::Null) => false,
-            ExecutionBinding::Const(_) => true,
-            ExecutionBinding::Bind(addr) => states[addr.node_idx].is_runnable(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -197,18 +184,6 @@ impl CompiledGraph {
             .iter()
             .map(|node_idx| self.node_ids[node_idx])
             .collect()
-    }
-
-    /// Whether `input` is set aside this run because the input that overrides
-    /// it delivers. A set-aside input is delivered and digested as unbound.
-    pub(crate) fn overridden(
-        &self,
-        input: &ExecutionInput,
-        states: &Column<NodeIdx, NodeState>,
-    ) -> bool {
-        input
-            .overridden_by
-            .is_some_and(|by| self.inputs[by].delivers(states))
     }
 
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {

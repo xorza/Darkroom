@@ -35,7 +35,7 @@ use crate::execution::cache::stamp_job::{FsPathId, StampJob};
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{NodeIdx, OutputAddr};
-use crate::execution::schedule::NodeState;
+use crate::execution::schedule::{Delivery, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
@@ -152,8 +152,8 @@ pub(crate) enum ReuseOutcome {
 #[derive(Debug)]
 pub(crate) struct Restamp<'a> {
     pub(crate) program: &'a CompiledGraph,
-    /// The run's settled states, which decide which producers fold as unbound.
-    pub(crate) states: &'a Column<NodeIdx, NodeState>,
+    /// The run's schedule, which decides what each input delivers.
+    pub(crate) schedule: &'a RunSchedule,
     pub(crate) node_idx: NodeIdx,
     pub(crate) demand: &'a [OutputDemand],
     pub(crate) cancel: CancelToken,
@@ -344,23 +344,15 @@ impl RuntimeCache {
         slot.read_output(address.port_idx, read)
     }
 
-    /// Producer-first digest pass over the whole schedule, so a consumer
-    /// folds an already-stamped producer digest. Reuse is deliberately not
-    /// probed here because exact demand exists only in the resolver's
-    /// reverse sweep. A Bind-delivered path value that is not resident yet
-    /// stamps `None`; the run loop can improve that node to reuse once its
-    /// path producer settles.
-    /// `executing` is the run's schedule in producer-first order
-    /// ([`RunSchedule::executing`](crate::execution::schedule::RunSchedule::executing));
-    /// the cache reads the nodes, not the plan that selected them.
-    pub(crate) fn stamp_digests(
-        &mut self,
-        program: &CompiledGraph,
-        states: &Column<NodeIdx, NodeState>,
-        executing: impl IntoIterator<Item = NodeIdx>,
-    ) {
-        for node_idx in executing {
-            self.stamp_digest(program, states, node_idx);
+    /// Producer-first digest pass over the nodes `schedule` runs
+    /// ([`RunSchedule::executing`]), so a consumer folds an already-stamped
+    /// producer digest. Reuse is deliberately not probed here because exact
+    /// demand exists only in the resolver's reverse sweep. A Bind-delivered path
+    /// value that is not resident yet stamps `None`; the run loop can improve
+    /// that node to reuse once its path producer settles.
+    pub(crate) fn stamp_digests(&mut self, program: &CompiledGraph, schedule: &RunSchedule) {
+        for node_idx in schedule.executing() {
+            self.stamp_digest(program, schedule, node_idx);
         }
     }
 
@@ -370,12 +362,12 @@ impl RuntimeCache {
     pub(crate) fn stamp_digest(
         &mut self,
         program: &CompiledGraph,
-        states: &Column<NodeIdx, NodeState>,
+        schedule: &RunSchedule,
         node_idx: NodeIdx,
     ) {
         // Folded whole before the write, so the fold's read of the slots ends
         // before the slot it stamps is borrowed mutably.
-        let digest = self.node_digest(program, states, node_idx);
+        let digest = self.node_digest(program, schedule, node_idx);
         self.slots[node_idx].current_digest = digest;
     }
 
@@ -387,10 +379,9 @@ impl RuntimeCache {
     ///
     /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
     ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
-    /// - Otherwise fold every input structurally: a `Const`'s value + prepared `FsPath`
-    ///   file/dir content, or a `Bind` producer's stamped `current_digest` — unless `states`
-    ///   says the producer does not run this run, when the input folds as unbound, which is
-    ///   what the executor hands the node there — plus, for a
+    /// - Otherwise fold what each input delivers ([`RunSchedule::delivery`]): a `Const`'s
+    ///   value + prepared `FsPath` file/dir content, a `Bind` producer's stamped
+    ///   `current_digest`, or the unbound marker — plus, for a
     ///   resource-typed input, the live identity of the referent behind the *delivered* value
     ///   ([`hash_bound_fs_path`](Self::hash_bound_fs_path)). That last fold needs the producer's
     ///   value: unreadable ⇒ `None`, and the run loop re-stamps such a node at reach time, once
@@ -404,7 +395,7 @@ impl RuntimeCache {
     pub(crate) fn node_digest(
         &self,
         program: &CompiledGraph,
-        states: &Column<NodeIdx, NodeState>,
+        schedule: &RunSchedule,
         node_idx: NodeIdx,
     ) -> Option<Digest> {
         let e_node = &program[node_idx];
@@ -427,28 +418,24 @@ impl RuntimeCache {
         }
 
         for input in &program.inputs[e_node.inputs] {
-            match &input.binding {
-                // Set aside by its override, the input is delivered unbound.
-                _ if program.overridden(input, states) => {
+            // Keyed by what the executor hands the node: a producer the run skips
+            // folds as unbound, since folding its stamp would key this node on the
+            // last run the producer took part in.
+            match schedule.delivery(program, input) {
+                Delivery::Unbound | Delivery::SetAside => {
                     hasher.write_input_tag(InputTag::Unbound);
                 }
-                ExecutionBinding::None => {
-                    hasher.write_input_tag(InputTag::Unbound);
+                Delivery::Blocked => {
+                    unreachable!("a node with a blocked input does not run, so it is not keyed")
                 }
-                // The executor delivers unbound for a producer the run skips (see its
-                // `producer_runs`), so the key is the unbound one: folding the producer's stamp
-                // would key this node on the last run the producer took part in.
-                ExecutionBinding::Bind(addr) if !states[addr.node_idx].is_runnable() => {
-                    hasher.write_input_tag(InputTag::Unbound);
-                }
-                ExecutionBinding::Const(value) => {
+                Delivery::Const(value) => {
                     hasher.write_input_tag(InputTag::Const);
                     hasher.write_static(value);
                     if let Some(paths) = value.as_fs_paths() {
                         self.hash_fs_paths(&mut hasher, paths)?;
                     }
                 }
-                ExecutionBinding::Bind(addr) => {
+                Delivery::Bind(addr) => {
                     // The producer was visited first (topological order), so its `current_digest`
                     // is set; a `None` taints this node.
                     let producer = self.slots[addr.node_idx].current_digest?;
@@ -464,7 +451,7 @@ impl RuntimeCache {
                     // producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                     // time by the run loop.
                     if input.stamps_fs_path {
-                        self.hash_bound_fs_path(&mut hasher, *addr)?;
+                        self.hash_bound_fs_path(&mut hasher, addr)?;
                     }
                 }
             }
@@ -648,13 +635,13 @@ impl RuntimeCache {
     ) -> Result<ReuseOutcome, StampError> {
         let Restamp {
             program,
-            states,
+            schedule,
             node_idx,
             demand,
             cancel,
         } = restamp;
         self.identify(program, iter::once(node_idx), cancel).await?;
-        self.stamp_digest(program, states, node_idx);
+        self.stamp_digest(program, schedule, node_idx);
         Ok(self.hydrate_reuse(program, node_idx, demand).await)
     }
 

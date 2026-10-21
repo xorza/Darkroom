@@ -114,7 +114,7 @@ impl<'a> Runs<'a> {
             cache,
             ..
         } = &mut self;
-        cache.stamp_digests(&owner.program, &schedule.states, schedule.executing());
+        cache.stamp_digests(&owner.program, schedule);
         cache.prime_hit(node.node_idx, values.into_iter().collect());
         self
     }

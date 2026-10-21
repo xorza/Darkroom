@@ -74,27 +74,9 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 2. One input-delivery rule
-
-Files: `src/execution/schedule/mod.rs`,
-`src/execution/compile/compiled_graph.rs`,
-`src/execution/cache/runtime_cache/mod.rs`, `src/execution/executor/mod.rs`.
-
-- [ ] `compiled_graph.rs:58` `ExecutionInput::delivers` and
-  `compiled_graph.rs:204` `CompiledGraph::overridden` — per-run queries on
-  the immutable artifact. They make `compile` import `schedule::NodeState`
-  (cycle `compile` ↔ `schedule`, edge to cut: `compiled_graph.rs:25`).
-  Target: move both into `schedule` as part of `RunSchedule::delivery`.
-- [ ] `schedule/mod.rs:267` `input_missing`, `runtime_cache/mod.rs:404`
-  `node_digest` (the input `match`), `executor/mod.rs:637` `collect_inputs`
-  (the binding `match`) — three copies of the same delivery rule. Target:
-  each matches on `RunSchedule::delivery` (`Unbound`, `Blocked`, `Const`,
-  `Bind`), and `input_missing` becomes `Unbound → required, Blocked → true,
-  else false`.
-
 ### 3. Split lambda state from the output cache
 
-Needs batch 2 (both rewrite `node_digest` and `collect_inputs`). Files:
+Files:
 `src/execution/cache/runtime_slot.rs`,
 `src/execution/cache/runtime_cache/mod.rs`,
 `src/execution/cache/stamp_job/mod.rs`, `src/execution/executor/mod.rs`,
