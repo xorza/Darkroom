@@ -4,7 +4,6 @@ use glam::Vec2;
 use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
 use crate::core::preview_sink;
-use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -13,6 +12,7 @@ use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::widgets::hover::Hover;
+use scenarium::EventPort;
 
 /// The `kind_label` a node reports when the library holds no func for it —
 /// see [`NodeCtx::missing`].
@@ -208,17 +208,12 @@ impl<'a> NodeCtx<'a> {
             && matches!(self.node.kind, NodeKind::Func(func_id) if preview_sink::is_func(func_id))
     }
 
-    /// Whether the header offers the RAM/disk storage chips. An impure func
-    /// has no content digest to key a cache on, and a func with no outputs
-    /// has nothing to store — a `missing` stub for both reasons at once.
-    pub(crate) fn cache_controls(self) -> bool {
-        self.func
-            .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
-    }
-
-    /// Whether the header offers runtime cache eviction — it needs a
-    /// reproducible output, which an impure or portless node has not.
-    pub(crate) fn can_evict_cache(self) -> bool {
+    /// Whether the node has an output a cache can key: the one rule behind
+    /// the header's RAM/disk storage chips and its eviction chip. An impure
+    /// func has no content digest to key a cache on, and a func with no
+    /// outputs has nothing to store — a `missing` stub for both reasons at
+    /// once.
+    pub(crate) fn cacheable(self) -> bool {
         self.func
             .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
     }
@@ -227,7 +222,7 @@ impl<'a> NodeCtx<'a> {
     /// sinks keeps disabled nodes directly runnable with their upstream cone
     /// intact.
     pub(crate) fn can_disable(self) -> bool {
-        self.sink() && !self.missing()
+        self.sink()
     }
 
     /// Whether this node can seed a "run to this node" — drives the header
@@ -315,12 +310,12 @@ impl<'a> NodeCtx<'a> {
         })
     }
 
-    /// Every `EventRef`, in declaration order — the emitter-glyph
+    /// Every `EventPort`, in declaration order — the emitter-glyph
     /// counterpart of [`Self::ports`], shared by `CanvasGeometry::rebuild`
     /// and the subscription-wire scans for the same reason.
-    pub(crate) fn event_refs(self) -> impl Iterator<Item = EventRef> {
+    pub(crate) fn event_ports(self) -> impl Iterator<Item = EventPort> {
         let node_id = self.id;
-        (0..self.events().len()).map(move |event_idx| EventRef { node_id, event_idx })
+        (0..self.events().len()).map(move |event_idx| EventPort::new(node_id, event_idx))
     }
 
     /// The port indices the last run could not feed — its own verdict, so a

@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use scenarium::NodeId;
+use scenarium::{EventPort, NodeId};
 
 /// A key that names the node it hangs off — how a cache keyed by ports,
 /// events or pins evicts a deleted node's entries, and how a gesture keyed by
@@ -15,5 +15,11 @@ pub(crate) trait NodeKey: Copy + Eq + Hash + Debug {
 impl NodeKey for NodeId {
     fn node(self) -> NodeId {
         self
+    }
+}
+
+impl NodeKey for EventPort {
+    fn node(self) -> NodeId {
+        self.node_id
     }
 }

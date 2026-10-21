@@ -5,17 +5,17 @@ use serde::{Deserialize, Serialize};
 
 /// What an editor tab shows: the document's graph ([`TabRef::Graph`]), or a
 /// non-graph app view like [`TabRef::Preferences`] (the settings window) or an
-/// image viewer. Persisted + undoable like the rest of the tab/view state, so
-/// reopening a document restores its open tabs and Ctrl+Z walks tab
-/// open/close.
+/// image viewer. Persisted with the rest of the document, so reopening one
+/// restores its open tabs; not undoable, since the pane arrangement records no
+/// undo step, so Ctrl+Z walks past a tab switch to the last graph edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum TabRef {
     /// The graph pane.
     Graph,
     /// The app-preferences / settings view — no graph, no canvas.
     Preferences,
-    /// A full-resolution viewer of one port's runtime image — one tab per
-    /// port, deduped on open. Content is runtime-only
+    /// A full-resolution viewer of one preview node's runtime image — one tab
+    /// per node, deduped on open. Content is runtime-only
     /// (`crate::gui::pane::image_viewer`): a restored tab pulls any current value
     /// from `RunState` when drawn. Pruned when its node is deleted.
     ///

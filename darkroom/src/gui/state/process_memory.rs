@@ -5,7 +5,7 @@
 //! against the OS. It counts everything the process holds: the graph cache the
 //! bar already reports, plus decoded images, GPU driver allocations, and the
 //! allocator's own retained arenas, which is why it reads well above the
-//! cache's own `RAM` clause.
+//! bar's `Cache` clause.
 
 use std::time::{Duration, Instant};
 

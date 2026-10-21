@@ -80,7 +80,7 @@ pub(crate) struct ImageViewer {
 /// Drawn when a viewer's node has published nothing yet. An invitation rather
 /// than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and
 /// not a message.
-const NOTHING_YET_HINT: &str = "the port's image appears here after the next graph run";
+const NOTHING_YET_HINT: &str = "the preview's image appears here after the next graph run";
 
 /// What [`StoredContent`] means to a viewer: a texture to paint, why there
 /// isn't one, or nothing published yet.

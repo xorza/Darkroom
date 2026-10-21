@@ -1,6 +1,5 @@
 pub(crate) mod app;
 pub(crate) mod dialogs;
-pub(crate) mod event_ref;
 pub(crate) mod frame;
 pub(crate) mod graph_ctx;
 pub(crate) mod main_window;

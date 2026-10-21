@@ -5,7 +5,7 @@ use scenarium::{InputPort, NodeId, OutputPort};
 use crate::gui::node_key::NodeKey;
 
 /// Whether a data port consumes a binding (`Input`) or produces a value
-/// (`Output`); an event has its own [`EventRef`](crate::gui::event_ref::EventRef).
+/// (`Output`); an event is addressed by the graph's own [`EventPort`](scenarium::EventPort).
 /// `Input` ports live in the left column, `Output` in the right; `opposite`
 /// flips between them for snap-target tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

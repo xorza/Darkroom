@@ -38,8 +38,9 @@ fn visibility_tracks_the_active_tab_not_the_graph_contents() {
 fn only_runnable_sinks_expose_the_disable_toggle() {
     use scenarium::FuncId;
 
-    // The two axes `can_disable` reads: sink or not, and resolvable or not.
-    // The third node names a func the library has never held.
+    // The two axes the toggle depends on: sink or not, and resolvable or not.
+    // `can_disable` reads only the first, since a node whose func the library
+    // has never held — the third here — declares no sink.
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
@@ -133,7 +134,7 @@ fn func_events_read_in_order_alongside_outputs() {
 
     let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
-    assert_eq!(n.event_refs().count(), 2, "one ref per declared event");
+    assert_eq!(n.event_ports().count(), 2, "one ref per declared event");
 
     let output_names: Vec<&str> = n.outputs().map(OutputCtx::name).collect();
     assert_eq!(
@@ -193,7 +194,7 @@ fn cache_mode_reads_verbatim_per_node() {
     for (id, mode) in ids {
         let node = graph_ctx.node(id).unwrap();
         assert_eq!(node.cache(), mode, "{mode:?} reads verbatim");
-        assert!(node.cache_controls());
+        assert!(node.cacheable());
     }
 }
 
@@ -216,19 +217,17 @@ fn impure_flag_reads_from_func_behavior() {
 
     assert!(!pure.impure(), "a Pure func keeps its cache chips");
     assert!(impure.impure(), "an Impure func hides its cache chips");
-    // Both have an output, so `impure` is the sole eviction differentiator.
+    // Both have an output, so `impure` is what tells them apart.
     assert!(
-        pure.can_evict_cache(),
-        "a Pure func with an output can be evicted"
+        pure.cacheable(),
+        "a Pure func with an output can be cached and evicted"
     );
     assert!(
-        !impure.can_evict_cache(),
-        "an Impure func cannot be evicted"
+        !impure.cacheable(),
+        "an Impure func has no digest to key a cache on"
     );
-    assert!(pure.cache_controls());
-    assert!(!impure.cache_controls());
     assert!(
-        !outputless.cache_controls() && !outputless.can_evict_cache(),
+        !outputless.cacheable(),
         "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());

@@ -147,10 +147,10 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
 fn a_node_key_names_the_node_its_glyph_hangs_off() {
     use scenarium::NodeId;
 
-    use crate::gui::event_ref::EventRef;
     use crate::gui::node_key::NodeKey;
     use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
     use crate::gui::port_ref::{PortKind, PortRef};
+    use scenarium::EventPort;
 
     let node = NodeId::unique();
     // A port and an emitter event belong to their node…
@@ -164,7 +164,7 @@ fn a_node_key_names_the_node_its_glyph_hangs_off() {
         node
     );
     assert_eq!(
-        EventRef {
+        EventPort {
             node_id: node,
             event_idx: 1,
         }
@@ -177,14 +177,14 @@ fn a_node_key_names_the_node_its_glyph_hangs_off() {
 
     // So a drag off any of them resolves the same owning node, whichever end
     // of an event wire the press started on.
-    let emitter = EventRef {
+    let emitter = EventPort {
         node_id: node,
         event_idx: 0,
     };
-    assert_eq!(GlyphDrag::<EventRef, NodeId>::new(emitter).node(), node);
-    assert_eq!(GlyphDrag::<NodeId, EventRef>::new(node).node(), node);
+    assert_eq!(GlyphDrag::<EventPort, NodeId>::new(emitter).node(), node);
+    assert_eq!(GlyphDrag::<NodeId, EventPort>::new(node).node(), node);
     // A fresh drag has no target yet — the snap scan fills it in each frame.
-    assert_eq!(GlyphDrag::<EventRef, NodeId>::new(emitter).snap, None);
+    assert_eq!(GlyphDrag::<EventPort, NodeId>::new(emitter).snap, None);
 }
 
 #[test]
