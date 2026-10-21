@@ -74,41 +74,9 @@ Scope: `scenarium/src`, production code only (tests and `internals/` ignored).
 
 ## Plan
 
-### 3. Split lambda state from the output cache
-
-Files:
-`src/execution/cache/runtime_slot.rs`,
-`src/execution/cache/runtime_cache/mod.rs`,
-`src/execution/cache/stamp_job/mod.rs`, `src/execution/executor/mod.rs`,
-`src/execution/engine/mod.rs`, `src/execution/engine/error.rs`.
-
-- [ ] `runtime_slot.rs` `RuntimeSlot` — holds `owner`, `state` and
-  `event_state` beside the cached value. Target: a `NodeRuntime { owner,
-  state, event_state }` column on `Executor`. `RuntimeSlot` keeps
-  `current_digest` and `value`. `reown` moves to `NodeRuntime`, and
-  `InvokeSlot` borrows `state` from the executor's column and `outputs` from
-  the slot.
-- [ ] `runtime_cache/mod.rs:294` `reconcile` — builds a `HashMap<NodeId,
-  RuntimeSlot>` on each install, although `previous.node_ids` and
-  `program.node_ids` are both sorted. Target: one merge walk over the two id
-  columns, used by `ExecutionEngine::install` to realign the cache slots and
-  the executor's `NodeRuntime` column. `engine/error.rs` `StateOwner` checks
-  the executor's column.
-- [ ] `runtime_cache/mod.rs:681` and `:850` — the two
-  `#[expect(clippy::needless_pass_by_ref_mut)]` exist only because
-  `AnyState` makes the slots non-`Sync`. Target: `probe_reuse` and
-  `flush_each` take `&self`, and both expects go.
-- [ ] `runtime_cache/mod.rs` fields `fs_paths`, `previous_fs_paths`,
-  `stamp_job` and the methods `prepare`, `identify`, `walk_queued`,
-  `hash_fs_paths` — a self-contained path-identity memo inside the cache.
-  Target: `PathIdentities` in `stamp_job/mod.rs`, owning the memo, the
-  previous run's keys and the job. The cache keeps `request_node_paths`,
-  which reads bound values off its slots, and asks `PathIdentities` to queue
-  and fold.
-
 ### 4. Move the sweep out of the schedule
 
-Needs batch 3 (the cache API it calls changes there). Files:
+Files:
 `src/execution/schedule/mod.rs`, new `src/execution/resolve.rs`,
 `src/execution/engine/mod.rs`, `src/execution/mod.rs`.
 

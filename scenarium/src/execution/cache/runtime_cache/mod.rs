@@ -1,5 +1,5 @@
-//! The cross-run runtime cache: the per-node RAM slots (output values + content digests + node
-//! state, index-aligned to the installed program) **plus** the [`DiskStore`] backing them, and the
+//! The cross-run runtime cache: the per-node RAM slots (output values + content digests,
+//! index-aligned to the installed program) **plus** the [`DiskStore`] backing them, and the
 //! caching policy over the two — reuse detection (the header-only
 //! [`probe_reuse`](RuntimeCache::probe_reuse)), frontier hydration (the decode, deferred to the
 //! node's turn in the run loop), persistence, and RAM eviction. Owned by the
@@ -14,12 +14,10 @@ pub(crate) mod error;
 
 use std::collections::HashSet;
 use std::iter;
-use std::mem;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
 use common::CancelToken;
-use hashbrown::HashMap;
 
 use crate::containers::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
@@ -27,11 +25,11 @@ use crate::execution::cache::disk_store::blob_target::BlobTarget;
 use crate::execution::cache::disk_store::error::StoreResult;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::disk_store::{DiskStore, StorePolicy};
+use crate::execution::cache::path_identities::PathIdentities;
 use crate::execution::cache::runtime_cache::cache_flush_report::CacheFlushReport;
 use crate::execution::cache::runtime_cache::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::execution::cache::runtime_slot::{OutputRead, RuntimeSlot};
 use crate::execution::cache::stamp_job::error::StampError;
-use crate::execution::cache::stamp_job::{FsPathId, StampJob};
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{NodeIdx, OutputAddr};
@@ -40,7 +38,6 @@ use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
 use crate::{DynamicValue, RamUsage};
-use tokio::task;
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a
 /// [`Column`] aligned to the installed program, so every run-loop access is
@@ -57,7 +54,7 @@ use tokio::task;
 /// than an invariant every method here would have to validate.
 ///
 /// The resolver stamps each node's digest and decides cache reuse, while the
-/// executor mutates outputs/state and consumes that decision. `disk_store`
+/// executor mutates outputs and consumes that decision. `disk_store`
 /// persists outputs and serves them back; it is kept across graph updates while
 /// only `slots` is reconciled or cleared.
 #[derive(Default, Debug)]
@@ -74,18 +71,9 @@ pub(crate) struct RuntimeCache {
     /// cache is told about rather than one done to it.
     disk_store: DiskStore,
     /// What each path this run reads *was*, identified once. Held beside the
-    /// slots rather than inside the walker that fills it, because the digest
-    /// fold reads both together — a path's identity, and the producer slot
-    /// that delivered the path.
-    fs_paths: HashMap<String, FsPathId>,
-    /// The previous run's memo, kept for its keys: a path read again moves its
-    /// string from here to the queue, so a run over the paths of the last
-    /// allocates none. What no run asked for again is dropped a run later, so
-    /// the two hold at most two runs' paths.
-    previous_fs_paths: HashMap<String, FsPathId>,
-    /// The off-thread walk that fills `fs_paths`: queue, then pass. It owns
-    /// only what crosses to the blocking pool.
-    stamp_job: StampJob,
+    /// slots, because the digest fold reads both together — a path's identity,
+    /// and the producer slot that delivered the path.
+    paths: PathIdentities,
     /// The buffers an eviction's downstream walk runs in. Held rather than
     /// built per call: what it derives is a pure function of the program and is
     /// refilled every time, but the allocations behind it need not be.
@@ -195,9 +183,7 @@ impl RuntimeCache {
 
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
-        self.fs_paths.clear();
-        self.previous_fs_paths.clear();
-        self.stamp_job.clear_queue();
+        self.paths.clear();
     }
 
     /// Drop `seeds` and everything downstream of them from RAM and disk.
@@ -279,11 +265,9 @@ impl RuntimeCache {
     }
 
     /// Realign the slots from the program they currently belong to onto a newly
-    /// installed one: re-pair them with the new index order by stable id —
-    /// dropping persistent state whose owning func changed — default new nodes,
-    /// trim removed ones, and apply the
-    /// installed program's RAM-retention policy immediately. The one place ids
-    /// are hashed for slot access; every per-run access is an index read.
+    /// installed one ([`CompiledGraph::realign`]): re-pair them with the new
+    /// index order by stable id, default new nodes, trim removed ones, and apply
+    /// the installed program's RAM-retention policy immediately.
     ///
     /// `previous` is the program the slots currently belong to — the empty one
     /// before anything was installed. It is named rather than remembered because the
@@ -292,25 +276,16 @@ impl RuntimeCache {
     /// holds both programs at the moment of the swap, so the pair this walks is
     /// established by the owner rather than validated afterwards.
     pub(crate) fn reconcile(&mut self, previous: &CompiledGraph, program: &CompiledGraph) {
-        let mut retained: HashMap<NodeId, RuntimeSlot> = previous
-            .node_ids
-            .iter()
-            .copied()
-            .zip(self.slots.drain())
-            .collect();
-        for (node_id, e_node) in program.node_ids.iter().zip(program.e_nodes.iter()) {
-            let owner = e_node.func_id;
-            let slot = match retained.remove(node_id) {
-                Some(mut slot) => {
-                    slot.reown(owner);
-                    // An unwritable verdict was the previous program's codecs'.
-                    slot.reconsider_unwritable_blob();
-                    slot
-                }
-                None => RuntimeSlot::new(owner),
-            };
-            self.slots.push(slot);
-        }
+        program.realign(
+            previous,
+            &mut self.slots,
+            |_, mut slot| {
+                // An unwritable verdict was the previous program's codecs'.
+                slot.reconsider_unwritable_blob();
+                slot
+            },
+            |_| RuntimeSlot::default(),
+        );
         self.release_dead_outputs(program);
     }
 
@@ -388,7 +363,7 @@ impl RuntimeCache {
     ///   its producers settled.
     ///
     /// A method on the cache because two of the three things it folds are the cache's: the slots
-    /// it reads producer digests and delivered values from, and the `fs_paths` memo behind every
+    /// it reads producer digests and delivered values from, and the path memo behind every
     /// external identity. The third — the node's own identity and inputs — is the program's, so
     /// that arrives as an argument. The *encoding* stays in `digest`, beside the [`DOMAIN`]
     /// versioning it.
@@ -432,7 +407,7 @@ impl RuntimeCache {
                     hasher.write_input_tag(InputTag::Const);
                     hasher.write_static(value);
                     if let Some(paths) = value.as_fs_paths() {
-                        self.hash_fs_paths(&mut hasher, paths)?;
+                        self.paths.hash(&mut hasher, paths)?;
                     }
                 }
                 Delivery::Bind(addr) => {
@@ -477,37 +452,13 @@ impl RuntimeCache {
         match delivered.as_fs_paths() {
             Some(paths) => {
                 hasher.write_input_tag(InputTag::BoundPaths);
-                self.hash_fs_paths(hasher, paths)?;
+                self.paths.hash(hasher, paths)?;
             }
             // A mis-typed wire — a resource input handed something that is
             // not a path — keys on its marker alone, and stays cacheable.
             None => {
                 hasher.write_input_tag(InputTag::BoundMistyped);
             }
-        }
-        Some(())
-    }
-
-    /// Fold the identities behind the paths a value names.
-    ///
-    /// `None` is the failure: a path this run never stamped, leaving its node
-    /// without a sound cache key. A value naming *no* paths does not call at
-    /// all — that is a plain const, not a filesystem read.
-    ///
-    /// An [unset](is_unset_path) slot is neither. It names nothing to stat, so
-    /// it folds a marker and leaves the node cacheable — "no file chosen yet"
-    /// is a state the author passes through, not a resource that failed. The
-    /// marker stands in the slot rather than being skipped: on the Bind side
-    /// the authored strings are not folded alongside, so skipping would let
-    /// `["", p]` and `[p, ""]` key alike.
-    fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
-        hasher.write_pod(paths.len() as u64);
-        for path in paths {
-            if is_unset_path(path) {
-                hasher.write_input_tag(InputTag::UnsetPath);
-                continue;
-            }
-            self.fs_paths.get(path)?.hash(hasher);
         }
         Some(())
     }
@@ -528,10 +479,7 @@ impl RuntimeCache {
         executing: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) {
-        // A fresh run identifies afresh, from the last run's keys.
-        mem::swap(&mut self.fs_paths, &mut self.previous_fs_paths);
-        self.fs_paths.clear();
-        self.stamp_job.clear_queue();
+        self.paths.begin_run();
         self.identify(program, executing, cancel).await.ok();
     }
 
@@ -547,7 +495,7 @@ impl RuntimeCache {
         for node_idx in nodes {
             self.request_node_paths(program, node_idx);
         }
-        self.walk_queued(cancel).await
+        self.paths.walk_queued(cancel).await
     }
 
     /// Queue the paths `node_idx` reads, on top of whatever is already queued,
@@ -574,48 +522,9 @@ impl RuntimeCache {
             };
             let Some(paths) = paths else { continue };
             for path in paths {
-                // An unset slot has nothing to walk, and queueing it would
-                // fail the whole pass on a `metadata("")` — costing every
-                // other node in the batch its pre-run identity.
-                if is_unset_path(path)
-                    || self.fs_paths.contains_key(path)
-                    || self.stamp_job.is_requested(path)
-                {
-                    continue;
-                }
-                let key = self
-                    .previous_fs_paths
-                    .remove_entry(path)
-                    .map_or_else(|| path.clone(), |(key, _)| key);
-                self.stamp_job.request(key);
+                self.paths.request(path);
             }
         }
-    }
-
-    /// Run the queued pass on the blocking pool, leaving the queue empty and
-    /// what it identified in the memo.
-    ///
-    /// The job goes out and comes back — it owns its queue and scratch, so
-    /// nothing of the cache is borrowed across the boundary and the memo never
-    /// moves at all. The memo takes what the pass stamped whatever its verdict,
-    /// and the pass walks past a path that will not read
-    /// ([`StampJob::run`]) — so one unreadable path costs its own node's
-    /// digest and none of the identities the same pass gathered for the rest of
-    /// the run.
-    async fn walk_queued(&mut self, cancel: CancelToken) -> Result<(), StampError> {
-        if !self.stamp_job.is_queued() {
-            return Ok(());
-        }
-        let mut job = mem::take(&mut self.stamp_job);
-        let (job, resolved) = task::spawn_blocking(move || {
-            let resolved = job.run(&cancel);
-            (job, resolved)
-        })
-        .await
-        .expect("resource stamping task panicked");
-        self.stamp_job = job;
-        self.fs_paths.extend(self.stamp_job.drain_stamped());
-        resolved
     }
 
     /// Identify one node's paths, stamp the digest they complete, and
@@ -664,12 +573,8 @@ impl RuntimeCache {
     /// under it — however the value came to be resident.
     /// Disk reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
     /// [`DiskStore::blob_target`]) and is answered from the blob header alone.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "the slots are not `Sync`, so a shared borrow across the await is not `Send`"
-    )]
     pub(crate) async fn probe_reuse(
-        &mut self,
+        &self,
         program: &CompiledGraph,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
@@ -829,11 +734,6 @@ impl RuntimeCache {
     /// [`StorePolicy::PreserveCovering`] because a flush carries no reuse
     /// verdict: nothing here ran, so a blob that already covers the snapshot
     /// must survive untouched.
-    ///
-    /// `&mut self` without mutating anything, for [`probe_reuse`](Self::probe_reuse)'s
-    /// reason: the slots hold `Send`-but-not-`Sync` node state, so a *shared*
-    /// cache borrow held across these awaits would make the whole worker future
-    /// non-`Send`.
     async fn flush_each(
         &mut self,
         program: &CompiledGraph,
@@ -875,9 +775,8 @@ impl RuntimeCache {
             };
             // A snapshot holding a different number of values cannot
             // describe this node's outputs, whatever its digest says: a func
-            // that grows an output keeps its id, so `reown` sees no owner
-            // change and the stale `produced_under` still equals the stale
-            // `current_digest`.
+            // that grows an output keeps its id, so the stale `produced_under`
+            // still equals the stale `current_digest`.
             let retained = resident_len == e_node.outputs.len as usize
                 && e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure
@@ -887,22 +786,6 @@ impl RuntimeCache {
             }
         }
     }
-}
-
-/// Whether a path string names nothing — the state a path port sits in before
-/// a file is chosen, whose placeholder is
-/// [`DataType::default_value`](crate::DataType::default_value)'s empty string.
-///
-/// Blank after trimming, not merely empty: whitespace is what a typed-in path
-/// collects, and no such string names a file anyone meant. The path itself is
-/// never trimmed — spaces are legal at either end of a filename, so rewriting
-/// one would read a file other than the authored one.
-///
-/// A free fn because the question is the string's alone, and because the queue
-/// side and the fold side must answer it identically: two copies of the rule
-/// would drift into a path that is walked but not folded, or the reverse.
-fn is_unset_path(path: &str) -> bool {
-    path.trim().is_empty()
 }
 
 #[cfg(test)]
@@ -915,7 +798,6 @@ pub(crate) mod internals {
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::runtime_cache::RuntimeCache;
     use crate::execution::cache::runtime_slot::OutputSnapshot;
-    use crate::execution::cache::stamp_job::FsPathId;
     use crate::execution::cache::stamp_job::error::StampError;
     use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::index::NodeIdx;
@@ -955,34 +837,25 @@ pub(crate) mod internals {
             for node_idx in nodes {
                 self.request_node_paths(program, node_idx);
             }
-            self.stamp_queued(&CancelToken::never())
-        }
-
-        pub(crate) fn stamp_queued(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
-            let resolved = self.stamp_job.run(cancel);
-            self.fs_paths.extend(self.stamp_job.drain_stamped());
-            resolved
+            self.paths.walk_queued_blocking(&CancelToken::never())
         }
 
         /// The key the run's memo holds `path` under, for a test about whose
         /// allocation it is.
         pub(crate) fn path_key(&self, path: &str) -> Option<&String> {
-            self.fs_paths.get_key_value(path).map(|(key, _)| key)
+            self.paths.key(path)
         }
 
         /// Re-key `path` with at least `capacity` bytes reserved — a key no
         /// copy of the path would have, so a test can tell it apart.
         pub(crate) fn widen_path_key(&mut self, path: &str, capacity: usize) {
-            let (mut key, identity) = self.fs_paths.remove_entry(path).unwrap();
-            key.reserve_exact(capacity);
-            self.fs_paths.insert(key, identity);
+            self.paths.widen_key(path, capacity);
         }
 
         /// Plant a file identity without touching a filesystem, so a
         /// digest folding a path can be pinned to a constant.
         pub(crate) fn stamp_file(&mut self, path: &str, len: u64, mtime_ns: i128) {
-            self.fs_paths
-                .insert(path.to_string(), FsPathId::file(len, mtime_ns));
+            self.paths.plant_file(path, len, mtime_ns);
         }
 
         /// Make `values` a hit for `node_idx`: resident under the digest this

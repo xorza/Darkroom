@@ -27,15 +27,17 @@ use crate::graph::identity::NodeId;
 
 /// The run-side pipeline container. Shares the installed program and its execution-attribution map,
 /// the reusable `schedule` buffer, the `planner` (scheduling scratch), the cross-run `cache`
-/// (per-node outputs + state, plus its owned [`DiskStore`] file persistence and the caching
-/// policy), and the `executor` (run loop + context). Compilation happens on the host
-/// ([`Compiler`](crate::execution::compile::Compiler)); the engine only ever receives ready
-/// [`CompiledGraph`]s. Not serializable — the persistent form is the [`CompiledGraph`] alone.
+/// (per-node outputs, plus its owned [`DiskStore`] file persistence and the caching
+/// policy), and the `executor` (run loop + context + each node's lambda state).
+/// Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler)); the
+/// engine only ever receives ready [`CompiledGraph`]s. Not serializable — the persistent form
+/// is the [`CompiledGraph`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed immutable artifact — the empty program until the first
     /// install. Replaced only by [`Self::install`] and [`Self::clear`], which
-    /// move `cache` with it, so the two never move independently.
+    /// move the cache slots and the executor's lambda state with it, so the
+    /// three never move independently.
     compiled: Arc<CompiledGraph>,
     /// The cross-run cache, its slots index-aligned to `compiled`'s dense node
     /// space. The cache holds no artifact handle of its own — a program reaches
@@ -45,6 +47,8 @@ pub(crate) struct ExecutionEngine {
     /// asserted afterwards by comparing two handles. [`Self::validate`] states
     /// the invariants of the pair.
     cache: RuntimeCache,
+    /// The run loop, and each node's lambda state, aligned to `compiled` the
+    /// same way the cache slots are.
     executor: Executor,
     planner: Planner,
     /// The one per-run state buffer: the schedule the planner builds and the
@@ -76,21 +80,24 @@ impl ExecutionEngine {
     pub(crate) fn clear(&mut self) {
         self.compiled = Arc::default();
         self.cache.clear();
+        self.executor.clear();
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program, replacing the
-    /// immutable artifact and reconciling the cache onto its dense node space as one
-    /// operation. Infallible: everything that can go wrong went wrong at compile
-    /// ([`Compiler`](crate::execution::compile::Compiler)), on the host's thread.
+    /// immutable artifact and reconciling the cache slots and the lambda state onto its
+    /// dense node space as one operation. Infallible: everything that can go wrong went
+    /// wrong at compile ([`Compiler`](crate::execution::compile::Compiler)), on the host's
+    /// thread.
     ///
-    /// Both programs are in hand here — the one the slots currently belong to and the
-    /// one they are moving onto — which is why `reconcile` is told the outgoing one
+    /// Both programs are in hand here — the one the columns currently belong to and the
+    /// one they are moving onto — which is why each `reconcile` is told the outgoing one
     /// rather than remembering it.
     ///
     /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
         self.cache.reconcile(&self.compiled, &compiled);
+        self.executor.reconcile(&self.compiled, &compiled);
         self.compiled = compiled;
         self.validate_debug();
     }
@@ -219,19 +226,26 @@ impl ExecutionEngine {
                 expected: program.e_nodes.len(),
             });
         }
+        if self.executor.nodes.len() != program.e_nodes.len() {
+            return Err(InstallValidationError::RuntimeCount {
+                runtimes: self.executor.nodes.len(),
+                expected: program.e_nodes.len(),
+            });
+        }
 
-        for ((node_id, e_node), slot) in program
+        for (((node_id, e_node), slot), node) in program
             .node_ids
             .iter()
             .zip(program.e_nodes.iter())
             .zip(self.cache.slots())
+            .zip(self.executor.nodes.iter())
         {
             if let Some(output_values) = slot.output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {
                 return Err(InstallValidationError::OutputArity { node_id: *node_id });
             }
-            if slot.owner != e_node.func_id {
+            if node.owner != e_node.func_id {
                 return Err(InstallValidationError::StateOwner { node_id: *node_id });
             }
         }

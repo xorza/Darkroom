@@ -134,11 +134,10 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 /// snapshot resident.
 ///
 /// The grown-input case above re-keys the digest, which is what retires the
-/// old value. Growing an output need not: the id is unchanged, so `reown`
-/// sees no owner change, and the stale `produced_under` still equals the
-/// stale `current_digest`, so the RAM-retention check keeps a snapshot that
-/// would be one value short of the port list. The install retires it, so the
-/// next run recomputes both outputs.
+/// old value. Growing an output need not: the id is unchanged, so the stale
+/// `produced_under` still equals the stale `current_digest`, so the RAM-retention
+/// check keeps a snapshot that would be one value short of the port list. The
+/// install retires it, so the next run recomputes both outputs.
 #[tokio::test]
 async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     use crate::async_lambda;

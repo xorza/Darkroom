@@ -7,7 +7,7 @@
 use super::*;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::lambda::internals;
-use crate::graph::identity::NodeId;
+use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals::program::ProgramBuilder;
 use crate::{ConstValue, async_lambda};
@@ -506,4 +506,59 @@ async fn reuse_survives_failed_upstream_rerun() {
         "C is skipped for the errored upstream"
     );
     assert!(run.error(b).is_none(), "B carries no error");
+}
+
+/// Lambda state follows its node by stable id across a recompile, and drops only
+/// when the node's implementation changes — a new function must not inherit the
+/// state its predecessor wrote.
+#[tokio::test]
+async fn reconcile_keeps_lambda_state_until_the_implementation_changes() {
+    // (node id, func id) per node.
+    let build = |nodes: &[(u128, u128)]| {
+        let mut prog = ProgramBuilder::default();
+        for &(node_id, func_id) in nodes {
+            prog.node()
+                .id(NodeId::from_u128(node_id))
+                .func(FuncId::from_u128(func_id))
+                .add();
+        }
+        prog.into_program()
+    };
+    let mut executor = Executor::default();
+    let first = build(&[(1, 10), (2, 20)]);
+    executor.reconcile(&CompiledGraph::default(), &first);
+    executor.nodes[NodeIdx(1)].state.set(17_u32);
+    executor.nodes[NodeIdx(1)]
+        .event_state
+        .lock()
+        .await
+        .set(23_u32);
+
+    // Node 1 dropped and node 3 added: node 2 slides from index 1 to 0.
+    let second = build(&[(2, 20), (3, 30)]);
+    executor.reconcile(&first, &second);
+    assert_eq!(executor.nodes[NodeIdx(0)].state.get::<u32>(), Some(&17));
+    assert_eq!(
+        executor.nodes[NodeIdx(0)]
+            .event_state
+            .lock()
+            .await
+            .get::<u32>(),
+        Some(&23)
+    );
+    assert!(executor.nodes[NodeIdx(1)].state.is_none());
+    assert_eq!(executor.nodes[NodeIdx(1)].owner, FuncId::from_u128(30));
+
+    // Node 2's func changes, so both of its states drop.
+    let third = build(&[(2, 21), (3, 30)]);
+    executor.reconcile(&second, &third);
+    assert!(executor.nodes[NodeIdx(0)].state.is_none());
+    assert!(
+        executor.nodes[NodeIdx(0)]
+            .event_state
+            .lock()
+            .await
+            .is_none()
+    );
+    assert_eq!(executor.nodes[NodeIdx(0)].owner, FuncId::from_u128(21));
 }

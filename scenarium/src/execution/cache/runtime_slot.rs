@@ -3,9 +3,6 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::StoreResult;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::graph::func::lambda::OutputDemand;
-use crate::graph::identity::FuncId;
-use crate::runtime::any_state::AnyState;
-use crate::runtime::shared_any_state::SharedAnyState;
 use std::mem;
 
 #[derive(Debug)]
@@ -84,18 +81,10 @@ enum BlobState {
     Unwritable,
 }
 
-/// One node's cross-run runtime state: the [`value`](RuntimeSlot::value) cache and
-/// the node's persistent `state`/`event_state`, owned by the implementation
-/// recorded in [`owner`](RuntimeSlot::owner).
+/// One node's cross-run output cache: the [`value`](RuntimeSlot::value) and the
+/// digest it is checked against.
 #[derive(Default, Debug)]
 pub(crate) struct RuntimeSlot {
-    /// The func whose implementation owns this slot's `state`/`event_state`.
-    /// Output values are digest-keyed (the digest folds the func id), but state
-    /// survives installs untouched — so [`RuntimeSlot::reown`] drops it when the
-    /// installed node's implementation no longer matches.
-    pub(crate) owner: FuncId,
-    pub(crate) state: AnyState,
-    pub(crate) event_state: SharedAnyState,
     /// The node's current content digest — its cache-validity key (`None` when not reproducible),
     /// stamped producer-first by the resolver and refreshed at execution reach only for a late
     /// bound-path identity
@@ -119,43 +108,11 @@ pub(crate) enum OutputRead {
     Take,
 }
 
-/// The two slot fields the run loop hands a lambda — its persistent `state` and the
-/// fresh output buffer — split-borrowed from one slot so both can be written at once.
-/// Produced by [`RuntimeSlot::invoke_slot`].
-#[derive(Debug)]
-pub(crate) struct InvokeSlot<'a> {
-    pub(crate) state: &'a mut AnyState,
-    pub(crate) outputs: &'a mut Vec<DynamicValue>,
-}
-
 impl RuntimeSlot {
-    /// The slot a node gains when an install first brings it in: no value, no
-    /// digest, owned by the implementation compiled for it.
-    pub(super) fn new(owner: FuncId) -> Self {
-        Self {
-            owner,
-            ..Default::default()
-        }
-    }
-
-    /// Re-stamp the slot for the installed node's implementation, dropping `state`
-    /// and `event_state` when a different one owned them — a changed function must
-    /// not inherit state written by its predecessor. The output value stays: its
-    /// validity is digest-keyed and the digest already folds the owner.
-    pub(super) fn reown(&mut self, owner: FuncId) {
-        if self.owner == owner {
-            return;
-        }
-        self.owner = owner;
-        self.state.clear();
-        self.event_state = SharedAnyState::default();
-    }
-
-    /// Drop the cached output, leaving the persistent `state`/`event_state` intact.
-    /// The run loop calls this on the failure paths — a node that errored or was
-    /// skipped for an errored dependency — so a stale prior value isn't left resident
-    /// as if it were this run's result. (Successful runs reuse the buffer in place;
-    /// see [`invoke_slot`](Self::invoke_slot).)
+    /// Drop the cached output. The run loop calls this on the failure paths — a node
+    /// that errored or was skipped for an errored dependency — so a stale prior value
+    /// isn't left resident as if it were this run's result. (Successful runs reuse
+    /// the buffer in place; see [`invoke_outputs`](Self::invoke_outputs).)
     pub(crate) fn clear_output(&mut self) {
         self.value = ValueState::Empty;
     }
@@ -163,7 +120,7 @@ impl RuntimeSlot {
     /// Take a whole snapshot decoded from this node's blob — the counterpart to
     /// [`clear_output`](Self::clear_output), and the only way a value arrives
     /// whole rather than port by port through
-    /// [`invoke_slot`](Self::invoke_slot).
+    /// [`invoke_outputs`](Self::invoke_outputs).
     ///
     /// Reading a blob is itself proof it is there, so residency and durability
     /// are established in one move rather than stamped separately by each
@@ -282,14 +239,12 @@ impl RuntimeSlot {
             .then_some(snapshot)
     }
 
-    /// Prepare the slot for a lambda invocation and hand back *disjoint* mutable
-    /// borrows of `state` and the output buffer — the lambda writes both at once,
-    /// which a single whole-slot borrow couldn't allow. A resident buffer is reused
-    /// **in place**, cleared to `Unbound`, and `resize`d to the current arity. Clearing
-    /// prevents a skipped output from retaining a value produced by an earlier run.
-    /// `produced_under` stays as-is until [`stamp_produced`](Self::stamp_produced)
-    /// updates it on success.
-    pub(crate) fn invoke_slot(&mut self, output_count: usize) -> InvokeSlot<'_> {
+    /// Prepare the slot for a lambda invocation and hand back the output buffer the
+    /// lambda writes. A resident buffer is reused **in place**, cleared to `Unbound`,
+    /// and `resize`d to the current arity. Clearing prevents a skipped output from
+    /// retaining a value produced by an earlier run. `produced_under` stays as-is
+    /// until [`stamp_produced`](Self::stamp_produced) updates it on success.
+    pub(crate) fn invoke_outputs(&mut self, output_count: usize) -> &mut [DynamicValue] {
         match &mut self.value {
             ValueState::Resident { snapshot, .. } => snapshot.reset(output_count),
             ValueState::Empty => {
@@ -303,10 +258,7 @@ impl RuntimeSlot {
         let ValueState::Resident { snapshot, .. } = &mut self.value else {
             unreachable!("set to Resident just above");
         };
-        InvokeSlot {
-            state: &mut self.state,
-            outputs: &mut snapshot.values,
-        }
+        &mut snapshot.values
     }
 
     pub(crate) fn unbound_demanded_outputs(&self, demand: &[OutputDemand]) -> Vec<usize> {
@@ -385,14 +337,13 @@ mod tests {
     use crate::execution::cache::disk_store::error::{StoreError, StoreResult};
     use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
     use crate::execution::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
-    use crate::graph::identity::FuncId;
 
     /// Each store outcome settles the debt its own way: a blob on disk pays
     /// it, a failed write leaves it for the next reuse, and a value no codec
     /// encodes is not retried until an install reconsiders it.
     #[test]
     fn a_store_outcome_settles_the_blob_debt() {
-        let mut slot = RuntimeSlot::new(FuncId::unique());
+        let mut slot = RuntimeSlot::default();
         slot.load_output(OutputSnapshot::new(Vec::new()), Some(Digest([1; 32])));
         assert!(slot.owes_blob(), "a value nothing wrote owes its blob");
 

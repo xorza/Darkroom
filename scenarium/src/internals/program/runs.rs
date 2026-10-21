@@ -45,11 +45,13 @@ impl<'a> Runs<'a> {
         let schedule = owner.running();
         let mut cache = RuntimeCache::default();
         cache.install_for_test(&owner.program);
+        let mut executor = Executor::default();
+        executor.reconcile(&CompiledGraph::default(), &owner.program);
         let mut runs = Self {
             owner,
             schedule,
             cache,
-            executor: Executor::default(),
+            executor,
             outcome: ExecutionOutcome::default(),
             resolve: false,
             cancel: CancelToken::never(),

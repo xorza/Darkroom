@@ -27,13 +27,16 @@ fn install_carries_slots_across_a_shifted_index_space() {
     let mut engine = ExecutionEngine::default();
     engine.install(program(&[NodeId::from_u128(1), surviving]));
     // Index 1 before the recompile: ids place in ascending order.
-    engine.cache[NodeIdx(1)].state.set(17_u32);
+    engine.executor.nodes[NodeIdx(1)].state.set(17_u32);
 
     // Node 1 is dropped, so the survivor slides to index 0.
     engine.install(program(&[surviving, NodeId::from_u128(3)]));
 
-    assert_eq!(engine.cache[NodeIdx(0)].state.get::<u32>(), Some(&17));
-    assert!(engine.cache[NodeIdx(1)].state.is_none());
+    assert_eq!(
+        engine.executor.nodes[NodeIdx(0)].state.get::<u32>(),
+        Some(&17)
+    );
+    assert!(engine.executor.nodes[NodeIdx(1)].state.is_none());
     engine.validate().unwrap();
 }
 

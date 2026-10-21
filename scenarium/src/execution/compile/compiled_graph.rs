@@ -15,6 +15,7 @@
 //! search of the id column it already carries rather than a lookup through a
 //! table beside it.
 
+use std::mem;
 use std::ops::Index;
 use std::sync::Arc;
 
@@ -184,6 +185,42 @@ impl CompiledGraph {
             .iter()
             .map(|node_idx| self.node_ids[node_idx])
             .collect()
+    }
+
+    /// Move `column`, aligned to `previous`, onto this program's dense node space,
+    /// pairing entries by stable id: an entry whose node both programs hold moves
+    /// to its new index through `carry`, one whose node this program dropped is
+    /// dropped, and a node this program adds gets `fresh`.
+    ///
+    /// A merge walk rather than a map: both id columns are sorted, so one pass
+    /// over each pairs every survivor.
+    pub(crate) fn realign<T>(
+        &self,
+        previous: &Self,
+        column: &mut Column<NodeIdx, T>,
+        mut carry: impl FnMut(NodeIdx, T) -> T,
+        mut fresh: impl FnMut(NodeIdx) -> T,
+    ) {
+        debug_assert_eq!(
+            column.len(),
+            previous.node_ids.len(),
+            "the column spans the program it is moving from"
+        );
+        let mut old = mem::replace(column, Column::with_capacity(self.node_ids.len()));
+        let mut old = previous
+            .node_ids
+            .iter()
+            .copied()
+            .zip(old.drain())
+            .peekable();
+        for (node_idx, &node_id) in self.node_ids.iter_indexed() {
+            while old.next_if(|(old_id, _)| *old_id < node_id).is_some() {}
+            let entry = match old.next_if(|(old_id, _)| *old_id == node_id) {
+                Some((_, value)) => carry(node_idx, value),
+                None => fresh(node_idx),
+            };
+            column.push(entry);
+        }
     }
 
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
