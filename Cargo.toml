@@ -2,7 +2,7 @@
 name = "imaginarium"
 version = "0.1.0"
 edition = "2024"
-exclude = ["AGENTS.md", "CLAUDE.md", "drive/"]
+exclude = ["AGENTS.md", "CLAUDE.md"]
 
 # Warn, not deny: the verification chain runs clippy with `-D warnings`.
 [lints.rust]
