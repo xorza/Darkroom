@@ -53,7 +53,7 @@ impl Planner {
         schedule.reset_for_program(program);
         self.reset_for_program(program);
 
-        // Collect the walk roots straight into `schedule.roots` — they seed the
+        // Collect the walk roots straight into the schedule — they seed the
         // backward walk below and the cache-aware reverse sweep.
         schedule.collect_roots(program, seeds)?;
 
@@ -71,9 +71,7 @@ impl Planner {
         program: &CompiledGraph,
         schedule: &mut RunSchedule,
     ) -> Result<()> {
-        for &node_idx in schedule.roots() {
-            self.stack.push(Visit::Discover(node_idx));
-        }
+        self.stack.extend(schedule.roots().map(Visit::Discover));
 
         while let Some(visit) = self.stack.pop() {
             let node_idx = match visit {

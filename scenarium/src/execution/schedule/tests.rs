@@ -296,7 +296,7 @@ mod planning {
             [a, b].map(|node| node.node_idx),
             "only B's cone, deps first"
         );
-        assert_eq!(p.roots(), [b.node_idx]);
+        assert_eq!(p.roots().collect::<Vec<_>>(), [b.node_idx]);
         assert_eq!(p.seeded_roots(), vec![b.node_idx]);
         assert!(p.states[a.node_idx].is_runnable());
         assert!(p.states[b.node_idx].is_runnable());
@@ -312,13 +312,27 @@ mod planning {
         planner
             .plan(prog.program(), &seeds, &mut p)
             .expect("no cycle");
-        assert_eq!(p.roots(), [b.node_idx], "a repeated seed is one root");
+        assert_eq!(
+            p.roots().collect::<Vec<_>>(),
+            [b.node_idx],
+            "a repeated seed is one root"
+        );
         assert_eq!(p.seeded_roots(), vec![b.node_idx]);
         assert_eq!(
             p.process_order,
             [a, b].map(|node| node.node_idx),
             "and schedules the same cone"
         );
+
+        // Seeds named against the program's order still list their roots
+        // ascending, with no sinks or event sources to sweep: the order the
+        // host named them in must not reach the schedule.
+        let seeds = RunSeeds::nodes(vec![b.node_id, a.node_id]);
+        planner
+            .plan(prog.program(), &seeds, &mut p)
+            .expect("no cycle");
+        assert_eq!(p.roots().collect::<Vec<_>>(), [a.node_idx, b.node_idx]);
+        assert_eq!(p.seeded_roots(), vec![a.node_idx, b.node_idx]);
 
         // Node seeds combine with sinks: the same seed plus `sinks` schedules
         // everything, and B stays seeded.
@@ -343,7 +357,11 @@ mod planning {
         planner
             .plan(prog.program(), &seeds, &mut p)
             .expect("no cycle");
-        assert_eq!(p.roots(), [c.node_idx], "reached twice, listed once");
+        assert_eq!(
+            p.roots().collect::<Vec<_>>(),
+            [c.node_idx],
+            "reached twice, listed once"
+        );
         assert_eq!(
             p.seeded_roots(),
             vec![c.node_idx],
@@ -373,7 +391,7 @@ mod planning {
         planner
             .plan(prog.program(), &RunSeeds::events(vec![event]), &mut plan)
             .unwrap();
-        assert_eq!(plan.roots(), [subscriber.node_idx]);
+        assert_eq!(plan.roots().collect::<Vec<_>>(), [subscriber.node_idx]);
         assert_eq!(plan.process_order, [subscriber].map(|node| node.node_idx));
         assert!(plan.event_source_roots().is_empty());
 
@@ -387,7 +405,7 @@ mod planning {
                 &mut plan,
             )
             .unwrap();
-        assert_eq!(plan.roots(), [emitter.node_idx]);
+        assert_eq!(plan.roots().collect::<Vec<_>>(), [emitter.node_idx]);
         assert_eq!(plan.event_source_roots(), vec![emitter.node_idx]);
         assert_eq!(plan.process_order, [emitter].map(|node| node.node_idx));
 
@@ -404,7 +422,7 @@ mod planning {
                 &mut plan,
             )
             .unwrap();
-        assert_eq!(plan.roots(), [emitter.node_idx]);
+        assert_eq!(plan.roots().collect::<Vec<_>>(), [emitter.node_idx]);
         assert_eq!(plan.seeded_roots(), vec![emitter.node_idx]);
         assert_eq!(plan.event_source_roots(), vec![emitter.node_idx]);
 

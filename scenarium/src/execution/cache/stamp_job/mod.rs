@@ -27,13 +27,10 @@ impl FsPathId {
     pub(super) fn hash(&self, hasher: &mut DigestHasher) {
         match self {
             Self::File(file) => {
-                hasher
-                    .write_bytes(&[0])
-                    .write_pod(file.len)
-                    .write_pod(file.mtime_ns);
+                hasher.write_bytes(&[0]).write_file_identity(file);
             }
             Self::Directory(digest) => {
-                hasher.write_bytes(&[1]).write_bytes(&digest.0);
+                hasher.write_bytes(&[1]).write_digest(digest);
             }
         }
     }
@@ -193,11 +190,10 @@ impl StampJob {
             // as the first one classified it.
             let path = root.join(rel);
             let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
-            hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
             let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
-            file.write_to(|bytes| {
-                hasher.write_bytes(bytes);
-            });
+            hasher
+                .write_len_prefixed(rel.as_os_str().as_encoded_bytes())
+                .write_file_identity(&file);
         }
         Ok(FsPathId::Directory(hasher.finish()))
     }

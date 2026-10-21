@@ -29,13 +29,13 @@
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
 //!   cached).
-//! - **`FsPath` identity is `(len, mtime)`** — a file's own, or that of every file
-//!   beneath a directory (empty directories are not part of it),
-//!   prepared by
+//! - **`FsPath` identity is the file's [`FileIdentity`]** — a file's own, or that of every
+//!   file beneath a directory (empty directories are not part of it), prepared by
 //!   [`RuntimeCache::prepare`](crate::execution::cache::runtime_cache::RuntimeCache::prepare),
 //!   so a folder-reading node can be `Pure` and still re-key when its contents change. A
-//!   same-size edit within mtime granularity can slip through; explicit runtime cache
-//!   eviction removes the affected node and downstream blobs.
+//!   same-size edit within one timestamp tick, on a system that states no change time or
+//!   file id, can slip through; explicit runtime cache eviction removes the affected node
+//!   and downstream blobs.
 //! - **A reference is dereferenced only through an input declared with its resource
 //!   type.** Const and Bind-delivered references both fold the referent's identity, but
 //!   only where the consumer's input is declared `FsPath` — a lambda that reads a file
@@ -45,12 +45,13 @@
 //!   disk blobs without discarding semantically unchanged RAM values or downstream digests.
 
 use blake3::Hasher;
+use common::FileIdentity;
 
 use crate::{ConstValue, DataType};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v5";
+pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v6";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same function identity, params, upstream outputs, and file inputs.
@@ -167,6 +168,15 @@ impl DigestHasher {
     /// Fold another digest (its fixed 32 bytes).
     pub(super) fn write_digest(&mut self, digest: &Digest) -> &mut Self {
         self.write_bytes(&digest.0)
+    }
+
+    /// Fold a file's identity, every field it states, in
+    /// [`FileIdentity::write_to`]'s fixed layout.
+    pub(super) fn write_file_identity(&mut self, file: &FileIdentity) -> &mut Self {
+        file.write_to(|bytes| {
+            self.write_bytes(bytes);
+        });
+        self
     }
 
     /// Finalize into a [`Digest`].
