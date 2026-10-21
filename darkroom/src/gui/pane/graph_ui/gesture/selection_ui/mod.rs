@@ -10,8 +10,8 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
 /// sweeps a rectangle; intersecting nodes highlight live as it moves and

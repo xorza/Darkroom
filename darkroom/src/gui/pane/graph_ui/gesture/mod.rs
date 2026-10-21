@@ -6,14 +6,14 @@
 //! editing the document — so the precedence among them lives in one match
 //! upstairs and never has to be kept disjoint by hand down here.
 //!
-//! [`group_drag`] and [`gesture_slot`] are the shared halves: the press-frame
-//! position snapshot behind every node drag, and the one-gesture-lifetime
-//! slot the rest are built out of.
+//! [`group_drag`] is the shared half: the press-frame position snapshot behind
+//! every node drag. The one-gesture-lifetime slot the rest are built out of is
+//! [`GestureSlot`](crate::gui::widgets::gesture_slot::GestureSlot), which the
+//! image viewer shares.
 
 pub(crate) mod breaker_ui;
 pub(crate) mod canvas_gesture;
 pub(crate) mod connection_ui;
-pub(crate) mod gesture_slot;
 pub(crate) mod group_drag;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu_ui;

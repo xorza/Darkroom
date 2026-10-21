@@ -11,11 +11,11 @@ use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture;
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::port_ref::{PortKind, PortRef};
+use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
 
 /// Owns the in-flight new-connection wire — a held drag or a free-floating

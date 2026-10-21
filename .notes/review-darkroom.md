@@ -6,12 +6,6 @@ Every root cause is fixed. The batches left are local: shared machinery in the w
 
 ## Plan
 
-### 8. Shared camera machinery out of the graph pane
-
-Files: `gui/pane/graph_ui/gesture/gesture_slot.rs`, `gui/pane/graph_ui/gesture/pan_zoom/mod.rs`, `gui/pane/image_viewer/{mod.rs, camera/mod.rs}`, `gui/widgets/mod.rs`.
-
-- [ ] `gui/pane/image_viewer/mod.rs:39-40`, `image_viewer/camera/mod.rs:14`: the viewer imports `GestureSlot`, `pan_zoom::scrolled` and `ZoomRange` from inside `graph_ui::gesture`. Target: `GestureSlot` and the pane-neutral zoom algebra (`ZoomRange`, `scrolled`, `scroll_to_zoom_factor`) in `gui/widgets/`. `Framing` and `CameraGesture` stay in `graph_ui`.
-
 ### 9. Gesture controller symmetry
 
 Files: `gui/pane/graph_ui/mod.rs`, `gui/pane/graph_ui/gesture/{subscription_ui.rs, new_node_ui/mod.rs, node_menu_ui/mod.rs}`.

@@ -1,7 +1,8 @@
-//! At most one canvas gesture at a time.
+//! At most one gesture at a time.
 //!
 //! [`GestureSlot`] is where that lives: an `Option` wearing the gesture
-//! vocabulary the controllers read in — latch, hold, take.
+//! vocabulary the canvas controllers and the image viewer read in — latch,
+//! hold, take.
 
 use glam::Vec2;
 
