@@ -34,7 +34,6 @@ use scenarium::{
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::ItemPlacement;
-use crate::core::document::port_ref::PortRef;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
@@ -190,12 +189,10 @@ impl GraphIntent {
         }
     }
 
-    /// [`Self::SetInput`] over a [`PortRef`] — the UI's port coordinate — so a
-    /// widget that has one does not restate the `PortRef` → [`InputPort`]
-    /// conversion at every call. `None` clears the binding.
-    pub(crate) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Self {
+    /// [`Self::SetInput`] taking a bare binding or `None`, which clears it.
+    pub(crate) fn set_input(input: InputPort, to: impl Into<Option<Binding>>) -> Self {
         Self::SetInput {
-            input: InputPort::new(port.node_id, port.port_idx),
+            input,
             to: to.into(),
         }
     }

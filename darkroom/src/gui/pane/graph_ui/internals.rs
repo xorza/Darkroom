@@ -14,7 +14,6 @@ use scenarium::NodeId;
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::port_ref::PortRef;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -24,6 +23,7 @@ use crate::gui::pane::graph_ui::GraphUI;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::port_ref::PortRef;
 use crate::gui::requests::Requests;
 use std::iter;
 

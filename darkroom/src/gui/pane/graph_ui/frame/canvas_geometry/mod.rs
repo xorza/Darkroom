@@ -5,14 +5,14 @@ use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::node_key::NodeKey;
-use crate::core::document::port_ref::{PortKind, PortRef};
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::node_key::NodeKey;
 use crate::gui::pane::graph_ui::node_ui::header;
 use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::port_ref::{PortKind, PortRef};
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every port-ish glyph plus the
 /// cross-frame node-size cache, all filled by one [`Self::rebuild`] pass polling

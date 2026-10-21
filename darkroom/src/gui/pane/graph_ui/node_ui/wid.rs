@@ -15,8 +15,8 @@
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
-use crate::core::document::port_ref::PortRef;
 use crate::gui::event_ref::EventRef;
+use crate::gui::port_ref::PortRef;
 
 use crate::gui::widgets::hover::Hover;
 

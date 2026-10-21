@@ -2,8 +2,8 @@
 
 use scenarium::{DataType, FuncOutput, OutputPort};
 
-use crate::core::document::port_ref::PortRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::port_ref::PortRef;
 
 /// One output port: what the func declares for it, and — for a wildcard —
 /// the type the graph resolves it to.

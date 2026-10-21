@@ -147,10 +147,10 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
 fn a_node_key_names_the_node_its_glyph_hangs_off() {
     use scenarium::NodeId;
 
-    use crate::core::document::node_key::NodeKey;
-    use crate::core::document::port_ref::{PortKind, PortRef};
     use crate::gui::event_ref::EventRef;
+    use crate::gui::node_key::NodeKey;
     use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
+    use crate::gui::port_ref::{PortKind, PortRef};
 
     let node = NodeId::unique();
     // A port and an emitter event belong to their node…

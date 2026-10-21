@@ -3,7 +3,7 @@
 use glam::Vec2;
 use scenarium::NodeId;
 
-use crate::core::document::node_key::NodeKey;
+use crate::gui::node_key::NodeKey;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer;
 
 /// One in-flight wire drag: the glyph the press latched (`from`, a key in

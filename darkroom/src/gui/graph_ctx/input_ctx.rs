@@ -2,8 +2,8 @@
 
 use scenarium::{Binding, ConstValue, DataType, FuncInput, InputPort, Library, ValueVariant};
 
-use crate::core::document::port_ref::PortRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::port_ref::PortRef;
 
 /// One input port: what the func declares for it, and what the graph has
 /// bound to it.
