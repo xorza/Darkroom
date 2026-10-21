@@ -348,7 +348,7 @@ impl OpenDocument {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::core::document::Document;
-    use crate::core::document::open_document::OpenDocument;
+    use crate::core::open_document::OpenDocument;
 
     impl OpenDocument {
         /// An unsaved document over `document`, with a fresh history — the

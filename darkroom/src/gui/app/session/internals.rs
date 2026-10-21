@@ -22,10 +22,10 @@ use palantir::internals::ui_harness::UiHarness;
 use scenarium::Library;
 
 use crate::core::document::internals::DocFixture;
-use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
+use crate::core::open_document::OpenDocument;
 use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};

@@ -11,6 +11,7 @@ mod background_runtime;
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod io;
+pub(crate) mod open_document;
 pub(crate) mod preview_sink;
 pub(crate) mod runtime_host;
 pub(crate) mod runtime_library;

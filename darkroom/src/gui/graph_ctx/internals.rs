@@ -10,7 +10,7 @@ use std::sync::Arc;
 use scenarium::{Library, NodeId, OutputTypes};
 
 use crate::core::document::internals::{self, DocFixture};
-use crate::core::document::open_document::OpenDocument;
+use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;

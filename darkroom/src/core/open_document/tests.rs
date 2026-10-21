@@ -8,7 +8,6 @@ use glam::Vec2;
 use crate::core::document::Document;
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::internals::DocFixture;
-use crate::core::document::open_document::{LaunchSource, OpenDocument};
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -16,6 +15,7 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::document;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::preferences::Preferences;
+use crate::core::open_document::{LaunchSource, OpenDocument};
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, ConstValue, DataType, FuncId, FuncInput, FuncOutput, FuncSignature, Graph, InputPort,
