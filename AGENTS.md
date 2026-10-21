@@ -112,3 +112,7 @@ a change to bench code runs it.
   UUID (`NodeId`, `FuncId`, `TypeId`, …), never hand-typed or invented, which
   can collide; `rg` it to confirm it is unique. A shipped id never changes:
   saved graphs bind to it.
+- **A document is parsed once, at load.** The load handles each inconsistency
+  with the library and reports it; the edit gate keeps the document
+  consistent after that. At run time and in each frame, code asserts the
+  document is valid and does not check it again or fall back.
