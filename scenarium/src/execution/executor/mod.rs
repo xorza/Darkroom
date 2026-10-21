@@ -1,9 +1,9 @@
 //! The run loop and its transient state. The `Executor` owns the shared
-//! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
-//! the [`RuntimeCache`]. Given a program, the [`RunSchedule`] planned and resolved
-//! against it, and that `RuntimeCache`, [`Executor::run`] invokes each scheduled node's
-//! lambda and gathers outcomes. Each node's per-run result is one [`NodeOutcome`] in the
-//! per-run outcome map.
+//! `ctx_manager`, the invoke scratch, and each node's cross-run lambda state; the
+//! per-node cross-run output cache lives in the [`RuntimeCache`]. Given a program, the
+//! [`RunSchedule`] planned and resolved against it, and that `RuntimeCache`,
+//! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes. Each
+//! node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
 //!
 //! **Pre-run resolution.** The loop reads a schedule
 //! [`resolve`](crate::execution::schedule::RunSchedule::resolve) has already swept, so
@@ -39,7 +39,6 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
 use crate::runtime::context_manager::ContextManager;
-use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime_cache::{Restamp, ReuseOutcome, RuntimeCache};
@@ -47,7 +46,10 @@ use crate::execution::cache::runtime_slot::OutputRead;
 use crate::execution::cache::stamp_job::error::StampError;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
+use crate::execution::executor::node_runtime::NodeRuntime;
 use crate::execution::schedule::{Delivery, NodeState, RunSchedule};
+
+mod node_runtime;
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -94,6 +96,9 @@ pub(crate) struct Executor {
     /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
     /// dense node vector. Reused across runs and rebuilt each run.
     outcomes: Column<NodeIdx, NodeOutcome>,
+    /// Each node's cross-run lambda state, aligned to the installed program's
+    /// dense node vector by [`reconcile`](Self::reconcile).
+    pub(super) nodes: Column<NodeIdx, NodeRuntime>,
 }
 
 /// Everything one run borrows from the engine. `'r` is the reporter's own lifetime — see
@@ -157,6 +162,26 @@ impl RemainingOutputReads {
 }
 
 impl Executor {
+    /// Move the nodes' lambda state from the program it belongs to onto a newly
+    /// installed one ([`CompiledGraph::realign`]), dropping the state of a node
+    /// whose implementation changed.
+    pub(crate) fn reconcile(&mut self, previous: &CompiledGraph, program: &CompiledGraph) {
+        program.realign(
+            previous,
+            &mut self.nodes,
+            |node_idx, mut node| {
+                node.reown(program[node_idx].func_id);
+                node
+            },
+            |node_idx| NodeRuntime::new(program[node_idx].func_id),
+        );
+    }
+
+    /// Drop every node's lambda state, for an engine left with no program.
+    pub(crate) fn clear(&mut self) {
+        self.nodes.clear();
+    }
+
     /// Walk `schedule.process_order` (producer-first), giving each node one turn. The loop
     /// itself owns only the two decisions that end it early or skip it wholesale — the
     /// per-node work is [`ExecutionFrame::run_node`].
@@ -191,6 +216,7 @@ impl Executor {
                 remaining_reads: &mut self.remaining_reads,
                 inputs: &mut self.inputs,
                 node_outcomes: &mut self.outcomes,
+                nodes: &mut self.nodes,
                 ctx: &mut self.ctx_manager,
                 reporter,
                 outcome,
@@ -338,6 +364,7 @@ struct ExecutionFrame<'a, 'r> {
     inputs: &'a mut Vec<DynamicValue>,
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
     node_outcomes: &'a mut Column<NodeIdx, NodeOutcome>,
+    nodes: &'a mut Column<NodeIdx, NodeRuntime>,
     ctx: &'a mut ContextManager,
     reporter: &'a mut (dyn RunReporter + 'r),
     outcome: &'a mut ExecutionOutcome,
@@ -500,7 +527,6 @@ impl ExecutionFrame<'_, '_> {
         // satisfies. A disk-reused producer was decoded at its own earlier turn.
         self.collect_inputs(node_idx);
 
-        let event_state = self.cache[node_idx].event_state.clone();
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
@@ -510,16 +536,16 @@ impl ExecutionFrame<'_, '_> {
             .progress(node_id, RunPhase::Started { at: invoke_start });
 
         let result = {
-            let slot = self.cache[node_idx].invoke_slot(e_node.outputs.len as usize);
+            let node = &mut self.nodes[node_idx];
             e_node
                 .lambda
                 .invoke(Invocation {
                     ctx: self.ctx,
-                    state: slot.state,
-                    event_state: &event_state,
+                    state: &mut node.state,
+                    event_state: &node.event_state,
                     inputs: self.inputs,
                     demand,
-                    outputs: slot.outputs,
+                    outputs: self.cache[node_idx].invoke_outputs(e_node.outputs.len as usize),
                 })
                 .await
                 .map_err(|e| match e {
@@ -578,7 +604,7 @@ impl ExecutionFrame<'_, '_> {
         }
 
         if self.schedule.root_flags(node_idx).is_event_source() {
-            self.collect_event_triggers(node_idx, &event_state);
+            self.collect_event_triggers(node_idx);
         }
         // Persist this node's cache the moment it finishes (durable as the run progresses),
         // not at the end of the whole run. The snapshot is taken synchronously inside
@@ -618,9 +644,10 @@ impl ExecutionFrame<'_, '_> {
 
     /// Hand the run's outcome the triggers a freshly initialized event source owns — only
     /// events that have a subscriber can fire.
-    fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
+    fn collect_event_triggers(&mut self, node_idx: NodeIdx) {
         let program = self.program;
         let node_id = program.node_ids[node_idx];
+        let event_state = &self.nodes[node_idx].event_state;
         self.outcome.event_triggers.extend(
             program.events[program[node_idx].events]
                 .iter()

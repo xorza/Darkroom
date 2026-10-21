@@ -9,8 +9,8 @@
 //! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
 //! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
-//! versioning them; the fold itself is a cache method, since all three things it reads
-//! (slots, the path memo, the program) are the cache's. External identities come from that
+//! versioning them; the fold itself is a cache method, since what it reads (slots, the path
+//! memo) is the cache's, beside the program it is handed. External identities come from that
 //! memo, filled once per run by a [`StampJob`](crate::execution::cache::stamp_job::StampJob),
 //! keeping this fold I/O-free.
 //! Equal digests ⇒ identical computation, so the digest is at once the cache key
@@ -24,7 +24,7 @@
 //!   different values for the same inputs reuses every digest it already produced. Give the
 //!   changed implementation a new id — that also drops the node's persistent
 //!   `state`/`event_state` at the next install
-//!   ([`RuntimeCache::reconcile`](crate::execution::cache::runtime_cache::RuntimeCache::reconcile)),
+//!   ([`Executor::reconcile`](crate::execution::executor::Executor::reconcile)),
 //!   so a new implementation never inherits its predecessor's state.
 //! - **`Pure` must be pure.** A `Pure` node that reads hidden state (context resources,
 //!   time, RNG) has a stable digest regardless — declare it `Impure` (no digest, never
@@ -190,7 +190,7 @@ impl DigestHasher {
     ///
     /// Filesystem-path values fold only their authored path string(s) here — the
     /// external files/dirs they point at are a separate concern, folded by the
-    /// caller through `RuntimeCache::hash_fs_paths`, so this stays a pure,
+    /// caller through `PathIdentities::hash`, so this stays a pure,
     /// no-I/O structural fold.
     pub(super) fn write_static(&mut self, value: &ConstValue) {
         match value {

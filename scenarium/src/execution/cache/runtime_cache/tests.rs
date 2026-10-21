@@ -101,9 +101,7 @@ fn reinstall(
 #[tokio::test]
 async fn eviction_clears_only_the_output_cache() {
     let digest = Digest([7u8; 32]);
-    let mut slot = resident_slot(Some(digest), Some(digest), out());
-    slot.state.set(17_u32);
-    slot.event_state.lock().await.set(23_u32);
+    let slot = resident_slot(Some(digest), Some(digest), out());
 
     let mut cache = RuntimeCache::default();
     let node_idx = NodeIdx(0);
@@ -114,9 +112,11 @@ async fn eviction_clears_only_the_output_cache() {
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
-    assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
-    let event_state = cache.slots[node_idx].event_state.lock().await;
-    assert_eq!(event_state.get::<u32>(), Some(&23));
+    assert_eq!(
+        cache.slots[node_idx].current_digest,
+        Some(digest),
+        "eviction drops the value, not the digest the node is keyed by"
+    );
 }
 
 /// `is_resident_hit` is the resident-cache definition: a slot hits iff it has a
@@ -276,12 +276,11 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     }
 }
 
-#[tokio::test]
-async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
-    let func_id = FuncId::from_u128(77);
+/// A recompile that changes a node's implementation keeps its resident value:
+/// the value's validity is digest-keyed, and the digest folds the func identity.
+#[test]
+fn reconcile_keeps_the_value_when_the_implementation_changes() {
     let node_id = NodeId::from_u128(1);
-    // Each install is its own program — the owner change under test is what a
-    // recompile does to the node, not an edit to the program already installed.
     let build = move |func_id| {
         let mut prog = ProgramBuilder::default();
         prog.node()
@@ -295,36 +294,13 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     };
 
     let mut cache = RuntimeCache::default();
-    let mut installed = build(func_id);
+    let installed = build(FuncId::from_u128(77));
     cache.install_for_test(&installed);
-    let digest = Digest([5u8; 32]);
     let node_idx = NodeIdx(0);
-    let slot = &mut cache.slots[node_idx];
-    slot.state.set(17_u32);
-    slot.event_state.lock().await.set(23_u32);
-    make_resident(slot, digest);
+    make_resident(&mut cache.slots[node_idx], Digest([5u8; 32]));
 
-    // Same func: everything survives.
-    installed = reinstall(&mut cache, &installed, build(func_id));
-    assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
-    assert_eq!(
-        cache.slots[node_idx].event_state.lock().await.get::<u32>(),
-        Some(&23),
-        "a same-owner reconcile must keep event state"
-    );
-
-    // Changed func id: state and event state drop; the resident value stays —
-    // its validity is digest-keyed and the digest folds the func identity.
     reinstall(&mut cache, &installed, build(FuncId::from_u128(78)));
-    assert!(
-        cache.slots[node_idx].state.is_none(),
-        "a func change must drop the predecessor's state"
-    );
-    assert!(cache.slots[node_idx].event_state.lock().await.is_none());
-    assert!(
-        cache.slots[node_idx].output_values().is_some(),
-        "reowning must not touch the digest-keyed value"
-    );
+    assert!(cache.slots[node_idx].output_values().is_some());
 }
 
 /// Slots follow their stable id when a recompile shifts the dense index space,
@@ -352,7 +328,6 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
         make_resident(slot, digest(u128::from(i) + 1));
-        slot.state.set(i);
     }
 
     // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
@@ -365,13 +340,11 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
         Some(digest(2)),
         "node 2's slot moved from index 1 to index 0"
     );
-    assert_eq!(cache.slots[NodeIdx(0)].state.get::<u32>(), Some(&1));
     assert_eq!(
         cache.slots[NodeIdx(1)].current_digest,
         Some(digest(3)),
         "node 3's slot moved from index 2 to index 1"
     );
-    assert_eq!(cache.slots[NodeIdx(1)].state.get::<u32>(), Some(&2));
     assert_eq!(
         cache.slots[NodeIdx(2)].current_digest,
         None,
@@ -411,7 +384,7 @@ fn resident_hit_derives_coverage_from_values() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     let mut slot = keyed_slot(Some(digest));
-    slot.invoke_slot(2).outputs[0] = ConstValue::Int(10).into();
+    slot.invoke_outputs(2)[0] = ConstValue::Int(10).into();
     slot.stamp_produced();
     let node_idx = NodeIdx(0);
     install(&mut cache, &ram_program(1), [slot]);

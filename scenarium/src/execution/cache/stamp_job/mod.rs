@@ -45,8 +45,8 @@ impl FsPathId {
 /// survives its walk but the 32-byte digest.
 ///
 /// The walk only; what a path *was* is remembered by the
-/// [`RuntimeCache`](crate::execution::cache::runtime_cache::RuntimeCache) this
-/// job belongs to, beside the slots and the digests that fold it.
+/// [`PathIdentities`](crate::execution::cache::path_identities::PathIdentities)
+/// this job belongs to.
 #[derive(Debug, Default)]
 pub(super) struct StampJob {
     /// Paths queued for this pass, deduplicated — a path fifty nodes read
