@@ -1,7 +1,7 @@
 use palantir::prelude::*;
 use palantir::{Anchor, ClickOutside, CloseHandle};
 
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
+use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the

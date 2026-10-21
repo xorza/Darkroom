@@ -11,9 +11,9 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
 use crate::gui::pane::graph_ui::gesture::pan_zoom;
 use crate::gui::pane::graph_ui::prepass_ctx::PrepassCtx;
+use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// The longest pause inside one run of wheel, touchpad or pinch input. The
 /// notches of one wheel spin arrive tens of milliseconds apart, and a

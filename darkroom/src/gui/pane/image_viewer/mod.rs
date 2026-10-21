@@ -37,8 +37,6 @@ use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
-use crate::gui::pane::graph_ui::gesture::gesture_slot::GestureSlot;
-use crate::gui::pane::graph_ui::gesture::pan_zoom;
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
 use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
@@ -48,9 +46,11 @@ use crate::gui::state::preview_store::{
 };
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::pill;
 use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
 use crate::gui::widgets::toggle::Toggle;
+use crate::gui::widgets::zoom_range;
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
@@ -412,7 +412,7 @@ impl ImageViewer {
             return;
         }
         let adjusting =
-            resp.left.drag.started() || resp.middle.drag.started() || pan_zoom::scrolled(&resp);
+            resp.left.drag.started() || resp.middle.drag.started() || zoom_range::scrolled(&resp);
         if self.view.is_none() && !adjusting {
             return;
         }
