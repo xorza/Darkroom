@@ -84,7 +84,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     }
 
     /// The field sits above the results, and the two plus the popup's own
-    /// chrome fit the cap with no slack the chrome doesn't account for —
+    /// inset fit the cap with no slack the inset doesn't account for —
     /// which catches an allowance that over-subtracts as well as one that
     /// under-subtracts.
     fn assert_fits(palette: Palette, menu: &palantir::ContextMenuTheme, label: &str) {
@@ -98,13 +98,13 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             "{label}: the results overlap the search field ({field:?} vs {results:?})",
         );
         // Spanned from the field's top to the results' bottom rather than
-        // rebuilt from the terms `chrome_above_results` adds up: a term missing
+        // rebuilt from the terms `space_above_results` adds up: a term missing
         // from both sides of a rebuilt sum cancels, and the test passes over
-        // exactly the gap the popup then paints its rows outside. The chrome
+        // exactly the gap the popup then paints its rows outside. The inset
         // around the span is the theme's padding plus the panel's border, which
         // palantir folds into the padding on every side.
-        let chrome = menu.padding.sums().h + 2.0 * menu.panel.border.width;
-        let used = chrome + (results.max().y - field.min.y);
+        let inset = menu.padding.sums().h + 2.0 * menu.panel.border.width;
+        let used = inset + (results.max().y - field.min.y);
         assert!(
             used <= cap + 0.5,
             "{label}: field {} and results {} overflow the {cap} cap (used {used})",
@@ -112,7 +112,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             results.size.h,
         );
         // With 60 rows the results always want more room than they get, so the
-        // area has to claim everything the chrome didn't — an allowance that
+        // area has to claim everything the inset didn't — an allowance that
         // over-subtracts would leave a visible dead band here.
         assert!(
             used >= cap - 1.0,

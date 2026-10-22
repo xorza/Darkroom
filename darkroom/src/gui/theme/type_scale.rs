@@ -2,7 +2,7 @@
 
 /// Font sizes by tier in the visual hierarchy — the typographic half of a
 /// [`Theme`](crate::gui::theme::Theme), beside the
-/// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) palette
+/// [`AppColors`](crate::gui::theme::app_colors::AppColors) palette
 /// half and the layout dimensions.
 ///
 /// Named by *prominence*, never by the surface that happens to use a tier, so
@@ -12,7 +12,7 @@
 /// decision.
 ///
 /// Palette-independent, so unlike
-/// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) there is
+/// [`AppColors`](crate::gui::theme::app_colors::AppColors) there is
 /// no `from_palette` here: a single [`Self::DEFAULT`] is the whole story.
 #[derive(Clone, Debug)]
 pub(crate) struct TypeScale {

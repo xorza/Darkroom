@@ -3,7 +3,7 @@ use super::*;
 use static_assertions::assert_not_impl_any;
 
 assert_not_impl_any!(Theme: Copy);
-assert_not_impl_any!(ChromeColors: Copy);
+assert_not_impl_any!(AppColors: Copy);
 assert_not_impl_any!(CanvasTheme: Copy);
 assert_not_impl_any!(CardTheme: Copy);
 assert_not_impl_any!(PortTheme: Copy);
@@ -46,7 +46,7 @@ fn default_wiring_and_menu_tweak() {
 /// common — the palette resolves both against one upstream semantic
 /// layer, and the two never share a surface. Two badges do, so this is
 /// the pair the roster cannot be allowed to collapse. Like
-/// [`chrome_surfaces_stack_darkest_first`], it is a rule a table of
+/// [`surfaces_stack_darkest_first`], it is a rule a table of
 /// colors cannot state about itself.
 #[test]
 fn badges_are_told_apart_from_each_other() {
@@ -67,18 +67,18 @@ fn badges_are_told_apart_from_each_other() {
     }
 }
 
-/// The six chrome surfaces stack in one view — a graph, the bar around
+/// The six surfaces stack in one view — a graph, the bar around
 /// it, an inactive tab, a node, a hovered control, a pressed one — so
 /// each must be lighter than the one under it. The palette's generator
 /// checks this before it writes the file; this is the half that would
 /// catch a hand-edited asset, and it is the one rule a table of colors
 /// cannot state about itself.
 #[test]
-fn chrome_surfaces_stack_darkest_first() {
+fn surfaces_stack_darkest_first() {
     let p = Palette::load();
     let ladder = [
         ("canvas_bg", p.canvas_bg),
-        ("chrome_fill", p.chrome_fill),
+        ("surround_fill", p.surround_fill),
         ("tab_inactive", p.tab_inactive),
         ("node_fill", p.node_fill),
         ("elem_hover", p.elem_hover),

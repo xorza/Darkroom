@@ -74,18 +74,18 @@ impl<V: Display> LabeledValue<'_, V> {
     }
 }
 
-/// A read-only "fact strip" footer's background: the chrome fill, rounded
+/// A read-only "fact strip" footer's chrome: the surround fill, rounded
 /// on only its bottom two corners so it seats under whatever rounds the
 /// top (a header bar, or the card's own top edge). Shared by a node body's
 /// memory footer and a preview node's image-info footer.
 pub(crate) fn footer_chrome(theme: &Theme, corner_radius: f32) -> Chrome {
     Chrome::rounded(
-        theme.colors.chrome_fill,
+        theme.colors.surround_fill,
         Corners::new(0.0, 0.0, corner_radius, corner_radius),
     )
 }
 
-/// A card's title-bar background: the header fill, rounded on only its top
+/// A card's title-bar chrome: the header fill, rounded on only its top
 /// two corners so it seats inside the card's own outer stroke — `corner_radius`
 /// should be [`CardTheme::inner_radius`](crate::gui::theme::card_theme::CardTheme::inner_radius),
 /// not the card's outer radius, else the band's corner leaves a wedge of the

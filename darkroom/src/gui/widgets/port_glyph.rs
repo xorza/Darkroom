@@ -16,7 +16,7 @@ use crate::gui::widgets::support;
 const HIT_SCALE: f32 = 1.8;
 
 /// Corner rounding of the triangle glyphs, matching the soft corners of the
-/// rest of the chrome.
+/// rest of the interface.
 const TRIANGLE_RADIUS: f32 = 2.0;
 
 /// Stroke width of the muted ring drawn around a circle with an

@@ -28,14 +28,14 @@ const PILL_RADIUS: f32 = BUTTON_RADIUS + PILL_PADDING;
 /// The frosted chrome backdrop shared by toolbar group pills.
 pub(crate) fn chrome(theme: &Theme) -> Chrome {
     Chrome::rounded(
-        theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA),
+        theme.colors.surround_fill.with_alpha(PILL_BG_ALPHA),
         Corners::all(PILL_RADIUS),
     )
 }
 
 /// One frosted group pill: `panel` (a caller-configured `Panel::hstack`
 /// / `vstack` carrying its id and any alignment) dressed in the shared
-/// pill chrome — hugging, chip gap, pill padding, frosted backdrop — for the
+/// pill layout — hugging, chip gap, pill padding, frosted backdrop — for the
 /// caller to show. The pill senses pointer gestures itself, so a drag or
 /// scroll starting between chips stays on the pill instead of falling
 /// through to the canvas or image beneath.
@@ -49,7 +49,7 @@ pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
 }
 
 /// Thin horizontal rule between concept groups sharing one column
-/// (vstack) pill, inset from the pill chrome on both ends. Grow an axis
+/// (vstack) pill, inset from the pill's chrome on both ends. Grow an axis
 /// parameter when a row pill first needs one.
 pub(crate) fn rule(ui: &mut Ui, theme: &Theme) {
     const INSET: f32 = 5.0;

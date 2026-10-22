@@ -31,7 +31,7 @@ pub(super) const CHECKER_SQUARE_PX: f32 = 8.0;
 
 /// Checkerboard grays (sRGB bytes) — shared by the backdrop tile and
 /// its control-panel swatch. Fixed regardless of theme: the checker is
-/// a neutral transparency reference, not chrome.
+/// a neutral transparency reference, not a surface.
 const CHECKER_LIGHT_U8: u8 = 77; // #4d4d4d
 const CHECKER_DARK_U8: u8 = 51; // #333333
 

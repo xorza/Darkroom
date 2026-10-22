@@ -144,3 +144,7 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   declare one name past its module, the narrower use takes a qualified one, as
   `DrawablePreview` beside `lumos::PreviewImage`; an error and its alias carry
   their domain, as `ExecError` and `ExecResult`.
+- **The surround is the editor's menu bar, tab strip and status bar**, as
+  `AppColors::surround_fill`; `chrome` is palantir's `Chrome` alone, a
+  widget's fill, border, radii and shadow. Refused: chrome for the surround,
+  and frame, which is one pass of the render loop.

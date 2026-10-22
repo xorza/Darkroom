@@ -3,14 +3,14 @@ use palantir::{Anchor, ClickOutside, CloseHandle};
 
 use crate::gui::widgets::gesture_slot::GestureSlot;
 
-/// Shared open/close lifecycle + chrome for the canvas's anchored context
+/// Shared open/close lifecycle + look for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the
 /// surface-space anchor and the dismiss bookkeeping; each caller stores its
 /// own per-open extras (target node, drop position, …) as plain fields set at
 /// open-time and read at pick-time.
 ///
 /// Carries what both controllers need: the Esc-to-close guard, the identical
-/// `Popup` chrome (the `ctx_menu` theme slot's panel, padding, and width
+/// `Popup` look (the `ctx_menu` theme slot's panel, padding, and width
 /// floor, hug sizing, click-outside dismiss), and the "a pick or an outside
 /// dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
@@ -49,7 +49,7 @@ impl AnchoredMenu {
     }
 
     /// Show the menu when open, recording `body` inside the shared popup
-    /// chrome shaped by `shape`. `body` records the items and returns the pick
+    /// look shaped by `shape`. `body` records the items and returns the pick
     /// (if any); returning `Some` — or an Esc / outside-click dismiss — closes
     /// the menu. The pick is handed back for the caller to act on.
     pub(crate) fn show<T>(

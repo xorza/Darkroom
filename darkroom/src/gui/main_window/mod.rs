@@ -32,7 +32,7 @@ fn app_root_wid() -> WidgetId {
 /// px.
 const MIN_PANE: f32 = 220.0;
 
-/// Top of darkroom's UI tree: the chrome (menu bar, status bar) around
+/// Top of darkroom's UI tree: the surround (menu bar, status bar) around
 /// the dock, plus the per-view state the dock's panes render into. The
 /// pane *machinery* — strips, splits, drag-docking — is
 /// [`DockView`]'s, and what each tab kind looks like is
@@ -124,12 +124,12 @@ impl MainWindow {
             requests: out,
         } = writes;
         // The frame's world without the document, for the surfaces below that
-        // read one and not the other: the chrome bands take the app context,
+        // read one and not the other: the surround bands take the app context,
         // the panes take the whole thing.
         let app = cx.app();
-        // The menu bar rides its own chrome band; the dock fills the
+        // The menu bar rides its own surround band; the dock fills the
         // space between it and the status bar.
-        let fill = app.theme().colors.chrome_fill;
+        let fill = app.theme().colors.surround_fill;
         let Self {
             graph_ui,
             image_viewers,
@@ -149,7 +149,7 @@ impl MainWindow {
             .input_scope(KeyFilter::ALL.difference(KeyFilter::TEXT))
             .show(ui, |ui| {
                 Panel::hstack()
-                    .id_salt("chrome_row")
+                    .id_salt("surround_row")
                     .size((Sizing::FILL, Sizing::HUG))
                     .child_align(Align::v(VAlign::Bottom))
                     .chrome(Chrome::fill(fill))
@@ -173,7 +173,7 @@ impl MainWindow {
                 for op in dock_ops.drain(..) {
                     out.push_view(op);
                 }
-                // Bottom chrome: the cache-memory readout, below the panes.
+                // Bottom surround band: the cache-memory readout, below the panes.
                 status_bar::show(ui, app);
             });
     }

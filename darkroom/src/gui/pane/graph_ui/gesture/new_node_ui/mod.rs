@@ -130,11 +130,11 @@ impl NewNodeUi {
         // the overflow (via the inner vertical `Scroll`) instead of
         // running off-screen. The popup's `max_size` height bounds the
         // whole popup; the search row sits above a `Scroll` whose own cap
-        // (`max_height` minus the chrome above it) keeps it from eating the
+        // (`max_height` minus the space above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
         let max_height = popup_cap(graph_ctx.theme().new_node_popup_max_height, surface.size.h);
-        let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
+        let scroll_cap = (max_height - space_above_results(ui)).max(MIN_RESULTS_HEIGHT);
         let search = &mut self.search;
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
@@ -190,7 +190,7 @@ const POPUP_MIN_HEIGHT: f32 = 120.0;
 /// Gap (px) below the search field, before the results scroll.
 const SEARCH_ROW_GAP: f32 = 8.0;
 
-/// Floor under the results area, so a window short enough that the chrome eats
+/// Floor under the results area, so a window short enough that the space above the results eats
 /// the whole cap still shows a scrollable strip of rows rather than nothing.
 const MIN_RESULTS_HEIGHT: f32 = 80.0;
 
@@ -201,14 +201,14 @@ pub(crate) fn search_field_wid() -> WidgetId {
     WidgetId::from_hash("new_node_search")
 }
 
-/// Stable id for the scrolling results area, the half [`chrome_above_results`]
+/// Stable id for the scrolling results area, the half [`space_above_results`]
 /// sizes. Explicit like the search field's so the two ends of that arithmetic
 /// are both addressable.
 pub(crate) fn results_wid() -> WidgetId {
     WidgetId::from_hash("new_node_results")
 }
 
-/// Vertical space the palette's chrome claims above the scrolling results: the
+/// Vertical space the palette claims above the scrolling results: the
 /// popup's own padding and border, plus everything the layout placed between
 /// the search field's top edge and the results' top edge.
 ///
@@ -222,7 +222,7 @@ pub(crate) fn results_wid() -> WidgetId {
 ///
 /// Every term is read rather than assumed — the two rows off their own
 /// last-frame rects, the padding and border off the theme slot the popup is
-/// built from — so restyling the field's text or the menu's chrome resizes the
+/// built from — so restyling the field's text or the menu's look resizes the
 /// results area with it instead of silently mis-sizing the scroll.
 ///
 /// Palantir folds a chrome's border into its padding on every side, unless the
@@ -232,11 +232,11 @@ pub(crate) fn results_wid() -> WidgetId {
 /// The span between the rows is measured rather than re-summed from the
 /// field's height, [`SEARCH_ROW_GAP`] and the stack's gutter. A sum has to be
 /// kept in step with what `body` records, and a term missing from it shrinks
-/// the chrome by that much, which lands as rows painted past the popup's
+/// the space by that much, which lands as rows painted past the popup's
 /// bottom edge. Measuring covers whatever the layout put between the rows,
 /// including a row added later. Only the first frame of the first open has no
 /// rects yet, and estimates the span from one line of body text.
-fn chrome_above_results(ui: &Ui) -> f32 {
+fn space_above_results(ui: &Ui) -> f32 {
     let menu = &ui.theme().context_menu;
     let field = ui.response_for(search_field_wid()).layout_rect;
     let results = ui.response_for(results_wid()).layout_rect;

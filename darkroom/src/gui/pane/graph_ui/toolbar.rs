@@ -1,6 +1,6 @@
 //! The floating toolbar pinned to the graph view's top-left corner: a
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
-//! chrome pill, with three view-framing buttons (reset view, show all, show
+//! pill, with three view-framing buttons (reset view, show all, show
 //! selected) stacked beneath on a second pill.
 //! The frosted pills keep the toolbar legible over both the canvas and any
 //! node under it; the buttons are opaque chips raised off the pill. All carry
@@ -59,7 +59,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         .gap(BUTTON_GAP)
         .show(ui, |ui| {
             // Top row: run/cancel + event-loop toggles, side by side on their
-            // own chrome pill. Both compile and run the whole document.
+            // own pill. Both compile and run the whole document.
             pill::dress(Panel::hstack().id_salt("graph_toolbar_run"), theme).show(ui, |ui| {
                 // Run / cancel: toggled while a one-shot run is in
                 // flight.
@@ -102,7 +102,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
             });
 
             // View-framing actions, stacked under the run row on their own
-            // chrome pill. Each emits a `SetViewport` intent (undoable), so they
+            // pill. Each emits a `SetViewport` intent (undoable), so they
             // ride the same path as a manual pan/zoom rather than mutating the
             // viewport out of band.
             let framing = Panel::vstack()

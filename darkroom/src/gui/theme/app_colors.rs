@@ -1,4 +1,4 @@
-//! [`ChromeColors`]: the colors belonging to no single widget — the
+//! [`AppColors`]: the colors belonging to no single widget — the
 //! surround, the shared inks, and the badge roster.
 
 use palantir::RgbaF32;
@@ -6,10 +6,10 @@ use palantir::widget::Animatable;
 
 use crate::gui::theme::palette::Palette;
 
-/// Chrome colors that belong to no single widget — the surround, the
+/// The colors that belong to no single widget — the surround, the
 /// shared inks, and the badge roster.
 #[derive(Clone, Debug)]
-pub(crate) struct ChromeColors {
+pub(crate) struct AppColors {
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
     /// node border, so "in the selection" reads as one color from sweep to
@@ -18,16 +18,16 @@ pub(crate) struct ChromeColors {
     pub(crate) wire_broken: RgbaF32,
     pub(crate) breaker_stroke: RgbaF32,
     /// Muted secondary foreground (palette `text_muted`). The
-    /// de-emphasized accent shared across chrome: inactive/disabled header
+    /// de-emphasized accent shared across the interface: inactive/disabled header
     /// chips and active-tab text — visible without competing with the bright
     /// accent (`badge_graph`) or full-strength text.
     pub(crate) text_muted: RgbaF32,
-    /// Top-chrome fill behind the menu bar + tab strip. A notch darker
+    /// Surround fill behind the menu bar + tab strip. A notch darker
     /// than the card surface, sitting between the graph (`canvas.bg`)
-    /// and the nodes, so the chrome recedes and the active tab (which
+    /// and the nodes, so the surround recedes and the active tab (which
     /// uses `canvas.bg`) reads as continuous with the graph below it.
-    pub(crate) chrome_fill: RgbaF32,
-    /// Inactive tab-strip chip. A notch above `chrome_fill` toward the card
+    pub(crate) surround_fill: RgbaF32,
+    /// Inactive tab-strip chip. A notch above `surround_fill` toward the card
     /// surface, so an unselected tab reads as a resting chip rather than a
     /// bare label; the active tab uses `canvas.bg` + a `selection_rect`
     /// accent top-line instead.
@@ -48,14 +48,14 @@ pub(crate) struct ChromeColors {
     pub(crate) badge_impure: RgbaF32,
 }
 
-impl ChromeColors {
+impl AppColors {
     pub(super) fn from_palette(p: &Palette) -> Self {
         Self {
             selection_rect: p.selection_rect,
             wire_broken: p.wire_broken,
             breaker_stroke: p.breaker_stroke,
             text_muted: p.text_muted,
-            chrome_fill: p.chrome_fill,
+            surround_fill: p.surround_fill,
             tab_inactive: p.tab_inactive,
             badge_graph: p.badge_graph,
             link: p.badge_graph,

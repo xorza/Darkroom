@@ -6,7 +6,7 @@
 //! - [`Scnr`] (post-stretch): Subtractive Chromatic Noise Reduction — clamp green that exceeds the
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 //!
-//! [`NeutralizeBg`]: neutralize_background::NeutralizeBackground
+//! [`NeutralizeBg`]: neutralize_bg::NeutralizeBg
 //! [`Scnr`]: scnr::Scnr
 
 pub(crate) mod neutralize_bg;

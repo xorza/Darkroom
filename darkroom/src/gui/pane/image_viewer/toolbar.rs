@@ -68,7 +68,7 @@ impl Controls<'_> {
 
 /// A frosted readout chip — the text sibling of the toolbar pills —
 /// dressing `panel` (caller-configured id + placement) in the shared
-/// chrome around one line of muted `text`. Used by the header readout and
+/// pill chrome around one line of muted `text`. Used by the header readout and
 /// the empty-pane hint.
 #[derive(Debug)]
 pub(super) struct Readout<'a> {

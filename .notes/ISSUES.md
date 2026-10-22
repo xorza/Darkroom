@@ -1,23 +1,11 @@
 # Open issues
 
-- **darkroom uses "chrome" in two senses.** `palantir::Chrome` is a node's
-  fill, border, corner radii and shadow, and darkroom passes it to every
-  panel. darkroom also names its frame surfaces chrome: `ChromeColors`,
-  `Palette::chrome_fill`, the `chrome_fill` key of
-  `darkroom/assets/ayu-graphite.ron`, and the "chrome bands" of
-  `gui/main_window/mod.rs`.
-- **Two lumos doc comments name items that no longer exist.**
-  `lumos/src/image_ops/color_calibration/mod.rs:9` links
-  `neutralize_background::NeutralizeBackground`, and
-  `lumos/src/internals/synthetic/mod.rs:17` uses `BackgroundField`.
-- **A merged worker batch can fail a run-to-node for a superseded request.**
-  `WorkerTask::next_intent` merges every pending message into one
-  `BatchIntent`, where the last `Update` wins but the `RunNodes` seeds of every
-  message accumulate. A run-to-node followed, before the worker wakes, by an
-  install of a graph without that node fails the run with `NodeSeedNotFound`
-  (`scenarium/src/exec/schedule/mod.rs:409`), and the editor reports it as
-  a run error.
-
+- **`darkroom/assets/ayu-graphite.ron` is not what its generator writes.**
+  `ayu-graphite/darkroom/build.py` emits a `connection_broken` key and an
+  `output_port` key and spells "colour" in the header; the asset has
+  `wire_broken`, no `output_port`, and "color", though its header says it is
+  generated and not edited by hand. `make install` there copies the generated
+  file over the asset (`ayu-graphite/install.sh:67`).
 - **The release build of the darkroom binary and bench does not link on
   macOS.** `ort-sys`'s CoreML objects (`host_utils.mm.o`, `model.mm.o`)
   reference `___isPlatformVersionAtLeast`, which the link does not resolve, so

@@ -8,7 +8,7 @@ use crate::gui::theme::type_scale::TypeScale;
 
 /// darkroom's roles as the [`palantir::Palette`] that
 /// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
-/// reads the same palette as darkroom-owned chrome. Two notes on the
+/// reads the same palette as darkroom's own widgets. Two notes on the
 /// mapping:
 /// - `window_bg` is the window clear and the selected tab chip —
 ///   the graph canvas, so a chip dissolves into the pane below it.
@@ -37,7 +37,7 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BridgeRoles<'a> {
     /// The band the menu bar, the status bar and every tab strip sit on.
-    pub(super) chrome_fill: RgbaF32,
+    pub(super) surround_fill: RgbaF32,
     /// Resting fill of an unselected tab chip.
     pub(super) tab_inactive: RgbaF32,
     /// The selection cap on a strip that does not hold focus, and the
@@ -52,7 +52,7 @@ pub(super) struct BridgeRoles<'a> {
 
 /// Palantir sub-theme for darkroom: assemble every widget recipe from
 /// the palette via [`palantir::Theme::from_palette`], then apply the
-/// darkroom-only tweaks (smaller context-menu font, chrome-colored dock
+/// darkroom-only tweaks (smaller context-menu font, surround-colored dock
 /// seam, darkroom's own tab chips).
 ///
 /// Takes the type scale rather than reaching for a private menu-font
@@ -60,15 +60,17 @@ pub(super) struct BridgeRoles<'a> {
 /// [`TypeScale::body`] like every other surface at that tier.
 pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
     let BridgeRoles {
-        chrome_fill, text, ..
+        surround_fill,
+        text,
+        ..
     } = r;
     let mut theme = palantir::Theme::from_palette(p);
 
-    // Dock splitter: the resting seam paints the chrome band that frames
+    // Dock splitter: the resting seam paints the surround band that frames
     // the panes, so the gap reads as part of that surround rather than a
     // dark line (hovered/active fill still marks the grab target); a wider
     // seam does the visual separation.
-    theme.splitter.rule = chrome_fill;
+    theme.splitter.rule = surround_fill;
     theme.splitter.rule_thickness = 4.0;
 
     tab_roles(&mut theme, p, r);
@@ -94,13 +96,13 @@ const CLOSE_LIFT_RADIUS: f32 = 3.0;
 ///
 /// Palantir derives its strip from the palette alone, which lands the
 /// band on `element` and the idle cap on `element_strong`. Darkroom wants the
-/// strip to continue the chrome band the menu bar rides, an unselected
+/// strip to continue the surround band the menu bar rides, an unselected
 /// chip on its own `tab_inactive` rung, and the card radius every other
 /// elevated surface uses — so those five roles are set here and the rest
 /// of the recipe is left alone.
 fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<'_>) {
     let tabs = &mut theme.tabs;
-    tabs.strip = Chrome::fill(r.chrome_fill);
+    tabs.strip = Chrome::fill(r.surround_fill);
     tabs.radius = r.corner_radius;
     tabs.accent_idle = r.header_fill;
     tabs.badge = r.warning;
@@ -117,7 +119,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     let lift = Chrome::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
     tabs.close.hovered.chrome = lift.clone();
     tabs.close.active.chrome = lift;
-    // Chips at the menu scale, like every other chrome label.
+    // Chips at the menu scale, like every other surround label.
     let scale = |look: &mut WidgetLook| {
         look.text = look.text.with_font_size(r.text.body);
     };
@@ -130,10 +132,10 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     scale(&mut theme.tabs.inactive.active);
     scale(&mut theme.tabs.inactive.disabled);
 
-    // The ghost chip trailing the pointer wears the chrome band, so it
+    // The ghost chip trailing the pointer wears the surround band, so it
     // reads as a tab lifted off its strip rather than as a popup.
     theme.dock.ghost.chrome =
-        Chrome::rounded(r.chrome_fill, Corners::all(4.0)).with_border(Stroke::new(p.accent, 1.0));
+        Chrome::rounded(r.surround_fill, Corners::all(4.0)).with_border(Stroke::new(p.accent, 1.0));
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
