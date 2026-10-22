@@ -30,7 +30,7 @@
 
     // Graph — the wires, and the marks drawn over them.
     selection_rect:      "#44b5ff",    // accent             blue_bright
-    wire_broken:   "#ff8b8c",    // error              red_bright
+    wire_broken:         "#ff8b8c",    // error              red_bright
     breaker_stroke:      "#ff8b8c",    // error              red_bright
 
     // Ports — an untyped port's circle, and the ink beside it. A typed port
