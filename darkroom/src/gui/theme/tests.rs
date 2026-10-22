@@ -123,8 +123,8 @@ fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
         (&base.looks.hovered, &error.looks.hovered),
         (&base.looks.active, &error.looks.active),
     ] {
-        assert_eq!(error.bg.border.color, theme.status.error);
-        assert_eq!(error.bg.border.width, base.bg.border.width);
-        assert_ne!(base.bg.border.color, theme.status.error);
+        assert_eq!(error.chrome.border.color, theme.status.error);
+        assert_eq!(error.chrome.border.width, base.chrome.border.width);
+        assert_ne!(base.chrome.border.color, theme.status.error);
     }
 }

@@ -201,7 +201,7 @@ impl InspectPanel<'_> {
             InspectMode::Pinned => theme.colors.badge_graph,
             InspectMode::Open => RgbaF32::TRANSPARENT,
         };
-        let chrome = Bg::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+        let chrome = Chrome::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
             .with_border(Stroke::new(border, theme.card.border_width))
             // Same elevation swatch as the node bodies, so every floating
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
@@ -213,7 +213,7 @@ impl InspectPanel<'_> {
             .sense(Sense::CLICK)
             .padding(Spacing::all(8.0))
             .gap(3.0)
-            .bg(chrome)
+            .chrome(chrome)
             .show(ui, |ui| {
                 let title = if node.name().is_empty() {
                     "(unnamed)"

@@ -127,8 +127,8 @@ impl<'a> NodeWidget<'a> {
             })
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
-            .bg(
-                Bg::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+            .chrome(
+                Chrome::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
                     .with_border(Stroke::new(border, border_width))
                     .with_shadow(shadow),
             )

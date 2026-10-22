@@ -79,7 +79,7 @@ impl AnchoredMenu {
         let mut pick = None;
         let mut popup = Popup::new(Anchor::at_point(anchor))
             .click_outside(ClickOutside::Dismiss)
-            .bg(chrome)
+            .chrome(chrome)
             .id_salt(id_salt)
             .size((Sizing::HUG, Sizing::HUG))
             .min_size((min_width, 0.0))

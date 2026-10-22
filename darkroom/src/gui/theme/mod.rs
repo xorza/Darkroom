@@ -236,7 +236,7 @@ fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
         &mut style.looks.hovered,
         &mut style.looks.active,
     ] {
-        look.bg.border = Stroke::new(color, look.bg.border.width);
+        look.chrome.border = Stroke::new(color, look.chrome.border.width);
     }
     style
 }

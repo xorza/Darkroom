@@ -246,7 +246,7 @@ impl ImageViewer {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .bg(Bg::fill(fill))
+            .chrome(Chrome::fill(fill))
             .show(ui, |ui| {
                 if prefs.bg == ViewerBg::Checker
                     && let Some(pane) = pane
