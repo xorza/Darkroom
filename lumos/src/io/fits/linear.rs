@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use common::file_utils;
+use common::fs;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::Image;
@@ -85,7 +85,7 @@ pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
     let encoded = LinearFitsHdu::encode(image, None)?;
     let flags = FlagsExtension::encode(image.flags(), None, 1)?;
     let gain = GainExtension::encode(image.flat_gain().map(Arc::as_ref), None)?;
-    file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer.write_image(&encoded.image, Some(&encoded.header))?;
         if let Some(flags) = &flags {

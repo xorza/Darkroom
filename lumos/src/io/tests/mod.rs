@@ -2,27 +2,27 @@
 mod real_data;
 mod synthetic;
 
+use common::{TempDir, fs};
+use fits_well::image::SampleType;
+use imaginarium::Buffer2;
+use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
+
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::image_metadata::ImageMetadata;
+use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::linear_image::LinearImage;
+use crate::image::preview_image::PreviewPixels;
+use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::writer;
-use crate::math::vec2us::Vec2us;
-use common::TempDir;
-use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
-
 use crate::io::error::{ImageError, ScientificRefusal, WriteError};
-use fits_well::image::SampleType;
-use imaginarium::Buffer2;
-
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
-use crate::image::preview_image::PreviewPixels;
-use crate::image::quality_flags::QualityFlags;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
+use crate::io::raster;
+use crate::io::writer;
+use crate::math::vec2us::Vec2us;
 
 #[test]
 fn metadata_default() {
@@ -184,13 +184,12 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
     let dir = TempDir::new("lumos-tiff-nulls");
     let path = dir.join("holes.tiff");
     let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
-    Image::new_with_data(
+    let image = Image::new_with_data(
         ImageDesc::new(2, 2, ColorFormat::L_F32),
         bytemuck::cast_slice(&samples).to_vec(),
     )
-    .unwrap()
-    .save_file(&path)
     .unwrap();
+    raster::write_image(&path, &image).unwrap();
 
     let masked = LoadCtx::default().linear(&path).unwrap();
     assert_eq!(masked.channel(0).pixels(), &[0.25, 0.5, 0.5, 0.75]);
@@ -226,7 +225,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         bytemuck::cast_slice(&float_pixels).to_vec(),
     )
     .unwrap();
-    float_image.save_file(&float_path).unwrap();
+    raster::write_image(&float_path, &float_image).unwrap();
 
     let scientific = LoadCtx::default().linear(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
@@ -265,7 +264,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
             },
         ),
     ] {
-        integer_image.save_file(path).unwrap();
+        raster::write_image(path, &integer_image).unwrap();
         for error in [
             LoadCtx::default().linear(path).unwrap_err(),
             LinearDecoder::load(path, &LoadCtx::default()).unwrap_err(),
@@ -280,13 +279,12 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let alpha_path = dir.join("alpha.tiff");
     let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
-    Image::new_with_data(
+    let alpha_image = Image::new_with_data(
         ImageDesc::new(2, 1, ColorFormat::RGBA_F32),
         bytemuck::cast_slice(&alpha_pixels).to_vec(),
     )
-    .unwrap()
-    .save_file(&alpha_path)
     .unwrap();
+    raster::write_image(&alpha_path, &alpha_image).unwrap();
     assert!(matches!(
         LoadCtx::default().linear(&alpha_path),
         Err(ImageError::ScientificInputRejected {
@@ -326,7 +324,7 @@ fn save_invalid_extension() {
 
     let result = writer::raster(&image, &output_path);
     assert!(matches!(result, Err(WriteError::Raster(_))), "{result:?}");
-    assert!(!output_path.exists());
+    assert!(!fs::exists(&output_path));
 }
 
 #[test]

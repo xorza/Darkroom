@@ -1,7 +1,4 @@
-use std::fs;
-use std::fs::File;
-
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
@@ -75,7 +72,7 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
 }
 
 fn write_named_multi_image(path: &Path) {
-    let mut writer = FitsWriter::new(File::create(path).unwrap());
+    let mut writer = FitsWriter::new(fs::create(path).unwrap());
     let mut primary = Header::new();
     primary.set("SIMPLE", true).unwrap();
     primary.set("BITPIX", 8).unwrap();
@@ -418,7 +415,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
     let image = Image::new([2, 2, 3], planar).unwrap();
-    FitsWriter::new(File::create(&path).unwrap())
+    FitsWriter::new(fs::create(&path).unwrap())
         .write_compressed_image(
             &image,
             Compression::GZIP,
@@ -552,7 +549,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     );
 
     let valid_path = dir.join("valid.fits");
-    FitsWriter::new(File::create(&valid_path).unwrap())
+    FitsWriter::new(fs::create(&valid_path).unwrap())
         .with_checksums()
         .write_image(&image, None)
         .unwrap();
@@ -627,7 +624,7 @@ fn a_zero_datamax_is_no_saturation_level() {
 fn a_header_only_image_extension_is_no_second_image() {
     let dir = TempDir::new("fits_header_only");
     let path = dir.join("one_image.fits");
-    let mut writer = FitsWriter::new(File::create(&path).unwrap());
+    let mut writer = FitsWriter::new(fs::create(&path).unwrap());
     let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
     writer.write_image(&image, None).unwrap();
     let mut empty = Header::new();

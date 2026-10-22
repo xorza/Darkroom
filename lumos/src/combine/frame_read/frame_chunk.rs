@@ -2,9 +2,9 @@
 
 use std::convert::Infallible;
 use std::ops::Range;
-use std::thread;
 
 use arrayvec::ArrayVec;
+use common::thread;
 
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
@@ -94,7 +94,9 @@ impl ChunkCopy {
                 .zip(self.frames.chunks_mut(per_reader))
             {
                 let range = range.clone();
-                scope.spawn(move || Self::fill_frames(frames, buffers, range));
+                scope.spawn("lumos-frame-reader", move || {
+                    Self::fill_frames(frames, buffers, range);
+                });
             }
         });
     }

@@ -7,7 +7,7 @@ use std::thread;
 use tokio::io::AsyncWriteExt as _;
 
 use crate::TempDir;
-use crate::file_utils::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
+use crate::fs::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
 use crate::internals;
 
 #[test]

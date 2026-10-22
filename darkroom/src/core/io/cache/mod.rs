@@ -4,10 +4,9 @@
 //! polluting a machine-global directory. An unsaved document has no path, so it
 //! stays memory-only until first save.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::file_utils;
+use common::fs;
 
 use crate::core::io::document::EXTENSION;
 
@@ -36,8 +35,8 @@ pub(crate) fn prepare(root: &Path) {
         return;
     }
     let gitignore = root.join(".gitignore");
-    if !gitignore.exists() {
-        file_utils::publish_bytes(&gitignore, b"*\n", file_utils::PublicationMode::Cache).ok();
+    if !fs::exists(&gitignore) {
+        fs::publish_bytes(&gitignore, b"*\n", fs::PublicationMode::Cache).ok();
     }
 }
 

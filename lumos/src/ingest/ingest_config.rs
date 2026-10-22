@@ -1,13 +1,13 @@
 //! [`IngestConfig`]: how a run reads its frames and where it parks them.
 
-use std::env;
 use std::path::PathBuf;
+
+use common::{UserCache, env};
 
 use crate::decode::decode_params::DecodeParams;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::null_policy::NullPolicy;
-use crate::platform::UserCache;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
 /// against, and the frame cache every combine reads its frames through.
@@ -45,7 +45,7 @@ pub struct IngestConfig {
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
-            cache_dir: UserCache::root(&|name| env::var_os(name)),
+            cache_dir: UserCache::root(&|name| env::var_os(name), "lumos"),
             keep_cache: false,
             memory_override: None,
             fits: FitsLoadConfig::default(),
@@ -83,7 +83,10 @@ mod tests {
     #[test]
     fn default_config_spills_under_the_user_cache_directory() {
         let config = IngestConfig::default();
-        assert_eq!(config.cache_dir, UserCache::root(&|name| env::var_os(name)));
+        assert_eq!(
+            config.cache_dir,
+            UserCache::root(&|name| env::var_os(name), "lumos")
+        );
         assert!(!config.keep_cache);
         assert_eq!(config.memory_override, None);
     }

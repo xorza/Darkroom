@@ -52,7 +52,6 @@ pub(crate) mod internals {
     }
 
     /// `None`: not read on this system.
-    #[cfg(test)]
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
     }
@@ -72,7 +71,7 @@ mod tests {
     fn the_cache_and_the_memory_follow_macos() {
         let home = |name: &str| (name == "HOME").then(|| OsString::from("/Users/u"));
         assert_eq!(
-            UserCache::root(&home),
+            UserCache::root(&home, "lumos"),
             PathBuf::from("/Users/u/Library/Caches/lumos")
         );
         let gib = 1 << 30;

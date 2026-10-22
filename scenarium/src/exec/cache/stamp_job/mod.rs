@@ -6,15 +6,14 @@
 
 pub(crate) mod error;
 
-use crate::exec::cache::stamp_job::error::StampError;
-use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 
-use common::{CancelToken, FileIdentity};
+use common::{CancelToken, FileIdentity, fs};
 use hashbrown::HashSet;
 
 use crate::exec::cache::digest::{Digest, DigestHasher};
+use crate::exec::cache::stamp_job::error::StampError;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum FsPathId {

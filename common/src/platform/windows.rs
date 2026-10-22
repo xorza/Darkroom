@@ -1,15 +1,24 @@
 //! Windows: a scratch file deleted when its last handle closes, the free space of a volume, the
-//! memory limits of the job object the process runs in, and the cache under `%LOCALAPPDATA%`.
+//! memory limits of the job object the process runs in, and the cache under `%LOCALAPPDATA%`;
+//! `MoveFileExW`, which replaces in one step and needs no directory sync, and the file's id and
+//! change time, which come from its handle, as `Metadata` does not expose them.
 
-use std::fs::{File, OpenOptions};
+use std::ffi::c_void;
+use std::fs::{File, Metadata, OpenOptions};
+use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
 use std::{env, io};
 
 use memmap2::Mmap;
 use sysinfo::System;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
-use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WIN32_ERROR};
+use windows::Win32::Storage::FileSystem::{
+    FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
+    FileBasicInfo, FileIdInfo, GetDiskFreeSpaceExW, GetFileInformationByHandleEx,
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+};
 use windows::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_BASIC_PROCESS_ID_LIST,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
@@ -21,7 +30,11 @@ use windows::Win32::System::ProcessStatus::{
 use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::core::HSTRING;
+use windows::core::{Error, HSTRING, PCWSTR};
+
+use crate::fs::PublicationMode;
+use crate::fs::file_identity::FileId;
+use crate::platform::{Observed, Stated};
 
 /// A new file at `path`, opened `FILE_FLAG_DELETE_ON_CLOSE` with every share mode, so the map can
 /// open the file beside the handle; the values are the Win32 headers'.
@@ -154,6 +167,92 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
     None
 }
 
+/// 100 ns ticks from 1601-01-01, the Windows file-time epoch, to the Unix epoch.
+const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+
+/// A file link: Windows tells a link to a file from one to a directory when it makes it.
+pub(super) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(original, link)
+}
+
+pub(super) fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
+    let wide = |path: &Path| {
+        path.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    let (source, destination) = (wide(source), wide(destination));
+    let mut flags = MOVEFILE_REPLACE_EXISTING;
+    if mode == PublicationMode::Durable {
+        flags |= MOVEFILE_WRITE_THROUGH;
+    }
+    unsafe { MoveFileExW(PCWSTR(source.as_ptr()), PCWSTR(destination.as_ptr()), flags) }
+        .map_err(io_error)
+}
+
+/// Nothing: `MOVEFILE_WRITE_THROUGH` already returns once the rename is on disk.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "one signature on every system: Unix syncs the directory, which can fail"
+)]
+pub(super) const fn sync_parent(_parent: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Nothing: the id and the change time are the handle's to state, not `Metadata`'s.
+pub(super) fn stated(_metadata: &Metadata) -> Stated {
+    Stated::default()
+}
+
+/// The file opened for its attributes alone, so a file another process holds open for writing
+/// still answers.
+pub(super) fn observe(path: &Path) -> io::Result<Observed> {
+    let file = OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    let file_id = query::<FILE_ID_INFO>(&file, FileIdInfo).map(|info| FileId {
+        volume: info.VolumeSerialNumber,
+        file: u128::from_le_bytes(info.FileId.Identifier),
+    });
+    let changed_ns = query::<FILE_BASIC_INFO>(&file, FileBasicInfo)
+        .map(|info| i128::from(info.ChangeTime - UNIX_EPOCH_TICKS) * 100);
+    Ok(Observed {
+        metadata,
+        stated: Stated {
+            file_id,
+            changed_ns,
+        },
+    })
+}
+
+/// The `class` of information about `file`, or `None` when its file system does not answer it.
+fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> Option<T> {
+    let mut info = T::default();
+    let answered = unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(file.as_raw_handle()),
+            class,
+            (&raw mut info).cast::<c_void>(),
+            u32::try_from(size_of::<T>()).expect("a file information struct's size fits u32"),
+        )
+    };
+    answered.is_ok().then_some(info)
+}
+
+/// `error` as the `io::Error` of its Win32 code, which `io::ErrorKind` reads: the crate's own
+/// conversion keeps the HRESULT, which it does not.
+fn io_error(error: Error) -> io::Error {
+    match WIN32_ERROR::from_error(&error) {
+        Some(code) => io::Error::from_raw_os_error(
+            i32::try_from(code.0).expect("a Win32 error code is 16 bits"),
+        ),
+        None => error.into(),
+    }
+}
+
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::fs::File;
@@ -169,12 +268,10 @@ pub(crate) mod internals {
     }
 
     /// `None`: not read on this system.
-    #[cfg(test)]
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
     }
 
     /// Yes: a scratch file is deleted only when its last handle closes.
-    #[cfg(test)]
     pub(crate) const SCRATCH_KEEPS_NAME: bool = true;
 }

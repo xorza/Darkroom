@@ -9,10 +9,9 @@
 //! [`load_to_disk`]: crate::combine::frame_cache
 //! [`load_in_memory`]: crate::combine::frame_cache
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::image::Image;
 

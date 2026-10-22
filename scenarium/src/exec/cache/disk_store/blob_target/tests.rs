@@ -1,8 +1,7 @@
-use std::fs;
 use std::path::Path;
 
 use common::internals::publication_temp_files;
-use common::{TempDir, TempFile};
+use common::{TempDir, TempFile, fs};
 
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
@@ -320,7 +319,7 @@ async fn a_missing_store_directory_is_created_on_the_write_that_needs_it() {
     let blob = target(&root.join("blob"), Digest([3; 32]));
 
     for _ in 0..2 {
-        assert!(!root.exists());
+        assert!(!fs::exists(&root));
         assert_eq!(
             blob.store(&codecs, &snapshot, StorePolicy::KnownMiss)
                 .await

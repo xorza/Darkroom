@@ -2,8 +2,10 @@
 //! implements.
 
 use std::ffi::OsString;
+use std::io;
 use std::path::PathBuf;
-use std::process::Command;
+
+use common::{env, process};
 
 use palantir::HostHandle;
 
@@ -11,17 +13,15 @@ use palantir::HostHandle;
 /// where the CLI already reads it.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
 
-pub(super) fn url_opener() -> Command {
-    let mut command = Command::new("cmd");
+pub(super) fn open_url(url: &str) -> io::Result<()> {
     // `start` treats its first quoted argument as the window title, so an
     // empty title has to go in before the URL.
-    command.args(["/C", "start", ""]);
-    command
+    process::spawn("cmd", ["/C", "start", "", url])
 }
 
 /// `%APPDATA%\Darkroom` — roaming, so settings follow a domain user.
 pub(super) fn config_dir() -> Option<PathBuf> {
-    resolve_config_dir(std::env::var_os("APPDATA"))
+    resolve_config_dir(env::var_os("APPDATA"))
 }
 
 /// Environment passed in, so resolution is testable without `set_var`.

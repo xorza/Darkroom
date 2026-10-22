@@ -8,8 +8,8 @@ Palantir.
 
 Workspace members, each after the crates it uses:
 
-- **`common`** — typed ids, serialization, introspection, cancellation, file
-  utilities. A leaf: in-tree it uses only its own `common-derive`.
+- **`common`** — typed ids, serialization, introspection, cancellation, I/O
+  and thread creation. A leaf: in-tree it uses only its own `common-derive`.
 - **`scenarium`** — the node-graph framework: the authoring model and the
   compile → plan → execute pipeline.
 - **`lumos`** — the astronomical image-processing pipeline.
@@ -106,6 +106,10 @@ a change to bench code runs it.
 
 ## Conventions
 
+- **I/O and thread creation go through `common`** (`fs`, `env`, `process`,
+  `thread`, `task`, `BgRuntime`); `clippy.toml` refuses the direct calls
+  elsewhere, tests included. Submodules get bytes or readers, never paths. A
+  task on a running pool or runtime is not a thread and stays as it is.
 - **No backward compatibility.** Change serialized shapes and APIs freely: no
   migrations, compat shims, legacy deserializers or legacy-format tests.
 - **New ids come from `uuidgen | tr 'A-Z' 'a-z'`** — every new `common::Id`

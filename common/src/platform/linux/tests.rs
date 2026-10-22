@@ -35,11 +35,14 @@ fn a_directory_on_tmpfs_or_ramfs_is_memory_backed() {
 #[test]
 fn the_cache_root_follows_xdg() {
     let root = |vars: &[(&str, &str)]| {
-        UserCache::root(&|name| {
-            vars.iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| OsString::from(value))
-        })
+        UserCache::root(
+            &|name| {
+                vars.iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| OsString::from(value))
+            },
+            "lumos",
+        )
     };
     assert_eq!(
         root(&[("XDG_CACHE_HOME", "/data/cache"), ("HOME", "/home/u")]),

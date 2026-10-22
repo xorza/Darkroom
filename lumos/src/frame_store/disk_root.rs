@@ -1,10 +1,10 @@
 //! [`DiskRoot`]: a directory the frame store writes into, held to disk.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
+use common::{FileSystem, fs};
+
 use crate::frame_store::error::FrameStoreError;
-use crate::platform::FileSystem;
 
 /// A directory the frame store writes into, created if it is missing, and on a file system that
 /// keeps its files on disk.

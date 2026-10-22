@@ -2,7 +2,7 @@ use std::fs;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::TempDir;
-use crate::file_utils::file_identity::{FileId, FileIdentity, epoch_offset_ns};
+use crate::fs::file_identity::{FileId, FileIdentity, epoch_offset_ns};
 
 /// Hand-computed against the epoch: signed, so the two sides of it are ordered rather than
 /// folded together, at full nanosecond resolution on both.

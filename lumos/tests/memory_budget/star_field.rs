@@ -1,10 +1,9 @@
 //! [`StarField`]: one field of stars, exposed at a dither and written as FITS.
 
 use std::f32::consts::{LN_2, TAU};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::Image as FitsImage;
@@ -84,7 +83,7 @@ impl StarField {
         if layout == Layout::Mosaic {
             header.set("BAYERPAT", "RGGB").unwrap();
         }
-        let mut writer = FitsWriter::new(File::create(path).unwrap());
+        let mut writer = FitsWriter::new(fs::create(path).unwrap());
         writer
             .write_image(
                 &FitsImage::new([self.side, self.side], self.render(idx)).unwrap(),

@@ -1,4 +1,4 @@
-use std::fs;
+use common::fs;
 
 use super::*;
 
@@ -292,11 +292,11 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     e.flush(["mult", "sum"]).await;
     assert_eq!(dir.entry_count(), 1, "exactly one blob was published");
     assert!(
-        e.blob_path("mult").exists(),
+        fs::exists(e.blob_path("mult")),
         "the node whose disk bit was turned on is the one written"
     );
     assert!(
-        !e.blob_path("sum").exists(),
+        !fs::exists(e.blob_path("sum")),
         "a named node the program still calls memory-only is skipped"
     );
 
@@ -435,7 +435,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     );
     let run = e.run_sinks().await;
     assert_eq!(run.cached(), ["make_blob"], "served from RAM");
-    assert!(!e.blob_path("make_blob").exists());
+    assert!(!fs::exists(e.blob_path("make_blob")));
 
     // An install that brings the codec back owes the resident value its blob,
     // and the next reuse writes it without recomputing. The rebuilt fixture
@@ -447,5 +447,5 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     let run = e.run_sinks().await;
     assert_eq!(run.cached(), ["make_blob"], "served from RAM");
     assert_eq!(recompute.count(), 3);
-    assert!(e.blob_path("make_blob").exists(), "the debt was paid");
+    assert!(fs::exists(e.blob_path("make_blob")), "the debt was paid");
 }

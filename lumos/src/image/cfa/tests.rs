@@ -1,9 +1,8 @@
 use std::f64::consts::FRAC_1_SQRT_2;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::io::{ChecksumReport, ChecksumStatus};

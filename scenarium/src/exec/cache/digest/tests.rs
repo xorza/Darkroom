@@ -1,5 +1,6 @@
 use super::*;
-use common::TempFile;
+
+use common::{TempFile, fs};
 
 use crate::data::data_type::DataType;
 use crate::exec::cache::runtime_cache::RuntimeCache;
@@ -10,7 +11,6 @@ use crate::exec::schedule::{NodeState, RunSchedule};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
-use std::fs;
 
 /// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
 ///

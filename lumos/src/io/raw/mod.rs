@@ -8,10 +8,10 @@ mod sensor_layout;
 mod unpacked_raw;
 
 use std::ffi;
-use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use common::fs;
 use libraw_sys as sys;
 
 use crate::image::cfa::cfa_image::CfaImage;
@@ -104,7 +104,7 @@ fn open(path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
         path: path.to_path_buf(),
         source,
     };
-    let file = File::open(path).map_err(io_error)?;
+    let file = fs::open(path).map_err(io_error)?;
     let len = file.metadata().map_err(io_error)?.len();
     OverBudget::check(len, ctx.memory_limit_bytes)
         .map_err(|budget| ImageError::raw(path, budget.into()))?;

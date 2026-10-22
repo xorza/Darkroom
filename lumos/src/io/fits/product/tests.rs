@@ -1,6 +1,4 @@
-use std::fs;
-
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Scaling};

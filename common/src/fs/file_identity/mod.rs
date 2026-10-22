@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::file_utils::platform;
-use crate::file_utils::platform::Stated;
+use crate::platform;
+use crate::platform::Stated;
 
 /// A file's length and modification time, and where the system states them its id and its change
 /// time: the identity every cache that is keyed on a source file compares, instead of the file's

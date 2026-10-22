@@ -1,3 +1,5 @@
+use common::thread;
+
 use crate::CfaType;
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
@@ -166,10 +168,7 @@ fn preparation_does_not_depend_on_the_thread_count() {
         standard_xtrans(),
     ] {
         let run = |threads: usize| {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(threads)
-                .build()
-                .unwrap();
+            let pool = thread::pool("lumos-test", threads);
             let flat = make_cfa(size, pixels.clone(), cfa_type);
             bits(
                 pool.install(|| prepare(flat, None))

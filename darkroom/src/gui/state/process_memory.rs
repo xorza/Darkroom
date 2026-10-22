@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use common::ResidentMemory;
 
 /// How long a reading is reused before the next refresh. The bar renders
 /// every frame; re-entering the kernel at frame rate for a number that moves
@@ -17,16 +17,10 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 /// so the on-screen figure simply holds until something else wakes a frame.
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Retained sampler for this process's resident set.
-///
-/// `System` is kept rather than rebuilt per reading: sysinfo carries
-/// per-process bookkeeping across refreshes (on Linux it holds the `stat`
-/// file open), so a fresh one each time would redo that setup for a single
-/// number.
+/// Retained, throttled sampler for this process's resident set.
 #[derive(Debug)]
 pub(crate) struct ProcessMemory {
-    system: System,
-    pid: Pid,
+    resident: ResidentMemory,
     /// The latest reading, in bytes — `0` before the first
     /// [`Self::sample`], which is also what that call hands back inside
     /// the throttle window.
@@ -38,12 +32,8 @@ pub(crate) struct ProcessMemory {
 
 impl ProcessMemory {
     pub(crate) fn new() -> Self {
-        // Failure here means sysinfo has no implementation for the target at
-        // all — a build-configuration error, not a runtime condition.
-        let pid = sysinfo::get_current_pid().expect("sysinfo cannot resolve this platform's pid");
         Self {
-            system: System::new(),
-            pid,
+            resident: ResidentMemory::new(),
             bytes: 0,
             last_sample: None,
         }
@@ -56,16 +46,7 @@ impl ProcessMemory {
     /// render the same figure.
     pub(crate) fn sample(&mut self, now: Instant) -> u64 {
         if self.due(now) {
-            self.system.refresh_processes_specifics(
-                ProcessesToUpdate::Some(&[self.pid]),
-                // We are the process being refreshed — there is no corpse to reap.
-                false,
-                ProcessRefreshKind::nothing().with_memory(),
-            );
-            self.bytes = self
-                .system
-                .process(self.pid)
-                .map_or(0, sysinfo::Process::memory);
+            self.bytes = self.resident.read();
         }
         self.bytes
     }

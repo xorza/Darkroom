@@ -1,5 +1,5 @@
 use super::*;
-use std::fs;
+use common::fs;
 
 /// A disk-persisted node's output survives a fresh engine (reopen), its
 /// sole-consumer upstream is pruned on the hit, and an input change
@@ -161,7 +161,7 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     assert!(run.errored().is_empty(), "the recomputed run succeeds");
     assert_eq!(calls.count(), 2);
     assert!(
-        blob.exists(),
+        fs::exists(&blob),
         "the refused blob is replaced by the same run"
     );
 
@@ -246,7 +246,7 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     fs::create_dir_all(&blob).unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the cold run computes");
-    assert!(blob.is_dir(), "the blocked path is still what it was");
+    assert!(fs::is_dir(&blob), "the blocked path is still what it was");
 
     // Clear the blockage. The value is still resident, so the node does not
     // recompute — but the blob it owes is now written.
@@ -263,7 +263,7 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
         "settling the debt must not re-run the node"
     );
     assert!(
-        blob.is_file(),
+        fs::is_file(&blob),
         "the owed blob was published on the next run"
     );
     let published = fs::read(&blob).unwrap();

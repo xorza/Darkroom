@@ -11,7 +11,7 @@ pub(crate) mod error;
 use std::fs::File;
 use std::path::Path;
 
-use common::file_utils;
+use common::fs;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
@@ -57,7 +57,7 @@ struct BundleIdxs {
 /// The defect map is encoded first, so a map the format cannot state writes no file.
 pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), BundleError> {
     let defects = masters.defect_map().map(encode_defect_map).transpose()?;
-    file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer.write_raw_hdu(&bundle_primary_header()?, &[])?;
 
@@ -95,7 +95,7 @@ pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, Bun
     // Streamed, not mapped: a bundle is the user's file, and one rewritten in place while it is
     // read must fail the load, not fault the process.
     let mut bundle = BundleReader {
-        reader: FitsReader::open(File::open(path)?)?,
+        reader: FitsReader::open(fs::open(path)?)?,
         path,
         ctx,
     };

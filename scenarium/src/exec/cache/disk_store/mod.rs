@@ -8,7 +8,7 @@ pub(crate) mod store_outcome;
 use std::io;
 use std::path::PathBuf;
 
-use tokio::fs;
+use common::fs;
 
 use crate::exec::cache::digest::Digest;
 use crate::exec::cache::disk_store::blob_target::BlobTarget;
@@ -54,7 +54,7 @@ impl DiskStore {
         let Some(path) = self.node_path(node_id) else {
             return Ok(());
         };
-        match fs::remove_file(&path).await {
+        match fs::remove_file_async(&path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(source) => Err(RemovalError { path, source }),
@@ -64,8 +64,9 @@ impl DiskStore {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::fs;
     use std::path::PathBuf;
+
+    use common::fs;
 
     use crate::exec::cache::disk_store::{DiskStore, format};
     use crate::graph::identity::NodeId;

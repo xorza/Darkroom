@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, fs};
 use fits_well::image::Image as FitsImage;
 use glam::DVec2;
 
@@ -1192,7 +1192,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     for ingest in [&ram_ingest, &streaming_ingest] {
         let root = &ingest.cache_dir;
         assert!(
-            !root.exists() || std::fs::read_dir(root).unwrap().next().is_none(),
+            !fs::exists(root) || fs::read_dir(root).unwrap().next().is_none(),
             "{} kept a file",
             root.display()
         );

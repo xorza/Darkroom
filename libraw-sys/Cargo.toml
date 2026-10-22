@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 # zlib for LibRaw's `USE_ZLIB`: deflate-compressed DNG. Built from its own sources, so every
 # platform decodes the same files and the build needs no system zlib.
-libz-sys = { workspace = true }
+libz-sys = { workspace = true, features = ["static"] }
 
 [build-dependencies]
 cc = { workspace = true }

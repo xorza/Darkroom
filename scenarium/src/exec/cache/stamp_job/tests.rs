@@ -1,6 +1,9 @@
+use std::io;
+use std::slice;
+
 #[cfg(unix)]
 use common::Unreadable;
-use common::{CancelToken, FileId, FileIdentity, TempDir};
+use common::{CancelToken, FileId, FileIdentity, TempDir, fs};
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
@@ -10,9 +13,6 @@ use crate::exec::cache::stamp_job::error::StampError;
 use crate::exec::cache::stamp_job::{FsPathId, StampJob};
 use crate::graph::identity::FuncId;
 use crate::internals::program::ProgramBuilder;
-use std::fs;
-use std::io;
-use std::slice;
 
 fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {
     let Ok(identity) = job.stamp(path, &CancelToken::never()) else {

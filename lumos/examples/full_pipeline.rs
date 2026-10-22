@@ -14,13 +14,13 @@
 
 #![expect(clippy::print_stdout, reason = "an example reports to the terminal")]
 
-use common::internals;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use common::{fs, internals};
 use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet, IngestConfig,
-    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold,
+    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold, writer,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -30,7 +30,7 @@ fn main() {
 
     let calibration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data");
     assert!(
-        calibration_dir.is_dir(),
+        fs::is_dir(&calibration_dir),
         "bundled dataset not found at {}",
         calibration_dir.display()
     );
@@ -76,8 +76,7 @@ fn main() {
 
     // Save the stacked master.
     let output = internals::output_path("stacked_result.tiff");
-    let image: imaginarium::Image = result.product.image.into();
-    image.save_file(&output).expect("save stacked master");
+    writer::raster(&result.product.image, &output).expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");
 
     println!(
@@ -96,7 +95,7 @@ fn elapsed(since: Instant) -> String {
 fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     let load = |subdir: &str| -> Vec<PathBuf> {
         let dir = calibration_dir.join(subdir);
-        if dir.exists() {
+        if fs::exists(&dir) {
             lumos::raw_files(&dir).expect("scan raw calibration frames")
         } else {
             Vec::new()

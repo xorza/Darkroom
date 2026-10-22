@@ -11,12 +11,10 @@
 //! the run ends, so a test can hold two runs side by side and compare them, and
 //! nothing it asserts is invalidated by the next `run_*` call.
 
-use std::fs;
 use std::path::PathBuf;
 
+use common::{CancelToken, fs};
 use hashbrown::HashMap;
-
-use common::CancelToken;
 
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;

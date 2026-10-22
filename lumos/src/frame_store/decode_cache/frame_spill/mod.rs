@@ -6,11 +6,10 @@
 //! no name at all: it goes to [`RunScratch`](crate::frame_store::run_scratch::RunScratch).
 
 use std::fmt::Display;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use bytemuck::Pod;
-use common::{SerdeFormat, file_utils};
+use common::{SerdeFormat, fs};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -288,14 +287,11 @@ fn decode_sidecar<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
 }
 
 fn write_sidecar<T: Serialize>(path: &Path, value: &T) -> Result<(), FrameStoreError> {
-    file_utils::publish_bytes(
-        path,
-        &encode_sidecar(value),
-        file_utils::PublicationMode::Cache,
-    )
-    .map_err(|source| FrameStoreError::WriteFile {
-        path: path.to_path_buf(),
-        source,
+    fs::publish_bytes(path, &encode_sidecar(value), fs::PublicationMode::Cache).map_err(|source| {
+        FrameStoreError::WriteFile {
+            path: path.to_path_buf(),
+            source,
+        }
     })
 }
 
@@ -306,8 +302,9 @@ fn read_sidecar<T: DeserializeOwned>(path: &Path) -> Option<T> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::fs;
     use std::path::Path;
+
+    use common::fs;
 
     use crate::frame_store::decode_cache::cache_key::CacheKey;
     use crate::frame_store::decode_cache::frame_spill::{

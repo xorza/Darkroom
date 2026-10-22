@@ -112,8 +112,9 @@ impl DecodeCache {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::fs;
     use std::path::Path;
+
+    use common::fs;
 
     use crate::frame_store::decode_cache::DecodeCache;
     use crate::frame_store::decode_cache::cached_source::CachedSource;

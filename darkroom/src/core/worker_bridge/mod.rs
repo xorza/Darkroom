@@ -15,12 +15,12 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use common::BgRuntime;
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::NodeId;
 use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
 
-use crate::core::bg_runtime::BgRuntime;
 use crate::core::wake::Wake;
 
 /// Every command here answers whether the worker took it. A send only fails
@@ -46,7 +46,7 @@ impl WorkerBridge {
     /// it forwards the result over `tx` and asks the host to paint, so the next
     /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
-        let runtime = BgRuntime::new().expect("build worker runtime");
+        let runtime = BgRuntime::new("darkroom-worker");
         let (tx, rx) = channel::<WorkerReport>();
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = runtime.enter(|| Worker::new(move |report| deliver(&tx, &wake, report)));

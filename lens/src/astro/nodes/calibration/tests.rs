@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use std::{fs, io, slice};
+use std::{io, slice};
 
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, fs};
 use imaginarium::Buffer2;
 use lumos::{
     CachedMaster, CalibrationSet, CfaImage, CfaType, FitsChecksumPolicy, ImageMetadata,

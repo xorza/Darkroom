@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
+use common::fs;
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::Data as FitsData;
@@ -67,7 +68,7 @@ pub(crate) enum Checksum {
 /// The FITS file at `path`, open for reading.
 pub(crate) fn open(path: &Path, ctx: &LoadCtx) -> Result<StreamReader<File>, FitsLoadError> {
     Cancelled::check(&ctx.cancel)?;
-    let reader = FitsReader::open(File::open(path)?)?;
+    let reader = FitsReader::open(fs::open(path)?)?;
     Cancelled::check(&ctx.cancel)?;
     Ok(reader)
 }

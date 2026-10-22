@@ -12,7 +12,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use common::file_utils;
+use common::fs;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Data as FitsData, Image};
@@ -114,7 +114,7 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
             planes.push(encode_plane(extension, map_samples(map), &described)?);
         }
     }
-    file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer.write_image(&primary.image, Some(&primary.header))?;
         if let Some(flags) = &flags {

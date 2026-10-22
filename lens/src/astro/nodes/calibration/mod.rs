@@ -1,9 +1,9 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
-use common::file_utils::{self, PublicationMode};
+use common::fs::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
@@ -260,7 +260,7 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
         let place = CachePlace::of(inputs)?;
         let marked =
             fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
-        if marked && place.paths.master.is_file() {
+        if marked && fs::is_file(&place.paths.master) {
             let ctx = LoadCtx {
                 cancel: self.cancel.clone(),
                 ..Default::default()
@@ -285,12 +285,12 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
             path: paths.master.clone(),
             source,
         })?;
-        file_utils::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(
-            |source| CacheError::Write {
+        fs::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(|source| {
+            CacheError::Write {
                 path: paths.marker,
                 source,
-            },
-        )
+            }
+        })
     }
 }
 

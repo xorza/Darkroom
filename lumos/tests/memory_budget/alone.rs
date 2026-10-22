@@ -1,8 +1,8 @@
 //! [`alone`]: each test's measurement in a process with nothing else to count.
 
-use std::env;
-use std::process::Command;
 use std::thread;
+
+use common::{env, process};
 
 /// Set in the child [`alone`] starts, so the body runs there rather than starting another.
 const CHILD: &str = "LUMOS_MEMORY_BUDGET_ALONE";
@@ -23,11 +23,12 @@ pub(crate) fn alone(body: impl FnOnce()) {
         .name()
         .expect("the harness names each test's thread after the test")
         .to_owned();
-    let output = Command::new(env::current_exe().unwrap())
-        .args(["--exact", &name, "--test-threads=1"])
-        .env(CHILD, "1")
-        .output()
-        .unwrap();
+    let output = process::output(
+        env::current_exe().unwrap(),
+        ["--exact", &name, "--test-threads=1"],
+        [(CHILD, "1")],
+    )
+    .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success() && stdout.contains("test result: ok. 1 passed"),

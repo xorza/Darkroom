@@ -42,7 +42,7 @@ pub fn scratch_dir(name: &str) -> PathBuf {
 }
 
 /// The publication temporaries beside `destination`: every file named like the ones
-/// [`file_utils`](crate::file_utils) writes before it renames, which a publication that failed
+/// [`fs`](crate::fs) writes before it renames, which a publication that failed
 /// must not leave behind.
 pub fn publication_temp_files(destination: &Path) -> Vec<PathBuf> {
     let prefix = format!("{}.", destination.file_name().unwrap().to_string_lossy());

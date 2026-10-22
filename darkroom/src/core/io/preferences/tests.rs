@@ -1,9 +1,8 @@
 use std::ffi::OsStr;
-use std::fs;
 use std::path::PathBuf;
 use std::str;
 
-use common::{SerdeFormat, TempDir};
+use common::{SerdeFormat, TempDir, fs};
 use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;

@@ -11,11 +11,10 @@ use std::ops::Range;
 use std::path::Path;
 
 use bytemuck::Pod;
-use common::file_utils;
+use common::{MappedFile, fs};
 use imaginarium::Buffer2;
 
 use crate::frame_store::error::FrameStoreError;
-use crate::platform::MappedFile;
 
 /// One planar buffer of `T` — `f32` samples, or `u8` flags — either resident or memory-mapped.
 #[derive(Debug)]
@@ -33,9 +32,9 @@ impl<T: Pod> StoredPlane<T> {
     /// wrote it: another run that publishes the same name after it is never read in its place.
     pub(crate) fn publish(path: &Path, pixels: &[T]) -> Result<Self, FrameStoreError> {
         let mut mapped = None;
-        file_utils::publish(
+        fs::publish(
             path,
-            file_utils::PublicationMode::Cache,
+            fs::PublicationMode::Cache,
             |file: &mut File| -> io::Result<()> {
                 file.write_all(bytemuck::cast_slice(pixels))?;
                 // A published file is replaced only by a rename, never written in place.
@@ -109,7 +108,7 @@ pub(crate) mod internals {
         /// Drop a mapped plane's pages from the page cache, so its next read comes from the disk;
         /// `false` for a resident plane, or when a page stays: see [`MappedFile::evict`].
         ///
-        /// [`MappedFile::evict`]: crate::platform::MappedFile::evict
+        /// [`MappedFile::evict`]: common::MappedFile::evict
         pub(crate) fn evict(&self) -> bool {
             match self {
                 Self::Memory(_) => false,

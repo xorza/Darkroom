@@ -7,7 +7,7 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
-use common::TempDir;
+use common::{MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
@@ -28,7 +28,6 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::memory::run_memory::RunMemory;
-use crate::platform::MappedFile;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 

@@ -175,7 +175,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use common::TempDir;
+    use common::{MappedFile, TempDir};
     use imaginarium::Buffer2;
 
     use crate::frame::admitted::Admitted;
@@ -186,7 +186,6 @@ mod tests {
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::math::size2us::Size2us;
-    use crate::platform::MappedFile;
 
     /// A spilled frame with quality planes leaves the page cache whole where the system evicts:
     /// its three channels and its coverage and confidence, 512² × 4 bytes = 1 MiB each, every page

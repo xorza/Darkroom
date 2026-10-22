@@ -20,7 +20,13 @@
 //!   derives expand to `::common::…` paths through every one of them, so
 //!   [`IntrospectInteger`], [`IntrospectFloat`] and [`IntrospectError`] are
 //!   exported for generated code to name rather than for hand-written `use`s.
-//! - [`file_utils`] — atomic same-directory publication, and [`FileIdentity`].
+//! - The one route outside `common` to what the program does beyond its own memory:
+//!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and,
+//!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`] for the environment;
+//!   [`process`] for other processes; [`thread`], [`task`] and [`BgRuntime`] for
+//!   a new thread, pool or runtime; [`SystemMemory`], [`ResidentMemory`],
+//!   [`FileSystem`] and [`UserCache`] for what the system states. The workspace's `clippy.toml`
+//!   refuses the direct calls everywhere else.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
@@ -32,19 +38,27 @@
 // crate-root `pub use`s below (one canonical path per item). Modules that are
 // free-function namespaces stay `pub` and are used as `common::<module>::fn`.
 
-pub mod file_utils;
+pub mod env;
+pub mod fs;
 #[cfg(feature = "internals")]
 pub mod internals;
+pub mod process;
+pub mod task;
+pub mod thread;
 
+mod bg_runtime;
 mod cancel_token;
 mod float_ext;
 mod id;
 mod introspect;
+#[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
+mod platform;
 mod serde;
 
+pub use bg_runtime::BgRuntime;
 pub use cancel_token::CancelToken;
-pub use file_utils::file_identity::{FileId, FileIdentity};
 pub use float_ext::FloatExt;
+pub use fs::file_identity::{FileId, FileIdentity};
 pub use id::Id;
 #[cfg(feature = "internals")]
 pub use internals::temp_dir::TempDir;
@@ -52,6 +66,9 @@ pub use internals::temp_dir::TempDir;
 pub use internals::temp_file::TempFile;
 #[cfg(all(unix, feature = "internals"))]
 pub use internals::unreadable::Unreadable;
+pub use platform::{
+    Eviction, FileSystem, MappedFile, ResidentMemory, ScratchFile, SystemMemory, UserCache,
+};
 // The derives share their traits' names in the macro namespace, so one name exports both.
 #[cfg(feature = "introspect-derive")]
 pub use common_derive::{Introspect, IntrospectEnum};

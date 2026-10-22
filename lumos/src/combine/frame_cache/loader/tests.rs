@@ -1,11 +1,10 @@
 use std::convert::Infallible;
-use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::image::Image as FitsImage;
 
 use crate::combine::frame_cache::loader::*;
@@ -103,16 +102,14 @@ fn spill_of<'a>(kept: &'a Path, source: &'a CachedSource) -> FrameSpill<'a> {
 
 /// Overwrite sample `idx` of a spilled plane in place, as anything outside lumos could.
 fn poke(path: &Path, idx: usize, value: f32) {
-    let mut file = OpenOptions::new().write(true).open(path).unwrap();
+    let mut file = fs::open_write(path).unwrap();
     file.seek(SeekFrom::Start((idx * size_of::<f32>()) as u64))
         .unwrap();
     file.write_all(&value.to_le_bytes()).unwrap();
 }
 
 fn set_mtime(path: &Path, nanos_past_epoch: u64) {
-    OpenOptions::new()
-        .write(true)
-        .open(path)
+    fs::open_write(path)
         .unwrap()
         .set_modified(UNIX_EPOCH + Duration::from_nanos(nanos_past_epoch))
         .unwrap();

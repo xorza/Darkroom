@@ -10,15 +10,15 @@ workspace = true
 
 [dependencies]
 common = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 strum = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true }
-tracing = { workspace = true }
-hashbrown = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true, features = ["std"] }
+hashbrown = { workspace = true, features = ["default-hasher", "inline-more", "serde"] }
 async-trait = { workspace = true }
-blake3 = { workspace = true }
+blake3 = { workspace = true, features = ["std"] }
 
 [features]
 internals = []

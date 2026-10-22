@@ -3,14 +3,14 @@ use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
-use rayon::ThreadPoolBuilder;
+use common::thread;
 
 use crate::concurrency;
 use crate::concurrency::{try_par_map_bounded, try_par_map_bounded_owned};
 
 #[test]
 fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
-    let pool = ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    let pool = thread::pool("lumos-test", 4);
     let barrier = Arc::new(Barrier::new(3));
     let in_flight = AtomicUsize::new(0);
     let max_observed = AtomicUsize::new(0);

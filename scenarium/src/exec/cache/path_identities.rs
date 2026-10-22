@@ -3,9 +3,8 @@
 
 use std::mem;
 
-use common::CancelToken;
+use common::{CancelToken, task};
 use hashbrown::HashMap;
-use tokio::task;
 
 use crate::exec::cache::digest::{DigestHasher, InputTag};
 use crate::exec::cache::stamp_job::error::StampError;

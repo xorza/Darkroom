@@ -56,7 +56,6 @@ mod math;
 mod memory;
 mod noise;
 mod pipeline;
-mod platform;
 mod progress;
 mod recycle;
 mod registration;

@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use common::{SerdeFormat, file_utils};
+use common::{SerdeFormat, fs};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -26,7 +26,7 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         });
     }
 
-    let file = File::open(path).map_err(|source| DocumentLoadError::Open {
+    let file = fs::open(path).map_err(|source| DocumentLoadError::Open {
         path: path.to_path_buf(),
         source,
     })?;
@@ -134,7 +134,7 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
         });
     }
 
-    file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
         write_archive(file, &encoded)
     })
     .map_err(|source| DocumentSaveError::Publish {

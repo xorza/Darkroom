@@ -1,8 +1,7 @@
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use common::TempDir;
+use common::{TempDir, fs};
 
 use crate::io::raw::error::RawScanError;
 use crate::io::raw::raw_files::raw_files;
@@ -67,19 +66,17 @@ fn scan_failures_name_the_path() {
 #[cfg(unix)]
 #[test]
 fn only_raw_named_links_are_followed() {
-    use std::os::unix::fs::symlink;
-
     let dir = TempDir::new("lumos-raw-files");
     fs::write(dir.join("a.cr2"), []).unwrap();
-    symlink(dir.join("gone.txt"), dir.join("notes.txt")).unwrap();
-    symlink(dir.join("a.cr2"), dir.join("link.cr2")).unwrap();
+    fs::symlink(dir.join("gone.txt"), dir.join("notes.txt")).unwrap();
+    fs::symlink(dir.join("a.cr2"), dir.join("link.cr2")).unwrap();
     assert_eq!(
         raw_files(dir.path()).unwrap(),
         [dir.join("a.cr2"), dir.join("link.cr2")]
     );
 
     let dangling = dir.join("x.cr2");
-    symlink(dir.join("gone.cr2"), &dangling).unwrap();
+    fs::symlink(dir.join("gone.cr2"), &dangling).unwrap();
     let error = raw_files(dir.path()).unwrap_err();
     assert!(
         matches!(&error, RawScanError::File { path, source }

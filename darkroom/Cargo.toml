@@ -28,19 +28,31 @@ common = { workspace = true }
 lens = { workspace = true }
 imaginarium = { workspace = true }
 
-image = { workspace = true }
-glam = { workspace = true }
-serde = { workspace = true }
+image = { workspace = true, features = ["png"] }
+glam = { workspace = true, features = ["serde", "std"] }
+serde = { workspace = true, features = ["derive", "std"] }
 thiserror = { workspace = true }
 ron = { workspace = true }
-sysinfo = { workspace = true }
-rfd = { workspace = true }
-zip = { workspace = true }
+rfd = { workspace = true, features = ["wayland", "xdg-portal"] }
+zip = { workspace = true, features = ["deflate"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
-clap = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-criterion = { workspace = true, optional = true }
+clap = { workspace = true, features = [
+    "derive",
+    "error-context",
+    "help",
+    "std",
+    "suggestions",
+    "usage",
+] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = [
+    "ansi",
+    "env-filter",
+    "fmt",
+    "std",
+    "tracing-log",
+] }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
 darkroom = { workspace = true, features = ["internals"] }
@@ -56,12 +68,12 @@ profile-with-tracy = ["palantir/profile-with-tracy"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }
-objc2-app-kit = { workspace = true }
-objc2-foundation = { workspace = true }
+objc2-app-kit = { workspace = true, features = ["NSApplication", "NSResponder"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSString", "NSURL"] }
 
 # Embeds the app icon in the .exe; a no-op off Windows.
 [target.'cfg(windows)'.build-dependencies]
-winresource = { workspace = true }
+winresource = { workspace = true, features = ["toml"] }
 
 # Regenerate the icons with scripts/generate-icons.sh.
 [package.metadata.bundle]

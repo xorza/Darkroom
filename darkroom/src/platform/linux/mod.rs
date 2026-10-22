@@ -1,9 +1,10 @@
 //! Linux. See [`crate::platform`] for the surface every OS module implements.
 
-use std::env;
 use std::ffi::OsString;
+use std::io;
 use std::path::PathBuf;
-use std::process::Command;
+
+use common::{env, process};
 
 use palantir::HostHandle;
 
@@ -12,8 +13,8 @@ use palantir::HostHandle;
 /// and the CLI already reads it.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
 
-pub(super) fn url_opener() -> Command {
-    Command::new("xdg-open")
+pub(super) fn open_url(url: &str) -> io::Result<()> {
+    process::spawn("xdg-open", [url])
 }
 
 /// `$XDG_CONFIG_HOME/darkroom`, or `~/.config/darkroom` when unset.
