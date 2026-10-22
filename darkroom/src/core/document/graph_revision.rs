@@ -1,14 +1,13 @@
-//! Which state of a graph its output types were worked out from.
+//! Which state of a graph's node set a cache was swept at.
 
-/// One state of a graph's node set and wiring — what a wildcard output's
-/// type is resolved from. Every edit that can retype an output moves its
-/// document to the next revision, so two equal revisions of one document are
-/// one graph in one state.
+/// One state of a graph's node set. Every edit that adds or removes a node
+/// moves its document to the next revision, so two equal revisions of one
+/// document hold the same nodes.
 ///
 /// Counted per document, so two documents can share a revision: a cache that
-/// keeps one must not outlive its document. Both that do — the window's
-/// output-type table and its node-cache sweep — live in the `MainWindow` that
-/// `Session::new` builds afresh with each document.
+/// keeps one must not outlive its document. The one that does — the window's
+/// node-cache sweep — lives in the `MainWindow` that `Session::new` builds
+/// afresh with each document.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GraphRevision(u64);
 

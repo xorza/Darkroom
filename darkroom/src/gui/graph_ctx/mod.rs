@@ -13,22 +13,15 @@
 //!
 //! **The one rule.** No accessor may walk the graph. Everything below is a
 //! field read, a hash lookup, or a slice index, so a per-widget call is
-//! O(1) and nothing has to be rebuilt when the document moves. The one answer
-//! that cannot come off a declaration — a wildcard output's resolved type —
-//! is read out of the [`OutputTypes`] table the context carries, which the
-//! caller resolves once per graph edit rather than per read (see
-//! [`OutputCtx::ty`](output_ctx::OutputCtx::ty)).
+//! O(1) and nothing has to be rebuilt when the document moves.
 
 pub(crate) mod input_ctx;
 pub(crate) mod node_ctx;
 pub(crate) mod output_ctx;
-pub(crate) mod output_type_cache;
 
 use std::collections::BTreeSet;
 
-use scenarium::{
-    DataType, Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription,
-};
+use scenarium::{DataType, Graph, InputPort, Library, NodeId, OutputPort, Subscription};
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::{GraphView, StackedItem};
@@ -65,14 +58,6 @@ pub(crate) struct GraphCtx<'a> {
     /// last run's per-node verdicts — status, retained RAM, unfed inputs, and
     /// the compiled program's word on what is a sink.
     window: WindowCtx<'a>,
-    /// Every output port's *resolved* type — the wildcard chains followed
-    /// once for the whole graph, so reading one is a lookup rather than a
-    /// walk. See [`OutputCtx::ty`](output_ctx::OutputCtx::ty).
-    ///
-    /// Resolved by the caller against the document the `window` carries, and
-    /// borrowed for as long as this context lives — so nothing can move it out
-    /// from under a reader.
-    output_types: &'a OutputTypes,
     /// Whether a pane is showing this graph, snapshot when the context was
     /// composed. See [`Self::is_visible`].
     is_visible: bool,
@@ -86,17 +71,11 @@ impl<'a> GraphCtx<'a> {
     /// with no nodes on an active tab is a legitimate pane, and one that
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
-    ///
-    /// `output_types` must be resolved against that document — see
-    /// [`OutputTypeCache`](output_type_cache::OutputTypeCache), which resolves
-    /// it again only after an edit that can retype an output. The table is
-    /// threaded in rather than owned because the context is `Copy`.
-    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a OutputTypes) -> Self {
+    pub(crate) fn new(window: WindowCtx<'a>) -> Self {
         let doc = window.document();
         Self {
             is_visible: doc.shows_graph(),
             window,
-            output_types,
         }
     }
 
@@ -143,7 +122,7 @@ impl<'a> GraphCtx<'a> {
     /// The library every node's declaration is resolved through — for the
     /// readers that need type metadata a port doesn't carry (an enum's
     /// registered variants, a type's display name).
-    pub(crate) fn library(self) -> &'a Library {
+    pub(crate) const fn library(self) -> &'a Library {
         self.window.app().library()
     }
 
@@ -154,27 +133,20 @@ impl<'a> GraphCtx<'a> {
         self.window.app().run_state()
     }
 
-    /// This graph's resolved output types. `pub(super)` because the one
-    /// reader is [`OutputCtx::ty`](output_ctx::OutputCtx::ty) — a widget
-    /// asks a port for its type, never the table for a port.
-    pub(super) const fn output_types(self) -> &'a OutputTypes {
-        self.output_types
-    }
-
-    /// The type of `port` — an input's declared type, or an output's resolved
-    /// one — read straight off the graph, the library and the type table, or
-    /// `None` for a port this graph does not hold. For a per-wire reader that
-    /// has no node context and wants none.
+    /// The declared type of `port`, read straight off the graph and the
+    /// library, or `None` for a port this graph does not hold. For a per-wire
+    /// reader that has no node context and wants none.
     pub(crate) fn port_type(self, port: PortRef) -> Option<&'a DataType> {
+        let func = self.body().find(port.node_id)?.func(self.library())?;
         match port.kind {
-            PortKind::Input => self
-                .body()
-                .find(port.node_id)?
-                .func(self.library())?
+            PortKind::Input => func
                 .inputs()
                 .get(port.port_idx)
                 .map(|input| &input.data_type),
-            PortKind::Output => self.output_types.get(port.output_port()?),
+            PortKind::Output => func
+                .outputs()
+                .get(port.port_idx)
+                .map(|output| &output.data_type),
         }
     }
 

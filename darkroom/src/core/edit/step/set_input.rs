@@ -40,7 +40,7 @@ impl Reversible for SetInput {
         matches!(from, Some(Binding::Const(_))) != matches!(to, Some(Binding::Const(_)))
     }
 
-    fn retypes_outputs(&self) -> bool {
-        true
+    fn changes_node_set(&self) -> bool {
+        false
     }
 }

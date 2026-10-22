@@ -13,16 +13,15 @@ use crate::graph::node::CacheMode;
 use crate::internals;
 
 #[test]
-fn validate_rejects_invalid_identities_wildcards_and_defaults() {
+fn validate_rejects_invalid_identities_and_defaults() {
     let nil_input = internals::stub_func(FuncId::unique(), "input").input(FuncInput::required(
         "value",
         DataType::Custom(TypeId::nil()),
     ));
     let nil_output = internals::stub_func(FuncId::unique(), "output")
         .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
-    let invalid_wildcard = internals::stub_func(FuncId::unique(), "wildcard")
-        .input(FuncInput::required("value", DataType::Any))
-        .wildcard_output("value", 1);
+    let any_output = internals::stub_func(FuncId::unique(), "any")
+        .output(FuncOutput::new("value", DataType::Any));
     let invalid = [
         (
             "function id must not be nil".to_owned(),
@@ -43,11 +42,8 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
             nil_output,
         ),
         (
-            format!(
-                "function {:?} output 0 mirrors input 1, but has 1 inputs",
-                invalid_wildcard.id
-            ),
-            invalid_wildcard,
+            format!("function {:?} output 0 is declared `Any`", any_output.id),
+            any_output,
         ),
     ];
 
@@ -149,8 +145,7 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
     }
 
     // Well-formed declarations: exact kinds, a variant member, Null on an
-    // optional input, `Any` accepting any literal, a valid wildcard and a
-    // valid override.
+    // optional input, `Any` accepting any literal, and a valid override.
     let ok = Func::builder(FuncId::unique(), "ok", FuncLambda::stub())
         .input(FuncInput::optional("int", DataType::Int).default(2i64))
         .input(FuncInput::optional("any", DataType::Any).default("text"))
@@ -169,7 +164,7 @@ fn validate_rejects_invalid_identities_wildcards_and_defaults() {
         )
         .input(preset())
         .input(config(5))
-        .wildcard_output("value", 0)
+        .output(FuncOutput::new("value", DataType::Int))
         .build();
     // `config` (input 6) overrides `preset` (input 5); nothing overrides `config`.
     assert_eq!(ok.overrider_of(5), Some(6));

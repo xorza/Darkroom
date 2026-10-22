@@ -1,17 +1,15 @@
-use std::slice;
-
 use super::*;
 
-use crate::data::data_type::{FsPathConfig, FsPathMode};
+use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 
 /// The output pool is range-addressed: when a consumer precedes its producer
 /// in insertion order, lowering claims the producer's *index* early while
 /// output ranges are assigned in emit order — an index-order sequential fill
-/// would hand the two producers each other's types.
+/// would hand the two producers each other's slots.
 #[test]
-fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
+fn a_wire_addresses_its_producer_range_when_the_consumer_precedes_it() {
     // Declared consumer-first, then the *other* producer, then the one it
     // binds — so `make_str` claims its index before its range is assigned.
     let mut g = TestGraph::new();
@@ -21,73 +19,12 @@ fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
     g.wire("make_str", "sink");
 
     let compiled = g.compile();
-
-    for (name, expected) in [("make_int", DataType::Int), ("make_str", DataType::String)] {
-        assert_eq!(
-            compiled.output_types(name),
-            [expected],
-            "{name} reads its own type, not its neighbour's"
-        );
-    }
-}
-
-#[test]
-fn compiled_output_types_match_authoring_resolution() {
-    let path_type = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
-
-    let mut g = TestGraph::new();
-    g.add("fixed", |n| n.output(DataType::Int));
-    // A reroute run long enough that a recursive resolver would blow the
-    // stack: the walk must be iterative on both sides.
-    let mut previous = "fixed".to_string();
-    for hop in 0..70 {
-        let name = format!("hop{hop}");
-        g.add(&name, NodeSpec::passthrough);
-        g.wire(&previous, &name);
-        previous = name;
-    }
-    g.add("scalar_const", NodeSpec::passthrough);
-    g.constant("scalar_const", 0, true);
-    g.add("ambiguous_const", NodeSpec::passthrough);
-    g.constant("ambiguous_const", 0, ConstValue::Enum("A".into()));
-    g.add("typed_const", |n| n.input(path_type.clone()).wildcard(0));
-    g.constant("typed_const", 0, ConstValue::FsPath("input.fit".into()));
-    g.add("unbound", NodeSpec::passthrough);
-
-    let cases = [
-        ("fixed", DataType::Int),
-        ("hop69", DataType::Int),
-        ("scalar_const", DataType::Bool),
-        ("ambiguous_const", DataType::Any),
-        ("typed_const", path_type),
-        ("unbound", DataType::Any),
-    ];
-    let authored: Vec<DataType> = cases
-        .iter()
-        .map(|(name, _)| g.output_type(name, 0))
-        .collect();
-
-    let compiled = g.compile();
-    for ((name, expected), authored) in cases.iter().zip(authored) {
-        assert_eq!(&authored, expected, "authoring resolution for {name}");
-        assert_eq!(
-            compiled.output_types(name),
-            slice::from_ref(expected),
-            "compiled resolution for {name}"
-        );
-    }
-}
-
-#[test]
-fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
-    let mut g = TestGraph::new();
-    g.add("passthrough", NodeSpec::passthrough);
-    g.wire("passthrough", "passthrough");
-    assert_eq!(g.output_type("passthrough", 0), DataType::Any);
-
-    // The same wire, compiled: the walk resolves the wildcard through the
-    // binding it just interned, and the cycle closes on `Any` there too.
-    assert_eq!(g.compile().output_types("passthrough"), [DataType::Any]);
+    let &ExecutionBinding::Bind(address) = compiled.binding("sink", 0) else {
+        panic!("the sink is bound to make_str");
+    };
+    let slot = compiled.program.output_idx(address).0 as usize;
+    assert!(compiled.node("make_str").outputs.range().contains(&slot));
+    assert!(!compiled.node("make_int").outputs.range().contains(&slot));
 }
 
 /// An install may carry an evolved library: changed inputs and lambdas must

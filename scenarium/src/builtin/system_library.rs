@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(concat.inputs()[0].data_type, DataType::Any);
         assert_eq!(concat.inputs()[1].data_type, DataType::Any);
         assert_eq!(concat.outputs().len(), 1);
-        assert_eq!(concat.outputs()[0].ty.declared(), DataType::String);
+        assert_eq!(concat.outputs()[0].data_type, DataType::String);
     }
 
     #[tokio::test]

@@ -1,15 +1,14 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, EventPort, FuncId, Graph, InputPort, Node, NodeId,
-    internals,
+    Binding, CacheMode, ConstValue, DataType, EventPort, FuncId, Graph, InputPort, Node, internals,
 };
 
 use crate::core::document::internals::DocFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
-use crate::gui::port_ref::{PortKind, PortRef};
+use crate::gui::port_ref::PortKind;
 
 /// Composing a context does not ask whether anyone is looking — the document,
 /// the library and the run resolve either way — so visibility rides along as a
@@ -21,11 +20,11 @@ use crate::gui::port_ref::{PortKind, PortRef};
 /// graph still reads back with every pane showing something else.
 #[test]
 fn visibility_tracks_the_active_tab_not_the_graph_contents() {
-    let mut empty_but_shown = GraphCtxFixture::over(DocFixture::default());
+    let empty_but_shown = GraphCtxFixture::over(DocFixture::default());
     assert!(empty_but_shown.graph_ctx().is_visible());
     assert_eq!(empty_but_shown.graph_ctx().nodes().count(), 0);
 
-    let mut populated_but_hidden =
+    let populated_but_hidden =
         GraphCtxFixture::over(DocFixture::probes(2).with_tab(TabRef::Preferences));
     assert!(!populated_but_hidden.graph_ctx().is_visible());
     assert_eq!(
@@ -46,7 +45,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
     let ghost = g.graph.add(internals::unresolved_node(FuncId::unique()));
-    let mut fixture = GraphCtxFixture::over(g);
+    let fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     assert!(
@@ -82,7 +81,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let ghost_id = graph.add(ghost);
     let changed_id = graph.add(internals::unresolved_node(add_id));
 
-    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     // Both nodes resolve, not silently dropped — so the unresolvable one
@@ -138,7 +137,7 @@ fn func_events_read_in_order_alongside_outputs() {
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
 
-    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let n = fixture.graph_ctx().node(node_id).unwrap();
 
     let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
@@ -167,7 +166,7 @@ fn subscriptions_read_from_the_graph() {
     let subscriber_id = graph.add(subscriber);
     graph.subscribe(EventPort::new(emitter_id, 1), subscriber_id);
 
-    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
@@ -196,7 +195,7 @@ fn cache_mode_reads_verbatim_per_node() {
         ids.push((node_id, mode));
     }
 
-    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     for (id, mode) in ids {
@@ -216,7 +215,7 @@ fn impure_flag_reads_from_func_behavior() {
     let impure_id = g.add("impure_src", |n| n.output(DataType::Int));
     let outputless_id = g.add("outputless", |n| n.sink().input(DataType::Int));
 
-    let mut fixture = GraphCtxFixture::over(g);
+    let fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     let pure = graph_ctx.node(pure_id).unwrap();
@@ -239,79 +238,6 @@ fn impure_flag_reads_from_func_behavior() {
         "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
-}
-
-/// A wildcard output reports what the *graph* wired into the input it
-/// mirrors — the one reading that cannot come off the declaration alone, and
-/// the reason the context carries a resolved table at all.
-///
-/// And the edit reaches the very next read with nothing announced: the canvas
-/// holds no derived state about the graph, so there is no invalidation step
-/// between wiring a port and the canvas reporting its new type — which is the
-/// whole reason resolving per read is safe. Wired through the same context the
-/// record passes build.
-#[test]
-fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
-    // `probe` declares a fixed `Int` output; the passthrough mirrors whatever
-    // reaches its input, so unwired it resolves to `Any`.
-    let mut g = TestGraph::new();
-    let producer = g.add("probe", |n| n.pure().output(DataType::Int));
-    let consumer = g.add("passthrough", |n| {
-        n.pure().optional(DataType::Any).wildcard(0)
-    });
-    let mut fixture = GraphCtxFixture::over(g);
-
-    // A fresh context per read, resolving its own output-type table — the
-    // same thing each record pass composes.
-    let resolved_output = |fixture: &mut GraphCtxFixture| {
-        fixture
-            .graph_ctx()
-            .node(consumer)
-            .expect("the passthrough resolves")
-            .outputs()
-            .next()
-            .expect("it declares one output")
-            .ty()
-            .clone()
-    };
-
-    assert_eq!(
-        resolved_output(&mut fixture),
-        DataType::Any,
-        "an unwired passthrough has nothing to mirror"
-    );
-
-    fixture
-        .open
-        .document
-        .graph
-        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    assert_eq!(
-        resolved_output(&mut fixture),
-        DataType::Int,
-        "the next read follows the new wire — nothing was invalidated in between"
-    );
-
-    // `port_type`, the per-wire read, answers the same off the graph and the
-    // table: the input's declared type, the output's resolved one, and `None`
-    // for a port no node holds.
-    let graph_ctx = fixture.graph_ctx();
-    assert_eq!(
-        graph_ctx.port_type(PortRef::input(consumer, 0)),
-        Some(&DataType::Any)
-    );
-    assert_eq!(
-        graph_ctx.port_type(PortRef::output(consumer, 0)),
-        Some(&DataType::Int)
-    );
-    assert_eq!(
-        graph_ctx.port_type(PortRef::output(producer, 0)),
-        Some(&DataType::Int)
-    );
-    assert_eq!(
-        graph_ctx.port_type(PortRef::input(NodeId::unique(), 0)),
-        None
-    );
 }
 
 /// An input reads as set aside exactly while the input declared to override

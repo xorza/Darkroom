@@ -6,7 +6,6 @@
 
 use hashbrown::HashMap;
 
-use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionNode};
 use crate::execution::index::NodeIdx;
 use crate::graph::identity::NodeId;
@@ -80,21 +79,6 @@ impl Compiled {
             "{name:?} declares no input {input}",
         );
         &self.program.inputs[e_node.inputs.nth(input as u32)].binding
-    }
-
-    /// The name of the node feeding `name`'s input `input` — `None` when the
-    /// port lowered to a literal or to nothing.
-    pub(crate) fn producer(&self, name: &str, input: usize) -> Option<&str> {
-        match self.binding(name, input) {
-            ExecutionBinding::Bind(address) => Some(self.name(address.node_idx)),
-            ExecutionBinding::Const(_) | ExecutionBinding::None => None,
-        }
-    }
-
-    /// `name`'s resolved output types, wildcards followed — the types the
-    /// artifact carries, which no declaration in the library need mention.
-    pub(crate) fn output_types(&self, name: &str) -> &[DataType] {
-        &self.program.outputs[self.node(name).outputs]
     }
 
     /// The names subscribed to `name`'s event `event_idx`, in the order the

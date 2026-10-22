@@ -63,8 +63,8 @@ pub(crate) use idx_type;
 ///
 /// The span carries the *space*, not the element type, which is what lets one
 /// span address every column over that space: a node's output run names its
-/// slots in the type column and in each per-run column aligned to it, with
-/// nothing to convert between them.
+/// slots in each per-run column aligned to it, with nothing to convert between
+/// them.
 #[derive(Debug)]
 pub(crate) struct Span<I> {
     pub(crate) start: u32,

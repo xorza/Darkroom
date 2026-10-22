@@ -13,7 +13,7 @@ use palantir::{
     DockDrop, DockOperation, DockTabMenu, DockTabs, InternedStr, MenuItem, Size, SplitSide,
     TabBadge, Ui,
 };
-use scenarium::{NodeId, OutputTypes};
+use scenarium::NodeId;
 
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
@@ -36,7 +36,6 @@ pub(crate) struct DockPanes<'a> {
     pub(crate) cx: WindowCtx<'a>,
     pub(crate) graph_ui: &'a mut GraphUI,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
-    pub(crate) output_types: &'a OutputTypes,
     pub(crate) prefs: &'a mut Preferences,
     pub(crate) out: &'a mut Requests,
 }
@@ -60,8 +59,7 @@ impl DockTabs for DockPanes<'_> {
             TabRef::Graph => {
                 // The context carries everything the canvas reads — theme
                 // and run included, through the `cx` it is composed from.
-                self.graph_ui
-                    .draw(ui, GraphCtx::new(cx, self.output_types), self.out);
+                self.graph_ui.draw(ui, GraphCtx::new(cx), self.out);
             }
             TabRef::Preferences => {
                 PreferencesForm {

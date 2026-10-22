@@ -40,7 +40,7 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.inputs().len(), 1);
     assert_eq!(f.outputs().len(), 1);
     assert_eq!(f.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs()[0].ty.declared(), IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn build_masters_node_is_registered() {
     // Pure: the digest folds each selected calibration file's identity.
     assert_eq!(f.behavior(), FuncBehavior::Pure);
     assert_eq!(f.outputs().len(), 1);
-    assert_eq!(f.outputs()[0].ty.declared(), MASTERS_DATA_TYPE);
+    assert_eq!(f.outputs()[0].data_type, MASTERS_DATA_TYPE);
 
     // Four optional calibration-frame sets, then sigma and cache.
     assert_eq!(f.inputs().len(), 6);
@@ -160,11 +160,7 @@ fn every_quick_knob_has_a_config_that_overrides_it() {
         assert!(!config.required, "{node} {config_name} is optional");
         assert_eq!(config.overrides, Some(knob_idx), "{node} {config_name}");
         let built = lib.by_name(builder).unwrap();
-        assert_eq!(
-            built.outputs()[0].ty.declared(),
-            config.data_type,
-            "{builder}"
-        );
+        assert_eq!(built.outputs()[0].data_type, config.data_type, "{builder}");
     }
 
     // A strength knob starts where the op's own default does.
@@ -218,7 +214,7 @@ fn stack_lights_node_is_registered() {
     let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
     for out in f.outputs() {
-        assert_eq!(out.ty.declared(), IMAGE_DATA_TYPE);
+        assert_eq!(out.data_type, IMAGE_DATA_TYPE);
     }
 }
 
@@ -240,11 +236,7 @@ fn processing_nodes_are_registered() {
         assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE, "{name} in type");
         assert!(f.inputs()[0].required, "{name} image required");
         assert_eq!(f.outputs().len(), 1, "{name} one output");
-        assert_eq!(
-            f.outputs()[0].ty.declared(),
-            IMAGE_DATA_TYPE,
-            "{name} out type"
-        );
+        assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE, "{name} out type");
     }
 }
 
@@ -270,7 +262,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     assert!(builder.inputs().iter().all(|i| i.required));
     assert_eq!(builder.outputs()[0].name, "Config");
     assert_eq!(
-        builder.outputs()[0].ty.declared(),
+        builder.outputs()[0].data_type,
         config_data_type::<ExtractBackground>()
     );
 
@@ -309,7 +301,7 @@ fn ml_denoise_node_is_registered() {
     );
     assert_eq!(f.outputs().len(), 1);
     assert_eq!(f.outputs()[0].name, "Image");
-    assert_eq!(f.outputs()[0].ty.declared(), IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -327,6 +319,6 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
     let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Starless", "Stars"]);
     for o in f.outputs() {
-        assert_eq!(o.ty.declared(), IMAGE_DATA_TYPE);
+        assert_eq!(o.data_type, IMAGE_DATA_TYPE);
     }
 }

@@ -5,7 +5,7 @@ use crate::data::data_type::{DataType, Strictness};
 use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::{FuncOutput, OutputType};
+use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncBehavior, FuncEvent, overrider_of};
@@ -83,21 +83,6 @@ impl FuncBuilder {
     #[must_use]
     pub fn output(mut self, output: FuncOutput) -> Self {
         self.outputs.push(output);
-        self
-    }
-
-    /// Add a *wildcard* output that mirrors input `mirrors_input`'s resolved
-    /// type — a polymorphic passthrough / reroute port. See
-    /// [`OutputType::Wildcard`].
-    #[must_use]
-    pub fn wildcard_output(mut self, name: impl Into<String>, mirrors_input: usize) -> Self {
-        self.outputs.push(FuncOutput {
-            name: name.into(),
-            ty: OutputType::Wildcard {
-                mirrors: mirrors_input,
-            },
-            description: None,
-        });
         self
     }
 
@@ -181,26 +166,20 @@ impl FuncBuilder {
             }
         }
         for (output_idx, output) in self.outputs.iter().enumerate() {
-            match &output.ty {
-                OutputType::Fixed(DataType::Custom(type_id) | DataType::Enum(type_id)) => {
-                    if type_id.is_nil() {
-                        return Err(FuncValidationError::NilOutputType {
-                            func_id: self.id,
-                            output_idx,
-                        });
-                    }
+            match &output.data_type {
+                DataType::Any => {
+                    return Err(FuncValidationError::AnyOutput {
+                        func_id: self.id,
+                        output_idx,
+                    });
                 }
-                OutputType::Wildcard { mirrors } => {
-                    if *mirrors >= self.inputs.len() {
-                        return Err(FuncValidationError::InvalidWildcardInput {
-                            func_id: self.id,
-                            output_idx,
-                            input_idx: *mirrors,
-                            input_count: self.inputs.len(),
-                        });
-                    }
+                DataType::Custom(type_id) | DataType::Enum(type_id) if type_id.is_nil() => {
+                    return Err(FuncValidationError::NilOutputType {
+                        func_id: self.id,
+                        output_idx,
+                    });
                 }
-                OutputType::Fixed(_) => {}
+                _ => {}
             }
         }
         Ok(())

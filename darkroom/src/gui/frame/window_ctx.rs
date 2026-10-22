@@ -16,9 +16,9 @@ use crate::gui::frame::app_ctx::AppCtx;
 /// can reach the edit history the pair also holds.
 ///
 /// **The middle of the context chain.** [`AppCtx`] above knows nothing about a
-/// document; [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) below adds the
-/// resolved output types a canvas reads, and derives itself from this one
-/// rather than restating what is already here.
+/// document; [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) below adds whether
+/// a pane shows the graph, and derives itself from this one rather than
+/// restating what is already here.
 ///
 /// **Composed per phase, never per frame.** The document reference cannot
 /// outlive the phase that took it: the session drains the frame's requests

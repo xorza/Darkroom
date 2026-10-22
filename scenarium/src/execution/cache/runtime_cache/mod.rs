@@ -342,7 +342,7 @@ impl RuntimeCache {
     }
 
     /// A node's **content digest** — the one content key it's cached under, folding its identity
-    /// (func id + output types) plus its structural inputs. The single digest the whole
+    /// (func id + port signature) plus its structural inputs. The single digest the whole
     /// cache keys on: RAM reuse ([`is_resident_hit`](Self::is_resident_hit)), disk load/store, and
     /// downstream folding all read the node's stamped `current_digest`. Computed producer-first
     /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
@@ -381,12 +381,6 @@ impl RuntimeCache {
             .write_bytes(DOMAIN)
             .write_pod(e_node.func_ref.id().as_u128())
             .write_bytes(e_node.func_ref.signature().bytes());
-
-        let outputs = &program.outputs[e_node.outputs];
-        hasher.write_pod(outputs.len() as u64);
-        for output in outputs {
-            hasher.write_data_type(output);
-        }
 
         for input in &program.inputs[e_node.inputs] {
             // Keyed by what the executor hands the node: a producer the run skips

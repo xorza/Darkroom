@@ -59,7 +59,7 @@ pub(super) fn validate(
             .inputs
             .get_span(e_node.inputs)
             .ok_or_else(|| range(PortPool::Input))?;
-        if compiled.outputs.get_span(e_node.outputs).is_none() {
+        if e_node.outputs.range().end > compiled.output_count as usize {
             return Err(range(PortPool::Output));
         }
         let events = compiled

@@ -2,10 +2,10 @@
 //! step.
 //!
 //! The frame-cost questions — whether a step dirties the document, whether
-//! it strands the canvas caches, whether it retypes an output — are swept
+//! it strands the canvas caches, whether it changes the node set — are swept
 //! over one representative of *every* kind, so a kind whose answer is wrong
 //! shows up here rather than as a save prompt that never fires, a drag that
-//! pays for two record passes, or a wire drawn with a stale type.
+//! pays for two record passes, or a removed node's cache entries left behind.
 
 use std::collections::BTreeSet;
 
@@ -129,17 +129,16 @@ fn dirties_document_splits_edits_from_navigation() {
     }
 }
 
-/// Only a node coming or going, or a binding changing, can move a wildcard
-/// output's resolved type; every other kind leaves the type table as it was,
-/// so a drag frame resolves nothing.
+/// Only a node coming or going changes the node set; every other kind leaves
+/// the canvas's node caches as they were, so a drag frame sweeps nothing.
 #[test]
-fn retypes_outputs_splits_wiring_from_everything_else() {
+fn changes_node_set_splits_node_presence_from_everything_else() {
     let node_id = NodeId::unique();
     let every_kind = [
         (node_presence(), true),
         (
             set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
-            true,
+            false,
         ),
         (move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)), false),
         (
@@ -183,8 +182,8 @@ fn retypes_outputs_splits_wiring_from_everything_else() {
         ),
         (subscribed(node_id, NodeId::unique()), false),
     ];
-    for (step, retypes) in &every_kind {
-        assert_eq!(step.retypes_outputs(), *retypes, "{step:?}");
+    for (step, changes) in &every_kind {
+        assert_eq!(step.changes_node_set(), *changes, "{step:?}");
     }
 }
 

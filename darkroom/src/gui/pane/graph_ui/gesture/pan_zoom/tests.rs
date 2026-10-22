@@ -15,7 +15,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     let a = fixture.stub_at(Vec2::new(0.0, 0.0));
     let b = fixture.stub_at(Vec2::new(1000.0, 500.0));
     fixture.stub_at(Vec2::new(-50.0, 300.0));
-    let mut scene = GraphCtxFixture::over(fixture);
+    let scene = GraphCtxFixture::over(fixture);
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));
     geometry.seed_node_size(b, Size::new(200.0, 100.0));
@@ -29,13 +29,13 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     assert_eq!(all.size, Size::new(1250.0, 600.0));
 
     // `Bounded::Selected` filters to exactly the selected node's rect.
-    let mut scene = scene.with_selection([b]);
+    let scene = scene.with_selection([b]);
     let sel = node_bounds(&geometry, scene.graph_ctx(), Bounded::Selected).unwrap();
     assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let mut empty = GraphCtxFixture::over(DocFixture::default());
+    let empty = GraphCtxFixture::over(DocFixture::default());
     assert!(node_bounds(&geometry, empty.graph_ctx(), Bounded::All).is_none());
 }
 

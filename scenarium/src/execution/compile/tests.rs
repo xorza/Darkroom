@@ -235,9 +235,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
                 input.required, input.stamps_fs_path
             ));
         }
-        for output in &compiled.outputs[e_node.outputs] {
-            out.push(format!("  out {output:?}"));
-        }
+        out.push(format!("  outputs {}", e_node.outputs.len));
         for event in &compiled.events[e_node.events] {
             let subscribers: Vec<_> = compiled.subscribers[event.subscribers]
                 .iter()
@@ -317,7 +315,7 @@ fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
 
     assert_eq!(summary(&second, &authored), first_summary);
     assert_eq!(second.inputs.len(), first.inputs.len());
-    assert_eq!(second.outputs.len(), first.outputs.len());
+    assert_eq!(second.output_count, first.output_count);
 }
 
 /// A producer declaring one output of `out_ty` and a consumer declaring one
@@ -377,11 +375,9 @@ fn packs_one_port_run_per_node_from_its_declaration() {
     assert_eq!((producer.outputs.len, producer.inputs.len), (1, 0));
     assert_eq!((consumer.outputs.len, consumer.inputs.len), (0, 1));
     assert_eq!(
-        compiled.program.outputs.len(),
-        1,
-        "one output port across both nodes, typed from the producer's declaration"
+        compiled.program.output_count, 1,
+        "one output port across both nodes"
     );
-    assert_eq!(compiled.output_types("producer"), [DataType::Int]);
     assert_eq!(compiled.program.inputs.len(), 1);
     assert_eq!(producer.outputs.start, 0, "the only run starts the pool");
 }
@@ -472,23 +468,6 @@ fn carries_the_disabled_flag_without_dropping_the_node() {
     assert!(compiled.node("producer").disabled);
 }
 
-/// The walk stamps each output with the type it *resolved*, wildcards followed —
-/// so the program carries a type no declaration in the library mentions, rather
-/// than the `Any` a re-derivation off the declaration alone would produce.
-#[test]
-fn stamps_each_output_with_the_resolved_type() {
-    let mut g = TestGraph::new();
-    g.add("producer", |n| n.pure().output(DataType::String));
-    g.add("pass", |n| n.pure().passthrough());
-    g.wire("producer", "pass");
-
-    assert_eq!(
-        g.compile().output_types("pass"),
-        [DataType::String],
-        "the wildcard followed its mirror to the producer's String"
-    );
-}
-
 /// Each event port gets its declared lambda and exactly the subscribers this
 /// graph wires to it, so an empty list means "nothing subscribes" rather than
 /// "not wired yet" — including for an emitter placed after its subscriber.
@@ -573,39 +552,27 @@ fn drops_subscriptions_that_cannot_fire() {
     );
 }
 
-/// A wire naming a port the producer no longer declares lowers as unbound, and
-/// the resolved-type table is *not* the thing that decides it.
-///
-/// A wildcard chain records every port it walks through — out-of-range ones
-/// included — as `Any`, so the consumer here reads `Some(Any)` for a port that
-/// does not exist. Only the range check against the producer's declared count
-/// unbinds it. Take that check out and the artifact carries an `OutputAddr`
-/// pointing past its producer's output run.
+/// A wire naming a port the producer no longer declares lowers as unbound:
+/// the range check unbinds it, so the artifact carries no `OutputAddr` past
+/// its producer's output run.
 #[test]
-fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
+fn a_wire_to_a_dropped_port_lowers_as_unbound() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::Int));
-    g.add("pass", |n| n.pure().passthrough());
+    g.add("consumer", |n| {
+        n.pure().input(DataType::Any).output(DataType::Int)
+    });
     // Port 99 does not exist: the library shrank under a saved document.
-    let dropped = OutputPort::new(g.id("producer"), 99);
-    g.wire(("producer", 99), "pass");
-
-    let mut types = OutputTypes::default();
-    types.update(&g.graph, &g.library);
-    assert_eq!(
-        types.get(dropped),
-        Some(&DataType::Any),
-        "the chain stamps the port it walked through, declared or not"
-    );
+    g.wire(("producer", 99), "consumer");
 
     assert!(
-        matches!(g.compile().binding("pass", 0), ExecutionBinding::None),
+        matches!(g.compile().binding("consumer", 0), ExecutionBinding::None),
         "the range check unbinds a port the producer does not declare"
     );
     assert!(
         g.graph
             .bindings
-            .contains_key(&InputPort::new(g.id("pass"), 0)),
+            .contains_key(&InputPort::new(g.id("consumer"), 0)),
         "the authored wire itself is untouched"
     );
 }

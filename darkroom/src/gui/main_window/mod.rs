@@ -16,7 +16,6 @@ use crate::gui::frame::frame_writes::FrameWrites;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 use crate::gui::main_window::dock_panes::DockPanes;
 use crate::gui::pane::graph_ui::GraphUI;
 use crate::gui::pane::image_viewer::ImageViewer;
@@ -46,13 +45,6 @@ const MIN_PANE: f32 = 220.0;
 /// that here rather than in `Editor` means the editor shell never has to name
 /// the canvas subsystem's view type, and everything below this file takes that
 /// context alone rather than it *and* the levels it came from.
-///
-/// That is also why the resolved-output table lives here rather than on
-/// `Editor`: it is the canvas context's second input, and [`GraphCtx::new`]
-/// resolves it against whichever document the entry point was handed. So each
-/// of the three below pays one resolve, over a document settled at that
-/// instant — the editor drains queued intents *between* them, and a table
-/// built once at frame top would be an edit behind by the record pass.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
@@ -64,9 +56,6 @@ pub(crate) struct MainWindow {
     /// fill it — the navigation scan and the record — reuse one buffer's
     /// capacity rather than building a `Vec` per frame.
     dock_ops: Vec<DockOperation<TabRef>>,
-    /// The open document's resolved output types, kept across frames and
-    /// resolved again only after an edit that can retype an output.
-    output_types: OutputTypeCache,
     /// The graph revision the canvas's node caches were last swept at. A node
     /// can only go with a step that moves the revision, so a frame at the
     /// same one has nothing to sweep.
@@ -111,19 +100,14 @@ impl MainWindow {
         cx: WindowCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
-        let Self {
-            graph_ui,
-            output_types,
-            ..
-        } = self;
+        let Self { graph_ui, .. } = self;
         let mut request_relayout = Relayout::NotNeeded;
         for tab in cx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUI::prepass` asserts.
                 TabRef::Graph => {
-                    let types = output_types.refresh(cx.open(), cx.app().shared_library());
-                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx, types), out);
+                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -150,7 +134,6 @@ impl MainWindow {
             graph_ui,
             image_viewers,
             dock_ops,
-            output_types,
             swept_at: _,
         } = self;
         Panel::vstack()
@@ -177,7 +160,6 @@ impl MainWindow {
                     cx,
                     graph_ui,
                     image_viewers,
-                    output_types: output_types.refresh(cx.open(), app.shared_library()),
                     prefs,
                     out,
                 };

@@ -22,7 +22,6 @@ use std::sync::Arc;
 use crate::containers::column::{Column, Span};
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::DataType;
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::graph::func::FuncBehavior;
@@ -102,8 +101,8 @@ pub(crate) struct ExecutionNode {
     pub(crate) lambda: FuncLambda,
 }
 
-/// The compile artifact: the lowered, immutable program — lambdas, resolved
-/// output types, and bound-path stamping metadata. Self-contained: executing it
+/// The compile artifact: the lowered, immutable program — lambdas, bindings,
+/// and bound-path stamping metadata. Self-contained: executing it
 /// needs neither the authoring graph nor the library.
 ///
 /// [`Default`] is the empty artifact, which is what an engine holds before
@@ -122,13 +121,9 @@ pub struct CompiledGraph {
     pub(crate) events: Column<EventIdx, ExecutionEvent>,
     /// Every event's subscribers, one event's run after another.
     pub(crate) subscribers: Column<SubscriberIdx, NodeIdx>,
-    /// Each node's resolved declared output types (wildcards followed), packed
-    /// in the same index space as the plan's output columns. Resolved by the
-    /// lowering walk and copied here slot for slot, so the artifact is
-    /// self-describing without retaining the func library. Read by the digest
-    /// (an output-signature change re-keys). An unresolved wildcard port is
-    /// `DataType::Any`. Its length is the artifact's total output count.
-    pub(crate) outputs: Column<OutputIdx, DataType>,
+    /// The output ports of every node, which each node's `outputs` run
+    /// addresses: the length of each per-run output column.
+    pub(crate) output_count: u32,
     /// The library's disk codecs when this was compiled, which the cache
     /// encodes and decodes this program's values with.
     pub(crate) codecs: Arc<Codecs>,

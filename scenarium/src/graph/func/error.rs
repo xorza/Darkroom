@@ -25,15 +25,10 @@ pub enum FuncValidationError {
     NilInputType { func_id: FuncId, input_idx: usize },
     #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]
     NilOutputType { func_id: FuncId, output_idx: usize },
-    #[error(
-        "function {func_id:?} output {output_idx} mirrors input {input_idx}, but has {input_count} inputs"
-    )]
-    InvalidWildcardInput {
-        func_id: FuncId,
-        output_idx: usize,
-        input_idx: usize,
-        input_count: usize,
-    },
+    /// An output's type is what a wire into an input is checked against, and
+    /// `Any` would pass every check.
+    #[error("function {func_id:?} output {output_idx} is declared `Any`")]
+    AnyOutput { func_id: FuncId, output_idx: usize },
     #[error(
         "function {func_id:?} input {input_idx} declares a default that matches neither its type nor its picker variants"
     )]

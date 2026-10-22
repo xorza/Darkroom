@@ -383,6 +383,21 @@ fn failing_lambda(message: &'static str) -> FuncLambda {
     async_lambda!(move |_| { Err(lambda::failure(message)) })
 }
 
+/// The type a scalar or string literal names. A path is a bare string without
+/// the mode and extensions of a `DataType::FsPath`, an enum variant a name
+/// without its type's id, and `Null` names nothing.
+fn literal_type(value: &ConstValue) -> DataType {
+    match value {
+        ConstValue::Float(_) => DataType::Float,
+        ConstValue::Int(_) => DataType::Int,
+        ConstValue::Bool(_) => DataType::Bool,
+        ConstValue::String(_) => DataType::String,
+        ConstValue::Null | ConstValue::FsPath(_) | ConstValue::FsPaths(_) | ConstValue::Enum(_) => {
+            panic!("{value:?} names no type an output could declare")
+        }
+    }
+}
+
 /// A port of a fixture's node, by the node's name: a bare `&str` is its port 0, a
 /// `(name, index)` pair any other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -504,21 +519,6 @@ impl NodeSpec {
         self
     }
 
-    /// One `Any` input and one wildcard output mirroring it — the generic hop
-    /// for wildcard type resolution through a node.
-    #[must_use]
-    pub fn passthrough(self) -> Self {
-        self.input(DataType::Any).wildcard(0)
-    }
-
-    /// An output mirroring input `mirrors` — a passthrough / reroute port.
-    #[must_use]
-    pub fn wildcard(mut self, mirrors: usize) -> Self {
-        let name = format!("out{}", self.func.outputs.len());
-        self.func = self.func.wildcard_output(name, mirrors);
-        self
-    }
-
     #[must_use]
     pub fn event(mut self, name: &str, lambda: EventLambda) -> Self {
         self.func = self.func.event(name, lambda);
@@ -566,13 +566,12 @@ impl NodeSpec {
         ))
     }
 
-    /// A pure source of one constant: declares the output too, typed from the
-    /// literal (`Any` for a literal that names no type of its own — a path, an
-    /// enum variant, `Null`).
+    /// A pure source of one scalar or string constant: declares the output
+    /// too, typed from the literal.
     #[must_use]
     pub fn returns(self, value: impl Into<ConstValue>) -> Self {
         let value = value.into();
-        let data_type = DataType::Any.or_const_type(&value);
+        let data_type = literal_type(&value);
         self.pure()
             .output(data_type)
             .compute(move |_| value.clone())
@@ -653,12 +652,10 @@ pub(crate) mod compiled;
 mod internals {
     use std::sync::Arc;
 
-    use crate::data::data_type::DataType;
     use crate::execution::compile::Compiler;
     use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::compile::error::CompileError;
-    use crate::graph::identity::{EventPort, NodeId, OutputPort};
-    use crate::graph::output_types::OutputTypes;
+    use crate::graph::identity::{EventPort, NodeId};
     use crate::internals::test_graph::TestGraph;
     use crate::internals::test_graph::compiled::Compiled;
 
@@ -669,20 +666,6 @@ mod internals {
             self.ids
                 .iter()
                 .map(|(name, node_id)| (*node_id, name.as_str()))
-        }
-
-        /// The effective type at `name`'s output `port`, through the graph's one
-        /// resolver — what the editor paints.
-        ///
-        /// A miss is the fixture naming a port that is not declared — never an
-        /// `Any` to assert on, which is what an unresolvable *chain* resolves to.
-        pub(crate) fn output_type(&self, name: &str, port: usize) -> DataType {
-            let mut types = OutputTypes::default();
-            types.update(&self.graph, &self.library);
-            types
-                .get(OutputPort::new(self.id(name), port))
-                .expect("the fixture names a declared output port")
-                .clone()
         }
 
         /// `name`'s event `event_idx`.
