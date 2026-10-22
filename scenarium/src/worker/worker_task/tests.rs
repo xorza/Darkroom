@@ -20,7 +20,7 @@ async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
     let node_id = NodeId::unique();
     tx.send(WorkerMessage::Clear).unwrap();
     tx.send(WorkerMessage::RunNodes {
-        nodes: vec![node_id],
+        node_ids: vec![node_id],
     })
     .unwrap();
     let shutdown = CancellationToken::new();
@@ -136,7 +136,7 @@ fn pending_run_couples_event_source_initialization_to_loop_rebuild() {
     let mut explicit = BatchIntent::default();
     explicit.reset(
         [WorkerMessage::RunNodes {
-            nodes: vec![node_id],
+            node_ids: vec![node_id],
         }],
         [],
     );

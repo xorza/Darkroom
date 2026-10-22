@@ -25,13 +25,13 @@ use std::path::{Path, PathBuf};
 use crate::core::document::Document;
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::load_report::LoadReport;
-use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::error::MalformedIntent;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::edit::step::undo_step::UndoStep;
+use crate::core::edit::undo_history::UndoHistory;
 use crate::core::io::document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
@@ -85,7 +85,7 @@ pub(crate) struct OpenDocument {
     /// frontend because it *is* document state — opening another file
     /// replaces the pair, and no UI can outlive one and inherit the other's
     /// history.
-    history: ActionStack,
+    history: UndoHistory,
     /// The steps of the batch [`Self::commit`] is recording, kept so a frame's
     /// edits allocate no list once it has grown. Empty between commits.
     batch: Vec<UndoStep>,
@@ -101,7 +101,7 @@ impl Default for OpenDocument {
             path: None,
             dirty: false,
             revision: GraphRevision::default(),
-            history: ActionStack::new(UNDO_HISTORY_BYTES),
+            history: UndoHistory::new(UNDO_HISTORY_BYTES),
             batch: Vec::new(),
         }
     }

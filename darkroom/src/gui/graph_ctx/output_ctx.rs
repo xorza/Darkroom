@@ -24,12 +24,12 @@ impl<'a> OutputCtx<'a> {
 
     /// This port's address in the graph.
     pub(crate) const fn port(self) -> OutputPort {
-        OutputPort::new(self.node.id, self.port_idx)
+        OutputPort::new(self.node.node_id, self.port_idx)
     }
 
     /// This port's address in the canvas's glyph domains.
     pub(crate) const fn port_ref(self) -> PortRef {
-        PortRef::output(self.node.id, self.port_idx)
+        PortRef::output(self.node.node_id, self.port_idx)
     }
 
     pub(crate) fn name(self) -> &'a str {

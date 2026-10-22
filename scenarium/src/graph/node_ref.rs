@@ -14,7 +14,7 @@ use crate::graph::node::Node;
 /// That is the whole rule — not an inconsistency to reconcile.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeRef<'a> {
-    pub id: NodeId,
+    pub node_id: NodeId,
     /// `pub(super)` so only the graph module's lookups mint one; readers go
     /// through [`Deref`], which is the point of the type.
     pub(super) node: &'a Node,

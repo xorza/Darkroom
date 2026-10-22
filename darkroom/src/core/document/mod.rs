@@ -350,7 +350,7 @@ fn repair_view(
     }
     let mut unplaced: Vec<NodeId> = graph
         .iter()
-        .map(|node| node.id)
+        .map(|node| node.node_id)
         .chain(stubs.iter().map(DetachedNode::node_id))
         .filter(|node_id| !placements.contains_key(node_id))
         .collect();

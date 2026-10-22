@@ -332,7 +332,7 @@ fn scan_snap_target(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<P
     }
     let candidates = graph_ctx
         .nodes()
-        .filter(|n| n.id != start.node_id)
+        .filter(|n| n.node_id != start.node_id)
         .flat_map(|n| n.ports(start.kind.opposite()));
     // Geometrically only one port sits under the pointer, so a port the
     // pointer is over but that `accepts_wire` rejects falls through to

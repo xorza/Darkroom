@@ -1,7 +1,7 @@
 //! Bitcode-packed undo/redo history in one byte buffer.
 //!
 //! Every entry — undoable *and* redoable — lives packed back-to-back in a
-//! single `actions: Vec<u8>`, with a parallel `entries` table of byte ranges.
+//! single `bytes: Vec<u8>`, with a parallel `entries` table of byte ranges.
 //! A `cursor` splits the applied entries (`entries[..cursor]`, undoable) from
 //! the undone ones (`entries[cursor..]`, redoable). Undo/redo are just a
 //! cursor step plus one deserialize — no second buffer, no copying bytes
@@ -39,15 +39,15 @@ struct OpenGesture {
 }
 
 #[derive(Debug)]
-pub(crate) struct ActionStack {
+pub(crate) struct UndoHistory {
     /// The single packed history buffer. Live entries occupy
     /// `[head, len)`; `[0, head)` is evicted-but-not-yet-reclaimed dead
     /// prefix. Entry ranges are absolute indices into this buffer.
-    actions: Vec<u8>,
-    /// First live byte of `actions`. Advanced on eviction (O(1)),
+    bytes: Vec<u8>,
+    /// First live byte of `bytes`. Advanced on eviction (O(1)),
     /// reclaimed by `trim_to_limit`'s lazy compaction.
     head: usize,
-    /// Byte range of each packed entry's serialized steps in `actions`.
+    /// Byte range of each packed entry's serialized steps in `bytes`.
     /// A `VecDeque` so front eviction (`pop_front`) is O(1) too.
     entries: VecDeque<Range<usize>>,
     /// Boundary between applied (`entries[..cursor]`) and undone
@@ -62,15 +62,15 @@ pub(crate) struct ActionStack {
     /// always survives, even when it alone exceeds the budget. Bounds
     /// history by memory rather than entry count, since one entry (e.g. a
     /// removal carrying a whole `Node` + wiring) can dwarf many small
-    /// ones. Physical `actions` peaks at ~2× this between compactions.
+    /// ones. Physical `bytes` peaks at ~2× this between compactions.
     max_bytes: usize,
 }
 
-impl ActionStack {
+impl UndoHistory {
     pub(crate) fn new(max_bytes: usize) -> Self {
         assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
-            actions: Vec::new(),
+            bytes: Vec::new(),
             head: 0,
             entries: VecDeque::new(),
             cursor: 0,
@@ -123,8 +123,7 @@ impl ActionStack {
         self.cursor -= 1;
         // The entry stays in the buffer — it just moved into the redoable
         // region.
-        let range = &self.entries[self.cursor];
-        let steps = deserialize_steps(slice_bytes(&self.actions, range));
+        let steps = deserialize_steps(&self.bytes[self.entries[self.cursor].clone()]);
         for step in steps.iter().rev() {
             step.revert(document);
             on_step(step);
@@ -141,8 +140,7 @@ impl ActionStack {
         if self.cursor == self.entries.len() {
             return false;
         }
-        let range = &self.entries[self.cursor];
-        let steps = deserialize_steps(slice_bytes(&self.actions, range));
+        let steps = deserialize_steps(&self.bytes[self.entries[self.cursor].clone()]);
         for step in &steps {
             step.apply(document);
             on_step(step);
@@ -158,10 +156,10 @@ impl ActionStack {
     fn discard_redo(&mut self) {
         if self.cursor < self.entries.len() {
             let cut = self.entries[self.cursor].start;
-            self.actions.truncate(cut);
+            self.bytes.truncate(cut);
             self.entries.truncate(self.cursor);
             if self.entries.is_empty() {
-                self.actions.clear();
+                self.bytes.clear();
                 self.head = 0;
             }
         }
@@ -179,16 +177,16 @@ impl ActionStack {
         // minimal history loss. Each drop just advances `head` past the
         // freed bytes and pops the front metadata entry: O(1), no memmove.
         // Always keep the last (just-pushed) entry.
-        while self.entries.len() > 1 && self.actions.len() - self.head > self.max_bytes {
+        while self.entries.len() > 1 && self.bytes.len() - self.head > self.max_bytes {
             let removed = self.entries.pop_front().unwrap();
             self.head = removed.end;
             self.cursor -= 1;
         }
         // Reclaim the dead prefix lazily, once it has grown past the
         // budget — the one memmove amortizes over a budget of evictions,
-        // and physical `actions` stays ~2× the budget.
+        // and physical `bytes` stays ~2× the budget.
         if self.head > self.max_bytes {
-            self.actions.drain(0..self.head);
+            self.bytes.drain(0..self.head);
             for range in &mut self.entries {
                 range.start -= self.head;
                 range.end -= self.head;
@@ -218,20 +216,11 @@ impl ActionStack {
 
     /// Append `steps` as the newest applied entry, then trim to the budget.
     fn pack(&mut self, steps: &[UndoStep]) {
-        let range = append_steps(&mut self.actions, steps);
+        let range = append_steps(&mut self.bytes, steps);
         self.entries.push_back(range);
         self.cursor = self.entries.len();
         self.trim_to_limit();
     }
-}
-
-fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {
-    debug_assert!(range.start <= range.end, "undo stack range start > end");
-    debug_assert!(
-        range.end <= buffer.len(),
-        "undo stack range exceeds buffer length"
-    );
-    &buffer[range.clone()]
 }
 
 fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
@@ -241,7 +230,7 @@ fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
 fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
     debug_assert!(
         !steps.is_empty(),
-        "undo stack should not store empty step batches"
+        "undo history should not store empty step batches"
     );
     let start = buffer.len();
     SerdeFormat::Bitcode
@@ -253,10 +242,10 @@ fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::core::edit::action_stack::ActionStack;
+    use crate::core::edit::undo_history::UndoHistory;
 
-    impl ActionStack {
-        /// Whether [`ActionStack::undo`] would take an entry back: a packed one,
+    impl UndoHistory {
+        /// Whether [`UndoHistory::undo`] would take an entry back: a packed one,
         /// or the open gesture unless sealing it would drop it.
         pub(crate) fn can_undo(&self) -> bool {
             self.cursor > 0 || self.open.as_ref().is_some_and(|open| !open.step.is_noop())

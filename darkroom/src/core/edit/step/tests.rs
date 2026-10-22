@@ -1,4 +1,4 @@
-//! The per-step predicates the undo stack and the frame pipeline read off a
+//! The per-step predicates the undo history and the frame pipeline read off a
 //! step.
 //!
 //! The frame-cost questions — whether a step dirties the document, whether
@@ -15,12 +15,12 @@ use scenarium::{Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, Su
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::Change;
-use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::raise::Raise;
-use crate::core::edit::step::rename_node::RenameNode;
+use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
+use crate::core::edit::step::set_node_name::SetNodeName;
 use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
+use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_viewport::{SetViewport, VIEWPORT_EPS};
@@ -30,17 +30,17 @@ fn viewport(pan: Vec2, zoom: f32) -> Viewport {
     Viewport { pan, zoom }
 }
 
-fn move_step(key: NodeId, from: Vec2, to: Vec2) -> UndoStep {
-    UndoStep::MoveSelection(MoveSelection {
+fn set_positions(node_id: NodeId, from: Vec2, to: Vec2) -> UndoStep {
+    UndoStep::Positions(SetPositions {
         moves: vec![Move {
-            key,
+            node_id,
             pos: Change { from, to },
         }],
     })
 }
 
 fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> UndoStep {
-    UndoStep::SetInput(SetInput {
+    UndoStep::Input(SetInput {
         input,
         binding: Change { from, to },
     })
@@ -52,7 +52,7 @@ fn constant(v: f64) -> Binding {
 
 /// `subscriber` subscribing to `emitter`'s first event.
 fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
-    UndoStep::SetSubscription(SetSubscription {
+    UndoStep::Subscription(SetSubscription {
         subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
         subscribed: Change {
             from: false,
@@ -62,7 +62,7 @@ fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
 }
 
 fn node_property(node_id: NodeId, from: CacheMode, to: CacheMode) -> UndoStep {
-    UndoStep::SetNodeProperty(SetNodeProperty {
+    UndoStep::NodeProperty(SetNodeProperty {
         node_id,
         property: Change {
             from: NodeProperty::RuntimeCache(from),
@@ -77,7 +77,7 @@ fn node_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
     let entry = NodeEntry::capture(&fixture.document, node_id).expect("the fixture placed it");
-    UndoStep::SetNode(Box::new(SetNode::removal(entry)))
+    UndoStep::Node(Box::new(SetNode::removal(entry)))
 }
 
 /// The exit prompt's split: camera, selection and stacking are navigation and
@@ -86,20 +86,20 @@ fn node_removal() -> UndoStep {
 fn dirties_document_splits_edits_from_navigation() {
     let node_id = NodeId::unique();
     let navigation = [
-        UndoStep::SetSelection(SetSelection {
+        UndoStep::Selection(SetSelection {
             selection: Change {
                 from: BTreeSet::new(),
                 to: BTreeSet::from([node_id]),
             },
         }),
-        UndoStep::SetViewport(SetViewport {
+        UndoStep::Viewport(SetViewport {
             viewport: Change {
                 from: viewport(Vec2::ZERO, 1.0),
                 to: viewport(Vec2::new(10.0, 20.0), 2.0),
             },
         }),
-        UndoStep::Raise(Raise {
-            key: node_id,
+        UndoStep::Depth(SetDepth {
+            node_id,
             z: Change { from: 0, to: 7 },
         }),
     ];
@@ -112,14 +112,14 @@ fn dirties_document_splits_edits_from_navigation() {
 
     let content = [
         node_removal(),
-        UndoStep::RenameNode(RenameNode {
+        UndoStep::NodeName(SetNodeName {
             node_id,
             name: Change {
                 from: "a".into(),
                 to: "b".into(),
             },
         }),
-        move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
+        set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
         set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         subscribed(node_id, NodeId::unique()),
@@ -140,9 +140,12 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
             set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
             false,
         ),
-        (move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)), false),
         (
-            UndoStep::RenameNode(RenameNode {
+            set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
+            false,
+        ),
+        (
+            UndoStep::NodeName(SetNodeName {
                 node_id,
                 name: Change {
                     from: "a".into(),
@@ -152,7 +155,7 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
             false,
         ),
         (
-            UndoStep::SetSelection(SetSelection {
+            UndoStep::Selection(SetSelection {
                 selection: Change {
                     from: BTreeSet::new(),
                     to: BTreeSet::from([node_id]),
@@ -161,8 +164,8 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
             false,
         ),
         (
-            UndoStep::Raise(Raise {
-                key: node_id,
+            UndoStep::Depth(SetDepth {
+                node_id,
                 z: Change { from: 0, to: 7 },
             }),
             false,
@@ -172,7 +175,7 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
             false,
         ),
         (
-            UndoStep::SetViewport(SetViewport {
+            UndoStep::Viewport(SetViewport {
                 viewport: Change {
                     from: viewport(Vec2::ZERO, 1.0),
                     to: viewport(Vec2::new(10.0, 20.0), 2.0),
@@ -202,21 +205,21 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     let moves = [
         // The node drag. Emits one step per gesture frame, drains pre-record,
         // and Pass A already arranges at the cursor.
-        move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-        UndoStep::SetViewport(SetViewport {
+        set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
+        UndoStep::Viewport(SetViewport {
             viewport: Change {
                 from: viewport(Vec2::ZERO, 1.0),
                 to: viewport(Vec2::new(10.0, 20.0), 2.0),
             },
         }),
-        UndoStep::SetSelection(SetSelection {
+        UndoStep::Selection(SetSelection {
             selection: Change {
                 from: BTreeSet::new(),
                 to: BTreeSet::from([node_id]),
             },
         }),
-        UndoStep::Raise(Raise {
-            key: node_id,
+        UndoStep::Depth(SetDepth {
+            node_id,
             z: Change { from: 0, to: 7 },
         }),
         // Value-only: the editor stays present at its `Fixed` size.
@@ -241,7 +244,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     // and the inline const editor appearing or leaving shifts every port row
     // below it.
     let resizes = [
-        UndoStep::RenameNode(RenameNode {
+        UndoStep::NodeName(SetNodeName {
             node_id,
             name: Change {
                 from: "a".into(),
@@ -274,25 +277,29 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
 #[test]
 fn a_held_gesture_absorbs_its_next_frame_in_place() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
-    let mv = |key, from, to| Move {
-        key,
+    let mv = |node_id, from, to| Move {
+        node_id,
         pos: Change { from, to },
     };
-    let mut open = UndoStep::MoveSelection(MoveSelection {
+    let mut open = UndoStep::Positions(SetPositions {
         moves: vec![
             mv(a, Vec2::ZERO, Vec2::new(10.0, 0.0)),
             mv(b, Vec2::ONE, Vec2::new(11.0, 1.0)),
         ],
     });
     // `a` dragged on to 25; `b` vanished, so the frame no longer carries it.
-    open.absorb(&move_step(a, Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0)));
-    let UndoStep::MoveSelection(folded) = &open else {
+    open.absorb(&set_positions(
+        a,
+        Vec2::new(10.0, 0.0),
+        Vec2::new(25.0, 0.0),
+    ));
+    let UndoStep::Positions(folded) = &open else {
         panic!("a folded drag stays a drag: {open:?}");
     };
     let halves: Vec<_> = folded
         .moves
         .iter()
-        .map(|moved| (moved.key, moved.pos.from, moved.pos.to))
+        .map(|moved| (moved.node_id, moved.pos.from, moved.pos.to))
         .collect();
     assert_eq!(
         halves,
@@ -303,7 +310,7 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
     );
 
     let camera = |from, to| {
-        UndoStep::SetViewport(SetViewport {
+        UndoStep::Viewport(SetViewport {
             viewport: Change { from, to },
         })
     };
@@ -314,7 +321,7 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
     );
     let mut open = camera(start, mid);
     open.absorb(&camera(mid, end));
-    let UndoStep::SetViewport(folded) = &open else {
+    let UndoStep::Viewport(folded) = &open else {
         panic!("a folded camera move stays one: {open:?}");
     };
     assert_eq!(
@@ -332,9 +339,9 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
 #[should_panic(expected = "a gesture cannot fold")]
 fn a_gesture_refuses_a_frame_of_another_kind() {
     let a = NodeId::unique();
-    let mut open = move_step(a, Vec2::ZERO, Vec2::ONE);
-    open.absorb(&UndoStep::Raise(Raise {
-        key: a,
+    let mut open = set_positions(a, Vec2::ZERO, Vec2::ONE);
+    open.absorb(&UndoStep::Depth(SetDepth {
+        node_id: a,
         z: Change { from: 0, to: 1 },
     }));
 }
@@ -345,7 +352,7 @@ fn a_gesture_refuses_a_frame_of_another_kind() {
 #[test]
 fn viewport_noop_is_measured_not_exact() {
     let same = |from, to| {
-        UndoStep::SetViewport(SetViewport {
+        UndoStep::Viewport(SetViewport {
             viewport: Change { from, to },
         })
         .is_noop()

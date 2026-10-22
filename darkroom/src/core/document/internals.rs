@@ -25,7 +25,7 @@ fn spread(view: &mut GraphView) {
     view.paint_order(&mut order);
     for (i, item) in order.into_iter().enumerate() {
         view.item_placements
-            .get_mut(&item.id)
+            .get_mut(&item.node_id)
             .expect("paint order lists only placed items")
             .pos = row_pos(i);
     }
@@ -48,7 +48,10 @@ fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
 pub(crate) fn nth_in_paint_order(view: &GraphView, i: usize) -> NodeId {
     let mut order = Vec::new();
     view.paint_order(&mut order);
-    order.get(i).expect("the fixture placed that many nodes").id
+    order
+        .get(i)
+        .expect("the fixture placed that many nodes")
+        .node_id
 }
 
 /// The func of [`DocumentFixture::plain_node`].

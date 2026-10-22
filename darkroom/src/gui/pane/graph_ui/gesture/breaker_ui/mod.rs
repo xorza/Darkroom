@@ -87,22 +87,22 @@ impl BreakerUi {
             return;
         }
         // Released: drain each target set into its severing intent. Drained
-        // rather than moved out — `broken_nodes` is read while the other two
+        // rather than moved out — `broken_node_ids` is read while the other two
         // drain, and taking it would hand its allocation to the intent
         // instead of to the next gesture.
         let Scribble {
             broken,
-            broken_nodes,
+            broken_node_ids,
             broken_subscriptions,
             ..
         } = scribble;
         out.extend_graph(
-            broken_nodes
+            broken_node_ids
                 .iter()
                 .map(|&node_id| GraphIntent::RemoveNode { node_id }),
         );
         for addr in broken.drain(..) {
-            if broken_nodes.contains(&addr.node_id) {
+            if broken_node_ids.contains(&addr.node_id) {
                 continue;
             }
             out.push_graph(GraphIntent::SetInput {
@@ -114,7 +114,8 @@ impl BreakerUi {
         // step captures every edge touching it), so skip any whose
         // emitter or subscriber is doomed to avoid redundant history.
         for s in broken_subscriptions.drain(..) {
-            if broken_nodes.contains(&s.event.node_id) || broken_nodes.contains(&s.subscriber) {
+            if broken_node_ids.contains(&s.event.node_id) || broken_node_ids.contains(&s.subscriber)
+            {
                 continue;
             }
             out.push_graph(GraphIntent::SetSubscription {
@@ -122,7 +123,7 @@ impl BreakerUi {
                 subscribe: false,
             });
         }
-        broken_nodes.clear();
+        broken_node_ids.clear();
         self.latched.clear();
     }
 

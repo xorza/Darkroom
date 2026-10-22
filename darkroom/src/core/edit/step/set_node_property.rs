@@ -35,7 +35,10 @@ pub(crate) struct SetNodeProperty {
 
 impl Reversible for SetNodeProperty {
     fn write(&self, document: &mut Document, dir: Direction) {
-        let node = document.graph.find_mut(self.node_id).unwrap();
+        let node = document
+            .graph
+            .find_mut(self.node_id)
+            .expect("history replays a property change against the node it recorded");
         match *self.property.half(dir) {
             NodeProperty::Disabled(disabled) => node.disabled = disabled,
             NodeProperty::RuntimeCache(cache) => node.cache = cache,

@@ -17,7 +17,9 @@ async fn a_successful_eviction_reports_nothing() {
         WorkerMessage::Update {
             compiled: Arc::clone(&compiled),
         },
-        WorkerMessage::EvictCache { nodes: vec![get_a] },
+        WorkerMessage::EvictCache {
+            node_ids: vec![get_a],
+        },
     ])
     .await;
 
@@ -45,7 +47,7 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
         TestWorker::disk_store(dir.path()),
         w.update(),
         WorkerMessage::EvictCache {
-            nodes: vec![blocked],
+            node_ids: vec![blocked],
         },
     ])
     .await;
@@ -208,7 +210,7 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 
     // And again for the flush the host asks for by node — the `↓` chip's path.
     w.settle([WorkerMessage::FlushCache {
-        nodes: vec![blocked],
+        node_ids: vec![blocked],
     }])
     .await;
     let WorkerReport::Error(WorkerError::CacheFlush { failures, .. }) = w.report().await else {
@@ -260,7 +262,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     assert_eq!(dir.entry_count(), 0, "nothing could be written");
 
     w.settle([WorkerMessage::FlushCache {
-        nodes: vec![w.id("make_blob")],
+        node_ids: vec![w.id("make_blob")],
     }])
     .await;
     let WorkerReport::Error(WorkerError::CacheFlush {

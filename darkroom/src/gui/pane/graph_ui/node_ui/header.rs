@@ -90,7 +90,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     // there. Placed by its grown box's center rather than in flow, so it
     // straddles the node's top-left corner.
     PortGlyph::arrow(
-        subscription_glyph_wid(node.id),
+        subscription_glyph_wid(node.node_id),
         theme.ports.size,
         hover.lift(port_color::event(theme)),
     )
@@ -144,7 +144,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
                 // "Run to this node" resolves to.
                 record
                     .out
-                    .push_app(AppCommand::Run(RunCommand::Node(node.id)));
+                    .push_app(AppCommand::Run(RunCommand::Node(node.node_id)));
             }
             title(ui, record);
             // Splits the title (left) from the descriptive cluster
@@ -177,7 +177,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
             }
             // Inspect toggle: filled (checked) when pinned, accent outline
             // when open, muted-grey outline (`text_muted`) when closed.
-            let mode = draw_ctx.inspectors().mode(node.id);
+            let mode = draw_ctx.inspectors().mode(node.node_id);
             let color = if mode.is_some() {
                 theme.colors.badge_graph
             } else {
@@ -185,7 +185,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
             };
             Badge::control(
                 BadgeFace::text("i", color, "Inspect — values, status, log"),
-                inspectors::inspect_badge_wid(node.id),
+                inspectors::inspect_badge_wid(node.node_id),
                 Toggle::from(mode == Some(InspectMode::Pinned)),
             )
             .show(ui)
@@ -270,13 +270,13 @@ pub(super) fn status_row(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                         theme.colors.badge_cache,
                         "Drop this node and downstream caches from RAM and disk",
                     ),
-                    wid::node("cache_eviction_badge", node.id),
+                    wid::node("cache_eviction_badge", node.node_id),
                     Toggle::Off,
                 )
                 .show(ui)
             {
                 record.out
-                    .push_app(AppCommand::Run(RunCommand::EvictCache(node.id)));
+                    .push_app(AppCommand::Run(RunCommand::EvictCache(node.node_id)));
             }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and
@@ -319,7 +319,7 @@ pub(super) fn status_row(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                         // a resident value writes no blob, so an unchanged node
                         // would sit "disk-cached" with nothing on disk.
                         then: (!disk)
-                            .then_some(AppCommand::Run(RunCommand::FlushCache(node.id))),
+                            .then_some(AppCommand::Run(RunCommand::FlushCache(node.node_id))),
                     },
                 ] {
                     chip.show(ui, record);
@@ -362,13 +362,13 @@ impl PropertyChip {
         };
         if Badge::control(
             BadgeFace::text(self.glyph, color, self.tooltip),
-            wid::node(self.tag, node.id),
+            wid::node(self.tag, node.node_id),
             self.state,
         )
         .show(ui)
         {
             record.out.push_graph(GraphIntent::SetNodeProperty {
-                node_id: node.id,
+                node_id: node.node_id,
                 to: self.to,
             });
             // After the intent, and it matters: the document tier drains before the
@@ -401,7 +401,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
     };
     Badge::control(
         BadgeFace::drawn(draw_play_triangle, theme.colors.text_muted, tooltip),
-        wid::node("play_badge", node.id),
+        wid::node("play_badge", node.node_id),
         Toggle::Off,
     )
     .hover_color(theme.status.success)
@@ -423,7 +423,7 @@ fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
 fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
-    let id = wid::rename(node.id);
+    let id = wid::rename(node.node_id);
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
@@ -437,13 +437,15 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     };
     let ev = rename.show(ui);
     if ev.clicked {
-        record
-            .out
-            .extend_graph(GraphIntent::click(mode, node.graph_ctx.selected(), node.id));
+        record.out.extend_graph(GraphIntent::click(
+            mode,
+            node.graph_ctx.selected(),
+            node.node_id,
+        ));
     }
     if let Some(to) = ev.committed {
         record.out.push_graph(GraphIntent::RenameNode {
-            node_id: node.id,
+            node_id: node.node_id,
             to,
         });
     }

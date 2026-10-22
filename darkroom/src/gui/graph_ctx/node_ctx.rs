@@ -52,7 +52,7 @@ enum Declaration<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NodeCtx<'a> {
     pub(crate) graph_ctx: GraphCtx<'a>,
-    pub(crate) id: NodeId,
+    pub(crate) node_id: NodeId,
     /// Where the node's body sits, from the view's placements. A field rather
     /// than an accessor: the paint stack is walked by position, and every
     /// geometry reader wants it.
@@ -106,7 +106,7 @@ impl<'a> NodeCtx<'a> {
         };
         Self {
             graph_ctx,
-            id: node_id,
+            node_id,
             pos,
             node,
             declaration,
@@ -312,7 +312,7 @@ impl<'a> NodeCtx<'a> {
     /// and the wire scans all need, so scan order and paint order
     /// can't drift apart.
     pub(crate) fn ports(self, kind: PortKind) -> impl Iterator<Item = PortRef> {
-        let node_id = self.id;
+        let node_id = self.node_id;
         (0..self.port_count(kind)).map(move |port_idx| PortRef {
             node_id,
             kind,
@@ -324,7 +324,7 @@ impl<'a> NodeCtx<'a> {
     /// counterpart of [`Self::ports`], shared by `CanvasGeometry::rebuild`
     /// and the subscription-wire scans for the same reason.
     pub(crate) fn event_ports(self) -> impl Iterator<Item = EventPort> {
-        let node_id = self.id;
+        let node_id = self.node_id;
         (0..self.events().len()).map(move |event_idx| EventPort::new(node_id, event_idx))
     }
 

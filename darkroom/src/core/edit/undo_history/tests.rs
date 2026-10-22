@@ -14,10 +14,10 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 /// build/apply path — the pair every test below drives, so neither has to be
 /// threaded through the helpers by hand.
 #[derive(Debug)]
-struct History {
+struct Harness {
     document: Document,
     library: Library,
-    stack: ActionStack,
+    history: UndoHistory,
     /// The last gesture id minted.
     gestures: GestureId,
 }
@@ -29,7 +29,7 @@ struct Drag {
     members: Arc<[DragStart]>,
 }
 
-impl History {
+impl Harness {
     /// [`TestGraph::sample`]'s multi-node graph, on a budget nothing here can
     /// overflow.
     fn sample() -> Self {
@@ -42,7 +42,7 @@ impl History {
         Self {
             document,
             library,
-            stack: ActionStack::new(max_bytes),
+            history: UndoHistory::new(max_bytes),
             gestures: GestureId::default(),
         }
     }
@@ -69,8 +69,8 @@ impl History {
         for intent in intents {
             self.apply(intent, &mut steps);
         }
-        self.stack.push(&mut steps, None);
-        assert!(steps.is_empty(), "the stack takes the whole batch");
+        self.history.push(&mut steps, None);
+        assert!(steps.is_empty(), "the history takes the whole batch");
     }
 
     /// One frame of the held gesture `intent` names.
@@ -80,7 +80,7 @@ impl History {
         let mut steps = Vec::new();
         self.apply(intent, &mut steps);
         assert_eq!(steps.len(), 1, "a frame commits one step");
-        self.stack.push(&mut steps, gesture);
+        self.history.push(&mut steps, gesture);
     }
 
     /// Commit `intent` onto `steps`, as `drain_requests` does.
@@ -99,7 +99,7 @@ impl History {
             members: members
                 .iter()
                 .map(|&node| DragStart {
-                    node,
+                    node_id: node,
                     pos: self.pos(node),
                 })
                 .collect(),
@@ -130,11 +130,11 @@ impl History {
     /// Take back one entry. The per-step callback is the editor's business —
     /// nothing here watches it.
     fn undo(&mut self) -> bool {
-        self.stack.undo(&mut self.document, &mut |_| {})
+        self.history.undo(&mut self.document, &mut |_| {})
     }
 
     fn redo(&mut self) -> bool {
-        self.stack.redo(&mut self.document, &mut |_| {})
+        self.history.redo(&mut self.document, &mut |_| {})
     }
 }
 
@@ -143,7 +143,7 @@ impl History {
 /// the drag is sealed nothing is packed, so a drag frame encodes nothing.
 #[test]
 fn the_frames_of_one_drag_are_one_entry() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let (a, b) = (h.node(0), h.node(1));
     let (a0, b0) = (h.pos(a), h.pos(b));
 
@@ -153,7 +153,7 @@ fn the_frames_of_one_drag_are_one_entry() {
         h.drag(&drag, offset);
     }
     assert_eq!((h.pos(a), h.pos(b)), (a0 + last, b0 + last));
-    assert!(h.stack.actions.is_empty(), "an open drag packs nothing");
+    assert!(h.history.bytes.is_empty(), "an open drag packs nothing");
 
     assert!(h.undo());
     assert_eq!((h.pos(a), h.pos(b)), (a0, b0), "one undo reverts the drag");
@@ -166,7 +166,7 @@ fn the_frames_of_one_drag_are_one_entry() {
 /// edit between them.
 #[test]
 fn two_drags_of_one_node_stay_two_entries() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let a = h.node(0);
     let a0 = h.pos(a);
 
@@ -187,7 +187,7 @@ fn two_drags_of_one_node_stay_two_entries() {
 /// records nothing.
 #[test]
 fn a_drag_back_to_its_start_records_nothing() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let (a, b) = (h.node(0), h.node(1));
     let a0 = h.pos(a);
     h.select([b]);
@@ -206,7 +206,7 @@ fn a_drag_back_to_its_start_records_nothing() {
 /// start a new entry, from where the edit left the document.
 #[test]
 fn another_edit_seals_the_open_gesture() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let (a, b) = (h.node(0), h.node(1));
     let a0 = h.pos(a);
 
@@ -233,7 +233,7 @@ fn another_edit_seals_the_open_gesture() {
 /// toolbar fit, Ctrl+0 — is its own.
 #[test]
 fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let start = h.document.main_view.viewport;
     let at = |x: f32, zoom| Viewport {
         pan: Vec2::new(x, 0.0),
@@ -267,14 +267,14 @@ fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
 fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     use scenarium::{Binding, InputPort};
 
-    let mut h = History::sample();
-    let named = |h: &History, name: &str| {
+    let mut h = Harness::sample();
+    let named = |h: &Harness, name: &str| {
         h.document
             .graph
             .iter()
             .find(|node| node.name == name)
             .expect("the sample holds the node")
-            .id
+            .node_id
     };
     let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
@@ -301,7 +301,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 
 #[test]
 fn new_edit_discards_the_redo_tail() {
-    let mut h = History::sample();
+    let mut h = Harness::sample();
     let node = h.node(0);
 
     h.select([node]); // A: {} -> {node}
@@ -320,12 +320,12 @@ fn new_edit_discards_the_redo_tail() {
 ///
 /// Every entry here is one selection toggle — `{} → {n}` or `{n} → {}`,
 /// one empty set and one single-member set either way — so all have one size
-/// `e`, and the stack must keep exactly `floor(256 / e)` of them. The model
+/// `e`, and the history must keep exactly `floor(256 / e)` of them. The model
 /// below follows `head` and the physical length byte for byte.
 #[test]
 fn history_bounded_by_byte_budget() {
     const BUDGET: usize = 256;
-    let mut h = History::bounded(BUDGET);
+    let mut h = Harness::bounded(BUDGET);
     let node = h.node(0);
 
     let toggle = |i: usize| -> BTreeSet<NodeId> {
@@ -336,7 +336,7 @@ fn history_bounded_by_byte_budget() {
         }
     };
     h.select(toggle(0));
-    let e = h.stack.entries[0].len();
+    let e = h.history.entries[0].len();
     let kept = BUDGET / e;
     assert!(kept >= 2, "the budget holds several entries of {e} bytes");
 
@@ -351,10 +351,10 @@ fn history_bounded_by_byte_budget() {
                 head = 0;
             }
         }
-        assert_eq!(h.stack.entries.len(), live, "entries after push {i}");
-        assert_eq!(h.stack.head, head, "head after push {i}");
+        assert_eq!(h.history.entries.len(), live, "entries after push {i}");
+        assert_eq!(h.history.head, head, "head after push {i}");
         assert_eq!(
-            h.stack.actions.len(),
+            h.history.bytes.len(),
             head + live * e,
             "bytes after push {i}"
         );

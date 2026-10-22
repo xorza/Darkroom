@@ -8,14 +8,14 @@ use crate::core::document::tab_ref::TabRef;
 pub(crate) enum GraphViewValidationError {
     #[error("graph viewport must have finite pan and positive finite zoom")]
     InvalidViewport,
-    #[error("view item {item:?} position must be finite")]
-    NonFinitePos { item: NodeId },
+    #[error("view item {node_id:?} position must be finite")]
+    NonFinitePos { node_id: NodeId },
     #[error("view items must match the graph's nodes and the stubs")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },
-    #[error("selected item {item:?} has no view item")]
-    MissingSelectedItem { item: NodeId },
+    #[error("selected item {node_id:?} has no view item")]
+    MissingSelectedItem { node_id: NodeId },
 }
 
 #[derive(Debug, thiserror::Error)]

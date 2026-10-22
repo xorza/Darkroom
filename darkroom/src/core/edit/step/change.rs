@@ -40,7 +40,7 @@ impl<T: PartialEq> Change<T> {
 /// Which half of a [`Change`] a replay writes into the document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Direction {
-    /// Write the `to` half: the initial commit, and undo-stack redo.
+    /// Write the `to` half: the initial commit, and undo-history redo.
     Forward,
     /// Write the `from` half: undo.
     Backward,

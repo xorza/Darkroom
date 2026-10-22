@@ -1,16 +1,16 @@
-//! The undo stack's whole vocabulary.
+//! The undo history's whole vocabulary.
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
 use crate::core::edit::step::change::Direction;
-use crate::core::edit::step::move_selection::MoveSelection;
-use crate::core::edit::step::raise::Raise;
-use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::reversible::Reversible;
+use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::SetNode;
+use crate::core::edit::step::set_node_name::SetNodeName;
 use crate::core::edit::step::set_node_property::SetNodeProperty;
+use crate::core::edit::step::set_positions::SetPositions;
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_viewport::SetViewport;
@@ -32,20 +32,20 @@ use crate::core::edit::step::set_viewport::SetViewport;
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
     /// Boxed: a whole detached node is several times the size of every other step.
-    SetNode(Box<SetNode>),
-    MoveSelection(MoveSelection),
-    RenameNode(RenameNode),
-    SetInput(SetInput),
-    SetSelection(SetSelection),
-    Raise(Raise),
-    SetNodeProperty(SetNodeProperty),
-    SetViewport(SetViewport),
-    SetSubscription(SetSubscription),
+    Node(Box<SetNode>),
+    Positions(SetPositions),
+    NodeName(SetNodeName),
+    Input(SetInput),
+    Selection(SetSelection),
+    Depth(SetDepth),
+    NodeProperty(SetNodeProperty),
+    Viewport(SetViewport),
+    Subscription(SetSubscription),
 }
 
 impl UndoStep {
     /// Forward apply: write the "to" half to `document`. Used by the initial
-    /// commit and by undo-stack redo, which replays a stored step without
+    /// commit and by undo-history redo, which replays a stored step without
     /// rebuilding it.
     pub(crate) fn apply(&self, document: &mut Document) {
         self.kind().write(document, Direction::Forward);
@@ -82,8 +82,8 @@ impl UndoStep {
     /// kind of intent for its whole life, so a mismatch is the caller's bug.
     pub(crate) fn absorb(&mut self, next: &Self) {
         match (self, next) {
-            (Self::MoveSelection(open), Self::MoveSelection(next)) => open.absorb(next),
-            (Self::SetViewport(open), Self::SetViewport(next)) => open.absorb(next),
+            (Self::Positions(open), Self::Positions(next)) => open.absorb(next),
+            (Self::Viewport(open), Self::Viewport(next)) => open.absorb(next),
             (open, next) => panic!("a gesture cannot fold {next:?} into {open:?}"),
         }
     }
@@ -96,15 +96,15 @@ impl UndoStep {
     /// matches. [`Self::absorb`] matches too, as it pairs two payloads.
     fn kind(&self) -> &dyn Reversible {
         match self {
-            Self::SetNode(step) => step.as_ref(),
-            Self::MoveSelection(step) => step,
-            Self::RenameNode(step) => step,
-            Self::SetInput(step) => step,
-            Self::SetSelection(step) => step,
-            Self::Raise(step) => step,
-            Self::SetNodeProperty(step) => step,
-            Self::SetViewport(step) => step,
-            Self::SetSubscription(step) => step,
+            Self::Node(step) => step.as_ref(),
+            Self::Positions(step) => step,
+            Self::NodeName(step) => step,
+            Self::Input(step) => step,
+            Self::Selection(step) => step,
+            Self::Depth(step) => step,
+            Self::NodeProperty(step) => step,
+            Self::Viewport(step) => step,
+            Self::Subscription(step) => step,
         }
     }
 }

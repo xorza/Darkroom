@@ -8,6 +8,6 @@ use scenarium::NodeId;
 /// rather than from the frame before, so a dropped frame cannot drift.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DragStart {
-    pub(crate) node: NodeId,
+    pub(crate) node_id: NodeId,
     pub(crate) pos: Vec2,
 }

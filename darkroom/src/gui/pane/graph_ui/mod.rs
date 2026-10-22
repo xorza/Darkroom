@@ -386,7 +386,7 @@ impl GraphUi {
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
-        // the undo stack with no-op `SetSelection` entries every time
+        // the undo history with no-op `SetSelection` entries every time
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
         if ctx.gesture() == Some(CanvasGesture::Deselect) && !ctx.graph_ctx().selected().is_empty()

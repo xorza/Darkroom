@@ -149,7 +149,7 @@ impl SelectionUi {
                 continue;
             };
             if rect.intersects(body) {
-                swept.push(n.id);
+                swept.push(n.node_id);
             }
         }
         // The base arrives sorted (it came off a `BTreeSet`) but the sweep

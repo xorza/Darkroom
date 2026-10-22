@@ -283,7 +283,10 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
     let start = open.document.main_view.item_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();
-    let members: Arc<[DragStart]> = Arc::from([DragStart { node, pos: start }]);
+    let members: Arc<[DragStart]> = Arc::from([DragStart {
+        node_id: node,
+        pos: start,
+    }]);
     let frame = |x: f32| GraphIntent::MoveSelection {
         gesture,
         members: Arc::clone(&members),

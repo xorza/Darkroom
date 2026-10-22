@@ -173,7 +173,7 @@ impl Editor {
             preferences: Preferences::default(),
             requests: Requests::default(),
             dragged: Arc::new([DragStart {
-                node: chains[DRAGGED_CHAIN][BLEND],
+                node_id: chains[DRAGGED_CHAIN][BLEND],
                 pos: Vec2::ZERO,
             }]),
             chains,
@@ -222,7 +222,7 @@ impl Editor {
             }
         }
         self.dragged = Arc::new([DragStart {
-            node: self.chains[DRAGGED_CHAIN][BLEND],
+            node_id: self.chains[DRAGGED_CHAIN][BLEND],
             pos: Vec2::new(cols[BLEND], DRAGGED_CHAIN as f32 * row),
         }]);
         true

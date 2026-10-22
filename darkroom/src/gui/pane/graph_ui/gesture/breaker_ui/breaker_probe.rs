@@ -65,7 +65,7 @@ impl<'a> BreakerProbe<'a> {
 
     /// Record `id`'s node body as targeted by the breaker this frame.
     pub(crate) fn mark_broken_node(&mut self, id: NodeId) {
-        self.live_scribble().broken_nodes.push(id);
+        self.live_scribble().broken_node_ids.push(id);
     }
 
     /// Record `s`'s event wire as targeted by the breaker this frame.

@@ -578,7 +578,7 @@ impl EventRow<'_> {
         let Self { idx, row, event } = self;
         let (node_ctx, draw_ctx) = (record.node, record.draw);
         let theme = node_ctx.theme();
-        let node_id = node_ctx.id;
+        let node_id = node_ctx.node_id;
         let overhang = theme.port_overhang();
         let ev = EventPort::new(node_id, idx);
         let wid = event_glyph_wid(ev);

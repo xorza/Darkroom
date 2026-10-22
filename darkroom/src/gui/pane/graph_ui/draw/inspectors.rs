@@ -161,7 +161,7 @@ impl Inspectors {
                 .node_world_rect(node)
                 .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            let node_ctx = node.with_hover(wid::hover(ui, node.id));
+            let node_ctx = node.with_hover(wid::hover(ui, node.node_id));
             InspectPanel {
                 node: node_ctx,
                 mode,
@@ -189,7 +189,7 @@ impl InspectPanel<'_> {
             pos,
         } = self;
         let (theme, node) = (node_ctx.theme(), node_ctx);
-        let logs = node_ctx.graph_ctx.run_state().logs(node.id);
+        let logs = node_ctx.graph_ctx.run_state().logs(node.node_id);
         let error = match node.exec_status() {
             ExecStatus::Errored(message) => message.as_deref(),
             _ => None,
@@ -208,7 +208,7 @@ impl InspectPanel<'_> {
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
             .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
         Panel::vstack()
-            .id(inspect_panel_wid(node.id))
+            .id(inspect_panel_wid(node.node_id))
             .pos(pos)
             .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
             .sense(Sense::CLICK)

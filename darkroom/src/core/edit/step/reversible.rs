@@ -9,7 +9,7 @@ use crate::core::edit::step::change::Direction;
 /// **This trait is the checklist for a new kind of edit.** Everything the
 /// pipeline wants to know about a kind — how it writes, whether it changed
 /// anything, what it costs the frame — is answered in that kind's own `impl`,
-/// so adding one is writing one file rather than widening a match in four.
+/// so adding one is writing one file rather than widening a match in five.
 /// No question has a default: a kind that forgets to answer one does not
 /// compile.
 ///
@@ -26,7 +26,7 @@ pub(super) trait Reversible {
     /// separately is how they drift.
     ///
     /// Applying and then reverting must leave `document` exactly as it was found:
-    /// the action stack replays entries in reverse and the steps inside an
+    /// the undo history replays entries in reverse and the steps inside an
     /// entry in reverse, so each step is reverted against precisely the
     /// document its own apply produced. Steps that check themselves against
     /// what they overwrite rely on it.

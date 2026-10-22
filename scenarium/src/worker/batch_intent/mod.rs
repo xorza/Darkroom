@@ -72,13 +72,17 @@ impl BatchIntent {
                     self.seeds.node_ids.clear();
                     self.graph_state = Some(GraphOp::Clear);
                 }
-                WorkerMessage::EvictCache { nodes } => unique::extend(&mut self.evict_cache, nodes),
-                WorkerMessage::FlushCache { nodes } => unique::extend(&mut self.flush_cache, nodes),
+                WorkerMessage::EvictCache { node_ids } => {
+                    unique::extend(&mut self.evict_cache, node_ids);
+                }
+                WorkerMessage::FlushCache { node_ids } => {
+                    unique::extend(&mut self.flush_cache, node_ids);
+                }
                 WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
                 WorkerMessage::RunSinks => self.seeds.sinks = true,
-                WorkerMessage::RunNodes { nodes } => {
-                    unique::extend(&mut self.seeds.node_ids, nodes);
+                WorkerMessage::RunNodes { node_ids } => {
+                    unique::extend(&mut self.seeds.node_ids, node_ids);
                 }
                 #[cfg(test)]
                 WorkerMessage::FireEvents { events } => self.seeds.add_events(events),
