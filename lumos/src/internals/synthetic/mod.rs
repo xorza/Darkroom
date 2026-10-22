@@ -14,7 +14,7 @@
 //! ```rust,ignore
 //! use crate::internals::synthetic::camera::Camera;
 //! use crate::internals::synthetic::observe::{Observation, render};
-//! use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+//! use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 //!
 //! let scene = Scene::scatter(
 //!     Size2us::new(512, 512),
@@ -24,7 +24,7 @@
 //!         placement: Placement::Uniform { margin: 16.0 },
 //!         seed: 42,
 //!     },
-//!     BackgroundField::Uniform { level: 0.05 },
+//!     BgField::Uniform { level: 0.05 },
 //! );
 //! let frame = render(&scene, &Camera::realistic(3.5), &Observation::reference(1));
 //! // Detect on `frame.image`, then grade against `frame.truth.sources` with `metrics`.

@@ -6,9 +6,9 @@
 //! itself from that palette through its own `from_palette`. The palantir-side
 //! half lives in [`palantir_bridge`].
 
+pub(crate) mod app_colors;
 pub(crate) mod canvas_theme;
 pub(crate) mod card_theme;
-pub(crate) mod chrome_colors;
 pub(crate) mod color;
 pub(crate) mod const_value_editor_theme;
 pub(crate) mod inline_rename_theme;
@@ -21,9 +21,9 @@ pub(crate) mod type_scale;
 
 use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyleOverrides};
 
+use crate::gui::theme::app_colors::AppColors;
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
-use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::BridgeRoles;
@@ -82,7 +82,7 @@ pub(crate) struct Theme {
     pub(crate) status: StatusColors,
 
     /// The colors belonging to no single widget.
-    pub(crate) colors: ChromeColors,
+    pub(crate) colors: AppColors,
 
     /// Data-type → wire/port hue roster (see [`TypeColors`]).
     pub(crate) type_colors: TypeColors,
@@ -179,7 +179,7 @@ impl Theme {
     /// static-value editor, inline rename) cascades from `p` rather than
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
-        let colors = ChromeColors::from_palette(p);
+        let colors = AppColors::from_palette(p);
         let text = TypeScale::DEFAULT;
         // The palantir half is derived here rather than stored on `Palette`:
         // it is a projection of the same roles, and a second copy of them
@@ -190,7 +190,7 @@ impl Theme {
         let palantir = palantir_bridge::theme(
             &pal,
             BridgeRoles {
-                chrome_fill: colors.chrome_fill,
+                surround_fill: colors.surround_fill,
                 tab_inactive: colors.tab_inactive,
                 header_fill: card.header_fill,
                 warning: status.warning,

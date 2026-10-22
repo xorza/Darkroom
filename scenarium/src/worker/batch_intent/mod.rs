@@ -58,10 +58,20 @@ impl BatchIntent {
         self.clear();
         for msg in msgs {
             match msg {
+                // A graph op supersedes the node seeds named before it: they
+                // asked about the program it replaces, so one its program
+                // lacks is void rather than inconsistent. A seed named after
+                // the last graph op still fails the run when absent.
                 WorkerMessage::Update { compiled } => {
+                    self.seeds
+                        .node_ids
+                        .retain(|&node_id| compiled.contains(node_id));
                     self.graph_state = Some(GraphOp::Replace(compiled));
                 }
-                WorkerMessage::Clear => self.graph_state = Some(GraphOp::Clear),
+                WorkerMessage::Clear => {
+                    self.seeds.node_ids.clear();
+                    self.graph_state = Some(GraphOp::Clear);
+                }
                 WorkerMessage::EvictCache { nodes } => unique::extend(&mut self.evict_cache, nodes),
                 WorkerMessage::FlushCache { nodes } => unique::extend(&mut self.flush_cache, nodes),
                 WorkerMessage::FlushAllCaches => self.flush_all_caches = true,

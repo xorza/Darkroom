@@ -15,7 +15,7 @@
 //! Split the way the graph pane is, by what each part does rather than by what
 //! it draws: [`camera`] is the affine algebra between texels, logical px and
 //! the pane, [`glyph`] is the drawn vocabulary, and [`toolbar`] is the
-//! floating chrome the panel stamps out. This file is [`ImageViewer`] and
+//! floating toolbar the panel stamps out. This file is [`ImageViewer`] and
 //! nothing else — the state one viewer tab keeps across frames, and the record
 //! pass that drives it.
 //!

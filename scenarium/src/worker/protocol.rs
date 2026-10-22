@@ -71,7 +71,8 @@ pub enum WorkerMessage {
     RunSinks,
     /// Run these nodes of the installed program and deliver every output —
     /// "run to this node". A disabled node named here runs for this run; one
-    /// the program does not hold fails the run.
+    /// the program does not hold fails the run, unless a later `Update` or
+    /// `Clear` in the same batch replaced the program it was named against.
     RunNodes {
         nodes: Vec<NodeId>,
     },

@@ -8,7 +8,7 @@ use crate::gui::widgets::toggle::Toggle;
 
 /// Side of each square button, in px.
 const BUTTON_SIZE: f32 = 30.0;
-/// Corner radius of a button's rounded-rect background — which the pill
+/// Corner radius of a button's rounded-rect chrome — which the pill
 /// around it grows by its padding, so the two roundings stay concentric.
 pub(super) const BUTTON_RADIUS: f32 = 6.0;
 
@@ -71,7 +71,7 @@ impl Chip {
         // for the toggled state, the fill also lifts on hover.
         let (glyph, fill) = match self.toggled {
             Toggle::On => (
-                theme.colors.chrome_fill,
+                theme.colors.surround_fill,
                 self.toggled_fill.unwrap_or(theme.colors.selection_rect),
             ),
             Toggle::Off => (

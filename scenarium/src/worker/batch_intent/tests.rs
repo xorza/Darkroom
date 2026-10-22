@@ -148,6 +148,46 @@ fn batch_intent_accumulates_unique_cache_nodes_in_order() {
     );
 }
 
+/// A node seed named before a graph op survives only if the program the op
+/// leaves holds it: a run-to-node followed by an edit that deletes the node
+/// asks for nothing, not for a node the install no longer has. A seed named
+/// after the op is kept as named, so an absent one still fails the run.
+#[test]
+fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
+    let kept = NodeId::from_u128(1);
+    let deleted = NodeId::from_u128(2);
+    let after = NodeId::from_u128(3);
+    let both = Arc::new(CompiledGraph::bare([kept, deleted]));
+    let without_deleted = Arc::new(CompiledGraph::bare([kept]));
+    let update = |compiled: &Arc<CompiledGraph>| WorkerMessage::Update {
+        compiled: Arc::clone(compiled),
+    };
+    let run = |node_id| WorkerMessage::RunNodes {
+        nodes: vec![node_id],
+    };
+
+    // `deleted` was named against `both`; `without_deleted` replaced it.
+    let intent = batch_intent([
+        update(&both),
+        run(kept),
+        run(deleted),
+        update(&without_deleted),
+        run(after),
+    ]);
+    assert_eq!(intent.seeds.node_ids, [kept, after]);
+
+    let intent = batch_intent([
+        update(&both),
+        run(kept),
+        WorkerMessage::Clear,
+        update(&both),
+    ]);
+    assert!(
+        intent.seeds.node_ids.is_empty(),
+        "a Clear voids every seed before it, even one the next program holds"
+    );
+}
+
 /// Each slot keeps the last message that wrote it — a graph op by identity,
 /// so a burst of edits installs the newest program, and a loop request.
 #[test]

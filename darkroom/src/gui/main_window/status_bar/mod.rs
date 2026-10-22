@@ -1,4 +1,4 @@
-//! The window's bottom status bar: a thin chrome strip carrying the last
+//! The window's bottom status bar: a thin surround strip carrying the last
 //! failed action's message or a warning (left, in the error or the warning
 //! color — run/save/load failures and what a load repaired, parked in the
 //! engine's `StatusLog` until a success of the same family clears it) and the memory readout (right): this process's own resident footprint, plus the runtime cache's
@@ -37,7 +37,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
         .size((Sizing::FILL, Sizing::HUG))
         .child_align(Align::new(HAlign::Right, VAlign::Center))
         .padding(Spacing::xy(PAD_X, PAD_Y))
-        .chrome(Chrome::fill(colors.chrome_fill))
+        .chrome(Chrome::fill(colors.surround_fill))
         .show(ui, |ui| {
             if let Some(message) = ctx.status_message() {
                 let status = &ctx.theme().status;

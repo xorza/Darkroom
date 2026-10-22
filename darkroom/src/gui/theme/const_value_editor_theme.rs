@@ -11,7 +11,7 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
 /// Per-widget theme bundle for the inline static-value editor on a
 /// `Binding::Const` input port. Owns the `DragValue` look (scrub chip —
-/// transparent at rest, hover-only background, no border — plus the inline
+/// transparent at rest, hover-only fill, no border — plus the inline
 /// editor derived from it) which the numeric fields use directly and the
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
@@ -29,7 +29,7 @@ pub(crate) struct ConstValueEditorTheme {
 impl ConstValueEditorTheme {
     /// The pointer-over-node variant of [`Self::from_palette`]: the
     /// chip's hover fill (`element_mid`), at reduced alpha, becomes the
-    /// *resting* background — const editors surface as soon as the
+    /// *resting* fill — const editors surface as soon as the
     /// pointer is anywhere over the node, without waiting for a direct
     /// hover. Fill only, so geometry is identical to the resting look.
     /// Built from the same palette recipe rather than patching a

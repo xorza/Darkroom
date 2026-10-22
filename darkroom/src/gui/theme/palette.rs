@@ -35,8 +35,8 @@ pub(crate) struct Palette {
     pub(crate) canvas_bg: RgbaF32,
     /// Backdrop grid dot color.
     pub(crate) canvas_dot: RgbaF32,
-    /// Top-chrome fill behind the menu bar and tab strip.
-    pub(crate) chrome_fill: RgbaF32,
+    /// Surround fill behind the menu bar and tab strip.
+    pub(crate) surround_fill: RgbaF32,
     /// Inactive tab chip.
     pub(crate) tab_inactive: RgbaF32,
     /// Node body fill, and the surface tier palantir gives its own popups.
@@ -50,11 +50,11 @@ pub(crate) struct Palette {
     pub(crate) node_ambient_shadow: RgbaF32,
     /// Primary ink.
     pub(crate) text: RgbaF32,
-    /// De-emphasized chrome ink.
+    /// De-emphasized ink.
     pub(crate) text_muted: RgbaF32,
     /// Disabled ink.
     pub(crate) text_disabled: RgbaF32,
-    /// Control fill one step up from the chrome behind it — the hover tier.
+    /// Control fill one step up from the surface behind it — the hover tier.
     pub(crate) elem_hover: RgbaF32,
     /// Control fill two steps up — the emphasis tier a press reaches for.
     pub(crate) elem_active: RgbaF32,
