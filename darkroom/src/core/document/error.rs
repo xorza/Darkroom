@@ -1,6 +1,6 @@
 //! Structural validation errors for documents and their per-graph editor views.
 
-use scenarium::{GraphValidationError, InputPort, NodeId, OutputPort, Subscription};
+use scenarium::{GraphValidationError, NodeId};
 
 use crate::core::document::tab_ref::TabRef;
 
@@ -10,7 +10,7 @@ pub(crate) enum GraphViewValidationError {
     InvalidViewport,
     #[error("view item {item:?} position must be finite")]
     NonFinitePosition { item: NodeId },
-    #[error("view node items must match graph nodes")]
+    #[error("view items must match the graph's nodes and the stubs")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },
@@ -27,7 +27,7 @@ pub(crate) enum DocumentValidationError {
         #[source]
         source: GraphViewValidationError,
     },
-    #[error("open tab references a missing target {tab:?}")]
+    #[error("open tab {tab:?} names no preview node in the graph")]
     MissingTab { tab: TabRef },
     /// The graph tab is the one that refuses to close, which is what keeps
     /// it reachable; a layout pinning another tab can lose it for good.
@@ -37,14 +37,6 @@ pub(crate) enum DocumentValidationError {
     /// widget ids would be this editor's.
     #[error("the layout belongs to another dock")]
     ForeignDock,
-    #[error("a binding sits on input {port:?}, which its node does not declare")]
-    UndeclaredInput { port: InputPort },
-    #[error("a wire reads output {port:?}, which its node does not declare")]
-    UndeclaredOutput { port: OutputPort },
-    #[error(
-        "a subscription listens to event {} of node {:?}, which it does not declare",
-        .subscription.event.event_idx,
-        .subscription.event.node_id
-    )]
-    UndeclaredEvent { subscription: Subscription },
+    #[error("node {node_id:?} is both a graph node and a stub")]
+    StubInGraph { node_id: NodeId },
 }

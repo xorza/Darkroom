@@ -52,11 +52,9 @@ use crate::gui::theme::Theme;
 pub(crate) struct GraphCtx<'a> {
     /// The window's context, one level up: the document this pane's graph
     /// lives in, plus the frame's read-only world — the theme every widget
-    /// paints from, the library each node's declaration resolves through (a
-    /// node whose func it no longer holds reads as a
-    /// [`missing`](NodeCtx::missing) stub rather than vanishing), and the
-    /// last run's per-node verdicts — status, retained RAM, unfed inputs, and
-    /// the compiled program's word on what is a sink.
+    /// paints from, the library each node's declaration resolves through, and
+    /// the last run's per-node verdicts — status, retained RAM, unfed inputs,
+    /// and the compiled program's word on what is a sink.
     window: WindowCtx<'a>,
     /// Whether a pane is showing this graph, snapshot when the context was
     /// composed. See [`Self::is_visible`].
@@ -134,26 +132,29 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// The declared type of `port`, read straight off the graph and the
-    /// library, or `None` for a port this graph does not hold. For a per-wire
-    /// reader that has no node context and wants none.
-    pub(crate) fn port_type(self, port: PortRef) -> Option<&'a DataType> {
-        let func = self.body().find(port.node_id)?.func(self.library())?;
+    /// library. For a per-wire reader that has no node context and wants none.
+    ///
+    /// # Panics
+    ///
+    /// If the graph does not hold `port`: a committed wire joins two declared
+    /// ports, and an in-flight wire drops once its start is gone.
+    pub(crate) fn port_type(self, port: PortRef) -> &'a DataType {
+        let func = self
+            .body()
+            .find(port.node_id)
+            .expect("a painted port's node is in the graph")
+            .func(self.library());
         match port.kind {
-            PortKind::Input => func
-                .inputs()
-                .get(port.port_idx)
-                .map(|input| &input.data_type),
-            PortKind::Output => func
-                .outputs()
-                .get(port.port_idx)
-                .map(|output| &output.data_type),
+            PortKind::Input => &func.inputs()[port.port_idx].data_type,
+            PortKind::Output => &func.outputs()[port.port_idx].data_type,
         }
     }
 
-    /// This graph's nodes, in no particular order.
+    /// This pane's placed items — every graph node and every stub — in no
+    /// particular order.
     ///
-    /// Driven by the view's placements, which name exactly the graph's nodes,
-    /// since a placement carries the position a node is drawn at.
+    /// Driven by the view's placements, which name exactly those items, since
+    /// a placement carries the position an item is drawn at.
     ///
     /// Unordered because almost nothing needs the stack: scanning for
     /// emitters, resolving a drag anchor, framing the viewport and hit-testing
@@ -178,13 +179,14 @@ impl<'a> GraphCtx<'a> {
         self.view().paint_order(out);
     }
 
-    /// One node of this graph, or `None` for an id it does not hold — a node
-    /// deleted since the caller read the id.
+    /// One placed item — a graph node or a stub — or `None` for an id the
+    /// document does not hold: one deleted since the caller read the id.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().item_placements.get(&node_id)?;
         Some(NodeCtx::resolve(self, node_id, placement.pos))
     }
 
+    /// Whether the document places `node_id`, as a graph node or a stub.
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
         self.node(node_id).is_some()
     }

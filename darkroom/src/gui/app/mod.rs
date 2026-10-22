@@ -55,13 +55,13 @@ pub(crate) struct App {
     /// its only writer — it fills as the worker is drained — and lent to the
     /// frame through [`AppCtx`]. Off the serialized state.
     run_state: RunState,
-    /// The user-facing outcome log behind the status bar's sticky error slot.
+    /// The user-facing outcome log behind the status bar's sticky slot.
     ///
     /// On `App` rather than inside the runtime because most of what reports
-    /// here is not the runtime's: file load/save outcomes, preferences
-    /// failures, and the document restore at startup all write it, and only
-    /// compile failures come from the worker side. Lent to whoever is
-    /// reporting.
+    /// here is not the runtime's: file load/save outcomes, what a load
+    /// repaired, preferences failures, and the document restore at startup all
+    /// write it, and only run outcomes come from the worker side. Lent to
+    /// whoever is reporting.
     status: StatusLog,
     theme: Theme,
     host_handle: HostHandle<Self>,
@@ -458,15 +458,16 @@ impl App {
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
     fn load_document(&mut self, path: &Path) {
-        let open = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
-            Ok(open) => open,
+        let loaded = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
+            Ok(loaded) => loaded,
             Err(err) => {
                 self.status
                     .error(StatusFamily::Document, format!("load failed: {err:#}"));
                 return;
             }
         };
-        self.adopt_document(open);
+        self.adopt_document(loaded.open);
+        loaded.report.report(&mut self.status);
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -552,9 +553,7 @@ impl App {
     }
 
     /// Compile the document graph and execute its sinks once on the
-    /// worker. A compile error is reported to the engine's status log
-    /// synchronously — no run starts, so the prior run's status stays
-    /// untouched. Worker status reports acknowledge actual execution and
+    /// worker. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
     fn run_graph(&mut self) {
         self.runtime
@@ -572,9 +571,8 @@ impl App {
     }
 
     /// Evict one node's cache cone and project the outcome onto exactly the
-    /// nodes it reaches. An empty answer means nothing was dispatched — a
-    /// failed compile, or a node the program holds no work for — so there is
-    /// nothing to project either.
+    /// nodes it reaches. An empty answer means the program holds no work for
+    /// the node, so there is nothing to project either.
     fn evict_cache(&mut self, node_id: NodeId) {
         let evicted = self
             .runtime
@@ -593,9 +591,7 @@ impl App {
     }
 
     /// Start the worker's event loop on the current graph: emitter events
-    /// fire their subscribers until stopped. A compile error (reported to
-    /// the engine's status log) leaves the loop's running state as it was —
-    /// nothing reached the worker.
+    /// fire their subscribers until stopped.
     fn start_events(&mut self) {
         self.runtime
             .start_event_loop(self.session.graph(), &mut self.status);
@@ -679,7 +675,7 @@ impl palantir::App for App {
         // derives its own context from this one rather than taking the refs
         // again.
         let ctx = AppCtx::new(&self.theme, &library, &self.run_state).with_status(StatusInputs {
-            error: self.status.current(),
+            message: self.status.current(),
             process_memory: self.process_memory.sample(Instant::now()),
         });
         // Reset here rather than inside the frame: the queue is `App`'s, and

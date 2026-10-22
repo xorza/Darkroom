@@ -1,32 +1,6 @@
 use super::*;
 use crate::internals::test_graph::NodeSpec;
 
-/// A run seeded with an event the *replacing* program no longer holds is
-/// refused, and the worker carries on with the new program.
-#[tokio::test]
-async fn a_stale_event_seed_is_rejected_without_stopping_the_worker() {
-    let mut w = TestWorker::frames();
-    w.settle([w.update()]).await;
-    let stale = w.graph.event("Frame Event", 0);
-
-    w.graph = TestWorker::print_graph("replacement");
-    w.send_many([
-        w.update(),
-        WorkerMessage::FireEvents {
-            events: vec![stale],
-        },
-    ]);
-
-    let error = w.finished().await.expect_err("the stale seed is refused");
-    assert!(
-        matches!(error, Error::EventSeedNotFound { event } if event == stale),
-        "unexpected stale-event error: {error:?}"
-    );
-
-    w.send(TestWorker::sinks());
-    assert_eq!(w.run().await.logs(), ["replacement"]);
-}
-
 /// An `Update` arriving mid-run is installed only after the running program
 /// reports — so the completion still describes the program that ran.
 #[tokio::test(flavor = "multi_thread")]

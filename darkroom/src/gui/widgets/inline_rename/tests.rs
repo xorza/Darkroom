@@ -86,4 +86,31 @@ fn entering_edit_mode_selects_the_whole_name() {
         "the first keystroke must replace the whole name, not splice into \
          it — and the draft must carry across frames from there",
     );
+
+    // A read-only label opens no editor, so the same gesture commits nothing.
+    let locked = WidgetId::from_hash("rename-read-only");
+    let render_locked = |ui: &mut Ui| {
+        InlineRename::new("Alpha", &theme.inline_rename)
+            .id(locked)
+            .read_only()
+            .show(ui)
+    };
+    h.frame(|ui| {
+        render_locked(ui);
+    });
+    let hit = h.rect(locked).expect("label arranged").center();
+    for _ in 0..2 {
+        h.click_at(hit);
+        h.frame(|ui| {
+            render_locked(ui);
+        });
+    }
+    h.key(Key::Char('X'));
+    h.key(Key::Enter);
+    let committed = h.frame_value(|ui| render_locked(ui).committed);
+    assert_eq!(committed, None, "a read-only name never commits");
+    assert!(
+        h.rect(label_wid(locked)).is_some(),
+        "the label stays a label"
+    );
 }

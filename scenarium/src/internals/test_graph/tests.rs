@@ -25,7 +25,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     );
     // `returns` declared the output its literal implies.
     let src = g.graph.find(g.id("src")).unwrap();
-    let func = src.func(&g.library).unwrap();
+    let func = src.func(&g.library);
     assert_eq!(func.outputs()[0].data_type, DataType::Int);
 }
 
@@ -43,7 +43,7 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
 
     let required = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        node.func(&g.library).unwrap().inputs()[0].required
+        node.func(&g.library).inputs()[0].required
     };
     assert!(!required(&g, "a"), "the edited declaration went optional");
     assert!(!required(&g, "a2"), "and its other instance shares it");
@@ -146,7 +146,7 @@ fn spec_flags_reach_the_declaration() {
 
     let func = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        node.func(&g.library).unwrap().clone()
+        node.func(&g.library).clone()
     };
     let plain = func(&g, "plain");
     assert_eq!(plain.behavior(), FuncBehavior::Impure);

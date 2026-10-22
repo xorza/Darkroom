@@ -74,9 +74,10 @@ impl NodeMenuUi {
         let graph_ctx = cx.graph_ctx();
         let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
             let mut chosen = None;
-            // "Run to this node" shows only when the clicked node can be a
-            // run seed (same rule as the header play chip). The body only
-            // runs while the menu is open.
+            // "Run to this node" and the duplicates show only when the
+            // clicked node is a graph node, not a stub (same rule as the
+            // header play chip): a stub neither runs nor copies. The body
+            // only runs while the menu is open.
             if graph_ctx.node(node_id).is_some_and(NodeCtx::runnable) {
                 if MenuItem::new("Run to this node")
                     .show(ui, popup)
@@ -86,22 +87,22 @@ impl NodeMenuUi {
                     chosen = Some(MenuChoice::Run);
                 }
                 MenuSeparator::new().show(ui);
+                if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
+                    chosen = Some(MenuChoice::Duplicate {
+                        incoming: IncomingWires::Drop,
+                    });
+                }
+                if MenuItem::new("Duplicate with incoming connections")
+                    .show(ui, popup)
+                    .left
+                    .clicked()
+                {
+                    chosen = Some(MenuChoice::Duplicate {
+                        incoming: IncomingWires::Keep,
+                    });
+                }
+                MenuSeparator::new().show(ui);
             }
-            if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
-                chosen = Some(MenuChoice::Duplicate {
-                    incoming: IncomingWires::Drop,
-                });
-            }
-            if MenuItem::new("Duplicate with incoming connections")
-                .show(ui, popup)
-                .left
-                .clicked()
-            {
-                chosen = Some(MenuChoice::Duplicate {
-                    incoming: IncomingWires::Keep,
-                });
-            }
-            MenuSeparator::new().show(ui);
             if MenuItem::new("Remove").show(ui, popup).left.clicked() {
                 chosen = Some(MenuChoice::Remove);
             }

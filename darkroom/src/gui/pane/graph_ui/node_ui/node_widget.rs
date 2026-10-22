@@ -87,7 +87,7 @@ impl<'a> NodeWidget<'a> {
         } else {
             CardTier::Resting
         };
-        let border = if node.missing() && tier != CardTier::Broken {
+        let border = if node.stub() && tier != CardTier::Broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
             theme.status.error

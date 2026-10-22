@@ -15,7 +15,6 @@ fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
 fn empty_compiled() -> Arc<CompiledGraph> {
     Compiler::default()
         .compile(&Graph::default(), &Library::default())
-        .unwrap()
         .into()
 }
 

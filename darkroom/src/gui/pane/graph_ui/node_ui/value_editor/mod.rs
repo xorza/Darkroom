@@ -103,7 +103,7 @@ impl ConstEdit<'_> {
             let before = value_variants
                 .iter()
                 .position(|o| &o.value == value)
-                .unwrap_or(0);
+                .expect("an admitted picker value is one of its variants");
             let picked = field.combo(
                 ui,
                 Pick {
@@ -115,10 +115,11 @@ impl ConstEdit<'_> {
             return value_variants.get(picked).map(|o| o.value.clone());
         }
         // The widget follows the *declared* port type, not the stored literal's
-        // kind: a coerced or library-drifted literal still gets the declared
-        // type's editor (displaying its coerced reading), and the next commit
-        // stores the declared kind — re-canonicalizing the document. A literal
-        // outside the type's coercion class falls back to a read-only label.
+        // kind: a coerced literal gets the declared type's editor (displaying
+        // its coerced reading), and the next commit stores the declared kind —
+        // re-canonicalizing the document. An admitted literal is in the type's
+        // coercion class, or `Null` on an optional input left unset, which
+        // shows as a read-only label.
         match data_type {
             // An untyped (`Any`) port declares no concrete kind, so the literal's
             // kind is inferred from the text (see `parse_any`). Keyed on the port
@@ -128,19 +129,19 @@ impl ConstEdit<'_> {
             DataType::Any => field.any_smart(ui, value),
             DataType::Int => {
                 let Some(current) = value.as_i64() else {
-                    return field.read_only(ui, value);
+                    return field.unset(ui, value);
                 };
                 field.int(ui, current)
             }
             DataType::Float => {
                 let Some(current) = value.as_f64() else {
-                    return field.read_only(ui, value);
+                    return field.unset(ui, value);
                 };
                 field.float(ui, current)
             }
             DataType::Bool => {
                 let Some(current) = value.as_bool() else {
-                    return field.read_only(ui, value);
+                    return field.unset(ui, value);
                 };
                 let mut draft = current;
                 Checkbox::new(&mut draft).id(field.id).show(ui);
@@ -148,19 +149,18 @@ impl ConstEdit<'_> {
             }
             DataType::String => {
                 let Some(current) = value.as_string() else {
-                    return field.read_only(ui, value);
+                    return field.unset(ui, value);
                 };
                 let edited = field.text(ui, current, format_string)?;
                 (edited != current).then_some(ConstValue::String(edited))
             }
             DataType::FsPath(config) => {
-                // Preview whichever path literal is stored — a mode/kind mismatch
-                // left by library drift still previews, and the pick dialog
-                // (opened per the declared config) replaces it wholesale.
+                // The admitted literal is the shape the mode takes; the pick
+                // dialog (opened per the declared config) replaces it wholesale.
                 let preview = match value {
                     ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
                     ConstValue::FsPaths(paths) => PathPreview::multi(paths),
-                    _ => return field.read_only(ui, value),
+                    _ => return field.unset(ui, value),
                 };
                 let label = fmt!(ui, "{preview}");
                 // The blocking dialog runs after authoring, so this button only records its click.
@@ -177,16 +177,17 @@ impl ConstEdit<'_> {
             DataType::Enum(type_id) => {
                 // A dropdown over the port's registered variants. The variant list
                 // lives on the library's `Enum` type entry, not on the value or the
-                // id-only `DataType` — without it (an unregistered type, or one
-                // registered with no variants) we can't populate the menu, so fall
-                // back to a read-only label. A drifted non-`Enum` literal seeds the
-                // first variant; any pick repairs it.
-                let Some(variants) = library.enum_variants(*type_id).filter(|v| !v.is_empty())
-                else {
-                    return field.read_only(ui, value);
+                // id-only `DataType`; an admitted literal names one of them.
+                let Some(current) = value.as_enum() else {
+                    return field.unset(ui, value);
                 };
-                let current = value.as_enum().unwrap_or_default();
-                let before = variants.iter().position(|v| v == current).unwrap_or(0);
+                let variants = library
+                    .enum_variants(*type_id)
+                    .expect("an admitted enum literal's type is registered");
+                let before = variants
+                    .iter()
+                    .position(|v| v == current)
+                    .expect("an admitted enum literal names a registered variant");
                 let picked = field.combo(
                     ui,
                     Pick {
@@ -198,7 +199,7 @@ impl ConstEdit<'_> {
                 variants.get(picked).cloned().map(ConstValue::Enum)
             }
             // No literal form (pick-or-wire ports carry variants, handled above).
-            DataType::Custom(_) => field.read_only(ui, value),
+            DataType::Custom(_) => field.unset(ui, value),
         }
     }
 }
@@ -242,11 +243,15 @@ impl Field<'_> {
         (parsed != *value).then_some(parsed)
     }
 
-    /// Non-editable fallback for a literal outside its port's coercion class —
-    /// a drifted kind, a `Custom` port's stray const, an unregistered enum, a
-    /// `Null`: shows the textual form in a read-only field; clicks fall
-    /// through to the surrounding row. Always returns `None`.
-    fn read_only(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
+    /// An optional input left unset: `Null`, the one admitted literal outside
+    /// its port's coercion class. Shows its textual form in a read-only field;
+    /// clicks fall through to the surrounding row. Always returns `None`.
+    fn unset(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
+        debug_assert_eq!(
+            *value,
+            ConstValue::Null,
+            "an admitted literal outside its port's class is `Null`"
+        );
         let Self { theme, id } = self;
         // The same retained buffer the editable fields keep under this id,
         // refilled from the literal every frame — which is also what makes the

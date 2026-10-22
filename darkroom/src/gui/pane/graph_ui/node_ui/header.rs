@@ -416,7 +416,8 @@ fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
 
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
-/// selects (the label would otherwise swallow the body's click).
+/// selects (the label would otherwise swallow the body's click). A stub's
+/// title is read-only: its record is a frozen snapshot no edit changes.
 fn title(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     let node = rec.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
@@ -424,10 +425,15 @@ fn title(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
-    let ev = InlineRename::new(node.name(), &node.theme().inline_rename_title)
+    let rename = InlineRename::new(node.name(), &node.theme().inline_rename_title)
         .id(id)
-        .max_chars(NODE_NAME_MAX_CHARS)
-        .show(ui);
+        .max_chars(NODE_NAME_MAX_CHARS);
+    let rename = if node.stub() {
+        rename.read_only()
+    } else {
+        rename
+    };
+    let ev = rename.show(ui);
     if ev.clicked {
         rec.out
             .extend_graph(GraphIntent::click(mode, node.graph_ctx.selected(), node.id));

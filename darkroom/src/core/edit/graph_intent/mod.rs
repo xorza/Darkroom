@@ -216,19 +216,22 @@ impl GraphIntent {
     ///
     /// The selection is the only source of a duplicate set: Ctrl+D and the
     /// node context menu's two Duplicate picks all act on it, the latter
-    /// because a right-click selects the node it landed on first.
+    /// because a right-click selects the node it landed on first. A selected
+    /// stub is skipped: a copy of a node that cannot run has little use.
     pub(crate) fn duplicate(doc: &Document, incoming: IncomingWires) -> Vec<Self> {
         let (graph, view) = (&doc.graph, &doc.main_view);
         // Resolve the whole set first, in selection order: an edge is only
         // recognisable as internal once both of its endpoints have a fresh id,
-        // so nothing can be authored until every member has one. A selected
-        // node the graph no longer holds simply isn't part of the set.
+        // so nothing can be authored until every member has one.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
         let mut sources = Vec::with_capacity(view.selected.len());
         for old_id in &view.selected {
-            let Some(node) = graph.find(*old_id) else {
+            if doc.stubs.contains(*old_id) {
                 continue;
-            };
+            }
+            let node = graph
+                .find(*old_id)
+                .expect("a selected node is a graph node or a stub");
             let new_id = NodeId::unique();
             clones.insert(*old_id, new_id);
             sources.push((*old_id, new_id, node));
@@ -301,7 +304,8 @@ impl GraphIntent {
     /// This is the only gate between a caller and the document, so each arm
     /// establishes the full precondition set the step's `write` half assumes:
     /// an `Ok` result is a proof that replaying the step trips no assert on
-    /// the way and leaves the document passing [`Document::validate`].
+    /// the way and leaves the document passing [`Document::validate`], with a
+    /// graph every compile accepts.
     /// Widgets only ever violate the staleness half, since they read the
     /// identities they emit out of the live document; anything else reaching
     /// here is a bug.
@@ -325,15 +329,15 @@ impl GraphIntent {
                 node,
                 bindings,
             } => {
-                validate::fresh_node_id(graph, node_id)?;
+                validate::fresh_node_id(doc, node_id)?;
                 validate::finite_position(pos, Role::AddNode)?;
-                validate::insertable_kind(&node)?;
+                let func = validate::resolving_node(library, &node)?;
                 validate::seed_bindings(
                     graph,
                     library,
                     Insertion {
                         node_id,
-                        node: &node,
+                        func,
                         bindings: &bindings,
                     },
                 )?;
@@ -394,35 +398,35 @@ impl GraphIntent {
                 })
             }
             Self::SetInput { input, to } => {
-                let Some(destination) =
-                    validate::live_node(graph, input.node_id, Role::SetInputDestination)?
-                else {
+                if validate::live_node(graph, input.node_id, Role::SetInputDestination)?.is_none() {
                     return Ok(None);
-                };
-                // Only a write is held to the declaration: clearing removes a
-                // binding wherever it sits, which is never worse than keeping it.
-                if to.is_some() {
-                    validate::declared_input(destination, library, input)?;
                 }
-                if let Some(Binding::Bind(source)) = &to {
-                    validate::wirable(destination, library, input)?;
-                    // A wire held across frames can outlive its producer, and
-                    // the bind would leave the graph with a dangling edge.
-                    let Some(producer) =
-                        validate::live_node(graph, source.node_id, Role::SetInputProducer)?
-                    else {
-                        return Ok(None);
-                    };
-                    validate::declared_output(producer, library, *source)?;
-                    // Reject a bind that would close a data cycle: the planner
-                    // rejects a cyclic graph outright (`Error::CycleDetected`),
-                    // so the edit must never land. The GUI snap filter normally
-                    // stops this earlier; this, with `wirable` above, is the
-                    // authoritative guard covering every binding path,
-                    // including any that bypass the canvas.
-                    if graph.produces_cycle(source.node_id, input.node_id) {
-                        return Ok(None);
+                // Only a write is admitted: clearing removes a binding wherever
+                // it sits, which is never worse than keeping it.
+                if let Some(binding) = &to {
+                    if let Binding::Bind(source) = binding {
+                        // A wire held across frames can outlive its producer,
+                        // and the bind would leave the graph with a dangling
+                        // edge.
+                        if validate::live_node(graph, source.node_id, Role::SetInputProducer)?
+                            .is_none()
+                        {
+                            return Ok(None);
+                        }
+                        // A bind that would close a data cycle never lands: a
+                        // compile refuses a cyclic graph. The canvas snap
+                        // filter normally stops it earlier; this is the guard
+                        // covering every binding path.
+                        if graph.produces_cycle(source.node_id, input.node_id) {
+                            return Ok(None);
+                        }
                     }
+                    graph.admit(library, input, binding).map_err(|rejection| {
+                        MalformedIntent::Rejected {
+                            port: input,
+                            rejection,
+                        }
+                    })?;
                 }
                 UndoStep::SetInput(SetInput {
                     input,
@@ -498,12 +502,15 @@ impl GraphIntent {
                 // naturally (nothing is subscribed → from == to == false), so
                 // it needs no existence check.
                 if subscribe {
-                    let (Some(emitter_node), Some(_)) =
-                        (graph.find(event.node_id), graph.find(subscriber))
-                    else {
+                    if graph.find(event.node_id).is_none() || graph.find(subscriber).is_none() {
                         return Ok(None);
-                    };
-                    validate::declared_event(emitter_node, library, subscription)?;
+                    }
+                    graph
+                        .admit_subscription(library, subscription)
+                        .map_err(|rejection| MalformedIntent::RejectedSubscription {
+                            subscription,
+                            rejection,
+                        })?;
                 }
                 UndoStep::SetSubscription(SetSubscription {
                     subscription,

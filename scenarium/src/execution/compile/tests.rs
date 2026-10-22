@@ -141,9 +141,7 @@ fn dense_order_is_id_order() {
     for &node_id in &authored {
         graph.insert(node_id, Node::from(&func));
     }
-    let compiled = Compiler::default()
-        .compile(&graph, &fixture.library)
-        .unwrap();
+    let compiled = Compiler::default().compile(&graph, &fixture.library);
 
     let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
     let expected: Vec<NodeId> = (1..=8u128).map(NodeId::from_u128).collect();
@@ -283,11 +281,9 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
         .collect();
 
     let mut reused = Compiler::default();
-    reused.compile(&warmup.graph, &warmup.library).unwrap();
-    let after_reuse = reused.compile(&subject.graph, &subject.library).unwrap();
-    let fresh = Compiler::default()
-        .compile(&subject.graph, &subject.library)
-        .unwrap();
+    reused.compile(&warmup.graph, &warmup.library);
+    let after_reuse = reused.compile(&subject.graph, &subject.library);
+    let fresh = Compiler::default().compile(&subject.graph, &subject.library);
 
     assert_eq!(
         summary(&after_reuse, &authored),
@@ -309,9 +305,9 @@ fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
         .collect();
     let mut compiler = Compiler::default();
 
-    let first = compiler.compile(&g.graph, &g.library).unwrap();
+    let first = compiler.compile(&g.graph, &g.library);
     let first_summary = summary(&first, &authored);
-    let second = compiler.compile(&g.graph, &g.library).unwrap();
+    let second = compiler.compile(&g.graph, &g.library);
 
     assert_eq!(summary(&second, &authored), first_summary);
     assert_eq!(second.inputs.len(), first.inputs.len());
@@ -414,45 +410,24 @@ fn interns_a_wire_to_the_producers_dense_address() {
     );
 }
 
-/// The type gate: a wire whose producer no longer fits the consumer lowers as
-/// unbound rather than severing the authored wiring, so it revives when the
-/// types line up again.
+/// A graph that breaks the load contract is the host's bug, so the compile
+/// stops in every build, naming the binding the load or the edit gate should
+/// have refused.
 #[test]
-fn drops_a_type_mismatched_wire_to_unbound() {
-    let g = wired_pair(DataType::String, DataType::Int);
-    let compiled = g.compile();
-
-    assert!(
-        matches!(compiled.binding("consumer", 0), ExecutionBinding::None),
-        "a String producer does not satisfy an Int input"
-    );
-    assert!(
-        g.graph
-            .bindings
-            .contains_key(&InputPort::new(g.id("consumer"), 0)),
-        "the authored wire itself is untouched"
-    );
+#[should_panic(expected = "breaks the load contract: the binding on")]
+fn a_graph_that_breaks_the_contract_panics_naming_the_breach() {
+    wired_pair(DataType::String, DataType::Int).compile();
 }
 
-/// A const that satisfies its input travels through verbatim; a mismatched one
-/// lowers unbound, on the same terms as a wire.
+/// A const travels through verbatim.
 #[test]
-fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
-    for (value, kept) in [
-        (ConstValue::Int(7), true),
-        (ConstValue::String("no".to_owned()), false),
-    ] {
-        let mut g = pair(DataType::Int, DataType::Int);
-        g.constant("consumer", 0, value.clone());
-        assert_eq!(
-            matches!(
-                g.compile().binding("consumer", 0),
-                ExecutionBinding::Const(_)
-            ),
-            kept,
-            "const {value:?} on an Int input",
-        );
-    }
+fn lowers_a_const_verbatim() {
+    let mut g = pair(DataType::Int, DataType::Int);
+    g.constant("consumer", 0, 7i64);
+    assert!(matches!(
+        g.compile().binding("consumer", 0),
+        ExecutionBinding::Const(ConstValue::Int(7))
+    ));
 }
 
 /// A disabled node keeps its place in the program — planning excludes it, the
@@ -495,9 +470,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
     );
 }
 
-/// A subscription whose emitter or subscriber is disabled wires nothing, and
-/// neither does one naming an event the func no longer declares — the same
-/// drift tolerance the type gate applies to data edges.
+/// A subscription whose emitter or subscriber is disabled wires nothing.
 #[test]
 fn drops_subscriptions_that_cannot_fire() {
     /// Which end of the edge, if either, the document disabled.
@@ -507,17 +480,13 @@ fn drops_subscriptions_that_cannot_fire() {
         Emitter,
         Subscriber,
     }
-    let build = |events: usize, disabled: Disabled| {
+    let build = |disabled: Disabled| {
         let mut g = TestGraph::new();
-        g.add("emitter", move |mut n| {
-            for i in 0..events {
-                n = n.event(&format!("e{i}"), internals::stub_event());
-            }
-            n
+        g.add("emitter", |n| {
+            n.event("e0", internals::stub_event())
+                .event("e1", internals::stub_event())
         });
         g.add("listener", NodeSpec::sink);
-        // Authored against a two-event declaration; `events == 1` is the library
-        // having since dropped the port this names.
         g.subscribe("emitter", 1, "listener");
         match disabled {
             Disabled::Neither => {}
@@ -525,54 +494,20 @@ fn drops_subscriptions_that_cannot_fire() {
             Disabled::Subscriber => g.disable("listener"),
         }
         let compiled = g.compile();
-        (0..events)
+        (0..2)
             .map(|event_idx| compiled.subscribers("emitter", event_idx).len())
             .sum::<usize>()
     };
 
+    assert_eq!(build(Disabled::Neither), 1, "the live subscription wires");
     assert_eq!(
-        build(2, Disabled::Neither),
-        1,
-        "the live subscription wires"
-    );
-    assert_eq!(
-        build(2, Disabled::Emitter),
+        build(Disabled::Emitter),
         0,
         "a disabled emitter fires nothing"
     );
     assert_eq!(
-        build(2, Disabled::Subscriber),
+        build(Disabled::Subscriber),
         0,
         "a disabled subscriber receives nothing"
-    );
-    assert_eq!(
-        build(1, Disabled::Neither),
-        0,
-        "an event the func dropped wires nothing"
-    );
-}
-
-/// A wire naming a port the producer no longer declares lowers as unbound:
-/// the range check unbinds it, so the artifact carries no `OutputAddr` past
-/// its producer's output run.
-#[test]
-fn a_wire_to_a_dropped_port_lowers_as_unbound() {
-    let mut g = TestGraph::new();
-    g.add("producer", |n| n.pure().output(DataType::Int));
-    g.add("consumer", |n| {
-        n.pure().input(DataType::Any).output(DataType::Int)
-    });
-    // Port 99 does not exist: the library shrank under a saved document.
-    g.wire(("producer", 99), "consumer");
-
-    assert!(
-        matches!(g.compile().binding("consumer", 0), ExecutionBinding::None),
-        "the range check unbinds a port the producer does not declare"
-    );
-    assert!(
-        g.graph
-            .bindings
-            .contains_key(&InputPort::new(g.id("consumer"), 0)),
-        "the authored wire itself is untouched"
     );
 }

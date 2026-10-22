@@ -36,7 +36,6 @@
     // Ports — an untyped port's circle, and the ink beside it. A typed port
     // takes its hue from the type table instead.
     input_port:          "#8bdd79",    // success            green_bright
-    output_port:         "#fa993b",    // syn_keyword        orange_bright
     event_port:          "#ff8b8c",    // error              red_bright
     port_label:          "#a4a4a4",    // text_muted         gray_6
 

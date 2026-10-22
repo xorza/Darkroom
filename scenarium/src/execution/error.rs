@@ -4,29 +4,20 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::graph::func::error::InvokeError;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::identity::NodeId;
 
-/// An **operation-level** failure that aborts a whole plan / run: the schedule has a cycle
-/// ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
-/// ([`NodeSeedNotFound`](Error::NodeSeedNotFound)), or an event seed had no port
-/// ([`EventSeedNotFound`](Error::EventSeedNotFound)). It's the error type of the engine's
-/// plan/execute, which the worker reports as
+/// An **operation-level** failure that aborts a whole plan / run: a node seed had no
+/// occurrence ([`NodeSeedNotFound`](Error::NodeSeedNotFound)). It's the error type of the
+/// engine's plan/execute, which the worker reports as
 /// [`WorkerError::Execution`](crate::worker::error::WorkerError::Execution). A *single node's* run
 /// failure is a [`RunError`], carried by that node's
-/// [`NodeStatus`](crate::execution::report::node_status::NodeStatus) row, never one of these; a
-/// graph that won't compile is a [`CompileError`](crate::execution::compile::error::CompileError),
-/// produced on the host before anything reaches the engine — the phases can't be confused at the
-/// type level.
+/// [`NodeStatus`](crate::execution::report::node_status::NodeStatus) row, never one of these.
 #[derive(Debug, Error, Clone)]
 pub enum Error {
-    #[error("Cycle detected while building execution graph at node {node_id:?}")]
-    CycleDetected { node_id: NodeId },
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
     #[error("node seed {node_id:?} not found in the compiled program")]
     NodeSeedNotFound { node_id: NodeId },
-    #[error("event seed {event:?} not found in the compiled program")]
-    EventSeedNotFound { event: EventPort },
 }
 
 /// A **single node's** run-time failure, reported in that node's one

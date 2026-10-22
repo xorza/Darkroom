@@ -133,11 +133,9 @@ impl NodeUI {
         let graph_ctx = dcx.graph_ctx();
         graph_ctx.paint_order(&mut order);
         for item in &order {
-            // A placement whose node is gone — deleted since the order was
-            // taken — resolves to nothing and is skipped, not faked.
-            let Some(n) = graph_ctx.node(item.id) else {
-                continue;
-            };
+            let n = graph_ctx
+                .node(item.id)
+                .expect("the paint order lists the context's own placements");
             let keeps_focus = ui.is_focus_within(wid::body(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);

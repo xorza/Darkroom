@@ -8,9 +8,11 @@ use std::sync::Arc;
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, Strictness, TypeId};
+use crate::graph::error::Unresolved;
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::FuncId;
+use crate::graph::node::{Node, NodeKind};
 use crate::library::type_entry::TypeEntry;
 
 /// The runtime registry every frontend resolves against: the [`Func`]s nodes instantiate, and the
@@ -36,6 +38,20 @@ impl Library {
     /// as [`FuncBuilder::build`](crate::FuncBuilder::build) refuses it.
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
+    }
+
+    /// The declaration `node` instantiates, or why it has none: the library
+    /// holds no func under its id, or holds it with other ports than the node
+    /// was authored against, so its wiring would land on the wrong ports.
+    pub fn func_of(&self, node: &Node) -> Result<&Func, Unresolved> {
+        match &node.kind {
+            NodeKind::Func(func_ref) => match self.by_id(func_ref.id()) {
+                Some(func) if func.func_ref() == *func_ref => Ok(func),
+                Some(_) => Err(Unresolved::ChangedPorts),
+                None => Err(Unresolved::MissingFunc),
+            },
+            NodeKind::Special(special) => Ok(special.func()),
+        }
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
@@ -192,9 +208,8 @@ impl Library {
     }
 
     /// Whether an authored `Const` literal `value` may sit on `input` — the
-    /// `Const` half of the lowering-time type degrade (the `Bind` half is
-    /// [`DataType::compatible_with`]); a literal that doesn't satisfy its port
-    /// lowers as unbound.
+    /// `Const` half of [`Graph::admit`](crate::Graph::admit) (the `Bind` half
+    /// is [`DataType::compatible_with`]).
     ///
     /// The registry's whole contribution is the enum arm: a literal is a
     /// variant *name*, and only this map says which names a type declares.

@@ -15,9 +15,9 @@ pub(crate) struct RunSeeds {
     /// Include every node owning a subscribed event so it initializes the
     /// shared state and runtime triggers that drive the event loop.
     pub(crate) event_sources: bool,
-    /// Run the subscribers of these specific fired events. An event absent from the
-    /// installed program fails with
-    /// [`Error::EventSeedNotFound`](crate::execution::error::Error::EventSeedNotFound).
+    /// Run the subscribers of these specific fired events, each one the installed
+    /// program declares: events arrive in a batch of their own, and each install
+    /// rebuilds the event loop.
     pub(crate) events: Vec<EventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for

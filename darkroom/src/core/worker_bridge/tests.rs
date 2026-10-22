@@ -36,10 +36,7 @@ fn drop_waits_for_worker_idle_before_runtime_shutdown() {
         Binding::from(ConstValue::String("tick".to_string())),
     );
     graph.subscribe(EventPort::new(frame, 1), print);
-    let compiled = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
+    let compiled = Compiler::default().compile(&graph, &library).into();
     bridge
         .install(compiled)
         .expect("worker accepts the program");

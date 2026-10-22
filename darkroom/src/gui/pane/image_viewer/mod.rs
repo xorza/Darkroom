@@ -483,11 +483,12 @@ impl Display for HeaderReadout<'_> {
 /// labels the one tab it is — because one hash probe per label is cheaper than
 /// a table keyed by every tab.
 pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
-    doc.graph
+    let name = &doc
+        .graph
         .find(node_id)
-        .map(|n| n.name.as_str())
-        .filter(|n| !n.is_empty())
-        .unwrap_or("image")
+        .expect("a viewer tab's node is in the graph")
+        .name;
+    if name.is_empty() { "image" } else { name }
 }
 
 /// A texture's 1:1 logical footprint on the current display — one texel per

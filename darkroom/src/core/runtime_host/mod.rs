@@ -104,26 +104,19 @@ impl RuntimeHost {
         self.dispatch(|worker| worker.set_disk_store(DiskStore::new(self.disk_root.clone())));
     }
 
-    /// Compile `graph` against the current library. A failure is reported to
-    /// `status` and returns `None` (nothing sent, worker untouched); a success
-    /// clears the sticky error.
+    /// Compile `graph` against the current library, and clear the last run's
+    /// failure from `status`: a new run supersedes it. The document keeps its
+    /// graph one the library can run, so a compile cannot fail.
     ///
     /// The log is borrowed rather than owned: it is the app's user-facing
     /// outcome slot, shared with file and preferences reporting, and this host
     /// is otherwise headless.
-    fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Option<Arc<CompiledGraph>> {
-        match self.compiler.compile(graph, self.library.current()) {
-            Ok(compiled) => {
-                status.succeeded(StatusFamily::Run);
-                self.disk_backed = graph.iter().any(|node| node.cache.persists_to_disk());
-                self.prepare_root();
-                Some(Arc::new(compiled))
-            }
-            Err(e) => {
-                status.error(StatusFamily::Run, format!("compile failed: {e}"));
-                None
-            }
-        }
+    fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Arc<CompiledGraph> {
+        let compiled = self.compiler.compile(graph, self.library.current());
+        status.succeeded(StatusFamily::Run);
+        self.disk_backed = graph.iter().any(|node| node.cache.persists_to_disk());
+        self.prepare_root();
+        Arc::new(compiled)
     }
 
     /// Drop the worker's installed program and the whole runtime cache behind
@@ -189,39 +182,29 @@ impl RuntimeHost {
     }
 
     /// Compile `graph` against the current library and send it to the worker
-    /// for one evaluation. `false` means the compile failed — it is reported
-    /// to the caller's [`StatusLog`] synchronously and nothing reaches the
-    /// worker.
-    /// Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_once(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
-        let Some(compiled) = self.compile(graph, status) else {
-            return false;
-        };
+    /// for one evaluation. Results arrive via [`Self::drain_worker`].
+    pub(crate) fn run_once(&mut self, graph: &Graph, status: &mut StatusLog) {
+        let compiled = self.compile(graph, status);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.run_sinks()
         });
-        true
     }
 
     /// Compile `graph` and evaluate authored `node_id`, delivering its outputs
     /// for the preview fetch ("run to this node"). The node seeds the run
     /// explicitly, which overrides its `disabled` flag during planning.
     ///
-    /// `false` means nothing reached the worker — either the compile failed
-    /// (reported to the caller's [`StatusLog`]) or the node has no execution
-    /// footprint at
-    /// all, i.e. the program dropped it. Results arrive via
-    /// [`Self::drain_worker`].
+    /// `false` means nothing reached the worker: the program holds no work
+    /// for the node, which an edit in the same frame removed (reported to
+    /// `status`). Results arrive via [`Self::drain_worker`].
     pub(crate) fn run_node(
         &mut self,
         graph: &Graph,
         node_id: NodeId,
         status: &mut StatusLog,
     ) -> bool {
-        let Some(compiled) = self.compile(graph, status) else {
-            return false;
-        };
+        let compiled = self.compile(graph, status);
         if !compiled.contains(node_id) {
             status.error(
                 StatusFamily::Run,
@@ -241,8 +224,7 @@ impl RuntimeHost {
     ///
     /// Answers with the nodes that eviction reaches, resolved against the very
     /// artifact it installs — so a caller projecting the outcome drops exactly
-    /// what the worker drops. Empty when nothing was dispatched: the compile
-    /// failed (reported to `status`), or the program holds no work for
+    /// what the worker drops. Empty when the program holds no work for
     /// `node_id`.
     ///
     /// Asking here rather than reading a reply: a successful eviction is
@@ -254,9 +236,7 @@ impl RuntimeHost {
         node_id: NodeId,
         status: &mut StatusLog,
     ) -> Vec<NodeId> {
-        let Some(compiled) = self.compile(graph, status) else {
-            return Vec::new();
-        };
+        let compiled = self.compile(graph, status);
         let evicted = compiled.consumer_cone([node_id]);
         self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
         evicted
@@ -269,17 +249,9 @@ impl RuntimeHost {
     ///
     /// The install has to travel with it: the worker reads the node's cache mode
     /// off the installed program, which is still the pre-edit one here.
-    pub(crate) fn flush_cache(
-        &mut self,
-        graph: &Graph,
-        node_id: NodeId,
-        status: &mut StatusLog,
-    ) -> bool {
-        let Some(compiled) = self.compile(graph, status) else {
-            return false;
-        };
+    pub(crate) fn flush_cache(&mut self, graph: &Graph, node_id: NodeId, status: &mut StatusLog) {
+        let compiled = self.compile(graph, status);
         self.dispatch(|worker| worker.install_and_flush_cache(compiled, node_id));
-        true
     }
 
     /// Request cancellation of the in-flight run (coarse — the running node
@@ -290,17 +262,12 @@ impl RuntimeHost {
 
     /// Start the event loop on `graph` (compiles + loads it, then fires
     /// events). The worker's `Update` tears down any prior loop first.
-    /// `false` means the compile failed — it is reported to the caller's
-    /// [`StatusLog`] and the loop's running state is untouched.
-    pub(crate) fn start_event_loop(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
-        let Some(compiled) = self.compile(graph, status) else {
-            return false;
-        };
+    pub(crate) fn start_event_loop(&mut self, graph: &Graph, status: &mut StatusLog) {
+        let compiled = self.compile(graph, status);
         self.dispatch(|worker| {
             worker.install(compiled)?;
             worker.start_event_loop()
         });
-        true
     }
 
     /// Stop the event loop.

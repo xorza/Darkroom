@@ -60,11 +60,11 @@ impl MoveSelection {
 impl Reversible for MoveSelection {
     fn write(&self, doc: &mut Document, dir: Direction) {
         for moved in &self.moves {
-            // A member removed since the step was recorded simply doesn't
-            // move: undo restores it before the entry that placed it here.
-            if let Some(placement) = doc.main_view.item_placements.get_mut(&moved.key) {
-                placement.pos = *moved.pos.half(dir);
-            }
+            doc.main_view
+                .item_placements
+                .get_mut(&moved.key)
+                .expect("history replays a move against the items it recorded")
+                .pos = *moved.pos.half(dir);
         }
     }
 

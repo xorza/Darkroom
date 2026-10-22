@@ -1,7 +1,7 @@
 //! The window's bottom status bar: a thin chrome strip carrying the last
-//! failed action's message (left, error-colored — compile/run/save/load
-//! failures parked in the engine's `StatusLog` until a success of the same
-//! family clears it) and the memory readout (right): this process's own resident footprint, plus the runtime cache's
+//! failed action's message or a warning (left, in the error or the warning
+//! color — run/save/load failures and what a load repaired, parked in the
+//! engine's `StatusLog` until a success of the same family clears it) and the memory readout (right): this process's own resident footprint, plus the runtime cache's
 //! system + GPU bytes under one `Cache` clause, mirrored from the last
 //! completed `RunSummary` and shown only when the cache holds something.
 //! The footprint is never zero, so the bar is always present: a strip that
@@ -11,6 +11,7 @@
 use palantir::prelude::*;
 use scenarium::RamUsage;
 
+use crate::core::status_log::Severity;
 use crate::gui::frame::app_ctx::AppCtx;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
@@ -38,10 +39,14 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
         .padding(Spacing::xy(PAD_X, PAD_Y))
         .background(Background::fill(colors.chrome_fill))
         .show(ui, |ui| {
-            if let Some(msg) = ctx.status_error() {
-                let style =
-                    support::colored_text(ui, ctx.theme().status.error, ctx.theme().text.body);
-                Text::new(msg).style(&style).show(ui);
+            if let Some(message) = ctx.status_message() {
+                let status = &ctx.theme().status;
+                let color = match message.severity {
+                    Severity::Error => status.error,
+                    Severity::Warning => status.warning,
+                };
+                let style = support::colored_text(ui, color, ctx.theme().text.body);
+                Text::new(message.line).style(&style).show(ui);
             }
             // Spacer: pins the message to the left edge and the memory
             // readout to the right.

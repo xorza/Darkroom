@@ -14,8 +14,9 @@ use crate::graph::func::func_output::FuncOutput;
 ///
 /// Bindings and subscriptions name ports by index, so a func whose ports moved or changed type
 /// under a saved node would bind that node's wiring to the wrong ports, or silently drop it. A
-/// node records the signature of the func it was authored against, and a mismatch with the
-/// library is refused by name rather than lowered into a wrong graph.
+/// node records the signature of the func it was authored against; one the library does not
+/// match does not resolve ([`Library::func_of`](crate::Library::func_of)), so the load detaches
+/// it with its wiring rather than landing that wiring on the wrong ports.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct FuncSignature([u8; 32]);
 

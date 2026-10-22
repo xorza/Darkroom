@@ -1,13 +1,10 @@
-//! What an authoring graph rejects: everything
-//! [`validate`](crate::graph::Graph::validate) refuses to call a graph.
-//!
-//! *Recoverable* — a stale document or an edit a user can undo — so it is a
-//! `Result` rather than a panic. Logic errors inside the graph's own mutations
-//! assert instead.
+//! What an authoring graph rejects: what
+//! [`validate`](crate::graph::Graph::validate) refuses to call a graph, what
+//! a library cannot resolve, and the wiring
+//! [`admit`](crate::graph::Graph::admit) refuses.
 
 use thiserror::Error;
 
-use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{EventPort, InputPort, OutputPort};
 use crate::graph::subscription::Subscription;
@@ -30,31 +27,52 @@ pub enum DetachedNodeError {
     DuplicateSubscription { subscription: Subscription },
 }
 
+/// Why a node has no declaration in a library: what
+/// [`Library::func_of`](crate::Library::func_of) answers for a node a graph
+/// cannot hold.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum Unresolved {
+    #[error("the library holds no func under its id")]
+    MissingFunc,
+    #[error("the library holds its func with other ports than it was authored against")]
+    ChangedPorts,
+}
+
+/// Why [`Graph::admit`](crate::Graph::admit) refuses a binding.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum BindingRejection {
+    #[error("its node does not declare the input")]
+    UndeclaredInput,
+    #[error("the producer does not declare the output")]
+    UndeclaredOutput,
+    #[error("the input is const-only and cannot take a wire")]
+    WiredConstOnly,
+    #[error("the input does not accept the constant")]
+    ConstMismatch,
+    #[error("the input does not accept the producer's output type")]
+    WireMismatch,
+}
+
+/// Why [`Graph::admit_subscription`](crate::Graph::admit_subscription)
+/// refuses a subscription.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionRejection {
+    #[error("the emitter does not declare the event")]
+    UndeclaredEvent,
+    #[error("a node cannot subscribe to its own event")]
+    SelfSubscription,
+}
+
+/// A graph that is not one a host may compile: its structure is broken, or it
+/// breaks the load contract against a library.
 #[derive(Debug, Error)]
 pub enum GraphValidationError {
     #[error("graph contains a node with a nil id")]
     NilNodeId,
-    #[error("node {node_id:?} has a nil func_id")]
-    NilFuncId { node_id: NodeId },
-    #[error("node {node_id:?} references func {func_id:?}, absent from the library")]
-    MissingFunc { node_id: NodeId, func_id: FuncId },
-    #[error(
-        "node {node_id:?} was authored against other ports of \"{func_name}\" ({func_id:?}) \
-         than the library declares"
-    )]
-    FuncChanged {
-        node_id: NodeId,
-        func_id: FuncId,
-        func_name: String,
-    },
+    #[error("node {node_id:?} does not resolve: {reason}")]
+    Unresolved { node_id: NodeId, reason: Unresolved },
     #[error("binding on missing node {node_id:?}")]
     BindingMissingNode { node_id: NodeId },
-    #[error(
-        "input {port_idx} on node {node_id:?} is const-only and cannot be wired to an upstream output",
-        node_id = .port.node_id,
-        port_idx = .port.port_idx
-    )]
-    ConstOnlyBinding { port: InputPort },
     #[error(
         "node {destination_id:?} input {port_idx} binds to missing node {source_id:?}",
         destination_id = .destination.node_id,
@@ -72,4 +90,16 @@ pub enum GraphValidationError {
         event: EventPort,
         subscriber: NodeId,
     },
+    #[error("the binding on {port:?} is refused: {rejection}")]
+    RejectedBinding {
+        port: InputPort,
+        rejection: BindingRejection,
+    },
+    #[error("subscription {subscription:?} is refused: {rejection}")]
+    RejectedSubscription {
+        subscription: Subscription,
+        rejection: SubscriptionRejection,
+    },
+    #[error("the wire into {port:?} closes a data cycle")]
+    Cycle { port: InputPort },
 }

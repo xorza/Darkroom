@@ -140,14 +140,12 @@ fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
 /// doesn't.
 #[test]
 fn dirty_flag_tracks_content_edits_not_navigation() {
-    let mut test = SessionHarness::new(DocFixture::default());
+    let mut fixture = DocFixture::default();
+    let node = fixture.plain_node();
+    let mut test = SessionHarness::new(fixture);
     let node_id = NodeId::unique();
 
-    test.apply(GraphIntent::add_node(
-        Vec2::ZERO,
-        node_id,
-        DocFixture::stub_node(),
-    ));
+    test.apply(GraphIntent::add_node(Vec2::ZERO, node_id, node));
     assert!(test.session.open.dirty, "adding a node is savable work");
 
     test.session.open.dirty = false;
@@ -163,12 +161,15 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
 /// rearrangement doesn't prompt.
 #[test]
 fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
-    let mut test = SessionHarness::new(DocFixture::default());
+    let mut fixture = DocFixture::default();
+    let preview = preview_sink::func(Arc::default());
+    fixture.library.add(preview.clone());
+    let mut test = SessionHarness::new(fixture);
     let node_id = NodeId::unique();
     test.apply(GraphIntent::add_node(
         Vec2::ZERO,
         node_id,
-        DocFixture::stub_node(),
+        scenarium::Node::from(&preview),
     ));
 
     let tab = TabRef::ImageViewer(node_id);
@@ -189,7 +190,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
         "arranging panes is navigation, not savable work"
     );
 
-    // One undo takes back the *node*, not the tab.
+    // One undo takes back the node, and its viewer tab goes with it.
     assert!(test.undo(), "the node add is the only entry");
     assert_eq!(
         test.session.open.document.graph.len(),
@@ -197,13 +198,14 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
         "the node came back out"
     );
     assert!(
-        test.session
+        !test
+            .session
             .open
             .document
             .layout
             .all_tabs()
             .any(|t| t == tab),
-        "undo leaves the layout alone"
+        "a removed node's viewer closes"
     );
     assert!(!test.undo(), "the dock op recorded nothing of its own");
 }

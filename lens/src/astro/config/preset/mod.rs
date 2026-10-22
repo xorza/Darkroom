@@ -69,7 +69,7 @@ pub(crate) trait Preset: IntrospectEnum + Copy + 'static {
         match config.as_custom::<ConfigValue<Self::Knobs>>() {
             Some(config) => config.0.clone().into(),
             None => Self::from_variant(pick.required_enum())
-                .expect("the compiler checked the pick against the picker's variants")
+                .expect("the load and the edit gate admitted the pick among the picker's variants")
                 .config(),
         }
     }

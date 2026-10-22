@@ -20,9 +20,11 @@ pub(crate) struct Raise {
 
 impl Reversible for Raise {
     fn write(&self, doc: &mut Document, dir: Direction) {
-        if let Some(placement) = doc.main_view.item_placements.get_mut(&self.key) {
-            placement.z = *self.z.half(dir);
-        }
+        doc.main_view
+            .item_placements
+            .get_mut(&self.key)
+            .expect("history replays a raise against the item it recorded")
+            .z = *self.z.half(dir);
     }
 
     /// Clicking what is already frontmost lands here: the click still asks for

@@ -297,11 +297,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
     let fill = if input.missing() {
         theme.status.warning
     } else {
-        Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(
-            theme,
-            input.ty(),
-            PortKind::Input,
-        ))
+        Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(theme, input.ty()))
     };
     // A required input's port reads as bigger — its total footprint matches
     // a bound output's circle-plus-ring, so "important port" carries the
@@ -483,11 +479,7 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
     let theme = ncx.theme();
     let port = output.port_ref();
     let ty = output.ty();
-    let fill = Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(
-        theme,
-        ty,
-        PortKind::Output,
-    ));
+    let fill = Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(theme, ty));
     let tip = PortTip {
         description: output.description(),
         ty,

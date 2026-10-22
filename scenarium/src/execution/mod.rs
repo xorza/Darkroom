@@ -3,9 +3,10 @@
 //! 1. **compile** — the [`Compiler`](compile::Compiler) walks the authoring
 //!    `Graph` straight into an immutable
 //!    [`CompiledGraph`](compile::compiled_graph::CompiledGraph), which lives
-//!    beside it. Runs on the *host's* thread (compile errors are synchronous);
-//!    the artifact is installed into the engine via
-//!    [`engine::ExecutionEngine::install`], which cannot fail.
+//!    beside it. Runs on the *host's* thread and cannot fail: the host keeps
+//!    the graph one the library can run, which the compile asserts. The
+//!    artifact is installed into the engine via
+//!    [`engine::ExecutionEngine::install`], which cannot fail either.
 //! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
 //!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.

@@ -5,9 +5,9 @@
 //! image type — the dominant payload on a darkroom canvas earns a deliberate
 //! color, not a hash pick. Remaining `Custom` / `Enum` types are keyed by
 //! their `type_id` onto a small ramp, so distinct custom types land on
-//! stable, distinct colors without enumerating them here. `Any` (the
-//! default / untyped boundary placeholder) has no type identity, so it
-//! falls back to the positional input/output port colors from the theme.
+//! stable, distinct colors without enumerating them here. `Any`, which only an
+//! input declares, has no type identity, so it falls back to the theme's
+//! untyped input color.
 //!
 //! The hue rosters themselves live on the theme
 //! ([`TypeColors`], serialized like every
@@ -17,16 +17,15 @@
 use palantir::RgbaF32;
 use scenarium::DataType;
 
-use crate::gui::port_ref::PortKind;
 use crate::gui::theme::Theme;
 use crate::gui::theme::type_colors::TypeColors;
 
-/// `RgbaF32` for a port of type `ty` on the given side, at rest — see
-/// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). Untyped (`Any`) ports defer to the
-/// theme's positional port colors.
-pub(crate) fn data(theme: &Theme, ty: &DataType, kind: PortKind) -> RgbaF32 {
+/// `RgbaF32` for a port of type `ty`, at rest — see
+/// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). An untyped (`Any`)
+/// input takes the theme's untyped input color.
+pub(crate) fn data(theme: &Theme, ty: &DataType) -> RgbaF32 {
     if matches!(ty, DataType::Any) {
-        fallback(theme, kind)
+        theme.ports.input
     } else {
         type_hue(&theme.type_colors, ty)
     }
@@ -37,13 +36,6 @@ pub(crate) fn data(theme: &Theme, ty: &DataType, kind: PortKind) -> RgbaF32 {
 /// rather than a type hue.
 pub(crate) const fn event(theme: &Theme) -> RgbaF32 {
     theme.ports.event
-}
-
-const fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
-    match kind {
-        PortKind::Input => theme.ports.input,
-        PortKind::Output => theme.ports.output,
-    }
 }
 
 /// The base hue for a non-`Any` type under the theme's roster.

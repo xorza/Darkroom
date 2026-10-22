@@ -654,7 +654,6 @@ mod internals {
 
     use crate::execution::compile::Compiler;
     use crate::execution::compile::compiled_graph::CompiledGraph;
-    use crate::execution::compile::error::CompileError;
     use crate::graph::identity::{EventPort, NodeId};
     use crate::internals::test_graph::TestGraph;
     use crate::internals::test_graph::compiled::Compiled;
@@ -678,18 +677,12 @@ mod internals {
             Arc::new(self.compile().program)
         }
 
-        /// Lower this fixture, keeping the names. Panics on a compile error —
-        /// for the tests where the refusal *is* the subject, see
-        /// [`try_compile`](Self::try_compile).
+        /// Lower this fixture, keeping the names.
         pub(crate) fn compile(&self) -> Compiled {
-            self.try_compile().expect("the fixture graph compiles")
-        }
-
-        pub(crate) fn try_compile(&self) -> Result<Compiled, CompileError> {
-            Ok(Compiled::new(
-                Compiler::default().compile(&self.graph, &self.library)?,
+            Compiled::new(
+                Compiler::default().compile(&self.graph, &self.library),
                 self.ids.clone(),
-            ))
+            )
         }
     }
 }

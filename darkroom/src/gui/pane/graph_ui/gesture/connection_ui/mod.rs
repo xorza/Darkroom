@@ -1,7 +1,6 @@
 use glam::Vec2;
 use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::Binding;
-use scenarium::DataType;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
@@ -129,9 +128,7 @@ impl ConnectionUI {
         };
         // Both modes span frames, and undo runs before this prepass, so the node the wire grew out
         // of can be deleted under it. Not re-latching is how the gesture drops — a commit against a
-        // dead producer is refused at the edit boundary anyway, silently, and `GraphCtx::port_type`
-        // would meanwhile report the start as untyped (which `scan_snap_target` reads as
-        // "compatible with anything").
+        // dead producer is refused at the edit boundary anyway, silently.
         if !graph_ctx.contains(state.drag.node()) {
             return;
         }
@@ -268,8 +265,8 @@ impl ConnectionUI {
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
         let theme = graph_ctx.theme();
-        let drag_ty = graph_ctx.port_type(start_port).unwrap_or(&DataType::Any);
-        let color = port_color::data(theme, drag_ty, start_port.kind);
+        let drag_ty = graph_ctx.port_type(start_port);
+        let color = port_color::data(theme, drag_ty);
         Wire::data(p0, p3).add(ui, theme.stroke_width, color);
     }
 }
@@ -303,21 +300,11 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// The endpoint colors of a committed data wire: the two ports' type colors,
 /// so each end matches the port it touches and the wire reads as its data type
 /// (both ends share it unless the input is the untyped `Any`).
-///
-/// A wire a library change left type-mismatched paints entirely in the
-/// missing-input warning color instead. Nothing severs it — it lowers as
-/// unbound (drift tolerance) — so it wears the same warning the run will report
-/// on the port.
 fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
     let theme = graph_ctx.theme();
-    let src_ty = graph_ctx.port_type(src).unwrap_or(&DataType::Any);
-    let tgt_ty = graph_ctx.port_type(tgt).unwrap_or(&DataType::Any);
-    if !tgt_ty.compatible_with(src_ty) {
-        return WireTint::flat(theme.status.warning);
-    }
     WireTint::new(
-        port_color::data(theme, src_ty, PortKind::Output),
-        port_color::data(theme, tgt_ty, PortKind::Input),
+        port_color::data(theme, graph_ctx.port_type(src)),
+        port_color::data(theme, graph_ctx.port_type(tgt)),
     )
 }
 
@@ -346,9 +333,7 @@ fn scan_snap_target(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<Po
     let candidates = graph_ctx
         .nodes()
         .filter(|n| n.id != start.node_id)
-        .flat_map(|n| n.ports(start.kind.opposite()))
-        // A const-only input is never a valid wire target.
-        .filter(|&port| !input_const_only(graph_ctx, port));
+        .flat_map(|n| n.ports(start.kind.opposite()));
     // Geometrically only one port sits under the pointer, so a port the
     // pointer is over but that `accepts_wire` rejects falls through to
     // `None` (drop) rather than snapping elsewhere.
@@ -358,8 +343,12 @@ fn scan_snap_target(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<Po
         .filter(|&port| accepts_wire(graph_ctx, start, port))
 }
 
-/// Whether a wire dragged from `start` may land on `port` — the two
-/// rejections that outlive the geometric hit test in [`scan_snap_target`].
+/// Whether a wire dragged from `start` may land on `port`: the graph admits
+/// the bind, and it closes no data cycle — the two questions the edit gate
+/// asks of it, asked of the same authoring graph, so the snap filter and
+/// `GraphIntent::into_step` cannot answer differently. Both ends are live
+/// graph nodes: the wire drops once its start is gone, and the candidates
+/// come from the graph's own nodes.
 fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool {
     // `start.kind` fixes which side is the producer (output) and which the
     // consumer (input).
@@ -367,21 +356,13 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
         PortKind::Output => (start, port),
         PortKind::Input => (port, start),
     };
-    let compatible = match (graph_ctx.port_type(consumer), graph_ctx.port_type(producer)) {
-        (Some(input), Some(output)) => input.compatible_with(output),
-        // Missing type info (port not in the scene this frame) — don't
-        // block; let the intent layer decide.
-        _ => true,
-    };
-    // ...and reject a drop that would close a data-flow cycle: the planner
-    // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
-    // refuses to commit one, so the wire must never latch. Asked of the
-    // authoring graph rather than the scene's edge mirror, so the snap filter
-    // and `GraphIntent::into_step` can't answer differently.
-    compatible
-        && !graph_ctx
-            .body()
-            .produces_cycle(producer.node_id, consumer.node_id)
+    let input = consumer.input_port().expect("a wire lands on an input");
+    let output = producer.output_port().expect("a wire reads an output");
+    let graph = graph_ctx.body();
+    graph
+        .admit(graph_ctx.library(), input, &Binding::Bind(output))
+        .is_ok()
+        && !graph.produces_cycle(output.node_id, input.node_id)
 }
 
 /// "Set const" gesture: an input-port drag released over its own
@@ -426,8 +407,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
 /// pair (one `Input`, one `Output` — caller-guaranteed by
 /// [`scan_snap_target`]) commits. A cycle-forming pair never reaches here —
 /// [`scan_snap_target`] refuses to snap one, and `GraphIntent::into_step`
-/// rejects any cycle-forming bind that slips through (the planner is the final
-/// backstop, `Error::CycleDetected`).
+/// rejects any cycle-forming bind that slips through.
 fn connection(start: PortRef, end: PortRef) -> GraphIntent {
     let pair = start
         .input_port()

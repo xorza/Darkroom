@@ -7,8 +7,7 @@ use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::execution::schedule::{NodeState, RunSchedule};
-use crate::graph::identity::FuncId;
-use crate::internals;
+use crate::graph::identity::{FuncId, FuncRef};
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::{Placed, ProgramBuilder};
 use std::fs;
@@ -110,8 +109,9 @@ fn deterministic_and_per_function_distinct() {
         "const-input node digest"
     );
 
-    p.program_mut().by_id_mut(a.node_id).func_ref =
-        internals::portless_func_ref(FuncId::from_u128(11));
+    // Another id under the same signature, so only the identity moves.
+    let signature = p.program().by_id(a.node_id).func_ref.signature();
+    p.program_mut().by_id_mut(a.node_id).func_ref = FuncRef::new(FuncId::from_u128(11), signature);
     let refunced = Digests::of(&p);
     assert_ne!(
         first.at(a),

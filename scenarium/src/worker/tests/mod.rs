@@ -12,7 +12,6 @@ use crate::data::data_type::DataType;
 use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::error::StoreError;
 use crate::execution::cache::runtime_cache::error::CacheNodeError;
-use crate::execution::error::Error;
 use crate::execution::report::run_reporter::RunPhase;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;

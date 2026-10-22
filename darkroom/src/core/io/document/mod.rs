@@ -1,4 +1,4 @@
-//! Darkroom document archives: one validated RON document inside a ZIP file.
+//! Darkroom document archives: one RON document inside a ZIP file.
 
 pub(crate) mod error;
 
@@ -17,6 +17,8 @@ pub(crate) const EXTENSION: &str = "darkroom";
 const DOCUMENT_ENTRY: &str = "document.ron";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
+/// Decode the document at `path`. What it holds is made consistent by
+/// [`Document::reconcile`], which the caller runs against its library.
 pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
     if !has_extension(path) {
         return Err(DocumentLoadError::InvalidExtension {
@@ -98,19 +100,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
         });
     }
 
-    let document: Document = SerdeFormat::Ron.deserialize(&encoded).map_err(|source| {
+    SerdeFormat::Ron.deserialize(&encoded).map_err(|source| {
         DocumentLoadError::DeserializeDocument {
             path: path.to_path_buf(),
             source: Box::new(source),
         }
-    })?;
-    document
-        .validate()
-        .map_err(|source| DocumentLoadError::InvalidDocument {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    Ok(document)
+    })
 }
 
 pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveError> {
@@ -119,12 +114,11 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
             path: path.to_path_buf(),
         });
     }
-    document
-        .validate()
-        .map_err(|source| DocumentSaveError::InvalidDocument {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    debug_assert!(
+        document.validate().is_ok(),
+        "a saved document is consistent: {:?}",
+        document.validate()
+    );
 
     let encoded =
         SerdeFormat::Ron

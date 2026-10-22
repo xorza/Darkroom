@@ -6,7 +6,7 @@
 
 use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::error::{Error, Result};
+use crate::execution::error::Result;
 use crate::execution::index::NodeIdx;
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::execution::seeds::RunSeeds;
@@ -39,7 +39,7 @@ impl Planner {
 
     /// Build the per-run schedule into `schedule` from the installed program and the run's
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
-    /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
+    /// directly. Errors on a node seed absent from the program.
     ///
     /// Leaves `schedule` structurally complete and cache-blind:
     /// [`resolve::sweep`](crate::execution::resolve::sweep) is the pass that refines it,
@@ -57,20 +57,16 @@ impl Planner {
         // backward walk below and the cache-aware reverse sweep.
         schedule.collect_roots(program, seeds)?;
 
-        self.walk_backward_collect_order(program, schedule)?;
+        self.walk_backward_collect_order(program, schedule);
         schedule.validate_debug(program);
         Ok(())
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
-    /// consumers), detects cycles, and resolves each node's structural [`NodeState`].
+    /// consumers) and resolves each node's structural [`NodeState`].
     /// The state is set in the `Done` arm, i.e. in post-order, so every `Bind`
     /// producer is done, with its own state set, when a consumer reads it.
-    fn walk_backward_collect_order(
-        &mut self,
-        program: &CompiledGraph,
-        schedule: &mut RunSchedule,
-    ) -> Result<()> {
+    fn walk_backward_collect_order(&mut self, program: &CompiledGraph, schedule: &mut RunSchedule) {
         self.stack.extend(schedule.roots().map(Visit::Discover));
 
         while let Some(visit) = self.stack.pop() {
@@ -102,11 +98,11 @@ impl Planner {
             if schedule.states[node_idx] != NodeState::Unvisited {
                 continue;
             }
-            if self.entered.contains(node_idx) {
-                return Err(Error::CycleDetected {
-                    node_id: program.node_ids[node_idx],
-                });
-            }
+            debug_assert!(
+                !self.entered.contains(node_idx),
+                "a compiled program is acyclic: node {:?} closes a cycle",
+                program.node_ids[node_idx]
+            );
 
             let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
@@ -125,7 +121,5 @@ impl Planner {
                 }
             }
         }
-
-        Ok(())
     }
 }
