@@ -28,10 +28,10 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::error::{ImageError, WriteError};
 use crate::io::fits::calibration_bundle::error::{BundleError, DefectTableError};
-use crate::io::fits::cfa::{CfaFitsHdu, CfaFitsHduMetadata};
+use crate::io::fits::cfa::{self, CfaFitsHduMetadata};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
-use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FlagsExtension};
+use crate::io::fits::flags_extension::{self, FLAGS_EXTNAME};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
@@ -66,19 +66,19 @@ pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), Bund
             // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
             // drift.
             let image_type = role.extname().replace('_', " ");
-            let encoded = CfaFitsHdu::encode(
+            cfa::hdu(
                 image,
                 CfaFitsHduMetadata {
                     extname: Some(role.extname()),
                     image_type: Some(&image_type),
                     prepared: role.prepared(),
                 },
-            )?;
-            writer.write_image(&encoded.image, Some(&encoded.header))?;
+            )?
+            .write(&mut writer)?;
             if let Some(flags) =
-                FlagsExtension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
+                flags_extension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
             {
-                writer.write_image(&flags.image, Some(&flags.header))?;
+                flags.write(&mut writer)?;
                 flags_written += 1;
             }
         }
@@ -179,7 +179,7 @@ impl BundleReader<'_> {
     /// Where each component's HDU sits.
     fn idxs(&self) -> Result<BundleIdxs, BundleError> {
         // Each master finds its own flags when it is read; this refuses one that names none.
-        FlagsExtension::check_claims(self.reader.hdus())
+        flags_extension::check_claims(self.reader.hdus())
             .map_err(|error| BundleError::Flags(ImageError::fits_load(self.path, error)))?;
         let mut idxs = BundleIdxs::default();
         for (hdu, unit) in self.reader.hdus().iter().enumerate().skip(1) {

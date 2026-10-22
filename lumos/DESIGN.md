@@ -42,3 +42,9 @@
   whose one drizzled frame and depth pass the run's memory, fails the run with
   `DrizzleError::OutputSize` or `OutputOverBudget`; prices saturate rather than wrap. Refused: a
   cap on the scale, which bounds no input's size.
+- **A FITS HDU is streamed from the planes it writes.** Every writer goes through `PlaneHdu`,
+  which reads a chunk of rows of `io::fits::CHUNK_BYTES` from the image's own planes, blanks or
+  strips each sample on the way, and hands it to fits-well's `stream_image`; the file is the one
+  `write_image` writes, byte for byte. Refused: an owned `Image` staged for each HDU before the file
+  opened, which held a copy of every HDU and fits-well's encoding of one, about 1.85 GB above a
+  24 MP RGB product.

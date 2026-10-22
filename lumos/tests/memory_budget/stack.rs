@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use lumos::{
     CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor,
-    SigmaThreshold, StackConfig,
+    SigmaThreshold, StackConfig, writer,
 };
 
 use crate::alone::alone;
-use crate::budget::Budget;
+use crate::budget::{Budget, UNPLANNED_BYTES};
 use crate::session::Session;
 use crate::star_field::{Layout, StarField};
 
@@ -24,6 +24,10 @@ const FRAMES: usize = 6;
 /// 25 600 coefficients of 33 bytes, 28 bytes of transform a pixel, a row of 160 pixels for each of
 /// the 2 workers and 136 of bookkeeping, 1 563 016 B. The run reports the 118 152 B those
 /// 1 691 016 B are past it.
+///
+/// The resident stack's product then saves streamed: each HDU through one chunk of samples and
+/// fits-well's encoding of it, a 102 400-byte plane each at this size, where a whole copy of every
+/// HDU was staged before the file was written.
 #[test]
 fn a_stack_stays_within_its_budget() {
     alone(|| {
@@ -47,6 +51,17 @@ fn a_stack_stays_within_its_budget() {
                 "{label}"
             );
             budget.assert_held(label, run.peak_bytes, report);
+            if spilled == 0 {
+                let path = session.scratch().join("product.fits");
+                let save = session.measure(|| writer::product_fits(&run.value, &path).unwrap());
+                let chunks = 2 * (SIDE * SIDE * size_of::<f32>()) as u64;
+                assert!(
+                    save.peak_bytes as u64 <= chunks + UNPLANNED_BYTES,
+                    "the save held {} B at its peak, over its two chunks of {chunks} B and \
+                     {UNPLANNED_BYTES} B unplanned",
+                    save.peak_bytes
+                );
+            }
         }
     });
 }

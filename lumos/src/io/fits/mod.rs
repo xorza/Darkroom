@@ -12,4 +12,9 @@ pub(crate) mod gain_extension;
 pub(crate) mod linear;
 pub(crate) mod lumos_extension;
 pub(crate) mod metadata;
+pub(crate) mod plane_hdu;
 pub(crate) mod product;
+
+/// The bytes of samples a FITS read or write holds at once beside the planes it reads or writes:
+/// past it the I/O dominates, and below any frame worth chunking.
+pub(crate) const CHUNK_BYTES: usize = 4 * 1024 * 1024;

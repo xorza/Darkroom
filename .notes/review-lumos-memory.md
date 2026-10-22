@@ -98,30 +98,9 @@ and a slowdown is a defect of the batch. A batch that changes a vector kernel ru
 check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
-Batch 1, prices that match the allocations, landed. Dependencies: batch 6 needs the digest that
-batch 5 computes at the write, and batch 7 needs the `Stored` return of batch 6. The other
-batches are independent.
-
-### 2. Streaming FITS output
-
-The product save holds about 1.85 GB above the product at 24 MP RGB, at the end of a run that can
-take hours. Files: `io/fits/product/mod.rs`, `io/fits/linear.rs`, `io/fits/cfa.rs`,
-`io/fits/calibration_bundle/mod.rs`, `io/fits/flags_extension.rs`,
-`io/fits/gain_extension.rs`.
-
-- [ ] `io/fits/product/mod.rs:74-131`, `io/fits/linear.rs:56-58`, `io/fits/cfa.rs:112`,
-  `io/fits/calibration_bundle/mod.rs:69-79`, `flags_extension.rs:48`, `gain_extension.rs:53` —
-  each writer copies every HDU into an owned `Image`, and fits-well's `write_image` encodes each
-  into a second full buffer. Target: one plane writer over `FitsWriter::stream_image`
-  (`fits-well/src/fits_writer/mod.rs:291`) and `Writer::write_chunk`
-  (`fits_writer/writer.rs:116`). It fills one reused `Data` chunk of a few MB band by band from
-  the borrowed planes, and applies the NaN back-out, the mask bytes and the flag-bit stripping
-  to each chunk, with no `BitBuffer2`. The three plane-concatenating encoders become this one
-  writer. `Writer::finish` seeks back to patch `DATASUM` and `CHECKSUM`, and the file that
-  `fs::publish` hands over can seek. A test compares the new file with the old one byte for
-  byte.
-- [ ] `tests/memory_budget/stack.rs` — no case saves a product. Target: a case that stacks, then
-  saves the product, and asserts the save holds at most one chunk above the product.
+Batches 1, prices that match the allocations, and 2, streaming FITS output, landed. Dependencies:
+batch 6 needs the digest that batch 5 computes at the write, and batch 7 needs the `Stored` return
+of batch 6. The other batches are independent.
 
 ### 3. Detection working set
 
