@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Background, ButtonTheme, Corners, RgbaF32, Stroke, WidgetLook};
+use palantir::{Bg, ButtonTheme, Corners, RgbaF32, Stroke, WidgetLook};
 
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::type_scale::TypeScale;
@@ -19,7 +19,7 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,
         text_disabled: p.text_disabled,
-        window_background: p.canvas_bg,
+        window_bg: p.canvas_bg,
         element: p.node_fill,
         element_mid: p.elem_hover,
         element_strong: p.elem_active,
@@ -100,23 +100,23 @@ const CLOSE_LIFT_RADIUS: f32 = 3.0;
 /// of the recipe is left alone.
 fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<'_>) {
     let tabs = &mut theme.tabs;
-    tabs.strip = Background::fill(r.chrome_fill);
+    tabs.strip = Bg::fill(r.chrome_fill);
     tabs.radius = r.corner_radius;
     tabs.accent_idle = r.header_fill;
     tabs.badge = r.warning;
     // The selected chip keeps palantir's `window_bg` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
-    let chip = |fill: RgbaF32| Background::rounded(fill, top);
-    tabs.inactive.normal.background = chip(r.tab_inactive);
-    tabs.inactive.hovered.background = chip(p.element_mid);
-    tabs.inactive.active.background = chip(p.element_strong);
-    tabs.inactive.disabled.background = chip(p.element);
+    let chip = |fill: RgbaF32| Bg::rounded(fill, top);
+    tabs.inactive.normal.bg = chip(r.tab_inactive);
+    tabs.inactive.hovered.bg = chip(p.element_mid);
+    tabs.inactive.active.bg = chip(p.element_strong);
+    tabs.inactive.disabled.bg = chip(p.element);
     // The chrome lift behind a hovered close button is the same header
     // band a node's title wears.
-    let lift = Background::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
-    tabs.close.hovered.background = lift.clone();
-    tabs.close.active.background = lift;
+    let lift = Bg::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
+    tabs.close.hovered.bg = lift.clone();
+    tabs.close.active.bg = lift;
     // Chips at the menu scale, like every other chrome label.
     let scale = |look: &mut WidgetLook| {
         look.text = look.text.with_font_size(r.text.body);
@@ -132,8 +132,8 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 
     // The ghost chip trailing the pointer wears the chrome band, so it
     // reads as a tab lifted off its strip rather than as a popup.
-    theme.dock.ghost.background = Background::rounded(r.chrome_fill, Corners::all(4.0))
-        .with_border(Stroke::new(p.accent, 1.0));
+    theme.dock.ghost.bg =
+        Bg::rounded(r.chrome_fill, Corners::all(4.0)).with_border(Stroke::new(p.accent, 1.0));
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe

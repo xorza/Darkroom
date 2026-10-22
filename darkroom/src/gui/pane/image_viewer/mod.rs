@@ -246,7 +246,7 @@ impl ImageViewer {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .background(Background::fill(fill))
+            .bg(Bg::fill(fill))
             .show(ui, |ui| {
                 if prefs.bg == ViewerBg::Checker
                     && let Some(pane) = pane

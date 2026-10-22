@@ -1,5 +1,9 @@
 # Open issues
 
+- **Two lumos doc comments name items that no longer exist.**
+  `lumos/src/image_ops/color_calibration/mod.rs:9` links
+  `neutralize_background::NeutralizeBackground`, and
+  `lumos/src/internals/synthetic/mod.rs:17` uses `BackgroundField`.
 - **A merged worker batch can fail a run-to-node for a superseded request.**
   `WorkerTask::next_intent` merges every pending message into one
   `BatchIntent`, where the last `Update` wins but the `RunNodes` seeds of every

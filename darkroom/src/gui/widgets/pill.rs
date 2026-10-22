@@ -26,8 +26,8 @@ const PILL_PADDING: f32 = 4.0;
 const PILL_RADIUS: f32 = BUTTON_RADIUS + PILL_PADDING;
 
 /// The frosted chrome backdrop shared by toolbar group pills.
-pub(crate) fn bg(theme: &Theme) -> Background {
-    Background::rounded(
+pub(crate) fn bg(theme: &Theme) -> Bg {
+    Bg::rounded(
         theme.colors.chrome_fill.with_alpha(PILL_BG_ALPHA),
         Corners::all(PILL_RADIUS),
     )
@@ -45,7 +45,7 @@ pub(crate) fn dress(panel: Panel, theme: &Theme) -> Panel {
         .gap(BUTTON_GAP)
         .padding(Spacing::all(PILL_PADDING))
         .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL)
-        .background(bg(theme))
+        .bg(bg(theme))
 }
 
 /// Thin horizontal rule between concept groups sharing one column

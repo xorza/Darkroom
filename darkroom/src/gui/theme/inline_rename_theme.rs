@@ -1,7 +1,7 @@
 //! [`InlineRenameTheme`]: how an in-place rename field is styled.
 
 use palantir::SlotDefaults;
-use palantir::{Background, Spacing, TextEditTheme, TextStyleOverrides};
+use palantir::{Bg, Spacing, TextEditTheme, TextStyleOverrides};
 
 /// Per-widget theme bundle for the inline-rename label⇄field widget
 /// (node title, boundary-port name, graph tab). The `text_edit`
@@ -26,7 +26,7 @@ impl InlineRenameTheme {
     /// The flattening half of [`Self::from_palette`], over an existing
     /// text-edit bundle.
     ///
-    /// [`Background::NONE`] wholesale rather than clearing fill and stroke
+    /// [`Bg::NONE`] wholesale rather than clearing fill and stroke
     /// by hand: `text_edit` may be an app-configured bundle, and a shadow
     /// or radius it carries would otherwise outlive the flattening and
     /// paint around a field that is supposed to read as a plain label.
@@ -45,7 +45,7 @@ impl InlineRenameTheme {
             &mut style.looks.active,
             &mut style.looks.disabled,
         ] {
-            look.background = Background::NONE;
+            look.bg = Bg::NONE;
         }
         Self { text_edit: style }
     }

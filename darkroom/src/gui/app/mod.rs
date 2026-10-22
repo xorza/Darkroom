@@ -244,14 +244,14 @@ impl App {
                 w.maximized = geom.placement.maximized;
                 if !geom.placement.maximized {
                     w.size = geom.inner_size;
-                    w.pos = geom.placement.position;
+                    w.pos = geom.placement.pos;
                 }
             }
             None => {
                 self.preferences.window = Some(WindowState {
                     size: geom.inner_size,
                     maximized: geom.placement.maximized,
-                    pos: geom.placement.position,
+                    pos: geom.placement.pos,
                 });
             }
         }

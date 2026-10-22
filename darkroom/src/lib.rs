@@ -40,7 +40,7 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     {
         window = window.with_inner_size(w.size).with_maximized(w.maximized);
         if let Some(pos) = w.pos {
-            window = window.with_position(pos);
+            window = window.with_pos(pos);
         }
     }
     let host = WinitHost::builder(MAIN_WINDOW)

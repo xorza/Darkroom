@@ -88,7 +88,7 @@ impl Chip {
             .id(self.wid)
             .size((Sizing::fixed(s), Sizing::fixed(s)))
             .sense(Sense::CLICK)
-            .background(Background::rounded(fill, Corners::all(BUTTON_RADIUS)))
+            .bg(Bg::rounded(fill, Corners::all(BUTTON_RADIUS)))
             .show(ui, |ui| draw_glyph(ui, s, glyph));
         // Take the owned snapshot + click result so the button's `ui`
         // borrow ends before the tooltip records into `ui`.

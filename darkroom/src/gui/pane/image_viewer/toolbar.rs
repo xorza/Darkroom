@@ -82,7 +82,7 @@ impl Readout<'_> {
         panel
             .size((Sizing::HUG, Sizing::HUG))
             .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-            .background(pill::bg(theme))
+            .bg(pill::bg(theme))
             .show(ui, |ui| {
                 let style = support::muted_text(ui, theme, theme.text.body);
                 Text::new(text).style(&style).show(ui);

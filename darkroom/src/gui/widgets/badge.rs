@@ -171,7 +171,7 @@ impl Badge {
             .child_align(Align::CENTER);
         let panel = match kind {
             BadgeKind::Marker { salt } => panel
-                .background(Background::rounded(
+                .bg(Bg::rounded(
                     color.with_alpha(CHIP_TINT_ALPHA),
                     Corners::all(BADGE_SIZE * 0.5),
                 ))
@@ -187,7 +187,7 @@ impl Badge {
                     (Toggle::Off, true) => CHIP_TINT_ALPHA,
                     (Toggle::Off, false) => 0.0,
                 };
-                let mut bg = Background {
+                let mut bg = Bg {
                     border: Stroke::new(color, 1.0),
                     corners: Corners::all(3.0),
                     ..Default::default()
@@ -197,7 +197,7 @@ impl Badge {
                 if alpha > 0.0 {
                     bg.fill = color.with_alpha(alpha).into();
                 }
-                panel.background(bg).id(wid).sense(Sense::CLICK)
+                panel.bg(bg).id(wid).sense(Sense::CLICK)
             }
         };
         let chip = panel.show(ui, |ui| match glyph {

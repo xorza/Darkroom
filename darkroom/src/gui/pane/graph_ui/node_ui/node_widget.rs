@@ -117,7 +117,7 @@ impl<'a> NodeWidget<'a> {
         let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
             .id(wid::body(node.id))
-            .position(node.pos)
+            .pos(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
             .min_size(if node.preview() {
@@ -127,8 +127,8 @@ impl<'a> NodeWidget<'a> {
             })
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
-            .background(
-                Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+            .bg(
+                Bg::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
                     .with_border(Stroke::new(border, border_width))
                     .with_shadow(shadow),
             )

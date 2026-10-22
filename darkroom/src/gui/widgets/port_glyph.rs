@@ -189,7 +189,7 @@ impl<'a> PortGlyph<'a> {
                 let [l, t, r, b] = margin.as_array();
                 panel.margin(Spacing::new(l - inset, t - inset, r - inset, b - inset))
             }
-            Placement::CenteredOn(point) => panel.position(point - Vec2::splat(hit * 0.5)),
+            Placement::CenteredOn(point) => panel.pos(point - Vec2::splat(hit * 0.5)),
         };
         let shown = panel.show(ui, |ui| glyph.draw(ui));
         // Take the owned snapshot + the click edges so the glyph's `ui` borrow

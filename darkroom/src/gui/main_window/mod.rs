@@ -152,7 +152,7 @@ impl MainWindow {
                     .id_salt("chrome_row")
                     .size((Sizing::FILL, Sizing::HUG))
                     .child_align(Align::v(VAlign::Bottom))
-                    .background(Background::fill(chrome))
+                    .bg(Bg::fill(chrome))
                     .show(ui, |ui| {
                         menu_bar::show(ui, app.theme(), out);
                     });
