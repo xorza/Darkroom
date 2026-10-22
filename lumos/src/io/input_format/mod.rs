@@ -22,7 +22,7 @@ pub const RAW_EXTENSIONS: &[&str] = &[
     "sr2", "srf", "srw", "sti",
 ];
 
-/// Every file extension [`LoadContext::preview`](crate::LoadContext::preview) accepts: FITS, camera
+/// Every file extension [`LoadCtx::preview`](crate::LoadCtx::preview) accepts: FITS, camera
 /// RAW, then imaginarium's formats, in the order its loader tries them.
 pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &PREVIEW_EXTENSION_TABLE;
 
@@ -33,11 +33,11 @@ const PREVIEW_EXTENSION_TABLE: [&str;
     let mut next = 0;
     let mut list = 0;
     while list < lists.len() {
-        let mut index = 0;
-        while index < lists[list].len() {
-            table[next] = lists[list][index];
+        let mut idx = 0;
+        while idx < lists[list].len() {
+            table[next] = lists[list][idx];
             next += 1;
-            index += 1;
+            idx += 1;
         }
         list += 1;
     }

@@ -44,15 +44,15 @@ impl StratifiedSamples {
     }
 
     /// The sampled pixel indices, ascending.
-    pub(crate) fn indices(&self) -> impl Iterator<Item = usize> + '_ {
+    pub(crate) fn idxs(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.retained).map(|k| {
             let rank = k * self.pixels / self.retained;
-            self.color.as_ref().map_or(rank, |color| color.index(rank))
+            self.color.as_ref().map_or(rank, |color| color.idx(rank))
         })
     }
 
     /// The values of `plane`, a whole channel, at the sampled pixels.
     pub(crate) fn gather(&self, plane: &[f32]) -> Vec<f32> {
-        self.indices().map(|index| plane[index]).collect()
+        self.idxs().map(|idx| plane[idx]).collect()
     }
 }

@@ -66,9 +66,9 @@ impl LanczosLut {
         debug_assert!(scaled >= 0.0, "a table read at {scaled}");
         let last = self.values.len() - 1;
         let below = scaled.floor();
-        let index = (below as usize).min(last);
-        let low = self.values[index];
-        let high = self.values[(index + 1).min(last)];
+        let idx = (below as usize).min(last);
+        let low = self.values[idx];
+        let high = self.values[(idx + 1).min(last)];
         (high - low).mul_add(scaled - below, low)
     }
 }

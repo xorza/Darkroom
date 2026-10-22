@@ -5,7 +5,7 @@ use crate::data::data_type::DataType;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::index::{NodeIdx, OutputAddr};
+use crate::execution::idx::{NodeIdx, OutputAddr};
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::internals::program::node_builder::NodeBuilder;
@@ -560,7 +560,7 @@ fn cycle_yields_none() {
     // The forward reference is spelled as a raw address, since the node it names
     // does not exist until the line after.
     let mut p = ProgramBuilder::default();
-    let forward = ExecutionBinding::Bind(OutputAddr {
+    let forward = ExecutionBinding::Wire(OutputAddr {
         node_idx: NodeIdx(1),
         port_idx: 0,
     });

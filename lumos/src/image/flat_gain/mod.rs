@@ -326,15 +326,15 @@ struct AxisPoint {
 }
 
 impl AxisPoint {
-    /// Pixel coordinate `position` on an axis of `nodes` nodes, held at the outermost nodes past
+    /// Pixel coordinate `pos` on an axis of `nodes` nodes, held at the outermost nodes past
     /// it.
     #[expect(
         clippy::cast_sign_loss,
         reason = "the node coordinate is clamped to be non-negative before the conversion"
     )]
-    fn locate(position: f32, nodes: usize) -> Self {
+    fn locate(pos: f32, nodes: usize) -> Self {
         let last = nodes - 1;
-        let coordinate = (position / STEP as f32).clamp(0.0, last as f32);
+        let coordinate = (pos / STEP as f32).clamp(0.0, last as f32);
         let low = (coordinate as usize).min(last.saturating_sub(1));
         Self {
             low,
@@ -373,14 +373,14 @@ impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
             let mut all = (0.0f64, 0usize);
             for y in window(size.height, node.y) {
                 for x in window(size.width, node.x) {
-                    let position = Vec2us::new(x, y);
-                    if self.cfa_type.slot_at(position) != color {
+                    let pos = Vec2us::new(x, y);
+                    if self.cfa_type.slot_at(pos) != color {
                         continue;
                     }
-                    let index = y * size.width + x;
-                    let gain = 1.0 / f64::from(divisor.pixels()[index]);
+                    let idx = y * size.width + x;
+                    let gain = 1.0 / f64::from(divisor.pixels()[idx]);
                     all = (all.0 + gain, all.1 + 1);
-                    if !(self.excluded)(index) {
+                    if !(self.excluded)(idx) {
                         measured = (measured.0 + gain, measured.1 + 1);
                     }
                 }

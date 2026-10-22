@@ -4,7 +4,7 @@
 use crate::combine::rejection::pass::{Narrowing, Pass};
 use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Configuration for linear fit clipping.
@@ -55,13 +55,13 @@ impl LinearFitClipConfig {
     /// never fits a line.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;
-        ConfigValue::new("max_iterations", self.max_iterations)
+        ConfigField::new("max_iterations", self.max_iterations)
             .must_be("at least 2", self.max_iterations >= 2)
     }
 
     pub(crate) fn narrow(self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
         let scores = &mut scratch.scores;
-        if pass.index == 0 {
+        if pass.idx == 0 {
             return Narrowing::Window(pass.clip_about_median(self.sigma, scores));
         }
         let fit = pass.rank_fit(scores);

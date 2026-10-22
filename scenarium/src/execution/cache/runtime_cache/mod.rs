@@ -34,7 +34,7 @@ use crate::execution::cache::runtime_slot::{OutputRead, RuntimeSlot};
 use crate::execution::cache::stamp_job::error::StampError;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::index::{NodeIdx, OutputAddr};
+use crate::execution::idx::{NodeIdx, OutputAddr};
 use crate::execution::schedule::{Delivery, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -345,12 +345,12 @@ impl RuntimeCache {
     /// (func id + port signature) plus its structural inputs. The single digest the whole
     /// cache keys on: RAM reuse ([`is_resident_hit`](Self::is_resident_hit)), disk load/store, and
     /// downstream folding all read the node's stamped `current_digest`. Computed producer-first
-    /// (topological), so a `Bind` producer's `current_digest` is already stamped when read.
+    /// (topological), so a `Wire` producer's `current_digest` is already stamped when read.
     ///
     /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
-    ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
+    ///   always recomputes; a `Wire` producer with a `None` digest taints this node to `None`.
     /// - Otherwise fold what each input delivers ([`RunSchedule::delivery`]): a `Const`'s
-    ///   value + prepared `FsPath` file/dir content, a `Bind` producer's stamped
+    ///   value + prepared `FsPath` file/dir content, a `Wire` producer's stamped
     ///   `current_digest`, or the unbound marker — plus, for a
     ///   resource-typed input, the live identity of the referent behind the *delivered* value
     ///   ([`hash_bound_fs_path`](Self::hash_bound_fs_path)). That last fold needs the producer's
@@ -400,14 +400,14 @@ impl RuntimeCache {
                         self.paths.hash(&mut hasher, paths)?;
                     }
                 }
-                Delivery::Bind(addr) => {
+                Delivery::Wire(addr) => {
                     // The producer was visited first (topological order), so its `current_digest`
                     // is set; a `None` taints this node.
                     let producer = self.slots[addr.node_idx].current_digest?;
                     // Producer digest then port index, both fixed-width, so two
                     // consumers reading different ports of one node fold apart.
                     hasher
-                        .write_input_tag(InputTag::Bind)
+                        .write_input_tag(InputTag::Wire)
                         .write_digest(&producer)
                         .write_pod(addr.port_idx);
                     // A resource-typed input dereferences the delivered reference, so the
@@ -503,7 +503,7 @@ impl RuntimeCache {
                 // fold's stricter accessor would see almost nothing here.
                 // Over-requesting costs one walk; under-requesting costs a
                 // node its pruning.
-                ExecutionBinding::Bind(address) if input.stamps_fs_path => self.slots
+                ExecutionBinding::Wire(address) if input.stamps_fs_path => self.slots
                     [address.node_idx]
                     .output_values()
                     .and_then(|values| values.get(address.port_idx as usize))
@@ -792,7 +792,7 @@ pub(crate) mod internals {
     use crate::execution::cache::runtime_slot::OutputSnapshot;
     use crate::execution::cache::stamp_job::error::StampError;
     use crate::execution::compile::compiled_graph::CompiledGraph;
-    use crate::execution::index::NodeIdx;
+    use crate::execution::idx::NodeIdx;
 
     impl RuntimeCache {
         /// A first install of `program` — the production pairing without an

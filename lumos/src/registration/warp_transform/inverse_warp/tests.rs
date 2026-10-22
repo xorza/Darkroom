@@ -41,11 +41,11 @@ fn the_inverse_undoes_the_forward_warp() {
     ] {
         let t = warp.apply(r);
         let mapped = inverse.apply(t).unwrap();
-        assert_eq!(inverse.position(t), Some(mapped.position));
+        assert_eq!(inverse.pos(t), Some(mapped.pos));
         assert!(
-            (mapped.position - r).length() < NEWTON_TOLERANCE_PX,
+            (mapped.pos - r).length() < NEWTON_TOLERANCE_PX,
             "{r:?} came back as {:?}",
-            mapped.position
+            mapped.pos
         );
         // Forward Jacobian by the chain rule, `J_T · (I + ∂c)`; its product with the inverse's
         // is the identity to the rounding of two 2×2 products, 1e-12 at these entry sizes.
@@ -63,10 +63,7 @@ fn the_inverse_undoes_the_forward_warp() {
 
     let plain = WarpTransform::new(transform).inverse();
     let t = DVec2::new(33.0, 44.0);
-    assert_eq!(
-        plain.apply(t).unwrap().position,
-        transform.inverse().apply(t)
-    );
+    assert_eq!(plain.apply(t).unwrap().pos, transform.inverse().apply(t));
 }
 
 /// Past a fold the correction has no inverse, and the iteration says so rather than returning
@@ -79,7 +76,7 @@ fn a_point_past_a_fold_does_not_invert() {
     });
     let inverse = warp.inverse();
     assert!(inverse.apply(DVec2::new(30.0, 0.0)).is_none());
-    let inside = inverse.apply(DVec2::new(10.0, 5.0)).unwrap().position;
+    let inside = inverse.apply(DVec2::new(10.0, 5.0)).unwrap().pos;
     let expected = (1.0 - 0.6f64.sqrt()) / 0.02;
     assert!((inside.x - expected).abs() < 1e-6, "{inside:?}");
     assert!((inside.y - 5.0).abs() < 1e-6, "{inside:?}");

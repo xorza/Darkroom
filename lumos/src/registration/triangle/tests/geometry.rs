@@ -12,7 +12,7 @@ use super::*;
 fn triangle_ratios_roles_and_orientation() {
     let mirrored = THREE_FOUR_FIVE.map(|p| DVec2::new(-p.x, p.y));
     let moved = THREE_FOUR_FIVE.map(|p| p * 10.0 + DVec2::new(7.0, -2.0));
-    for (positions, ratios, orientation) in [
+    for (poss, ratios, orientation) in [
         (
             THREE_FOUR_FIVE,
             DVec2::new(0.6, 0.8),
@@ -25,13 +25,13 @@ fn triangle_ratios_roles_and_orientation() {
             Orientation::CounterClockwise,
         ),
     ] {
-        let tri = Triangle::from_positions([10, 20, 30], positions, NOISE_SCALE).unwrap();
-        assert_eq!(tri.ratios, ratios, "{positions:?}");
-        assert_eq!(tri.indices, [30, 20, 10], "{positions:?}");
-        assert_eq!(tri.orientation, orientation, "{positions:?}");
+        let tri = Triangle::from_poss([10, 20, 30], poss, NOISE_SCALE).unwrap();
+        assert_eq!(tri.ratios, ratios, "{poss:?}");
+        assert_eq!(tri.idxs, [30, 20, 10], "{poss:?}");
+        assert_eq!(tri.orientation, orientation, "{poss:?}");
     }
 
-    let equilateral = Triangle::from_positions(
+    let equilateral = Triangle::from_poss(
         [0, 1, 2],
         [
             DVec2::new(0.0, 0.0),
@@ -55,7 +55,7 @@ fn triangle_ratios_roles_and_orientation() {
 #[test]
 fn triangles_too_flat_for_the_noise_are_refused() {
     let p = DVec2::new;
-    for (positions, noise, kept, why) in [
+    for (poss, noise, kept, why) in [
         (
             [p(0.0, 0.0), p(1.0, 1.0), p(2.0, 2.0)],
             1.0,
@@ -94,7 +94,7 @@ fn triangles_too_flat_for_the_noise_are_refused() {
         ),
     ] {
         assert_eq!(
-            Triangle::from_positions([0, 1, 2], positions, noise).is_some(),
+            Triangle::from_poss([0, 1, 2], poss, noise).is_some(),
             kept,
             "{why}"
         );
@@ -106,7 +106,7 @@ fn triangles_too_flat_for_the_noise_are_refused() {
 #[test]
 fn similarity_is_strict_in_both_ratios() {
     let tri = |ratios| Triangle {
-        indices: [0, 1, 2],
+        idxs: [0, 1, 2],
         ratios,
         orientation: Orientation::Clockwise,
     };
@@ -134,16 +134,16 @@ fn vertex_ordering_is_the_same_for_every_input_order() {
         DVec2::new(5.0, 0.0),
         DVec2::new(2.0, 7.0),
     ];
-    let indices = [100, 200, 300];
-    let reference = Triangle::from_positions(indices, points, NOISE_SCALE).unwrap();
+    let idxs = [100, 200, 300];
+    let reference = Triangle::from_poss(idxs, points, NOISE_SCALE).unwrap();
     for (a, b, c) in [(0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)] {
-        let tri = Triangle::from_positions(
-            [indices[a], indices[b], indices[c]],
+        let tri = Triangle::from_poss(
+            [idxs[a], idxs[b], idxs[c]],
             [points[a], points[b], points[c]],
             NOISE_SCALE,
         )
         .unwrap();
-        assert_eq!(tri.indices, reference.indices, "({a}, {b}, {c})");
+        assert_eq!(tri.idxs, reference.idxs, "({a}, {b}, {c})");
         assert_eq!(tri.orientation, reference.orientation, "({a}, {b}, {c})");
         assert_eq!(tri.ratios, reference.ratios, "({a}, {b}, {c})");
     }
@@ -174,12 +174,7 @@ fn irregular_triangles_are_pairwise_dissimilar() {
         let DVec2 { x: r0, y: r1 } = a.ratios;
         assert!(r1 - r0 >= 0.02 && 1.0 - r1 >= 0.02, "{:?}", a.ratios);
         for b in &triangles[i + 1..] {
-            assert!(
-                !a.is_similar(b, 0.05),
-                "{:?} and {:?}",
-                a.indices,
-                b.indices
-            );
+            assert!(!a.is_similar(b, 0.05), "{:?} and {:?}", a.idxs, b.idxs);
         }
     }
 }

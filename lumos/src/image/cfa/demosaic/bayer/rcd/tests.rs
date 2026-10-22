@@ -218,7 +218,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
             let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-                scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
+                scene(pattern.color_at(Vec2us::new(x, y)).idx(), x, y)
             });
             let planes = demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
             let mut digest = 0xcbf2_9ce4_8422_2325u64;
@@ -267,12 +267,8 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
             };
             let (high, low) = (run(1000.0), run(-1000.0));
             for (high, low) in high.iter().zip(&low) {
-                for (index, (a, b)) in high.iter().zip(low).enumerate() {
-                    assert_eq!(
-                        a.to_bits(),
-                        b.to_bits(),
-                        "{pattern:?}, {place:?} at {index}"
-                    );
+                for (idx, (a, b)) in high.iter().zip(low).enumerate() {
+                    assert_eq!(a.to_bits(), b.to_bits(), "{pattern:?}, {place:?} at {idx}");
                 }
             }
             let written = high[0].iter().filter(|value| !value.is_nan()).count();
@@ -293,13 +289,13 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let mut rng = TestRng::new(5);
     let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
     for pattern in CfaPattern::ALL {
-        let color = |index: usize| pattern.color_at(size.point_of(index)).index();
+        let color = |idx: usize| pattern.color_at(size.point_of(idx)).idx();
         let balanced = Buffer2::new(
             size.width,
             size.height,
             data.iter()
                 .enumerate()
-                .map(|(index, &sample)| sample * gains[color(index)])
+                .map(|(idx, &sample)| sample * gains[color(idx)])
                 .collect(),
         );
         let never = CancelToken::never();
@@ -307,17 +303,17 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
         let reference = demosaic(&MosaicView::new(&balanced, pattern), &never).unwrap();
         let border = INTERPOLATED_BORDER;
         for row in border..size.height - border {
-            for index in row * size.width + border..(row + 1) * size.width - border {
+            for idx in row * size.width + border..(row + 1) * size.width - border {
                 for (channel, (plane, reference)) in planes.iter().zip(&reference).enumerate() {
-                    let expected = if channel == color(index) {
-                        data[index]
+                    let expected = if channel == color(idx) {
+                        data[idx]
                     } else {
-                        reference[index] / gains[channel]
+                        reference[idx] / gains[channel]
                     };
                     assert_eq!(
-                        plane[index].to_bits(),
+                        plane[idx].to_bits(),
                         expected.to_bits(),
-                        "{pattern:?} channel {channel} at {index}"
+                        "{pattern:?} channel {channel} at {idx}"
                     );
                 }
             }

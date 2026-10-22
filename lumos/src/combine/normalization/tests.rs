@@ -331,7 +331,7 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
     assert!(matches!(
         result,
         Err(StackError::NonPositiveMedian {
-            index: 1,
+            idx: 1,
             slot: 0,
             median: 0.0
         })
@@ -618,15 +618,15 @@ fn global_norms_are_fitted_against_the_selected_reference() {
         [(0.1, 6.0), (100.0, 0.0), (0.5, 5.0)],
         [(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)],
     ];
-    for (frame_index, frame) in norms.iter().enumerate() {
-        for (channel, &(gain, offset)) in expected[frame_index].iter().enumerate() {
+    for (frame_idx, frame) in norms.iter().enumerate() {
+        for (channel, &(gain, offset)) in expected[frame_idx].iter().enumerate() {
             assert_eq!(
                 frame.slots[channel].gain, gain,
-                "frame {frame_index} channel {channel} gain"
+                "frame {frame_idx} channel {channel} gain"
             );
             assert_eq!(
                 frame.slots[channel].offset, offset,
-                "frame {frame_index} channel {channel} offset"
+                "frame {frame_idx} channel {channel} offset"
             );
         }
     }
@@ -660,12 +660,12 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
         [3.0 / 30.0, 30.0 / 3.0, 7.0 / 70.0],
         [3.0f32 / 9.0, 30.0 / 300.0, 7.0 / 40.0],
     ];
-    for (frame_index, frame) in norms(Normalization::Multiplicative).iter().enumerate() {
-        for (channel, &gain) in expected_gains[frame_index].iter().enumerate() {
+    for (frame_idx, frame) in norms(Normalization::Multiplicative).iter().enumerate() {
+        for (channel, &gain) in expected_gains[frame_idx].iter().enumerate() {
             assert_eq!(
                 frame.slots[channel],
                 SlotNorm { gain, offset: 0.0 },
-                "frame {frame_index} channel {channel}"
+                "frame {frame_idx} channel {channel}"
             );
         }
     }
@@ -675,12 +675,12 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
         [(0.1, 0.0), (10.0, 0.0), (0.1, 0.0)],
         [(1.0, -6.0), (0.1, 0.0), (0.2, -1.0)],
     ];
-    for (frame_index, frame) in norms(Normalization::Global).iter().enumerate() {
-        for (channel, &(gain, offset)) in expected_norms[frame_index].iter().enumerate() {
+    for (frame_idx, frame) in norms(Normalization::Global).iter().enumerate() {
+        for (channel, &(gain, offset)) in expected_norms[frame_idx].iter().enumerate() {
             assert_eq!(
                 frame.slots[channel],
                 SlotNorm { gain, offset },
-                "frame {frame_index} channel {channel}"
+                "frame {frame_idx} channel {channel}"
             );
         }
     }
@@ -843,15 +843,15 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
 fn samples_spread_evenly_by_rank_past_the_limit() {
     let cancel = CancelToken::never();
     let pixel_count = 200_000;
-    let check = |indices: Vec<usize>, first: [usize; 4], last: usize| {
-        assert_eq!(indices.len(), SAMPLE_LIMIT);
-        assert_eq!(indices[..4], first);
-        assert_eq!(indices[indices.len() - 1], last);
-        assert!(indices.is_sorted() && indices.windows(2).all(|pair| pair[0] < pair[1]));
+    let check = |idxs: Vec<usize>, first: [usize; 4], last: usize| {
+        assert_eq!(idxs.len(), SAMPLE_LIMIT);
+        assert_eq!(idxs[..4], first);
+        assert_eq!(idxs[idxs.len() - 1], last);
+        assert!(idxs.is_sorted() && idxs.windows(2).all(|pair| pair[0] < pair[1]));
     };
     let every = |size: Size2us| {
         StratifiedSamples::new(size, None, 0)
-            .indices()
+            .idxs()
             .collect::<Vec<_>>()
     };
     check(every(Size2us::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
@@ -876,7 +876,7 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     .unwrap();
     assert_eq!(domain.sample_count, 100_000);
     check(
-        domain.stratified_indices(&cancel).unwrap(),
+        domain.stratified_idxs(&cancel).unwrap(),
         [0, 2, 6, 8],
         199_996,
     );
@@ -890,8 +890,8 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
         .enumerate()
     {
         let mut phases = [0; 4];
-        for index in StratifiedSamples::new(size, Some(&rggb), slot).indices() {
-            phases[(index / 4096 % 2) * 2 + index % 2] += 1;
+        for idx in StratifiedSamples::new(size, Some(&rggb), slot).idxs() {
+            phases[(idx / 4096 % 2) * 2 + idx % 2] += 1;
         }
         assert_eq!(
             phases, expected,
@@ -922,7 +922,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
         stats.clone(),
     );
     let unwarped = StoredFrame::from_memory(image, FrameQuality::None, stats);
-    let indices = [0, 1, 2, 3];
+    let idxs = [0, 1, 2, 3];
     let mono = Slots::new(None, 1);
     assert_eq!(
         SlotPlanes {
@@ -934,7 +934,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
             slots: mono,
             cancel: &cancel
         }
-        .noise_variance(0, 0, &indices)
+        .noise_variance(0, 0, &idxs)
         .unwrap(),
         2.0 * sigma * sigma
     );
@@ -948,7 +948,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
             slots: mono,
             cancel: &cancel
         }
-        .noise_variance(0, 0, &indices)
+        .noise_variance(0, 0, &idxs)
         .unwrap(),
         sigma * sigma
     );
@@ -987,7 +987,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
                 slots: colors,
                 cancel: &cancel
             }
-            .noise_variance(0, slot, &indices)
+            .noise_variance(0, slot, &idxs)
             .unwrap(),
             expected * sigma * sigma,
             "slot {slot}"
@@ -1008,7 +1008,7 @@ fn twilight_flats_normalize_per_color() {
     let size = Size2us::new(16, 16);
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
     let pattern: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.25 + (37 * index % 64) as f32 / 1024.0)
+        .map(|idx| 0.25 + (37 * idx % 64) as f32 / 1024.0)
         .collect();
     let scales = [[1.0, 1.0, 1.0], [2.0, 1.0, 4.0], [0.5, 2.0, 2.0]];
     let images: Vec<CfaImage> = scales
@@ -1017,8 +1017,8 @@ fn twilight_flats_normalize_per_color() {
             let pixels = pattern
                 .iter()
                 .enumerate()
-                .map(|(index, &level)| {
-                    let color = cfa.slot_at(Vec2us::new(index % 16, index / 16));
+                .map(|(idx, &level)| {
+                    let color = cfa.slot_at(Vec2us::new(idx % 16, idx / 16));
                     level * scale[color]
                 })
                 .collect();
@@ -1065,8 +1065,8 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         let mut rng = TestRng::new(frame as u64 * 3 + channel as u64);
         let gain = 1.0 + 0.25 * frame as f32;
         (0..size.pixel_count())
-            .map(|index| {
-                let level = 0.2 + 0.1 * channel as f32 + (index % 300) as f32 / 3000.0;
+            .map(|idx| {
+                let level = 0.2 + 0.1 * channel as f32 + (idx % 300) as f32 / 3000.0;
                 level * gain + 0.01 * frame as f32 + 0.01 * (rng.next_f32() - 0.5)
             })
             .collect()
@@ -1311,13 +1311,13 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
             .into_iter()
             .zip(figures)
             .enumerate()
-            .map(|(index, ((a, b, reach), (median, noise, spread)))| {
+            .map(|(idx, ((a, b, reach), (median, noise, spread)))| {
                 let plane: Vec<f32> = (0..6)
                     .map(|x| {
                         if !reach.contains(&x) {
                             return 0.0;
                         }
-                        let shift = if index == 1 { jitter[x] } else { 0.0 };
+                        let shift = if idx == 1 { jitter[x] } else { 0.0 };
                         a * (x + 1) as f32 + b + shift
                     })
                     .collect();
@@ -1363,12 +1363,12 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
         .unwrap()
     };
     let expect = |measured: Vec<FrameNorm>, expected: [(f32, f32); 3], case: &str| {
-        for (index, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
+        for (idx, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
             assert!(
                 norm.slots
                     .iter()
                     .all(|&slot| slot == SlotNorm { gain, offset }),
-                "{case}: frame {index}: {:?}",
+                "{case}: frame {idx}: {:?}",
                 norm.slots
             );
         }
@@ -1455,12 +1455,12 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
     ];
     let expect = |normalization, expected: [(f32, f32); 3]| {
         let measured = norms(&frames, normalization).unwrap().unwrap();
-        for (index, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
+        for (idx, (norm, (gain, offset))) in measured.iter().zip(expected).enumerate() {
             assert!(
                 norm.slots
                     .iter()
                     .all(|&slot| slot == SlotNorm { gain, offset }),
-                "frame {index} under {normalization:?}: {:?}",
+                "frame {idx} under {normalization:?}: {:?}",
                 norm.slots
             );
         }
@@ -1481,7 +1481,7 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
             matches!(
                 error,
                 StackError::NoSignalScale {
-                    index: 1,
+                    idx: 1,
                     slot: 0,
                     ..
                 }

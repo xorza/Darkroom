@@ -3,12 +3,12 @@
 //! Every pair of matching triangles votes for the three vertex correspondences it implies;
 //! the accumulated votes are then resolved greedily so each point is claimed at most once.
 
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 
 /// A matched point pair between reference and target, with the confidence its votes earned.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PointMatch {
-    pub(crate) indices: MatchIndices,
+    pub(crate) idxs: MatchIdxs,
     /// The pair's votes relative to the most-voted match of the resolved set: 1 for the best.
     pub(crate) confidence: f64,
 }
@@ -40,13 +40,13 @@ impl Votes {
     }
 
     /// Every pair that drew votes, with how many it drew, in the order of the votes: by
-    /// `(reference, target)` once [`Self::sort`]ed. The pair travels as a [`MatchIndices`] rather
+    /// `(reference, target)` once [`Self::sort`]ed. The pair travels as a [`MatchIdxs`] rather
     /// than two `usize`s, which are the same type and so could be handed over transposed without
     /// the compiler noticing.
-    pub(super) fn counts(&self) -> impl Iterator<Item = (MatchIndices, usize)> + '_ {
+    pub(super) fn counts(&self) -> impl Iterator<Item = (MatchIdxs, usize)> + '_ {
         debug_assert!(self.votes.is_sorted(), "votes are counted once sorted");
         self.votes.chunk_by(|a, b| a == b).map(|run| {
-            let pair = MatchIndices {
+            let pair = MatchIdxs {
                 reference: (run[0] >> 32) as usize,
                 target: (run[0] & u64::from(u32::MAX)) as usize,
             };
@@ -64,7 +64,7 @@ impl Votes {
         min_votes: usize,
     ) -> Vec<PointMatch> {
         self.sort();
-        let mut voted: Vec<(MatchIndices, usize)> = self
+        let mut voted: Vec<(MatchIdxs, usize)> = self
             .counts()
             .filter(|&(_, votes)| votes >= min_votes)
             .collect();
@@ -88,8 +88,8 @@ impl Votes {
         let max_votes = voted.first().map_or(1, |(_, votes)| *votes);
         voted
             .into_iter()
-            .map(|(indices, votes)| PointMatch {
-                indices,
+            .map(|(idxs, votes)| PointMatch {
+                idxs,
                 confidence: votes as f64 / max_votes as f64,
             })
             .collect()

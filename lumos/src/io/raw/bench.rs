@@ -81,13 +81,13 @@ impl RawSensor {
         let light = field.light(active, CfaType::Bayer(CfaPattern::Rggb));
         let span = black.span();
         let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
-            .map(|index| {
-                let (x, y) = (index % layout.raw.width, index / layout.raw.width);
+            .map(|idx| {
+                let (x, y) = (idx % layout.raw.width, idx / layout.raw.width);
                 u16::try_from(BLACK + CHANNEL_BLACK[raw::filter_color(RGGB, y, x)]).unwrap()
             })
             .collect();
-        for (index, &sample) in light.data().pixels().iter().enumerate() {
-            let (x, y) = (index % active.width, index / active.width);
+        for (idx, &sample) in light.data().pixels().iter().enumerate() {
+            let (x, y) = (idx % active.width, idx / active.width);
             let level = black.of_channel(raw::filter_color(RGGB, y, x))
                 + (f64::from(sample) - f64::from(BIAS)) * span;
             let (raw_x, raw_y) = (layout.margin.x + x, layout.margin.y + y);

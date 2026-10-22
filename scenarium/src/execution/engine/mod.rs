@@ -4,7 +4,6 @@
 
 mod error;
 
-use std::result;
 use std::sync::Arc;
 
 use common::{CancelToken, is_debug};
@@ -16,7 +15,7 @@ use crate::execution::cache::runtime_cache::cache_flush_report::CacheFlushReport
 use crate::execution::cache::runtime_cache::error::CacheNodeFailure;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::engine::error::InstallValidationError;
-use crate::execution::error::Result;
+use crate::execution::error::ExecutionResult;
 use crate::execution::executor::{CollectRequest, Executor, RunRequest};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::run_reporter::RunReporter;
@@ -131,7 +130,7 @@ impl ExecutionEngine {
         &mut self,
         request: ExecuteRequest<'_, '_>,
         outcome: &mut ExecutionOutcome,
-    ) -> Result<()> {
+    ) -> ExecutionResult<()> {
         let ExecuteRequest {
             seeds,
             reporter,
@@ -219,7 +218,7 @@ impl ExecutionEngine {
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
-    fn validate(&self) -> result::Result<(), InstallValidationError> {
+    fn validate(&self) -> Result<(), InstallValidationError> {
         let program: &CompiledGraph = &self.compiled;
         if self.cache.slot_count() != program.e_nodes.len() {
             return Err(InstallValidationError::NodeCount {
@@ -268,8 +267,8 @@ pub(crate) mod internals {
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionInput};
     use crate::execution::engine::ExecutionEngine;
-    use crate::execution::error::Result;
-    use crate::execution::index::NodeIdx;
+    use crate::execution::error::ExecutionResult;
+    use crate::execution::idx::NodeIdx;
     use crate::execution::resolve;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
@@ -301,7 +300,7 @@ pub(crate) mod internals {
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-        pub(crate) async fn prepare_execution(&mut self, seeds: &RunSeeds) -> Result<()> {
+        pub(crate) async fn prepare_execution(&mut self, seeds: &RunSeeds) -> ExecutionResult<()> {
             let compiled: &CompiledGraph = &self.compiled;
             self.planner.plan(compiled, seeds, &mut self.schedule)?;
             resolve::sweep(compiled, &mut self.schedule, &mut self.cache).await;
@@ -357,7 +356,7 @@ pub(crate) mod internals {
                 .map(|input| match &input.binding {
                     ExecutionBinding::None => None,
                     ExecutionBinding::Const(value) => Some(DynamicValue::from(value)),
-                    ExecutionBinding::Bind(address) => self.cache[address.node_idx]
+                    ExecutionBinding::Wire(address) => self.cache[address.node_idx]
                         .output_values()
                         .and_then(|outputs| outputs.get(address.port_idx as usize))
                         .cloned(),

@@ -32,7 +32,7 @@ use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::frame_info::FrameInfo;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 mod hdu_sections;
@@ -109,53 +109,53 @@ fn refuse_mosaic(path: &Path, selected: &SelectedFits<'_>) -> Result<(), ImageEr
 }
 
 /// Load an already-linear astronomical image from a FITS file.
-pub(crate) fn load_linear(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+pub(crate) fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
     let fits = |error| ImageError::fits_load(path, error);
-    let mut reader = selected_fits::open(path, context).map_err(fits)?;
-    let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
+    let mut reader = selected_fits::open(path, ctx).map_err(fits)?;
+    let selected = SelectedFits::select(&mut reader, ctx).map_err(fits)?;
     refuse_mosaic(path, &selected)?;
     selected
-        .read(context, Checksum::Judged)
+        .read(ctx, Checksum::Judged)
         .and_then(DecodedFitsImage::into_linear)
         .map_err(fits)
 }
 
-pub(crate) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
     let preview = || {
-        let mut reader = selected_fits::open(path, context)?;
-        let selected = SelectedFits::select(&mut reader, context)?;
+        let mut reader = selected_fits::open(path, ctx)?;
+        let selected = SelectedFits::select(&mut reader, ctx)?;
         if selected.cfa_type.is_none() {
-            return selected.read(context, Checksum::Judged)?.into_linear();
+            return selected.read(ctx, Checksum::Judged)?.into_linear();
         }
         let info = selected.cfa_frame_info()?;
-        info.admit_demosaic(context)
+        info.admit_demosaic(ctx)
             .map_err(|budget| FitsRefusal::OverBudget {
                 allocation: FitsAllocation::Demosaic,
                 budget,
             })?;
         let cfa = selected
-            .read(context, Checksum::Judged)?
+            .read(ctx, Checksum::Judged)?
             .into_cfa(info.cfa_type)?;
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
-        Ok(cfa.demosaic(context.xtrans_passes, noise, &context.cancel)?)
+        Ok(cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?)
     };
     preview().map_err(|error| ImageError::fits_load(path, error))
 }
 
-pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
+pub(crate) fn load_cfa(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
     let cfa = || {
-        let mut reader = selected_fits::open(path, context)?;
-        let selected = SelectedFits::select(&mut reader, context)?;
+        let mut reader = selected_fits::open(path, ctx)?;
+        let selected = SelectedFits::select(&mut reader, ctx)?;
         let cfa_type = selected.require_cfa()?;
-        selected.read(context, Checksum::Judged)?.into_cfa(cfa_type)
+        selected.read(ctx, Checksum::Judged)?.into_cfa(cfa_type)
     };
     cfa().map_err(|error| ImageError::fits_load(path, error))
 }
 
-pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
+pub(crate) fn cfa_frame_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, ImageError> {
     let info = || {
-        let mut reader = selected_fits::open(path, context)?;
-        SelectedFits::select(&mut reader, context)?.cfa_frame_info()
+        let mut reader = selected_fits::open(path, ctx)?;
+        SelectedFits::select(&mut reader, ctx)?.cfa_frame_info()
     };
     info().map_err(|error| ImageError::fits_load(path, error))
 }
@@ -164,10 +164,10 @@ pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<Frame
 /// what its decode holds beside them, by the same selection, cube reading and limits
 /// [`load_linear`] applies, without reading a sample. A header that declares a mosaic is refused,
 /// as the load refuses it.
-pub(crate) fn linear_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
+pub(crate) fn linear_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, ImageError> {
     let fits = |error| ImageError::fits_load(path, error);
-    let mut reader = selected_fits::open(path, context).map_err(fits)?;
-    let selected = SelectedFits::select(&mut reader, context).map_err(fits)?;
+    let mut reader = selected_fits::open(path, ctx).map_err(fits)?;
+    let selected = SelectedFits::select(&mut reader, ctx).map_err(fits)?;
     refuse_mosaic(path, &selected)?;
     Ok(FrameInfo {
         dimensions: selected.plan.dimensions,

@@ -14,7 +14,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
 use crate::math::size2us::Size2us;
@@ -33,7 +33,7 @@ fn markesteijn_quality_vs_libraw() {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Quality comparison on: {}\n", path.display());
 
-    let ours = raw::load_preview(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load_preview(&path, &LoadCtx::default()).unwrap();
     let one_pass = load_raw_libraw_demosaic(&path, 1).unwrap();
     let three_pass = load_raw_libraw_demosaic(&path, 3).unwrap();
     assert_eq!(ours.dimensions(), one_pass.dimensions());
@@ -97,7 +97,7 @@ fn bayer_rcd_quality_vs_libraw() {
         .expect("No Bayer test file found in test_data/raw_samples/");
     println!("Bayer quality comparison on: {}\n", path.display());
 
-    let ours = raw::load_preview(&path, &LoadContext::default()).unwrap();
+    let ours = raw::load_preview(&path, &LoadCtx::default()).unwrap();
     for (qual, label) in [(3, "AHD"), (2, "PPG"), (11, "DHT")] {
         let reference = load_raw_libraw_demosaic(&path, qual).unwrap();
         assert_eq!(ours.dimensions(), reference.dimensions(), "{label}");
@@ -174,14 +174,14 @@ impl Compared<'_> {
 
         for y in border..(size.height - border) {
             for x in border..(size.width - border) {
-                let index = size.index_of(Vec2us::new(x, y));
+                let idx = size.idx_of(Vec2us::new(x, y));
                 let mut predicted = [0.0; 3];
                 let mut actual = [0.0; 3];
                 for channel in 0..3 {
                     let transform = &transforms[channel];
                     predicted[channel] =
-                        f64::from(a.channel(channel)[index]) * transform.scale + transform.offset;
-                    actual[channel] = f64::from(b.channel(channel)[index]);
+                        f64::from(a.channel(channel)[idx]) * transform.scale + transform.offset;
+                    actual[channel] = f64::from(b.channel(channel)[idx]);
                 }
                 let red_green = (predicted[0] - predicted[1]) - (actual[0] - actual[1]);
                 let blue_green = (predicted[2] - predicted[1]) - (actual[2] - actual[1]);
@@ -213,7 +213,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
-            let idx = size.index_of(Vec2us::new(x, y));
+            let idx = size.idx_of(Vec2us::new(x, y));
             let av = f64::from(a[idx]);
             let bv = f64::from(b[idx]);
             sum_a += av;
@@ -242,7 +242,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
-            let idx = size.index_of(Vec2us::new(x, y));
+            let idx = size.idx_of(Vec2us::new(x, y));
             let predicted = f64::from(a[idx]) * scale + offset;
             let actual = f64::from(b[idx]);
             let diff = predicted - actual;

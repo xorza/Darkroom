@@ -20,7 +20,7 @@ use crate::execution::cache::digest::{Digest, DigestHasher};
 pub(super) enum FsPathId {
     File(FileIdentity),
     /// Every file beneath the root, folded in relative-path order.
-    Directory(Digest),
+    Dir(Digest),
 }
 
 impl FsPathId {
@@ -29,7 +29,7 @@ impl FsPathId {
             Self::File(file) => {
                 hasher.write_bytes(&[0]).write_file_identity(file);
             }
-            Self::Directory(digest) => {
+            Self::Dir(digest) => {
                 hasher.write_bytes(&[1]).write_digest(digest);
             }
         }
@@ -152,7 +152,7 @@ impl StampJob {
         let path = Path::new(path);
         let metadata = fs::metadata(path).map_err(StampError::io(path))?;
         if metadata.is_dir() {
-            self.stamp_directory(path, cancel)
+            self.stamp_dir(path, cancel)
         } else {
             let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(path))?;
             Ok(FsPathId::File(file))
@@ -171,11 +171,7 @@ impl StampJob {
     /// vanishing, or changing its relative path. What that gives up is
     /// the empty directory, which does not move the identity at all —
     /// nothing a node reads is a function of it.
-    fn stamp_directory(
-        &mut self,
-        root: &Path,
-        cancel: &CancelToken,
-    ) -> Result<FsPathId, StampError> {
+    fn stamp_dir(&mut self, root: &Path, cancel: &CancelToken) -> Result<FsPathId, StampError> {
         self.collect_files(root, cancel)?;
         // `read_dir` order is not a property of the directory, so the fold
         // takes the files in an order the filesystem does not choose.
@@ -195,7 +191,7 @@ impl StampJob {
                 .write_len_prefixed(rel.as_os_str().as_encoded_bytes())
                 .write_file_identity(&file);
         }
-        Ok(FsPathId::Directory(hasher.finish()))
+        Ok(FsPathId::Dir(hasher.finish()))
     }
 
     /// Walk **the whole subtree** under `root`, listing every file beneath

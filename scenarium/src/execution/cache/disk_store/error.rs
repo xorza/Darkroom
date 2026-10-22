@@ -18,7 +18,7 @@ use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("could not create the cache directory for {}: {source}", path.display())]
-    Directory {
+    Dir {
         path: PathBuf,
         #[source]
         source: io::Error,

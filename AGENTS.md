@@ -116,3 +116,25 @@ a change to bench code runs it.
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the
   document is valid and does not check it again or fall back.
+
+## Names
+
+One word, one meaning, in the workspace crates; the submodules keep their own.
+`cargo drive vocabulary` lists every declared name and word for a review.
+
+- **A wire joins an output to an input.** `Binding` is what an input holds,
+  `Const` or `Wire`; the GUI draws a wire and an event subscription alike as
+  wires. Refused: edge, connection and link for it — "edge" is the graph's
+  general word for a wire or a subscription, and "link" a text hyperlink.
+- **Fixed short forms.** `idx`, `pos`, `ctx`/`Ctx`, `dir`, and their plurals
+  with `s` (`idxs`, `poss`), in every name; prose and test names keep whole
+  words. A name a foreign API sets keeps its own form, as `Iterator::position`
+  and `std::task::Context`.
+- **`*Config` is what a caller sets, `*Params` what a stage derives** from a
+  config and reads. Refused: `*Options` and `*Settings`.
+- **An acronym is one word,** as the Rust API Guidelines case it: `GraphUi`,
+  `LmModel`.
+- **A type name keeps one meaning in the workspace.** Where two crates would
+  declare one name past its module, the narrower use takes a qualified one, as
+  `DrawablePreview` beside `lumos::PreviewImage`; an error and its alias carry
+  their domain, as `ExecutionError` and `ExecutionResult`.

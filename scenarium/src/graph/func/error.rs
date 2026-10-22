@@ -65,9 +65,9 @@ pub enum InvokeError {
     /// its own source chain are the error's.
     #[error(transparent)]
     External(Box<dyn error::Error + Send + Sync>),
-    #[error("input {index} must be {expected}, got {actual}")]
+    #[error("input {idx} must be {expected}, got {actual}")]
     InvalidInput {
-        index: usize,
+        idx: usize,
         expected: &'static str,
         actual: String,
     },
@@ -85,9 +85,9 @@ impl InvokeError {
         Self::External(Box::new(error))
     }
 
-    pub fn invalid_input(index: usize, expected: &'static str, actual: impl fmt::Debug) -> Self {
+    pub fn invalid_input(idx: usize, expected: &'static str, actual: impl fmt::Debug) -> Self {
         Self::InvalidInput {
-            index,
+            idx,
             expected,
             actual: format!("{actual:?}"),
         }

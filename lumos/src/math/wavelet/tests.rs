@@ -2,7 +2,7 @@ use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
 use crate::math::wavelet::{B3, SmoothRow, atrous_smooth, max_scales, reflect, white_noise_sigma};
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     Buffer2::from_fn(size.width, size.height, |x, y| {
@@ -12,7 +12,7 @@ fn pattern(size: Size2us) -> Buffer2<f32> {
 }
 
 #[test]
-fn reflect_mirrors_indices() {
+fn reflect_mirrors_idxs() {
     let n = 5; // period = 2*(5-1) = 8
     assert_eq!(reflect(0, n), 0);
     assert_eq!(reflect(4, n), 4);
@@ -155,7 +155,7 @@ fn every_tier_smooths_a_row_as_the_scalar_order_does() {
             let expected: Vec<u32> = (0..width)
                 .map(|x| reference(&column, x, step).to_bits())
                 .collect();
-            for tier in Tier::supported() {
+            for tier in IsaTier::supported() {
                 let (mut scratch, mut out) = (vec![0.0; width], vec![0.0; width]);
                 tier.run(SmoothRow {
                     rows: [&rows[0], &rows[1], &rows[2], &rows[3], &rows[4]],

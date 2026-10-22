@@ -19,14 +19,14 @@ fn each_color_reads_its_own_level() {
         _ => 0.375,
     });
     let mesh = ColorMesh::measure(MaskedPlane::from(&pixels), &cfa, 64);
-    for position in [
+    for pos in [
         Vec2us::new(31, 31),
         Vec2us::new(64, 10),
         Vec2us::new(100, 90),
     ] {
-        assert_eq!(mesh.at(1, position).sky, 0.25, "{position:?}");
-        assert_eq!(mesh.at(2, position).sky, 0.375, "{position:?}");
-        assert_eq!(mesh.at(1, position).noise, 0.0, "{position:?}");
+        assert_eq!(mesh.at(1, pos).sky, 0.25, "{pos:?}");
+        assert_eq!(mesh.at(2, pos).sky, 0.375, "{pos:?}");
+        assert_eq!(mesh.at(1, pos).noise, 0.0, "{pos:?}");
     }
     assert_eq!(mesh.at(0, Vec2us::new(31, 31)).sky, red(31));
     assert_eq!(mesh.at(0, Vec2us::new(63, 31)).sky, red(63));

@@ -169,7 +169,7 @@ mod tests {
             },
             AnnulusRadii { inner: 1, outer: 1 },
         ];
-        let positions = [
+        let poss = [
             DVec2::new(20.0, 15.0),
             DVec2::new(0.0, 0.0),
             DVec2::new(39.4, 29.0),
@@ -177,7 +177,7 @@ mod tests {
             DVec2::new(-2.0, 15.0),
         ];
         for annulus in annuli {
-            for pos in positions {
+            for pos in poss {
                 let (cx, cy) = (pos.x.round() as isize, pos.y.round() as isize);
                 let reach = annulus.outer as isize;
                 let (inner_sq, outer_sq) = (annulus.inner.pow(2), annulus.outer.pow(2));

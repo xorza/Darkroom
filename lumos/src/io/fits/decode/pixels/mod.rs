@@ -25,10 +25,10 @@ use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::plan::FitsDecodePlan;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::fits::fits_load_options::FitsChecksumPolicy;
+use crate::io::fits::fits_load_config::FitsChecksumPolicy;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::{self, NullPolicy, NullSamples};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 
@@ -41,7 +41,7 @@ pub(super) struct HduDecode<'a> {
     pub(super) plan: &'a FitsDecodePlan,
     /// The pattern the header declares, which the selection resolved.
     pub(super) cfa_type: Option<CfaType>,
-    pub(super) context: &'a LoadContext,
+    pub(super) ctx: &'a LoadCtx,
 }
 
 impl HduDecode<'_> {
@@ -53,18 +53,18 @@ impl HduDecode<'_> {
         reader: &mut StreamReader<File>,
         policy: FitsChecksumPolicy,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
-        let index = self.hdu.index;
-        let context = self.context;
+        let idx = self.hdu.idx;
+        let ctx = self.ctx;
         if policy == FitsChecksumPolicy::Ignore {
-            return self.read(&mut HduSections::new(reader, index), |_| {
+            return self.read(&mut HduSections::new(reader, idx), |_| {
                 Ok(FitsChecksumProvenance::NOT_CHECKED)
             });
         }
-        let mut sections = HduSections::summed(reader, index)?;
+        let mut sections = HduSections::summed(reader, idx)?;
         self.read(&mut sections, |sections| {
-            Cancelled::check(&context.cancel)?;
+            Cancelled::check(&ctx.cancel)?;
             let report = sections.finish_checksum()?;
-            policy.judge(report, index)
+            policy.judge(report, idx)
         })
     }
 
@@ -79,7 +79,7 @@ impl HduDecode<'_> {
             header,
             plan,
             cfa_type,
-            context,
+            ctx,
             ..
         } = self;
         tracing::debug!(
@@ -122,7 +122,7 @@ impl HduDecode<'_> {
                 step as f32 * QUANTIZATION_SIGMA_PER_STEP
             }),
         };
-        let pedestal = domain_keywords::read_pedestal(header)?.unwrap_or(context.fits.pedestal);
+        let pedestal = domain_keywords::read_pedestal(header)?.unwrap_or(ctx.fits.pedestal);
         let mut metadata = metadata::read(header, plan.sample_type);
         // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to
         // the samples if it is divided by the same span they were.
@@ -195,7 +195,7 @@ impl HduDecode<'_> {
         saturation: Option<f32>,
     ) -> Result<Option<PixelFlags>, FitsLoadError> {
         let dimensions = self.plan.dimensions;
-        let policy = self.context.nulls;
+        let policy = self.ctx.nulls;
         let count: usize = planes
             .iter()
             .filter_map(|plane| plane.nulls)
@@ -206,19 +206,19 @@ impl HduDecode<'_> {
         }
 
         if count > 0 && policy == NullPolicy::Reject {
-            let first_index = planes
+            let first_idx = planes
                 .iter()
                 .enumerate()
                 .find_map(|(channel, plane)| {
                     plane
                         .nulls
-                        .map(|nulls| channel * dimensions.pixel_count() + nulls.first_index)
+                        .map(|nulls| channel * dimensions.pixel_count() + nulls.first_idx)
                 })
                 .expect("a nonzero count means at least one plane reported a null");
             // Samples, not pixels: this counts each channel's nulls separately, and the index is in
             // the channel-major sample space the count belongs to. The pixel figure needs the mask,
             // which this branch does not build.
-            return Err(NullSamples { count, first_index }.into());
+            return Err(NullSamples { count, first_idx }.into());
         }
 
         // Before the fill, which is what erases the evidence. A non-finite sample fails every
@@ -228,11 +228,11 @@ impl HduDecode<'_> {
                 .iter()
                 .map(|plane| plane.samples.as_slice())
                 .collect::<ArrayVec<&[f32], 3>>();
-            PixelFlags::from_fn(dimensions.size(), |index| {
-                if samples.iter().any(|plane| !plane[index].is_finite()) {
+            PixelFlags::from_fn(dimensions.size(), |idx| {
+                if samples.iter().any(|plane| !plane[idx].is_finite()) {
                     QualityFlags::NO_DATA
                 } else if saturation
-                    .is_some_and(|level| samples.iter().any(|plane| plane[index] >= level))
+                    .is_some_and(|level| samples.iter().any(|plane| plane[idx] >= level))
                 {
                     QualityFlags::SATURATED
                 } else {
@@ -267,7 +267,7 @@ impl HduDecode<'_> {
         sections: &mut HduSections<'_>,
     ) -> Result<DecodedPlane, FitsLoadError> {
         let plan = self.plan;
-        let context = self.context;
+        let ctx = self.ctx;
         let width = plan.dimensions.width();
         let height = plan.dimensions.height();
         let expected_pixels = plan.dimensions.pixel_count();
@@ -275,12 +275,12 @@ impl HduDecode<'_> {
         let mut nulls: Option<NullSummary> = None;
         let mut scan = SampleScan::EMPTY;
         for row_start in (0..height).step_by(plan.rows_per_chunk) {
-            Cancelled::check(&context.cancel)?;
+            Cancelled::check(&ctx.cancel)?;
             let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
             let expected_chunk = (row_end - row_start) * width;
             let section =
                 sections.read_section(&channel_ranges(plan, channel, row_start..row_end))?;
-            Cancelled::check(&context.cancel)?;
+            Cancelled::check(&ctx.cancel)?;
             let samples = section.samples();
             if samples.len() != expected_chunk {
                 return Err(FitsLoadError::from(FitsRefusal::SectionLength {
@@ -297,7 +297,7 @@ impl HduDecode<'_> {
             } = Conversion {
                 scaling: section.scaling(),
                 divisor: plan.sample_scale.divisor,
-                cancel: &context.cancel,
+                cancel: &ctx.cancel,
             }
             .scan(samples, &mut output[start..start + expected_chunk])?;
             scan = scan.merge(chunk_scan);
@@ -346,7 +346,7 @@ const CHUNK_SAMPLES: usize = 64 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NullSummary {
     count: usize,
-    first_index: usize,
+    first_idx: usize,
 }
 
 impl NullSummary {
@@ -354,7 +354,7 @@ impl NullSummary {
     const fn offset_by(self, by: usize) -> Self {
         Self {
             count: self.count,
-            first_index: self.first_index + by,
+            first_idx: self.first_idx + by,
         }
     }
 
@@ -362,7 +362,7 @@ impl NullSummary {
     fn merge(self, other: Self) -> Self {
         Self {
             count: self.count + other.count,
-            first_index: self.first_index.min(other.first_index),
+            first_idx: self.first_idx.min(other.first_idx),
         }
     }
 }
@@ -521,7 +521,7 @@ impl Conversion<'_> {
         out.par_chunks_mut(CHUNK_SAMPLES)
             .zip(stored.par_chunks(CHUNK_SAMPLES))
             .enumerate()
-            .map(|(chunk_index, (out, stored))| {
+            .map(|(chunk_idx, (out, stored))| {
                 Cancelled::check(cancel)?;
                 let raw_bits = convert(stored, out);
                 let mut nonfinite = false;
@@ -532,7 +532,7 @@ impl Conversion<'_> {
                     maximum = maximum.max(if finite { pixel } else { f32::NEG_INFINITY });
                 }
                 Ok(ChunkScan {
-                    nulls: nonfinite.then(|| summarize_nulls(out, chunk_index * CHUNK_SAMPLES)),
+                    nulls: nonfinite.then(|| summarize_nulls(out, chunk_idx * CHUNK_SAMPLES)),
                     scan: SampleScan { raw_bits, maximum },
                 })
             })
@@ -561,16 +561,16 @@ impl Conversion<'_> {
 /// known to hold at least one null.
 fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
     let mut count = 0;
-    let mut first_index = None;
-    for (index, pixel) in chunk.iter().enumerate() {
+    let mut first_idx = None;
+    for (idx, pixel) in chunk.iter().enumerate() {
         if !pixel.is_finite() {
             count += 1;
-            first_index.get_or_insert(chunk_start + index);
+            first_idx.get_or_insert(chunk_start + idx);
         }
     }
     NullSummary {
         count,
-        first_index: first_index.expect("only called for a chunk already known to hold a null"),
+        first_idx: first_idx.expect("only called for a chunk already known to hold a null"),
     }
 }
 

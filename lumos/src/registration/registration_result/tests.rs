@@ -3,7 +3,7 @@ use glam::DVec2;
 use crate::registration::error::{
     RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::registration_result::{RegistrationResult, StarMatch, rms_error};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
@@ -18,10 +18,10 @@ fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
     residuals
         .iter()
         .enumerate()
-        .map(|(index, &residual)| StarMatch {
-            indices: MatchIndices {
-                reference: index,
-                target: index,
+        .map(|(idx, &residual)| StarMatch {
+            idxs: MatchIdxs {
+                reference: idx,
+                target: idx,
             },
             residual,
         })
@@ -33,21 +33,21 @@ fn result_keeps_matches_and_derives_diagnostics() {
     let transform = Transform::translation(DVec2::new(1.0, 2.0));
     let matches = vec![
         StarMatch {
-            indices: MatchIndices {
+            idxs: MatchIdxs {
                 reference: 0,
                 target: 2,
             },
             residual: 0.1,
         },
         StarMatch {
-            indices: MatchIndices {
+            idxs: MatchIdxs {
                 reference: 1,
                 target: 4,
             },
             residual: 0.2,
         },
         StarMatch {
-            indices: MatchIndices {
+            idxs: MatchIdxs {
                 reference: 3,
                 target: 5,
             },
@@ -140,17 +140,17 @@ fn registration_error_messages_include_context() {
         // The two that interpolate a field's *fields* rather than the field itself, and so are
         // the ones a reformatting of this enum is most likely to get wrong.
         (
-            RegistrationError::InvalidStarPosition {
+            RegistrationError::InvalidStarPos {
                 catalog: RegistrationCatalog::Reference,
-                index: 3,
-                position: DVec2::new(f64::NAN, 4.5),
+                idx: 3,
+                pos: DVec2::new(f64::NAN, 4.5),
             },
             "reference star 3 position must be finite, got (NaN, 4.5)",
         ),
         (
             RegistrationError::InvalidStarField {
                 catalog: RegistrationCatalog::Target,
-                index: 7,
+                idx: 7,
                 field: StarField::Fwhm,
                 value: f64::INFINITY,
             },

@@ -263,7 +263,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     // Edge a -> b, then select both for deletion.
     h.doc
         .graph
-        .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
+        .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
     h.doc.main_view.selected = [a, b].into_iter().collect();
 
     // The a->b edge is captured by a's step (before a is removed), so a
@@ -276,7 +276,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     assert!(h.doc.graph.find(a).is_some());
     assert!(h.doc.graph.find(b).is_some());
     match h.doc.graph.bindings.get(&InputPort::new(b, 0)) {
-        Some(Binding::Bind(src)) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
+        Some(Binding::Wire(src)) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
         other => panic!("expected restored a->b edge, got {other:?}"),
     }
     assert!(!h.undo(), "the whole delete collapsed to one undo entry");

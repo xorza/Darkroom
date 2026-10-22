@@ -39,7 +39,7 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     }) = &preferences
     {
         window = window.with_inner_size(w.size).with_maximized(w.maximized);
-        if let Some(pos) = w.position {
+        if let Some(pos) = w.pos {
             window = window.with_position(pos);
         }
     }

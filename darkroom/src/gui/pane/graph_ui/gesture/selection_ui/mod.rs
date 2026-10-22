@@ -22,7 +22,7 @@ use crate::gui::widgets::gesture_slot::GestureSlot;
 /// that fall through to the bare canvas (node bodies hit-test first, so
 /// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
-pub(crate) struct SelectionUI {
+pub(crate) struct SelectionUi {
     band: GestureSlot<RubberBand>,
     /// The swept set while a band is active, **sorted and deduplicated** so
     /// [`Selection::contains`](crate::gui::pane::graph_ui::draw_ctx::Selection::contains) can
@@ -70,7 +70,7 @@ impl RubberBand {
     }
 }
 
-impl SelectionUI {
+impl SelectionUi {
     /// Drop the in-flight band and its preview. `swept` is cleared in place —
     /// keeping the allocation is the whole reason it is a `Vec`.
     pub(crate) fn reset(&mut self) {

@@ -5,8 +5,8 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::math::vec2us::Vec2us;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
-fn hash_unit(index: usize) -> f32 {
-    ((index.wrapping_mul(2_654_435_761) >> 8) & 0xffff) as f32 / 65536.0
+fn hash_unit(idx: usize) -> f32 {
+    ((idx.wrapping_mul(2_654_435_761) >> 8) & 0xffff) as f32 / 65536.0
 }
 
 /// A frame of `size` whose pixels lie in [1, 2), different for each `seed`.
@@ -138,7 +138,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
                 .collect();
             if f == TRAIL_FRAME {
                 for x in 40..88 {
-                    pixels[size.index_of(Vec2us::new(x, 64))] = 100.0;
+                    pixels[size.idx_of(Vec2us::new(x, 64))] = 100.0;
                 }
             }
             gray_image(size, pixels)
@@ -168,10 +168,10 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
         )
         .unwrap();
     let plain = drizzle_plain(drizzle_frames(images, &transforms), &config).unwrap();
-    for (index, &value) in rejected.image.channel(0).pixels().iter().enumerate() {
+    for (idx, &value) in rejected.image.channel(0).pixels().iter().enumerate() {
         assert!(
             value == -1.0 || (value - 1.0).abs() <= 0.005,
-            "pixel {index}: {value}"
+            "pixel {idx}: {value}"
         );
     }
     let brightest = plain

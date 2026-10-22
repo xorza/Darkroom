@@ -174,7 +174,7 @@ fn register_transform(library: &mut Library) {
                 debug_assert_eq!(inputs.len(), 6);
                 debug_assert_eq!(outputs.len(), 1);
                 let image = inputs[0].required_custom::<Image>();
-                let scalar = |index: usize| inputs[index].required_f64() as f32;
+                let scalar = |idx: usize| inputs[idx].required_f64() as f32;
                 let center = Vec2::new(
                     image.desc().width as f32 / 2.0,
                     image.desc().height as f32 / 2.0,
@@ -253,7 +253,7 @@ mod tests {
         let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
         let op = ContrastBrightness::new(1.5, 0.1);
         let pattern: Vec<u8> = (0..desc.size_in_bytes())
-            .map(|index| u8::try_from(index % 251).unwrap())
+            .map(|idx| u8::try_from(idx % 251).unwrap())
             .collect();
         let patterned_image = || {
             let mut image = imaginarium::Image::new_black(desc).unwrap();

@@ -55,7 +55,7 @@ impl FuncRef {
 }
 
 /// Address of a producer node's output port — the source side of a data
-/// binding (`Binding::Bind`).
+/// binding (`Binding::Wire`).
 #[derive(
     Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]

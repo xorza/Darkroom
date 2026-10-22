@@ -15,10 +15,10 @@ use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::{FrameStoreError, LoadError};
 use crate::image::stackable_image::StackableImage;
 use crate::io::decoder::Decoder;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
 /// The directory under the cache root a kept frame lives in.
-const DIRECTORY: &str = "decode-cache";
+const DIR: &str = "decode-cache";
 
 /// Decoded frames keyed by their source and decoder, kept across runs: what `keep_cache` writes and
 /// a later run reuses. Only content-keyed frames go here, each committed under its
@@ -34,7 +34,7 @@ impl DecodeCache {
     /// The cache under `root`, created if missing.
     pub(crate) fn open(root: &Path) -> Result<Self, FrameStoreError> {
         Ok(Self {
-            root: DiskRoot::create(&root.join(DIRECTORY))?,
+            root: DiskRoot::create(&root.join(DIR))?,
         })
     }
 
@@ -75,7 +75,7 @@ impl DecodeCache {
         KeptFrame::keep(&self.spill(source), image, admitted)
     }
 
-    /// `path` decoded by `D` under `context`, whole in RAM: read back from the cache when a frame
+    /// `path` decoded by `D` under `ctx`, whole in RAM: read back from the cache when a frame
     /// is committed there for the source as it is now, decoded and kept otherwise. For an entry
     /// that changes a frame in place — calibration, a cosmic-ray pass — and measures it after.
     ///
@@ -85,33 +85,27 @@ impl DecodeCache {
     pub(crate) fn decode<D: Decoder>(
         &self,
         path: &Path,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<D::Image, LoadError> {
-        let source = CachedSource::of(path, D::KIND, context)?;
+        let source = CachedSource::of(path, D::KIND, ctx)?;
         if let Some(reused) = self.reuse(&source) {
             return Ok(reused.into_image());
         }
-        let image = D::load(path, context)?;
+        let image = D::load(path, ctx)?;
         self.keep(&source, &image, Admitted::measure(&image))?;
         Ok(image)
     }
 
     /// How many of `paths` hold no frame committed for their source as it is now, decoded by `D`
-    /// under `context`: the frames a run that reads them through the cache writes. A path that
+    /// under `ctx`: the frames a run that reads them through the cache writes. A path that
     /// cannot be read counts as one, as its run fails on it anyway.
-    pub(crate) fn missing<D: Decoder>(
-        &self,
-        paths: &[impl AsRef<Path>],
-        context: &LoadContext,
-    ) -> usize {
+    pub(crate) fn missing<D: Decoder>(&self, paths: &[impl AsRef<Path>], ctx: &LoadCtx) -> usize {
         paths
             .iter()
-            .filter(
-                |path| match CachedSource::of(path.as_ref(), D::KIND, context) {
-                    Ok(source) => self.spill(&source).committed().is_none(),
-                    Err(_) => true,
-                },
-            )
+            .filter(|path| match CachedSource::of(path.as_ref(), D::KIND, ctx) {
+                Ok(source) => self.spill(&source).committed().is_none(),
+                Err(_) => true,
+            })
             .count()
     }
 }
@@ -124,19 +118,19 @@ pub(crate) mod internals {
     use crate::frame_store::decode_cache::DecodeCache;
     use crate::frame_store::decode_cache::cached_source::CachedSource;
     use crate::io::decoder::Decoder;
-    use crate::io::load_context::LoadContext;
+    use crate::io::load_ctx::LoadCtx;
 
     impl DecodeCache {
-        /// Edit channel 0 of the frame kept for `path` decoded by `D` under `context`, as anything
+        /// Edit channel 0 of the frame kept for `path` decoded by `D` under `ctx`, as anything
         /// outside lumos could, and commit it again as it now is: a test that edits a kept frame on
         /// purpose sees a later run read it back rather than decode the source.
         pub(crate) fn edit_kept<D: Decoder>(
             &self,
             path: &Path,
-            context: &LoadContext,
+            ctx: &LoadCtx,
             edit: impl FnOnce(&mut [f32]),
         ) {
-            let source = CachedSource::of(path, D::KIND, context).unwrap();
+            let source = CachedSource::of(path, D::KIND, ctx).unwrap();
             let spill = self.spill(&source);
             assert!(spill.committed().is_some(), "a frame is kept for the path");
             let plane_path = spill.channel_path(0);

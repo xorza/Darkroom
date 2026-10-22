@@ -92,17 +92,13 @@ impl<'a> FrameRegistrar<'a> {
         }
     }
 
-    /// Register light `index`, `frame`, warp it into a set leased from the registrar and park it.
+    /// Register light `idx`, `frame`, warp it into a set leased from the registrar and park it.
     /// See [`FrameParking::store`] for where the set goes.
     ///
     /// # Errors
     ///
     /// [`AlignStackError::Cancelled`] when the run was cancelled, or the frame store.
-    pub(super) fn park(
-        &self,
-        index: usize,
-        frame: DetectedFrame,
-    ) -> Result<Parked, AlignStackError> {
+    pub(super) fn park(&self, idx: usize, frame: DetectedFrame) -> Result<Parked, AlignStackError> {
         if self.run.cancel().is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
@@ -111,7 +107,7 @@ impl<'a> FrameRegistrar<'a> {
             stars,
             admitted,
         } = frame;
-        if index == self.reference {
+        if idx == self.reference {
             // The unwarped reference has full support and unit interpolation confidence.
             return Ok(Parked::Reference(
                 self.parking.store_reference(image, admitted)?,
@@ -121,12 +117,12 @@ impl<'a> FrameRegistrar<'a> {
         let registration = match self.run.registrar.register(&self.reference_stars, &stars) {
             Ok(registration) => registration,
             Err(error) => {
-                tracing::info!(light = index, total = self.count, %error, "registration failed");
+                tracing::info!(light = idx, total = self.count, %error, "registration failed");
                 return Ok(Parked::Dropped(error));
             }
         };
         tracing::info!(
-            light = index,
+            light = idx,
             total = self.count,
             inliers = registration.num_inliers(),
             rms = format!("{:.3}", registration.rms_error()),

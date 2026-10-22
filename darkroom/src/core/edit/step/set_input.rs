@@ -32,7 +32,7 @@ impl Reversible for SetInput {
     /// The inline const-value editor exists only while the binding is
     /// `Const(_)`. Flipping that presence (None ⇄ Const, Bind ⇄ Const) adds or
     /// removes a widget, so the node remeasures and every port below it
-    /// shifts — connection curves have to re-sample their endpoints. Typing
+    /// shifts — wire curves have to re-sample their endpoints. Typing
     /// inside an existing `Const` keeps the editor present at its `Fixed`
     /// size, so a value-only edit costs no second pass.
     fn invalidates_cached_geometry(&self) -> bool {

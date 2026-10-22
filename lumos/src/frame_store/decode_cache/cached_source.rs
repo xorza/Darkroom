@@ -8,7 +8,7 @@ use common::FileIdentity;
 use crate::decode::decoder_kind::DecoderKind;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
 /// A source file as the decode cache names and keys it: the path it was read by, its canonical
 /// path, and the key of its decode as the file was then.
@@ -20,18 +20,18 @@ pub(crate) struct CachedSource {
 }
 
 impl CachedSource {
-    /// `path` as it is now, decoded by `decoder` under `context`.
+    /// `path` as it is now, decoded by `decoder` under `ctx`.
     pub(crate) fn of(
         path: &Path,
         decoder: DecoderKind,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<Self, FrameStoreError> {
         let canonical = canonicalize(path)?;
         let identity = identity(path, &canonical)?;
         Ok(Self {
             path: path.to_path_buf(),
             canonical,
-            key: CacheKey::new(identity, decoder, context),
+            key: CacheKey::new(identity, decoder, ctx),
         })
     }
 

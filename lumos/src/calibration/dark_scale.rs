@@ -103,32 +103,32 @@ impl FitLight<'_> {
         let saturation = (!image.metadata.derived.saturation_flagged())
             .then(|| image.metadata.header.saturation_level());
         let excluded = QualityFlags::SATURATED.union(QualityFlags::NO_DATA);
-        let unmeasured = |index: usize| {
+        let unmeasured = |idx: usize| {
             image
                 .flags()
-                .is_some_and(|flags| flags.at(index).intersects(excluded))
+                .is_some_and(|flags| flags.at(idx).intersects(excluded))
                 || self
                     .imposed
-                    .is_some_and(|flags| flags.at(index).intersects(excluded))
-                || saturation.is_some_and(|level| samples[index] >= level)
+                    .is_some_and(|flags| flags.at(idx).intersects(excluded))
+                || saturation.is_some_and(|level| samples[idx] >= level)
         };
         let less_bias =
-            |index: usize| f64::from(samples[index]) - self.bias.map_or(0.0, |bias| bias.at(index));
-        hot.indices
+            |idx: usize| f64::from(samples[idx]) - self.bias.map_or(0.0, |bias| bias.at(idx));
+        hot.idxs
             .par_iter()
             .zip(&hot.excess)
-            .map_init(RingReference::default, |ring, (&index, &excess)| {
-                if unmeasured(index) {
+            .map_init(RingReference::default, |ring, (&idx, &excess)| {
+                if unmeasured(idx) {
                     return None;
                 }
                 let frame = RingFrame {
                     size,
                     value: less_bias,
                 };
-                let level = ring.at(frame, &image.cfa_type(), size.point_of(index))?;
+                let level = ring.at(frame, &image.cfa_type(), size.point_of(idx))?;
                 Some(Pair {
                     dark: f64::from(excess) * self.dark_gain,
-                    light: less_bias(index) - f64::from(level),
+                    light: less_bias(idx) - f64::from(level),
                 })
             })
             .flatten()

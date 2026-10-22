@@ -24,11 +24,11 @@ use std::mem;
 /// integration over the moving source. Only one node can hold the
 /// pointer at a time, so one anchor slot is enough.
 ///
-/// `draw_all` is the single entry point; `GraphUI` calls it once per frame after
+/// `draw_all` is the single entry point; `GraphUi` calls it once per frame after
 /// [`crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry`] has been rebuilt from
 /// last-frame's responses.
 #[derive(Default, Debug)]
-pub(super) struct NodeUI {
+pub(super) struct NodeUi {
     /// The body/title drag, latched in [`node_widget::NodeWidget::show`] and
     /// stepped by [`Self::prepass`].
     drag: GroupDrag,
@@ -83,7 +83,7 @@ pub(crate) struct NodeDrawOutcome {
     pub(crate) menu_opened: Option<NodeId>,
 }
 
-impl NodeUI {
+impl NodeUi {
     /// Drop the in-flight drag and the focus hysteresis. `row_tracks` and
     /// `paint_order` are scratch grown to the largest scene seen, not gesture
     /// state, so they keep their capacity across the reset.
@@ -126,7 +126,7 @@ impl NodeUI {
         // commits.
         let mut outcome = NodeDrawOutcome::default();
         let mut focus_kept = None;
-        // Swapped out for the sweep because each node hands the whole `NodeUI`
+        // Swapped out for the sweep because each node hands the whole `NodeUi`
         // to its widget; it goes back below with its capacity, so only a graph
         // larger than every earlier one ever allocates here.
         let mut order = mem::take(&mut self.paint_order);
@@ -162,7 +162,7 @@ impl NodeUI {
     }
 
     /// Pre-record pass: peek palantir's input state for any widgets
-    /// this `NodeUI` owns and push the corresponding `GraphIntent`s into
+    /// this `NodeUi` owns and push the corresponding `GraphIntent`s into
     /// `out`. Runs in the pre-record pass, so any state mutation applied
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the

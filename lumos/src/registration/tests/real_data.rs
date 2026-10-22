@@ -13,7 +13,7 @@ use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::point_normalization::centroid;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
@@ -98,12 +98,12 @@ fn register_two_lights() {
     let inlier_ref: Vec<DVec2> = result
         .matched_stars()
         .iter()
-        .map(|star_match| result1.stars[star_match.indices.reference].pos)
+        .map(|star_match| result1.stars[star_match.idxs.reference].pos)
         .collect();
     let inlier_target: Vec<DVec2> = result
         .matched_stars()
         .iter()
-        .map(|star_match| result2.stars[star_match.indices.target].pos)
+        .map(|star_match| result2.stars[star_match.idxs.target].pos)
         .collect();
 
     let origin = centroid(&inlier_ref);
@@ -148,7 +148,7 @@ fn register_two_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
-    let warped = WarpParams::default()
+    let warped = WarpConfig::default()
         .warp(&img2, result.warp_transform())
         .image;
     let warp_elapsed = warp_start.elapsed();

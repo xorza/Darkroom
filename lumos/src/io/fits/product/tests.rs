@@ -22,7 +22,7 @@ use crate::image::temperature_source::TemperatureSource;
 use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
@@ -77,9 +77,9 @@ fn rgb_product() -> StackProduct {
     let mut dispersion = [plane(20.0), plane(21.0), plane(22.0)];
     dispersion[2][3] = f32::NAN;
     let mut excluded_samples = [0; 8];
-    excluded_samples[QualityFlags::SATURATED.index()] = 7;
+    excluded_samples[QualityFlags::SATURATED.idx()] = 7;
     let mut kept_flagged_samples = [0; 8];
-    kept_flagged_samples[QualityFlags::DEFECT.index()] = 3;
+    kept_flagged_samples[QualityFlags::DEFECT.idx()] = 3;
     StackProduct {
         image: image(
             LinearPixels::Rgb([plane(0.0), plane(1.0), plane(2.0)]),
@@ -157,12 +157,12 @@ fn assert_map_eq(read: Option<&QualityMap>, written: Option<&QualityMap>, name: 
 /// quality planes describe it, so the file holds one image.
 #[test]
 fn a_product_round_trips_every_plane_bit_for_bit() {
-    let directory = TempDir::new("product-round-trip");
-    let path = directory.join("product.fits");
+    let dir = TempDir::new("product-round-trip");
+    let path = dir.join("product.fits");
     let written = rgb_product();
     writer::product_fits(&written, &path).unwrap();
 
-    let read = LoadContext::default().product(&path).unwrap();
+    let read = LoadCtx::default().product(&path).unwrap();
     for channel in 0..3 {
         let (read, written) = (read.image.channel(channel), written.image.channel(channel));
         for (pixel, (read, written)) in read.pixels().iter().zip(written.pixels()).enumerate() {
@@ -214,7 +214,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
             "DISPERSION"
         ]
     );
-    let scaling = |index: usize| file.hdus()[index].image().unwrap().scaling;
+    let scaling = |idx: usize| file.hdus()[idx].image().unwrap().scaling;
     assert_eq!(scaling(0).bscale, SCALE);
     assert_eq!(scaling(2), Scaling::IDENTITY);
     assert_eq!(scaling(3).bscale, 1.0 / (SCALE * SCALE));
@@ -238,7 +238,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
     let mask = reader.read_data_raw(2).unwrap().into_data();
     let pixel_count = SIZE.pixel_count();
-    let set: Vec<_> = (0..mask.len()).filter(|&index| mask[index] == 1).collect();
+    let set: Vec<_> = (0..mask.len()).filter(|&idx| mask[idx] == 1).collect();
     assert_eq!(
         set,
         [
@@ -248,7 +248,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
         ]
     );
 
-    let alone = LoadContext::default().linear(&path).unwrap();
+    let alone = LoadCtx::default().linear(&path).unwrap();
     assert_eq!(bits(alone.channel(1)), bits(read.image.channel(1)));
 }
 
@@ -258,8 +258,8 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
 /// reloads as itself, an RGB one as a cube no load option has to name.
 #[test]
 fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
-    let directory = TempDir::new("product-mosaic");
-    let path = directory.join("product.fits");
+    let dir = TempDir::new("product-mosaic");
+    let path = dir.join("product.fits");
     let cfa_type = CfaType::Bayer(CfaPattern::Gbrg);
     let written = StackProduct {
         image: image(LinearPixels::L(plane(0.0)), None),
@@ -275,7 +275,7 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
         report: RunReport::default(),
     };
     writer::product_fits(&written, &path).unwrap();
-    let read = LoadContext::default().product(&path).unwrap();
+    let read = LoadCtx::default().product(&path).unwrap();
     assert_eq!(read.cfa_type, Some(cfa_type));
     assert!(matches!(
         read.coverage,
@@ -295,9 +295,9 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     assert_eq!(read.weight_kind, WeightKind::Count);
 
     let rgb = rgb_product().image;
-    let linear_path = directory.join("linear.fits");
+    let linear_path = dir.join("linear.fits");
     writer::linear_fits(&rgb, &linear_path).unwrap();
-    let reloaded = LoadContext::default().linear(&linear_path).unwrap();
+    let reloaded = LoadCtx::default().linear(&linear_path).unwrap();
     assert!(reloaded.is_rgb());
     assert_eq!(bits(reloaded.channel(2)).len(), SIZE.pixel_count());
     for channel in 0..3 {
@@ -315,15 +315,15 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
 /// made valid again, against the refusal it meets.
 #[test]
 fn a_product_edited_out_of_its_format_is_refused() {
-    let directory = TempDir::new("product-refusals");
-    let source = directory.join("product.fits");
+    let dir = TempDir::new("product-refusals");
+    let source = dir.join("product.fits");
     writer::product_fits(&rgb_product(), &source).unwrap();
     let pixel_count = SIZE.pixel_count();
     let cases: Vec<(&str, Edit, FitsRefusal)> = vec![
         (
             "no product version",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.remove("LUMPRODV");
                 }
                 true
@@ -332,8 +332,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "another product version",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.set("LUMPRODV", 3).unwrap();
                 }
                 true
@@ -342,8 +342,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "no weight kind",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.remove("LUMWGTK");
                 }
                 true
@@ -354,8 +354,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "a weight kind no product names",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.set("LUMWGTK", "EXPOSURE").unwrap();
                 }
                 true
@@ -366,8 +366,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "inverse-variance weights named a count",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.set("LUMWGTK", "COUNT").unwrap();
                 }
                 true
@@ -383,8 +383,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "a report field missing",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.remove("LUMSPIL");
                 }
                 true
@@ -395,8 +395,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "a negative count",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.set("LUMEXC1", -1).unwrap();
                 }
                 true
@@ -407,8 +407,8 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "an uncertainty of another kind",
-            Box::new(|index, header, _| {
-                if index == 3 {
+            Box::new(|idx, header, _| {
+                if idx == 3 {
                     header.set("UTYPE", "StdDevUncertainty").unwrap();
                 }
                 true
@@ -419,25 +419,23 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
         (
             "a mask set where the image holds data",
-            Box::new(move |index, _, data| {
-                if index == 2 {
+            Box::new(move |idx, _, data| {
+                if idx == 2 {
                     data[pixel_count] = 1;
                 }
                 true
             }),
-            FitsRefusal::MaskDisagrees { index: pixel_count },
+            FitsRefusal::MaskDisagrees { idx: pixel_count },
         ),
         (
             "no mask for a pixel of no data",
-            Box::new(|index, _, _| index != 2),
-            FitsRefusal::MaskDisagrees {
-                index: NO_DATA_PIXEL,
-            },
+            Box::new(|idx, _, _| idx != 2),
+            FitsRefusal::MaskDisagrees { idx: NO_DATA_PIXEL },
         ),
         (
             "a uniform coverage beside its plane",
-            Box::new(|index, header, _| {
-                if index == 0 {
+            Box::new(|idx, header, _| {
+                if idx == 0 {
                     header.set("LUMCOVU", 1.0).unwrap();
                 }
                 true
@@ -446,15 +444,15 @@ fn a_product_edited_out_of_its_format_is_refused() {
         ),
     ];
     for (name, edit, refusal) in cases {
-        let path = directory.join("edited.fits");
+        let path = dir.join("edited.fits");
         fs::copy(&source, &path).unwrap();
         rewrite_fits(&path, edit);
-        let error = LoadContext::default().product(&path).unwrap_err();
+        let error = LoadCtx::default().product(&path).unwrap_err();
         assert_eq!(fits_refusal(error), refusal, "{name}");
     }
 
-    let linear = directory.join("linear.fits");
+    let linear = dir.join("linear.fits");
     writer::linear_fits(&rgb_product().image, &linear).unwrap();
-    let error = LoadContext::default().product(&linear).unwrap_err();
+    let error = LoadCtx::default().product(&linear).unwrap_err();
     assert_eq!(fits_refusal(error), FitsRefusal::NotAProduct);
 }

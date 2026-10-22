@@ -29,8 +29,8 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::panic_message;
-use crate::io::fits::fits_load_options::{FitsHduSelector, FitsLoadOptions};
-use crate::io::load_context::LoadContext;
+use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
+use crate::io::load_ctx::LoadCtx;
 use crate::platform::ScratchFile;
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
@@ -38,15 +38,15 @@ use crate::platform::ScratchFile;
 /// outlive it anywhere.
 #[test]
 fn a_parked_image_reads_back_and_leaves_no_file() {
-    let directory = TempDir::new("frame_store_image");
-    let scratch = RunScratch::create(directory.path()).unwrap();
+    let dir = TempDir::new("frame_store_image");
+    let scratch = RunScratch::create(dir.path()).unwrap();
     let dimensions = ImageDimensions::new((3, 2), ChannelLayout::Mono);
     let mut image = LinearImage::from_interleaved(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.header.exposure_time = Some(30.0);
 
     let stored = StoredImage::spill(&scratch, &image).unwrap();
     if !ScratchFile::KEEPS_NAME {
-        assert_eq!(directory.entry_count(), 0, "a parked plane kept its name");
+        assert_eq!(dir.entry_count(), 0, "a parked plane kept its name");
     }
     assert_eq!(
         stored.planes().collect::<Vec<_>>(),
@@ -65,16 +65,12 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 2);
     assert_eq!(
         (0..6)
-            .map(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index))
+            .map(|idx| nulls.mask_of(QualityFlags::NO_DATA).get(idx))
             .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
     drop((stored, masked));
-    assert_eq!(
-        directory.entry_count(),
-        0,
-        "a parked plane outlived its frame"
-    );
+    assert_eq!(dir.entry_count(), 0, "a parked plane outlived its frame");
 }
 
 /// Two runs scratching in one root — a root the caller also keeps files in — each read back their
@@ -163,7 +159,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     let gate = FrameGate::of(&frame, 0, 0..4);
     assert_eq!(
         (0..4)
-            .map(|index| gate.sample(index).map(|sample| sample.confidence))
+            .map(|idx| gate.sample(idx).map(|sample| sample.confidence))
             .collect::<Vec<_>>(),
         [Some(1.0), Some(1.0), None, Some(1.0)]
     );
@@ -179,7 +175,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 /// nothing: another decode version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
-    let directory = TempDir::new("frame_store_cached_quality");
+    let dir = TempDir::new("frame_store_cached_quality");
     let dimensions = ImageDimensions::new((2, 2), ChannelLayout::Mono);
     let identity = FileIdentity {
         len: 16,
@@ -187,14 +183,14 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         file_id: None,
         changed_ns: None,
     };
-    let key = CacheKey::new(identity, DecoderKind::Linear, &LoadContext::default());
+    let key = CacheKey::new(identity, DecoderKind::Linear, &LoadCtx::default());
     let mut image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.set_flags(PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[1.0, 2.0, f32::NAN, 4.0]],
     ));
     let cache = |name, image: &LinearImage| {
-        let spill = FrameSpill::named(directory.path(), name, key);
+        let spill = FrameSpill::named(dir.path(), name, key);
         let kept = KeptFrame::keep(&spill, image, Admitted::measure(image)).unwrap();
         (spill, kept.into_frame())
     };
@@ -233,24 +229,24 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         decoder: DecoderKind::Cfa,
         ..key
     };
-    let three_passes = LoadContext {
+    let three_passes = LoadCtx {
         xtrans_passes: MarkesteijnPasses::Three,
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
-    let second_hdu = LoadContext {
-        fits: FitsLoadOptions {
-            hdu: FitsHduSelector::Index(1),
-            ..FitsLoadOptions::default()
+    let second_hdu = LoadCtx {
+        fits: FitsLoadConfig {
+            hdu: FitsHduSelector::Idx(1),
+            ..FitsLoadConfig::default()
         },
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
-    let other_options = [three_passes, second_hdu]
-        .map(|context| CacheKey::new(identity, DecoderKind::Linear, &context));
+    let other_options =
+        [three_passes, second_hdu].map(|ctx| CacheKey::new(identity, DecoderKind::Linear, &ctx));
     for other in [other_version, other_decoder]
         .into_iter()
         .chain(other_options)
     {
-        let other = FrameSpill::named(directory.path(), "masked", other);
+        let other = FrameSpill::named(dir.path(), "masked", other);
         assert!(KeptFrame::reuse(&other).is_none());
     }
 
@@ -315,8 +311,8 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
 /// the same name after it replaces the name, and leaves the first map reading its own samples.
 #[test]
 fn a_published_plane_maps_back_what_its_writer_wrote() {
-    let directory = TempDir::new("frame_store_plane");
-    let path = directory.join("plane.bin");
+    let dir = TempDir::new("frame_store_plane");
+    let path = dir.join("plane.bin");
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
     let first = StoredPlane::publish(&path, &pixels).unwrap();
     let second = StoredPlane::publish(&path, &[7.0f32; 12]).unwrap();
@@ -342,7 +338,7 @@ fn spill_names_are_stable_per_source_and_key_and_share_one_stem() {
                 changed_ns: None,
             },
             decoder,
-            &LoadContext::default(),
+            &LoadCtx::default(),
         )
     };
     let linear = key(DecoderKind::Linear);

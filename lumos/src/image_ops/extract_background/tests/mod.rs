@@ -14,7 +14,7 @@ fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            v[size.index_of(Vec2us::new(x, y))] = f(x, y);
+            v[size.idx_of(Vec2us::new(x, y))] = f(x, y);
         }
     }
     v
@@ -228,7 +228,7 @@ fn outlier_tiles_are_rejected_from_the_fit() {
         for x in 0..size.width {
             let expected = if blob(x, y) { level + 0.5 } else { level };
             assert_eq!(
-                rejected[size.index_of(Vec2us::new(x, y))],
+                rejected[size.idx_of(Vec2us::new(x, y))],
                 expected,
                 "({x}, {y})"
             );

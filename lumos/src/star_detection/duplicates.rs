@@ -49,7 +49,7 @@ impl Duplicates {
             stars
                 .iter()
                 .enumerate()
-                .map(|(index, star)| (cell_of(star), index)),
+                .map(|(idx, star)| (cell_of(star), idx)),
         );
         members.sort_unstable();
         kept.clear();
@@ -71,10 +71,10 @@ impl Duplicates {
         }
 
         let removed = kept.iter().filter(|&&keep| !keep).count();
-        let mut index = 0;
+        let mut idx = 0;
         stars.retain(|_| {
-            let keep = kept[index];
-            index += 1;
+            let keep = kept[idx];
+            idx += 1;
             keep
         });
         removed

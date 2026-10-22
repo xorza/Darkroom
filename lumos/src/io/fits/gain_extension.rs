@@ -64,8 +64,8 @@ impl GainExtension {
         described: &DescribedImage,
     ) -> Result<Option<usize>, FitsLoadError> {
         let found = ExtensionClaims::of(file, LumosExtension::Gain)?.for_image(file, image)?;
-        if let Some(index) = found {
-            let hdu = &file[index];
+        if let Some(idx) = found {
+            let hdu = &file[idx];
             LumosExtension::Gain.check(hdu, described)?;
             let step = hdu.header.get_integer(STEP_KEYWORD)?;
             if step != Some(flat_gain::STEP as i64) {
@@ -84,13 +84,13 @@ impl GainExtension {
         let grid = GainGrid::of(size);
         let per_plane = grid.columns * grid.rows;
         debug_assert_eq!(nodes.len() % per_plane, 0);
-        if let Some(index) = nodes
+        if let Some(idx) = nodes
             .iter()
             .position(|&gain| !gain.is_finite() || gain <= 0.0)
         {
             return Err(FitsLoadError::from(FitsRefusal::NotAGain {
-                node: index,
-                value: nodes[index],
+                node: idx,
+                value: nodes[idx],
             }));
         }
         let planes: ArrayVec<Buffer2<f32>, 3> = nodes

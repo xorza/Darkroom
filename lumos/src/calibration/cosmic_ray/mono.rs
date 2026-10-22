@@ -48,7 +48,7 @@ struct MonoScratch {
     /// `median₅(S)`. Each is consumed by the step immediately after it, so the three never overlap.
     median: Buffer2<f32>,
     /// A stage's input, one at a time: `median₃(I)`, then `S = L⁺/(2N)`; then the read-only
-    /// snapshot [`Repair::apply`] gathers from.
+    /// snapshot [`PixelRepair::apply`] gathers from.
     staged: Buffer2<f32>,
 }
 
@@ -256,7 +256,7 @@ impl<'a> MonoDetector<'a> {
             if masks.detect_and_grow(planes, config, never_flagged) == 0 {
                 break;
             }
-            Repair {
+            PixelRepair {
                 flagged: &masks.accumulated,
                 unread: kept_out.map(|kept_out| &kept_out.unread),
                 local,
@@ -405,9 +405,7 @@ impl WindowMedian {
                             let yy = rows(dy);
                             for dx in 0..side {
                                 let xx = (x + dx).saturating_sub(r).min(width - 1);
-                                scratch
-                                    .values
-                                    .push(data[size.index_of(Vec2us::new(xx, yy))]);
+                                scratch.values.push(data[size.idx_of(Vec2us::new(xx, yy))]);
                             }
                         }
                         row[x] = statistics::median_mut(&mut scratch.values);
@@ -467,11 +465,11 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
     };
     let (mut first, mut end, mut next) = (0, count / 2 + 2, count / 2 + 2);
     loop {
-        for index in first + 1..end {
-            exchange(lanes, first, index);
+        for idx in first + 1..end {
+            exchange(lanes, first, idx);
         }
-        for index in first + 1..end - 1 {
-            exchange(lanes, index, end - 1);
+        for idx in first + 1..end - 1 {
+            exchange(lanes, idx, end - 1);
         }
         if end - first == 3 {
             debug_assert_eq!(next, count);
@@ -513,8 +511,8 @@ impl PixelNoise<'_> {
             .par_iter_mut()
             .zip(&m5[span])
             .enumerate()
-            .for_each(|(index, (out, &signal))| {
-                *out = self.model.noise(signal, (self.local)(first + index));
+            .for_each(|(idx, (out, &signal))| {
+                *out = self.model.noise(signal, (self.local)(first + idx));
             });
     }
 }
@@ -548,7 +546,7 @@ fn rows_within(changed: &[bool], reach: usize, bands: &mut Vec<Range<usize>>) {
 /// `bench_cosmic_ray_reject_mono`: the false sharing costs more than the copy. The copy lands in
 /// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
 #[derive(Clone, Copy)]
-pub(super) struct Repair<'a> {
+pub(super) struct PixelRepair<'a> {
     pub(super) flagged: &'a BitBuffer2,
     pub(super) unread: Option<&'a BitBuffer2>,
     /// Each pixel's local background, whose sky stands in where no neighbour within
@@ -561,7 +559,7 @@ pub(super) struct Repair<'a> {
 /// than the local sky does.
 const REPAIR_REACH: usize = 7;
 
-impl fmt::Debug for Repair<'_> {
+impl fmt::Debug for PixelRepair<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Repair")
             .field("flagged", &self.flagged)
@@ -570,7 +568,7 @@ impl fmt::Debug for Repair<'_> {
     }
 }
 
-impl Repair<'_> {
+impl PixelRepair<'_> {
     /// In-paint `data` in place, reading its copy in `snapshot`.
     pub(super) fn apply(
         self,
@@ -605,14 +603,14 @@ impl Repair<'_> {
                             break;
                         }
                         for (xx, yy) in ring(Vec2us::new(x, y), reach, size) {
-                            let j = size.index_of(Vec2us::new(xx, yy));
+                            let j = size.idx_of(Vec2us::new(xx, yy));
                             if measured(j) {
                                 buf.push(src[j]);
                             }
                         }
                     }
                     *o = if buf.is_empty() {
-                        local(size.index_of(Vec2us::new(x, y))).local.sky
+                        local(size.idx_of(Vec2us::new(x, y))).local.sky
                     } else {
                         statistics::median_mut(buf)
                     };

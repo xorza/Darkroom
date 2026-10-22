@@ -84,7 +84,7 @@ impl Default for ViewerPreferences {
 
 /// Persisted main-window geometry. `size` is logical pixels (DPI-independent,
 /// so it restores to the same apparent size on a differently-scaled
-/// monitor); `position` is physical pixels, absent when the platform
+/// monitor); `pos` is physical pixels, absent when the platform
 /// doesn't report it (Wayland). `maximized` restores the maximized state
 /// while `size` remains what to return to when un-maximized. glam vecs
 /// serialize as `[x, y]` arrays.
@@ -95,7 +95,7 @@ pub(crate) struct WindowState {
     pub(crate) size: UVec2,
     pub(crate) maximized: bool,
     /// Physical outer position `[x, y]`; `None` on Wayland.
-    pub(crate) position: Option<IVec2>,
+    pub(crate) pos: Option<IVec2>,
 }
 
 impl Default for Preferences {

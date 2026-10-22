@@ -2,7 +2,7 @@
 
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// How far either side of the reference a value may sit before it is rejected, in units of the
@@ -53,9 +53,9 @@ impl SigmaBounds {
     /// Reports under the path a caller sets, `sigma.low` and `sigma.high`: every rejection config
     /// holds its bounds in a field named `sigma`.
     pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("sigma.low", self.low)
+        ConfigField::new("sigma.low", self.low)
             .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::new("sigma.high", self.high)
+        ConfigField::new("sigma.high", self.high)
             .finite_and("finite and positive", |value| value > 0.0)
     }
 }

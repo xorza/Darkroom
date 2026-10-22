@@ -36,8 +36,8 @@ fn a_light_is_its_f64_calibration_rounded_once() {
         offset: 0.0005,
     };
     let scale = 1.7;
-    let imposed = PixelFlags::from_fn(size, |index| {
-        if index == 3 {
+    let imposed = PixelFlags::from_fn(size, |idx| {
+        if idx == 3 {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
@@ -67,23 +67,23 @@ fn a_light_is_its_f64_calibration_rounded_once() {
     .apply(&mut light);
 
     let mut chain_strays = 0;
-    for index in 0..size.pixel_count() {
-        let removed = (f64::from(bias[index]) * bias_map.gain + bias_map.offset)
-            + (f64::from(dark[index]) * (dark_map.gain * scale) + dark_map.offset);
-        let exact = (f64::from(light_samples[index]) - removed) / f64::from(flat[index]);
+    for idx in 0..size.pixel_count() {
+        let removed = (f64::from(bias[idx]) * bias_map.gain + bias_map.offset)
+            + (f64::from(dark[idx]) * (dark_map.gain * scale) + dark_map.offset);
+        let exact = (f64::from(light_samples[idx]) - removed) / f64::from(flat[idx]);
         let within_half_ulp = |value: f32| {
             let half_ulp = f64::from(value.abs()) * f64::from(f32::EPSILON) / 2.0;
             (f64::from(value) - exact).abs() <= half_ulp * (1.0 + 1e-9)
         };
-        let value = light.data().pixels()[index];
+        let value = light.data().pixels()[idx];
         assert!(
             within_half_ulp(value),
-            "pixel {index}: {value} against {exact}"
+            "pixel {idx}: {value} against {exact}"
         );
-        let chain = ((light_samples[index]
-            - (bias[index] * bias_map.gain as f32 + bias_map.offset as f32))
-            - (dark[index] * (dark_map.gain * scale) as f32 + dark_map.offset as f32))
-            / flat[index];
+        let chain = ((light_samples[idx]
+            - (bias[idx] * bias_map.gain as f32 + bias_map.offset as f32))
+            - (dark[idx] * (dark_map.gain * scale) as f32 + dark_map.offset as f32))
+            / flat[idx];
         chain_strays += usize::from(!within_half_ulp(chain));
     }
     assert!(
@@ -92,7 +92,7 @@ fn a_light_is_its_f64_calibration_rounded_once() {
     );
     let flags = light.flags().unwrap();
     let flagged: Vec<(usize, QualityFlags)> = (0..size.pixel_count())
-        .map(|index| (index, flags.at(index)))
+        .map(|idx| (idx, flags.at(idx)))
         .filter(|(_, flags)| *flags != QualityFlags::default())
         .collect();
     assert_eq!(

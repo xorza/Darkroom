@@ -44,7 +44,7 @@ use crate::internals::assertions::{assert_close, bits};
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane, constant_cfa, make_cfa};
 use crate::internals::fits::rewrite_fits;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -603,7 +603,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
 
 #[test]
 fn every_component_round_trips_through_its_extname() {
-    // One name table: the writer stamps `extname()` and `bundle_indices` recognizes the HDU by
+    // One name table: the writer stamps `extname()` and `bundle_idxs` recognizes the HDU by
     // feeding it back through `from_extname`, so a role that fails to round-trip is a role that
     // silently vanishes from a saved bundle.
     for component in MasterRole::ALL
@@ -728,7 +728,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
 
         let masters = bundle(images);
         let defects = masters.defect_map.as_ref().unwrap();
-        assert_eq!(defects.cold_indices(), [dead], "{kind:?}");
+        assert_eq!(defects.cold_idxs(), [dead], "{kind:?}");
 
         let prepared = masters.flat.as_ref().unwrap().divisor();
         assert_eq!(prepared.data()[dead], 0.1, "{kind:?}");
@@ -815,10 +815,10 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
         assert!(light.flags().is_none());
     }
 
-    let flagged = |value, index, flag| {
+    let flagged = |value, idx, flag| {
         let mut master = constant_cfa(size, value, CfaType::Mono);
         master.set_flags(PixelFlags::from_fn(size, |at| {
-            if at == index {
+            if at == idx {
                 flag
             } else {
                 QualityFlags::default()
@@ -1054,7 +1054,7 @@ fn defect_detection_zero_median_no_false_positives() {
         .unwrap();
 
     // The tiny values one ADC step up are not flagged; the genuine outlier at 0.5 is, alone.
-    assert_eq!(defect_map.hot().indices, [50]);
+    assert_eq!(defect_map.hot().idxs, [50]);
 }
 
 /// A hot pixel is repaired from its own color. The light's red, green and blue sit at 0.5, 0.3 and
@@ -1113,12 +1113,12 @@ fn calibrate_hot_pixel_correction() {
     );
 
     let nulls = [(0, 2), (4, 2), (2, 0), (2, 4)].map(|(x, y)| y * w + x);
-    for &index in &nulls {
-        light_pixels.pixels_mut()[index] = 0.9;
+    for &idx in &nulls {
+        light_pixels.pixels_mut()[idx] = 0.9;
     }
     let mut light = cfa_from_plane(light_pixels, pattern);
-    light.set_flags(PixelFlags::from_fn(Size2us::new(w, h), |index| {
-        if nulls.contains(&index) {
+    light.set_flags(PixelFlags::from_fn(Size2us::new(w, h), |idx| {
+        if nulls.contains(&idx) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
@@ -1126,8 +1126,8 @@ fn calibrate_hot_pixel_correction() {
     }));
     masters.calibrate(&mut light).unwrap();
     assert_eq!(light.data()[2 * w + 2], 0.5 - 0.0625);
-    for index in nulls {
-        assert_eq!(light.data()[index], 0.5 - 0.0625, "null at {index}");
+    for idx in nulls {
+        assert_eq!(light.data()[idx], 0.5 - 0.0625, "null at {idx}");
     }
 }
 
@@ -1163,8 +1163,8 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     dark.metadata.derived.set_quantization_sigma(Some(0.000_02));
     // Pixel 5 is saturated and a defect: 2 + 4 = 6. The dark's flags go in its own `LUMFLAGS`
     // extension, right after it.
-    let dark_flags = PixelFlags::from_fn(Size2us::new(4, 4), |index| {
-        QualityFlags::from_byte(if index == 5 { 6 } else { 0 })
+    let dark_flags = PixelFlags::from_fn(Size2us::new(4, 4), |idx| {
+        QualityFlags::from_byte(if idx == 5 { 6 } else { 0 })
     });
     dark.set_flags(dark_flags.clone());
     // Two hot pixels with excesses f32 rounds, and pixel 10 cold as well.
@@ -1172,7 +1172,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         DefectMap::from_lists(
             Size2us::new(4, 4),
             HotPixels {
-                indices: vec![5, 10],
+                idxs: vec![5, 10],
                 excess: vec![0.1, 3.0e-5],
             },
             vec![10],
@@ -1184,8 +1184,8 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     masters.calibrate(&mut expected).unwrap();
 
-    let directory = TempDir::new("lumos-calibration-roundtrip");
-    let path = directory.join("masters.fits");
+    let dir = TempDir::new("lumos-calibration-roundtrip");
+    let path = dir.join("masters.fits");
     writer::calibration_bundle(&masters, &path).unwrap();
     // A bundle is no single image, whichever loader is pointed at it.
     let refused = |result: Result<(), ImageError>| {
@@ -1197,10 +1197,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             }) if format == "CALMASTR"
         )
     };
-    let context = LoadContext::default();
-    assert!(refused(context.cfa(&path).map(drop)));
-    assert!(refused(context.linear(&path).map(drop)));
-    assert!(refused(context.preview(&path).map(drop)));
+    let ctx = LoadCtx::default();
+    assert!(refused(ctx.cfa(&path).map(drop)));
+    assert!(refused(ctx.linear(&path).map(drop)));
+    assert!(refused(ctx.preview(&path).map(drop)));
     let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 6);
@@ -1229,18 +1229,18 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         reader.hdus()[2].header.get_text("LUMFOR").unwrap(),
         Some("MASTER_DARK")
     );
-    for image_index in [1, 3, 4] {
+    for image_idx in [1, 3, 4] {
         assert_eq!(
-            reader.hdus()[image_index].header.bitpix().unwrap(),
+            reader.hdus()[image_idx].header.bitpix().unwrap(),
             Bitpix::F32
         );
     }
-    for index in 0..reader.hdus().len() {
-        let report = reader.verify_checksum(index).unwrap();
+    for idx in 0..reader.hdus().len() {
+        let report = reader.verify_checksum(idx).unwrap();
         assert_eq!(report.datasum, ChecksumStatus::Valid);
         assert_eq!(report.checksum, ChecksumStatus::Valid);
     }
-    let loaded = LoadContext::default().calibration_masters(&path).unwrap();
+    let loaded = LoadCtx::default().calibration_masters(&path).unwrap();
     // The flat's stack left its flat-dark's temperature uncompared, and the bundle keeps saying so.
     assert_eq!(loaded.flat_dark(), Some(UNSHARED_TEMPERATURE));
     assert_eq!(
@@ -1249,12 +1249,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     );
     assert!(loaded.bias.as_ref().unwrap().flags().is_none());
     // Flags whose master is gone would be dropped unseen, so the bundle is refused.
-    let orphan = directory.join("orphan.fits");
+    let orphan = dir.join("orphan.fits");
     fs::write(&orphan, &cache_bytes).unwrap();
-    rewrite_fits(&orphan, |index, _, _| index != 1);
-    let error = LoadContext::default()
-        .calibration_masters(&orphan)
-        .unwrap_err();
+    rewrite_fits(&orphan, |idx, _, _| idx != 1);
+    let error = LoadCtx::default().calibration_masters(&orphan).unwrap_err();
     assert!(matches!(error, BundleError::Flags(_)), "{error:?}");
     assert!(
         error
@@ -1266,7 +1264,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cancel = CancelToken::new();
     cancel.cancel();
     assert!(matches!(
-        LoadContext::new(cancel, u64::MAX).calibration_masters(&path),
+        LoadCtx::new(cancel, u64::MAX).calibration_masters(&path),
         Err(BundleError::Cancelled)
     ));
 
@@ -1282,7 +1280,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     invalid_version[version_card + version_digit] = b'4';
     fs::write(&path, invalid_version).unwrap();
     assert!(matches!(
-        LoadContext::default().calibration_masters(&path),
+        LoadCtx::default().calibration_masters(&path),
         Err(BundleError::Version {
             found: 4,
             expected: 6
@@ -1308,9 +1306,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .unwrap();
     invalid_data[pixel_offset] ^= 0x01;
     fs::write(&path, invalid_data).unwrap();
-    let error = LoadContext::default()
-        .calibration_masters(&path)
-        .unwrap_err();
+    let error = LoadCtx::default().calibration_masters(&path).unwrap_err();
     assert!(
         matches!(error, BundleError::Checksum { hdu: 4 }),
         "{error:?}"
@@ -1359,23 +1355,23 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         masters.defect_map.as_ref().unwrap(),
     );
     assert_eq!(loaded_defects.hot(), defects.hot());
-    assert_eq!(loaded_defects.cold_indices(), [10]);
+    assert_eq!(loaded_defects.cold_idxs(), [10]);
 
     // Each way a bundle can be malformed, rewritten with fresh checksums so the check behind them
     // is what refuses it. The HDUs are the primary, the dark, its flags, the flat, the bias and the
     // defect table, whose rows are 13 bytes — KIND, INDEX (8, big-endian), EXCESS (4) — hot 5 and
     // 10, then cold 10.
-    let malformed = directory.join("malformed.fits");
+    let malformed = dir.join("malformed.fits");
     let refused = |edit: &mut dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool| {
         fs::write(&malformed, &cache_bytes).unwrap();
         rewrite_fits(&malformed, edit);
-        LoadContext::default()
+        LoadCtx::default()
             .calibration_masters(&malformed)
             .unwrap_err()
     };
     let set = |hdu: usize, key: &'static str, value: &'static str| {
-        refused(&mut |index, header, _| {
-            if index == hdu {
+        refused(&mut |idx, header, _| {
+            if idx == hdu {
                 header.set(key, value).unwrap();
             }
             true
@@ -1394,12 +1390,12 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         BundleError::DuplicateExtension { extname } if extname == "MASTER_BIAS"
     ));
     assert!(matches!(
-        refused(&mut |index, _, _| !(1..=3).contains(&index)),
+        refused(&mut |idx, _, _| !(1..=3).contains(&idx)),
         BundleError::DefectsWithoutMaster
     ));
     let table = |at: usize, bytes: &[u8]| {
-        refused(&mut |index, _, data| {
-            if index == 5 {
+        refused(&mut |idx, _, data| {
+            if idx == 5 {
                 data[at..at + bytes.len()].copy_from_slice(bytes);
             }
             true
@@ -1409,7 +1405,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         (table(0, &[2]), DefectTableError::Kind { row: 0, kind: 2 }),
         (
             table(2 * 13 + 1, &16i64.to_be_bytes()),
-            DefectTableError::Index { row: 2 },
+            DefectTableError::Idx { row: 2 },
         ),
         (
             table(13 + 9, &(-1.0f32).to_be_bytes()),
@@ -1444,7 +1440,7 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     assert_eq!(report.datasum, ChecksumStatus::Valid);
     assert_eq!(report.checksum, ChecksumStatus::Valid);
 
-    let loaded = LoadContext::default().calibration_masters(&path).unwrap();
+    let loaded = LoadCtx::default().calibration_masters(&path).unwrap();
     assert_eq!(loaded.components().collect::<Vec<_>>(), []);
 }
 
@@ -1462,7 +1458,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
     let defects = DefectMap::from_lists(
         Size2us::new(10, 8),
         HotPixels {
-            indices: vec![1, 2],
+            idxs: vec![1, 2],
             excess: vec![0.5, 0.25],
         },
         vec![7],
@@ -1711,10 +1707,10 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
     let size = Size2us::new(2, 2);
     let saturated = |light: &CfaImage| {
         (0..4)
-            .filter(|&index| {
+            .filter(|&idx| {
                 light
                     .flags()
-                    .is_some_and(|flags| flags.at(index).intersects(QualityFlags::SATURATED))
+                    .is_some_and(|flags| flags.at(idx).intersects(QualityFlags::SATURATED))
             })
             .collect::<Vec<_>>()
     };
@@ -1731,10 +1727,10 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
     assert!(light.metadata.derived.saturation_flagged());
     assert_eq!(light.metadata.header.data_max, None);
 
-    let directory = TempDir::new("lumos-calibrated-saturation");
-    let path = directory.path().join("light.fits");
+    let dir = TempDir::new("lumos-calibrated-saturation");
+    let path = dir.path().join("light.fits");
     writer::cfa_fits(&light, &path).unwrap();
-    let loaded = LoadContext::default().cfa(&path).unwrap();
+    let loaded = LoadCtx::default().cfa(&path).unwrap();
     assert!(loaded.metadata.derived.saturation_flagged());
     assert_eq!(saturated(&loaded), [0]);
 
@@ -2103,11 +2099,11 @@ fn flats_are_calibrated_before_they_are_combined() {
             1.0
         }
     };
-    let directory = TempDir::new("lumos-flat-calibration");
+    let dir = TempDir::new("lumos-flat-calibration");
     let paths: Vec<PathBuf> = [0.25f32, 0.5]
         .into_iter()
         .enumerate()
-        .map(|(index, level)| {
+        .map(|(idx, level)| {
             let flat = make_cfa(
                 size,
                 (0..size.pixel_count())
@@ -2115,7 +2111,7 @@ fn flats_are_calibrated_before_they_are_combined() {
                     .collect(),
                 CfaType::Mono,
             );
-            let path = directory.join(format!("flat_{index}.fits"));
+            let path = dir.join(format!("flat_{idx}.fits"));
             writer::cfa_fits(&flat, &path).unwrap();
             path
         })
@@ -2132,7 +2128,7 @@ fn flats_are_calibrated_before_they_are_combined() {
         };
         let ingest = IngestConfig {
             memory_override,
-            cache_dir: directory.join("cache"),
+            cache_dir: dir.join("cache"),
             ..IngestConfig::default()
         };
         let calibrated = MasterStack {
@@ -2230,7 +2226,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
 
     let size = Size2us::new(8, 8);
     let offset = 1.0 / 32.0;
-    let directory = TempDir::new("lumos-master-builder");
+    let dir = TempDir::new("lumos-master-builder");
     let write = |name: &str, exposure: f64, value: &dyn Fn(usize) -> f32| -> PathBuf {
         let mut frame = make_cfa(
             size,
@@ -2238,7 +2234,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
             CfaType::Mono,
         );
         frame.metadata.header.exposure_time = Some(exposure);
-        let path = directory.join(name);
+        let path = dir.join(name);
         writer::cfa_fits(&frame, &path).unwrap();
         path
     };
@@ -2252,11 +2248,11 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     };
     let dark_per_second = 1.0 / 64.0;
     let bias: Vec<PathBuf> = (0..2)
-        .map(|index| write(&format!("bias_{index}.fits"), 0.0, &|_| offset))
+        .map(|idx| write(&format!("bias_{idx}.fits"), 0.0, &|_| offset))
         .collect();
     let flat_darks: Vec<PathBuf> = (0..2)
-        .map(|index| {
-            write(&format!("flat_dark_{index}.fits"), 1.0, &|_| {
+        .map(|idx| {
+            write(&format!("flat_dark_{idx}.fits"), 1.0, &|_| {
                 offset + dark_per_second
             })
         })
@@ -2264,13 +2260,13 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
     let flats: Vec<PathBuf> = [0.5f32, 0.25]
         .into_iter()
         .enumerate()
-        .map(|(index, level)| {
-            write(&format!("flat_{index}.fits"), 2.0, &|i| {
+        .map(|(idx, level)| {
+            write(&format!("flat_{idx}.fits"), 2.0, &|i| {
                 offset + 2.0 * dark_per_second + level * vignette(i)
             })
         })
         .collect();
-    let darks = vec![directory.join("absent_dark.fits")];
+    let darks = vec![dir.join("absent_dark.fits")];
     let mut held_dark = constant_cfa(size, 0.01, CfaType::Mono);
     held_dark
         .metadata
@@ -2291,7 +2287,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
             sigma_threshold: SigmaThreshold::DEFAULT,
             cache: &cache,
         },
-        &IngestConfig::with_cache_dir(directory.join("cache")),
+        &IngestConfig::with_cache_dir(dir.join("cache")),
         ProgressMonitor::unattended(),
     )
     .unwrap();
@@ -2341,10 +2337,10 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
         }
     }
 
-    let directory = TempDir::new("lumos-master-build-cancel");
+    let dir = TempDir::new("lumos-master-build-cancel");
     let bias: Vec<PathBuf> = (0..2)
-        .map(|index| {
-            let path = directory.join(format!("bias_{index}.fits"));
+        .map(|idx| {
+            let path = dir.join(format!("bias_{idx}.fits"));
             writer::cfa_fits(
                 &constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono),
                 &path,
@@ -2365,7 +2361,7 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
             sigma_threshold: SigmaThreshold::DEFAULT,
             cache: &Cancelling(cancel.clone()),
         },
-        &IngestConfig::with_cache_dir(directory.join("cache")),
+        &IngestConfig::with_cache_dir(dir.join("cache")),
         ProgressMonitor::new(ProgressCallback::default(), cancel),
     )
     .unwrap_err();
@@ -2384,16 +2380,16 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
 ///   it keeps, compared it.
 #[test]
 fn dark_frames_share_one_exposure() {
-    let directory = TempDir::new("lumos-master-conditions");
+    let dir = TempDir::new("lumos-master-conditions");
     let write = |name: &str, frames: &[(f64, Option<f64>)]| -> Vec<PathBuf> {
         frames
             .iter()
             .enumerate()
-            .map(|(index, &(exposure, temperature))| {
+            .map(|(idx, &(exposure, temperature))| {
                 let mut frame = constant_cfa(Size2us::new(4, 4), 0.25, CfaType::Mono);
                 frame.metadata.header.exposure_time = Some(exposure);
                 frame.metadata.header.ccd_temp = temperature;
-                let path = directory.join(format!("{name}_{index}.fits"));
+                let path = dir.join(format!("{name}_{idx}.fits"));
                 writer::cfa_fits(&frame, &path).unwrap();
                 path
             })
@@ -2426,9 +2422,9 @@ fn dark_frames_share_one_exposure() {
                 role: MasterRole::Dark,
                 source: ConditionMismatch {
                     condition: CaptureCondition::Exposure,
-                    index: 1,
+                    idx: 1,
                     value: 300.0,
-                    reference_index: 0,
+                    reference_idx: 0,
                     reference: 120.0,
                 },
             }
@@ -2492,8 +2488,8 @@ fn calibration_counts_its_flags_as_it_sets_them() {
     let size = Size2us::new(16, 16);
     let at = |x: usize, y: usize| y * size.width + x;
     let mut bias = constant_cfa(size, 0.0625, CfaType::Mono);
-    bias.set_flags(PixelFlags::from_fn(size, |index| {
-        if index == at(4, 4) {
+    bias.set_flags(PixelFlags::from_fn(size, |idx| {
+        if idx == at(4, 4) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()
@@ -2511,8 +2507,8 @@ fn calibration_counts_its_flags_as_it_sets_them() {
     });
     let mut light = constant_cfa(size, 0.5, CfaType::Mono);
     light.data_mut()[at(2, 10)] = 0.99;
-    light.set_flags(PixelFlags::from_fn(size, |index| {
-        if index == at(10, 12) {
+    light.set_flags(PixelFlags::from_fn(size, |idx| {
+        if idx == at(10, 12) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()

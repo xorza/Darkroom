@@ -13,30 +13,30 @@ use fits_well::io::{ChecksumReport, DataChecksum, StreamReader};
 #[derive(Debug)]
 pub(super) struct HduSections<'r> {
     reader: &'r mut StreamReader<File>,
-    index: usize,
+    idx: usize,
     words: Vec<u64>,
     sum: Option<DataChecksum>,
 }
 
 impl<'r> HduSections<'r> {
-    pub(super) const fn new(reader: &'r mut StreamReader<File>, index: usize) -> Self {
+    pub(super) const fn new(reader: &'r mut StreamReader<File>, idx: usize) -> Self {
         Self {
             reader,
-            index,
+            idx,
             words: Vec::new(),
             sum: None,
         }
     }
 
-    /// Sections of HDU `index` that feed its data checksum.
+    /// Sections of HDU `idx` that feed its data checksum.
     pub(super) fn summed(
         reader: &'r mut StreamReader<File>,
-        index: usize,
+        idx: usize,
     ) -> fits_well::Result<Self> {
-        let sum = reader.begin_data_checksum(index)?;
+        let sum = reader.begin_data_checksum(idx)?;
         Ok(Self {
             sum: Some(sum),
-            ..Self::new(reader, index)
+            ..Self::new(reader, idx)
         })
     }
 
@@ -58,11 +58,11 @@ impl<'r> HduSections<'r> {
         match &mut self.sum {
             Some(sum) => {
                 self.reader
-                    .read_image_section_view_summed(self.index, ranges, &mut self.words, sum)
+                    .read_image_section_view_summed(self.idx, ranges, &mut self.words, sum)
             }
             None => self
                 .reader
-                .read_image_section_view(self.index, ranges, &mut self.words),
+                .read_image_section_view(self.idx, ranges, &mut self.words),
         }
     }
 }

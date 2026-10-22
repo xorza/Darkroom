@@ -58,10 +58,10 @@ fn k_nearest_over_every_layout() {
     fn ranked(pairs: &[(usize, f64)]) -> Vec<Group> {
         pairs
             .iter()
-            .map(|&(index, dist_sq)| Group {
+            .map(|&(idx, dist_sq)| Group {
                 dist_sq,
                 ranks: 1,
-                allowed: vec![index],
+                allowed: vec![idx],
             })
             .collect()
     }
@@ -259,13 +259,13 @@ fn k_nearest_over_every_layout() {
                     group.dist_sq
                 );
                 assert!(
-                    group.allowed.contains(&neighbour.index),
+                    group.allowed.contains(&neighbour.idx),
                     "{name}: rank {rank} index {} not among {:?}",
-                    neighbour.index,
+                    neighbour.idx,
                     group.allowed
                 );
             }
-            let mut used: Vec<usize> = run.iter().map(|neighbour| neighbour.index).collect();
+            let mut used: Vec<usize> = run.iter().map(|neighbour| neighbour.idx).collect();
             used.sort_unstable();
             used.dedup();
             assert_eq!(
@@ -284,7 +284,7 @@ fn k_nearest_over_every_layout() {
 #[test]
 fn nearest_one_hand_cases() {
     let p = DVec2::new;
-    for (points, query, indices, dist_sq) in [
+    for (points, query, idxs, dist_sq) in [
         (
             &[p(0.0, 0.0), p(10.0, 10.0), p(5.0, 5.0)][..],
             p(5.0, 5.0),
@@ -303,11 +303,7 @@ fn nearest_one_hand_cases() {
             .unwrap()
             .nearest_one(query)
             .unwrap();
-        assert!(
-            indices.contains(&nearest.index),
-            "{query:?}: {}",
-            nearest.index
-        );
+        assert!(idxs.contains(&nearest.idx), "{query:?}: {}", nearest.idx);
         assert_eq!(nearest.dist_sq, dist_sq, "{query:?}");
     }
 }
@@ -363,7 +359,7 @@ fn radius_search_hand_cases() {
             "everything",
         ),
     ] {
-        tree.radius_indices_into(query, radius, &mut found);
+        tree.radius_idxs_into(query, radius, &mut found);
         found.sort_unstable();
         assert_eq!(found, expected, "{why}");
     }
@@ -398,13 +394,13 @@ fn queries_agree_with_a_brute_force_scan() {
             for k in [1, 5, 17] {
                 tree.k_nearest_into(query, k, &mut neighbours);
                 let found: Vec<(f64, usize)> =
-                    neighbours.iter().map(|n| (n.dist_sq, n.index)).collect();
+                    neighbours.iter().map(|n| (n.dist_sq, n.idx)).collect();
                 assert_eq!(found, brute[..k], "k = {k} at {query:?}");
             }
             let nearest = tree.nearest_one(query).unwrap();
-            assert_eq!((nearest.dist_sq, nearest.index), brute[0]);
+            assert_eq!((nearest.dist_sq, nearest.idx), brute[0]);
             for radius in [0.0, 15.5, 100.0, 500.0] {
-                tree.radius_indices_into(query, radius, &mut within);
+                tree.radius_idxs_into(query, radius, &mut within);
                 within.sort_unstable();
                 let mut expected: Vec<usize> = brute
                     .iter()
@@ -463,15 +459,15 @@ fn heap_small_push_and_eviction() {
 
     // Push 3 items: dist_sq = 10, 5, 15
     heap.push(Neighbor {
-        index: 0,
+        idx: 0,
         dist_sq: 10.0,
     });
     heap.push(Neighbor {
-        index: 1,
+        idx: 1,
         dist_sq: 5.0,
     });
     heap.push(Neighbor {
-        index: 2,
+        idx: 2,
         dist_sq: 15.0,
     });
 
@@ -481,7 +477,7 @@ fn heap_small_push_and_eviction() {
 
     // Push smaller item (2.0) — should evict 15.0
     heap.push(Neighbor {
-        index: 3,
+        idx: 3,
         dist_sq: 2.0,
     });
     // New max should be 10.0
@@ -489,7 +485,7 @@ fn heap_small_push_and_eviction() {
 
     // Push larger item (20.0) — should be rejected
     heap.push(Neighbor {
-        index: 4,
+        idx: 4,
         dist_sq: 20.0,
     });
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
@@ -502,9 +498,9 @@ fn heap_small_push_and_eviction() {
     let expected: Vec<u64> = [2.0_f64, 5.0, 10.0].iter().map(|d| d.to_bits()).collect();
     assert_eq!(dist_sqs, expected);
 
-    let mut indices: Vec<usize> = result.iter().map(|n| n.index).collect();
-    indices.sort_unstable();
-    assert_eq!(indices, vec![0, 1, 3]);
+    let mut idxs: Vec<usize> = result.iter().map(|n| n.idx).collect();
+    idxs.sort_unstable();
+    assert_eq!(idxs, vec![0, 1, 3]);
 }
 
 #[test]
@@ -519,7 +515,7 @@ fn heap_large_push_and_eviction() {
     // Push capacity items with dist_sq = capacity, capacity-1, ..., 1
     for i in 0..capacity {
         heap.push(Neighbor {
-            index: i,
+            idx: i,
             dist_sq: (capacity - i) as f64,
         });
     }
@@ -530,7 +526,7 @@ fn heap_large_push_and_eviction() {
 
     // Push 0.5 — should evict the max (37.0)
     heap.push(Neighbor {
-        index: 100,
+        idx: 100,
         dist_sq: 0.5,
     });
     // New max should be capacity-1 = 36
@@ -558,7 +554,7 @@ fn heap_capacity_one() {
     };
 
     heap.push(Neighbor {
-        index: 0,
+        idx: 0,
         dist_sq: 10.0,
     });
     assert!(heap.is_full());
@@ -566,20 +562,20 @@ fn heap_capacity_one() {
 
     // Push smaller — should replace
     heap.push(Neighbor {
-        index: 1,
+        idx: 1,
         dist_sq: 3.0,
     });
     assert!((heap.max_distance() - 3.0).abs() < 1e-10);
 
     // Push larger — should be rejected
     heap.push(Neighbor {
-        index: 2,
+        idx: 2,
         dist_sq: 50.0,
     });
     assert!((heap.max_distance() - 3.0).abs() < 1e-10);
 
     let result = heap_items;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].index, 1);
+    assert_eq!(result[0].idx, 1);
     assert!((result[0].dist_sq - 3.0).abs() < 1e-10);
 }

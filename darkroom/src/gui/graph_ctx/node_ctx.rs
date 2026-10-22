@@ -309,7 +309,7 @@ impl<'a> NodeCtx<'a> {
 
     /// Every `PortRef` on the given side, in port order. Single source for
     /// the "iterate a node's ports by kind" loop `CanvasGeometry::rebuild`
-    /// and the connection scans all need, so scan order and paint order
+    /// and the wire scans all need, so scan order and paint order
     /// can't drift apart.
     pub(crate) fn ports(self, kind: PortKind) -> impl Iterator<Item = PortRef> {
         let node_id = self.id;

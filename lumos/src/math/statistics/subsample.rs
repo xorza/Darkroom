@@ -34,19 +34,19 @@ impl Subsample {
     }
 
     /// The `k`-th sampled index.
-    pub(crate) const fn index(self, k: usize) -> usize {
+    pub(crate) const fn idx(self, k: usize) -> usize {
         k * self.stride
     }
 
     /// The sampled indices, in order.
-    pub(crate) fn indices(self) -> impl Iterator<Item = usize> {
-        (0..self.count).map(move |k| self.index(k))
+    pub(crate) fn idxs(self) -> impl Iterator<Item = usize> {
+        (0..self.count).map(move |k| self.idx(k))
     }
 
     /// The sampled values of `plane`, which the sample was made for.
     pub(crate) fn of(self, plane: &[f32]) -> impl Iterator<Item = f32> + '_ {
-        debug_assert!(self.count == 0 || self.index(self.count - 1) < plane.len());
-        self.indices().map(move |index| plane[index])
+        debug_assert!(self.count == 0 || self.idx(self.count - 1) < plane.len());
+        self.idxs().map(move |idx| plane[idx])
     }
 
     /// The values of `plane` an image statistic is taken from: at most [`MAX_STATISTIC_SAMPLES`].
@@ -77,9 +77,9 @@ mod tests {
         ] {
             let sample = Subsample::new(len, 1000);
             assert_eq!((sample.stride(), sample.count()), (stride, count), "{len}");
-            let indices: Vec<usize> = sample.indices().collect();
-            assert_eq!(indices.len(), count);
-            assert!(indices.iter().all(|&i| i < len && i % stride == 0));
+            let idxs: Vec<usize> = sample.idxs().collect();
+            assert_eq!(idxs.len(), count);
+            assert!(idxs.iter().all(|&i| i < len && i % stride == 0));
         }
         let plane: Vec<f32> = (0..7).map(|i| i as f32).collect();
         assert_eq!(

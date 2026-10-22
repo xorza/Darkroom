@@ -32,7 +32,7 @@ impl PixelFlags {
         bits.pixels_mut()
             .par_iter_mut()
             .enumerate()
-            .for_each(|(index, byte)| *byte = flags_at(index).byte());
+            .for_each(|(idx, byte)| *byte = flags_at(idx).byte());
         Self::from_bytes(bits)
     }
 
@@ -70,31 +70,27 @@ impl PixelFlags {
         self.counts = self.counts.merged(added);
     }
 
-    /// OR `flags` into the pixels at `indices`; the counts take the bits it sets.
-    pub(super) fn or_at(&mut self, flags: QualityFlags, indices: &[usize]) {
+    /// OR `flags` into the pixels at `idxs`; the counts take the bits it sets.
+    pub(super) fn or_at(&mut self, flags: QualityFlags, idxs: &[usize]) {
         let bytes = self.bits.pixels_mut();
-        for &index in indices {
+        for &idx in idxs {
             self.counts
-                .tally(QualityFlags::from_byte(flags.byte() & !bytes[index]));
-            bytes[index] |= flags.byte();
+                .tally(QualityFlags::from_byte(flags.byte() & !bytes[idx]));
+            bytes[idx] |= flags.byte();
         }
     }
 
-    /// A `size` plane holding `flags` at `indices` alone; `None` when there are none, so no pixel
+    /// A `size` plane holding `flags` at `idxs` alone; `None` when there are none, so no pixel
     /// holds one.
-    pub(super) fn at_indices(
-        size: Size2us,
-        flags: QualityFlags,
-        indices: &[usize],
-    ) -> Option<Self> {
-        if indices.is_empty() || flags == QualityFlags::default() {
+    pub(super) fn at_idxs(size: Size2us, flags: QualityFlags, idxs: &[usize]) -> Option<Self> {
+        if idxs.is_empty() || flags == QualityFlags::default() {
             return None;
         }
         let mut plane = Self {
             bits: Buffer2::new_default(size.width, size.height),
             counts: FlagCounts::default(),
         };
-        plane.or_at(flags, indices);
+        plane.or_at(flags, idxs);
         Some(plane)
     }
 
@@ -155,23 +151,23 @@ impl PixelFlags {
         self.bits
     }
 
-    /// Whether the pixel at `index` carries any flag: a stage that measures only the pixels of a
+    /// Whether the pixel at `idx` carries any flag: a stage that measures only the pixels of a
     /// plain measurement leaves it out.
     #[inline]
-    pub(crate) fn is_flagged(&self, index: usize) -> bool {
-        self.bits.pixels()[index] != 0
+    pub(crate) fn is_flagged(&self, idx: usize) -> bool {
+        self.bits.pixels()[idx] != 0
     }
 
-    /// The flags of the pixel at `index`, row-major.
+    /// The flags of the pixel at `idx`, row-major.
     #[inline]
-    pub(crate) fn at(&self, index: usize) -> QualityFlags {
-        QualityFlags::from_byte(self.bits.pixels()[index])
+    pub(crate) fn at(&self, idx: usize) -> QualityFlags {
+        QualityFlags::from_byte(self.bits.pixels()[idx])
     }
 
     /// The flags of the pixel at `pos`.
     #[inline]
     pub fn at_pos(&self, pos: Vec2us) -> QualityFlags {
-        self.at(self.size().index_of(pos))
+        self.at(self.size().idx_of(pos))
     }
 
     /// How many pixels hold `flag`.
@@ -193,7 +189,7 @@ impl PixelFlags {
     pub(crate) fn mask_of(&self, flag: QualityFlags) -> BitBuffer2 {
         let mut mask = BitBuffer2::new_default(self.size());
         let bytes = self.bits.pixels();
-        mask.fill_from_predicate(|index| QualityFlags::from_byte(bytes[index]).intersects(flag));
+        mask.fill_from_predicate(|idx| QualityFlags::from_byte(bytes[idx]).intersects(flag));
         mask
     }
 
@@ -444,8 +440,8 @@ pub(crate) mod internals {
                     .all(|plane| plane.len() == size.width * size.height),
                 "every plane must match the flag geometry"
             );
-            Self::from_fn(size, |index| {
-                if planes.iter().any(|plane| !plane[index].is_finite()) {
+            Self::from_fn(size, |idx| {
+                if planes.iter().any(|plane| !plane[idx].is_finite()) {
                     QualityFlags::NO_DATA
                 } else {
                     QualityFlags::default()
@@ -498,15 +494,15 @@ mod tests {
         );
         assert!(flags.contains_other_than(QualityFlags::SATURATED));
         let mask = flags.mask_of(QualityFlags::NO_DATA);
-        for index in 0..6 {
-            let expected = index == 1 || index == 4;
+        for idx in 0..6 {
+            let expected = idx == 1 || idx == 4;
             assert_eq!(
-                flags.at(index) == QualityFlags::NO_DATA,
+                flags.at(idx) == QualityFlags::NO_DATA,
                 expected,
-                "index {index}"
+                "index {idx}"
             );
-            assert_eq!(mask.get(index), expected, "index {index}");
-            assert_eq!(flags.is_flagged(index), expected, "index {index}");
+            assert_eq!(mask.get(idx), expected, "index {idx}");
+            assert_eq!(flags.is_flagged(idx), expected, "index {idx}");
         }
         let mut validity = Buffer2::new_default(size.width, size.height);
         flags.validity_into(QualityFlags::NO_DATA, &mut validity);
@@ -568,7 +564,7 @@ mod tests {
                         _ => QualityFlags::default(),
                     })
                     .collect();
-                let Some(mut flags) = PixelFlags::from_fn(size, |index| initial[index]) else {
+                let Some(mut flags) = PixelFlags::from_fn(size, |idx| initial[idx]) else {
                     continue;
                 };
                 flags.dilate_window(reach, QualityFlags::NO_DATA);
@@ -582,27 +578,27 @@ mod tests {
                                     .any(|sx| initial[sy * width + sx] == flag)
                             })
                         };
-                        let index = y * width + x;
+                        let idx = y * width + x;
                         let expected = QualityFlags::default()
                             .union(if near(QualityFlags::SATURATED) {
                                 QualityFlags::SATURATED
                             } else {
                                 QualityFlags::default()
                             })
-                            .union(if initial[index] == QualityFlags::NO_DATA {
+                            .union(if initial[idx] == QualityFlags::NO_DATA {
                                 QualityFlags::NO_DATA
                             } else {
                                 QualityFlags::default()
                             });
                         assert_eq!(
-                            flags.at(index),
+                            flags.at(idx),
                             expected,
                             "{width}x{height}, {reach:?}, ({x}, {y})"
                         );
                     }
                 }
                 let saturated = (0..size.pixel_count())
-                    .filter(|&index| flags.at(index).intersects(QualityFlags::SATURATED))
+                    .filter(|&idx| flags.at(idx).intersects(QualityFlags::SATURATED))
                     .count();
                 assert_eq!(
                     flags.count(QualityFlags::SATURATED),

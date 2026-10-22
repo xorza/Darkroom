@@ -87,8 +87,8 @@ pub(crate) mod internals {
     impl Index<usize> for Coverage {
         type Output = f32;
 
-        fn index(&self, index: usize) -> &f32 {
-            self.shared(|plane| &plane[index])
+        fn index(&self, idx: usize) -> &f32 {
+            self.shared(|plane| &plane[idx])
         }
     }
 

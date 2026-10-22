@@ -1,7 +1,7 @@
 //! The canvas's keyboard chords: Esc-deselect, Ctrl+0 reset-zoom, Ctrl+D
 //! duplicate, and Delete/Backspace.
 //!
-//! Raised from [`GraphUI::prepass`](crate::gui::pane::graph_ui::GraphUI::prepass) beside the
+//! Raised from [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) beside the
 //! pointer gestures, because they are the same kind of thing — this frame's input turned into
 //! intents, drained before the record. Being reached from the canvas is also what scopes them: a
 //! chord names no pane of its own, so running only while a graph pane is up is what keeps Delete

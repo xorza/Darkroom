@@ -153,7 +153,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 ///
 /// A stamp that counted painted frames would see a gap at every blink, and the
 /// next real frame would reset every in-flight gesture, the palette with them.
-/// The reset is `GraphUI`-wide, so the palette here stands in for every
+/// The reset is `GraphUi`-wide, so the palette here stands in for every
 /// gesture the same blink would drop.
 #[test]
 fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {

@@ -97,15 +97,15 @@ fn register_rejects_non_finite_positions_in_both_catalogs() {
             .register(&ref_stars, &target_stars)
             .unwrap_err();
         match error {
-            RegistrationError::InvalidStarPosition {
+            RegistrationError::InvalidStarPos {
                 catalog: actual,
-                index,
-                position,
+                idx,
+                pos,
             } => {
                 assert_eq!(actual, catalog);
-                assert_eq!(index, 3);
-                assert!(position.x.is_nan());
-                assert_eq!(position.y, 4.0);
+                assert_eq!(idx, 3);
+                assert!(pos.x.is_nan());
+                assert_eq!(pos.y, 4.0);
             }
             other => panic!("expected invalid star position, got {other:?}"),
         }
@@ -125,7 +125,7 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
             RegistrationCatalog::Target => &mut target_stars,
         };
         stars[5].fwhm = f32::INFINITY;
-        stars[6].position_sigma = 0.0;
+        stars[6].pos_sigma = 0.0;
         stars[7].snr = f32::NAN;
 
         let error = RegistrationConfig::default()
@@ -136,12 +136,12 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
         match error {
             RegistrationError::InvalidStarField {
                 catalog: actual,
-                index,
+                idx,
                 field,
                 value,
             } => {
                 assert_eq!(actual, catalog);
-                assert_eq!((index, field), (5, StarField::Fwhm));
+                assert_eq!((idx, field), (5, StarField::Fwhm));
                 assert_eq!(value, f64::INFINITY);
             }
             other => panic!("expected invalid star FWHM, got {other:?}"),
@@ -160,8 +160,8 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
             matches!(
                 error,
                 RegistrationError::InvalidStarField {
-                    index: 6,
-                    field: StarField::PositionSigma,
+                    idx: 6,
+                    field: StarField::PosSigma,
                     value: 0.0,
                     ..
                 }
@@ -176,7 +176,7 @@ fn register_checks_the_fields_it_reads_in_both_catalogs() {
             RegistrationCatalog::Reference => &mut ref_stars,
             RegistrationCatalog::Target => &mut target_stars,
         };
-        stars[6].position_sigma = 0.1;
+        stars[6].pos_sigma = 0.1;
         let error = RegistrationConfig::default()
             .registrar()
             .unwrap()

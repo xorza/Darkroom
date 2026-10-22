@@ -6,7 +6,7 @@
 
 use crate::registration::resample::ringing_clamp::LobeSums;
 use crate::registration::resample::source_image::SourcePlane;
-use crate::registration::resample::source_position::SourceAt;
+use crate::registration::resample::source_pos::SourceAt;
 use crate::registration::resample::tap_window::{AxisSums, Lobes, RowLanes, WindowWeights};
 use crate::registration::resample::warp_kernel::WarpKernel;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
@@ -29,24 +29,22 @@ impl<V: F32x8> InteriorWindow<V> {
     /// span more than a vector on either axis, or some tap lies outside the source.
     #[inline(always)]
     pub(crate) fn new<S: Isa<F32 = V>>(isa: S, kernel: &WarpKernel, at: SourceAt) -> Option<Self> {
-        let SourceAt { position, size } = at;
-        let x = kernel.taps(position.fx);
-        let y = kernel.taps(position.fy);
+        let SourceAt { pos, size } = at;
+        let x = kernel.taps(pos.fx);
+        let y = kernel.taps(pos.fy);
         if x.count > F32_LANES || y.count > F32_LANES {
             return None;
         }
-        let first_x = usize::try_from(position.cell_x + x.first).ok()?;
-        let first_y = usize::try_from(position.cell_y + y.first).ok()?;
+        let first_x = usize::try_from(pos.cell_x + x.first).ok()?;
+        let first_y = usize::try_from(pos.cell_y + y.first).ok()?;
         if first_x + x.count > size.width || first_y + y.count > size.height {
             return None;
         }
         let lanes = RowLanes::first(isa, x.count);
-        let wx = lanes
-            .keep()
-            .keep(kernel.weight_lanes(isa, x.first, position.fx));
+        let wx = lanes.keep().keep(kernel.weight_lanes(isa, x.first, pos.fx));
         let wy_lanes = RowLanes::first(isa, y.count)
             .keep()
-            .keep(kernel.weight_lanes(isa, y.first, position.fy));
+            .keep(kernel.weight_lanes(isa, y.first, pos.fy));
         Some(Self {
             x: first_x,
             y: first_y,

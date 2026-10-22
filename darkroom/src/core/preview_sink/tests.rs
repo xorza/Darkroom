@@ -1,6 +1,6 @@
 use super::*;
 use scenarium::internals::func_invoker::FuncInvoker;
-use scenarium::{AnyState, ConstValue, ContextManager, SharedAnyState};
+use scenarium::{AnyState, ConstValue, CtxManager, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
@@ -33,7 +33,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
     // Built by hand rather than through `FuncInvoker`: the test reads the
     // input slot back after the call, which the invoker does not hand out.
     let invoke = async |value: i64| {
-        let mut ctx = ContextManager::default();
+        let mut ctx = CtxManager::default();
         ctx.set_current_node(first);
         let mut inputs = [DynamicValue::Static(ConstValue::Int(value))];
         func.lambda()

@@ -153,10 +153,10 @@ impl Editor {
         for _ in 0..CHAINS {
             let nodes = [&load, &adjust, &transform, &blend, &show].map(|f| graph.add_func_node(f));
             for pair in nodes.windows(2) {
-                graph.set_input_binding(InputPort::new(pair[1], 0), Binding::bind(pair[0], 0));
+                graph.set_input_binding(InputPort::new(pair[1], 0), Binding::wire(pair[0], 0));
             }
             let layer = transform_above.unwrap_or(nodes[TRANSFORM]);
-            graph.set_input_binding(InputPort::new(nodes[BLEND], 1), Binding::bind(layer, 0));
+            graph.set_input_binding(InputPort::new(nodes[BLEND], 1), Binding::wire(layer, 0));
             transform_above = Some(nodes[TRANSFORM]);
             chains.push(nodes);
         }
@@ -186,8 +186,8 @@ impl Editor {
     /// Land an image on every preview node, as a finished run does once its
     /// conversions finish.
     fn publish_previews(&mut self, ui: &Ui) {
-        for (index, chain) in self.chains.iter().enumerate() {
-            let card = self.converted[index % 2].clone();
+        for (idx, chain) in self.chains.iter().enumerate() {
+            let card = self.converted[idx % 2].clone();
             self.run_state
                 .previews
                 .land_converted(ui, chain[PREVIEW], card);

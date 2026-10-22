@@ -48,7 +48,7 @@ struct SlotOutcome<R, E> {
 /// A job's failure and the index it failed at.
 #[derive(Debug)]
 struct Failure<E> {
-    index: usize,
+    idx: usize,
     error: E,
 }
 
@@ -95,15 +95,15 @@ where
             let (next, lowest_failure, job) = (&next, &lowest_failure, &job);
             scope.spawn(move |_| {
                 loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= len || index > lowest_failure.load(Ordering::Acquire) {
+                    let idx = next.fetch_add(1, Ordering::Relaxed);
+                    if idx >= len || idx > lowest_failure.load(Ordering::Acquire) {
                         break;
                     }
-                    match job(slot, index) {
-                        Ok(value) => outcome.values.push((index, value)),
+                    match job(slot, idx) {
+                        Ok(value) => outcome.values.push((idx, value)),
                         Err(error) => {
-                            lowest_failure.fetch_min(index, Ordering::AcqRel);
-                            outcome.failure = Some(Failure { index, error });
+                            lowest_failure.fetch_min(idx, Ordering::AcqRel);
+                            outcome.failure = Some(Failure { idx, error });
                             return;
                         }
                     }
@@ -115,13 +115,13 @@ where
     let mut ordered: Vec<Option<R>> = (0..len).map(|_| None).collect();
     let mut first_failure: Option<Failure<E>> = None;
     for outcome in outcomes {
-        for (index, value) in outcome.values {
-            ordered[index] = Some(value);
+        for (idx, value) in outcome.values {
+            ordered[idx] = Some(value);
         }
         if let Some(failure) = outcome.failure
             && first_failure
                 .as_ref()
-                .is_none_or(|first| failure.index < first.index)
+                .is_none_or(|first| failure.idx < first.idx)
         {
             first_failure = Some(failure);
         }
@@ -162,13 +162,13 @@ where
         .into_iter()
         .map(|item| Mutex::new(Some(item)))
         .collect();
-    try_par_map_bounded(cells.len(), slots, |slot, index| {
-        let item = cells[index]
+    try_par_map_bounded(cells.len(), slots, |slot, idx| {
+        let item = cells[idx]
             .lock()
             .expect("no holder of this lock panicked")
             .take()
             .expect("each index is claimed by exactly one worker");
-        operation(slot, index, item)
+        operation(slot, idx, item)
     })
 }
 

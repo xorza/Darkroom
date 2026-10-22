@@ -202,7 +202,7 @@ pub enum BlackLevelError {
 pub enum RawScanError {
     /// The directory could not be opened.
     #[error("failed to read directory '{}': {source}", path.display())]
-    Directory { path: PathBuf, source: io::Error },
+    Dir { path: PathBuf, source: io::Error },
     /// An entry of the directory could not be read.
     #[error("failed to read an entry of directory '{}': {source}", path.display())]
     Entry { path: PathBuf, source: io::Error },

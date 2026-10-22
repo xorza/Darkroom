@@ -9,7 +9,7 @@ use crate::io::error::ImageError;
 #[derive(Debug, thiserror::Error)]
 pub enum FrameStoreError {
     #[error("failed to create frame-store directory '{path}': {source}")]
-    CreateDirectory {
+    CreateDir {
         path: PathBuf,
         #[source]
         source: io::Error,
@@ -38,7 +38,7 @@ pub enum FrameStoreError {
         "frame-store directory '{path}' is on {filesystem}, which keeps its files in memory: a \
          spill there spends the RAM it was meant to free; set `cache_dir` to a directory on disk"
     )]
-    MemoryBackedDirectory { path: PathBuf, filesystem: String },
+    MemoryBackedDir { path: PathBuf, filesystem: String },
     /// The disk a spill goes to holds less than the run will write there: refused before the
     /// first frame is decoded rather than after hours of them. A figure, not a reservation:
     /// another writer can still fill the disk later.

@@ -79,7 +79,7 @@ impl CgroupMemory {
             .into_iter()
             .flatten()
             .filter_map(|(path, mount, version)| {
-                let group = below(&Self::group_directory(Path::new(path), mount)?);
+                let group = below(&Self::group_dir(Path::new(path), mount)?);
                 let top = below(&mount.mount_point);
                 Some(
                     group
@@ -99,7 +99,7 @@ impl CgroupMemory {
 
     /// Where the group at hierarchy `path` sits under `mount`: `None` when the mount shows only
     /// another part of the hierarchy.
-    fn group_directory(path: &Path, mount: &Mount) -> Option<PathBuf> {
+    fn group_dir(path: &Path, mount: &Mount) -> Option<PathBuf> {
         let below_root = path.strip_prefix(&mount.root).ok()?;
         Some(mount.mount_point.join(below_root))
     }
@@ -167,10 +167,10 @@ mod tests {
 
     /// One level of a fake hierarchy under `root`: `files` written into `path`.
     fn level(root: &Path, path: &str, files: &[(&str, &str)]) {
-        let directory = root.join(path);
-        fs::create_dir_all(&directory).unwrap();
+        let dir = root.join(path);
+        fs::create_dir_all(&dir).unwrap();
         for (name, contents) in files {
-            fs::write(directory.join(name), contents).unwrap();
+            fs::write(dir.join(name), contents).unwrap();
         }
     }
 

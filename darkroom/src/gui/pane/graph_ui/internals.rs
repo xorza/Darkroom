@@ -1,5 +1,5 @@
 //! The canvas a test drives real input at: a [`UiHarness`] surface, the
-//! [`GraphUI`] recorded onto it, and the document both read.
+//! [`GraphUi`] recorded onto it, and the document both read.
 //!
 //! One type rather than a closure per test file because the subject under test
 //! is the same machinery in each case — [`Self::frame`] runs the sequence
@@ -20,16 +20,16 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
-use crate::gui::pane::graph_ui::GraphUI;
+use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::node_ui::port_row;
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::port_ref::PortRef;
 use std::iter;
 
-impl GraphUI {
+impl GraphUi {
     /// The canvas's cross-frame geometry cache, for the tests that assert
-    /// on what a record filled into it and what [`GraphUI::retain_nodes`]
+    /// on what a record filled into it and what [`GraphUi::retain_nodes`]
     /// released — port centers, node sizes, cached world rects.
     ///
     /// Shared, not `&mut`: a test reads what the passes settled, it does
@@ -48,7 +48,7 @@ pub(crate) struct CanvasHarness {
     /// The palantir side. `pub(crate)` so tests drive input and read geometry
     /// through it directly — `h.ui.press_at(..)`, `h.ui.rect(..)`.
     pub(crate) ui: UiHarness,
-    pub(crate) graph_ui: GraphUI,
+    pub(crate) graph_ui: GraphUi,
     /// The document the canvas draws and the context it resolves through.
     /// `pub(crate)` so a test can edit the document between frames, the way an
     /// undo edits it under a running gesture.
@@ -88,7 +88,7 @@ impl CanvasHarness {
     fn over(ui: UiHarness, fixture: impl Into<DocFixture>) -> Self {
         Self {
             ui,
-            graph_ui: GraphUI::default(),
+            graph_ui: GraphUi::default(),
             ctx: GraphCtxFixture::over(fixture),
             commands: Vec::new(),
             view_ops: Vec::new(),
@@ -203,7 +203,7 @@ impl CanvasHarness {
 }
 
 /// The record body both frame drivers run.
-fn record(graph_ui: &mut GraphUI, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
+fn record(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
     let mut out = Requests::default();
     let graph_ctx = ctx.graph_ctx();
     graph_ui.prepass(recorder, graph_ctx, &mut out);

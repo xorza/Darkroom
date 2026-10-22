@@ -163,14 +163,14 @@ mod tests {
     /// six pixels of three channels, the chunk pixels 2 to 5.
     #[test]
     fn a_copied_chunk_reads_as_the_planes_do() {
-        let directory = TempDir::new("frame_chunk_copy");
-        let scratch = RunScratch::create(directory.path()).unwrap();
+        let dir = TempDir::new("frame_chunk_copy");
+        let scratch = RunScratch::create(dir.path()).unwrap();
         let dimensions = ImageDimensions::new((6, 1), ChannelLayout::Rgb);
         let ramp = |offset: f32| -> Vec<f32> { (0..6).map(|x| offset + x as f32).collect() };
         let mut image =
             LinearImage::from_planar_channels(dimensions, [ramp(0.0), ramp(10.0), ramp(20.0)]);
-        image.set_flags(PixelFlags::from_fn(dimensions.size(), |index| {
-            if index == 3 {
+        image.set_flags(PixelFlags::from_fn(dimensions.size(), |idx| {
+            if idx == 3 {
                 QualityFlags::SATURATED
             } else {
                 QualityFlags::default()

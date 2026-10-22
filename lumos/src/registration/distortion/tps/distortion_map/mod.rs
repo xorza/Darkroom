@@ -71,7 +71,7 @@ impl DistortionMap {
     fn get(&self, point: Vec2us) -> Option<DVec2> {
         self.grid
             .contains(point)
-            .then(|| self.vectors[self.grid.index_of(point)])
+            .then(|| self.vectors[self.grid.idx_of(point)])
     }
 
     /// Interpolate the distortion at an arbitrary position: bilinear inside the grid, and the
@@ -79,7 +79,7 @@ impl DistortionMap {
     fn interpolate(&self, p: DVec2) -> DVec2 {
         let x = self.cell(&self.columns, p.x);
         let y = self.cell(&self.rows, p.y);
-        let at = |x, y| self.vectors[self.grid.index_of(Vec2us::new(x, y))];
+        let at = |x, y| self.vectors[self.grid.idx_of(Vec2us::new(x, y))];
         let (v00, v10, v01, v11) = (
             at(x.lower, y.lower),
             at(x.upper, y.lower),

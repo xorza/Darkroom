@@ -88,8 +88,8 @@ impl FlagsExtension {
         described: &DescribedImage,
     ) -> Result<Option<usize>, FitsLoadError> {
         let found = Self::check_claims(file)?.for_image(file, image)?;
-        if let Some(index) = found {
-            LumosExtension::Flags.check(&file[index], described)?;
+        if let Some(idx) = found {
+            LumosExtension::Flags.check(&file[idx], described)?;
         }
         Ok(found)
     }
@@ -113,13 +113,13 @@ impl FlagsExtension {
         let mut bytes = stored;
         let unknown = !QualityFlags::KNOWN.byte();
         let no_data = QualityFlags::NO_DATA.byte();
-        let disagreement = bytes.par_iter().enumerate().find_first(|&(index, &byte)| {
+        let disagreement = bytes.par_iter().enumerate().find_first(|&(idx, &byte)| {
             let decoded_no_data =
-                decoded.is_some_and(|flags| flags.at(index).intersects(QualityFlags::NO_DATA));
+                decoded.is_some_and(|flags| flags.at(idx).intersects(QualityFlags::NO_DATA));
             byte & unknown != 0 || (byte & no_data != 0) != decoded_no_data
         });
-        if let Some((index, &byte)) = disagreement {
-            let pixel = Vec2us::new(index % size.width, index / size.width);
+        if let Some((idx, &byte)) = disagreement {
+            let pixel = Vec2us::new(idx % size.width, idx / size.width);
             let reason = if byte & unknown != 0 {
                 FitsRefusal::UnknownFlagBits { pixel, byte }
             } else {
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn stored_flags_join_the_decoded_ones() {
         let size = Size2us::new(3, 2);
-        let decoded = PixelFlags::from_fn(size, |index| match index {
+        let decoded = PixelFlags::from_fn(size, |idx| match idx {
             1 => QualityFlags::NO_DATA,
             3 => QualityFlags::SATURATED,
             _ => QualityFlags::default(),
@@ -222,8 +222,8 @@ mod tests {
             );
         }
         assert!(FlagsExtension::encode(None, None, 1).unwrap().is_none());
-        let defect = PixelFlags::from_fn(size, |index| {
-            if index == 0 {
+        let defect = PixelFlags::from_fn(size, |idx| {
+            if idx == 0 {
                 QualityFlags::DEFECT
             } else {
                 QualityFlags::default()

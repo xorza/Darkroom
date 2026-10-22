@@ -60,30 +60,30 @@ impl CaptureCondition {
         set: impl IntoIterator<Item = CaptureConditions>,
     ) -> Result<(), ConditionMismatch> {
         let mut range: Option<StatedRange> = None;
-        for (index, conditions) in set.into_iter().enumerate() {
+        for (idx, conditions) in set.into_iter().enumerate() {
             let Some(value) = self.of(conditions) else {
                 continue;
             };
             let Some(range) = &mut range else {
-                range = Some(StatedRange::new(index, value));
+                range = Some(StatedRange::new(idx, value));
                 continue;
             };
             let (low, high) = (range.low.min(value), range.high.max(value));
             if !self.agree(low, high) {
-                let (reference_index, reference) = if value > range.high {
-                    (range.low_index, range.low)
+                let (reference_idx, reference) = if value > range.high {
+                    (range.low_idx, range.low)
                 } else {
-                    (range.high_index, range.high)
+                    (range.high_idx, range.high)
                 };
                 return Err(ConditionMismatch {
                     condition: self,
-                    index,
+                    idx,
                     value,
-                    reference_index,
+                    reference_idx,
                     reference,
                 });
             }
-            range.include(index, value);
+            range.include(idx, value);
         }
         Ok(())
     }
@@ -107,29 +107,29 @@ impl CaptureCondition {
 #[derive(Debug)]
 struct StatedRange {
     low: f64,
-    low_index: usize,
+    low_idx: usize,
     high: f64,
-    high_index: usize,
+    high_idx: usize,
 }
 
 impl StatedRange {
-    const fn new(index: usize, value: f64) -> Self {
+    const fn new(idx: usize, value: f64) -> Self {
         Self {
             low: value,
-            low_index: index,
+            low_idx: idx,
             high: value,
-            high_index: index,
+            high_idx: idx,
         }
     }
 
-    fn include(&mut self, index: usize, value: f64) {
+    fn include(&mut self, idx: usize, value: f64) {
         if value < self.low {
             self.low = value;
-            self.low_index = index;
+            self.low_idx = idx;
         }
         if value > self.high {
             self.high = value;
-            self.high_index = index;
+            self.high_idx = idx;
         }
     }
 }

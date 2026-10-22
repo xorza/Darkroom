@@ -9,13 +9,13 @@
 //! screen-space `Layer::Popup` and wouldn't track the canvas. Instead
 //! [`Inspectors::draw_panels`] records ordinary `Panel`s as direct
 //! children of the inner (transformed) canvas in
-//! [`crate::gui::pane::graph_ui::GraphUI::draw`], positioned at the node's world
+//! [`crate::gui::pane::graph_ui::GraphUi::draw`], positioned at the node's world
 //! coords — so they pan and scale with the node for free.
 //!
 //! Each node cycles independently `Closed → Open → Pinned → Closed` on
 //! each header-chip click. `Open` (unpinned) panels close on any outside
 //! action (clicking a node / bare canvas, panning, zooming); `Pinned`
-//! ones persist. State lives on `GraphUI` (not the resettable gesture
+//! ones persist. State lives on `GraphUi` (not the resettable gesture
 //! group) so pinned panels survive tab switches — panels only render for
 //! nodes the current `GraphCtx` holds, so off-tab ones disappear.
 
@@ -429,7 +429,7 @@ fn body_style(theme: &Theme, ui: &Ui) -> TextStyle {
 fn value_str(ui: &mut Ui, binding: Option<&Binding>) -> TextInput<'static> {
     match binding {
         None => TextInput::Borrowed("—"),
-        Some(Binding::Bind(_)) => TextInput::Borrowed("linked"),
+        Some(Binding::Wire(_)) => TextInput::Borrowed("linked"),
         // `ConstValue::Display` — the same formatter a preview node's
         // value goes through via `DynamicValue::Display`, so a static
         // binding and a live one can't render one float two ways.

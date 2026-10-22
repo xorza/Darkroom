@@ -31,10 +31,10 @@ impl Slots {
         self.count
     }
 
-    /// The slot of the pixel at `position` in `channel`.
-    pub(crate) const fn slot(&self, channel: usize, position: Vec2us) -> usize {
+    /// The slot of the pixel at `pos` in `channel`.
+    pub(crate) const fn slot(&self, channel: usize, pos: Vec2us) -> usize {
         match &self.mosaic {
-            Some(cfa) => cfa.slot_at(position),
+            Some(cfa) => cfa.slot_at(pos),
             None => channel,
         }
     }

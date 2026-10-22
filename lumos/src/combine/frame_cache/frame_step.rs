@@ -10,7 +10,7 @@ pub(crate) trait FrameStep<I>: Sync + Debug {
     /// Why the step could not be taken on a frame.
     type Error;
 
-    fn apply(&self, index: usize, image: &mut I) -> Result<(), Self::Error>;
+    fn apply(&self, idx: usize, image: &mut I) -> Result<(), Self::Error>;
 
     /// Whether the step changes a frame at all; a run whose step does not takes each frame as the
     /// planes the decode cache keeps for it.
@@ -40,7 +40,7 @@ impl<P, S> Copy for SteppedPaths<'_, P, S> {}
 impl<I> FrameStep<I> for Infallible {
     type Error = Self;
 
-    fn apply(&self, _index: usize, _image: &mut I) -> Result<(), Self> {
+    fn apply(&self, _idx: usize, _image: &mut I) -> Result<(), Self> {
         match *self {}
     }
 }
@@ -49,9 +49,8 @@ impl<I> FrameStep<I> for Infallible {
 impl<I, S: FrameStep<I>> FrameStep<I> for Option<S> {
     type Error = S::Error;
 
-    fn apply(&self, index: usize, image: &mut I) -> Result<(), S::Error> {
-        self.as_ref()
-            .map_or(Ok(()), |step| step.apply(index, image))
+    fn apply(&self, idx: usize, image: &mut I) -> Result<(), S::Error> {
+        self.as_ref().map_or(Ok(()), |step| step.apply(idx, image))
     }
 
     fn changes_frames(&self) -> bool {
@@ -67,13 +66,13 @@ mod tests {
 
     /// Adds the frame's index, so a test sees which frames went through it.
     #[derive(Debug)]
-    struct AddIndex;
+    struct AddIdx;
 
-    impl FrameStep<usize> for AddIndex {
+    impl FrameStep<usize> for AddIdx {
         type Error = Infallible;
 
-        fn apply(&self, index: usize, image: &mut usize) -> Result<(), Infallible> {
-            *image += index;
+        fn apply(&self, idx: usize, image: &mut usize) -> Result<(), Infallible> {
+            *image += idx;
             Ok(())
         }
     }
@@ -83,8 +82,8 @@ mod tests {
     #[test]
     fn a_step_not_taken_leaves_every_frame_as_it_decodes() {
         let cases: [(&dyn FrameStep<usize, Error = Infallible>, usize, bool); 3] = [
-            (&Some(AddIndex), 10 + 3, true),
-            (&None::<AddIndex>, 10, false),
+            (&Some(AddIdx), 10 + 3, true),
+            (&None::<AddIdx>, 10, false),
             (&None::<Infallible>, 10, false),
         ];
         for (step, want, changes) in cases {

@@ -15,7 +15,7 @@ use crate::io::raw::error::RawScanError;
 ///
 /// [`RawScanError`], naming the directory or the entry it is about.
 pub fn raw_files(dir: &Path) -> Result<Vec<PathBuf>, RawScanError> {
-    let entries = fs::read_dir(dir).map_err(|source| RawScanError::Directory {
+    let entries = fs::read_dir(dir).map_err(|source| RawScanError::Dir {
         path: dir.to_path_buf(),
         source,
     })?;

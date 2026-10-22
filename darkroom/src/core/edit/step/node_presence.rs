@@ -20,7 +20,7 @@ enum Home {
 /// forward it paints, and whether it was selected. What a removal takes out,
 /// and what an undo has to put back for the removal to have been reversible.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct NodeState {
+pub(crate) struct PresenceState {
     detached: DetachedNode,
     home: Home,
     /// Restored verbatim rather than recomputed, so an undone delete comes
@@ -30,7 +30,7 @@ pub(crate) struct NodeState {
     selected: bool,
 }
 
-impl NodeState {
+impl PresenceState {
     /// Read `node_id`'s whole state out of `doc`, a graph node or a stub, or
     /// `None` when the document no longer holds it — the ordinary outcome of
     /// an intent that spans frames.
@@ -83,7 +83,7 @@ pub(crate) struct NodePresence {
     node_id: NodeId,
     /// Exactly one half is `Some`: a presence step is an insertion or a
     /// removal, never a replacement of one node by another.
-    state: Change<Option<NodeState>>,
+    state: Change<Option<PresenceState>>,
 }
 
 impl NodePresence {
@@ -96,7 +96,7 @@ impl NodePresence {
             node_id: detached.node_id(),
             state: Change {
                 from: None,
-                to: Some(NodeState {
+                to: Some(PresenceState {
                     detached,
                     home: Home::Graph,
                     placement,
@@ -107,7 +107,7 @@ impl NodePresence {
     }
 
     /// Take `state`'s node out of the document; undo puts it back whole.
-    pub(crate) const fn removal(state: NodeState) -> Self {
+    pub(crate) const fn removal(state: PresenceState) -> Self {
         Self {
             node_id: state.detached.node_id(),
             state: Change {

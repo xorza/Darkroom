@@ -16,7 +16,7 @@ use crate::internals::images::gray_image;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
@@ -47,7 +47,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
         (
             "ramp",
             (0..WIDTH * HEIGHT)
-                .map(|index| 10.0 + (index % WIDTH) as f32 + (index / WIDTH) as f32 * 0.25)
+                .map(|idx| 10.0 + (idx % WIDTH) as f32 + (idx / WIDTH) as f32 * 0.25)
                 .collect(),
         ),
     ];
@@ -58,7 +58,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
             for method in InterpolationMethod::ALL {
-                let result = WarpParams {
+                let result = WarpConfig {
                     method,
                     border_value: BORDER,
                     ..Default::default()
@@ -106,12 +106,12 @@ struct NullFixture {
 }
 
 impl NullFixture {
-    fn new(dimensions: ImageDimensions, null_index: usize) -> Self {
+    fn new(dimensions: ImageDimensions, null_idx: usize) -> Self {
         const FILL: f32 = 999.0;
         let mut pixels = vec![3.25f32; dimensions.pixel_count()];
-        pixels[null_index] = FILL;
+        pixels[null_idx] = FILL;
         let mut nulls = vec![0.0f32; dimensions.pixel_count()];
-        nulls[null_index] = f32::NAN;
+        nulls[null_idx] = f32::NAN;
 
         let mut declared = LinearImage::from_interleaved(dimensions, pixels.clone());
         declared.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
@@ -137,7 +137,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     // positive lobes' mean it falls back to is the constant.
     let tolerance = TOL;
     for method in InterpolationMethod::ALL {
-        let params = WarpParams {
+        let params = WarpConfig {
             method,
             border_value: BORDER,
             clamping_threshold: None,
@@ -149,18 +149,18 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
         // flat field over whichever taps survived is that field, so the fill never reaches the
         // result no matter how much of the window it took up.
         let mut reduced = 0;
-        for index in 0..dimensions.pixel_count() {
-            let value = masked.image.channel(0).pixels()[index];
-            let coverage = masked.coverage.pixels()[index];
+        for idx in 0..dimensions.pixel_count() {
+            let value = masked.image.channel(0).pixels()[idx];
+            let coverage = masked.coverage.pixels()[idx];
             if coverage > 0.0 {
                 assert!(
                     (value - CONSTANT).abs() <= tolerance,
-                    "{method:?} pixel {index}: coverage {coverage}, value {value}"
+                    "{method:?} pixel {idx}: coverage {coverage}, value {value}"
                 );
             } else {
-                assert_eq!(value, BORDER, "{method:?} pixel {index}");
+                assert_eq!(value, BORDER, "{method:?} pixel {idx}");
             }
-            if coverage < plain.coverage.pixels()[index] {
+            if coverage < plain.coverage.pixels()[idx] {
                 reduced += 1;
             }
         }
@@ -168,7 +168,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
         // The control frame smears instead: with nothing marking that sample as missing, the 999
         // lands in every output pixel whose window reached it.
         let smeared = (0..dimensions.pixel_count())
-            .filter(|&index| (plain.image.channel(0).pixels()[index] - CONSTANT).abs() > tolerance)
+            .filter(|&idx| (plain.image.channel(0).pixels()[idx] - CONSTANT).abs() > tolerance)
             .count();
         assert!(smeared > 0, "{method:?}: the control must smear");
 
@@ -193,7 +193,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // Against the same frame without the null, so the frame's own edge band — where a half-pixel
     // shift already costs coverage — is not counted as the null's doing.
     let reduced = |method| {
-        let params = WarpParams {
+        let params = WarpConfig {
             method,
             border_value: 0.0,
             ..Default::default()
@@ -201,7 +201,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
         let masked = params.warp(&fixture.declared, &transform);
         let plain = params.warp(&fixture.undeclared, &transform);
         (0..dimensions.pixel_count())
-            .filter(|&index| masked.coverage.pixels()[index] < plain.coverage.pixels()[index])
+            .filter(|&idx| masked.coverage.pixels()[idx] < plain.coverage.pixels()[idx])
             .count()
     };
 
@@ -230,7 +230,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     let mut image = LinearImage::from_interleaved(dimensions, vec![3.25; dimensions.pixel_count()]);
     image.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
 
-    let result = WarpParams {
+    let result = WarpConfig {
         method: InterpolationMethod::Bilinear,
         border_value: BORDER,
         ..Default::default()
@@ -255,7 +255,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
 #[test]
 #[should_panic(expected = "warp border_value must be finite")]
 fn warp_refuses_a_non_finite_border() {
-    // `WarpParams::validate` is only reached through `RegistrationConfig::validate`, so a direct
+    // `WarpConfig::validate` is only reached through `RegistrationConfig::validate`, so a direct
     // caller of the public `warp` could fill every out-of-footprint pixel with NaN and have it
     // noticed only by a debug assert deep in the combine.
     let image = LinearImage::from_interleaved(
@@ -263,7 +263,7 @@ fn warp_refuses_a_non_finite_border() {
         vec![0.5; 16],
     );
     let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
-    WarpParams {
+    WarpConfig {
         border_value: f32::NAN,
         ..Default::default()
     }
@@ -302,7 +302,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                 .map(|value| value * -3.0)
                 .collect(),
         );
-        previous.set_flags(PixelFlags::from_fn(size, |index| match index {
+        previous.set_flags(PixelFlags::from_fn(size, |idx| match idx {
             30 | 31 => QualityFlags::NO_DATA,
             100..=103 => QualityFlags::SATURATED,
             _ => QualityFlags::default(),
@@ -310,7 +310,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
         for image in [&plain, &masked] {
             for transform in &transforms {
                 for method in InterpolationMethod::ALL {
-                    let params = WarpParams {
+                    let params = WarpConfig {
                         method,
                         border_value: -7.0,
                         ..Default::default()
@@ -381,7 +381,7 @@ fn an_rgb_warp_is_three_mono_warps() {
     );
     let transform = WarpTransform::new(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
     for method in InterpolationMethod::ALL {
-        let params = WarpParams {
+        let params = WarpConfig {
             method,
             border_value: 0.0,
             ..Default::default()
@@ -410,11 +410,11 @@ fn an_rgb_warp_is_three_mono_warps() {
 
 fn assert_bitwise(actual: &[f32], expected: &[f32], method: InterpolationMethod) {
     assert_eq!(actual.len(), expected.len());
-    for (index, (a, e)) in actual.iter().zip(expected).enumerate() {
+    for (idx, (a, e)) in actual.iter().zip(expected).enumerate() {
         assert_eq!(
             a.to_bits(),
             e.to_bits(),
-            "{method:?} pixel {index}: {a} against {e}"
+            "{method:?} pixel {idx}: {a} against {e}"
         );
     }
 }
@@ -451,15 +451,15 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
         pixels[flagged] = 999.0;
         let mut image = gray_image(size, pixels);
         image.set_flags(flag.and_then(|flag| {
-            PixelFlags::from_fn(size, |index| {
-                if index == flagged {
+            PixelFlags::from_fn(size, |idx| {
+                if idx == flagged {
                     flag
                 } else {
                     QualityFlags::default()
                 }
             })
         }));
-        WarpParams {
+        WarpConfig {
             method: InterpolationMethod::Lanczos3,
             border_value: 0.0,
             ..Default::default()
@@ -474,15 +474,15 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
     let plain = warp(None, half);
     for y in 0..size.height {
         for x in 0..size.width {
-            let index = y * size.width + x;
-            let coverage = null.coverage.pixels()[index];
+            let idx = y * size.width + x;
+            let coverage = null.coverage.pixels()[idx];
             assert_eq!(
-                coverage < plain.coverage.pixels()[index],
+                coverage < plain.coverage.pixels()[idx],
                 within(x, y),
                 "({x}, {y}): coverage {coverage}"
             );
             if coverage > 0.0 {
-                let value = null.image.channel(0).pixels()[index];
+                let value = null.image.channel(0).pixels()[idx];
                 assert!((value - CONSTANT).abs() <= TOL, "({x}, {y}): {value}");
             }
         }
@@ -562,7 +562,7 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
         &CfaType::Mono,
         |_| false,
     ))));
-    let warped = WarpParams::default().warp(
+    let warped = WarpConfig::default().warp(
         &image,
         &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),
     );
@@ -589,7 +589,7 @@ fn only_the_nearest_pixel_keeps_the_quantization_step() {
     image.metadata.derived.set_mosaic_noise(Some(mosaic_noise));
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.0)));
     for method in InterpolationMethod::ALL {
-        let warped = WarpParams::with_method(method).warp(&image, &transform);
+        let warped = WarpConfig::with_method(method).warp(&image, &transform);
         let expected = (method == InterpolationMethod::Nearest).then_some(0.25);
         assert_eq!(
             warped.image.metadata.derived.quantization_sigma(),

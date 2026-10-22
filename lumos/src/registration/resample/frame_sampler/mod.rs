@@ -28,10 +28,10 @@ use crate::registration::resample::flagged_sources::FlaggedSources;
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
-use crate::registration::resample::source_position::{SourceAt, SourcePosition};
+use crate::registration::resample::source_pos::{SourceAt, SourcePos};
 use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::warp_kernel::{Filter, TapAxis, WarpKernel};
-use crate::registration::resample::warp_params::WarpParams;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::{Isa, Kernel};
 
@@ -54,7 +54,7 @@ pub(crate) struct FilterSampling {
 
 impl SampleMethod {
     /// What `params` asks for, at the stretch `warp` needs over an output frame of `size`.
-    pub(super) fn for_frame(params: WarpParams, warp: &WarpTransform, size: Size2us) -> Self {
+    pub(super) fn for_frame(params: WarpConfig, warp: &WarpTransform, size: Size2us) -> Self {
         match Filter::of(params.method) {
             None => Self::Nearest,
             Some(filter) => Self::Filter(FilterSampling {
@@ -133,11 +133,11 @@ impl<'a> FrameSampler<'a> {
         }
     }
 
-    /// Every channel and the quality of one output row at its source `positions`, `None` outside
+    /// Every channel and the quality of one output row at its source `poss`, `None` outside
     /// the source footprint.
     pub(crate) fn sample_row(
         &self,
-        positions: &[Option<SourcePosition>],
+        poss: &[Option<SourcePos>],
         axes: &mut WindowAxes,
         output: RowOutput<'_, '_>,
     ) {
@@ -147,40 +147,35 @@ impl<'a> FrameSampler<'a> {
             reason = "`iter` only reads the rows, which are mutable for the caller"
         )]
         {
-            debug_assert!(
-                output
-                    .channels
-                    .iter()
-                    .all(|row| row.len() == positions.len())
-            );
+            debug_assert!(output.channels.iter().all(|row| row.len() == poss.len()));
         }
         SampleRow {
             sampler: self,
-            positions,
+            poss,
             axes,
             output,
         }
         .dispatch();
     }
 
-    fn nearest(&self, position: SourcePosition, out: &mut PixelOut<'_, '_>) -> PixelQuality {
-        let index = position.nearest_index(self.size);
+    fn nearest(&self, pos: SourcePos, out: &mut PixelOut<'_, '_>) -> PixelQuality {
+        let idx = pos.nearest_idx(self.size);
         if self
             .flagged
             .and_then(FlaggedSources::validity)
-            .is_some_and(|validity| validity.pixels[index] == 0.0)
+            .is_some_and(|validity| validity.pixels[idx] == 0.0)
         {
             return self.no_data(out);
         }
         for (row, source) in out.channels.iter_mut().zip(&self.sources) {
-            row[out.x] = source.pixels[index];
+            row[out.x] = source.pixels[idx];
         }
         PixelQuality {
             coverage: 1.0,
             confidence: 1.0,
             flags: self
                 .flagged
-                .map_or_else(QualityFlags::default, |flagged| flagged.carried_at(index)),
+                .map_or_else(QualityFlags::default, |flagged| flagged.carried_at(idx)),
         }
     }
 
@@ -227,16 +222,16 @@ struct RowSampler<'s, 'a, S> {
 }
 
 impl<S: Isa> RowSampler<'_, '_, S> {
-    /// One pixel at its source `position`, every channel written into `out`.
+    /// One pixel at its source `pos`, every channel written into `out`.
     #[inline(always)]
-    fn pixel(&mut self, position: SourcePosition, out: &mut PixelOut<'_, '_>) -> PixelQuality {
+    fn pixel(&mut self, pos: SourcePos, out: &mut PixelOut<'_, '_>) -> PixelQuality {
         match self.sampler.method {
-            SampleMethod::Nearest => self.sampler.nearest(position, out),
-            SampleMethod::Filter(filter) => self.filtered(filter, position, out),
+            SampleMethod::Nearest => self.sampler.nearest(pos, out),
+            SampleMethod::Filter(filter) => self.filtered(filter, pos, out),
         }
     }
 
-    /// The filter's kernel over the window at `position`: the whole kernel where it lands on data;
+    /// The filter's kernel over the window at `pos`: the whole kernel where it lands on data;
     /// its taps with data, normalized, where the source edge or a flagged pixel cut it and what is
     /// left is [well conditioned](WindowWeights::well_conditioned); otherwise Bilinear at the same
     /// stretch over its own taps with data, whose weights are never negative and so always average.
@@ -244,19 +239,19 @@ impl<S: Isa> RowSampler<'_, '_, S> {
     fn filtered(
         &mut self,
         FilterSampling { kernel, clamp }: FilterSampling,
-        position: SourcePosition,
+        pos: SourcePos,
         out: &mut PixelOut<'_, '_>,
     ) -> PixelQuality {
         let (sampler, isa) = (self.sampler, self.isa);
         let near = sampler
             .flagged
-            .map_or_else(QualityFlags::default, |flagged| flagged.near(position));
+            .map_or_else(QualityFlags::default, |flagged| flagged.near(pos));
         if near == QualityFlags::default()
             && let Some(window) = InteriorWindow::new(
                 isa,
                 &kernel,
                 SourceAt {
-                    position,
+                    pos,
                     size: sampler.size,
                 },
             )
@@ -278,8 +273,8 @@ impl<S: Isa> RowSampler<'_, '_, S> {
             };
         }
 
-        kernel.axis(isa, position.x(), &mut self.axes.x);
-        kernel.axis(isa, position.y(), &mut self.axes.y);
+        kernel.axis(isa, pos.x(), &mut self.axes.x);
+        kernel.axis(isa, pos.y(), &mut self.axes.y);
         let Some(window) = TapWindow::new(&self.axes.x, &self.axes.y, sampler.size) else {
             return sampler.no_data(out);
         };
@@ -322,8 +317,8 @@ impl<S: Isa> RowSampler<'_, '_, S> {
         }
 
         let fallback = kernel.bilinear();
-        fallback.axis(isa, position.x(), &mut self.axes.x);
-        fallback.axis(isa, position.y(), &mut self.axes.y);
+        fallback.axis(isa, pos.x(), &mut self.axes.x);
+        fallback.axis(isa, pos.y(), &mut self.axes.y);
         let Some(window) = TapWindow::new(&self.axes.x, &self.axes.y, sampler.size) else {
             return sampler.no_data(out);
         };
@@ -377,7 +372,7 @@ impl<S: Isa> RowSampler<'_, '_, S> {
 #[derive(Debug)]
 struct SampleRow<'s, 'a, 'o, 'r> {
     sampler: &'s FrameSampler<'a>,
-    positions: &'s [Option<SourcePosition>],
+    poss: &'s [Option<SourcePos>],
     axes: &'s mut WindowAxes,
     output: RowOutput<'o, 'r>,
 }
@@ -398,13 +393,13 @@ impl Kernel for SampleRow<'_, '_, '_, '_> {
             isa,
             axes: self.axes,
         };
-        for (x, position) in self.positions.iter().enumerate() {
+        for (x, pos) in self.poss.iter().enumerate() {
             let out = &mut PixelOut {
                 channels: &mut *channels,
                 x,
             };
-            let quality = match *position {
-                Some(position) => row.pixel(position, out),
+            let quality = match *pos {
+                Some(pos) => row.pixel(pos, out),
                 None => row.sampler.no_data(out),
             };
             coverage[x] = quality.coverage;

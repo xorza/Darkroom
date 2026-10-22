@@ -67,7 +67,7 @@ impl BlobTarget {
     }
 
     /// Create the directory the blob lives in.
-    async fn create_directory(&self) -> Result<(), StoreError> {
+    async fn create_dir(&self) -> Result<(), StoreError> {
         let Some(parent) = self
             .path
             .parent()
@@ -77,7 +77,7 @@ impl BlobTarget {
         };
         fs::create_dir_all(parent)
             .await
-            .map_err(|source| StoreError::Directory {
+            .map_err(|source| StoreError::Dir {
                 path: self.path.clone(),
                 source,
             })
@@ -182,7 +182,7 @@ impl BlobTarget {
         // Every other write costs no directory syscall.
         let file = match AtomicFile::new(&self.path, PublicationMode::Cache).await {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                self.create_directory().await?;
+                self.create_dir().await?;
                 AtomicFile::new(&self.path, PublicationMode::Cache).await
             }
             opened => opened,

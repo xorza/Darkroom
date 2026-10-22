@@ -140,13 +140,13 @@ impl NormFit<'_> {
         let slot_count = planes.slots.count();
         let fitted = (0..frames.len() * slot_count)
             .into_par_iter()
-            .map_init(RadixMedian::default, |median, pair_index| {
-                let frame_index = pair_index / slot_count;
-                let slot = pair_index % slot_count;
-                if frame_index == reference {
+            .map_init(RadixMedian::default, |median, pair_idx| {
+                let frame_idx = pair_idx / slot_count;
+                let slot = pair_idx % slot_count;
+                if frame_idx == reference {
                     return Ok(Some(SlotEstimate::EXACT_IDENTITY));
                 }
-                let pair = [&frames[frame_index], &frames[reference]];
+                let pair = [&frames[frame_idx], &frames[reference]];
                 let coverage = ChannelCoverage {
                     frames: &pair,
                     channel: planes.slots.channel(slot),
@@ -157,26 +157,26 @@ impl NormFit<'_> {
                     Err(StackError::NoCommonCoverage) => return Ok(None),
                     Err(error) => return Err(error),
                 };
-                let indices = domain.stratified_indices(cancel)?;
+                let idxs = domain.stratified_idxs(cancel)?;
                 let sampling = PlaneSampling {
                     domain: Some(&domain),
-                    indices: &indices,
+                    idxs: &idxs,
                 };
-                let mut measured_median = |index: usize| -> Result<f32, StackError> {
+                let mut measured_median = |idx: usize| -> Result<f32, StackError> {
                     Ok(sampling
-                        .median(planes.values(index, slot), median, cancel)?
+                        .median(planes.values(idx, slot), median, cancel)?
                         .expect("a pair's medians are measured over its domain"))
                 };
                 let (frame_median, reference_median) =
-                    (measured_median(frame_index)?, measured_median(reference)?);
+                    (measured_median(frame_idx)?, measured_median(reference)?);
                 let (frame_variance, reference_variance) = (
-                    planes.noise_variance(frame_index, slot, &indices)?,
-                    planes.noise_variance(reference, slot, &indices)?,
+                    planes.noise_variance(frame_idx, slot, &idxs)?,
+                    planes.noise_variance(reference, slot, &idxs)?,
                 );
                 match self.normalization {
                     Fitted::Global => {
-                        let [ours, theirs] = [frame_index, reference]
-                            .map(|index| sampling.samples(planes.values(index, slot), cancel));
+                        let [ours, theirs] = [frame_idx, reference]
+                            .map(|idx| sampling.samples(planes.values(idx, slot), cancel));
                         let (ours, theirs) = (ours?, theirs?);
                         let pair = SamplePair {
                             frame: PairSide::new(&ours, frame_variance, cancel)?,
@@ -193,7 +193,7 @@ impl NormFit<'_> {
                     }
                     Fitted::Multiplicative => {
                         let norm = SlotNorm::median_ratio(
-                            (frame_index, frame_median),
+                            (frame_idx, frame_median),
                             (reference, reference_median),
                             slot,
                         )?;
@@ -205,7 +205,7 @@ impl NormFit<'_> {
                                 * (relative(frame_variance, frame_median)
                                     + relative(reference_variance, reference_median))
                                 .sqrt()
-                                / (indices.len() as f64).sqrt(),
+                                / (idxs.len() as f64).sqrt(),
                         }))
                     }
                 }
@@ -250,16 +250,16 @@ impl NormFit<'_> {
             .iter()
             .map(|frame| frame.source_stats.medians.clone())
             .collect();
-        let spread = |index: usize, slot: usize| {
-            frames[index]
+        let spread = |idx: usize, slot: usize| {
+            frames[idx]
                 .source_stats
                 .spread
                 .as_ref()
                 .map(|spread| spread[slot])
         };
-        let scale = |index: usize, slot: usize| -> Result<MeasuredScale, StackError> {
-            let stats = &frames[index].source_stats;
-            let spread = spread(index, slot)
+        let scale = |idx: usize, slot: usize| -> Result<MeasuredScale, StackError> {
+            let stats = &frames[idx].source_stats;
+            let spread = spread(idx, slot)
                 .expect("a frame gathered per channel was measured with its spread");
             let noise = stats.slot_noise(slot);
             let signal = f64::from(spread.sigma).powi(2) - f64::from(noise).powi(2);
@@ -270,38 +270,38 @@ impl NormFit<'_> {
                 })
             } else {
                 Err(StackError::NoSignalScale {
-                    index,
+                    idx,
                     slot,
                     spread: spread.sigma,
                     noise,
                 })
             }
         };
-        let median_error = |index: usize, slot: usize| {
-            spread(index, slot).map_or(f64::INFINITY, |spread| {
+        let median_error = |idx: usize, slot: usize| {
+            spread(idx, slot).map_or(f64::INFINITY, |spread| {
                 MEDIAN_ERROR * f64::from(spread.sigma)
                     / (spread.samples.max(1) as f64).sqrt()
-                    / f64::from(medians[index][slot])
+                    / f64::from(medians[idx][slot])
             })
         };
         frames
             .iter()
             .enumerate()
-            .map(|(index, frame)| {
+            .map(|(idx, frame)| {
                 (0..frame.source_stats.medians.len())
                     .map(|slot| {
-                        if index == reference {
+                        if idx == reference {
                             return Ok(SlotEstimate::EXACT_IDENTITY);
                         }
                         match self.normalization {
                             Fitted::Global => {
-                                let (ours, theirs) = (scale(index, slot)?, scale(reference, slot)?);
+                                let (ours, theirs) = (scale(idx, slot)?, scale(reference, slot)?);
                                 let gain = (theirs.scale / ours.scale) as f32;
                                 Ok(SlotEstimate {
                                     norm: SlotNorm {
                                         gain,
                                         offset: medians[reference][slot]
-                                            - medians[index][slot] * gain,
+                                            - medians[idx][slot] * gain,
                                     },
                                     relative_error: ours
                                         .relative_error
@@ -310,11 +310,11 @@ impl NormFit<'_> {
                             }
                             Fitted::Multiplicative => Ok(SlotEstimate {
                                 norm: SlotNorm::median_ratio(
-                                    (index, medians[index][slot]),
+                                    (idx, medians[idx][slot]),
                                     (reference, medians[reference][slot]),
                                     slot,
                                 )?,
-                                relative_error: median_error(index, slot)
+                                relative_error: median_error(idx, slot)
                                     .hypot(median_error(reference, slot)),
                             }),
                         }
@@ -342,16 +342,16 @@ impl NormFit<'_> {
         let cancel = planes.cancel;
         let reference = self.reference;
         let slot_count = pixels.len();
-        let indices = pixels
+        let idxs = pixels
             .iter()
-            .map(|pixels| pixels.indices(cancel))
+            .map(|pixels| pixels.idxs(cancel))
             .collect::<Result<ArrayVec<_, 3>, StackError>>()?;
         let measure = |frame: usize, slot: usize, median: &mut RadixMedian| {
             if let (SlotPixels::Everywhere(_), Some(samples)) =
                 (&pixels[slot], &frames[frame].samples)
             {
                 let samples = &samples[slot];
-                debug_assert_eq!(samples.samples(), indices[slot].len());
+                debug_assert_eq!(samples.samples(), idxs[slot].len());
                 return Ok(PlaneMeasurement {
                     median: None,
                     samples: samples.chunk(0..samples.samples()).to_vec(),
@@ -359,7 +359,7 @@ impl NormFit<'_> {
             }
             PlaneSampling {
                 domain: pixels[slot].shared(),
-                indices: &indices[slot],
+                idxs: &idxs[slot],
             }
             .measure(planes.values(frame, slot), median, cancel)
         };
@@ -370,7 +370,7 @@ impl NormFit<'_> {
                 let measured = measure(reference, slot, &mut RadixMedian::default())?;
                 let side = PairSide::new(
                     &measured.samples,
-                    planes.noise_variance(reference, slot, &indices[slot])?,
+                    planes.noise_variance(reference, slot, &idxs[slot])?,
                     cancel,
                 )?;
                 Ok(ReferenceSlot {
@@ -384,20 +384,20 @@ impl NormFit<'_> {
 
         let fitted = (0..frames.len() * slot_count)
             .into_par_iter()
-            .map_init(RadixMedian::default, |median, pair_index| {
-                let frame_index = pair_index / slot_count;
-                let slot = pair_index % slot_count;
-                if frame_index == reference {
+            .map_init(RadixMedian::default, |median, pair_idx| {
+                let frame_idx = pair_idx / slot_count;
+                let slot = pair_idx % slot_count;
+                if frame_idx == reference {
                     return Ok(SlotNorm::IDENTITY);
                 }
-                let frame = &frames[frame_index];
-                let measured = measure(frame_index, slot, median)?;
+                let frame = &frames[frame_idx];
+                let measured = measure(frame_idx, slot, median)?;
                 let median = measured.median.unwrap_or(frame.source_stats.medians[slot]);
                 let reference = &reference_slots[slot];
                 let pair = SamplePair {
                     frame: PairSide::new(
                         &measured.samples,
-                        planes.noise_variance(frame_index, slot, &indices[slot])?,
+                        planes.noise_variance(frame_idx, slot, &idxs[slot])?,
                         cancel,
                     )?,
                     reference: reference.side(),
@@ -489,13 +489,13 @@ fn multiplicative_norms(
     medians
         .iter()
         .enumerate()
-        .map(|(index, frame)| {
+        .map(|(idx, frame)| {
             let slots = frame
                 .iter()
                 .zip(&medians[reference])
                 .enumerate()
                 .map(|(slot, (&median, &reference_median))| {
-                    SlotNorm::median_ratio((index, median), (reference, reference_median), slot)
+                    SlotNorm::median_ratio((idx, median), (reference, reference_median), slot)
                 })
                 .collect::<Result<_, _>>()?;
             Ok(FrameNorm { slots })

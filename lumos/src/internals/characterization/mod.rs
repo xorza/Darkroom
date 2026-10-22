@@ -41,13 +41,13 @@ use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::test_rng::TestRng;
 use crate::io::fits::cfa;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
@@ -99,7 +99,7 @@ fn dither() -> Transform {
 }
 
 fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
-    WarpParams::default().warp(image, &WarpTransform::new(transform))
+    WarpConfig::default().warp(image, &WarpTransform::new(transform))
 }
 
 /// A decoded mosaic as a kept cache holds it: its plane, the flags its decoder set, and its
@@ -131,7 +131,7 @@ fn decode_snapshot() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let image = LoadContext::default().linear(path).unwrap();
+    let image = LoadCtx::default().linear(path).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);
     assert_decode("FITS decode", &snapshot, DECODE_PINS.fits_linear);
@@ -148,7 +148,7 @@ fn decode_snapshot() {
     );
     let tiff = scratch.join("field.tiff");
     writer::raster(&rgb, &tiff).unwrap();
-    let image = LoadContext::default().linear(&tiff).unwrap();
+    let image = LoadCtx::default().linear(&tiff).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);
     assert_decode("float TIFF decode", &snapshot, DECODE_PINS.float_tiff);
@@ -161,7 +161,7 @@ fn decode_snapshot() {
         CfaType::Bayer(CfaPattern::Rggb),
     );
     cfa::save(&fits, &mosaic).unwrap();
-    let cfa = LoadContext::default().cfa(&fits).unwrap();
+    let cfa = LoadCtx::default().cfa(&fits).unwrap();
     let mut snapshot = Snapshot::default();
     cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("mosaic FITS decode", &snapshot, DECODE_PINS.fits_cfa);
@@ -483,7 +483,7 @@ fn raw_decode_snapshot() {
         return;
     }
     let path = &raw_frames("Lights")[0];
-    let cfa = raw::load_cfa(path, &LoadContext::default()).unwrap();
+    let cfa = raw::load_cfa(path, &LoadCtx::default()).unwrap();
     let mut snapshot = Snapshot::default();
     cfa_snapshot(&mut snapshot, &cfa);
     assert_decode("RAW decode", &snapshot, DECODE_PINS.raw_cfa);

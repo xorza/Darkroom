@@ -22,7 +22,7 @@ pub(crate) struct RunSeeds {
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
-    /// [`Error::NodeSeedNotFound`](crate::execution::error::Error::NodeSeedNotFound).
+    /// [`ExecutionError::NodeSeedNotFound`](crate::execution::error::ExecutionError::NodeSeedNotFound).
     pub(crate) node_ids: Vec<NodeId>,
 }
 

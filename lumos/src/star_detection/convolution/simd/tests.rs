@@ -8,7 +8,7 @@ use crate::math::size2us::Size2us;
 use crate::simd::Kernel;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
-    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, mirror_index,
+    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, mirror_idx,
 };
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
@@ -148,30 +148,30 @@ fn convolve_row_impulse_response_is_the_reversed_kernel() {
 }
 
 #[test]
-fn mirror_index_in_bounds() {
+fn mirror_idx_in_bounds() {
     for len in [5, 10, 100] {
         for i in 0..len {
-            assert_eq!(mirror_index(i as isize, len), i);
+            assert_eq!(mirror_idx(i as isize, len), i);
         }
     }
 }
 
 #[test]
-fn mirror_index_negative() {
+fn mirror_idx_negative() {
     // Negative indices should reflect: -1 -> 1, -2 -> 2, etc.
     let len = 10;
-    assert_eq!(mirror_index(-1, len), 1);
-    assert_eq!(mirror_index(-2, len), 2);
-    assert_eq!(mirror_index(-3, len), 3);
+    assert_eq!(mirror_idx(-1, len), 1);
+    assert_eq!(mirror_idx(-2, len), 2);
+    assert_eq!(mirror_idx(-3, len), 3);
 }
 
 #[test]
-fn mirror_index_overflow() {
+fn mirror_idx_overflow() {
     // Indices >= len should reflect: len -> len-2, len+1 -> len-3, etc.
     let len = 10;
-    assert_eq!(mirror_index(10, len), 8); // 2*10-2-10 = 8
-    assert_eq!(mirror_index(11, len), 7); // 2*10-2-11 = 7
-    assert_eq!(mirror_index(12, len), 6); // 2*10-2-12 = 6
+    assert_eq!(mirror_idx(10, len), 8); // 2*10-2-10 = 8
+    assert_eq!(mirror_idx(11, len), 7); // 2*10-2-11 = 7
+    assert_eq!(mirror_idx(12, len), 6); // 2*10-2-12 = 6
 }
 
 #[test]
@@ -180,19 +180,19 @@ fn mirror_index_far_out_of_bounds() {
     // −5 → 3, −10 → 2 (phase 6, 8 − 6), 20 → 4 (phase 4), 100 → 4 (phase 4). For len 3, period 4,
     // −5 → 1 and 5 → 1, where one reflection and a clamp gave 2 and 0. Length 1 is always 0.
     let len = 5;
-    assert_eq!(mirror_index(-5, len), 3);
-    assert_eq!(mirror_index(-10, len), 2);
-    assert_eq!(mirror_index(20, len), 4);
-    assert_eq!(mirror_index(100, len), 4);
-    assert_eq!(mirror_index(-5, 3), 1);
-    assert_eq!(mirror_index(5, 3), 1);
-    assert_eq!(mirror_index(7, 1), 0);
+    assert_eq!(mirror_idx(-5, len), 3);
+    assert_eq!(mirror_idx(-10, len), 2);
+    assert_eq!(mirror_idx(20, len), 4);
+    assert_eq!(mirror_idx(100, len), 4);
+    assert_eq!(mirror_idx(-5, 3), 1);
+    assert_eq!(mirror_idx(5, 3), 1);
+    assert_eq!(mirror_idx(7, 1), 0);
     for i in -20..30 {
-        let index = mirror_index(i, len);
-        assert!(index < len, "mirror_index({i}, {len})");
+        let idx = mirror_idx(i, len);
+        assert!(idx < len, "mirror_index({i}, {len})");
         // Mirroring is symmetric about 0 and periodic.
-        assert_eq!(index, mirror_index(-i, len), "{i}");
-        assert_eq!(index, mirror_index(i + 8, len), "{i}");
+        assert_eq!(idx, mirror_idx(-i, len), "{i}");
+        assert_eq!(idx, mirror_idx(i + 8, len), "{i}");
     }
 }
 

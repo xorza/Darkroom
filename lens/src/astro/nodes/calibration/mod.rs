@@ -6,9 +6,9 @@ use std::{fs, io};
 use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::{
-    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadContext,
-    MasterBuild, MasterBuildError, MasterCache, MasterInputs, MasterRole, ProgressCallback,
-    ProgressMonitor, SigmaThreshold, WriteError, writer,
+    CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
+    MasterBuildError, MasterCache, MasterInputs, MasterRole, ProgressCallback, ProgressMonitor,
+    SigmaThreshold, WriteError, writer,
 };
 use scenarium::{
     DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
@@ -49,7 +49,7 @@ enum CacheError {
         source: io::Error,
     },
     #[error("calibration cache requires one source directory, but '{first}' and '{other}' differ")]
-    SourceDirectories { first: PathBuf, other: PathBuf },
+    SourceDirs { first: PathBuf, other: PathBuf },
 }
 
 type BuildMastersError = MasterBuildError<CacheError>;
@@ -81,7 +81,7 @@ impl MastersRequest {
                     flat_dark: self.frames.flat_dark.as_slice(),
                 },
                 sigma_threshold: self.sigma,
-                cache: &SourceDirectoryCache {
+                cache: &SourceDirCache {
                     caching: self.caching,
                     cancel,
                 },
@@ -103,18 +103,18 @@ impl RoleCachePaths {
     /// it.
     fn beside(frames: &[PathBuf], master_file: &str) -> Result<Self, CacheError> {
         let first = frames.first().expect("empty frame sets are not cached");
-        let directory = first.parent().unwrap_or_else(|| Path::new(""));
+        let dir = first.parent().unwrap_or_else(|| Path::new(""));
         if let Some(other) = frames
             .iter()
             .skip(1)
-            .find(|path| path.parent().unwrap_or_else(|| Path::new("")) != directory)
+            .find(|path| path.parent().unwrap_or_else(|| Path::new("")) != dir)
         {
-            return Err(CacheError::SourceDirectories {
+            return Err(CacheError::SourceDirs {
                 first: first.clone(),
                 other: other.clone(),
             });
         }
-        let master = directory.join(master_file);
+        let master = dir.join(master_file);
         let marker = cache_marker_path(&master);
         Ok(Self { master, marker })
     }
@@ -131,8 +131,8 @@ pub(crate) fn register(library: &mut Library) {
                 debug_assert_eq!(inputs.len(), 6);
                 debug_assert_eq!(outputs.len(), 1);
 
-                let frames = |index: usize| {
-                    inputs[index]
+                let frames = |idx: usize| {
+                    inputs[idx]
                         .as_fs_paths()
                         .map(|paths| paths.iter().map(PathBuf::from).collect())
                         .unwrap_or_default()
@@ -211,7 +211,7 @@ fn frames_input(name: &str, what: &str) -> FuncInput {
 /// nothing and keys nothing: a key is a `stat` per frame, and one that fails would fail a build
 /// that never reads the cache.
 #[derive(Debug)]
-struct SourceDirectoryCache<'a> {
+struct SourceDirCache<'a> {
     caching: Caching,
     cancel: &'a CancelToken,
 }
@@ -245,7 +245,7 @@ impl CachePlace {
     }
 }
 
-impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
+impl MasterCache<PathBuf> for SourceDirCache<'_> {
     type Error = CacheError;
     /// `None` with the cache off.
     type Key = Option<CachePlace>;
@@ -261,11 +261,11 @@ impl MasterCache<PathBuf> for SourceDirectoryCache<'_> {
         let marked =
             fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
         if marked && place.paths.master.is_file() {
-            let context = LoadContext {
+            let ctx = LoadCtx {
                 cancel: self.cancel.clone(),
                 ..Default::default()
             };
-            match context.cfa(&place.paths.master) {
+            match ctx.cfa(&place.paths.master) {
                 Ok(master) => return Ok(CachedMaster::Kept(Box::new(master))),
                 Err(error) => tracing::warn!(
                     path = %place.paths.master.display(),

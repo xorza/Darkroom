@@ -290,7 +290,7 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P,
 pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
     use crate::math::pixel_quadrature::PixelQuadrature;
-    use crate::simd::tier::Tier;
+    use crate::simd::isa_tier::IsaTier;
     use crate::star_detection::centroid::profile_problem::FitData;
     use crate::star_detection::centroid::simd::{BatchModel, Chi2Kernel, NormalEquationsKernel};
 
@@ -320,7 +320,7 @@ pub(crate) mod internals {
         let weights: Vec<f64> = (0..16).map(|i| 0.5 + f64::from(i % 5) * 0.37).collect();
         for n in 9..=16 {
             let portable = |data| {
-                Tier::portable().run(NormalEquationsKernel {
+                IsaTier::portable().run(NormalEquationsKernel {
                     model,
                     data,
                     quadrature,
@@ -333,13 +333,13 @@ pub(crate) mod internals {
             );
             for data in [prefix(stamp, n, None), prefix(stamp, n, Some(&weights))] {
                 let equations = portable(data);
-                let chi2 = Tier::portable().run(Chi2Kernel {
+                let chi2 = IsaTier::portable().run(Chi2Kernel {
                     model,
                     data,
                     quadrature,
                 });
                 assert_eq!(chi2.to_bits(), equations.chi2.to_bits(), "n={n}");
-                for tier in Tier::supported() {
+                for tier in IsaTier::supported() {
                     assert_eq!(
                         bits(&tier.run(NormalEquationsKernel {
                             model,

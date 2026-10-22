@@ -15,7 +15,7 @@ use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -114,7 +114,7 @@ fn run_tiles(
 
 /// A stride that covers the frame at full weight: at least one pixel, and at most [`MAX_STRIDE`].
 fn validate_stride(stride: usize) -> Result<(), InvalidConfigField> {
-    ConfigValue::count("ML tile stride", stride)
+    ConfigField::count("ML tile stride", stride)
         .must_be("between 1 and 384", (1..=MAX_STRIDE).contains(&stride))
 }
 

@@ -77,7 +77,7 @@ pub(crate) fn pick_new_file(extensions: &[&str]) -> Option<PathBuf> {
     filtered_file_dialog(extensions).save_file()
 }
 
-pub(crate) fn pick_directory() -> Option<PathBuf> {
+pub(crate) fn pick_dir() -> Option<PathBuf> {
     rfd::FileDialog::new().pick_folder()
 }
 

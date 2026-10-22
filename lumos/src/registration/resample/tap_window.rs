@@ -153,7 +153,7 @@ pub(crate) struct TapWindow<'a> {
 }
 
 /// Lane indices, for the mask that keeps a row's first vector to the window's taps.
-const LANE_INDEX: [f32; F32_LANES] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+const LANE_IDX: [f32; F32_LANES] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
 
 /// The weights of one chunk of a window row, split by sign as the lobe sums take them.
 #[derive(Debug, Clone, Copy)]
@@ -419,7 +419,7 @@ impl<V: F32x8> RowLanes<V> {
     pub(crate) fn first<S: Isa<F32 = V>>(isa: S, count: usize) -> Self {
         Self {
             keep: isa
-                .load_f32(&LANE_INDEX)
+                .load_f32(&LANE_IDX)
                 .lanes_lt(isa.splat_f32(count as f32)),
             count,
         }

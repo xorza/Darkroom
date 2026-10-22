@@ -26,9 +26,9 @@ pub enum AlignStackError {
     /// The configuration cannot run over these lights, found before any light is worked.
     #[error("invalid configuration: {0}")]
     Config(#[from] AlignStackConfigError),
-    #[error("reference frame {index} has only {found} stars (need {required})")]
+    #[error("reference frame {idx} has only {found} stars (need {required})")]
     ReferenceInsufficientStars {
-        index: usize,
+        idx: usize,
         found: usize,
         required: usize,
     },
@@ -71,8 +71,8 @@ pub enum AlignStackConfigError {
     CosmicRay(InvalidConfigField),
     #[error("combine: {0}")]
     Stack(#[from] StackConfigError),
-    #[error("reference index {index} out of range ({count} frames)")]
-    ReferenceOutOfRange { index: usize, count: usize },
+    #[error("reference index {idx} out of range ({count} frames)")]
+    ReferenceOutOfRange { idx: usize, count: usize },
     /// A cosmic-ray pass asked of lights that are already linear: the pass runs on a mosaic
     /// before its demosaic would smear a hit across pixels, and these lights have none.
     #[error(

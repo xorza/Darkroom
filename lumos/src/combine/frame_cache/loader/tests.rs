@@ -14,7 +14,7 @@ use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame_store::decode_cache::frame_spill::{Carries, FrameSpill};
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::tier::CombineBudget;
+use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
@@ -28,12 +28,12 @@ use crate::io::writer;
 use crate::memory::run_memory::RunMemory;
 use crate::stack_product::quality_planes::QualityPlanes;
 
-/// Frame `index` of a set of `dimensions`, decoded from `source`.
+/// Frame `idx` of a set of `dimensions`, decoded from `source`.
 #[derive(Debug, Clone, Copy)]
 struct SetFrame<'a> {
     source: &'a Path,
     dimensions: ImageDimensions,
-    index: usize,
+    idx: usize,
 }
 
 impl SetFrame<'_> {
@@ -42,7 +42,7 @@ impl SetFrame<'_> {
         let Self {
             source,
             dimensions,
-            index,
+            idx,
         } = self;
         // A fresh intake per call: these tests are about one frame's cache files, not the set it
         // belongs to, so no frame 0 is admitted before it.
@@ -56,23 +56,23 @@ impl SetFrame<'_> {
         let intake = FrameIntake::new(
             IntakePlan {
                 dimensions,
-                frame_count: index + 1,
+                frame_count: idx + 1,
                 decode_slots: 1,
                 stage: StackingStage::Loading,
             },
             &run,
         );
-        let tier = Tier::Spilled {
+        let tier = StorageTier::Spilled {
             scratch: RunScratch::create(cache_dir).unwrap(),
             combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
         };
-        let paths = vec![source; index + 1];
+        let paths = vec![source; idx + 1];
         let storage = RunStorage::decoding(&run).unwrap();
         let load = FrameLoad::<D, Option<Infallible>> {
             paths: &paths,
             storage: &storage,
             kept: storage.kept(),
-            context: &run.context,
+            ctx: &run.ctx,
             step: &None::<Infallible>,
             decoder: PhantomData,
         };
@@ -81,19 +81,19 @@ impl SetFrame<'_> {
             tier: &tier,
             intake: &intake,
         }
-        .frame(index, None)
+        .frame(idx, None)
         .map(|loaded| loaded.frame)
     }
 }
 
 /// The directory of the decode cache under `cache_dir`.
-fn kept_directory(cache_dir: &Path) -> PathBuf {
+fn kept_dir(cache_dir: &Path) -> PathBuf {
     DecodeCache::open(cache_dir).unwrap().path().to_path_buf()
 }
 
 /// `path` decoded by `I` under the default context, as the decode cache names and keys it.
 fn source_of<D: Decoder>(path: &Path) -> CachedSource {
-    CachedSource::of(path, D::KIND, &LoadContext::default()).unwrap()
+    CachedSource::of(path, D::KIND, &LoadCtx::default()).unwrap()
 }
 
 /// The files `source` is kept in under `kept`.
@@ -101,10 +101,10 @@ fn spill_of<'a>(kept: &'a Path, source: &'a CachedSource) -> FrameSpill<'a> {
     FrameSpill::cached(kept, &source.canonical, source.key)
 }
 
-/// Overwrite sample `index` of a spilled plane in place, as anything outside lumos could.
-fn poke(path: &Path, index: usize, value: f32) {
+/// Overwrite sample `idx` of a spilled plane in place, as anything outside lumos could.
+fn poke(path: &Path, idx: usize, value: f32) {
     let mut file = OpenOptions::new().write(true).open(path).unwrap();
-    file.seek(SeekFrom::Start((index * size_of::<f32>()) as u64))
+    file.seek(SeekFrom::Start((idx * size_of::<f32>()) as u64))
         .unwrap();
     file.write_all(&value.to_le_bytes()).unwrap();
 }
@@ -140,7 +140,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let frame = SetFrame {
         source: &source,
         dimensions: dims,
-        index: 0,
+        idx: 0,
     };
 
     let first = frame.load::<LinearDecoder>(temp_dir.path()).unwrap();
@@ -150,7 +150,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     // A sample and the statistics changed on disk and sealed again come back as they are: the
     // frame was mapped and its statistics read, not measured again.
-    let kept = kept_directory(temp_dir.path());
+    let kept = kept_dir(temp_dir.path());
     let plane = spill_of(&kept, &source_of::<LinearDecoder>(&source)).channel_path(0);
     let edit = |value: f32| {
         let kept_source = source_of::<LinearDecoder>(&source);
@@ -244,10 +244,10 @@ fn cache_frame_validates_a_reused_frame() {
     let frame = SetFrame {
         source: &source,
         dimensions: dims,
-        index: 1,
+        idx: 1,
     };
     drop(frame.load::<LinearDecoder>(temp_dir.path()).unwrap());
-    let kept = kept_directory(temp_dir.path());
+    let kept = kept_dir(temp_dir.path());
     let kept_source = source_of::<LinearDecoder>(&source);
     let spill = spill_of(&kept, &kept_source);
 
@@ -258,7 +258,7 @@ fn cache_frame_validates_a_reused_frame() {
     assert!(matches!(
         error,
         StackError::Admission(AdmissionError::NonFiniteImageSample {
-            index: 1,
+            idx: 1,
             channel: 0,
             pixel: 2,
             value: f32::INFINITY,
@@ -283,11 +283,11 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
     let frame = SetFrame {
         source: &source,
         dimensions: dims,
-        index: 0,
+        idx: 0,
     };
 
     drop(frame.load::<LinearDecoder>(temp_dir.path()).unwrap());
-    let kept = kept_directory(temp_dir.path());
+    let kept = kept_dir(temp_dir.path());
     assert_ne!(
         spill_of(&kept, &source_of::<LinearDecoder>(&source)).channel_path(0),
         spill_of(&kept, &source_of::<CfaDecoder>(&source)).channel_path(0)
@@ -303,7 +303,7 @@ struct AddOne;
 impl FrameStep<LinearImage> for AddOne {
     type Error = Infallible;
 
-    fn apply(&self, _index: usize, image: &mut LinearImage) -> Result<(), Infallible> {
+    fn apply(&self, _idx: usize, image: &mut LinearImage) -> Result<(), Infallible> {
         for plane in image.planes_mut() {
             for sample in plane.pixels_mut() {
                 *sample += 1.0;
@@ -338,12 +338,12 @@ fn a_kept_cache_is_reused_by_the_next_run() {
         ("fits", None, false),
     ] {
         let label = format!("{format}, spilled {spills}");
-        let directory = temp_dir.join(format!("{format}_{spills}"));
-        fs::create_dir_all(&directory).unwrap();
+        let dir = temp_dir.join(format!("{format}_{spills}"));
+        fs::create_dir_all(&dir).unwrap();
         let paths: Vec<PathBuf> = (0..2)
-            .map(|index| {
-                let path = directory.join(format!("light_{index}.{format}"));
-                let pixels = vec![0.25 + 0.25 * index as f32; 12];
+            .map(|idx| {
+                let path = dir.join(format!("light_{idx}.{format}"));
+                let pixels = vec![0.25 + 0.25 * idx as f32; 12];
                 if format == "fits" {
                     write_fits(&path, &FitsImage::new([4, 3], pixels).unwrap(), None);
                 } else {
@@ -353,7 +353,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
             })
             .collect();
         let ingest = IngestConfig {
-            cache_dir: directory.join("cache"),
+            cache_dir: dir.join("cache"),
             keep_cache: true,
             ..IngestConfig::default()
         };
@@ -378,7 +378,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
         assert_eq!(first.frames[0].channels[0].chunk(1..2), &[1.25], "{label}");
         assert_eq!(first.frames[1].channels[0].chunk(1..2), &[1.5], "{label}");
         drop(first);
-        let kept = kept_directory(&ingest.cache_dir);
+        let kept = kept_dir(&ingest.cache_dir);
         for path in &paths {
             let kept_source = source_of::<LinearDecoder>(path);
             let spill = spill_of(&kept, &kept_source);
@@ -436,14 +436,14 @@ fn cache_frame_dimension_mismatch() {
     let result = SetFrame {
         source: &source_path,
         dimensions: expected_dims,
-        index: 5,
+        idx: 5,
     }
     .load::<LinearDecoder>(temp_dir.path());
 
     assert!(matches!(
         result.unwrap_err(),
         StackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
-            index: 5,
+            idx: 5,
             expected,
             actual,
         })) if expected == expected_dims && actual == actual_dims

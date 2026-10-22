@@ -19,7 +19,7 @@ use crate::pipeline::mosaic_preparation::MosaicPreparation;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registrar::Registrar;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 
 /// How the reference frame (the alignment anchor) is chosen.
@@ -30,7 +30,7 @@ pub enum Reference {
     #[default]
     Auto,
     /// A specific frame, by index into the input slice.
-    Index(usize),
+    Idx(usize),
 }
 
 /// What [`Reference::select`] weighs of one frame: its detected stars, and their median FWHM.
@@ -42,7 +42,7 @@ pub(super) struct ReferenceCandidate {
 
 impl Reference {
     /// The index of the reference (alignment anchor) among `candidates`, one per light, which must
-    /// have the `required` stars registration needs. An [`Self::Index`] is in range: the run
+    /// have the `required` stars registration needs. An [`Self::Idx`] is in range: the run
     /// validated it against the lights.
     ///
     /// `Auto` takes the sharpest frame among those with `required` stars: the lowest median FWHM,
@@ -54,10 +54,10 @@ impl Reference {
         candidates: &[ReferenceCandidate],
         required: usize,
     ) -> Result<usize, AlignStackError> {
-        let index = match self {
-            Self::Index(index) => {
-                debug_assert!(index < candidates.len());
-                index
+        let idx = match self {
+            Self::Idx(idx) => {
+                debug_assert!(idx < candidates.len());
+                idx
             }
             Self::Auto => candidates
                 .iter()
@@ -80,18 +80,18 @@ impl Reference {
                     |(i, _)| i,
                 ),
         };
-        candidates[index].check(index, required)?;
-        Ok(index)
+        candidates[idx].check(idx, required)?;
+        Ok(idx)
     }
 }
 
 impl ReferenceCandidate {
-    /// This candidate, light `index`, as the reference: refused without the `required` stars
+    /// This candidate, light `idx`, as the reference: refused without the `required` stars
     /// registration needs.
-    pub(super) const fn check(self, index: usize, required: usize) -> Result<(), AlignStackError> {
+    pub(super) const fn check(self, idx: usize, required: usize) -> Result<(), AlignStackError> {
         if self.stars < required {
             return Err(AlignStackError::ReferenceInsufficientStars {
-                index,
+                idx,
                 found: self.stars,
                 required,
             });
@@ -106,7 +106,7 @@ pub struct AlignStackConfig {
     pub detection: StarDetectionConfig,
     pub registration: RegistrationConfig,
     /// How a registered light is resampled onto the reference's grid.
-    pub warp: WarpParams,
+    pub warp: WarpConfig,
     /// How the registered lights combine: [`StackConfig::light`] by default.
     pub stack: StackConfig,
     pub reference: Reference,
@@ -122,7 +122,7 @@ impl Default for AlignStackConfig {
         Self {
             detection: StarDetectionConfig::default(),
             registration: RegistrationConfig::default(),
-            warp: WarpParams::default(),
+            warp: WarpConfig::default(),
             stack: StackConfig::light(),
             reference: Reference::default(),
             cosmic_ray: None,
@@ -178,13 +178,13 @@ impl AlignStackConfig {
     }
 
     /// Detect → register → warp → stack calibrated linear lights read from files: FITS or
-    /// floating-point TIFF, as [`LoadContext::linear`](crate::LoadContext::linear) reads them — the
+    /// floating-point TIFF, as [`LoadCtx::linear`](crate::LoadCtx::linear) reads them — the
     /// output of Siril or PixInsight, for one.
     ///
     /// [`Self::align_stack_images`] for frames on disk: each light is decoded on a worker, checked,
     /// and its stars detected, and when the set would not fit the memory it plans against, parked
     /// and warped through the frame store as [`Self::calibrate_align_stack_paths`] parks its
-    /// lights, so peak RAM stays flat in the frame count. With [`Reference::Index`] each light goes
+    /// lights, so peak RAM stays flat in the frame count. With [`Reference::Idx`] each light goes
     /// through one pass, written once.
     pub fn align_stack_paths<P: AsRef<Path> + Sync>(
         &self,
@@ -208,7 +208,7 @@ impl AlignStackConfig {
     /// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
     /// dropped and reported in [`AlignStackResult::dropped`].
     ///
-    /// With [`Reference::Index`] the reference is prepared first, and each other light then goes
+    /// With [`Reference::Idx`] the reference is prepared first, and each other light then goes
     /// through its preparation, its registration and its warp in one pass, written once. With
     /// [`Reference::Auto`] every light is prepared and detected first, since the reference is the
     /// sharpest one, and parked until it registers.
@@ -283,11 +283,11 @@ impl AlignStackConfig {
             .map_err(AlignStackConfigError::Registration)?;
         self.warp.validate().map_err(AlignStackConfigError::Warp)?;
         self.stack.validate(frame_count)?;
-        if let Reference::Index(index) = self.reference
-            && index >= frame_count
+        if let Reference::Idx(idx) = self.reference
+            && idx >= frame_count
         {
             return Err(AlignStackConfigError::ReferenceOutOfRange {
-                index,
+                idx,
                 count: frame_count,
             });
         }
@@ -316,7 +316,7 @@ mod tests {
     use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
     use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
     use crate::progress::progress_monitor::ProgressMonitor;
-    use crate::registration::resample::warp_params::WarpParams;
+    use crate::registration::resample::warp_config::WarpConfig;
 
     /// `Auto` takes the lowest median FWHM among the frames with the stars registration needs:
     /// frame 2 at 2.5 of 2.5, 3.0 and 3.5; a tie goes to the lowest index; a frame below the gate
@@ -343,7 +343,7 @@ mod tests {
         assert!(matches!(
             auto(&[10, 20, 15], &[3.0, 2.0, 3.5]),
             Err(AlignStackError::ReferenceInsufficientStars {
-                index: 1,
+                idx: 1,
                 found: 20,
                 required: 40
             })
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn a_reference_index_past_the_lights_is_refused_before_decoding() {
         let config = AlignStackConfig {
-            reference: Reference::Index(1),
+            reference: Reference::Idx(1),
             ..AlignStackConfig::default()
         };
         let result = config.align_stack_paths(
@@ -366,14 +366,14 @@ mod tests {
         assert!(matches!(
             result,
             Err(AlignStackError::Config(
-                AlignStackConfigError::ReferenceOutOfRange { index: 1, count: 1 }
+                AlignStackConfigError::ReferenceOutOfRange { idx: 1, count: 1 }
             ))
         ));
         assert!(config.validate(2).is_ok());
         let error = AlignStackConfig {
-            warp: WarpParams {
+            warp: WarpConfig {
                 border_value: f32::NAN,
-                ..WarpParams::default()
+                ..WarpConfig::default()
             },
             ..AlignStackConfig::default()
         }

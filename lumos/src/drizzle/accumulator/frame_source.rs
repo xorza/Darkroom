@@ -45,8 +45,8 @@ pub(super) struct Fluxes {
 /// multiply the scan exists to hoist.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct InputPixel {
-    pub(super) position: Vec2us,
-    pub(super) index: usize,
+    pub(super) pos: Vec2us,
+    pub(super) idx: usize,
 }
 
 /// One input pixel's drop reduced to what a kernel shapes: where it lands on the output grid, and
@@ -130,10 +130,10 @@ impl<'a> FrameSource<'a> {
     #[inline]
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
         Fluxes {
-            values: self.planes.iter().map(|plane| plane[pixel.index]).collect(),
-            color: self.mosaic.map(|cfa_type| cfa_type.slot_at(pixel.position)),
+            values: self.planes.iter().map(|plane| plane[pixel.idx]).collect(),
+            color: self.mosaic.map(|cfa_type| cfa_type.slot_at(pixel.pos)),
             carried: self.flags.map_or(0, |flags| {
-                flags.at(pixel.index).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
+                flags.at(pixel.idx).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
             }),
         }
     }
@@ -147,8 +147,8 @@ impl<'a> FrameSource<'a> {
         let Some(weight) = self.deposit_weight(pixel) else {
             return Drop::Empty;
         };
-        let position = DVec2::new(pixel.position.x as f64, pixel.position.y as f64);
-        match self.map.position(position) {
+        let pos = DVec2::new(pixel.pos.x as f64, pixel.pos.y as f64);
+        match self.map.pos(pos) {
             Some(centre) => Drop::Landed(Droplet { centre, weight }),
             None => Drop::Unconverged,
         }
@@ -157,17 +157,17 @@ impl<'a> FrameSource<'a> {
     /// Where input point `p` lands on the output grid, or `None` when the SIP inverse does not
     /// converge there.
     #[inline]
-    pub(super) fn position(&self, p: DVec2) -> Option<DVec2> {
-        self.map.position(p)
+    pub(super) fn pos(&self, p: DVec2) -> Option<DVec2> {
+        self.map.pos(p)
     }
 
     /// The drop at `pixel` as the quadrilateral its corners map to, shrunk by the pixel fraction to
     /// `half_drop` either side of its centre.
     #[inline]
     pub(super) fn quad(&self, pixel: InputPixel, half_drop: f64) -> Drop<DropQuad> {
-        let centre = DVec2::new(pixel.position.x as f64, pixel.position.y as f64);
+        let centre = DVec2::new(pixel.pos.x as f64, pixel.pos.y as f64);
         self.quad_of(pixel, |corner| {
-            self.map.position(centre + QUAD_CORNERS[corner] * half_drop)
+            self.map.pos(centre + QUAD_CORNERS[corner] * half_drop)
         })
     }
 
@@ -183,11 +183,11 @@ impl<'a> FrameSource<'a> {
             return Drop::Empty;
         };
         let mut corners = [DVec2::ZERO; 4];
-        for (index, mapped) in corners.iter_mut().enumerate() {
-            let Some(position) = corner(index) else {
+        for (idx, mapped) in corners.iter_mut().enumerate() {
+            let Some(pos) = corner(idx) else {
                 return Drop::Unconverged;
             };
-            *mapped = position;
+            *mapped = pos;
         }
 
         // The magnification is the quadrilateral's own signed area, from the cross product of its
@@ -245,14 +245,12 @@ impl<'a> FrameSource<'a> {
     fn deposit_weight(&self, pixel: InputPixel) -> Option<f64> {
         if self.flags.is_some_and(|flags| {
             flags
-                .at(pixel.index)
+                .at(pixel.idx)
                 .intersects(QualityFlags::RESAMPLE_EXCLUDED)
         }) {
             return None;
         }
-        let weight = self
-            .pixel_weights
-            .map_or(1.0, |weights| weights[pixel.index]);
+        let weight = self.pixel_weights.map_or(1.0, |weights| weights[pixel.idx]);
         (weight > 0.0).then_some(f64::from(weight))
     }
 }

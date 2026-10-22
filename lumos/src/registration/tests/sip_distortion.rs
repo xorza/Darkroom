@@ -7,7 +7,7 @@
 use glam::DVec2;
 
 use crate::internals::synthetic::distortion::RadialField;
-use crate::internals::synthetic::transforms::{StarScatter, positions_to_stars};
+use crate::internals::synthetic::transforms::{StarScatter, poss_to_stars};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::registration_config::RegistrationConfig;
@@ -28,14 +28,14 @@ fn register_with_sip_recovers_barrel_distortion() {
         side: 1024.0,
         seed: 42,
     }
-    .positions();
+    .poss();
     let field = RadialField {
         transform: Transform::translation(DVec2::new(7.0, -4.0)),
         ..RadialField::new(DVec2::new(512.0, 512.0), 1e-8)
     };
     let target_pos: Vec<DVec2> = ref_pos.iter().map(|&p| field.image(p)).collect();
-    let ref_stars = positions_to_stars(&ref_pos, 3.0);
-    let target_stars = positions_to_stars(&target_pos, 3.0);
+    let ref_stars = poss_to_stars(&ref_pos, 3.0);
+    let target_stars = poss_to_stars(&target_pos, 3.0);
 
     let base_config = RegistrationConfig {
         matching: helpers::matching_config(20, 10),

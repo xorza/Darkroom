@@ -208,7 +208,7 @@ impl Library {
     }
 
     /// Whether an authored `Const` literal `value` may sit on `input` — the
-    /// `Const` half of [`Graph::admit`](crate::Graph::admit) (the `Bind` half
+    /// `Const` half of [`Graph::admit`](crate::Graph::admit) (the `Wire` half
     /// is [`DataType::compatible_with`]).
     ///
     /// The registry's whole contribution is the enum arm: a literal is a

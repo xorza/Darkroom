@@ -1,4 +1,4 @@
-//! [`Tier`]: the Isas this architecture has, as one value to dispatch on and to test each of.
+//! [`IsaTier`]: the Isas this architecture has, as one value to dispatch on and to test each of.
 
 #[cfg(target_arch = "x86_64")]
 use crate::simd::avx2_fma::Avx2Fma;
@@ -8,13 +8,13 @@ use crate::simd::neon::Neon;
 use crate::simd::portable::Portable;
 use crate::simd::{Isa, Kernel};
 
-/// One Isa of this architecture, holding its token. A `Tier` exists only for an Isa this CPU
+/// One Isa of this architecture, holding its token. A `IsaTier` exists only for an Isa this CPU
 /// runs, so running a kernel on one needs no further check.
 ///
-/// The one list of Isas: [`Kernel::dispatch`] takes [`Tier::widest`], and the tests walk every
+/// The one list of Isas: [`Kernel::dispatch`] takes [`IsaTier::widest`], and the tests walk every
 /// tier the CPU has, so an Isa cannot be dispatched to without being tested.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Tier {
+pub(crate) enum IsaTier {
     /// Never dispatched on aarch64, where every CPU has NEON; kept there for the tests and benches.
     #[cfg(any(feature = "internals", not(target_arch = "aarch64")))]
     Portable(Portable),
@@ -24,7 +24,7 @@ pub(crate) enum Tier {
     Neon(Neon),
 }
 
-impl Tier {
+impl IsaTier {
     /// The widest Isa this CPU has.
     #[inline]
     #[cfg_attr(
@@ -66,12 +66,12 @@ pub(crate) mod internals {
 
     #[cfg(target_arch = "x86_64")]
     use crate::simd::avx2_fma::Avx2Fma;
+    use crate::simd::isa_tier::IsaTier;
     #[cfg(target_arch = "aarch64")]
     use crate::simd::neon::Neon;
     use crate::simd::portable::Portable;
-    use crate::simd::tier::Tier;
 
-    impl Tier {
+    impl IsaTier {
         /// `Portable`, the tier every other one is held to.
         pub(crate) const fn portable() -> Self {
             Self::Portable(Portable::new())
@@ -101,7 +101,7 @@ pub(crate) mod internals {
         }
     }
 
-    impl Tier {
+    impl IsaTier {
         /// The tier's part of a bench id: `portable`, `avx2_fma`, `neon`.
         pub(crate) const fn id(self) -> &'static str {
             match self {
@@ -114,7 +114,7 @@ pub(crate) mod internals {
         }
     }
 
-    impl Display for Tier {
+    impl Display for IsaTier {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             f.write_str(match self {
                 Self::Portable(_) => "Portable",

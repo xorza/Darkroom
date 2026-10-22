@@ -9,7 +9,7 @@ use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_provenance::RowOrder;
 use crate::image::sample_domain::SampleDomain;
 
-/// Why frame `index` of a set failed the checks every frame passes before it is combined: its
+/// Why frame `idx` of a set failed the checks every frame passes before it is combined: its
 /// geometry, the facts it must state alike with the others, its samples and its quality planes.
 #[derive(Debug, Error)]
 pub enum AdmissionError {
@@ -20,16 +20,16 @@ pub enum AdmissionError {
     /// Reported as a plane count and sample counts rather than as
     /// [`ImageDimensions`](crate::ImageDimensions) because a stored plane knows only its length —
     /// it has no width or height to report.
-    #[error("stored frame {index} has {actual} channel planes, expected {expected}")]
+    #[error("stored frame {idx} has {actual} channel planes, expected {expected}")]
     StoredFrameChannels {
-        index: usize,
+        idx: usize,
         expected: usize,
         actual: usize,
     },
 
-    #[error("stored frame {index} {plane} holds {actual} samples, expected {expected}")]
+    #[error("stored frame {idx} {plane} holds {actual} samples, expected {expected}")]
     StoredFramePlaneSamples {
-        index: usize,
+        idx: usize,
         plane: FramePlane,
         expected: usize,
         actual: usize,
@@ -43,13 +43,13 @@ pub enum AdmissionError {
     /// already normalized stacked against a `uint16` one divided by 65535. Two declared spans in
     /// one unit (two RAWs whose `maximum − black` differ) are converted, not refused.
     #[error(
-        "frame {index} was decoded into sample domain {actual}, but frame {reference_index} used \
+        "frame {idx} was decoded into sample domain {actual}, but frame {reference_idx} used \
          {expected}; neither can be expressed in the other"
     )]
     SampleDomainMismatch {
-        index: usize,
+        idx: usize,
         actual: Box<SampleDomain>,
-        reference_index: usize,
+        reference_idx: usize,
         expected: Box<SampleDomain>,
     },
 
@@ -59,39 +59,37 @@ pub enum AdmissionError {
     /// same target are upside-down relative to each other. Named here rather than left to surface
     /// as a registration failure with no stated cause.
     #[error(
-        "frame {index} stores its rows {actual}, but frame {reference_index} stores them \
+        "frame {idx} stores its rows {actual}, but frame {reference_idx} stores them \
          {expected}; the two are mirrored views and cannot be combined"
     )]
     RowOrderMismatch {
-        index: usize,
+        idx: usize,
         actual: RowOrder,
-        reference_index: usize,
+        reference_idx: usize,
         expected: RowOrder,
     },
 
     /// Two frames carry different mosaic patterns, or one is a mosaic and the other is not, so
     /// the same pixel is a different color in each.
-    #[error(
-        "frame {index} has CFA pattern {actual:?}, but frame {reference_index} has {expected:?}"
-    )]
+    #[error("frame {idx} has CFA pattern {actual:?}, but frame {reference_idx} has {expected:?}")]
     CfaPatternMismatch {
-        index: usize,
+        idx: usize,
         actual: Option<CfaType>,
-        reference_index: usize,
+        reference_idx: usize,
         expected: Option<CfaType>,
     },
 
-    #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]
+    #[error("frame {idx}, channel {channel}, pixel {pixel} has non-finite image value {value}")]
     NonFiniteImageSample {
-        index: usize,
+        idx: usize,
         channel: usize,
         pixel: usize,
         value: f32,
     },
 
-    #[error("{plane} for frame {index} has invalid value {value} at pixel {pixel}")]
+    #[error("{plane} for frame {idx} has invalid value {value} at pixel {pixel}")]
     InvalidQualityPlaneValue {
-        index: usize,
+        idx: usize,
         plane: FramePlane,
         pixel: usize,
         value: f32,
@@ -103,10 +101,10 @@ pub enum AdmissionError {
     /// confidence, so a pixel supported at zero confidence would enter the statistics with no
     /// finite noise and one confident at zero support would be dropped despite having data.
     #[error(
-        "frame {index} has {plane} {support} with confidence {confidence} at pixel {pixel}: a pixel has support and confidence together or neither"
+        "frame {idx} has {plane} {support} with confidence {confidence} at pixel {pixel}: a pixel has support and confidence together or neither"
     )]
     FrameQualityPairMismatch {
-        index: usize,
+        idx: usize,
         pixel: usize,
         plane: FramePlane,
         support: f32,
@@ -127,88 +125,88 @@ impl AdmissionError {
                 Self::DimensionMismatch(mismatch.renumbered(inputs))
             }
             Self::StoredFrameChannels {
-                index,
+                idx,
                 expected,
                 actual,
             } => Self::StoredFrameChannels {
-                index: inputs[index],
+                idx: inputs[idx],
                 expected,
                 actual,
             },
             Self::StoredFramePlaneSamples {
-                index,
+                idx,
                 plane,
                 expected,
                 actual,
             } => Self::StoredFramePlaneSamples {
-                index: inputs[index],
+                idx: inputs[idx],
                 plane,
                 expected,
                 actual,
             },
             Self::SampleDomainMismatch {
-                index,
+                idx,
                 actual,
-                reference_index,
+                reference_idx,
                 expected,
             } => Self::SampleDomainMismatch {
-                index: inputs[index],
+                idx: inputs[idx],
                 actual,
-                reference_index: inputs[reference_index],
+                reference_idx: inputs[reference_idx],
                 expected,
             },
             Self::RowOrderMismatch {
-                index,
+                idx,
                 actual,
-                reference_index,
+                reference_idx,
                 expected,
             } => Self::RowOrderMismatch {
-                index: inputs[index],
+                idx: inputs[idx],
                 actual,
-                reference_index: inputs[reference_index],
+                reference_idx: inputs[reference_idx],
                 expected,
             },
             Self::CfaPatternMismatch {
-                index,
+                idx,
                 actual,
-                reference_index,
+                reference_idx,
                 expected,
             } => Self::CfaPatternMismatch {
-                index: inputs[index],
+                idx: inputs[idx],
                 actual,
-                reference_index: inputs[reference_index],
+                reference_idx: inputs[reference_idx],
                 expected,
             },
             Self::NonFiniteImageSample {
-                index,
+                idx,
                 channel,
                 pixel,
                 value,
             } => Self::NonFiniteImageSample {
-                index: inputs[index],
+                idx: inputs[idx],
                 channel,
                 pixel,
                 value,
             },
             Self::InvalidQualityPlaneValue {
-                index,
+                idx,
                 plane,
                 pixel,
                 value,
             } => Self::InvalidQualityPlaneValue {
-                index: inputs[index],
+                idx: inputs[idx],
                 plane,
                 pixel,
                 value,
             },
             Self::FrameQualityPairMismatch {
-                index,
+                idx,
                 pixel,
                 plane,
                 support,
                 confidence,
             } => Self::FrameQualityPairMismatch {
-                index: inputs[index],
+                idx: inputs[idx],
                 pixel,
                 plane,
                 support,

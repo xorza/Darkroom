@@ -21,8 +21,8 @@ use crate::math::vec2us::Vec2us;
 
 /// A color filter a demosaic reads a mosaic through, anchored at the mosaic's first pixel.
 pub(crate) trait MosaicPattern: Copy + Sync {
-    /// The color of the photosite at `position`.
-    fn color_at(&self, position: Vec2us) -> CfaColor;
+    /// The color of the photosite at `pos`.
+    fn color_at(&self, pos: Vec2us) -> CfaColor;
 }
 
 /// A frame's mosaic as a demosaic reads it: its samples row by row — calibration may put them
@@ -83,7 +83,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// The gain that balances the color of the photosite at `at`.
     #[inline(always)]
     pub(super) fn gain_at(&self, at: Vec2us) -> f32 {
-        self.gains[self.pattern.color_at(at).index()]
+        self.gains[self.pattern.color_at(at).idx()]
     }
 
     /// Row `y`'s own samples over `columns`, as the input holds them.
@@ -96,11 +96,11 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// The pixel at `at` as a kernel writes it: its index, its color and its own sample.
     #[inline(always)]
     pub(crate) fn native(&self, at: Vec2us) -> NativePixel {
-        let index = at.y * self.size.width + at.x;
+        let idx = at.y * self.size.width + at.x;
         NativePixel {
-            index,
-            native: self.pattern.color_at(at).index(),
-            sample: self.data[index],
+            idx,
+            native: self.pattern.color_at(at).idx(),
+            sample: self.data[idx],
         }
     }
 
@@ -201,12 +201,12 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
                 let color = self
                     .pattern
                     .color_at(Vec2us::new(neighbor_x, neighbor_y))
-                    .index();
+                    .idx();
                 sums[color] += self.data[neighbor_y * width + neighbor_x] * weight;
                 weights[color] += weight;
             }
         }
-        let native = self.pattern.color_at(at).index();
+        let native = self.pattern.color_at(at).idx();
         let sample = self.data[y * width + x];
         let channel = |color: usize| {
             if color == native {
@@ -235,7 +235,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
                     if self
                         .pattern
                         .color_at(Vec2us::new(neighbor_x, neighbor_y))
-                        .index()
+                        .idx()
                         == color
                     {
                         sum += self.data[neighbor_y * width + neighbor_x];
@@ -267,7 +267,7 @@ mod tests {
         let bayer = MosaicView::new(&data, CfaPattern::Rggb).with_gains([2.0, 1.0, 4.0]);
         assert_eq!(bayer.size, Size2us::new(6, 4));
         let blue = bayer.native(Vec2us::new(1, 1));
-        assert_eq!((blue.index, blue.native, blue.sample), (7, 2, 0.5));
+        assert_eq!((blue.idx, blue.native, blue.sample), (7, 2, 0.5));
         assert_eq!(bayer.balanced(Vec2us::new(1, 0)), 0.5);
         assert_eq!(bayer.balanced(Vec2us::new(1, 1)), 2.0);
         assert_eq!(

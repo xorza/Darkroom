@@ -86,9 +86,9 @@ impl Kind {
         }
     }
 
-    /// Field `fname` read back from `values[index]`, falling back to its default in `d`.
-    pub(super) fn read(&self, index: usize, fname: &Ident) -> TokenStream2 {
-        let get = quote!(values.get(#index));
+    /// Field `fname` read back from `values[idx]`, falling back to its default in `d`.
+    pub(super) fn read(&self, idx: usize, fname: &Ident) -> TokenStream2 {
+        let get = quote!(values.get(#idx));
         match self {
             Self::Required(scalar) => scalar.read(&get, fname),
             Self::Optional(scalar) => scalar.read_optional(&get, fname),

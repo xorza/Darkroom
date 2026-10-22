@@ -4,7 +4,7 @@ use crate::graph::identity::NodeId;
 use crate::runtime::log_entry::{LogEntry, LogLevel};
 
 #[derive(Debug, Default)]
-pub struct ContextManager {
+pub struct CtxManager {
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
     pub(crate) current_node: Option<NodeId>,
@@ -18,7 +18,7 @@ pub struct ContextManager {
     pub(crate) cancel: CancelToken,
 }
 
-impl ContextManager {
+impl CtxManager {
     /// A clonable handle to the run's [`CancelToken`], for a lambda to hand to
     /// long-running work (e.g. a `spawn_blocking` lumos op) so it can poll
     /// `token.is_cancelled()` and stop early. A never-token outside a
@@ -92,11 +92,11 @@ impl ContextManager {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::graph::identity::NodeId;
-    use crate::runtime::context_manager::ContextManager;
+    use crate::runtime::ctx_manager::CtxManager;
 
-    impl ContextManager {
+    impl CtxManager {
         /// Stand in for the executor's per-invoke attribution, so a lambda that
-        /// reads [`ContextManager::current_node`] can be tested without a run.
+        /// reads [`CtxManager::current_node`] can be tested without a run.
         pub const fn set_current_node(&mut self, node_id: NodeId) {
             self.current_node = Some(node_id);
         }

@@ -57,9 +57,9 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
         let Size2us { width, .. } = self.size;
         for y in self.cfa_type.sampled_rows(self.size, self.per_color) {
             for x in 0..width {
-                let index = y * width + x;
-                if !(self.excluded)(index) {
-                    visit(index, self.cfa_type.slot_at(Vec2us::new(x, y)));
+                let idx = y * width + x;
+                if !(self.excluded)(idx) {
+                    visit(idx, self.cfa_type.slot_at(Vec2us::new(x, y)));
                 }
             }
         }

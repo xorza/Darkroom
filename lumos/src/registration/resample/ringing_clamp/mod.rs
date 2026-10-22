@@ -1,6 +1,6 @@
 //! [`RingingClamp`]: PixInsight's limit on what a kernel's negative lobes may take from a sample.
 
-use crate::registration::resample::warp_params::ClampingThreshold;
+use crate::registration::resample::warp_config::ClampingThreshold;
 
 /// One channel's sums over a window, split as the clamp reads them.
 ///

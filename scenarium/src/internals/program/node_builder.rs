@@ -164,11 +164,11 @@ impl<'a> NodeBuilder<'a> {
             func_id,
             node_id,
         } = self;
-        let position = owner.placed.len();
+        let pos = owner.placed.len();
         // The convention every hand-built fixture used, now in one place: ids
         // ascend from 1 with the placement, so `node_ids` stays sorted (which
         // `CompiledGraph::node` binary-searches) and index 0 is not the nil id.
-        let node_id = node_id.unwrap_or_else(|| NodeId::from_u128(position as u128 + 1));
+        let node_id = node_id.unwrap_or_else(|| NodeId::from_u128(pos as u128 + 1));
         // Keyed by default to the *node's* id, not its position: one
         // implementation per node (the authoring default), and stable across a
         // reinstall that shifts the index space — where a func id that moved

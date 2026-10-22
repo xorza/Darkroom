@@ -41,7 +41,7 @@ const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN]);
 /// under a name of the whole decode it holds.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameSpill<'a> {
-    directory: &'a Path,
+    dir: &'a Path,
     stem: String,
     /// The canonical path of the source the files are of, which the commit records.
     source: &'a Path,
@@ -56,7 +56,7 @@ impl<'a> FrameSpill<'a> {
     /// write one name write the same planes. A clash of the hash is told apart by the commit,
     /// which records the source's path and the key and is checked before a byte is reused: a clash
     /// rebuilds the frame, it never reads another's.
-    pub(crate) fn cached(directory: &'a Path, canonical_source: &'a Path, key: CacheKey) -> Self {
+    pub(crate) fn cached(dir: &'a Path, canonical_source: &'a Path, key: CacheKey) -> Self {
         let key_bytes = SerdeFormat::Bitcode
             .serialize(&key)
             .expect("a cache key of plain data always serializes");
@@ -64,7 +64,7 @@ impl<'a> FrameSpill<'a> {
         let hash = fnv1a::hash(hash, &key_bytes);
         let hash = fnv1a::hash(hash, canonical_source.as_os_str().as_encoded_bytes());
         Self {
-            directory,
+            dir,
             stem: format!("{hash:016x}"),
             source: canonical_source,
             key,
@@ -96,7 +96,7 @@ impl<'a> FrameSpill<'a> {
     }
 
     fn file(&self, suffix: impl Display) -> PathBuf {
-        self.directory.join(format!("{}{suffix}", self.stem))
+        self.dir.join(format!("{}{suffix}", self.stem))
     }
 
     /// The plane at `path` mapped; `None` when it cannot be, which a reuse reads as a frame to
@@ -315,11 +315,11 @@ pub(crate) mod internals {
     };
 
     impl<'a> FrameSpill<'a> {
-        /// A kept frame's files under `stem` in `directory`, of a source with no path, decoded
+        /// A kept frame's files under `stem` in `dir`, of a source with no path, decoded
         /// under `key`: [`Self::cached`]'s naming with a stem a test can read.
-        pub(crate) fn named(directory: &'a Path, stem: &str, key: CacheKey) -> Self {
+        pub(crate) fn named(dir: &'a Path, stem: &str, key: CacheKey) -> Self {
             Self {
-                directory,
+                dir,
                 stem: stem.to_owned(),
                 source: Path::new(""),
                 key,

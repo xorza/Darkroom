@@ -154,7 +154,7 @@ async fn frame_event_rejects_invalid_frequencies() {
         // A fresh source each time: the refusal must not depend on history.
         let error = FrameSource::new().tick(frequency).await.unwrap_err();
         assert!(
-            matches!(error, InvokeError::InvalidInput { index: 0, .. }),
+            matches!(error, InvokeError::InvalidInput { idx: 0, .. }),
             "unexpected error for {frequency:?}: {error:?}"
         );
     }

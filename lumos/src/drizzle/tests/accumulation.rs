@@ -137,7 +137,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
 
     let loaded: Vec<LinearImage> = paths
         .iter()
-        .map(|path| LoadContext::default().linear(path).unwrap())
+        .map(|path| LoadCtx::default().linear(path).unwrap())
         .collect();
     let in_memory = config
         .drizzle_images(
@@ -177,7 +177,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     );
     DecodeCache::open(&kept.cache_dir)
         .unwrap()
-        .edit_kept::<LinearDecoder>(&paths[1], &LoadContext::default(), |plane| {
+        .edit_kept::<LinearDecoder>(&paths[1], &LoadCtx::default(), |plane| {
             for sample in plane.iter_mut() {
                 *sample += 0.125;
             }
@@ -254,7 +254,7 @@ fn drizzle_admits_each_frame_before_it_deposits() {
         matches!(
             error,
             DrizzleError::Stack(StackError::Admission(AdmissionError::NonFiniteImageSample {
-                index: 1,
+                idx: 1,
                 channel: 0,
                 pixel: 6,
                 value,
@@ -384,7 +384,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
 
     let mut pixels = vec![0.0f32; size.pixel_count()];
     let t = Vec2us::new(20, 9);
-    pixels[size.index_of(t)] = 1.0;
+    pixels[size.idx_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
     let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), point);
     acc.add_frame(&DrizzleFrame::new(gray_image(size, pixels), warp.clone()))
@@ -394,7 +394,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
         .inverse()
         .apply(DVec2::new(t.x as f64, t.y as f64))
         .unwrap()
-        .position;
+        .pos;
     let landing = Vec2us::new(r.x.round() as usize, r.y.round() as usize);
     assert_eq!(
         out.image.channel(0)[(landing.x, landing.y)],
@@ -457,7 +457,7 @@ fn drizzle_images_dimension_mismatch() {
     assert!(matches!(
         result.unwrap_err(),
         DrizzleError::Stack(StackError::Admission(AdmissionError::DimensionMismatch(
-            FrameDimensionMismatch { index: 1, .. }
+            FrameDimensionMismatch { idx: 1, .. }
         )))
     ));
 }
@@ -873,7 +873,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     assert!(matches!(
         error,
         DrizzleError::Stack(StackError::PlaneDimensionMismatch {
-            index: 0,
+            idx: 0,
             plane: FramePlane::PixelWeight,
             expected: Size2us {
                 width: 4,
@@ -901,7 +901,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         error,
         DrizzleError::Stack(StackError::Admission(
             AdmissionError::InvalidQualityPlaneValue {
-                index: 0,
+                idx: 0,
                 plane: FramePlane::PixelWeight,
                 pixel: 5,
                 value: -0.25,

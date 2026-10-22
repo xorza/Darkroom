@@ -66,7 +66,7 @@ impl HexTable {
     /// The color index at `(row, col)`: 0 red, 1 green, 2 blue.
     #[inline(always)]
     pub(super) const fn color(&self, row: usize, col: usize) -> usize {
-        self.pattern.color_at(Vec2us::new(col, row)).index()
+        self.pattern.color_at(Vec2us::new(col, row)).idx()
     }
 
     /// Whether `(row, col)` is green; greens repeat every three rows and columns.

@@ -23,7 +23,7 @@ use crate::containers::column::{Column, Span};
 use crate::data::codec::Codecs;
 use crate::data::const_value::ConstValue;
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
+use crate::execution::idx::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
@@ -36,7 +36,7 @@ pub(crate) enum ExecutionBinding {
     #[default]
     None,
     Const(ConstValue),
-    Bind(OutputAddr),
+    Wire(OutputAddr),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -132,8 +132,8 @@ pub struct CompiledGraph {
 impl Index<NodeIdx> for CompiledGraph {
     type Output = ExecutionNode;
 
-    fn index(&self, index: NodeIdx) -> &ExecutionNode {
-        &self.e_nodes[index]
+    fn index(&self, idx: NodeIdx) -> &ExecutionNode {
+        &self.e_nodes[idx]
     }
 }
 
@@ -227,7 +227,7 @@ impl CompiledGraph {
 pub(crate) mod internals {
     use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
-    use crate::execution::index::NodeIdx;
+    use crate::execution::idx::NodeIdx;
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::FuncLambda;
     use crate::graph::identity::{FuncId, NodeId};

@@ -115,7 +115,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     );
     assert_eq!(nothing.hint().unwrap().to_string(), NOTHING_YET_HINT);
 
-    let errored = StoredContent::Error(PreviewImageError::Empty);
+    let errored = StoredContent::Error(DrawablePreviewError::Empty);
     let resolved = ShownSource::resolve(Some(&errored), h.ui());
     assert!(resolved.image().is_none());
     assert_eq!(resolved.hint().unwrap().to_string(), "image is empty");

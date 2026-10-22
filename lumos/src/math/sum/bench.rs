@@ -9,14 +9,14 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{scalar, sum_f32, weighted_sums};
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 
 /// The 6/10/12/24 rungs measure the range about the one-vector gate: steps of 4, 8, 16 jump clean
 /// over it.
 const LENGTHS: [usize; 13] = [1, 4, 6, 8, 10, 12, 16, 24, 32, 64, 256, 1_024, 10_000];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let tiers: Vec<Tier> = Tier::supported().collect();
+    let tiers: Vec<IsaTier> = IsaTier::supported().collect();
     let mut group = Kind::Atomic.group(c, "math/sum", Scale::Sample);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));

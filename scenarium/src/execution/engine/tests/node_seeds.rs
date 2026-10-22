@@ -112,5 +112,5 @@ async fn unresolvable_node_seed_fails_the_run() {
         .await
         .expect_err("a stale seed fails the run");
 
-    assert!(matches!(error, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(matches!(error, ExecutionError::NodeSeedNotFound { node_id } if node_id == bogus));
 }

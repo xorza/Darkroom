@@ -1,6 +1,6 @@
 //! Configuration for the registration module.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::ransac::ransac_config::{RansacConfig, ScaleRange};
@@ -45,20 +45,20 @@ impl RegistrationMatchingConfig {
     }
 
     fn validate(&self, model: TransformModel) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("max_stars", self.max_stars)
+        ConfigField::count("max_stars", self.max_stars)
             .must_be("at least 3 for triangle matching", self.max_stars >= 3)?;
         if let Some(min_stars) = self.min_stars {
-            ConfigValue::count("min_stars", min_stars)
+            ConfigField::count("min_stars", min_stars)
                 .must_be("at least 3 for triangle matching", min_stars >= 3)?;
         }
         let required_stars = self.required_stars(model);
-        ConfigValue::count("max_stars", self.max_stars).must_be_against_count(
+        ConfigField::count("max_stars", self.max_stars).must_be_against_count(
             "at least the star gate",
             required_stars,
             self.max_stars >= required_stars,
         )?;
         let required_points = model.most_general().min_points();
-        ConfigValue::count("min_matches", self.min_matches).must_be_against_count(
+        ConfigField::count("min_matches", self.min_matches).must_be_against_count(
             "at least the transform's minimum point count",
             required_points,
             self.min_matches >= required_points,
@@ -274,7 +274,7 @@ impl RegistrationConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         self.matching.validate(self.model)?;
         self.ransac.validate()?;
-        ConfigValue::new("max_rms_error", self.max_rms_error)
+        ConfigField::new("max_rms_error", self.max_rms_error)
             .finite_and("finite and positive", |value| value > 0.0)?;
         if let Some(sip) = self.model.sip() {
             sip.validate()?;

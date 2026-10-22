@@ -27,7 +27,7 @@ fn load_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
     // A path that cannot be read is an `Io` error; a readable file libraw
     // refuses is a `Raw` one, pinned by `load_rejects_invalid_files`.
-    let error = load_preview(path, &LoadContext::default()).unwrap_err();
+    let error = load_preview(path, &LoadCtx::default()).unwrap_err();
     assert!(
         matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
         "a missing file should read as an Io error, got: {error}",
@@ -35,7 +35,7 @@ fn load_invalid_path() {
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let cancelled = LoadContext::new(cancel, u64::MAX);
+    let cancelled = LoadCtx::new(cancel, u64::MAX);
     assert!(matches!(
         load_preview(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
@@ -58,7 +58,7 @@ fn load_rejects_invalid_files() {
         contents: &'static [u8],
     }
 
-    let directory = TempDir::new("invalid_raw_files");
+    let dir = TempDir::new("invalid_raw_files");
     let cases = [
         InvalidRawCase {
             name: "invalid_data",
@@ -71,17 +71,17 @@ fn load_rejects_invalid_files() {
     ];
 
     for case in cases {
-        let path = directory.join(format!("{}.raf", case.name));
+        let path = dir.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
         assert!(
-            load_preview(&path, &LoadContext::default()).is_err(),
+            load_preview(&path, &LoadCtx::default()).is_err(),
             "{case:?}"
         );
 
         // The rejection happens while libraw is being opened, so the handle exists and has to
         // free itself on the way out — the failure path most likely to leak the instance. The file
         // reads back, so what libraw refuses is its contents: a `Raw` error naming the open.
-        let error = load_cfa(&path, &LoadContext::default()).unwrap_err();
+        let error = load_cfa(&path, &LoadCtx::default()).unwrap_err();
         assert!(
             matches!(
                 &error,
@@ -127,11 +127,11 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
             }
         })
     };
-    let context = LoadContext::default();
+    let ctx = LoadCtx::default();
     let preview = |margin| {
         bayer_dump(&samples(margin), black(1004))
             .unwrap()
-            .into_linear_image(&context)
+            .into_linear_image(&ctx)
     };
     let dark = preview(0).unwrap();
     let bright = preview(65_535).unwrap();
@@ -181,7 +181,7 @@ fn load_valid_file() {
 
     init_tracing();
 
-    let result = load_preview(&path, &LoadContext::default());
+    let result = load_preview(&path, &LoadCtx::default());
     assert!(result.is_ok(), "Failed to load {path:?}: {result:?}");
 
     let image = result.unwrap();
@@ -219,7 +219,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
     use crate::internals::real_data::raw_frames;
 
     for path in raw_frames("raw_samples") {
-        let mut raw = open_raw(&path, &LoadContext::default(), |_| Ok(RawPath::Processed)).unwrap();
+        let mut raw = open_raw(&path, &LoadCtx::default(), |_| Ok(RawPath::Processed)).unwrap();
         let visible = raw.layout.active;
         assert_ne!(
             visible.width, visible.height,
@@ -410,21 +410,18 @@ fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
     )
     .unwrap();
     assert!(way >= 4 * 1936, "{way}");
-    let context = |limit| LoadContext::new(CancelToken::never(), limit);
-    assert_eq!(
-        preview_route(&libraw, &context(way)).unwrap(),
-        RawPath::Mosaic
-    );
+    let ctx = |limit| LoadCtx::new(CancelToken::never(), limit);
+    assert_eq!(preview_route(&libraw, &ctx(way)).unwrap(), RawPath::Mosaic);
     assert!(matches!(
-        preview_route(&libraw, &context(way - 1)),
+        preview_route(&libraw, &ctx(way - 1)),
         Err(RawError::OverBudget(budget)) if budget == OverBudget { required: way, limit: way - 1 }
     ));
 
     // A file longer than the limit is refused before it is read: these 3 bytes past a limit of 2.
-    let directory = TempDir::new("raw-over-budget");
-    let path = directory.join("long.raf");
+    let dir = TempDir::new("raw-over-budget");
+    let path = dir.join("long.raf");
     fs::write(&path, [0u8; 3]).unwrap();
-    let error = load_cfa(&path, &LoadContext::new(CancelToken::never(), 2)).unwrap_err();
+    let error = load_cfa(&path, &LoadCtx::new(CancelToken::never(), 2)).unwrap_err();
     assert!(
         matches!(
             error,

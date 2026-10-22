@@ -21,8 +21,8 @@ use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
 use crate::frame_store::stored_frame::SpillFrame;
-use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -55,7 +55,7 @@ use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::weight_kind::WeightKind;
@@ -242,7 +242,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     .stack_stored_frames(
                         stored,
                         CacheCore {
-                            tier: Tier::Spilled {
+                            tier: StorageTier::Spilled {
                                 scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
                                 combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
                             },
@@ -428,9 +428,9 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     let dims = ImageDimensions::new((2, 2), ChannelLayout::Mono);
     let frame = |value: f32, null_at: Option<usize>| {
         let mut image = LinearImage::from_interleaved(dims, vec![value; 4]);
-        if let Some(index) = null_at {
+        if let Some(idx) = null_at {
             let mut samples = vec![0.0f32; 4];
-            samples[index] = f32::NAN;
+            samples[idx] = f32::NAN;
             image.set_flags(PixelFlags::of_non_finite(dims.size(), &[&samples]));
         }
         StackFrame::from(image)
@@ -484,7 +484,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     assert_eq!(coverage.pixels(), &[1.0, 1.0, 1.0, 0.0]);
     let flags = stacked.image.flags().unwrap();
     assert_eq!(
-        (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        (0..4).map(|idx| flags.at(idx)).collect::<Vec<_>>(),
         [
             QualityFlags::default(),
             QualityFlags::default(),
@@ -611,8 +611,8 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
         matches!(
             stack([Some(RowOrder::TopDown), Some(RowOrder::BottomUp)]).unwrap_err(),
             StackError::Admission(AdmissionError::RowOrderMismatch {
-                index: 1,
-                reference_index: 0,
+                idx: 1,
+                reference_idx: 0,
                 ..
             })
         ),
@@ -679,8 +679,8 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
             ])
             .unwrap_err(),
             StackError::Admission(AdmissionError::SampleDomainMismatch {
-                index: 1,
-                reference_index: 0,
+                idx: 1,
+                reference_idx: 0,
                 ..
             })
         ),
@@ -734,8 +734,8 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
             ])
             .unwrap_err(),
             StackError::Admission(AdmissionError::SampleDomainMismatch {
-                index: 1,
-                reference_index: 0,
+                idx: 1,
+                reference_idx: 0,
                 ..
             })
         ),
@@ -764,8 +764,8 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
             )
             .unwrap_err(),
             StackError::Admission(AdmissionError::SampleDomainMismatch {
-                index: 2,
-                reference_index: 1,
+                idx: 2,
+                reference_idx: 1,
                 ..
             })
         ),
@@ -818,7 +818,7 @@ fn stack_images_dimension_errors() {
     assert!(matches!(
         result.unwrap_err(),
         StackError::Admission(AdmissionError::DimensionMismatch(FrameDimensionMismatch {
-            index: 1,
+            idx: 1,
             ..
         }))
     ));
@@ -859,7 +859,7 @@ fn stack_images_dimension_errors() {
             matches!(
                 error,
                 StackError::PlaneDimensionMismatch {
-                    index: 0,
+                    idx: 0,
                     plane,
                     expected: Size2us { width: 4, height: 4 },
                     actual: Size2us { width: 2, height: 2 },
@@ -908,7 +908,7 @@ fn stack_images_rejects_invalid_warp_quality_values() {
             matches!(
                 error,
                 StackError::Admission(AdmissionError::InvalidQualityPlaneValue {
-                    index: 0,
+                    idx: 0,
                     plane,
                     pixel: 1,
                     value,
@@ -950,7 +950,7 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
             matches!(
                 error,
                 StackError::Admission(AdmissionError::FrameQualityPairMismatch {
-                    index: 0,
+                    idx: 0,
                     pixel: 1,
                     plane: FramePlane::Coverage,
                     support,
@@ -1008,7 +1008,7 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         .unwrap_err();
 
         let StackError::Admission(AdmissionError::NonFiniteImageSample {
-            index,
+            idx,
             channel,
             pixel,
             value,
@@ -1016,7 +1016,7 @@ fn stack_images_rejects_each_nonfinite_sample_class_with_location() {
         else {
             panic!("expected a non-finite image sample error, got {error:?}");
         };
-        assert_eq!(index, 1);
+        assert_eq!(idx, 1);
         assert_eq!(channel, 1);
         assert_eq!(pixel, 2);
         assert_eq!(value.to_bits(), invalid_value.to_bits());
@@ -1314,7 +1314,7 @@ fn only_normalization_requires_common_coverage() {
     assert_eq!(product.image.channel(0).pixels(), &[1.0, 4.0, 0.0]);
     let flags = product.image.flags().unwrap();
     assert_eq!(
-        (0..3).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        (0..3).map(|idx| flags.at(idx)).collect::<Vec<_>>(),
         [
             QualityFlags::default(),
             QualityFlags::default(),
@@ -1398,7 +1398,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     };
 
     for method in InterpolationMethod::ALL {
-        let warped = WarpParams::with_method(method).warp(&source, &transform);
+        let warped = WarpConfig::with_method(method).warp(&source, &transform);
         let frames = vec![
             StackFrame::from(source.clone()),
             StackFrame::registered(&source, warped),
@@ -1462,7 +1462,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     let b = field(1.0, 0.8, 0.006, 2);
     let mads = [&a, &b]
         .map(|image| f64::from(MedianMad::of_mut(&mut image.channel(0).pixels().to_vec()).mad));
-    let params = WarpParams::with_method(InterpolationMethod::Bilinear);
+    let params = WarpConfig::with_method(InterpolationMethod::Bilinear);
     let warped_b = params.warp(
         &b,
         &WarpTransform::new(Transform::translation(DVec2::new(1.0, 0.0))),
@@ -1512,7 +1512,7 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .map(|_| rng.next_f32() - 0.5)
         .collect();
     let source = LinearImage::from_interleaved(dims, pixels);
-    let params = WarpParams::with_method(InterpolationMethod::Bilinear);
+    let params = WarpConfig::with_method(InterpolationMethod::Bilinear);
     let frames = vec![
         StackFrame::registered(
             &source,
@@ -1791,7 +1791,7 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
     assert_eq!(product.image.metadata.derived.mosaic_noise(), None);
     assert!(matches!(
         combine(vec![frame(1.0, None), frame(3.0, None)], &config),
-        Err(StackError::NoNoiseToWeigh { index: 0 })
+        Err(StackError::NoNoiseToWeigh { idx: 0 })
     ));
 }
 
@@ -2134,7 +2134,7 @@ fn noise_weighting_refuses_a_frame_with_no_noise() {
     };
     assert!(matches!(
         config.run_stacking(&cache),
-        Err(StackError::NoNoiseToWeigh { index: 0 })
+        Err(StackError::NoNoiseToWeigh { idx: 0 })
     ));
 }
 
@@ -2204,8 +2204,8 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
             ];
             let mut image = LinearImage::from_interleaved(dims, values.to_vec());
             image.metadata.derived.set_saturation_flagged(true);
-            image.set_flags(PixelFlags::from_fn(dims.size(), |index| {
-                if saturated[index] {
+            image.set_flags(PixelFlags::from_fn(dims.size(), |idx| {
+                if saturated[idx] {
                     QualityFlags::SATURATED
                 } else {
                     QualityFlags::default()
@@ -2229,7 +2229,7 @@ fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
     assert!(product.image.metadata.derived.saturation_flagged());
     let flags = product.image.flags().unwrap();
     let saturated: Vec<bool> = (0..3)
-        .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
+        .map(|idx| flags.at(idx).intersects(QualityFlags::SATURATED))
         .collect();
     assert_eq!(saturated, [false, true, true]);
     assert_eq!(
@@ -2267,19 +2267,19 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
     let dims = ImageDimensions::new((8, 8), ChannelLayout::Mono);
     let core = |x: usize, y: usize| (3..5).contains(&x) && (3..5).contains(&y);
     let field = |offset: usize| {
-        let at = |index: usize| (index % 8 + offset, index / 8);
+        let at = |idx: usize| (idx % 8 + offset, idx / 8);
         let mut image = LinearImage::from_interleaved(
             dims,
             (0..64)
-                .map(|index| {
-                    let (x, y) = at(index);
+                .map(|idx| {
+                    let (x, y) = at(idx);
                     if core(x, y) { 1.0 } else { 0.25 }
                 })
                 .collect(),
         );
         image.metadata.derived.set_saturation_flagged(true);
-        image.set_flags(PixelFlags::from_fn(dims.size(), |index| {
-            let (x, y) = at(index);
+        image.set_flags(PixelFlags::from_fn(dims.size(), |idx| {
+            let (x, y) = at(idx);
             if core(x, y) {
                 QualityFlags::SATURATED
             } else {
@@ -2288,7 +2288,7 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
         }));
         image
     };
-    let params = WarpParams::with_method(InterpolationMethod::Lanczos3);
+    let params = WarpConfig::with_method(InterpolationMethod::Lanczos3);
     let reference = field(0);
     let shifted = field(1);
     let frames = vec![
@@ -2446,7 +2446,7 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
     )
     .unwrap_err();
     assert!(
-        matches!(refused, StackError::UnknownGain { index: 1 }),
+        matches!(refused, StackError::UnknownGain { idx: 1 }),
         "{refused:?}"
     );
     let known = combine(

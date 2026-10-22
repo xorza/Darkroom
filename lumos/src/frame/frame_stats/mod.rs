@@ -86,7 +86,7 @@ impl FrameStats {
         let dimensions = image.dimensions();
         let metadata = image.metadata();
         let flags = image.flags();
-        let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
+        let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
         let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
         let mosaic_noise = match mosaic {
             Some(cfa_type) => Some(
@@ -119,11 +119,11 @@ impl FrameStats {
                         excluded,
                     }
                     .background(image.flat_gain().map(|gain| PixelGains {
-                        gain: move |index| {
+                        gain: move |idx| {
                             gain.at(
                                 channel,
-                                (index % size.width) as f32,
-                                (index / size.width) as f32,
+                                (idx % size.width) as f32,
+                                (idx / size.width) as f32,
                             )
                         },
                         bins: gain.bins(channel),
@@ -132,15 +132,14 @@ impl FrameStats {
                 .collect(),
         };
         let nulls = flags.filter(|flags| flags.contains(QualityFlags::NO_DATA));
-        let measured = |index: usize| {
-            nulls.is_none_or(|nulls| !nulls.at(index).intersects(QualityFlags::NO_DATA))
-        };
+        let measured =
+            |idx: usize| nulls.is_none_or(|nulls| !nulls.at(idx).intersects(QualityFlags::NO_DATA));
         let levels: Vec<SlotLevel> = match mosaic {
             Some(cfa_type) => (0..cfa_type.num_colors())
                 .into_par_iter()
                 .map(|color| {
-                    SlotLevel::of(image.channel(0), spreads, |index, position| {
-                        measured(index) && cfa_type.slot_at(position) == color
+                    SlotLevel::of(image.channel(0), spreads, |idx, pos| {
+                        measured(idx) && cfa_type.slot_at(pos) == color
                     })
                 })
                 .collect(),
@@ -148,7 +147,7 @@ impl FrameStats {
             // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
                 .map(|channel| {
-                    SlotLevel::of(image.channel(channel), spreads, |index, _| measured(index))
+                    SlotLevel::of(image.channel(channel), spreads, |idx, _| measured(idx))
                 })
                 .collect(),
         };

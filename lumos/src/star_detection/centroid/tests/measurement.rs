@@ -229,7 +229,7 @@ fn measure_star_multiple_stars_independent() {
         &measured.sky,
         &ExtractionConfig::default(),
     );
-    let mut positions: Vec<DVec2> = candidates
+    let mut poss: Vec<DVec2> = candidates
         .iter()
         .map(|candidate| {
             measured
@@ -238,16 +238,10 @@ fn measure_star_multiple_stars_independent() {
                 .pos
         })
         .collect();
-    positions.sort_by(|a, b| a.x.total_cmp(&b.x));
-    assert_eq!(positions.len(), 2);
-    for (position, truth) in positions
-        .iter()
-        .zip([DVec2::splat(40.0), DVec2::splat(90.0)])
-    {
-        assert!(
-            (*position - truth).length() <= 1e-9,
-            "{position} vs {truth}"
-        );
+    poss.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert_eq!(poss.len(), 2);
+    for (pos, truth) in poss.iter().zip([DVec2::splat(40.0), DVec2::splat(90.0)]) {
+        assert!((*pos - truth).length() <= 1e-9, "{pos} vs {truth}");
     }
 
     // A candidate whose stamp would leave the frame is not measured.

@@ -54,16 +54,16 @@ struct LightIntake<'a> {
 }
 
 impl LightIntake<'_> {
-    /// Light `index`, `image`, admitted to the set, its stars detected by `detector`.
+    /// Light `idx`, `image`, admitted to the set, its stars detected by `detector`.
     fn detect(
         &self,
         detector: &mut StarDetector,
-        index: usize,
+        idx: usize,
         image: LinearImage,
     ) -> Result<DetectedLight<LinearImage>, AlignStackError> {
-        let admitted = self.intake.admit(index, &image)?;
+        let admitted = self.intake.admit(idx, &image)?;
         let result = detector.detect(&image);
-        self.log(index, &result);
+        self.log(idx, &result);
         let DetectionResult { stars, diagnostics } = result;
         Ok(DetectedLight {
             frame: DetectedFrame {
@@ -76,11 +76,11 @@ impl LightIntake<'_> {
     }
 
     /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
-    /// light `index` resolved into usable stars.
-    fn log(&self, index: usize, result: &DetectionResult) {
+    /// light `idx` resolved into usable stars.
+    fn log(&self, idx: usize, result: &DetectionResult) {
         let diagnostics = &result.diagnostics;
         tracing::info!(
-            light = index,
+            light = idx,
             total = self.count,
             candidates = diagnostics.candidates_after_filtering,
             deblended = diagnostics.deblended_components,
@@ -93,10 +93,10 @@ impl LightIntake<'_> {
 
 impl AlignStackRun<'_> {
     pub(super) const fn cancel(&self) -> &CancelToken {
-        &self.ingest.context.cancel
+        &self.ingest.ctx.cancel
     }
 
-    /// Stack `lights`. Lights from files with [`Reference::Index`] go in one pass, each prepared,
+    /// Stack `lights`. Lights from files with [`Reference::Idx`] go in one pass, each prepared,
     /// detected, registered, warped and stored by one worker; otherwise every light is prepared
     /// and detected first — the reference is the sharpest, or the lights are already in memory —
     /// and parked until it registers.
@@ -105,7 +105,7 @@ impl AlignStackRun<'_> {
         lights: LightSource<'_, P>,
     ) -> Result<AlignStackResult, AlignStackError> {
         match (self.config.reference, lights) {
-            (Reference::Index(reference), LightSource::Files(files)) => {
+            (Reference::Idx(reference), LightSource::Files(files)) => {
                 self.stack_in_one_pass(&files, reference)
             }
             (_, lights) => {
@@ -159,9 +159,9 @@ impl AlignStackRun<'_> {
             LightSource::Held(frames) => {
                 intake
                     .intake
-                    .map_owned(frames, &mut detectors, |detector, index, image| {
+                    .map_owned(frames, &mut detectors, |detector, idx, image| {
                         let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, index, image)?;
+                            intake.detect(detector, idx, image)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight {
                             frame: frame.resident(),
@@ -172,10 +172,10 @@ impl AlignStackRun<'_> {
             LightSource::Files(files) => {
                 intake
                     .intake
-                    .map(0..count, &mut detectors, |detector, index| {
-                        let image = files.prepare(index, intake.intake.context())?;
+                    .map(0..count, &mut detectors, |detector, idx| {
+                        let image = files.prepare(idx, intake.intake.ctx())?;
                         let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, index, image)?;
+                            intake.detect(detector, idx, image)?;
                         let frame = frame.parked(&stage.parking)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
@@ -248,9 +248,9 @@ impl AlignStackRun<'_> {
         let parked = concurrency::try_par_map_bounded_owned(
             frames,
             &mut vec![(); warp_width],
-            |(), index, frame| {
-                let parked = registrar.park(index, frame)?;
-                if index != reference {
+            |(), idx, frame| {
+                let parked = registrar.park(idx, frame)?;
+                if idx != reference {
                     registering.complete_one();
                 }
                 Ok::<_, AlignStackError>(parked)
@@ -313,7 +313,7 @@ impl AlignStackRun<'_> {
             return Err(AlignStackError::Cancelled);
         }
         // The reference decodes alone, on every thread a decode may use.
-        let image = files.prepare(reference, &ingest.context)?;
+        let image = files.prepare(reference, &ingest.ctx)?;
         let DetectedLight {
             frame: mut first,
             diagnostics,
@@ -341,21 +341,19 @@ impl AlignStackRun<'_> {
         };
         intake.intake.complete_one();
 
-        let others: Vec<usize> = (0..count).filter(|&index| index != reference).collect();
-        let mut lights =
-            intake
-                .intake
-                .map_owned(others, &mut detectors, |detector, _, index| {
-                    let image = files.prepare(index, intake.intake.context())?;
-                    let DetectedLight { frame, diagnostics } =
-                        intake.detect(detector, index, image)?;
-                    let parked = registrar.park(index, frame.resident())?;
-                    intake.intake.complete_one();
-                    Ok::<_, AlignStackError>(ParkedLight {
-                        parked,
-                        detection: diagnostics,
-                    })
-                })?;
+        let others: Vec<usize> = (0..count).filter(|&idx| idx != reference).collect();
+        let mut lights = intake
+            .intake
+            .map_owned(others, &mut detectors, |detector, _, idx| {
+                let image = files.prepare(idx, intake.intake.ctx())?;
+                let DetectedLight { frame, diagnostics } = intake.detect(detector, idx, image)?;
+                let parked = registrar.park(idx, frame.resident())?;
+                intake.intake.complete_one();
+                Ok::<_, AlignStackError>(ParkedLight {
+                    parked,
+                    detection: diagnostics,
+                })
+            })?;
         lights.insert(reference, reference_light);
         // The registrar's warp sets are a warped frame's worth each, and a detector's pool the
         // planes detection holds: the combine sizes its chunks against the memory without them.

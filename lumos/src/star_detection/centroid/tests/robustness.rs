@@ -125,7 +125,7 @@ fn gaussian_fit_with_contamination() {
 /// relative.
 #[test]
 fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
-    for (sigma, side, position_bound, fwhm) in [
+    for (sigma, side, pos_bound, fwhm) in [
         (0.7f32, 64, 0.0098, 2.148_717),
         (8.0, 128, 0.054, 18.020_363),
     ] {
@@ -139,7 +139,7 @@ fn the_windowed_centroid_on_undersampled_and_truncated_stars() {
             .expect("the centroid converges")
             .pos;
         assert!(
-            (centre - truth.as_dvec2()).length() <= position_bound,
+            (centre - truth.as_dvec2()).length() <= pos_bound,
             "σ {sigma}: {centre}"
         );
         let radius = if sigma < 1.0 { 5 } else { MAX_STAMP_RADIUS };

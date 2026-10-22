@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 use crate::background_mesh::mesh_workspace::{
     DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams,
 };
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Strategy for refining background estimation.
@@ -50,13 +50,13 @@ impl BackgroundRefinement {
                 mask_dilation,
                 mask_sigma,
             }) => {
-                ConfigValue::count("background refinement iterations", iterations.get())
+                ConfigField::count("background refinement iterations", iterations.get())
                     .must_be("at most 10", iterations.get() <= 10)?;
-                ConfigValue::count("background refinement mask_dilation", *mask_dilation).must_be(
+                ConfigField::count("background refinement mask_dilation", *mask_dilation).must_be(
                     "at most 50",
                     *mask_dilation <= IterativeRefinement::MAX_MASK_DILATION,
                 )?;
-                ConfigValue::new("background refinement mask_sigma", *mask_sigma)
+                ConfigField::new("background refinement mask_sigma", *mask_sigma)
                     .finite_and("finite and positive", |value| value > 0.0)
             }
         }
@@ -96,9 +96,9 @@ impl BackgroundConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("tile_size", self.tile_size)
+        ConfigField::count("tile_size", self.tile_size)
             .must_be("between 16 and 256", (16..=256).contains(&self.tile_size))?;
-        ConfigValue::count("sigma_clip_max_iterations", self.sigma_clip_max_iterations)
+        ConfigField::count("sigma_clip_max_iterations", self.sigma_clip_max_iterations)
             .must_be("at most 10", self.sigma_clip_max_iterations <= 10)?;
         self.refinement.validate()
     }

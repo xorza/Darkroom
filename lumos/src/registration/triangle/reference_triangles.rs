@@ -56,7 +56,7 @@ impl ReferenceTriangles {
         for target_tri in target_triangles {
             let query = target_tri.ratios;
             self.invariants
-                .radius_indices_into(query, l2_radius, &mut candidates);
+                .radius_idxs_into(query, l2_radius, &mut candidates);
 
             for &ref_idx in &candidates {
                 let ref_tri = &self.triangles[ref_idx];
@@ -74,7 +74,7 @@ impl ReferenceTriangles {
                         continue;
                     }
                     for (i, &role) in roles.iter().enumerate() {
-                        votes.increment(ref_tri.indices[i], target_tri.indices[role]);
+                        votes.increment(ref_tri.idxs[i], target_tri.idxs[role]);
                     }
                 }
             }

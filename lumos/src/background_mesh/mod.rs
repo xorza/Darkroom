@@ -109,8 +109,8 @@ impl BackgroundMesh {
         let tiles_x = self.stats.width();
         let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
         let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
-        let tile_at = |index: usize| {
-            let (tx, ty) = (index % tiles_x, index / tiles_x);
+        let tile_at = |idx: usize| {
+            let (tx, ty) = (idx % tiles_x, idx / tiles_x);
             URect::new(
                 Vec2us::new(columns.start(tx), rows.start(ty)),
                 Vec2us::new(columns.end(tx), rows.end(ty)),
@@ -125,8 +125,8 @@ impl BackgroundMesh {
             .enumerate()
             .for_each_init(
                 || tile_scratch.acquire(),
-                |scratch, (index, (out, measured))| {
-                    let stats = TileStats::compute(input, tile_at(index), scratch);
+                |scratch, (idx, (out, measured))| {
+                    let stats = TileStats::compute(input, tile_at(idx), scratch);
                     *measured = stats.is_some();
                     *out = stats.unwrap_or_default();
                 },
@@ -145,10 +145,10 @@ impl BackgroundMesh {
                 .enumerate()
                 .for_each_init(
                     || tile_scratch.acquire(),
-                    |scratch, (index, out)| {
+                    |scratch, (idx, out)| {
                         // An eligibility test that takes no pixel of a tile leaves it nothing to
                         // measure, mask or not.
-                        *out = TileStats::compute(&unmasked, tile_at(index), scratch)
+                        *out = TileStats::compute(&unmasked, tile_at(idx), scratch)
                             .unwrap_or_default();
                     },
                 );
@@ -166,11 +166,11 @@ impl BackgroundMesh {
         let mut skies = Vec::new();
         let mut sigmas = Vec::new();
         let mut noises = Vec::new();
-        for index in 0..self.measured.len() {
-            if self.measured[index] {
+        for idx in 0..self.measured.len() {
+            if self.measured[idx] {
                 continue;
             }
-            let (tx, ty) = (index % tiles_x, index / tiles_x);
+            let (tx, ty) = (idx % tiles_x, idx / tiles_x);
             for radius in 1..=reach {
                 skies.clear();
                 sigmas.clear();
@@ -270,9 +270,9 @@ struct Reflection {
 }
 
 impl Reflection {
-    /// The neighbour `delta` from `index` on an axis whose last tile is `last` ≥ 1.
-    const fn of(index: usize, delta: isize, last: usize) -> Self {
-        let (pivot, mirror) = match index.checked_add_signed(delta) {
+    /// The neighbour `delta` from `idx` on an axis whose last tile is `last` ≥ 1.
+    const fn of(idx: usize, delta: isize, last: usize) -> Self {
+        let (pivot, mirror) = match idx.checked_add_signed(delta) {
             Some(neighbour) if neighbour <= last => (neighbour, neighbour),
             Some(_) => (last, last - 1),
             None => (0, 1),

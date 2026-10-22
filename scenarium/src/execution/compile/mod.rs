@@ -49,7 +49,7 @@ use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
-use crate::execution::index::{InputIdx, NodeIdx, OutputAddr};
+use crate::execution::idx::{InputIdx, NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
@@ -161,8 +161,8 @@ impl Compiler {
             .node_ids
             .append(self.placed.iter().map(|placed| placed.node_id));
 
-        for position in 0..self.placed.len() {
-            let node_id = self.placed[position].node_id;
+        for pos in 0..self.placed.len() {
+            let node_id = self.placed[pos].node_id;
             let node = graph
                 .find(node_id)
                 .expect("the placement names this graph's nodes");
@@ -298,11 +298,11 @@ impl Compiler {
     /// already *is* the lookup. Every id the walk resolves came out of the graph
     /// the placement covers, so a miss is a compile bug.
     fn idx(&self, node_id: NodeId) -> NodeIdx {
-        let position = self
+        let pos = self
             .placed
             .binary_search_by_key(&node_id, |placed| placed.node_id)
             .expect("the placement covers every node the graph holds");
-        NodeIdx::from_idx(position)
+        NodeIdx::from_idx(pos)
     }
 
     fn placement(&self, node_id: NodeId) -> &PendingNode {
@@ -315,7 +315,7 @@ impl Compiler {
         match binding {
             None => ExecutionBinding::None,
             Some(Binding::Const(value)) => ExecutionBinding::Const(value.clone()),
-            Some(Binding::Bind(source)) => self.resolve(*source),
+            Some(Binding::Wire(source)) => self.resolve(*source),
         }
     }
 
@@ -323,7 +323,7 @@ impl Compiler {
     /// landed at — the one place a producer id is ever hashed, once per compile
     /// instead of once per run.
     fn resolve(&self, port: OutputPort) -> ExecutionBinding {
-        ExecutionBinding::Bind(OutputAddr {
+        ExecutionBinding::Wire(OutputAddr {
             node_idx: self.idx(port.node_id),
             port_idx: port.port_idx as u32,
         })

@@ -90,15 +90,15 @@ fn form_triangles_full_k_equals_brute_force() {
 
 #[test]
 fn form_triangles_kdtree_empty() {
-    let positions: Vec<DVec2> = vec![];
-    let triangles = triangles_of(&positions, 5);
+    let poss: Vec<DVec2> = vec![];
+    let triangles = triangles_of(&poss, 5);
     assert!(triangles.is_empty());
 }
 
 #[test]
 fn form_triangles_kdtree_too_few() {
-    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let triangles = triangles_of(&positions, 5);
+    let poss = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
+    let triangles = triangles_of(&poss, 5);
     assert!(triangles.is_empty());
 }
 
@@ -112,13 +112,13 @@ fn form_triangles_kdtree_single_triangle() {
 #[test]
 fn form_triangles_kdtree_all_collinear() {
     // All collinear points produce no valid triangles
-    let positions = vec![
+    let poss = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
         DVec2::new(2.0, 0.0),
         DVec2::new(3.0, 0.0),
     ];
-    let triangles = triangles_of(&positions, 4);
+    let triangles = triangles_of(&poss, 4);
     assert!(triangles.is_empty());
 }
 

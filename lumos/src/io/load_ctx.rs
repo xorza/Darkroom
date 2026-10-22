@@ -11,7 +11,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::preview_image::PreviewImage;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::calibration_bundle::error::BundleError;
-use crate::io::fits::fits_load_options::FitsLoadOptions;
+use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::fits::{calibration_bundle, decode as fits_decode, product as fits_product};
 use crate::io::frame_info::FrameInfo;
 use crate::io::input_format::InputFormat;
@@ -22,13 +22,13 @@ use crate::stack_product::StackProduct;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
 #[derive(Debug, Clone)]
-pub struct LoadContext {
+pub struct LoadCtx {
     /// Cooperative cancellation token polled between bounded decode stages.
     pub cancel: CancelToken,
     /// FITS source, output, and estimated peak byte ceiling.
     pub memory_limit_bytes: u64,
     /// FITS-specific policy; ignored by non-FITS decoders.
-    pub fits: FitsLoadOptions,
+    pub fits: FitsLoadConfig,
     /// What a null sample does to a linear decode: a FITS null, or a floating-point raster's NaN
     /// or infinity.
     pub nulls: NullPolicy,
@@ -41,13 +41,13 @@ pub struct LoadContext {
     pub decode_threads: usize,
 }
 
-impl LoadContext {
+impl LoadCtx {
     /// Creates a context with strict FITS defaults and the supplied resource controls.
     pub fn new(cancel: CancelToken, memory_limit_bytes: u64) -> Self {
         Self {
             cancel,
             memory_limit_bytes,
-            fits: FitsLoadOptions::default(),
+            fits: FitsLoadConfig::default(),
             nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
             decode_threads: rayon::current_num_threads(),
@@ -158,7 +158,7 @@ const fn threads_per_decode(cores: usize, slots: usize) -> usize {
     if share == 0 { 1 } else { share }
 }
 
-impl Default for LoadContext {
+impl Default for LoadCtx {
     /// The system's memory read once, its decode ceiling the limit: a load of one file outside
     /// any run.
     fn default() -> Self {

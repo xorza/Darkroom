@@ -18,11 +18,11 @@ use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::set_facts::SetFacts;
 
-/// The checks one frame of a set must pass, reporting their failures against its `index` and
+/// The checks one frame of a set must pass, reporting their failures against its `idx` and
 /// polling `cancel` once per chunk.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FrameCheck<'a> {
-    pub(crate) index: usize,
+    pub(crate) idx: usize,
     pub(crate) cancel: &'a CancelToken,
 }
 
@@ -47,7 +47,7 @@ impl FrameCheck<'_> {
     ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
         self.geometry(frame, dimensions)?;
-        facts.admit(self.index, &frame.facts)?;
+        facts.admit(self.idx, &frame.facts)?;
         self.stored_samples(&frame.channels, dimensions.pixel_count())?;
         self.stored_quality(frame, dimensions)
     }
@@ -110,7 +110,7 @@ impl FrameCheck<'_> {
             confidence.len(),
             "frame quality planes are validated for geometry before their values"
         );
-        let index = self.index;
+        let idx = self.idx;
         for (chunk, (support, confidence)) in support
             .chunks(CANCEL_POLL_CHUNK)
             .zip(confidence.chunks(CANCEL_POLL_CHUNK))
@@ -122,7 +122,7 @@ impl FrameCheck<'_> {
                 for (kind, value) in [(kind, support), (FramePlane::Confidence, confidence)] {
                     if !kind.accepts(value) {
                         return Err(AdmissionError::InvalidQualityPlaneValue {
-                            index,
+                            idx,
                             plane: kind,
                             pixel: pixel(offset),
                             value,
@@ -131,7 +131,7 @@ impl FrameCheck<'_> {
                 }
                 if (support > 0.0) != (confidence > 0.0) {
                     return Err(AdmissionError::FrameQualityPairMismatch {
-                        index,
+                        idx,
                         pixel: pixel(offset),
                         plane: kind,
                         support,
@@ -152,10 +152,10 @@ impl FrameCheck<'_> {
         frame: &StoredFrame,
         dimensions: ImageDimensions,
     ) -> Result<(), AdmissionError> {
-        let index = self.index;
+        let idx = self.idx;
         if frame.channels.len() != dimensions.channels() {
             return Err(AdmissionError::StoredFrameChannels {
-                index,
+                idx,
                 expected: dimensions.channels(),
                 actual: frame.channels.len(),
             });
@@ -177,7 +177,7 @@ impl FrameCheck<'_> {
         for (kind, plane) in planes {
             if plane.samples() != expected {
                 return Err(AdmissionError::StoredFramePlaneSamples {
-                    index,
+                    idx,
                     plane: kind,
                     expected,
                     actual: plane.samples(),
@@ -199,7 +199,7 @@ impl FrameCheck<'_> {
                 for (offset, value) in values.iter().copied().enumerate() {
                     if !value.is_finite() {
                         return Err(AdmissionError::NonFiniteImageSample {
-                            index: self.index,
+                            idx: self.idx,
                             channel,
                             pixel: chunk * CANCEL_POLL_CHUNK + offset,
                             value,

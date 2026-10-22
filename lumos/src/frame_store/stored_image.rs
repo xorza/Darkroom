@@ -158,16 +158,14 @@ mod tests {
     /// channels, and loads back as it was spilled.
     #[test]
     fn an_evicted_image_leaves_every_plane_on_the_disk() {
-        let directory = TempDir::new("stored_image_evict");
-        let scratch = RunScratch::create_evictable(directory.path()).unwrap();
+        let dir = TempDir::new("stored_image_evict");
+        let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let size = Size2us::new(512, 512);
         let mut image = LinearImage::from_planar_channels(
             ImageDimensions::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
         );
-        let bytes: Vec<u8> = (0..size.pixel_count())
-            .map(|index| (index % 2) as u8)
-            .collect();
+        let bytes: Vec<u8> = (0..size.pixel_count()).map(|idx| (idx % 2) as u8).collect();
         image.set_flags(PixelFlags::from_bytes(Buffer2::new(
             size.width,
             size.height,

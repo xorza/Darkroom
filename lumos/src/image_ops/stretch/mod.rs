@@ -43,7 +43,7 @@ use common::IntrospectEnum;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
@@ -182,13 +182,13 @@ impl Stretch {
                 shadow_sigmas,
                 target_background,
             } => {
-                ConfigValue::new("shadow_sigmas", shadow_sigmas)
+                ConfigField::new("shadow_sigmas", shadow_sigmas)
                     .finite_and("finite and non-negative", |value| value >= 0.0)?;
                 ensure_target_background(target_background)
             }
             StretchMethod::Asinh { black_point, beta } => {
                 ensure_black_point(black_point)?;
-                ConfigValue::new("asinh beta", beta)
+                ConfigField::new("asinh beta", beta)
                     .finite_and("finite and positive", |value| value > 0.0)
             }
             StretchMethod::Ghs {
@@ -200,17 +200,17 @@ impl Stretch {
                 hp,
             } => {
                 ensure_black_point(black_point)?;
-                ConfigValue::new("ghs d", d)
+                ConfigField::new("ghs d", d)
                     .finite_and("finite and non-negative", |value| value >= 0.0)?;
-                ConfigValue::new("ghs b", b).finite()?;
-                ConfigValue::new("ghs sp", sp)
+                ConfigField::new("ghs b", b).finite()?;
+                ConfigField::new("ghs sp", sp)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
-                ConfigValue::new("ghs lp", lp).must_be_against(
+                ConfigField::new("ghs lp", lp).must_be_against(
                     "in [0, sp]",
                     sp,
                     (0.0..=sp).contains(&lp),
                 )?;
-                ConfigValue::new("ghs hp", hp).must_be_against(
+                ConfigField::new("ghs hp", hp).must_be_against(
                     "in [sp, 1]",
                     sp,
                     (sp..=1.0).contains(&hp),
@@ -228,13 +228,13 @@ impl Default for Stretch {
 
 /// `Ok(())` if `t` is a valid target background in `(0, 1)`.
 fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
-    ConfigValue::new("target_background", t)
+    ConfigField::new("target_background", t)
         .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)
 }
 
 /// `Ok(())` if `black` is a valid black point in `[0, 1)`: one at white leaves no range to map.
 fn ensure_black_point(black: f32) -> Result<(), InvalidConfigField> {
-    ConfigValue::new("black_point", black)
+    ConfigField::new("black_point", black)
         .finite_and("finite and in [0, 1)", |value| (0.0..1.0).contains(&value))
 }
 
@@ -297,7 +297,7 @@ fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     (0..sample.count())
         .into_par_iter()
         .map(|k| {
-            let i = sample.index(k);
+            let i = sample.idx(k);
             Rgb {
                 r: plane[i],
                 g: g[i],

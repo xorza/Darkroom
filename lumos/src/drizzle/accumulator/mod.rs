@@ -113,7 +113,7 @@ impl Drizzler {
         }
     }
 
-    /// Frame `index` drizzled on its own: see [`DrizzledPlanes`].
+    /// Frame `idx` drizzled on its own: see [`DrizzledPlanes`].
     ///
     /// # Errors
     ///
@@ -121,10 +121,10 @@ impl Drizzler {
     pub(crate) fn drizzle(
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
-        index: usize,
+        idx: usize,
     ) -> Result<DrizzledPlanes, DrizzleError> {
         let mut sums = self.sums();
-        let unconverged_points = self.scatter(frame, index, &mut sums)?;
+        let unconverged_points = self.scatter(frame, idx, &mut sums)?;
         Ok(sums.into_planes(self.deposit, unconverged_points))
     }
 
@@ -144,7 +144,7 @@ impl Drizzler {
         }
     }
 
-    /// Scatter frame `index`'s drops into `sums`, and count its input pixels whose position the
+    /// Scatter frame `idx`'s drops into `sums`, and count its input pixels whose position the
     /// warp's SIP correction could not invert.
     ///
     /// # Errors
@@ -154,11 +154,11 @@ impl Drizzler {
     pub(crate) fn scatter(
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
-        index: usize,
+        idx: usize,
         sums: &mut OutputSums,
     ) -> Result<usize, DrizzleError> {
         let band_rows = Self::balanced_band_rows(self.grid.size().height);
-        self.scatter_in_bands(frame, index, sums, band_rows)
+        self.scatter_in_bands(frame, idx, sums, band_rows)
     }
 
     /// [`Self::scatter`] over output bands of `band_rows` rows each. The result does not depend
@@ -166,11 +166,11 @@ impl Drizzler {
     fn scatter_in_bands(
         &mut self,
         frame: &DrizzleFrame<impl StackableImage>,
-        index: usize,
+        idx: usize,
         sums: &mut OutputSums,
         band_rows: usize,
     ) -> Result<usize, DrizzleError> {
-        self.validate(frame, index)?;
+        self.validate(frame, idx)?;
         let Size2us { width, height } = self.grid.size();
         if sums.flags.is_none()
             && frame
@@ -217,7 +217,7 @@ impl Drizzler {
                             .as_mut()
                             .map(|chunks| chunks.next().expect("one chunk per band")),
                     },
-                    index: band,
+                    idx: band,
                     scans,
                     radial,
                     lattice,
@@ -231,23 +231,23 @@ impl Drizzler {
     }
 
     /// Refuse a frame whose pixel weights do not fit it; debug-assert what admission already
-    /// checked of frame `index`.
+    /// checked of frame `idx`.
     fn validate(
         &self,
         frame: &DrizzleFrame<impl StackableImage>,
-        index: usize,
+        idx: usize,
     ) -> Result<(), DrizzleError> {
         // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
         // pattern, its samples finite.
         debug_assert_eq!(
             frame.source.dimensions(),
             self.input_dims,
-            "drizzle frame {index} reached the accumulator unadmitted: another shape"
+            "drizzle frame {idx} reached the accumulator unadmitted: another shape"
         );
         debug_assert_eq!(
             Deposit::of(&frame.source),
             self.deposit,
-            "drizzle frame {index} reached the accumulator unadmitted: another pattern"
+            "drizzle frame {idx} reached the accumulator unadmitted: another pattern"
         );
         debug_assert!(
             (0..self.input_dims.channels()).all(|channel| frame
@@ -255,7 +255,7 @@ impl Drizzler {
                 .channel(channel)
                 .iter()
                 .all(|v| v.is_finite())),
-            "drizzle frame {index} reached the accumulator unadmitted: a non-finite sample"
+            "drizzle frame {idx} reached the accumulator unadmitted: a non-finite sample"
         );
 
         let Some(pixel_weights) = &frame.pixel_weight_map else {
@@ -264,7 +264,7 @@ impl Drizzler {
         let actual = Size2us::from(pixel_weights);
         if actual != self.input_dims.size() {
             return Err(StackError::PlaneDimensionMismatch {
-                index,
+                idx,
                 plane: FramePlane::PixelWeight,
                 expected: self.input_dims.size(),
                 actual,
@@ -278,7 +278,7 @@ impl Drizzler {
             .find_first(|(_, value)| !FramePlane::PixelWeight.accepts(**value))
         {
             return Err(AdmissionError::InvalidQualityPlaneValue {
-                index,
+                idx,
                 plane: FramePlane::PixelWeight,
                 pixel,
                 value,

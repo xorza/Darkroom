@@ -283,12 +283,12 @@ fn an_input_reads_as_set_aside_while_its_overrider_holds_something() {
         "a constant sets the knob aside, and the overrider itself is never set aside"
     );
     assert_eq!(
-        set_aside(&mut fixture, Some(Binding::bind(feed, 0))),
+        set_aside(&mut fixture, Some(Binding::wire(feed, 0))),
         (Some("in1".to_owned()), None)
     );
     fixture.open.document.graph.find_mut(feed).unwrap().disabled = true;
     assert_eq!(
-        set_aside(&mut fixture, Some(Binding::bind(feed, 0))),
+        set_aside(&mut fixture, Some(Binding::wire(feed, 0))),
         (None, None),
         "a disabled producer delivers nothing, so the knob is in force"
     );

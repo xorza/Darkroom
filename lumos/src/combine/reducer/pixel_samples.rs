@@ -24,13 +24,13 @@ pub(crate) struct NoiseColumns<'a> {
 }
 
 impl NoiseColumns<'_> {
-    /// The variance of sample `index` at value `x`.
+    /// The variance of sample `idx` at value `x`.
     #[inline(always)]
-    pub(crate) fn variance_at(&self, index: usize, x: f32) -> f32 {
+    pub(crate) fn variance_at(&self, idx: usize, x: f32) -> f32 {
         NoiseAt {
-            background: self.background[index],
-            sky: self.sky[index],
-            per_unit: self.per_unit[index],
+            background: self.background[idx],
+            sky: self.sky[idx],
+            per_unit: self.per_unit[idx],
         }
         .variance(x)
     }

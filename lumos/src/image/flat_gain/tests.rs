@@ -23,7 +23,7 @@ fn a_node_is_its_colors_mean_gain() {
     let mut pixels = vec![0.5; size.pixel_count()];
     pixels[4 * 9 + 4] = 0.1;
     let divisor = Buffer2::new(9, 9, pixels);
-    let flagged = FlatGain::of_divisor(&divisor, &CfaType::Mono, |index| index == 4 * 9 + 4);
+    let flagged = FlatGain::of_divisor(&divisor, &CfaType::Mono, |idx| idx == 4 * 9 + 4);
     let unflagged = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     for (x, y) in [(0.0, 0.0), (4.0, 4.0), (8.0, 4.0)] {
         assert_eq!(flagged.at(0, x, y), 2.0, "({x}, {y})");

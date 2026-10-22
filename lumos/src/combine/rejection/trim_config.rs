@@ -2,7 +2,7 @@
 
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::MethodScratch;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
 
@@ -49,16 +49,16 @@ impl TrimConfig {
 
     /// Validate that each end drops a sane share and that together they leave survivors.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("low_percent", self.low_percent)
+        ConfigField::new("low_percent", self.low_percent)
             .finite_and("finite and between 0 and 50", |value| {
                 (0.0..=50.0).contains(&value)
             })?;
-        ConfigValue::new("high_percent", self.high_percent)
+        ConfigField::new("high_percent", self.high_percent)
             .finite_and("finite and between 0 and 50", |value| {
                 (0.0..=50.0).contains(&value)
             })?;
         let total = self.low_percent + self.high_percent;
-        ConfigValue::new("low_percent + high_percent", total).must_be("below 100", total < 100.0)
+        ConfigField::new("low_percent + high_percent", total).must_be("below 100", total < 100.0)
     }
 
     /// The counts for `n` samples, exact. `p·n` is exact in f64, a 24-bit significand times an

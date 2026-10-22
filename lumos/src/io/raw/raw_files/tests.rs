@@ -46,7 +46,7 @@ fn scan_failures_name_the_path() {
     fs::write(&file, []).unwrap();
     let error = raw_files(&file).unwrap_err();
     assert!(
-        matches!(&error, RawScanError::Directory { path, .. } if *path == file),
+        matches!(&error, RawScanError::Dir { path, .. } if *path == file),
         "{error:?}"
     );
     assert!(error.to_string().contains(&file.display().to_string()));
@@ -54,7 +54,7 @@ fn scan_failures_name_the_path() {
     let missing = dir.join("missing");
     let error = raw_files(&missing).unwrap_err();
     assert!(
-        matches!(&error, RawScanError::Directory { path, source }
+        matches!(&error, RawScanError::Dir { path, source }
             if *path == missing && source.kind() == io::ErrorKind::NotFound),
         "{error:?}"
     );
@@ -102,7 +102,7 @@ fn unreadable_directory_returns_contextual_error() {
 
     let error = result.unwrap_err();
     assert!(
-        matches!(&error, RawScanError::Directory { source, .. }
+        matches!(&error, RawScanError::Dir { source, .. }
             if source.kind() == io::ErrorKind::PermissionDenied),
         "{error:?}"
     );

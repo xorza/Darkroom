@@ -21,8 +21,8 @@ fn a_spilled_drizzle_stays_within_its_budget() {
             .expose(session.scratch(), FRAMES, Layout::Mono)
             .into_iter()
             .enumerate()
-            .map(|(index, source)| {
-                let [x, y] = StarField::dither(index);
+            .map(|(idx, source)| {
+                let [x, y] = StarField::dither(idx);
                 DrizzleFrame {
                     source,
                     warp: WarpTransform::new(Transform::translation(DVec2::new(

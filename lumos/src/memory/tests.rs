@@ -522,8 +522,8 @@ fn a_plan_never_overshoots_its_budget() {
                         let budget = Budget::new(memory::usable(budget_gib * GB), workers);
                         let plan = RunPlan::of(frames, stages, budget);
                         let mut before = 0;
-                        for (index, stage) in stages.iter().enumerate() {
-                            let width = plan.width(index);
+                        for (idx, stage) in stages.iter().enumerate() {
+                            let width = plan.width(idx);
                             let set = if plan.resident {
                                 before.max(stage.kept) as u64 * frames as u64
                             } else {
@@ -543,7 +543,7 @@ fn a_plan_never_overshoots_its_budget() {
                             let projected = set + stage.held as u64 + width as u64 * per_unit;
                             assert!(
                                 projected <= budget.usable() || width <= MIN_CHUNK_ROWS,
-                                "stage {index}: {} MiB exceeds {} MiB usable",
+                                "stage {idx}: {} MiB exceeds {} MiB usable",
                                 projected / MIB,
                                 budget.usable() / MIB
                             );

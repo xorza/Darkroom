@@ -86,8 +86,8 @@ fn a_field_keeps_its_density_on_a_smaller_frame() {
     // 1.08 of it. The medians, the sky with no bias under them, stand in the same ratios.
     let median = |image: &CfaImage| statistics::median_mut(&mut image.data().pixels().to_vec());
     let field_sky = median(&mosaic);
-    for (index, level) in [(1, 1.0), (2, 1.08)] {
-        let exposure = Field::Typical.mosaic_exposure(SMALL, RGGB, index);
+    for (idx, level) in [(1, 1.0), (2, 1.08)] {
+        let exposure = Field::Typical.mosaic_exposure(SMALL, RGGB, idx);
         assert_eq!(
             exposure.metadata.header.camera_white_balance,
             Some(WHITE_BALANCE)
@@ -95,7 +95,7 @@ fn a_field_keeps_its_density_on_a_smaller_frame() {
         let ratio = median(&exposure) / field_sky;
         assert!(
             (ratio / level - 1.0).abs() < 0.005,
-            "exposure {index}: sky ratio {ratio}"
+            "exposure {idx}: sky ratio {ratio}"
         );
     }
 }
@@ -124,12 +124,12 @@ fn the_masters_find_the_sensors_defects() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
     let SensorDefects { hot, dead } = defects(SMALL);
-    let index = |x: usize, y: usize| SMALL.index_of(Vec2us::new(x, y));
-    let mut hot: Vec<usize> = hot.into_iter().map(|(x, y, _)| index(x, y)).collect();
+    let idx = |x: usize, y: usize| SMALL.idx_of(Vec2us::new(x, y));
+    let mut hot: Vec<usize> = hot.into_iter().map(|(x, y, _)| idx(x, y)).collect();
     hot.sort_unstable();
-    assert_eq!(map.hot().indices, hot);
-    let dead: Vec<usize> = dead.into_iter().map(|(x, y)| index(x, y)).collect();
-    assert_eq!(map.cold_indices(), dead);
+    assert_eq!(map.hot().idxs, hot);
+    let dead: Vec<usize> = dead.into_iter().map(|(x, y)| idx(x, y)).collect();
+    assert_eq!(map.cold_idxs(), dead);
 }
 
 /// Calibrating a light with its masters takes out the bias and the vignette: each color of it
@@ -158,7 +158,7 @@ fn a_light_calibrated_by_its_masters_is_the_calibrated_mosaic() {
             pixels
                 .iter()
                 .enumerate()
-                .filter(|&(index, _)| RGGB.slot_at(SMALL.point_of(index)) == color)
+                .filter(|&(idx, _)| RGGB.slot_at(SMALL.point_of(idx)) == color)
                 .map(|(_, &value)| value)
                 .collect()
         };

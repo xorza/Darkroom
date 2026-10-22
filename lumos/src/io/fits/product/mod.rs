@@ -32,7 +32,7 @@ use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::linear::{self, LinearFitsHdu};
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
@@ -130,13 +130,13 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     })
 }
 
-/// Read the stack product at `path`, under `context`'s options and memory limit.
-pub(crate) fn load(path: &Path, context: &LoadContext) -> Result<StackProduct, ImageError> {
-    read(path, context).map_err(|error| ImageError::fits_load(path, error))
+/// Read the stack product at `path`, under `ctx`'s options and memory limit.
+pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ImageError> {
+    read(path, ctx).map_err(|error| ImageError::fits_load(path, error))
 }
 
-fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadError> {
-    let mut reader = selected_fits::open(path, context)?;
+fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
+    let mut reader = selected_fits::open(path, ctx)?;
     let primary = reader.hdus()[0].header.clone();
     if !linear::validate_image_header(&primary)? {
         return Err(FitsRefusal::NotAProduct.into());
@@ -163,25 +163,25 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
         })
         .transpose()?;
 
-    let selected = SelectedFits::primary(&mut reader, context)?;
+    let selected = SelectedFits::primary(&mut reader, ctx)?;
     let cfa_type = selected.cfa_type();
-    let image = selected.read(context, Checksum::Judged)?.into_linear()?;
+    let image = selected.read(ctx, Checksum::Judged)?.into_linear()?;
 
     let mut found = Vec::with_capacity(PLANES.len());
     for extension in PLANES {
         let hdus = reader.hdus();
-        if let Some(index) = ExtensionClaims::of(hdus, extension)?.for_image(hdus, 0)? {
-            found.push(Found { extension, index });
+        if let Some(idx) = ExtensionClaims::of(hdus, extension)?.for_image(hdus, 0)? {
+            found.push(Found { extension, idx });
         }
     }
     let plane_bytes = found.iter().try_fold(0, |bytes: u64, plane| {
-        let image = reader.hdus()[plane.index].image()?;
+        let image = reader.hdus()[plane.idx].image()?;
         let samples = image.shape.iter().product::<usize>() * image.bitpix.elem_size();
         Ok::<_, FitsLoadError>(bytes + u64::try_from(samples).expect("a size fits u64"))
     })?;
     let image_bytes = u64::try_from(image.sample_count() * size_of::<f32>() + image.pixel_count())
         .expect("a size fits u64");
-    OverBudget::check(image_bytes + plane_bytes, context.memory_limit_bytes).map_err(|budget| {
+    OverBudget::check(image_bytes + plane_bytes, ctx.memory_limit_bytes).map_err(|budget| {
         FitsRefusal::OverBudget {
             allocation: FitsAllocation::QualityPlanes,
             budget,
@@ -196,9 +196,9 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
     };
     let mut planes = QualityPlanesRead::default();
     let mut mask = None;
-    for Found { extension, index } in found {
-        Cancelled::check(&context.cancel)?;
-        let stored = read_plane(&mut reader, index, extension, &described)?;
+    for Found { extension, idx } in found {
+        Cancelled::check(&ctx.cancel)?;
+        let stored = read_plane(&mut reader, idx, extension, &described)?;
         match extension {
             LumosExtension::Mask => mask = Some(stored),
             LumosExtension::Uncertainty => planes.inverse_variance = Some(stored),
@@ -234,7 +234,7 @@ fn read(path: &Path, context: &LoadContext) -> Result<StackProduct, FitsLoadErro
 #[derive(Debug)]
 struct Found {
     extension: LumosExtension,
-    index: usize,
+    idx: usize,
 }
 
 /// The samples of each quality plane the file holds, as stored.
@@ -359,15 +359,15 @@ where
     Ok(EncodedPlane { image, header })
 }
 
-/// The samples of the `extension` plane at HDU `index`, refused unless it is its format's for
+/// The samples of the `extension` plane at HDU `idx`, refused unless it is its format's for
 /// `image` ([`LumosExtension::check`]), an uncertainty an inverse variance.
 fn read_plane(
     reader: &mut StreamReader<File>,
-    index: usize,
+    idx: usize,
     extension: LumosExtension,
     image: &DescribedImage,
 ) -> Result<FitsData, FitsLoadError> {
-    let hdu = &reader.hdus()[index];
+    let hdu = &reader.hdus()[idx];
     extension.check(hdu, image)?;
     if extension == LumosExtension::Uncertainty {
         let utype = hdu.header.get_text(UNCERTAINTY_TYPE)?;
@@ -380,7 +380,7 @@ fn read_plane(
     }
     let stored = hdu.image()?;
     let section: Vec<_> = stored.shape.iter().map(|&extent| 0..extent).collect();
-    selected_fits::read_extension(reader, index, &section)
+    selected_fits::read_extension(reader, idx, &section)
 }
 
 /// Refuse a `mask` that is not the image's `NO_DATA` at each of its pixels, in every channel, or
@@ -394,7 +394,7 @@ fn check_mask(mask: Option<FitsData>, image: &LinearImage) -> Result<(), FitsLoa
     let pixel_count = image.pixel_count();
     let Some(mask) = mask else {
         return match (0..pixel_count).find(|&pixel| no_data(pixel)) {
-            Some(index) => Err(FitsRefusal::MaskDisagrees { index }.into()),
+            Some(idx) => Err(FitsRefusal::MaskDisagrees { idx }.into()),
             None => Ok(()),
         };
     };
@@ -404,9 +404,9 @@ fn check_mask(mask: Option<FitsData>, image: &LinearImage) -> Result<(), FitsLoa
     match mask
         .iter()
         .enumerate()
-        .position(|(index, &byte)| byte != u8::from(no_data(index % pixel_count)))
+        .position(|(idx, &byte)| byte != u8::from(no_data(idx % pixel_count)))
     {
-        Some(index) => Err(FitsRefusal::MaskDisagrees { index }.into()),
+        Some(idx) => Err(FitsRefusal::MaskDisagrees { idx }.into()),
         None => Ok(()),
     }
 }

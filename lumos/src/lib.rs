@@ -6,7 +6,7 @@
 //! - Master dark, flat and bias, defect maps, and per-frame calibration ([`CalibrationMasters`]).
 //! - Sub-pixel star detection that feeds registration ([`StarDetector`]).
 //! - Star-pattern alignment and the warp into a common frame ([`Registrar::register`],
-//!   [`WarpParams::warp`]).
+//!   [`WarpConfig::warp`]).
 //! - Statistical per-pixel combination, with rejection, normalization and weighting
 //!   ([`StackConfig`]).
 //! - Fruchter & Hook variable-pixel reconstruction of dithered sets ([`DrizzleConfig`]).
@@ -42,7 +42,7 @@ mod bit_buffer2;
 mod calibration;
 mod combine;
 mod concurrency;
-mod config_value;
+mod config_field;
 mod decode;
 mod drizzle;
 mod error;
@@ -105,12 +105,12 @@ pub use image::unverified_conditions::UnverifiedConditions;
 pub use io::error::{ImageError, OverBudget, ScientificRefusal, WriteError};
 pub use io::fits::calibration_bundle::error::{BundleError, DefectTableError};
 pub use io::fits::error::{FitsAllocation, FitsRefusal};
-pub use io::fits::fits_load_options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
+pub use io::fits::fits_load_config::{
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 pub use io::fits::lumos_extension::LumosExtension;
 pub use io::input_format::{PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
-pub use io::load_context::LoadContext;
+pub use io::load_ctx::LoadCtx;
 pub use io::null_policy::NullPolicy;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
@@ -155,13 +155,13 @@ pub use registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use registration::error::{
     FailedModel, RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
-pub use registration::match_indices::MatchIndices;
+pub use registration::match_idxs::MatchIdxs;
 pub use registration::ransac::ransac_config::{RansacConfig, ScaleRange};
 pub use registration::registrar::Registrar;
 pub use registration::registration_config::{RegistrationConfig, RegistrationMatchingConfig};
 pub use registration::registration_result::{RegistrationResult, StarMatch};
 pub use registration::resample::WarpResult;
-pub use registration::resample::warp_params::{ClampingThreshold, InterpolationMethod, WarpParams};
+pub use registration::resample::warp_config::{ClampingThreshold, InterpolationMethod, WarpConfig};
 pub use registration::transform::linear_model::LinearModel;
 pub use registration::transform::local_geometry::LocalGeometry;
 pub use registration::transform::{Transform, TransformType};

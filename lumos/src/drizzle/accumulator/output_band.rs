@@ -86,7 +86,7 @@ impl CornerLattice {
     fn corner(&mut self, source: &FrameSource<'_>, j: usize, k: usize) -> Option<DVec2> {
         let row = &mut self.rows[k % 2];
         if row.stamps[j] != k + 1 {
-            row.points[j] = source.position(DVec2::new(j as f64 - 0.5, k as f64 - 0.5));
+            row.points[j] = source.pos(DVec2::new(j as f64 - 0.5, k as f64 - 0.5));
             row.stamps[j] = k + 1;
         }
         row.points[j]
@@ -113,7 +113,7 @@ pub(super) struct OutputBand<'a> {
     /// Which band this is, and the input pixels every band scans for this frame — this one's, and
     /// the earlier ones', which decide whether a pixel that failed to invert is this band's to
     /// count.
-    pub(super) index: usize,
+    pub(super) idx: usize,
     pub(super) scans: &'a [BandScan],
     /// The radial kernels' scratch, which the bands lease from as they run.
     pub(super) radial: &'a ScratchPool<RadialScratch>,
@@ -131,7 +131,7 @@ impl OutputBand<'_> {
                 let mut lattice = self.lattice.acquire();
                 debug_assert!(lattice.has_shape(source.width()));
                 self.distribute_square(source, |pixel| {
-                    let Vec2us { x, y } = pixel.position;
+                    let Vec2us { x, y } = pixel.pos;
                     source.quad_of(pixel, |corner| {
                         let [dx, dy] = LATTICE_CORNERS[corner];
                         lattice.corner(source, x + dx, y + dy)
@@ -184,22 +184,22 @@ impl OutputBand<'_> {
     ) -> usize {
         let width = source.width();
         let mut unconverged = 0;
-        let scan = &self.scans[self.index];
+        let scan = &self.scans[self.idx];
         for iy in scan.rows() {
             let row = iy * width;
             for ix in scan.columns(iy) {
                 let pixel = InputPixel {
-                    position: Vec2us::new(ix, iy),
-                    index: row + ix,
+                    pos: Vec2us::new(ix, iy),
+                    idx: row + ix,
                 };
                 match drop(pixel) {
                     Drop::Landed(landed) => deposit(self, pixel, landed),
                     Drop::Empty => {}
                     Drop::Unconverged => {
                         unconverged += usize::from(
-                            !self.scans[..self.index]
+                            !self.scans[..self.idx]
                                 .iter()
-                                .any(|scan| scan.contains(pixel.position)),
+                                .any(|scan| scan.contains(pixel.pos)),
                         );
                     }
                 }
@@ -322,8 +322,8 @@ impl OutputBand<'_> {
                 }
 
                 let fluxes = source.fluxes(pixel);
-                let index = band.row_base(rows.start) + cols.start;
-                band.accumulate(&fluxes, index, drop.weight as f32);
+                let idx = band.row_base(rows.start) + cols.start;
+                band.accumulate(&fluxes, idx, drop.weight as f32);
             },
         )
     }
@@ -455,7 +455,7 @@ impl OutputBand<'_> {
         (oy - self.rows.start) * self.width
     }
 
-    /// Accumulate one input pixel's `fluxes` into the band pixel at `index`.
+    /// Accumulate one input pixel's `fluxes` into the band pixel at `idx`.
     ///
     /// The flux values travel rather than the coordinate they came from: with one index in the
     /// signature there is no input/output pair to mix up, and the samples are read once per drop
@@ -464,29 +464,29 @@ impl OutputBand<'_> {
     /// The flags stay tested per deposit although a frame fixes whether it has any: the test is on
     /// a value the loop cannot change, so it hoists.
     #[inline]
-    fn accumulate(&mut self, fluxes: &Fluxes, index: usize, weight: f32) {
+    fn accumulate(&mut self, fluxes: &Fluxes, idx: usize, weight: f32) {
         // A pixel whose channels all deposit shares one weight plane; a photosite deposits its one
         // sample, and its weight, in its color's.
         let weights = match fluxes.color {
             None => {
                 for (plane, &flux) in self.planes.data.iter_mut().zip(&fluxes.values) {
-                    plane[index] += flux * weight;
+                    plane[idx] += flux * weight;
                 }
                 0
             }
             Some(color) => {
-                self.planes.data[color][index] += fluxes.values[0] * weight;
+                self.planes.data[color][idx] += fluxes.values[0] * weight;
                 color
             }
         };
-        self.planes.weight[weights][index] += weight;
-        self.planes.weight_sq[weights][index] += weight * weight;
+        self.planes.weight[weights][idx] += weight;
+        self.planes.weight_sq[weights][idx] += weight * weight;
         // A tap of zero weight, where a Lanczos lobe crosses zero, deposits nothing and carries
         // nothing.
         if weight != 0.0
             && let Some(flags) = &mut self.planes.flags
         {
-            flags[index] |= fluxes.carried;
+            flags[idx] |= fluxes.carried;
         }
     }
 }
@@ -552,8 +552,8 @@ mod tests {
             let frame = DrizzleFrame::new(image.clone(), warp);
             let source = FrameSource::new(&frame, Deposit::of(&image), OutputGrid::new(2.0, size));
             let pixel = |x: usize, y: usize| InputPixel {
-                position: Vec2us::new(x, y),
-                index: y * size.width + x,
+                pos: Vec2us::new(x, y),
+                idx: y * size.width + x,
             };
             let rows_first = (0..size.height).flat_map(|y| (0..size.width).map(move |x| (x, y)));
             let columns_first = (0..size.width).flat_map(|x| (0..size.height).map(move |y| (x, y)));

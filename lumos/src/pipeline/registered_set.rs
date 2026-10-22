@@ -39,7 +39,7 @@ impl RegisteredSet {
         let mut lights = Vec::with_capacity(total);
         let mut dropped = Vec::new();
         // Ascending without a sort: the lights are in input order.
-        for (index, ParkedLight { parked, detection }) in self.lights.into_iter().enumerate() {
+        for (idx, ParkedLight { parked, detection }) in self.lights.into_iter().enumerate() {
             let (frame, registration) = match parked {
                 Parked::Reference(frame) => (Some(frame), FrameRegistration::Reference),
                 Parked::Registered {
@@ -60,9 +60,9 @@ impl RegisteredSet {
             match frame {
                 Some(frame) => {
                     frames.push(frame);
-                    survivors.push(index);
+                    survivors.push(idx);
                 }
-                None => dropped.push(index),
+                None => dropped.push(idx),
             }
             lights.push(LightOutcome {
                 detection,

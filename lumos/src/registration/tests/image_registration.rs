@@ -97,7 +97,7 @@ impl Rendered {
             result
                 .matched_stars()
                 .iter()
-                .map(|m| reference_stars[m.indices.reference].pos),
+                .map(|m| reference_stars[m.idxs.reference].pos),
         );
         assert!(
             deviation <= bound,
@@ -105,13 +105,13 @@ impl Rendered {
             self.name
         );
         for m in result.matched_stars() {
-            let r = reference_stars[m.indices.reference].pos;
-            let t = target_stars[m.indices.target].pos;
+            let r = reference_stars[m.idxs.reference].pos;
+            let t = target_stars[m.idxs.target].pos;
             assert!(
                 self.truth.apply(r).distance(t) <= 5.0 * pair_sigma * 2f64.sqrt(),
                 "{}: pair {:?} is not a true one",
                 self.name,
-                m.indices
+                m.idxs
             );
         }
     }

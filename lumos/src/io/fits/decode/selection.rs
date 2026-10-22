@@ -3,13 +3,13 @@ use fits_well::io::Hdu;
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::ExtensionClaims;
-use crate::io::fits::fits_load_options::FitsHduSelector;
+use crate::io::fits::fits_load_config::FitsHduSelector;
 use crate::io::fits::metadata;
 
-pub(super) fn selected_hdu(hdus: &[Hdu], index: usize) -> Result<FitsHduProvenance, FitsLoadError> {
-    let hdu = hdus.get(index).ok_or_else(|| {
+pub(super) fn selected_hdu(hdus: &[Hdu], idx: usize) -> Result<FitsHduProvenance, FitsLoadError> {
+    let hdu = hdus.get(idx).ok_or_else(|| {
         FitsLoadError::from(FitsRefusal::HduOutOfRange {
-            index,
+            idx,
             hdus: hdus.len(),
         })
     })?;
@@ -20,7 +20,7 @@ pub(super) fn selected_hdu(hdus: &[Hdu], index: usize) -> Result<FitsHduProvenan
         None
     };
     Ok(FitsHduProvenance {
-        index,
+        idx,
         extname,
         extver,
     })
@@ -33,14 +33,14 @@ pub(super) fn select_image_hdu(
     let selected = match selector {
         FitsHduSelector::Auto => {
             let mut images = Vec::new();
-            for (index, hdu) in hdus.iter().enumerate() {
+            for (idx, hdu) in hdus.iter().enumerate() {
                 if ExtensionClaims::holds_image(hdu)? {
-                    images.push(index);
+                    images.push(idx);
                 }
             }
             match images.as_slice() {
                 [] => return Err(FitsLoadError::from(FitsRefusal::NoImageHdu)),
-                [index] => *index,
+                [idx] => *idx,
                 _ => {
                     return Err(FitsLoadError::from(FitsRefusal::SeveralImageHdus {
                         images: images.len(),
@@ -48,12 +48,12 @@ pub(super) fn select_image_hdu(
                 }
             }
         }
-        FitsHduSelector::Index(index) => *index,
+        FitsHduSelector::Idx(idx) => *idx,
         FitsHduSelector::Name { extname, extver } => {
             let mut matches = Vec::new();
-            for (index, hdu) in hdus.iter().enumerate() {
+            for (idx, hdu) in hdus.iter().enumerate() {
                 if hdu.matches_extension(extname, *extver, None)? {
-                    matches.push(index);
+                    matches.push(idx);
                 }
             }
             match matches.as_slice() {
@@ -63,7 +63,7 @@ pub(super) fn select_image_hdu(
                         extver: *extver,
                     }));
                 }
-                [index] => *index,
+                [idx] => *idx,
                 _ => {
                     return Err(FitsLoadError::from(FitsRefusal::SeveralMatchingHdus {
                         extname: extname.clone(),
@@ -75,9 +75,9 @@ pub(super) fn select_image_hdu(
         }
     };
     let selected = selected_hdu(hdus, selected)?;
-    if !hdus[selected.index].is_image() {
+    if !hdus[selected.idx].is_image() {
         return Err(FitsLoadError::from(FitsRefusal::NotAnImage {
-            hdu: selected.index,
+            hdu: selected.idx,
         }));
     }
     Ok(selected)

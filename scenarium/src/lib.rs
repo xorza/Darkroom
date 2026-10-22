@@ -29,7 +29,7 @@ pub use execution::cache::runtime_cache::error::{
 };
 pub use execution::compile::Compiler;
 pub use execution::compile::compiled_graph::CompiledGraph;
-pub use execution::error::{Error, Result, RunError};
+pub use execution::error::{ExecutionError, ExecutionResult, RunError};
 pub use execution::report::node_status::NodeExecutionStatus;
 pub use execution::report::node_status::NodeStatus;
 pub use execution::report::run_reporter::RunPhase;
@@ -57,7 +57,7 @@ pub use graph::subscription::Subscription;
 pub use library::Library;
 pub use library::type_entry::TypeEntry;
 pub use runtime::any_state::AnyState;
-pub use runtime::context_manager::ContextManager;
+pub use runtime::ctx_manager::CtxManager;
 pub use runtime::log_entry::{LogEntry, LogLevel};
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;

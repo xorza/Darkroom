@@ -1,9 +1,9 @@
 use std::any;
 use std::f64::consts::PI;
 
+use crate::simd::isa_tier::IsaTier;
 use crate::simd::math::Math;
 use crate::simd::portable::Portable;
-use crate::simd::tier::Tier;
 use crate::simd::{F32_LANES, F32x8, F64_LANES, F64x4, Isa, Kernel, Mask8};
 
 /// Rows that put every special value against every other across the battery's pairs: signed
@@ -159,7 +159,7 @@ fn same(a: f64, b: f64) -> bool {
 #[test]
 fn every_tier_matches_portable_lane_for_lane() {
     let reference = Portable::new().run(Battery);
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         let outcomes = tier.run(Battery);
         assert_eq!(outcomes.len(), reference.len(), "{tier}");
         for (got, want) in outcomes.iter().zip(&reference) {
@@ -225,9 +225,9 @@ fn reductions_fold_in_their_stated_order() {
 #[test]
 fn lookup_clamps_into_the_table() {
     let isa = Portable::new();
-    let index = isa.load_f32(&[-5.0, f32::NAN, 2.7, 15.0, 15.99, 16.0, 1e9, f32::INFINITY]);
+    let idx = isa.load_f32(&[-5.0, f32::NAN, 2.7, 15.0, 15.99, 16.0, 1e9, f32::INFINITY]);
     assert_eq!(
-        isa.lookup_f32(&TABLE, index).to_array(),
+        isa.lookup_f32(&TABLE, idx).to_array(),
         [10.0, 10.0, 12.0, 25.0, 25.0, 25.0, 25.0, 25.0]
     );
 }
@@ -288,7 +288,7 @@ fn exp_is_accurate_across_the_normal_range() {
 
     let mut xs: Vec<f64> = (0..1400).map(|i| f64::from(i) * 0.5 - 700.0).collect();
     xs.extend([0.001, -0.001, 0.1, -0.1, PI, -PI, 1.0, -1.0]);
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         for (&x, got) in xs.iter().zip(tier.run(Exp(&xs))) {
             let want = x.exp();
             if want < 1e-300 {
@@ -317,11 +317,11 @@ impl Kernel for IsaName {
 /// Dispatch runs on the widest tier: the last of the supported ones, which come narrowest first.
 #[test]
 fn dispatch_runs_on_the_widest_supported_tier() {
-    let widest = Tier::supported()
+    let widest = IsaTier::supported()
         .last()
         .expect("Portable is always supported");
     assert_eq!(IsaName.dispatch(), widest.run(IsaName));
-    assert_eq!(Tier::widest().run(IsaName), widest.run(IsaName));
+    assert_eq!(IsaTier::widest().run(IsaName), widest.run(IsaName));
 }
 
 /// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³` and the smallest normal `0.5 · 2⁻¹⁰²¹` in
@@ -341,7 +341,7 @@ fn f64_frexp_splits_off_the_exponent() {
         }
     }
 
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         assert_eq!(
             tier.run(Split),
             [[0.75, 0.5, 0.1 / 0.125, 0.5], [3.0, 1.0, -3.0, -1021.0]],
@@ -385,7 +385,7 @@ fn ln_f64_is_accurate_at_every_magnitude() {
         PI,
     ]);
     xs.resize(xs.len().next_multiple_of(F64_LANES), 1.0);
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         for (&x, got) in xs.iter().zip(tier.run(Ln(&xs))) {
             let want = x.ln();
             if want == 0.0 {

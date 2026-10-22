@@ -13,7 +13,7 @@ pub struct Star {
     /// The position's standard error, `√((σ_x² + σ_y²)/2)` in pixels: from the profile fit's
     /// covariance `(JᵀWJ)⁻¹·χ²/(n − p)`, or from the windowed centroid's propagated pixel noise when
     /// no fit ran or it failed.
-    pub position_sigma: f64,
+    pub pos_sigma: f64,
     /// Total flux (sum of background-subtracted pixel values).
     pub flux: f32,
     /// The PSF's full width at half maximum, in pixels, before the pixel integrated it: the width
@@ -76,7 +76,7 @@ pub(crate) mod internals {
         pub(crate) const fn at(pos: DVec2) -> Self {
             Self {
                 pos,
-                position_sigma: 0.01,
+                pos_sigma: 0.01,
                 flux: 100.0,
                 fwhm: 3.0,
                 eccentricity: 0.1,

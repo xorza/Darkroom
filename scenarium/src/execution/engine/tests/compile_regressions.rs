@@ -19,7 +19,7 @@ fn a_wire_addresses_its_producer_range_when_the_consumer_precedes_it() {
     g.wire("make_str", "sink");
 
     let compiled = g.compile();
-    let &ExecutionBinding::Bind(address) = compiled.binding("sink", 0) else {
+    let &ExecutionBinding::Wire(address) = compiled.binding("sink", 0) else {
         panic!("the sink is bound to make_str");
     };
     let slot = compiled.program.output_idx(address).0 as usize;

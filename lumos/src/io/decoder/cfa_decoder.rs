@@ -7,9 +7,9 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::io::decoder::Decoder;
 use crate::io::error::ImageError;
 use crate::io::frame_info::FrameInfo;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
-/// Frames read as [`CfaImage`]s: [`LoadContext::cfa`].
+/// Frames read as [`CfaImage`]s: [`LoadCtx::cfa`].
 #[derive(Debug)]
 pub(crate) struct CfaDecoder;
 
@@ -17,12 +17,12 @@ impl Decoder for CfaDecoder {
     type Image = CfaImage;
     const KIND: DecoderKind = DecoderKind::Cfa;
 
-    fn load(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-        context.cfa(path)
+    fn load(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
+        ctx.cfa(path)
     }
 
     /// A RAW or FITS header answers without a decode.
-    fn peek(path: &Path, context: &LoadContext) -> Option<FrameInfo> {
-        context.cfa_info(path).ok()
+    fn peek(path: &Path, ctx: &LoadCtx) -> Option<FrameInfo> {
+        ctx.cfa_info(path).ok()
     }
 }

@@ -16,7 +16,7 @@ use crate::core::document::internals::DocFixture;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::node_presence::{NodePresence, NodeState};
+use crate::core::edit::step::node_presence::{NodePresence, PresenceState};
 use crate::core::edit::step::raise::Raise;
 use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::set_input::SetInput;
@@ -76,7 +76,7 @@ fn node_property(node_id: NodeId, from: CacheMode, to: CacheMode) -> UndoStep {
 fn node_presence() -> UndoStep {
     let mut fixture = DocFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
-    let state = NodeState::capture(&fixture.doc, node_id).expect("the fixture placed it");
+    let state = PresenceState::capture(&fixture.doc, node_id).expect("the fixture placed it");
     UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
 }
 
@@ -249,7 +249,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
             },
         }),
         set_input(port, None, Some(cst(1.0))),
-        // ...and removing it is the connection commit, the case Pass B has
+        // ...and removing it is the wire commit, the case Pass B has
         // always existed for.
         set_input(port, Some(cst(1.0)), None),
         // A node arriving — or coming back on an undo — has no cached port

@@ -53,9 +53,9 @@ impl From<Cancelled> for FitsLoadError {
 /// Why a FITS file is refused: one case per refusal a caller can tell apart.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FitsRefusal {
-    /// [`FitsHduSelector::Index`](crate::FitsHduSelector::Index) past the file's `hdus`.
+    /// [`FitsHduSelector::Idx`](crate::FitsHduSelector::Idx) past the file's `hdus`.
     HduOutOfRange {
-        index: usize,
+        idx: usize,
         hdus: usize,
     },
     /// No HDU holds an image for [`FitsHduSelector::Auto`](crate::FitsHduSelector::Auto).
@@ -181,11 +181,11 @@ pub enum FitsRefusal {
     UncertaintyType {
         utype: Option<String>,
     },
-    /// A `MASK` sample, at `index` of its channel-major space, that is not the image's `NO_DATA`
+    /// A `MASK` sample, at `idx` of its channel-major space, that is not the image's `NO_DATA`
     /// at its pixel: set where the pixel holds data, clear where it holds none, or other than 0
     /// and 1.
     MaskDisagrees {
-        index: usize,
+        idx: usize,
     },
     /// A stack product that states a uniform coverage and holds a `COVERAGE` extension too.
     CoverageTwice,
@@ -262,7 +262,7 @@ pub enum FitsRefusal {
     /// `CFATYPE = 'BAYER'` with no `BAYERPAT` to give the phase.
     MissingBayerPattern,
     /// `BAYERPAT = 'TRUE'`, a Bayer mosaic of no stated phase, and no
-    /// [`FitsLoadOptions::unstated_bayer_pattern`](crate::FitsLoadOptions::unstated_bayer_pattern)
+    /// [`FitsLoadConfig::unstated_bayer_pattern`](crate::FitsLoadConfig::unstated_bayer_pattern)
     /// to give it.
     UnstatedBayerPhase,
     /// A `BAYERPAT` that names no Bayer phase.
@@ -294,8 +294,8 @@ pub enum FitsRefusal {
 impl Display for FitsRefusal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::HduOutOfRange { index, hdus } => {
-                write!(f, "HDU index {index} is out of range for {hdus} HDUs")
+            Self::HduOutOfRange { idx, hdus } => {
+                write!(f, "HDU index {idx} is out of range for {hdus} HDUs")
             }
             Self::NoImageHdu => write!(f, "no image HDU found"),
             Self::SeveralImageHdus { images } => write!(
@@ -428,9 +428,9 @@ impl Display for FitsRefusal {
                 LumosExtension::Uncertainty,
                 Stated(utype.as_ref())
             ),
-            Self::MaskDisagrees { index } => write!(
+            Self::MaskDisagrees { idx } => write!(
                 f,
-                "{} sample {index} is not the image's NO_DATA at its pixel",
+                "{} sample {idx} is not the image's NO_DATA at its pixel",
                 LumosExtension::Mask
             ),
             Self::CoverageTwice => write!(

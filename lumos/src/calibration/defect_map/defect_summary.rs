@@ -26,7 +26,7 @@ pub struct DefectSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorShares {
     Mono(ColorDefects),
-    /// Each color's, at its [`CfaColor::index`].
+    /// Each color's, at its [`CfaColor::idx`].
     Mosaic([ColorDefects; 3]),
 }
 
@@ -35,7 +35,7 @@ impl ColorShares {
     pub const fn of(&self, color: CfaColor) -> Option<&ColorDefects> {
         match self {
             Self::Mono(_) => None,
-            Self::Mosaic(colors) => Some(&colors[color.index()]),
+            Self::Mosaic(colors) => Some(&colors[color.idx()]),
         }
     }
 

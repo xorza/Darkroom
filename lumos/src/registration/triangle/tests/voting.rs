@@ -76,7 +76,7 @@ fn resolve_claims_each_star_once_by_votes() {
         let matches = votes_from_entries(entries).resolve(5, 5, min_votes);
         let resolved: Vec<(usize, usize, f64)> = matches
             .iter()
-            .map(|m| (m.indices.reference, m.indices.target, m.confidence))
+            .map(|m| (m.idxs.reference, m.idxs.target, m.confidence))
             .collect();
         assert_eq!(resolved, expected, "{entries:?} with min_votes {min_votes}");
     }

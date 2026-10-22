@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::simd::Kernel;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::median_filter::simd::MedianRow;
 
@@ -26,7 +26,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let row = |y: usize| &measure[y * FRAME.width..(y + 1) * FRAME.width];
         [row(y - 1), row(y), row(y + 1)]
     };
-    let tiers: Vec<Tier> = Tier::supported().collect();
+    let tiers: Vec<IsaTier> = IsaTier::supported().collect();
     let mut group = Kind::Atomic.group(c, "detection/median_filter", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];

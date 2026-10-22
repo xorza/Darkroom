@@ -76,10 +76,10 @@ pub(crate) struct InvalidFlatGain {
 /// plane knows only its length, a pixel-weight map has no channels, and a calibration master is
 /// measured against the sensor rather than against frame 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("frame {index} is {actual}, expected {expected}")]
+#[error("frame {idx} is {actual}, expected {expected}")]
 pub struct FrameDimensionMismatch {
     /// Position of the offending frame in the input set.
-    pub index: usize,
+    pub idx: usize,
     /// The geometry every frame has to match — frame 0's, or the accumulator's.
     pub expected: ImageDimensions,
     /// What this frame turned out to be.
@@ -91,16 +91,16 @@ impl FrameDimensionMismatch {
     /// through `inputs` into the caller's own numbering of those frames.
     pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
         Self {
-            index: inputs[self.index],
+            idx: inputs[self.idx],
             ..self
         }
     }
 
-    /// `Ok(())` when `actual` matches, else the rejection of frame `index`: the Result-returning
+    /// `Ok(())` when `actual` matches, else the rejection of frame `idx`: the Result-returning
     /// counterpart to `assert_eq!` for frame geometry, in
-    /// [`ConfigValue::must_be`](crate::config_value::ConfigValue::must_be)'s shape.
+    /// [`ConfigField::must_be`](crate::config_field::ConfigField::must_be)'s shape.
     pub(crate) fn check(
-        index: usize,
+        idx: usize,
         expected: ImageDimensions,
         actual: ImageDimensions,
     ) -> Result<(), Self> {
@@ -108,7 +108,7 @@ impl FrameDimensionMismatch {
             Ok(())
         } else {
             Err(Self {
-                index,
+                idx,
                 expected,
                 actual,
             })

@@ -83,7 +83,7 @@ fn a_flat_is_normalized_by_one_rounding() {
 fn a_flats_mean_leaves_out_what_it_did_not_measure() {
     let size = Size2us::new(2, 2);
     let mut flat = make_cfa(size, vec![1.0, 3.0, 5.0, 9.0], CfaType::Mono);
-    flat.set_flags(PixelFlags::from_fn(size, |index| match index {
+    flat.set_flags(PixelFlags::from_fn(size, |idx| match idx {
         2 => QualityFlags::SATURATED,
         3 => QualityFlags::NO_DATA,
         _ => QualityFlags::default(),
@@ -96,7 +96,7 @@ fn a_flats_mean_leaves_out_what_it_did_not_measure() {
     assert_eq!(light.data().pixels()[0], 2.0);
     let flags = light.flags().unwrap();
     assert_eq!(
-        (0..4).map(|index| flags.at(index)).collect::<Vec<_>>(),
+        (0..4).map(|idx| flags.at(idx)).collect::<Vec<_>>(),
         [
             QualityFlags::default(),
             QualityFlags::default(),

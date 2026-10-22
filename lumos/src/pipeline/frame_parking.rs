@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
+use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::frame_store::stored_image::StoredImage;
-use crate::frame_store::tier::Tier;
 use crate::image::linear_image::LinearImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
@@ -22,18 +22,18 @@ pub(super) struct StagePlan {
     pub(super) warp_width: usize,
 }
 
-/// Where the pipeline keeps its frames: the run's [`Tier`], chosen once from the
+/// Where the pipeline keeps its frames: the run's [`StorageTier`], chosen once from the
 /// [`RunPlan`](crate::memory::run_plan::RunPlan) and threaded through the pipeline body, which is
 /// otherwise identical either way, and how many calibrated lights it parked on disk before their
 /// registration, for the run's report.
 #[derive(Debug)]
 pub(super) struct FrameParking {
-    tier: Tier,
+    tier: StorageTier,
     parked: AtomicU64,
 }
 
 impl FrameParking {
-    pub(super) const fn new(tier: Tier) -> Self {
+    pub(super) const fn new(tier: StorageTier) -> Self {
         Self {
             tier,
             parked: AtomicU64::new(0),
@@ -47,8 +47,8 @@ impl FrameParking {
     /// Park a calibrated frame between detection and registration.
     pub(super) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
         match &self.tier {
-            Tier::Resident => Ok(PipelineFrame::Resident(image)),
-            Tier::Spilled { scratch, .. } => {
+            StorageTier::Resident => Ok(PipelineFrame::Resident(image)),
+            StorageTier::Spilled { scratch, .. } => {
                 let stored = StoredImage::spill(scratch, &image)?;
                 self.parked.fetch_add(1, Ordering::Relaxed);
                 Ok(PipelineFrame::Spilled(stored))
@@ -73,7 +73,7 @@ impl FrameParking {
         admitted: Admitted,
     ) -> Result<StoredFrame, AlignStackError> {
         match &self.tier {
-            Tier::Resident => {
+            StorageTier::Resident => {
                 let WarpResult {
                     image,
                     coverage,
@@ -85,7 +85,7 @@ impl FrameParking {
                 };
                 Ok(StoredFrame::from_memory(image, quality, admitted))
             }
-            Tier::Spilled { scratch, .. } => {
+            StorageTier::Spilled { scratch, .. } => {
                 let quality = FrameQuality::Planes {
                     coverage: &warped.coverage,
                     confidence: &warped.confidence,
@@ -116,31 +116,31 @@ impl FrameParking {
                     .store(image, quality, admitted)
                     .map_err(AlignStackError::from)
             }
-            (Tier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
+            (StorageTier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
                 .into_reference_frame(scratch, admitted)
                 .map_err(AlignStackError::from),
-            (Tier::Resident, PipelineFrame::Spilled(_)) => {
+            (StorageTier::Resident, PipelineFrame::Spilled(_)) => {
                 unreachable!("the resident tier parks no frame on disk")
             }
         }
     }
 
     /// The tier the combine reads the stored frames through.
-    pub(super) fn into_tier(self) -> Tier {
+    pub(super) fn into_tier(self) -> StorageTier {
         self.tier
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::frame_store::tier::CombineBudget;
+    use crate::frame_store::storage_tier::CombineBudget;
     use crate::memory::run_memory::RunMemory;
     use common::TempDir;
 
     use crate::combine::frame_read::frame_gate::FrameGate;
     use crate::frame::admitted::Admitted;
     use crate::frame_store::run_scratch::RunScratch;
-    use crate::frame_store::tier::Tier;
+    use crate::frame_store::storage_tier::StorageTier;
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
@@ -155,23 +155,23 @@ mod tests {
     /// mask reads stay, the first's saturation among them when it is saturated.
     #[test]
     fn a_reference_leaves_out_the_excluded_and_keeps_the_carried() {
-        let directory = TempDir::new("frame_tier_reference");
+        let dir = TempDir::new("frame_tier_reference");
         let spill = || {
-            FrameParking::new(Tier::Spilled {
-                scratch: RunScratch::create(directory.path()).unwrap(),
+            FrameParking::new(StorageTier::Spilled {
+                scratch: RunScratch::create(dir.path()).unwrap(),
                 combine: CombineBudget::new(RunMemory::new(1 << 20, None).budget(1)),
             })
         };
         let dims = ImageDimensions::new((4, 1), ChannelLayout::Mono);
         for saturated in [false, true] {
             let mut image = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
-            image.set_flags(PixelFlags::from_fn(dims.size(), |index| match index {
+            image.set_flags(PixelFlags::from_fn(dims.size(), |idx| match idx {
                 0 if saturated => QualityFlags::SATURATED,
                 1 => QualityFlags::COSMIC_RAY,
                 _ => QualityFlags::default(),
             }));
             for (label, tier, parked) in [
-                ("ram", FrameParking::new(Tier::Resident), false),
+                ("ram", FrameParking::new(StorageTier::Resident), false),
                 ("spill", spill(), false),
                 ("parked", spill(), true),
             ] {
@@ -186,7 +186,7 @@ mod tests {
                 let gate = FrameGate::of(&stored, 0, 0..4);
                 assert_eq!(
                     (0..4)
-                        .map(|index| gate.sample(index).map(|sample| sample.confidence))
+                        .map(|idx| gate.sample(idx).map(|sample| sample.confidence))
                         .collect::<Vec<_>>(),
                     [Some(1.0), None, Some(1.0), Some(1.0)],
                     "{label} {saturated}"

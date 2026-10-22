@@ -11,7 +11,7 @@ use std::sync::Arc;
 /// one batch — the one-gesture counterpart to the port menu's "Add preview".
 ///
 /// Drives the real chord through the harness rather than calling the gesture
-/// directly: the whole point of the modifier is that `ConnectionUI` and
+/// directly: the whole point of the modifier is that `WireUi` and
 /// `PreviewDrag` can't both claim the same press, and only a real press
 /// exercises that.
 #[test]
@@ -68,7 +68,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     assert!(
         spawned.iter().any(|intent| matches!(
             intent,
-            GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }
+            GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }
                 if input.node_id == *node_id
                     && src.node_id == producer
                     && src.port_idx == 0

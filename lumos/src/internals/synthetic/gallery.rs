@@ -68,7 +68,7 @@ fn checkerboard(size: Size2us, cell_size: usize, [value_a, value_b]: [f32; 2]) -
     for y in 0..size.height {
         for x in 0..size.width {
             let checker = ((x / cell_size) + (y / cell_size)) % 2;
-            pixels[size.index_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
+            pixels[size.idx_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
         }
     }
     Buffer2::new(size.width, size.height, pixels)

@@ -1,6 +1,6 @@
 //! [`SigmaThreshold`]: how far above its dark's background a pixel stands before it is hot.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// How many σ above the per-color residual median of a master dark a pixel stands before it is
@@ -19,7 +19,7 @@ impl SigmaThreshold {
     ///
     /// [`InvalidConfigField`] when `sigma` is not finite or is below 1.
     pub fn new(sigma: f32) -> Result<Self, InvalidConfigField> {
-        ConfigValue::new("sigma_threshold", sigma)
+        ConfigField::new("sigma_threshold", sigma)
             .finite_and("finite and at least 1", |sigma| sigma >= 1.0)?;
         Ok(Self(sigma))
     }

@@ -102,7 +102,7 @@ fn deblended(
 }
 
 /// `(x, y)` of each peak, in the order given.
-fn positions(peaks: &[Pixel]) -> Vec<(usize, usize)> {
+fn poss(peaks: &[Pixel]) -> Vec<(usize, usize)> {
     peaks.iter().map(|p| (p.pos.x, p.pos.y)).collect()
 }
 
@@ -112,7 +112,7 @@ fn single_star_is_one_whole_region() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let peaks = maxima(&component, default_separation(), default_relative_height());
-    assert_eq!(positions(&peaks), [(50, 50)]);
+    assert_eq!(poss(&peaks), [(50, 50)]);
     assert_eq!(peaks[0].value, fixture.pixels[(50, 50)]);
 
     // One candidate needs no map of the component to be kept.
@@ -137,7 +137,7 @@ fn two_separated_stars() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let peaks = maxima(&component, default_separation(), default_relative_height());
-    assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
+    assert_eq!(poss(&peaks), [(30, 50), (70, 50)]);
     // Two candidates map every pixel of the component to check one against the other.
     assert_eq!(indexed(&component), fixture.data.area);
     assert_eq!(
@@ -178,9 +178,9 @@ fn euclidean_separation() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let merged = maxima(&component, 5, 0.3);
-    assert_eq!(positions(&merged), [(50, 50)]);
+    assert_eq!(poss(&merged), [(50, 50)]);
     let separate = maxima(&component, 4, 0.3);
-    assert_eq!(positions(&separate), [(50, 50), (53, 53)]);
+    assert_eq!(poss(&separate), [(50, 50), (53, 53)]);
 }
 
 #[test]
@@ -194,9 +194,9 @@ fn relative_height_filter() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let strict = maxima(&component, 3, 0.5);
-    assert_eq!(positions(&strict), [(30, 50)]);
+    assert_eq!(poss(&strict), [(30, 50)]);
     let loose = maxima(&component, 3, 0.1);
-    assert_eq!(positions(&loose), [(30, 50), (70, 50)]);
+    assert_eq!(poss(&loose), [(30, 50), (70, 50)]);
 }
 
 #[test]
@@ -211,9 +211,9 @@ fn zero_min_separation_keeps_adjacent_peaks() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let none = maxima(&component, 0, 0.1);
-    assert_eq!(positions(&none), [(50, 50), (53, 50)]);
+    assert_eq!(poss(&none), [(50, 50), (53, 50)]);
     let four = maxima(&component, 4, 0.1);
-    assert_eq!(positions(&four), [(50, 50)]);
+    assert_eq!(poss(&four), [(50, 50)]);
 }
 
 #[test]
@@ -230,9 +230,9 @@ fn equal_brightness_tie_breaking() {
     assert_eq!(fixture.pixels[(48, 50)], fixture.pixels[(52, 50)]);
 
     let tied = maxima(&component, 5, 0.3);
-    assert_eq!(positions(&tied), [(48, 50)]);
+    assert_eq!(poss(&tied), [(48, 50)]);
     let both = maxima(&component, 4, 0.3);
-    assert_eq!(positions(&both), [(48, 50), (52, 50)]);
+    assert_eq!(poss(&both), [(48, 50), (52, 50)]);
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn peaks_sorted_by_brightness() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let peaks = maxima(&component, default_separation(), default_relative_height());
-    assert_eq!(positions(&peaks), [(50, 50), (70, 50), (30, 50)]);
+    assert_eq!(poss(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
     assert_eq!(component.peak().pos, Vec2us::new(50, 50));
@@ -263,7 +263,7 @@ fn close_peaks_keep_the_brighter() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
     let peaks = maxima(&component, 5, 0.3);
-    assert_eq!(positions(&peaks), [(50, 50)]);
+    assert_eq!(poss(&peaks), [(50, 50)]);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn suppressed_peak_does_not_suppress_dimmer_ones() {
         0.1,
     );
 
-    assert_eq!(positions(&peaks), [(56, 50), (50, 50)]);
+    assert_eq!(poss(&peaks), [(56, 50), (50, 50)]);
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn plateau_has_its_first_pixel_as_maximum() {
 
     let peaks = maxima(&component, 1, 0.0);
     assert_eq!(
-        positions(&peaks),
+        poss(&peaks),
         [(3, 3)],
         "a plateau's first pixel is its maximum"
     );
@@ -407,7 +407,7 @@ fn single_pixel_is_local_max() {
         default_separation(),
         default_relative_height(),
     );
-    assert_eq!(positions(&peaks), [(5, 5)]);
+    assert_eq!(poss(&peaks), [(5, 5)]);
 }
 
 #[test]
@@ -517,8 +517,8 @@ fn fast_paths_match_the_definitions() {
         }
         let peaks = maxima(&component, separation, relative_height);
         assert_eq!(
-            positions(&peaks),
-            positions(&expected),
+            poss(&peaks),
+            poss(&expected),
             "seed {seed}, separation {separation}"
         );
 
@@ -591,7 +591,7 @@ fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     let component = Component::new(&data, &pixels, &labels);
 
     assert_eq!(
-        positions(&maxima(&component, 3, 0.5)),
+        poss(&maxima(&component, 3, 0.5)),
         [(10, 10), (4, 11), (18, 11)]
     );
     let regions = deblended(&component, 3, 0.5);

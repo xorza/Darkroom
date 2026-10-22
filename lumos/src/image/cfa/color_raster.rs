@@ -65,7 +65,7 @@ impl ColorRaster {
     }
 
     /// The pixel index of the photosite of rank `rank` among the color's, in raster order.
-    pub(crate) fn index(&self, rank: usize) -> usize {
+    pub(crate) fn idx(&self, rank: usize) -> usize {
         debug_assert!(rank < self.count, "rank {rank} of {}", self.count);
         let mut row = rank / self.period_count * self.period;
         let mut rank = rank % self.period_count;
@@ -114,9 +114,7 @@ mod tests {
                 let size = Size2us::new(width, height);
                 for color in 0..3 {
                     let walk: Vec<usize> = (0..size.pixel_count())
-                        .filter(|&index| {
-                            cfa.slot_at(Vec2us::new(index % width, index / width)) == color
-                        })
+                        .filter(|&idx| cfa.slot_at(Vec2us::new(idx % width, idx / width)) == color)
                         .collect();
                     let raster = ColorRaster::new(&cfa, size, color);
                     assert_eq!(
@@ -124,10 +122,10 @@ mod tests {
                         walk.len(),
                         "{cfa:?} {width}x{height} {color}"
                     );
-                    for (rank, &index) in walk.iter().enumerate() {
+                    for (rank, &idx) in walk.iter().enumerate() {
                         assert_eq!(
-                            raster.index(rank),
-                            index,
+                            raster.idx(rank),
+                            idx,
                             "{cfa:?} {width}x{height} color {color} rank {rank}"
                         );
                     }

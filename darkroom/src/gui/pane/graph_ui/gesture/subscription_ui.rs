@@ -20,7 +20,7 @@ use scenarium::EventPort;
 /// live on the authoring graph and are painted straight off it by the
 /// module-level [`draw`], which needs nothing from here.
 ///
-/// A sibling of [`crate::gui::pane::graph_ui::gesture::connection_ui::ConnectionUI`] rather
+/// A sibling of [`crate::gui::pane::graph_ui::gesture::wire_ui::WireUi`] rather
 /// than a mode of it: an event wire carries no data type, runs no cycle /
 /// const checks, and links an emitter event glyph to a whole-node
 /// subscription pin (which only sink nodes expose — that's what makes
@@ -31,7 +31,7 @@ use scenarium::EventPort;
 /// or pull from a pin and drop on an emitter. Held-drag only; no const-drop or
 /// new-node spawn.
 #[derive(Default, Debug)]
-pub(crate) struct SubscriptionUI {
+pub(crate) struct SubscriptionUi {
     state: GestureSlot<InFlight>,
 }
 
@@ -58,7 +58,7 @@ impl InFlight {
     }
 }
 
-impl SubscriptionUI {
+impl SubscriptionUi {
     /// Drop the in-flight event wire.
     pub(crate) fn reset(&mut self) {
         self.state.clear();
@@ -206,8 +206,8 @@ impl SubscriptionUI {
 /// via `probe.mark_broken_subscription` for the breaker's release-frame drain.
 ///
 /// Reads nothing but committed scene state off `pass`, so — like
-/// [`crate::gui::pane::graph_ui::gesture::connection_ui::draw`] — it belongs to the module
-/// rather than [`SubscriptionUI`].
+/// [`crate::gui::pane::graph_ui::gesture::wire_ui::draw`] — it belongs to the module
+/// rather than [`SubscriptionUi`].
 pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (theme, graph_ctx, geometry) =
         (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());

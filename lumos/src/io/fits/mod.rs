@@ -6,7 +6,7 @@ pub(crate) mod cfa;
 pub(crate) mod decode;
 pub(crate) mod error;
 pub(crate) mod extension_claims;
-pub(crate) mod fits_load_options;
+pub(crate) mod fits_load_config;
 pub(crate) mod flags_extension;
 pub(crate) mod gain_extension;
 pub(crate) mod linear;

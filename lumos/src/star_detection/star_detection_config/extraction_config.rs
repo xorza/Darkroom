@@ -1,6 +1,6 @@
 //! Candidate detection, deblending, and region-filtering settings.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Pixel connectivity for connected component labeling.
@@ -86,32 +86,32 @@ impl Default for ExtractionConfig {
 
 impl ExtractionConfig {
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("sigma_threshold", self.sigma_threshold)
+        ConfigField::new("sigma_threshold", self.sigma_threshold)
             .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::count("deblend_min_separation", self.deblend_min_separation)
+        ConfigField::count("deblend_min_separation", self.deblend_min_separation)
             .must_be("at least 1", self.deblend_min_separation >= 1)?;
         match self.deblend {
             Deblend::LocalMaxima {
                 min_relative_height,
             } => {
-                ConfigValue::new("deblend min_relative_height", min_relative_height)
+                ConfigField::new("deblend min_relative_height", min_relative_height)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }
             Deblend::MultiThreshold {
                 n_thresholds,
                 min_contrast,
             } => {
-                ConfigValue::count("deblend n_thresholds", n_thresholds).must_be_against_count(
+                ConfigField::count("deblend n_thresholds", n_thresholds).must_be_against_count(
                     "between 2 and the deblend level cap",
                     MAX_DEBLEND_N_THRESHOLDS,
                     (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&n_thresholds),
                 )?;
-                ConfigValue::new("deblend min_contrast", min_contrast)
+                ConfigField::new("deblend min_contrast", min_contrast)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }
         }
-        ConfigValue::count("min_area", self.min_area).must_be("at least 1", self.min_area >= 1)?;
-        ConfigValue::count("max_area", self.max_area).must_be_against_count(
+        ConfigField::count("min_area", self.min_area).must_be("at least 1", self.min_area >= 1)?;
+        ConfigField::count("max_area", self.max_area).must_be_against_count(
             "at least min_area",
             self.min_area,
             self.max_area >= self.min_area,

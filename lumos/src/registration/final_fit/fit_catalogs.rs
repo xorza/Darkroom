@@ -8,7 +8,7 @@ use crate::math::statistics::CHI2_99_2DOF;
 use crate::registration::final_fit::weighted_pairs::WeightedPairs;
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitModel};
 use crate::registration::kd_tree::KdTree;
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::registration_result::{self, StarMatch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
@@ -42,7 +42,7 @@ pub(crate) struct FitCatalogs {
     /// The unsaturated target stars.
     target_tree: KdTree,
     /// For each point of `target_tree`, its index in the target catalog.
-    target_index: Vec<usize>,
+    target_idx: Vec<usize>,
 }
 
 /// Where the pass accepts a pair.
@@ -57,7 +57,7 @@ enum Gate {
 /// One candidate pair of a pass.
 #[derive(Debug, Clone, Copy)]
 struct Candidate {
-    indices: MatchIndices,
+    idxs: MatchIdxs,
     /// The residual over the pair's σ.
     normalized: f64,
     variance: f64,
@@ -66,12 +66,12 @@ struct Candidate {
 impl FitCatalogs {
     /// The catalogs of `reference` and `target`, the target holding at least one unsaturated star.
     pub(crate) fn new(reference: &[Star], target: &[Star]) -> Self {
-        let variance = |star: &Star| star.position_sigma * star.position_sigma;
-        let (target_points, target_index): (Vec<DVec2>, Vec<usize>) = target
+        let variance = |star: &Star| star.pos_sigma * star.pos_sigma;
+        let (target_points, target_idx): (Vec<DVec2>, Vec<usize>) = target
             .iter()
             .enumerate()
             .filter(|(_, star)| !star.saturated)
-            .map(|(index, star)| (star.pos, index))
+            .map(|(idx, star)| (star.pos, idx))
             .unzip();
         Self {
             reference: reference.iter().map(|star| star.pos).collect(),
@@ -81,20 +81,20 @@ impl FitCatalogs {
             target_variance: target.iter().map(variance).collect(),
             target_tree: KdTree::build(target_points)
                 .expect("registration gates the unsaturated targets before the fit"),
-            target_index,
+            target_idx,
         }
     }
 
     /// The residual of `pair` under `warp`, over the pair's σ.
-    pub(crate) fn normalized_residual(&self, warp: &WarpTransform, pair: MatchIndices) -> f64 {
-        let position = self.reference[pair.reference];
-        (warp.apply(position) - self.target[pair.target]).length()
+    pub(crate) fn normalized_residual(&self, warp: &WarpTransform, pair: MatchIdxs) -> f64 {
+        let pos = self.reference[pair.reference];
+        (warp.apply(pos) - self.target[pair.target]).length()
             / self.pair_variance(warp, pair).sqrt()
     }
 
     /// The variance of `pair`'s residual under `warp`, in target pixels: the reference star's
     /// position variance carried through the warp's local area scale, and the target's own.
-    fn pair_variance(&self, warp: &WarpTransform, pair: MatchIndices) -> f64 {
+    fn pair_variance(&self, warp: &WarpTransform, pair: MatchIdxs) -> f64 {
         warp.jacobian(self.reference[pair.reference])
             .determinant()
             .abs()
@@ -106,19 +106,19 @@ impl FitCatalogs {
     /// target taken by the reference star nearest it in units of σ.
     fn candidates(&self, warp: &WarpTransform, gate: Gate, out: &mut Vec<Candidate>) {
         out.clear();
-        for (reference, &position) in self.reference.iter().enumerate() {
+        for (reference, &pos) in self.reference.iter().enumerate() {
             if !self.reference_usable[reference] {
                 continue;
             }
-            let predicted = warp.apply(position);
+            let predicted = warp.apply(pos);
             let Some(nearest) = self.target_tree.nearest_one(predicted) else {
                 continue;
             };
-            let indices = MatchIndices {
+            let idxs = MatchIdxs {
                 reference,
-                target: self.target_index[nearest.index],
+                target: self.target_idx[nearest.idx],
             };
-            let variance = self.pair_variance(warp, indices);
+            let variance = self.pair_variance(warp, idxs);
             let normalized = nearest.dist_sq.sqrt() / variance.sqrt();
             let admitted = match gate {
                 Gate::Radius(radius) => nearest.dist_sq <= radius * radius,
@@ -130,23 +130,21 @@ impl FitCatalogs {
             );
             if admitted {
                 out.push(Candidate {
-                    indices,
+                    idxs,
                     normalized,
                     variance,
                 });
             }
         }
         out.sort_unstable_by(|a, b| {
-            a.indices
+            a.idxs
                 .target
-                .cmp(&b.indices.target)
+                .cmp(&b.idxs.target)
                 .then(a.normalized.total_cmp(&b.normalized))
-                .then(a.indices.reference.cmp(&b.indices.reference))
+                .then(a.idxs.reference.cmp(&b.idxs.reference))
         });
-        out.dedup_by_key(|candidate| candidate.indices.target);
-        out.sort_unstable_by_key(|candidate| {
-            (candidate.indices.reference, candidate.indices.target)
-        });
+        out.dedup_by_key(|candidate| candidate.idxs.target);
+        out.sort_unstable_by_key(|candidate| (candidate.idxs.reference, candidate.idxs.target));
     }
 
     /// The fit of `model` from `hypothesis`, the first pass gated at `radius` pixels.
@@ -165,7 +163,7 @@ impl FitCatalogs {
         let mut warp = WarpTransform::new(hypothesis);
         let mut gate = Gate::Radius(radius);
         let mut candidates = Vec::new();
-        let mut previous: Vec<MatchIndices> = Vec::new();
+        let mut previous: Vec<MatchIdxs> = Vec::new();
         let mut normalized = Vec::new();
         let mut pairs = WeightedPairs::default();
         let mut scale = 1.0;
@@ -192,8 +190,8 @@ impl FitCatalogs {
             for candidate in &candidates {
                 let robust = 1.0 / (1.0 + (candidate.normalized / (CAUCHY_TUNING * scale)).powi(2));
                 pairs.push(
-                    self.reference[candidate.indices.reference],
-                    self.target[candidate.indices.target],
+                    self.reference[candidate.idxs.reference],
+                    self.target[candidate.idxs.target],
                     robust / candidate.variance,
                 );
             }
@@ -201,7 +199,7 @@ impl FitCatalogs {
 
             let same_pairs = candidates
                 .iter()
-                .map(|candidate| candidate.indices)
+                .map(|candidate| candidate.idxs)
                 .eq(previous.iter().copied());
             let moved = pairs
                 .reference
@@ -213,16 +211,16 @@ impl FitCatalogs {
                 break;
             }
             previous.clear();
-            previous.extend(candidates.iter().map(|candidate| candidate.indices));
+            previous.extend(candidates.iter().map(|candidate| candidate.idxs));
             gate = Gate::Scale(scale);
         }
 
         let matches: Vec<StarMatch> = candidates
             .iter()
             .map(|candidate| StarMatch {
-                indices: candidate.indices,
-                residual: (warp.apply(self.reference[candidate.indices.reference])
-                    - self.target[candidate.indices.target])
+                idxs: candidate.idxs,
+                residual: (warp.apply(self.reference[candidate.idxs.reference])
+                    - self.target[candidate.idxs.target])
                     .length(),
             })
             .collect();

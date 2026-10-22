@@ -8,7 +8,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::sample_domain::ScaleOrigin;
 use crate::io::error::OverBudget;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
-use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale};
+use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 
@@ -32,10 +32,10 @@ pub(super) struct FitsHduDescription<'a> {
 }
 
 impl<'a> FitsHduDescription<'a> {
-    /// The image at HDU `index`, `hdu`.
-    pub(super) fn from_hdu(hdu: &'a Hdu, index: usize) -> Result<Self, FitsLoadError> {
+    /// The image at HDU `idx`, `hdu`.
+    pub(super) fn from_hdu(hdu: &'a Hdu, idx: usize) -> Result<Self, FitsLoadError> {
         let image = hdu.image().map_err(|source| match source {
-            FitsError::NotAnImage => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: index }),
+            FitsError::NotAnImage => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: idx }),
             source => FitsLoadError::from(source),
         })?;
         Ok(Self {

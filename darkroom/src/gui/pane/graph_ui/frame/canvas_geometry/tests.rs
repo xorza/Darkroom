@@ -22,7 +22,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     fixture
         .doc
         .graph
-        .set_input_binding(InputPort::new(leaves, 0), Binding::bind(stays, 0));
+        .set_input_binding(InputPort::new(leaves, 0), Binding::wire(stays, 0));
 
     // Both on screen and recorded, so every glyph has a fresh offset cached.
     let mut h = CanvasHarness::new(fixture);

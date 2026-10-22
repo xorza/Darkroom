@@ -28,7 +28,7 @@ pub(crate) struct SetFacts {
 /// A fact and the frame that stated it first.
 #[derive(Debug)]
 struct Stated<T> {
-    index: usize,
+    idx: usize,
     value: T,
 }
 
@@ -41,23 +41,23 @@ impl SetFacts {
         set
     }
 
-    /// Check frame `index` against the facts stated before it, then record the ones it states
+    /// Check frame `idx` against the facts stated before it, then record the ones it states
     /// first. The caller admits frames in index order, so the frame each fact is held to is the
     /// lowest index that states it.
-    pub(crate) fn admit(&mut self, index: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
-        self.check(index, facts)?;
-        self.record(index, facts);
+    pub(crate) fn admit(&mut self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
+        self.check(idx, facts)?;
+        self.record(idx, facts);
         Ok(())
     }
 
-    /// Check frame `index` against the facts recorded so far, without recording its own.
-    pub(crate) fn check(&self, index: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
+    /// Check frame `idx` against the facts recorded so far, without recording its own.
+    pub(crate) fn check(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
         if let Some(domain) = &facts.domain {
             let mismatch =
                 |reference: &Stated<SampleDomain>| AdmissionError::SampleDomainMismatch {
-                    index,
+                    idx,
                     actual: Box::new(domain.clone()),
-                    reference_index: reference.index,
+                    reference_idx: reference.idx,
                     expected: Box::new(reference.value.clone()),
                 };
             if let Some(scale) = &self.scale
@@ -76,9 +76,9 @@ impl SetFacts {
             && actual != reference.value
         {
             return Err(AdmissionError::RowOrderMismatch {
-                index,
+                idx,
                 actual,
-                reference_index: reference.index,
+                reference_idx: reference.idx,
                 expected: reference.value,
             });
         }
@@ -86,36 +86,36 @@ impl SetFacts {
             && facts.cfa_type != reference.value
         {
             return Err(AdmissionError::CfaPatternMismatch {
-                index,
+                idx,
                 actual: facts.cfa_type,
-                reference_index: reference.index,
+                reference_idx: reference.idx,
                 expected: reference.value,
             });
         }
         Ok(())
     }
 
-    fn record(&mut self, index: usize, facts: &FrameFacts) {
+    fn record(&mut self, idx: usize, facts: &FrameFacts) {
         if let Some(domain) = &facts.domain {
             self.scale.get_or_insert_with(|| Stated {
-                index,
+                idx,
                 value: domain.clone(),
             });
             if domain.unit.is_some() {
                 self.unit.get_or_insert_with(|| Stated {
-                    index,
+                    idx,
                     value: domain.clone(),
                 });
             }
         }
         if let Some(row_order) = facts.row_order {
             self.row_order.get_or_insert(Stated {
-                index,
+                idx,
                 value: row_order,
             });
         }
         self.cfa_type.get_or_insert(Stated {
-            index,
+            idx,
             value: facts.cfa_type,
         });
     }

@@ -23,7 +23,7 @@ use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::registration::resample::source_image::SourcePlane;
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;
 
@@ -143,25 +143,25 @@ impl FlaggedSources<'_> {
         self.validity.map(plane)
     }
 
-    /// The flags a window sampling `position` can read. A position in the footprint's rim takes
+    /// The flags a window sampling `pos` can read. A position in the footprint's rim takes
     /// the edge cell, whose grown flags cover every in-bounds tap such a window reads.
     #[expect(
         clippy::cast_sign_loss,
         reason = "each cell is clamped to the image before the conversion"
     )]
-    pub(crate) fn near(&self, position: SourcePosition) -> QualityFlags {
+    pub(crate) fn near(&self, pos: SourcePos) -> QualityFlags {
         let near = self
             .near
             .expect("a filter's sources are grown by its window");
-        let x = (position.cell_x.max(0) as usize).min(near.width() - 1);
-        let y = (position.cell_y.max(0) as usize).min(near.height() - 1);
+        let x = (pos.cell_x.max(0) as usize).min(near.width() - 1);
+        let y = (pos.cell_y.max(0) as usize).min(near.height() - 1);
         QualityFlags::from_byte(near.pixels()[y * near.width() + x])
     }
 
-    /// The carried flags of source pixel `index`, none when it is excluded: an excluded pixel is
+    /// The carried flags of source pixel `idx`, none when it is excluded: an excluded pixel is
     /// never sampled.
-    pub(super) fn carried_at(&self, index: usize) -> QualityFlags {
-        carried(self.flags.at(index))
+    pub(super) fn carried_at(&self, idx: usize) -> QualityFlags {
+        carried(self.flags.at(idx))
     }
 
     /// The carried flags of every in-bounds source pixel the window of `x` and `y` gives a weight

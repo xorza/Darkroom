@@ -6,7 +6,7 @@
 //! external resources it reads.
 //! [`RuntimeCache::node_digest`](crate::execution::cache::runtime_cache::RuntimeCache::node_digest)
 //! folds that into a 256-bit
-//! BLAKE3 digest, reading each `Bind` producer's *already-stamped* `current_digest`
+//! BLAKE3 digest, reading each `Wire` producer's *already-stamped* `current_digest`
 //! (the resolver computes digests producer-first, so no recursive digest traversal is
 //! needed). This module owns the *encoding* — the hasher, the tags, and the [`DOMAIN`]
 //! versioning them; the fold itself is a cache method, since what it reads (slots, the path
@@ -110,7 +110,7 @@ pub(super) enum InputTag {
     /// An authored constant, its value following.
     Const = 1,
     /// A producer port, its digest and port index following.
-    Bind = 2,
+    Wire = 2,
     /// A resource input, the referent's identity following.
     BoundPaths = 3,
     /// A resource input handed something that is not a path — the marker

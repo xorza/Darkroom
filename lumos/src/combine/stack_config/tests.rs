@@ -359,7 +359,7 @@ fn validate_invalid_config_returns_exact_errors() {
                 ..StackConfig::light()
             },
             StackConfigError::InvalidManualWeight {
-                index: 1,
+                idx: 1,
                 value: -0.5,
             },
         ),
@@ -369,10 +369,7 @@ fn validate_invalid_config_returns_exact_errors() {
                 normalization: Normalization::None,
                 ..StackConfig::light()
             },
-            StackConfigError::InvalidManualWeight {
-                index: 1,
-                value: 0.0,
-            },
+            StackConfigError::InvalidManualWeight { idx: 1, value: 0.0 },
         ),
         (
             StackConfig {

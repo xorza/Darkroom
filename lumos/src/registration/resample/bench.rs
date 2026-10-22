@@ -15,7 +15,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::linear_image::LinearImage;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::Scratch;
@@ -97,9 +97,9 @@ fn warp(b: &mut Bencher<'_>, case: WarpCase<'_>) {
     } = case;
     let warp = Warp {
         transform,
-        params: WarpParams {
+        params: WarpConfig {
             method,
-            ..WarpParams::default()
+            ..WarpConfig::default()
         },
     };
     let source = SourceImage::of(light);

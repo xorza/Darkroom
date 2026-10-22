@@ -70,7 +70,7 @@ impl<'a> MosaicNoiseMeasure<'a> {
         let sampling = MosaicSampling {
             size: Size2us::from(mosaic),
             cfa_type: &cfa_type,
-            excluded: |index| flags.is_some_and(|flags| flags.is_flagged(index)),
+            excluded: |idx| flags.is_some_and(|flags| flags.is_flagged(idx)),
             per_color: MAX_STATISTIC_SAMPLES,
         };
         let background = sampling.backgrounds(mosaic, flat_gain);
@@ -89,7 +89,7 @@ fn color_medians(
     sampling: &MosaicSampling<'_, impl Fn(usize) -> bool>,
 ) -> [f32; 3] {
     let mut samples = sampling.photosite_counts().map(Vec::with_capacity);
-    sampling.for_each_photosite(|index, color| samples[color].push(mosaic[index]));
+    sampling.for_each_photosite(|idx, color| samples[color].push(mosaic[idx]));
     samples.map(|mut color| {
         if color.is_empty() {
             0.0

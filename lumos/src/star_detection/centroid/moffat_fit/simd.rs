@@ -129,7 +129,7 @@ impl<S: Isa> Profile<S> {
 mod tests {
     use crate::star_detection::centroid::moffat_fit::MoffatFixedBeta;
     use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
-    use crate::star_detection::centroid::profile_problem::LMModel;
+    use crate::star_detection::centroid::profile_problem::LmModel;
     use crate::star_detection::centroid::profile_problem::internals::ModelStamp;
     use crate::star_detection::centroid::simd::internals::assert_every_tier_matches_portable;
 

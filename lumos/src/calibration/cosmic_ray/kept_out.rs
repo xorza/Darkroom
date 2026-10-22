@@ -103,29 +103,27 @@ fn star_cores(data: &Buffer2<f32>, saturated: &BitBuffer2) -> BitBuffer2 {
     // saturated samples would be a plane no budget charges.
     let mut level = RadixMedian::default();
     let mut high = level.high_pass();
-    saturated.for_each_set(|position| high.add(data[size.index_of(position)]));
+    saturated.for_each_set(|pos| high.add(data[size.idx_of(pos)]));
     if high.len() == 0 {
         return cores;
     }
     let mut low = high.finish();
-    saturated.for_each_set(|position| low.add(data[size.index_of(position)]));
+    saturated.for_each_set(|pos| low.add(data[size.idx_of(pos)]));
     let threshold = CORE_SHARE * low.median();
     let mut window = Vec::with_capacity((2 * CORE_RADIUS + 1).pow(2));
-    saturated.for_each_set(|position| {
+    saturated.for_each_set(|pos| {
         window.clear();
         for dy in 0..=2 * CORE_RADIUS {
-            let y = (position.y + dy)
+            let y = (pos.y + dy)
                 .saturating_sub(CORE_RADIUS)
                 .min(size.height - 1);
             for dx in 0..=2 * CORE_RADIUS {
-                let x = (position.x + dx)
-                    .saturating_sub(CORE_RADIUS)
-                    .min(size.width - 1);
-                window.push(data[size.index_of(Vec2us::new(x, y))]);
+                let x = (pos.x + dx).saturating_sub(CORE_RADIUS).min(size.width - 1);
+                window.push(data[size.idx_of(Vec2us::new(x, y))]);
             }
         }
         if statistics::median_mut(&mut window) > threshold {
-            cores.set_at(position, true);
+            cores.set_at(pos, true);
         }
     });
     cores

@@ -21,7 +21,7 @@ use crate::combine::stack_config::combine_method::CombineMethod;
 use crate::combine::stack_config::small_n::SmallN;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::combine::stack_frame::StackFrame;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
@@ -94,10 +94,10 @@ impl StackConfig {
     pub(crate) fn for_survivors(&self, dropped: &[usize]) -> Self {
         let mut config = self.clone();
         if let Weighting::Manual(weights) = &mut config.weighting {
-            let mut index = 0;
+            let mut idx = 0;
             weights.retain(|_| {
-                let kept = dropped.binary_search(&index).is_err();
-                index += 1;
+                let kept = dropped.binary_search(&idx).is_err();
+                idx += 1;
                 kept
             });
         }
@@ -152,7 +152,7 @@ impl StackConfig {
     /// Validate the configuration for a run over `frame_count` frames: every parameter, and one
     /// manual weight per frame.
     pub(crate) fn validate(&self, frame_count: usize) -> Result<(), StackConfigError> {
-        ConfigValue::count("min_survivors", self.min_survivors)
+        ConfigField::count("min_survivors", self.min_survivors)
             .must_be("at least 1", self.min_survivors >= 1)?;
         if let CombineMethod::Mean(rejection) = &self.combine.method {
             rejection.validate()?;
@@ -169,12 +169,12 @@ impl StackConfig {
         // only such frames cover would read 0 as if measured. Dropping the frame is the honest
         // form.
         if let Weighting::Manual(weights) = &self.weighting {
-            if let Some((index, &value)) = weights
+            if let Some((idx, &value)) = weights
                 .iter()
                 .enumerate()
                 .find(|(_, value)| !value.is_finite() || **value <= 0.0)
             {
-                return Err(StackConfigError::InvalidManualWeight { index, value });
+                return Err(StackConfigError::InvalidManualWeight { idx, value });
             }
             let sum: f32 = weights.iter().sum();
             if !sum.is_finite() || sum <= 0.0 {

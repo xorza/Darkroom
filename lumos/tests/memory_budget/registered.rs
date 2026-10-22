@@ -115,7 +115,7 @@ fn a_spilled_run_that_finds_its_reference_stays_within_its_budget() {
 fn a_spilled_run_with_a_named_reference_stays_within_its_budget() {
     alone(|| {
         let config = AlignStackConfig {
-            reference: Reference::Index(1),
+            reference: Reference::Idx(1),
             ..AlignStackConfig::default()
         };
         let report = Mosaics {
@@ -197,7 +197,7 @@ fn held_lights_add_no_more_than_the_budget() {
         let budget = Budget::mib(16);
         let ingest = session.ingest(budget);
         let field = StarField::new(SIDE, STARS, 0x5EED);
-        let lights: Vec<LinearImage> = (0..LIGHTS).map(|index| field.frame(index)).collect();
+        let lights: Vec<LinearImage> = (0..LIGHTS).map(|idx| field.frame(idx)).collect();
         let run = session.measure(|| {
             AlignStackConfig::default()
                 .align_stack_images(lights, &ingest, ProgressMonitor::unattended())

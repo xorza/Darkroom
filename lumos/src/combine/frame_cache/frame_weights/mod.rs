@@ -50,15 +50,15 @@ impl FrameWeights {
             ),
             Weighting::Noise => {
                 let mut values = Vec::new();
-                for (index, stats) in stats.into_iter().enumerate() {
+                for (idx, stats) in stats.into_iter().enumerate() {
                     for slot in 0..slots.count() {
-                        let gain = frame_norms.map_or(1.0, |norms| norms[index].slots[slot].gain);
+                        let gain = frame_norms.map_or(1.0, |norms| norms[idx].slots[slot].gain);
                         // The frame's noise where no flat amplified it, as normalization scaled
                         // it: the flat's gain changes across the frame, not between frames.
                         let variance = stats.ccd_noise(slot).at(1.0).background * gain * gain;
                         let weight = 1.0 / variance;
                         if !weight.is_finite() {
-                            return Err(StackError::NoNoiseToWeigh { index });
+                            return Err(StackError::NoNoiseToWeigh { idx });
                         }
                         values.push(weight);
                     }

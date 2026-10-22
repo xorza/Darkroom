@@ -31,7 +31,7 @@ impl MasterRecipe {
     /// The recipe of `role`'s master stacked by this lumos under `ingest`, as
     /// [`CalibrationMasters::build`](crate::CalibrationMasters::build) hands it to a cache.
     pub fn of(role: MasterRole, ingest: &IngestConfig) -> Self {
-        let options = ingest.decode_options().digest();
+        let options = ingest.decode_params().digest();
         let hash = fnv1a::hash(
             fnv1a::hash(MASTER_VERSION, &options.to_le_bytes()),
             role.extname().as_bytes(),
@@ -51,7 +51,7 @@ mod tests {
     use crate::calibration::master_recipe::MasterRecipe;
     use crate::calibration::master_role::MasterRole;
     use crate::ingest::ingest_config::IngestConfig;
-    use crate::io::fits::fits_load_options::FitsChecksumPolicy;
+    use crate::io::fits::fits_load_config::FitsChecksumPolicy;
 
     /// The recipe moves with the decode options and with the role, and with nothing else: a FITS
     /// checksum policy of `RequireValid` against the default, a flat against a dark, while the

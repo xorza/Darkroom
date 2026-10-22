@@ -9,7 +9,7 @@ use crate::registration::distortion::sip::{SipConfig, SipModel};
 use crate::registration::error::{FailedModel, RegistrationError};
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitModel};
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::{RansacEstimator, RansacResult};
 use crate::registration::transform::TransformType;
@@ -112,9 +112,9 @@ impl ModelSearch<'_> {
         let Some(scale) = fitted.last().map(|(_, fit)| fit.scale) else {
             return Err(RegistrationError::EveryModelFailed { failures });
         };
-        let mut union: Vec<MatchIndices> = fitted
+        let mut union: Vec<MatchIdxs> = fitted
             .iter()
-            .flat_map(|(_, fit)| fit.matches.iter().map(|star_match| star_match.indices))
+            .flat_map(|(_, fit)| fit.matches.iter().map(|star_match| star_match.idxs))
             .collect();
         union.sort_unstable_by_key(|pair| (pair.reference, pair.target));
         union.dedup();

@@ -194,8 +194,8 @@ mod tests {
     /// written.
     #[test]
     fn an_evicted_frame_leaves_every_plane_on_the_disk() {
-        let directory = TempDir::new("stored_frame_evict");
-        let scratch = RunScratch::create_evictable(directory.path()).unwrap();
+        let dir = TempDir::new("stored_frame_evict");
+        let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let size = Size2us::new(512, 512);
         let image = LinearImage::from_planar_channels(
             ImageDimensions::new(size, ChannelLayout::Rgb),

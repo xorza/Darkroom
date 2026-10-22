@@ -21,7 +21,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
     assert_eq!(g.graph.len(), 3);
     assert_eq!(
         g.graph.bindings[&InputPort::new(g.id("double"), 0)],
-        Binding::bind(g.id("src"), 0)
+        Binding::wire(g.id("src"), 0)
     );
     // `returns` declared the output its literal implies.
     let src = g.graph.find(g.id("src")).unwrap();
@@ -93,7 +93,7 @@ fn sample_wires_five_nodes_in_declaration_order() {
     ] {
         assert_eq!(
             g.graph.bindings[&InputPort::new(g.id(consumer), input)],
-            Binding::bind(g.id(producer), 0),
+            Binding::wire(g.id(producer), 0),
             "{producer} feeds {consumer}[{input}]"
         );
     }

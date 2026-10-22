@@ -40,7 +40,7 @@ use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
 use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
-use crate::gui::state::preview_store::error::PreviewImageError;
+use crate::gui::state::preview_store::error::DrawablePreviewError;
 use crate::gui::state::preview_store::{
     DrawableImage, FullView, PreviewMessage, PreviewStore, StoredContent,
 };
@@ -95,9 +95,9 @@ enum ShownSource {
     Image(FullView),
     /// Why this value has no picture. Carries the reason rather than its
     /// wording, so the pane decides how to say it — including for a perfectly
-    /// good non-image value, which is [`PreviewImageError::NotAnImage`] and
+    /// good non-image value, which is [`DrawablePreviewError::NotAnImage`] and
     /// not a fault.
-    NoImage(PreviewImageError),
+    NoImage(DrawablePreviewError),
 }
 
 impl ShownSource {
@@ -119,7 +119,7 @@ impl ShownSource {
             // non-image value is `NotAnImage`: "7" is not what a viewer tab is
             // for, and the preview card is what renders it.
             Some(StoredContent::Error(error)) => Self::NoImage(error.clone()),
-            Some(StoredContent::Text(_)) => Self::NoImage(PreviewImageError::NotAnImage),
+            Some(StoredContent::Text(_)) => Self::NoImage(DrawablePreviewError::NotAnImage),
         }
     }
 

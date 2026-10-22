@@ -236,7 +236,7 @@ fn path_previews_distinguish_single_modes_and_multi_selections() {
 
     assert_eq!(single("", FsPathMode::ExistingFile), "Choose file…");
     assert_eq!(single("", FsPathMode::NewFile), "Choose save path…");
-    assert_eq!(single("", FsPathMode::Directory), "Choose directory…");
+    assert_eq!(single("", FsPathMode::Dir), "Choose directory…");
     assert_eq!(
         single("frames/light-01.raf", FsPathMode::ExistingFile),
         "light-01.raf"

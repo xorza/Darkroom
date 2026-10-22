@@ -10,7 +10,7 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::{OutputSnapshot, RuntimeSlot};
 use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::index::NodeIdx;
+use crate::execution::idx::NodeIdx;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
@@ -82,8 +82,8 @@ fn install(
     slots: impl IntoIterator<Item = RuntimeSlot>,
 ) {
     cache.install_for_test(program);
-    for (index, slot) in slots.into_iter().enumerate() {
-        cache.slots[NodeIdx(index as u32)] = slot;
+    for (idx, slot) in slots.into_iter().enumerate() {
+        cache.slots[NodeIdx(idx as u32)] = slot;
     }
 }
 
@@ -238,9 +238,9 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
 
     cache.release_dead_outputs(&program);
 
-    for (index, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
+    for (idx, (name, _, _, _, _, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
-            cache.slots[NodeIdx(index as u32)].output_values().is_some(),
+            cache.slots[NodeIdx(idx as u32)].output_values().is_some(),
             *expected_resident,
             "{name}"
         );
@@ -264,15 +264,15 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     let mut cache = RuntimeCache::default();
     let retaining = build([CacheMode::Ram; 4]);
     cache.install_for_test(&retaining);
-    for (index, _) in cases.iter().enumerate() {
-        make_resident(&mut cache.slots[NodeIdx(index as u32)], digest);
+    for (idx, _) in cases.iter().enumerate() {
+        make_resident(&mut cache.slots[NodeIdx(idx as u32)], digest);
     }
 
     cache.reconcile(&retaining, &build(cases.map(|(mode, _)| mode)));
 
-    for (index, (mode, expected_resident)) in cases.iter().enumerate() {
+    for (idx, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(
-            cache.slots[NodeIdx(index as u32)].output_values().is_some(),
+            cache.slots[NodeIdx(idx as u32)].output_values().is_some(),
             *expected_resident,
             "{mode:?}"
         );
@@ -425,7 +425,7 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use crate::execution::cache::runtime_slot::OutputRead;
-    use crate::execution::index::OutputAddr;
+    use crate::execution::idx::OutputAddr;
 
     let snapshot = OutputSnapshot::new(vec![DynamicValue::Unbound]);
     assert!(

@@ -26,7 +26,7 @@ pub(super) fn fit_is_plausible(result_pos: DVec2, input_pos: DVec2, stamp_radius
 /// per axis, which holds when the weights are right up to a common scale, and `√((σ_x² + σ_y²)/2)`
 /// of them. `None` when the Hessian at the solution is singular, or the stamp holds no more
 /// samples than parameters.
-pub(super) fn position_sigma<const N: usize>(fit: &LmFit<N>, samples: usize) -> Option<f64> {
+pub(super) fn pos_sigma<const N: usize>(fit: &LmFit<N>, samples: usize) -> Option<f64> {
     let inverse = fit.inverse_hessian_diagonal?;
     let freedom = samples.checked_sub(N).filter(|&freedom| freedom > 0)?;
     let scale = fit.chi2 / freedom as f64;
@@ -60,7 +60,7 @@ impl<'a> FitData<'a> {
 
 /// A profile model that can be fit with L-M optimization. Its samples are pixels, so it is fit
 /// as the profile integrated over each by its [`PixelQuadrature`].
-pub(super) trait LMModel<const N: usize>: std::fmt::Debug {
+pub(super) trait LmModel<const N: usize>: std::fmt::Debug {
     /// The profile at a point.
     fn point(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
@@ -113,7 +113,7 @@ struct ProfileProblem<'a, M> {
     data: FitData<'a>,
 }
 
-impl<M: LMModel<N>, const N: usize> LmProblem<N> for ProfileProblem<'_, M> {
+impl<M: LmModel<N>, const N: usize> LmProblem<N> for ProfileProblem<'_, M> {
     fn normal_equations(&self, params: &[f64; N]) -> NormalEquations<N> {
         self.model.batch_build_normal_equations(self.data, params)
     }
@@ -130,7 +130,7 @@ impl<M: LMModel<N>, const N: usize> LmProblem<N> for ProfileProblem<'_, M> {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
-    use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
+    use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
 
     impl<'a> FitData<'a> {
         pub(crate) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
@@ -157,7 +157,7 @@ pub(crate) mod internals {
 
     /// A model's scalar value and Jacobian row: the definition each model's vector lanes mirror,
     /// and the reference the batch kernels are tested against.
-    pub(crate) trait ModelJacobian<const N: usize>: LMModel<N> {
+    pub(crate) trait ModelJacobian<const N: usize>: LmModel<N> {
         /// At one point.
         fn point_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
 
@@ -221,7 +221,7 @@ pub(crate) mod internals {
     }
 
     impl ModelStamp {
-        pub(crate) fn of<M: LMModel<N>, const N: usize>(
+        pub(crate) fn of<M: LmModel<N>, const N: usize>(
             model: &M,
             size: usize,
             params: &[f64; N],

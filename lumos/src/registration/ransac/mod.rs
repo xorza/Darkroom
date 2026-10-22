@@ -184,7 +184,7 @@ impl<'a> Search<'a> {
         // nothing after its first improvement.
         let mut best: Option<ScoredHypothesis> = None;
         let mut scratch: Vec<usize> = Vec::with_capacity(n);
-        let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
+        let mut sample_idxs: Vec<usize> = Vec::with_capacity(min_samples);
         let mut sample = PointPairs::with_capacity(min_samples);
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
@@ -201,8 +201,8 @@ impl<'a> Search<'a> {
         {
             iterations += 1;
 
-            sample_fn(iterations, &mut sample_indices);
-            sample.gather(&sample_indices, &self.pairs.reference, &self.pairs.target);
+            sample_fn(iterations, &mut sample_idxs);
+            sample.gather(&sample_idxs, &self.pairs.reference, &self.pairs.target);
 
             if is_sample_degenerate(&sample.reference, max_sigma)
                 || is_sample_degenerate(&sample.target, max_sigma)

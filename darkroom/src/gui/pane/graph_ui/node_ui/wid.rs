@@ -8,7 +8,7 @@
 //! own responses.
 //!
 //! Kept out of the node module proper because these are shared vocabulary
-//! rather than [`NodeUI`](crate::gui::pane::graph_ui::node_ui::NodeUI) state: the
+//! rather than [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi) state: the
 //! geometry rebuild, the test harness, and the inspector all derive ids here
 //! for widgets they never record.
 
@@ -43,7 +43,7 @@ pub(super) fn event(tag: &'static str, event: EventPort) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, event.node_id, event.event_idx))
 }
 
-/// The node's outer body panel — probed by the connection breaker and the
+/// The node's outer body panel — probed by the wire breaker and the
 /// geometry rebuild for last frame's arranged rect, before the panel's own
 /// response round-trips.
 pub(crate) fn body(node_id: NodeId) -> WidgetId {

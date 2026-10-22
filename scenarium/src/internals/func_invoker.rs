@@ -5,7 +5,7 @@ use crate::graph::func::Func;
 use crate::graph::func::error::InvokeResult;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::runtime::any_state::AnyState;
-use crate::runtime::context_manager::ContextManager;
+use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// The five collaborators a lambda is handed, held so a test can just say what
@@ -22,7 +22,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 /// a second invoker.
 #[derive(Debug, Default)]
 pub struct FuncInvoker {
-    ctx: ContextManager,
+    ctx: CtxManager,
     state: AnyState,
     event_state: SharedAnyState,
 }
@@ -65,7 +65,7 @@ impl FuncInvoker {
 
     /// The context the calls run under, for a test that installs what a body
     /// reads from it.
-    pub const fn ctx_mut(&mut self) -> &mut ContextManager {
+    pub const fn ctx_mut(&mut self) -> &mut CtxManager {
         &mut self.ctx
     }
 }

@@ -32,7 +32,7 @@ use crate::internals::test_rng::TestRng;
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::VERSION_KEYWORD;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::{raw, writer};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -115,8 +115,8 @@ fn a_masters_flags_survive_the_fits_round_trip() {
             CfaType::Mono,
             ImageMetadata::default(),
         );
-        image.set_flags(PixelFlags::from_fn(size, |index| {
-            QualityFlags::from_byte(bytes[index])
+        image.set_flags(PixelFlags::from_fn(size, |idx| {
+            QualityFlags::from_byte(bytes[idx])
         }));
         image
     };
@@ -129,7 +129,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
 
     writer::cfa_fits(&cfa(bytes), &path).unwrap();
     assert_eq!(hdu_count(&path), 2);
-    let loaded = LoadContext::default().cfa(&path).unwrap();
+    let loaded = LoadCtx::default().cfa(&path).unwrap();
     assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 6, 0, 24, 32]);
     assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
     // The measured samples are untouched by the trip; only the null's own value is not what was
@@ -143,7 +143,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     let nulls_path = dir.join("nulls.fits");
     writer::cfa_fits(&cfa([0u8, 17, 0, 0, 0, 0]), &nulls_path).unwrap();
     assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
-    let loaded = LoadContext::default().cfa(&nulls_path).unwrap();
+    let loaded = LoadCtx::default().cfa(&nulls_path).unwrap();
     assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 0, 0, 0, 0]);
 }
 
@@ -175,7 +175,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     };
 
     write();
-    let loaded = LoadContext::default().cfa(&path).unwrap();
+    let loaded = LoadCtx::default().cfa(&path).unwrap();
     let reloaded = loaded.flat_gain().unwrap();
     assert_eq!(reloaded.size(), size);
     assert!(reloaded.planes().eq(gain.planes()));
@@ -235,13 +235,13 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     ];
     for (name, edit, expected) in cases {
         write();
-        rewrite_fits(&path, |index, header, data| {
-            if index == 1 {
+        rewrite_fits(&path, |idx, header, data| {
+            if idx == 1 {
                 edit(header, data);
             }
             true
         });
-        let error = LoadContext::default().cfa(&path).unwrap_err();
+        let error = LoadCtx::default().cfa(&path).unwrap_err();
         assert_eq!(fits_refusal(error), expected, "{name}");
     }
     assert_eq!(
@@ -278,15 +278,15 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     // A mono frame's one plane under three colors' grids, through either loader: a file no image
     // writes, as an image takes no gain over other colors, so the mosaic's header is made mono.
     write();
-    rewrite_fits(&path, |index, header, _| {
-        if index == 0 {
+    rewrite_fits(&path, |idx, header, _| {
+        if idx == 0 {
             header.set("CFATYPE", "MONO").unwrap();
         }
         true
     });
     for error in [
-        LoadContext::default().cfa(&path).unwrap_err(),
-        LoadContext::default().linear(&path).unwrap_err(),
+        LoadCtx::default().cfa(&path).unwrap_err(),
+        LoadCtx::default().linear(&path).unwrap_err(),
     ] {
         assert_eq!(
             fits_refusal(error),
@@ -317,8 +317,8 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
                 CfaType::Mono,
                 ImageMetadata::default(),
             );
-            image.set_flags(PixelFlags::from_fn(size, |index| {
-                QualityFlags::from_byte(bytes[index])
+            image.set_flags(PixelFlags::from_fn(size, |idx| {
+                QualityFlags::from_byte(bytes[idx])
             }));
             image
         };
@@ -385,13 +385,13 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
     ];
     for (name, edit, expected) in cases {
         write();
-        rewrite_fits(&path, |index, header, data| {
-            if index == 1 {
+        rewrite_fits(&path, |idx, header, data| {
+            if idx == 1 {
                 edit(header, data);
             }
             true
         });
-        let error = LoadContext::default().cfa(&path).unwrap_err();
+        let error = LoadCtx::default().cfa(&path).unwrap_err();
         assert_eq!(fits_refusal(error), expected, "{name}");
     }
     assert_eq!(
@@ -410,7 +410,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
     let flags_start = file.len() - 2880;
     file[flags_start + 1] = 0;
     fs::write(&path, &file).unwrap();
-    let error = LoadContext::default().cfa(&path).unwrap_err();
+    let error = LoadCtx::default().cfa(&path).unwrap_err();
     assert_eq!(
         fits_refusal(error),
         FitsRefusal::ChecksumRequired {
@@ -437,8 +437,8 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
     let mut rng = TestRng::new(7);
     let pixels = (0..size.pixel_count())
-        .map(|index| {
-            let color = cfa_type.slot_at(Vec2us::new(index % 64, index / 64));
+        .map(|idx| {
+            let color = cfa_type.slot_at(Vec2us::new(idx % 64, idx / 64));
             level[color] + sigma[color] * rng.next_gaussian_f32()
         })
         .collect();
@@ -487,7 +487,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
 /// knows nothing of lumos gets `0.25 × scale` in the stated `BUNIT`.
 #[test]
 fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
-    let directory = TempDir::new("lumos-cfa-domain");
+    let dir = TempDir::new("lumos-cfa-domain");
     let mut case = 0;
     for origin in [ScaleOrigin::Declared, ScaleOrigin::Assumed] {
         for pedestal in [Pedestal::Removed, Pedestal::Kept(2048.0), Pedestal::Unknown] {
@@ -509,14 +509,14 @@ fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
                     .metadata
                     .derived
                     .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 15_360.0));
-                let path = directory.path().join(format!("master_{case}.fits"));
+                let path = dir.path().join(format!("master_{case}.fits"));
                 writer::cfa_fits(&master, &path).unwrap();
                 let bytes = fs::read(&path).unwrap();
                 let reader = FitsReader::from_bytes(&bytes).unwrap();
                 let header = &reader.hdus()[0].header;
                 assert_eq!(header.get_real("BSCALE").unwrap(), Some(scale), "{domain}");
                 assert_eq!(header.get_text("BUNIT").unwrap(), unit, "{domain}");
-                let loaded = LoadContext::default().cfa(&path).unwrap();
+                let loaded = LoadCtx::default().cfa(&path).unwrap();
 
                 assert_eq!(loaded.metadata.derived.domain(), Some(&domain), "{domain}");
                 assert_eq!(
@@ -562,13 +562,13 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     let dir = TempDir::new("lumos-cfa-roundtrip");
     let path = dir.join("master.fits");
     writer::cfa_fits(&cfa, &path).unwrap();
-    let info = LoadContext::default().cfa_info(&path).unwrap();
+    let info = LoadCtx::default().cfa_info(&path).unwrap();
     assert_eq!(
         info.dimensions,
         ImageDimensions::new((2, 2), ChannelLayout::Mono)
     );
     assert_eq!(info.cfa_type, CfaType::Bayer(CfaPattern::Bggr));
-    let loaded = LoadContext::default().cfa(&path).unwrap();
+    let loaded = LoadCtx::default().cfa(&path).unwrap();
 
     assert_eq!((loaded.data().width(), loaded.data().height()), (2, 2));
     assert_eq!(loaded.data().to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
@@ -591,7 +591,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         .unwrap();
     invalid_version[version_card + version_digit] = b'0';
     fs::write(&path, invalid_version).unwrap();
-    let error = LoadContext::default().cfa(&path).unwrap_err();
+    let error = LoadCtx::default().cfa(&path).unwrap_err();
     assert_eq!(
         fits_refusal(error),
         FitsRefusal::CfaVersion { version: Some(0) }
@@ -605,7 +605,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         .unwrap();
     corrupted[offset] ^= 0x01;
     fs::write(&path, corrupted).unwrap();
-    let error = LoadContext::default().cfa(&path).unwrap_err();
+    let error = LoadCtx::default().cfa(&path).unwrap_err();
     assert_eq!(
         fits_refusal(error),
         FitsRefusal::ChecksumRequired {
@@ -633,7 +633,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
         let path = dir.join(format!("master_{name}.fits"));
 
         writer::cfa_fits(&image, &path).unwrap();
-        let loaded = LoadContext::default().cfa(path).unwrap();
+        let loaded = LoadCtx::default().cfa(path).unwrap();
 
         assert_eq!(loaded.cfa_type(), cfa_type, "{name}");
         assert_eq!(loaded.data().pixels(), image.data().pixels(), "{name}");
@@ -710,11 +710,7 @@ fn every_pattern_names_the_color_at_each_position() {
             for x in 0..4 {
                 let expected = color_of(spelling[(y % 2) * 2 + x % 2]);
                 let pos = Vec2us::new(x, y);
-                assert_eq!(
-                    pattern.color_at(pos).index(),
-                    expected,
-                    "{pattern:?} {pos:?}"
-                );
+                assert_eq!(pattern.color_at(pos).idx(), expected, "{pattern:?} {pos:?}");
                 assert_eq!(CfaType::Bayer(pattern).slot_at(pos), expected);
                 assert_eq!(raw::filter_color(filters, y, x), expected);
             }
@@ -827,9 +823,9 @@ fn demosaic_spreads_flags_by_its_support() {
         vec![0.25; size.pixel_count()],
         CfaType::Bayer(CfaPattern::Rggb),
     );
-    cfa.set_flags(PixelFlags::from_fn(size, |index| match index {
-        index if index == 20 * 48 + 20 => QualityFlags::SATURATED,
-        index if index == 40 * 48 + 40 => QualityFlags::NO_DATA,
+    cfa.set_flags(PixelFlags::from_fn(size, |idx| match idx {
+        idx if idx == 20 * 48 + 20 => QualityFlags::SATURATED,
+        idx if idx == 40 * 48 + 40 => QualityFlags::NO_DATA,
         _ => QualityFlags::default(),
     }));
     let flags = cfa
@@ -873,10 +869,10 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
         CfaType::Bayer(CfaPattern::Rggb),
         CfaType::XTrans(XTRANS_PATTERN),
     ] {
-        for (scene_index, scene) in scenes.iter().enumerate() {
+        for (scene_idx, scene) in scenes.iter().enumerate() {
             let samples: Vec<f32> = (0..size.pixel_count())
-                .map(|index| {
-                    let (x, y) = (index % size.width, index / size.width);
+                .map(|idx| {
+                    let (x, y) = (idx % size.width, idx / size.width);
                     scene(x, y) / gains[cfa_type.slot_at(Vec2us::new(x, y))]
                 })
                 .collect();
@@ -901,7 +897,7 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
             let unbalanced = false_color(None);
             assert!(
                 balanced * 3.0 < unbalanced,
-                "{cfa_type:?} scene {scene_index}: balanced {balanced}, unbalanced {unbalanced}"
+                "{cfa_type:?} scene {scene_idx}: balanced {balanced}, unbalanced {unbalanced}"
             );
         }
     }
@@ -921,10 +917,10 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
 fn the_green_proxy_fills_each_photosite_from_its_greens() {
     let size = Size2us::new(6, 6);
     let pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| (index % 6 + 10 * (index / 6)) as f32)
+        .map(|idx| (idx % 6 + 10 * (idx / 6)) as f32)
         .collect();
     let mut bayer = make_cfa(size, pixels.clone(), CfaType::Bayer(CfaPattern::Rggb));
-    bayer.add_flags_where(QualityFlags::SATURATED, |index| index == 1);
+    bayer.add_flags_where(QualityFlags::SATURATED, |idx| idx == 1);
     let proxy = bayer.green_proxy();
     let plane = proxy.channel(0);
     assert_eq!(plane[(0, 0)], 5.5);

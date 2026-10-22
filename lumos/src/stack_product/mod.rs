@@ -111,7 +111,7 @@ impl PixelQuality {
 }
 
 impl StackProduct {
-    /// Hold every pixel of each channel that `empty(channel, index)` names at `fill_value`, a value
+    /// Hold every pixel of each channel that `empty(channel, idx)` names at `fill_value`, a value
     /// no frame measured, and each quality plane there at [`PixelQuality::UNMEASURED`], so no plane
     /// claims a measurement there. A plane every channel shares holds none only where no channel
     /// does.
@@ -122,18 +122,15 @@ impl StackProduct {
     ) {
         let channels = self.image.channels();
         let fill = |plane: &mut [f32], channel: Option<usize>, value: f32| {
-            plane
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(index, sample)| {
-                    let filled = match channel {
-                        Some(channel) => empty(channel, index),
-                        None => (0..channels).all(|channel| empty(channel, index)),
-                    };
-                    if filled {
-                        *sample = value;
-                    }
-                });
+            plane.par_iter_mut().enumerate().for_each(|(idx, sample)| {
+                let filled = match channel {
+                    Some(channel) => empty(channel, idx),
+                    None => (0..channels).all(|channel| empty(channel, idx)),
+                };
+                if filled {
+                    *sample = value;
+                }
+            });
         };
         for channel in 0..channels {
             fill(
@@ -271,7 +268,7 @@ mod tests {
             dispersion: Some(measured()),
             ..product(3, None)
         };
-        filled.fill_where(|channel, index| index == 1 || channel == 0, -1.0);
+        filled.fill_where(|channel, idx| idx == 1 || channel == 0, -1.0);
 
         assert_eq!(filled.image.channel(0).pixels(), &[-1.0, -1.0]);
         assert_eq!(filled.image.channel(1).pixels(), &[1.0, -1.0]);

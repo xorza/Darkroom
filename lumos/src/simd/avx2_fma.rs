@@ -65,8 +65,8 @@ impl Isa for Avx2Fma {
     }
 
     #[inline(always)]
-    fn lookup_f32(self, table: &[f32], index: Avx2F32) -> Avx2F32 {
-        let clamped = index
+    fn lookup_f32(self, table: &[f32], idx: Avx2F32) -> Avx2F32 {
+        let clamped = idx
             .min(self.splat_f32(lookup_last(table)))
             .max(self.splat_f32(0.0));
         Avx2F32(unsafe { _mm256_i32gather_ps::<4>(table.as_ptr(), _mm256_cvttps_epi32(clamped.0)) })

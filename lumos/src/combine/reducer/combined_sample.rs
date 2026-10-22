@@ -45,15 +45,15 @@ impl CombinedSample {
         let mut weight = 0.0f32;
         let mut weighted_variance = 0.0f32;
         let mut weighted_squares = 0.0f32;
-        for index in survivors {
-            let survivor_weight = weights[index];
+        for idx in survivors {
+            let survivor_weight = weights[idx];
             count += 1;
             weight += survivor_weight;
-            let deviation = values[index] - value;
+            let deviation = values[idx] - value;
             weighted_squares += survivor_weight * deviation * deviation;
             if let Some(noise) = noise {
                 weighted_variance +=
-                    survivor_weight * survivor_weight * noise.variance_at(index, value);
+                    survivor_weight * survivor_weight * noise.variance_at(idx, value);
             }
         }
         Self {

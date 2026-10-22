@@ -40,14 +40,14 @@ impl<'a> SlotPlanes<'a> {
         let slot_count = pixels.len();
         let medians = (0..self.frames.len() * slot_count)
             .into_par_iter()
-            .map_init(RadixMedian::default, |median, pair_index| {
-                let slot = pair_index % slot_count;
+            .map_init(RadixMedian::default, |median, pair_idx| {
+                let slot = pair_idx % slot_count;
                 let sampling = PlaneSampling {
                     domain: pixels[slot].shared(),
-                    indices: &[],
+                    idxs: &[],
                 };
                 let measured = sampling.median(
-                    self.values(pair_index / slot_count, slot),
+                    self.values(pair_idx / slot_count, slot),
                     median,
                     self.cancel,
                 )?;
@@ -60,14 +60,14 @@ impl<'a> SlotPlanes<'a> {
             .collect())
     }
 
-    /// The noise variance of slot `slot` of frame `frame` at the sampled pixels `indices`: the
+    /// The noise variance of slot `slot` of frame `frame` at the sampled pixels `idxs`: the
     /// source's white noise σ², scaled by the mean inverse confidence there, since interpolation
     /// that averaged several source pixels left less noise than the source had.
     pub(super) fn noise_variance(
         &self,
         frame: usize,
         slot: usize,
-        indices: &[usize],
+        idxs: &[usize],
     ) -> Result<f64, StackError> {
         let frame = &self.frames[frame];
         let sigma = f64::from(frame.source_stats.slot_noise(slot));
@@ -76,30 +76,27 @@ impl<'a> SlotPlanes<'a> {
         };
         let values = confidence.chunk(0..self.dimensions.pixel_count());
         let mut inverse_confidence = 0.0;
-        for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
+        for chunk in idxs.chunks(CANCEL_POLL_CHUNK) {
             Cancelled::check(self.cancel)?;
-            for &index in chunk {
-                let value = f64::from(values[index]);
-                // `indices` are common-domain pixels, which clear the coverage floor, and a
+            for &idx in chunk {
+                let value = f64::from(values[idx]);
+                // `idxs` are common-domain pixels, which clear the coverage floor, and a
                 // frame-quality pair has confidence wherever it has support — so this is never a
                 // division by zero.
-                debug_assert!(
-                    value > 0.0,
-                    "zero confidence at common-domain pixel {index}"
-                );
+                debug_assert!(value > 0.0, "zero confidence at common-domain pixel {idx}");
                 inverse_confidence += 1.0 / value;
             }
         }
-        Ok(sigma * sigma * inverse_confidence / indices.len() as f64)
+        Ok(sigma * sigma * inverse_confidence / idxs.len() as f64)
     }
 }
 
 /// Where a plane is measured: its median over `domain`, when the frames do not all cover every
-/// pixel, and its values at the ascending `indices`.
+/// pixel, and its values at the ascending `idxs`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PlaneSampling<'a> {
     pub(super) domain: Option<&'a CommonDomain>,
-    pub(super) indices: &'a [usize],
+    pub(super) idxs: &'a [usize],
 }
 
 /// What [`PlaneSampling::measure`] measures of a plane.
@@ -129,11 +126,11 @@ impl PlaneSampling<'_> {
         values: &[f32],
         cancel: &CancelToken,
     ) -> Result<Vec<f32>, StackError> {
-        debug_assert!(self.indices.is_sorted(), "the sample indices ascend");
-        let mut samples = Vec::with_capacity(self.indices.len());
-        for chunk in self.indices.chunks(CANCEL_POLL_CHUNK) {
+        debug_assert!(self.idxs.is_sorted(), "the sample indices ascend");
+        let mut samples = Vec::with_capacity(self.idxs.len());
+        for chunk in self.idxs.chunks(CANCEL_POLL_CHUNK) {
             Cancelled::check(cancel)?;
-            samples.extend(chunk.iter().map(|&index| values[index]));
+            samples.extend(chunk.iter().map(|&idx| values[idx]));
         }
         Ok(samples)
     }

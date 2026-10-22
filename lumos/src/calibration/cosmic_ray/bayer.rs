@@ -86,9 +86,9 @@ impl<'a> BayerDetector<'a> {
                 continue;
             }
             phase.deinterleave(data, plane);
-            let color = pattern.color_at(phase.origin()).index();
+            let color = pattern.color_at(phase.origin()).idx();
             let local =
-                |index: usize| backgrounds.at(color, phase.to_mosaic(plane_size.point_of(index)));
+                |idx: usize| backgrounds.at(color, phase.to_mosaic(plane_size.point_of(idx)));
             let phase_kept_out = kept_out.map(|kept_out| {
                 kept_out.sample_into(plane_kept_out, phase);
                 &*plane_kept_out

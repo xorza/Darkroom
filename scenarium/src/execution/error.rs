@@ -1,4 +1,3 @@
-use std::result;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -7,13 +6,13 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::identity::NodeId;
 
 /// An **operation-level** failure that aborts a whole plan / run: a node seed had no
-/// occurrence ([`NodeSeedNotFound`](Error::NodeSeedNotFound)). It's the error type of the
+/// occurrence ([`NodeSeedNotFound`](ExecutionError::NodeSeedNotFound)). It's the error type of the
 /// engine's plan/execute, which the worker reports as
 /// [`WorkerError::Execution`](crate::worker::error::WorkerError::Execution). A *single node's* run
 /// failure is a [`RunError`], carried by that node's
 /// [`NodeStatus`](crate::execution::report::node_status::NodeStatus) row, never one of these.
 #[derive(Debug, Error, Clone)]
-pub enum Error {
+pub enum ExecutionError {
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
     #[error("node seed {node_id:?} not found in the compiled program")]
@@ -23,7 +22,7 @@ pub enum Error {
 /// A **single node's** run-time failure, reported in that node's one
 /// [`NodeStatus`](crate::execution::report::node_status::NodeStatus) row as
 /// [`NodeExecutionStatus::Errored`](crate::execution::report::node_status::NodeExecutionStatus::Errored).
-/// Distinct from [`Error`](enum@Error) (whole-operation failures): a `RunError` always concerns
+/// Distinct from [`ExecutionError`](enum@ExecutionError) (whole-operation failures): a `RunError` always concerns
 /// exactly one node, so it can't carry a compile/plan failure, and a caller reading a node's row
 /// can't mistake a setup failure for a node's outcome.
 ///
@@ -48,4 +47,4 @@ pub enum RunError {
     Cancelled,
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub type ExecutionResult<T> = Result<T, ExecutionError>;

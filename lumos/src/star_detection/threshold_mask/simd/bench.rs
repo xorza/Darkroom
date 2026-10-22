@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::simd::Kernel;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::threshold_mask::simd::{ProcessWords, WORD_PIXELS};
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
@@ -30,7 +30,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             threshold,
         }
     };
-    let tiers: Vec<Tier> = Tier::supported().collect();
+    let tiers: Vec<IsaTier> = IsaTier::supported().collect();
     let mut group = Kind::Atomic.group(c, "detection/threshold_mask", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut words = vec![0; FRAME.width.div_ceil(WORD_PIXELS)];

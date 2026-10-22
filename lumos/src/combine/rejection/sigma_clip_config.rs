@@ -4,7 +4,7 @@ use crate::combine::rejection::pass::{Narrowing, Pass};
 use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::scratch_buffers::MethodScratch;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Configuration for sigma clipping.
@@ -59,7 +59,7 @@ impl SigmaClipConfig {
     /// Validate the clip thresholds and pass count: the cap leaves at least one pass to run.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()?;
-        ConfigValue::new("max_iterations", self.max_iterations)
+        ConfigField::new("max_iterations", self.max_iterations)
             .must_be("at least 1", self.max_iterations >= 1)
     }
 

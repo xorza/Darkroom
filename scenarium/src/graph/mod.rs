@@ -162,7 +162,7 @@ impl Graph {
         match self.bindings.get(&InputPort::new(port.node_id, by)) {
             None | Some(Binding::Const(ConstValue::Null)) => false,
             Some(Binding::Const(_)) => true,
-            Some(Binding::Bind(source)) => self
+            Some(Binding::Wire(source)) => self
                 .find(source.node_id)
                 .is_some_and(|producer| !producer.disabled),
         }
@@ -215,7 +215,7 @@ impl Graph {
                     Err(BindingRejection::ConstMismatch)
                 }
             }
-            Binding::Bind(source) => {
+            Binding::Wire(source) => {
                 if input.const_only {
                     return Err(BindingRejection::WiredConstOnly);
                 }
@@ -260,13 +260,13 @@ impl Graph {
             Err(SubscriptionRejection::UndeclaredEvent)
         }
     }
-    /// Every data edge as (consumer input ← producer output). Const bindings
+    /// Every wire as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
-    pub fn edges(&self) -> impl Iterator<Item = (InputPort, OutputPort)> + '_ {
+    pub fn wires(&self) -> impl Iterator<Item = (InputPort, OutputPort)> + '_ {
         self.bindings
             .iter()
             .filter_map(|(dst, binding)| match binding {
-                Binding::Bind(src) => Some((*dst, *src)),
+                Binding::Wire(src) => Some((*dst, *src)),
                 Binding::Const(_) => None,
             })
     }
@@ -297,7 +297,7 @@ impl Graph {
         let mut seen: HashSet<NodeId> = HashSet::from_iter([producer]);
         while let Some(node) = stack.pop() {
             for (_, binding) in self.input_bindings(node) {
-                let Binding::Bind(source) = binding else {
+                let Binding::Wire(source) = binding else {
                     continue;
                 };
                 if source.node_id == consumer {
@@ -461,7 +461,7 @@ impl Graph {
                     node_id: destination.node_id,
                 });
             }
-            if let Binding::Bind(src) = binding
+            if let Binding::Wire(src) = binding
                 && !self.nodes.contains_key(&src.node_id)
             {
                 return Err(GraphValidationError::BindingMissingProducer {
@@ -541,7 +541,7 @@ impl Graph {
         self.bindings.retain(|port, binding| {
             let held = nodes.contains_key(&port.node_id)
                 && match binding {
-                    Binding::Bind(source) => nodes.contains_key(&source.node_id),
+                    Binding::Wire(source) => nodes.contains_key(&source.node_id),
                     Binding::Const(_) => true,
                 };
             if !held {
@@ -616,7 +616,7 @@ impl Graph {
         }
 
         for port in self.closing_wires() {
-            let Some(Binding::Bind(producer)) = self.bindings.remove(&port) else {
+            let Some(Binding::Wire(producer)) = self.bindings.remove(&port) else {
                 unreachable!("a closing wire is a wire in the graph");
             };
             repairs.push(Repair::CycleWire { port, producer });
@@ -664,7 +664,7 @@ impl Graph {
                         let first = stack.len();
                         stack.extend(self.input_bindings(node_id).filter_map(|(port, binding)| {
                             match binding {
-                                Binding::Bind(source) => Some(Visit::Wire(port, source.node_id)),
+                                Binding::Wire(source) => Some(Visit::Wire(port, source.node_id)),
                                 Binding::Const(_) => None,
                             }
                         }));

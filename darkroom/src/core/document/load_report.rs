@@ -50,7 +50,7 @@ pub(crate) enum DocumentRepair {
         node_id: NodeId,
     },
     /// A non-finite position, moved to the origin.
-    PositionReset {
+    PosReset {
         node_id: NodeId,
     },
     /// A node or stub with no placement, placed at the origin.
@@ -126,7 +126,7 @@ impl Display for DocumentRepair {
                     "removed the placement of {node_id:?}, which names no node"
                 )
             }
-            Self::PositionReset { node_id } => {
+            Self::PosReset { node_id } => {
                 write!(
                     f,
                     "moved {node_id:?} to the origin: its position is not finite"

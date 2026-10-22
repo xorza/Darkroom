@@ -244,14 +244,14 @@ impl App {
                 w.maximized = geom.placement.maximized;
                 if !geom.placement.maximized {
                     w.size = geom.inner_size;
-                    w.position = geom.placement.position;
+                    w.pos = geom.placement.position;
                 }
             }
             None => {
                 self.preferences.window = Some(WindowState {
                     size: geom.inner_size,
                     maximized: geom.placement.maximized,
-                    position: geom.placement.position,
+                    pos: geom.placement.position,
                 });
             }
         }
@@ -382,7 +382,7 @@ impl App {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions).map(fs_path),
             FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(fs_paths),
             FsPathMode::NewFile => dialogs::pick_new_file(&extensions).map(fs_path),
-            FsPathMode::Directory => dialogs::pick_directory().map(fs_path),
+            FsPathMode::Dir => dialogs::pick_dir().map(fs_path),
         };
         let value = match picked {
             None => return Relayout::NotNeeded,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::data::dynamic_value::DynamicValue;
 use crate::graph::func::error::InvokeResult;
 use crate::runtime::any_state::AnyState;
-use crate::runtime::context_manager::ContextManager;
+use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// Whether a node output must be produced for this run. The planner marks an output
@@ -36,7 +36,7 @@ impl OutputDemand {
 /// move-on-last-use).
 #[derive(Debug)]
 pub struct Invocation<'a> {
-    pub ctx: &'a mut ContextManager,
+    pub ctx: &'a mut CtxManager,
     pub state: &'a mut AnyState,
     pub event_state: &'a SharedAnyState,
     pub inputs: &'a mut [DynamicValue],

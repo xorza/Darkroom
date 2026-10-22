@@ -191,9 +191,9 @@ impl<'a> GraphCtx<'a> {
         self.node(node_id).is_some()
     }
 
-    /// This graph's data edges, as `(consumer input ← producer output)`.
-    pub(crate) fn connections(self) -> impl Iterator<Item = (InputPort, OutputPort)> + 'a {
-        self.body().edges()
+    /// This graph's wires, as `(consumer input ← producer output)`.
+    pub(crate) fn wires(self) -> impl Iterator<Item = (InputPort, OutputPort)> + 'a {
+        self.body().wires()
     }
 
     /// This graph's event-subscription edges.

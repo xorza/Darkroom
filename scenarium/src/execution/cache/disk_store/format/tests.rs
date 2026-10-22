@@ -23,8 +23,8 @@ use crate::library::Library;
 /// skipped — the shape the run loop hands the decoder.
 fn demand(output_count: usize, produced: &[usize]) -> Vec<OutputDemand> {
     let mut demand = vec![OutputDemand::Skip; output_count];
-    for &index in produced {
-        demand[index] = OutputDemand::Produce;
+    for &idx in produced {
+        demand[idx] = OutputDemand::Produce;
     }
     demand
 }
@@ -83,8 +83,8 @@ impl<T, const N: usize> AsyncSeek for ChunkedIo<T, N>
 where
     T: AsyncSeek + Unpin,
 {
-    fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
-        Pin::new(&mut self.get_mut().0).start_seek(position)
+    fn start_seek(self: Pin<&mut Self>, pos: SeekFrom) -> io::Result<()> {
+        Pin::new(&mut self.get_mut().0).start_seek(pos)
     }
 
     fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {

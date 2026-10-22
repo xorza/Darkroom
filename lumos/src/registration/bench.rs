@@ -12,7 +12,7 @@ use crate::registration::distortion::sip::{SipConfig, SipModel};
 use crate::registration::final_fit::{FinalFit, FitModel};
 use crate::registration::register::PreparedPair;
 use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::resample::{self, row_positions};
+use crate::registration::resample::{self, row_poss};
 use crate::registration::transform::linear_model::LinearModel;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
@@ -49,14 +49,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     triangle::bench::atomic(c);
     ransac::bench::atomic(c);
     final_fit::bench::atomic(c);
-    row_positions::bench::atomic(c);
+    row_poss::bench::atomic(c);
 }
 
 /// The FWHM the stars are measured at, as the scene renders them.
 const FWHM: f32 = 3.5;
 
 /// A star position's measurement error, in pixels: a centroid's at the scene's typical SNR.
-const POSITION_SIGMA: f64 = 0.05;
+const POS_SIGMA: f64 = 0.05;
 
 /// A typical field's star catalogue in two exposures through one lens, each sorted by flux as the
 /// detector returns it: the second dithered by (11, −7) px and turned 0.2°, as a dithered sequence
@@ -83,8 +83,8 @@ impl Pair {
                 f64::from(rng.next_gaussian_f32()),
             );
             Star {
-                position_sigma: POSITION_SIGMA,
-                ..Star::at(pos + POSITION_SIGMA * error)
+                pos_sigma: POS_SIGMA,
+                ..Star::at(pos + POS_SIGMA * error)
                     .with_flux(flux)
                     .with_fwhm(FWHM)
             }

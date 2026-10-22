@@ -56,9 +56,9 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
         "a node-local output outside its compiled range must trip in debug"
     );
 
-    if let Ok(index) = usize::try_from(u64::from(u32::MAX) + 1) {
+    if let Ok(idx) = usize::try_from(u64::from(u32::MAX) + 1) {
         assert!(
-            catch_unwind(|| OutputIdx::from_idx(index)).is_err(),
+            catch_unwind(|| OutputIdx::from_idx(idx)).is_err(),
             "the output pool cannot exceed its u32 index representation"
         );
     }

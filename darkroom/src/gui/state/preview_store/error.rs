@@ -8,7 +8,7 @@ use palantir::ImageTooLarge;
 /// conversion on every frame that draws it, so a broken value is diagnosed
 /// once and reported the same way from then on.
 #[derive(Clone, Debug, thiserror::Error)]
-pub(crate) enum PreviewImageError {
+pub(crate) enum DrawablePreviewError {
     /// The node published something that isn't an image — a number, a string.
     /// Not a fault: the preview card formats it, and only a viewer tab, which
     /// has nothing else to show, reports it.

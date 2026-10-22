@@ -17,7 +17,7 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::main_window::dock_panes::DockPanes;
-use crate::gui::pane::graph_ui::GraphUI;
+use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::ImageViewer;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
@@ -47,7 +47,7 @@ const MIN_PANE: f32 = 220.0;
 /// context alone rather than it *and* the levels it came from.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
-    pub(crate) graph_ui: GraphUI,
+    pub(crate) graph_ui: GraphUi,
     /// One image-viewer navigation state per rendered viewer tab
     /// ([`TabRef::ImageViewer`]), keyed by the preview node it shows. Textures remain
     /// centralized in the preview store.
@@ -66,7 +66,7 @@ impl MainWindow {
     /// Navigation scan: surface tab activate/close/drag-drop from *last*
     /// frame's chip responses. Runs at the top of the frame so a switch
     /// applies before the record — the switched-to tab records in Pass A and
-    /// its connections draw in Pass B, no first-frame gap.
+    /// its wires draw in Pass B, no first-frame gap.
     ///
     /// The dock is the whole of it. The panes' own input reads are the
     /// prepass's, over the arrangement this phase's drain settles.
@@ -105,7 +105,7 @@ impl MainWindow {
         for tab in cx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
-                // by construction — which is what `GraphUI::prepass` asserts.
+                // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
                     request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx), out);
                 }
@@ -180,7 +180,7 @@ impl MainWindow {
 
     /// Release everything this window caches for a subject the document has
     /// stopped holding: the canvas's `NodeId`-keyed tables (see
-    /// [`GraphUI::retain_nodes`]), swept only when the graph's revision moved,
+    /// [`GraphUi::retain_nodes`]), swept only when the graph's revision moved,
     /// and the per-tab viewer state.
     ///
     /// Driven from `App::update`, beside the preview store's

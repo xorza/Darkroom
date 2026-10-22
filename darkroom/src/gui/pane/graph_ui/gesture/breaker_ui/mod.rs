@@ -14,9 +14,9 @@ use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::gesture_slot::GestureSlot;
 
-/// Owns the active connection-breaker gesture (RMB / Ctrl+LMB drag on
+/// Owns the active wire-breaker gesture (RMB / Ctrl+LMB drag on
 /// the outer canvas). Hands out a `BreakerProbe` to the canvas record so node
-/// and connection draws can flag intersections inline.
+/// and wire draws can flag intersections inline.
 ///
 /// Split in two by what each half *is*, not by when it lives: the slot holds
 /// the gesture — present or absent, cancelled by a single `clear` — while the
@@ -24,7 +24,7 @@ use crate::gui::widgets::gesture_slot::GestureSlot;
 /// in the slot allocates, which is what lets it stay the same plain
 /// [`GestureSlot`] every other controller uses.
 #[derive(Default, Debug)]
-pub(crate) struct BreakerUI {
+pub(crate) struct BreakerUi {
     /// The button that latched the live gesture — the whole of its identity,
     /// and what the release check polls: a Ctrl+LMB-launched breaker must
     /// keep reading Left, not Right. Empty when no scribble is in flight,
@@ -33,7 +33,7 @@ pub(crate) struct BreakerUI {
     scribble: Scribble,
 }
 
-impl BreakerUI {
+impl BreakerUi {
     /// Drop the in-flight scribble. Only the latch is cleared: the point and
     /// broken-target buffers are meaningless without it (see
     /// [`Self::scribble`]) and keep their capacity for the next gesture.

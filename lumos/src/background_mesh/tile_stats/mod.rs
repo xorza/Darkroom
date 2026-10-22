@@ -45,8 +45,8 @@ pub(crate) struct CfaColor<'a> {
 }
 
 impl CfaColor<'_> {
-    const fn takes(self, position: Vec2us) -> bool {
-        self.cfa.slot_at(position) == self.color
+    const fn takes(self, pos: Vec2us) -> bool {
+        self.cfa.slot_at(pos) == self.color
     }
 }
 
@@ -439,22 +439,22 @@ impl ColorTile<'_> {
         };
         for y in self.tile.min.y..self.tile.max.y {
             for x in self.tile.min.x..self.tile.max.x {
-                let position = Vec2us::new(x, y);
-                if self.color.takes(position) {
+                let pos = Vec2us::new(x, y);
+                if self.color.takes(pos) {
                     count.eligible += 1;
-                    count.unmasked += usize::from(!self.masked(position));
+                    count.unmasked += usize::from(!self.masked(pos));
                 }
             }
         }
         count
     }
 
-    fn takes(&self, position: Vec2us) -> bool {
-        self.color.takes(position) && !self.masked(position)
+    fn takes(&self, pos: Vec2us) -> bool {
+        self.color.takes(pos) && !self.masked(pos)
     }
 
-    fn masked(&self, position: Vec2us) -> bool {
-        self.mask.is_some_and(|mask| mask.get_at(position))
+    fn masked(&self, pos: Vec2us) -> bool {
+        self.mask.is_some_and(|mask| mask.get_at(pos))
     }
 }
 

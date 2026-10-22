@@ -11,7 +11,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use crate::execution::index::{NodeIdx, OutputAddr};
+use crate::execution::idx::{NodeIdx, OutputAddr};
 use crate::graph::identity::{FuncId, NodeId};
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an

@@ -23,7 +23,7 @@ impl OnePixel {
     /// An image of `background` with this pixel set.
     fn on(self, size: Size2us, background: f32) -> LinearImage {
         let mut pixels = vec![background; size.pixel_count()];
-        pixels[size.index_of(self.at)] = self.value;
+        pixels[size.idx_of(self.at)] = self.value;
         gray_image(size, pixels)
     }
 }
@@ -55,7 +55,7 @@ fn constant_or_fill_violation(
     let threshold = (gate * deepest).max(f32::MIN_POSITIVE);
     let bound = (2.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * value.abs() * LOBE_EXCESS / gate;
     let mut covered = 0;
-    for (index, (&actual, &w)) in product
+    for (idx, (&actual, &w)) in product
         .image
         .channel(0)
         .pixels()
@@ -67,12 +67,12 @@ fn constant_or_fill_violation(
             covered += 1;
             if (actual - value).abs() > bound {
                 return Some(format!(
-                    "pixel {index}: {actual}, expected {value} (weight {w})"
+                    "pixel {idx}: {actual}, expected {value} (weight {w})"
                 ));
             }
         } else if actual != fill {
             return Some(format!(
-                "pixel {index}: {actual}, expected the fill {fill} (weight {w})"
+                "pixel {idx}: {actual}, expected the fill {fill} (weight {w})"
             ));
         }
     }
@@ -148,7 +148,7 @@ fn two_frames_combine_to_their_weighted_mean() {
         .unwrap();
         // Two frames' deposits, at the larger value.
         let bound = (4.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * 6.0 * LOBE_EXCESS;
-        for (index, (&value, &weight)) in product
+        for (idx, (&value, &weight)) in product
             .image
             .channel(0)
             .pixels()
@@ -159,7 +159,7 @@ fn two_frames_combine_to_their_weighted_mean() {
             let expected = if weight > 0.0 { 5.0 } else { 0.0 };
             assert!(
                 (value - expected).abs() <= bound,
-                "{kernel:?} pixel {index}: {value}"
+                "{kernel:?} pixel {idx}: {value}"
             );
         }
     }
@@ -539,13 +539,9 @@ fn a_frame_of_zero_pixel_weights_is_not_gathered() {
     frames[1].pixel_weight_map = Some(Buffer2::new_filled(size.width, size.height, 0.0));
     let product = drizzle_plain(frames, &usual_config(DrizzleKernel::Turbo)).unwrap();
     let weight = weight_plane(&product);
-    for (index, &value) in product.image.channel(0).pixels().iter().enumerate() {
-        let expected = if weight.pixels()[index] > 0.0 {
-            3.0
-        } else {
-            0.0
-        };
-        assert_eq!(value, expected, "pixel {index}");
+    for (idx, &value) in product.image.channel(0).pixels().iter().enumerate() {
+        let expected = if weight.pixels()[idx] > 0.0 { 3.0 } else { 0.0 };
+        assert_eq!(value, expected, "pixel {idx}");
     }
     assert_eq!(product.coverage.as_ref().unwrap().to_plane(0)[(8, 8)], 0.5);
 }

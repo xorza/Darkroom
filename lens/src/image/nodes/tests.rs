@@ -101,7 +101,7 @@ async fn blend_refuses_a_destination_of_another_size_or_format() {
     ] {
         assert!(matches!(
             blend(image(2, ColorFormat::RGB_U8), destination).await,
-            Err(scenarium::InvokeError::InvalidInput { index: 1, .. })
+            Err(scenarium::InvokeError::InvalidInput { idx: 1, .. })
         ));
     }
     assert!(
@@ -138,7 +138,7 @@ async fn transform_refuses_a_transform_with_no_inverse() {
         assert!(
             matches!(
                 run(values).await,
-                Err(scenarium::InvokeError::InvalidInput { index: 1, .. })
+                Err(scenarium::InvokeError::InvalidInput { idx: 1, .. })
             ),
             "{values:?}"
         );

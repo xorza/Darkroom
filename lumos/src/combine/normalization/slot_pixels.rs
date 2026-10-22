@@ -44,7 +44,7 @@ impl<'a> SlotPixels<'a> {
                 (Some(domain), None) => Ok(Self::Common(domain)),
                 (Some(domain), Some(cfa_type)) => Ok(Self::CommonColor(domain.restricted(
                     size,
-                    |position| cfa_type.slot_at(position) == slot,
+                    |pos| cfa_type.slot_at(pos) == slot,
                     planes.cancel,
                 )?)),
             })
@@ -62,11 +62,11 @@ impl<'a> SlotPixels<'a> {
     }
 
     /// The sampled pixel indices, ascending.
-    pub(super) fn indices(&self, cancel: &CancelToken) -> Result<Vec<usize>, StackError> {
+    pub(super) fn idxs(&self, cancel: &CancelToken) -> Result<Vec<usize>, StackError> {
         match self {
-            Self::Everywhere(samples) => Ok(samples.indices().collect()),
-            Self::Common(domain) => domain.stratified_indices(cancel),
-            Self::CommonColor(domain) => domain.stratified_indices(cancel),
+            Self::Everywhere(samples) => Ok(samples.idxs().collect()),
+            Self::Common(domain) => domain.stratified_idxs(cancel),
+            Self::CommonColor(domain) => domain.stratified_idxs(cancel),
         }
     }
 }

@@ -3,8 +3,8 @@
 
 use crate::data::const_value::ConstValue;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
-use crate::execution::error::Error;
-use crate::execution::index::{InputIdx, NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::error::ExecutionError;
+use crate::execution::idx::{InputIdx, NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::schedule::planner::Planner;
 use crate::execution::schedule::{Delivery, NodeState, RootFlags, RunSchedule};
 use crate::execution::seeds::RunSeeds;
@@ -126,7 +126,7 @@ fn chain_orders_deps_before_consumers_and_schedules_all() {
     // target past the last node must not index `seen_in_order` out of range.
     let past_the_end = NodeIdx(prog.program_mut().e_nodes.len() as u32);
     let b_input = prog.program()[b.node_idx].inputs.nth(0);
-    prog.program_mut().inputs[b_input].binding = ExecutionBinding::Bind(OutputAddr {
+    prog.program_mut().inputs[b_input].binding = ExecutionBinding::Wire(OutputAddr {
         node_idx: past_the_end,
         port_idx: 0,
     });
@@ -211,9 +211,9 @@ fn delivery_follows_binding_producer_state_and_override() {
 
     // The bound input against each settled producer state.
     for (state, expected) in [
-        (NodeState::Cut, (Delivery::Bind(addr), false)),
-        (NodeState::Reuse, (Delivery::Bind(addr), false)),
-        (NodeState::Run, (Delivery::Bind(addr), false)),
+        (NodeState::Cut, (Delivery::Wire(addr), false)),
+        (NodeState::Reuse, (Delivery::Wire(addr), false)),
+        (NodeState::Run, (Delivery::Wire(addr), false)),
         (NodeState::Disabled, (Delivery::Unbound, true)),
         (NodeState::MissingInputs, (Delivery::Blocked, true)),
     ] {
@@ -347,7 +347,7 @@ fn a_dependency_cycle_is_a_broken_contract() {
     // The forward reference is spelled by index, since the node it names
     // does not exist until the line after.
     let at = |node_idx: u32| {
-        ExecutionBinding::Bind(OutputAddr {
+        ExecutionBinding::Wire(OutputAddr {
             node_idx: NodeIdx(node_idx),
             port_idx: 0,
         })
@@ -460,7 +460,7 @@ fn node_seed_schedules_only_its_cone_and_pins_it() {
     let bogus = NodeId::from_u128(0xdead_beef);
     let seeds = RunSeeds::nodes(vec![bogus]);
     let err = planner.plan(prog.program(), &seeds, &mut p).unwrap_err();
-    assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+    assert!(matches!(err, ExecutionError::NodeSeedNotFound { node_id } if node_id == bogus));
 }
 
 #[test]

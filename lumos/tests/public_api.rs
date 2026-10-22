@@ -9,25 +9,25 @@ use lumos::{
     Combine, CombineMethod, Coverage, DefectSummary, DerivedFacts, DetectionDiagnostics, DomainMap,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig,
     FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
-    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsTransferProvenance,
+    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadConfig, FitsTransferProvenance,
     FlagCounts, FrameRegistration, FrameStoreError, FwhmConfig, GesdConfig, ImageDimensions,
     ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField, LightOutcome,
-    LinearFitClipConfig, LinearImage, LinearModel, LoadContext, MarkesteijnPasses, MasterRole,
-    MatchIndices, MeasurementConfig, Normalization, NullPolicy, ObservationHeader, Pedestal,
+    LinearFitClipConfig, LinearImage, LinearModel, LoadCtx, MarkesteijnPasses, MasterRole,
+    MatchIdxs, MeasurementConfig, Normalization, NullPolicy, ObservationHeader, Pedestal,
     ProgressMonitor, QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig,
     RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
     Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SipOrder, SmallN,
     SourceProvenance, StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
     StarDetector, StarField, StarMatch, Transform, TransformModel, TransformType, TriangleConfig,
-    TrimConfig, WarpParams, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
+    TrimConfig, WarpConfig, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
 fn file_loading_policy_is_available_from_the_crate_root() {
-    let _: LoadContext = LoadContext {
+    let _: LoadCtx = LoadCtx {
         cancel: CancelToken::never(),
         memory_limit_bytes: 64 * 1024 * 1024,
-        fits: FitsLoadOptions {
+        fits: FitsLoadConfig {
             hdu: FitsHduSelector::Name {
                 extname: "SCI".to_owned(),
                 extver: Some(2),
@@ -50,7 +50,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
         bscale: 1.0,
         bzero: 0.0,
         hdu: FitsHduProvenance {
-            index: 3,
+            idx: 3,
             extname: Some("SCI".to_owned()),
             extver: Some(2),
         },
@@ -147,7 +147,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     registration.registrar().unwrap();
     let align = AlignStackConfig {
         registration,
-        warp: WarpParams {
+        warp: WarpConfig {
             method: InterpolationMethod::Bilinear,
             border_value: -1.0,
             clamping_threshold: None,
@@ -223,7 +223,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "sigma.low must be finite and positive, got 0"
     );
 
-    let storage_error = FrameStoreError::CreateDirectory {
+    let storage_error = FrameStoreError::CreateDir {
         path: ".tmp/unwritable".into(),
         source: Error::new(ErrorKind::PermissionDenied, "denied"),
     };
@@ -299,7 +299,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
 
     let registration_error = RegistrationError::InvalidStarField {
         catalog: RegistrationCatalog::Target,
-        index: 7,
+        idx: 7,
         field: StarField::Fwhm,
         value: f64::INFINITY,
     };
@@ -429,7 +429,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     );
 
     let _: StarMatch = StarMatch {
-        indices: MatchIndices {
+        idxs: MatchIdxs {
             reference: 4,
             target: 9,
         },

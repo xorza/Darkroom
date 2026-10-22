@@ -5,7 +5,7 @@ use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::error::OverBudget;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::memory::footprint::Footprint;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
@@ -54,18 +54,18 @@ impl FrameInfo {
         })
     }
 
-    /// Refuse a decode of the frame and its demosaic past `context`'s memory limit, from the
+    /// Refuse a decode of the frame and its demosaic past `ctx`'s memory limit, from the
     /// header before either runs: the way a preview of a mosaic takes, its demosaic on every
     /// thread of the pool it runs on.
-    pub(super) fn admit_demosaic(self, context: &LoadContext) -> Result<(), OverBudget> {
+    pub(super) fn admit_demosaic(self, ctx: &LoadCtx) -> Result<(), OverBudget> {
         let way = self.demosaiced(
             self.decoded(),
-            context.xtrans_passes,
+            ctx.xtrans_passes,
             rayon::current_num_threads(),
         );
         OverBudget::check(
             u64::try_from(way.peak).expect("a byte count fits u64"),
-            context.memory_limit_bytes,
+            ctx.memory_limit_bytes,
         )
     }
 }

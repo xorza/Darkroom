@@ -20,7 +20,7 @@ use crate::star_detection::centroid::tests::perturbation::Perturbation;
 ///
 /// A clean stamp with the right β is samples of the fitted model itself, held to [`EXACT`] times
 /// `(A + B)/A` as there. A noisy one is held to five times the position's Cramér–Rao bound,
-/// computed from the model's own Jacobian ([`MoffatCase::position_bound`]). A wrong β has no
+/// computed from the model's own Jacobian ([`MoffatCase::pos_bound`]). A wrong β has no
 /// closed-form bias: it is held to what was measured, 9.2e-3 px, with room.
 #[derive(Debug)]
 struct MoffatCase {
@@ -46,12 +46,12 @@ struct MoffatCase {
 const EXACT: f64 = 1e-6;
 
 /// What a wrong β leaves in the centre; see [`MoffatCase`].
-const WRONG_BETA_POSITION: f64 = 0.02;
+const WRONG_BETA_POS: f64 = 0.02;
 
 impl MoffatCase {
     /// Five standard deviations of each centre coordinate under the stamp's noise: the Fisher
     /// information on x₀ is `Σ(∂f/∂x₀)²/σₙ²` over the fitted stamp, so `σ_x = σₙ/√Σ(∂f/∂x₀)²`.
-    fn position_bound(&self) -> DVec2 {
+    fn pos_bound(&self) -> DVec2 {
         let mut model = MoffatFixedBeta::new(self.fit_radius as f64, f64::from(self.beta), 1e-6);
         let params = [
             self.center.x,
@@ -219,7 +219,7 @@ fn moffat_fit_recovers_known_parameters() {
         let offset = (result.pos - case.center).abs();
         if case.fixed_beta != case.beta {
             assert!(
-                offset.length() <= WRONG_BETA_POSITION,
+                offset.length() <= WRONG_BETA_POS,
                 "{}: position off by {}",
                 case.name,
                 offset.length()
@@ -254,7 +254,7 @@ fn moffat_fit_recovers_known_parameters() {
             let order = model.sufficient_order(&[0.0, 0.0, 1.0, f64::from(case.alpha), 0.0]);
             assert_eq!(result.debug.order, order, "{}: quadrature order", case.name);
         } else {
-            let bound = case.position_bound();
+            let bound = case.pos_bound();
             assert!(
                 offset.x <= bound.x && offset.y <= bound.y,
                 "{}: position off by {offset} against {bound}",

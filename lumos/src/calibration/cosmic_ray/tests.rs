@@ -9,7 +9,7 @@ use imaginarium::Buffer2;
 use crate::background_mesh::color_mesh::LocalBackground;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
-use crate::calibration::cosmic_ray::mono::Repair;
+use crate::calibration::cosmic_ray::mono::PixelRepair;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
 use crate::calibration::cosmic_ray::noise_model::PixelBackground;
 use crate::calibration::cosmic_ray::*;
@@ -66,9 +66,9 @@ fn removes_cosmic_rays_preserves_stars() {
     ];
     let streak = [Vec2us::new(30, 8), Vec2us::new(31, 8), Vec2us::new(32, 8)];
     for &p in crs.iter().chain(&streak) {
-        data[size.index_of(p)] = 0.95;
+        data[size.idx_of(p)] = 0.95;
     }
-    let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.index_of(p)]).collect();
+    let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.idx_of(p)]).collect();
 
     let mut img = cfa_from_plane(data, CfaType::Mono);
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
@@ -77,21 +77,21 @@ fn removes_cosmic_rays_preserves_stars() {
     // Every injected CR is removed (the spike drops back toward sky, ≪ 0.95).
     for &p in crs.iter().chain(&streak) {
         assert!(
-            out[size.index_of(p)] < 0.2,
+            out[size.idx_of(p)] < 0.2,
             "CR at ({},{}) not removed: {}",
             p.x,
             p.y,
-            out[size.index_of(p)]
+            out[size.idx_of(p)]
         );
     }
     // Star cores are untouched — the fine-structure test must not flag PSF-broadened peaks.
     for (&p, &orig) in star_cores.iter().zip(&star_vals) {
         assert!(
-            (out[size.index_of(p)] - orig).abs() < 1e-6,
+            (out[size.idx_of(p)] - orig).abs() < 1e-6,
             "star core at ({},{}) was altered: {} vs {orig}",
             p.x,
             p.y,
-            out[size.index_of(p)]
+            out[size.idx_of(p)]
         );
     }
     // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54),
@@ -120,7 +120,7 @@ fn sigclip_controls_sensitivity() {
         pixels: mut data, ..
     } = synthetic_field();
     let size = Size2us::from(&data);
-    data[size.index_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
+    data[size.idx_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
     let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig {
@@ -151,7 +151,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
     } = synthetic_field();
     let size = Size2us::from(&data);
     let cr = Vec2us::new(15, 33);
-    data[size.index_of(cr)] = 0.99;
+    data[size.idx_of(cr)] = 0.99;
     for noise in [
         NoiseEstimation::Measured,
         NoiseEstimation::Gain {
@@ -173,7 +173,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
         .unwrap();
         assert!(count >= 1, "bright CR missed");
         assert!(
-            img.data().pixels()[size.index_of(cr)] < 0.2,
+            img.data().pixels()[size.idx_of(cr)] < 0.2,
             "bright CR not in-painted"
         );
     }
@@ -203,7 +203,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         },
     );
     let core = Vec2us::new(24, 24);
-    let star = data[size.index_of(core)];
+    let star = data[size.idx_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
     let crs = [
         Vec2us::new(8, 8),
@@ -212,24 +212,24 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         Vec2us::new(37, 37),
     ];
     for &p in &crs {
-        data[size.index_of(p)] = 0.95;
+        data[size.idx_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data().pixels();
     for &p in &crs {
         assert!(
-            out[size.index_of(p)] < 0.2,
+            out[size.idx_of(p)] < 0.2,
             "Bayer CR ({},{}) not removed: {}",
             p.x,
             p.y,
-            out[size.index_of(p)]
+            out[size.idx_of(p)]
         );
     }
     assert!(
-        out[size.index_of(core)] > 0.5,
+        out[size.idx_of(core)] > 0.5,
         "star core gutted: {} (was {star})",
-        out[size.index_of(core)]
+        out[size.idx_of(core)]
     );
     // The four CRs, and three pixels the growth pass takes: (10, 10) beside (8, 8), (11, 10) beside
     // (9, 12) and (35, 39) beside (37, 37), each a diagonal neighbour in its CR's phase plane,
@@ -285,7 +285,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     let core = Vec2us::new(24, 24);
     let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
     for &p in &crs {
-        data[size.index_of(p)] = 0.95;
+        data[size.idx_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     reject(&mut img, &CosmicRayConfig::default()).unwrap();
@@ -293,23 +293,23 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     // CR rejection still works — the injected CRs are removed.
     for &p in &crs {
         assert!(
-            out[size.index_of(p)] < 0.2,
+            out[size.idx_of(p)] < 0.2,
             "Bayer CR ({},{}) not removed: {}",
             p.x,
             p.y,
-            out[size.index_of(p)]
+            out[size.idx_of(p)]
         );
     }
     // Known limitation: the tight star core is also gutted (flagged as a CR).
     assert!(
-        out[size.index_of(core)] < 0.2,
+        out[size.idx_of(core)] < 0.2,
         "tight star core unexpectedly survived ({}) — if per-phase Bayer CR detection was \
          fixed, update this characterization test",
-        out[size.index_of(core)]
+        out[size.idx_of(core)]
     );
 }
 
-/// An independently written reference for [`Repair::apply`], asserting the property that makes
+/// An independently written reference for [`PixelRepair::apply`], asserting the property that makes
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
 /// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
 /// that, and this is what would catch a change that broke it. A pixel with no unmasked neighbour
@@ -321,7 +321,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
     let (wi, hi) = (size.width as isize, size.height as isize);
     for y in 0..size.height {
         for x in 0..size.width {
-            let target = size.index_of(Vec2us::new(x, y));
+            let target = size.idx_of(Vec2us::new(x, y));
             if !mask.get(target) {
                 continue;
             }
@@ -334,7 +334,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
                             continue;
                         }
                         let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                        let j = size.index_of(Vec2us::new(xx, yy));
+                        let j = size.idx_of(Vec2us::new(xx, yy));
                         if !mask.get(j) {
                             buf.push(src[j]);
                         }
@@ -361,7 +361,7 @@ fn a_repair_matches_a_snapshot_reference() {
     let pixels = Buffer2::from_fn(12, 12, |x, y| (y * 12 + x) as f32);
 
     let mut mask = BitBuffer2::new_default(size);
-    let at = |x, y| size.index_of(Vec2us::new(x, y));
+    let at = |x, y| size.idx_of(Vec2us::new(x, y));
     // Isolated hit.
     mask.set(at(6, 6), true);
     // Adjacent 2x2 block: the case that would expose an order-dependent read, since each of the
@@ -390,7 +390,7 @@ fn a_repair_matches_a_snapshot_reference() {
     };
     let repair = |pixels: &Buffer2<f32>, mask: &BitBuffer2| {
         let mut got = pixels.clone();
-        Repair {
+        PixelRepair {
             flagged: mask,
             unread: None,
             local: &local,
@@ -516,7 +516,7 @@ fn a_faint_hit_on_a_gradient_is_caught() {
         0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
     });
     let hit = Vec2us::new(70, 70);
-    pixels[size.index_of(hit)] += 0.04;
+    pixels[size.idx_of(hit)] += 0.04;
     let whole_frame_sigma = MedianMad::of_mut(&mut pixels.clone()).sigma();
     assert!(whole_frame_sigma > 0.08, "premise: {whole_frame_sigma}");
     let mut image = cfa_from_plane(pixels, CfaType::Mono);
@@ -587,7 +587,7 @@ fn the_mask_grows_in_astroscrappys_two_rings() {
     };
     assert_eq!(masks.detect_and_grow(planes, &cfg, None), 4);
     let flagged: Vec<usize> = (0..size.pixel_count())
-        .filter(|&index| masks.accumulated.get(index))
+        .filter(|&idx| masks.accumulated.get(idx))
         .collect();
     assert_eq!(flagged, [at(2, 1), at(3, 1), at(4, 1), at(2, 2)]);
     // A second pass finds nothing new: every pixel it would take is held already.
@@ -678,24 +678,24 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
     )
     .pixels;
     let hit = Vec2us::new(44, 30);
-    data[size.index_of(hit)] = 2.0;
+    data[size.idx_of(hit)] = 2.0;
     for value in data.pixels_mut() {
         *value = value.min(0.9);
     }
     let clipped: Vec<usize> = (0..size.pixel_count())
-        .filter(|&index| data.pixels()[index] >= 0.9)
+        .filter(|&idx| data.pixels()[idx] >= 0.9)
         .collect();
     let core: Vec<usize> = clipped
         .iter()
         .copied()
-        .filter(|&index| index != size.index_of(hit))
+        .filter(|&idx| idx != size.idx_of(hit))
         .collect();
     assert_eq!(core.len(), 69);
     let rejected = |data: Buffer2<f32>, flag: bool| {
         let mut image = cfa_from_plane(data, CfaType::Mono);
         if flag {
-            image.set_flags(PixelFlags::from_fn(size, |index| {
-                if clipped.contains(&index) {
+            image.set_flags(PixelFlags::from_fn(size, |idx| {
+                if clipped.contains(&idx) {
                     QualityFlags::SATURATED
                 } else {
                     QualityFlags::default()
@@ -705,35 +705,29 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
         reject(&mut image, &CosmicRayConfig::default()).unwrap();
         image
     };
-    let cosmic = |image: &CfaImage, index: usize| {
+    let cosmic = |image: &CfaImage, idx: usize| {
         image
             .flags()
-            .is_some_and(|flags| flags.at(index).intersects(QualityFlags::COSMIC_RAY))
+            .is_some_and(|flags| flags.at(idx).intersects(QualityFlags::COSMIC_RAY))
     };
 
     let unflagged = rejected(data.clone(), false);
     assert_eq!(
-        core.iter()
-            .filter(|&&index| cosmic(&unflagged, index))
-            .count(),
+        core.iter().filter(|&&idx| cosmic(&unflagged, idx)).count(),
         24,
         "without its flags the core is taken for a hit, or the test tells nothing"
     );
 
     let kept = rejected(data, true);
-    for &index in &core {
-        assert!(
-            !cosmic(&kept, index),
-            "core pixel {:?}",
-            size.point_of(index)
-        );
-        assert_eq!(kept.data()[index], 0.9);
+    for &idx in &core {
+        assert!(!cosmic(&kept, idx), "core pixel {:?}", size.point_of(idx));
+        assert_eq!(kept.data()[idx], 0.9);
     }
-    assert!(cosmic(&kept, size.index_of(hit)));
+    assert!(cosmic(&kept, size.idx_of(hit)));
     assert!(
-        (kept.data()[size.index_of(hit)] - 0.05).abs() < 0.02,
+        (kept.data()[size.idx_of(hit)] - 0.05).abs() < 0.02,
         "the hit is repaired from the sky: {}",
-        kept.data()[size.index_of(hit)]
+        kept.data()[size.idx_of(hit)]
     );
 }
 
@@ -745,12 +739,12 @@ fn an_xtrans_mosaic_is_refused_untouched() {
     let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
-        .map(|index| 0.04 + 0.01 * cfa.slot_at(size.point_of(index)) as f32)
+        .map(|idx| 0.04 + 0.01 * cfa.slot_at(size.point_of(idx)) as f32)
         .collect();
-    data[size.index_of(Vec2us::new(18, 18))] = 0.95;
+    data[size.idx_of(Vec2us::new(18, 18))] = 0.95;
     let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data.clone()), cfa);
-    image.set_flags(PixelFlags::from_fn(size, |index| {
-        if index == 7 {
+    image.set_flags(PixelFlags::from_fn(size, |idx| {
+        if idx == 7 {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
@@ -823,7 +817,7 @@ fn the_local_recompute_is_the_full_one() {
         }
     }
     for &hit in &hits {
-        data[size.index_of(hit)] = 0.9;
+        data[size.idx_of(hit)] = 0.9;
     }
     let config = CosmicRayConfig::default();
     let mut local = data.clone();

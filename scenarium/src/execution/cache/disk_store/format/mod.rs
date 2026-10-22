@@ -92,7 +92,7 @@ where
             .expect("a cache header length must fit in the file format");
         debug_assert_eq!(writer.stream_position().await?, body_start);
 
-        for (index, value) in outputs.iter().enumerate() {
+        for (idx, value) in outputs.iter().enumerate() {
             if matches!(value, DynamicValue::Unbound) {
                 continue;
             }
@@ -116,7 +116,7 @@ where
                 .checked_sub(payload_start)
                 .expect("a streaming cache writer cannot move before its payload start");
             writer
-                .seek(SeekFrom::Start(descriptor_payload_len_offset(index)))
+                .seek(SeekFrom::Start(descriptor_payload_len_offset(idx)))
                 .await?;
             writer.write_all(&payload_len.to_le_bytes()).await?;
             writer.seek(SeekFrom::Start(payload_end)).await?;
@@ -150,9 +150,9 @@ where
 {
     pub(super) async fn covers_outputs(&mut self, outputs: &[DynamicValue]) -> FormatResult<bool> {
         let prefix = self
-            .scan_header(|index, descriptor| {
+            .scan_header(|idx, descriptor| {
                 outputs
-                    .get(index)
+                    .get(idx)
                     .is_some_and(|value| descriptor_covers(descriptor, value))
             })
             .await?;
@@ -210,8 +210,8 @@ where
     async fn read_header(&mut self, demand: &[OutputDemand]) -> FormatResult<Option<BlobHeader>> {
         let mut descriptors = Vec::new();
         let prefix = self
-            .scan_header(|index, descriptor| {
-                let Some(output_demand) = demand.get(index) else {
+            .scan_header(|idx, descriptor| {
+                let Some(output_demand) = demand.get(idx) else {
                     return false;
                 };
                 if !output_demand.is_skip() && matches!(descriptor.kind, OutputKind::Unbound) {
@@ -234,7 +234,7 @@ where
             return Ok(None);
         };
         let mut payload_sum = 0u64;
-        for index in 0..prefix.output_count {
+        for idx in 0..prefix.output_count {
             let descriptor = read_descriptor(self.reader).await?;
             payload_sum = payload_sum
                 .checked_add(descriptor.payload_len)
@@ -247,7 +247,7 @@ where
             {
                 return Ok(None);
             }
-            if !accept(index, descriptor) {
+            if !accept(idx, descriptor) {
                 return Ok(None);
             }
         }
@@ -552,12 +552,11 @@ fn checked_header_len(output_count: usize) -> Option<usize> {
     FIXED_LEN.checked_add(output_count.checked_mul(DESCRIPTOR_LEN)?)
 }
 
-fn descriptor_payload_len_offset(index: usize) -> u64 {
+fn descriptor_payload_len_offset(idx: usize) -> u64 {
     u64::try_from(
         FIXED_LEN
             .checked_add(
-                index
-                    .checked_mul(DESCRIPTOR_LEN)
+                idx.checked_mul(DESCRIPTOR_LEN)
                     .expect("a cache descriptor offset must fit in memory"),
             )
             .expect("a cache descriptor offset must fit in memory"),

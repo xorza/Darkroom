@@ -56,7 +56,7 @@ impl<'a> InputCtx<'a> {
         self.declared.required
     }
 
-    /// Const-only inputs reject a wired binding: the connection gesture won't
+    /// Const-only inputs reject a wired binding: the wire gesture won't
     /// snap to them, so they can only hold a literal.
     pub(crate) const fn const_only(self) -> bool {
         self.declared.const_only

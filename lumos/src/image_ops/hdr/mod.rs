@@ -17,7 +17,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -115,8 +115,8 @@ impl Hdr {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("hdr scales", self.scales).must_be("at least 1", self.scales >= 1)?;
-        ConfigValue::new("hdr amount", self.amount)
+        ConfigField::count("hdr scales", self.scales).must_be("at least 1", self.scales >= 1)?;
+        ConfigField::new("hdr amount", self.amount)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }

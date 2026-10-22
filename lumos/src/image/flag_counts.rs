@@ -28,7 +28,7 @@ impl FlagCounts {
     ///
     /// If `flag` is not a single flag.
     pub const fn count(&self, flag: QualityFlags) -> u64 {
-        self.0[flag.index()]
+        self.0[flag.idx()]
     }
 
     /// Whether any holds a flag of `flags`.

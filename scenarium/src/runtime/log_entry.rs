@@ -11,7 +11,7 @@ pub enum LogLevel {
 }
 
 /// One node-attributed log record.
-/// [`ContextManager::log`](crate::runtime::context_manager::ContextManager::log) writes
+/// [`CtxManager::log`](crate::runtime::ctx_manager::CtxManager::log) writes
 /// these while a lambda runs; a run's
 /// [`ExecutionOutcome`](crate::execution::report::execution_outcome::ExecutionOutcome)
 /// carries them out, and

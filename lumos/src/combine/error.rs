@@ -22,9 +22,9 @@ pub enum StackConfigError {
     Field(#[from] InvalidConfigField),
 
     #[error(
-        "manual weight {index} must be finite and positive, got {value}: drop a frame from the set rather than weigh it 0"
+        "manual weight {idx} must be finite and positive, got {value}: drop a frame from the set rather than weigh it 0"
     )]
-    InvalidManualWeight { index: usize, value: f32 },
+    InvalidManualWeight { idx: usize, value: f32 },
 
     #[error("manual weights must contain at least one value, with a finite sum")]
     InvalidManualWeightSum,
@@ -56,10 +56,10 @@ pub enum StackError {
 
     /// Multiplicative normalization divides by each frame's median, and this one is not positive.
     #[error(
-        "frame {index} has median {median} in slot {slot}; a multiplicative normalization needs a positive one"
+        "frame {idx} has median {median} in slot {slot}; a multiplicative normalization needs a positive one"
     )]
     NonPositiveMedian {
-        index: usize,
+        idx: usize,
         /// A channel, or a color of a mosaic.
         slot: usize,
         median: f32,
@@ -68,11 +68,11 @@ pub enum StackError {
     /// A normalization that scales each frame by its own spread found this one's spread no larger
     /// than its white noise: the slot holds no signal structure to scale by.
     #[error(
-        "frame {index} has spread {spread} in slot {slot}, no larger than its white noise {noise}; \
+        "frame {idx} has spread {spread} in slot {slot}, no larger than its white noise {noise}; \
          it holds no signal to scale a normalization by"
     )]
     NoSignalScale {
-        index: usize,
+        idx: usize,
         /// A channel, or a color of a mosaic.
         slot: usize,
         spread: f32,
@@ -81,17 +81,17 @@ pub enum StackError {
 
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
     /// none: only synthetic data has no noise at all.
-    #[error("frame {index} has no measured noise to weight by; use Equal or Manual weighting")]
-    NoNoiseToWeigh { index: usize },
+    #[error("frame {idx} has no measured noise to weight by; use Equal or Manual weighting")]
+    NoNoiseToWeigh { idx: usize },
 
     /// [`RejectionScale::CcdModel`](crate::RejectionScale::CcdModel) holds each sample to its own
     /// CCD noise, whose photon term needs the frame's gain, and this frame, the first of the set,
     /// states none.
     #[error(
-        "frame {index} states no gain, which CCD-model rejection needs; use Robust rejection or \
+        "frame {idx} states no gain, which CCD-model rejection needs; use Robust rejection or \
          give every frame its gain"
     )]
-    UnknownGain { index: usize },
+    UnknownGain { idx: usize },
 
     /// A file that could not be decoded, held as the decoder's own error — which already names the
     /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
@@ -100,9 +100,9 @@ pub enum StackError {
     #[error(transparent)]
     ImageLoad(ImageError),
 
-    #[error("{plane} dimensions for frame {index} do not match: expected {expected}, got {actual}")]
+    #[error("{plane} dimensions for frame {idx} do not match: expected {expected}, got {actual}")]
     PlaneDimensionMismatch {
-        index: usize,
+        idx: usize,
         plane: FramePlane,
         expected: Size2us,
         actual: Size2us,
@@ -118,8 +118,8 @@ impl StackConfigError {
     /// through `inputs` into the caller's own numbering of those frames.
     pub(crate) const fn renumbered(self, inputs: &[usize]) -> Self {
         match self {
-            Self::InvalidManualWeight { index, value } => Self::InvalidManualWeight {
-                index: inputs[index],
+            Self::InvalidManualWeight { idx, value } => Self::InvalidManualWeight {
+                idx: inputs[idx],
                 value,
             },
             error @ (Self::Field(_)
@@ -136,39 +136,31 @@ impl StackError {
     pub(crate) fn renumbered(self, inputs: &[usize]) -> Self {
         match self {
             Self::Config(error) => Self::Config(error.renumbered(inputs)),
-            Self::NonPositiveMedian {
-                index,
-                slot,
-                median,
-            } => Self::NonPositiveMedian {
-                index: inputs[index],
+            Self::NonPositiveMedian { idx, slot, median } => Self::NonPositiveMedian {
+                idx: inputs[idx],
                 slot,
                 median,
             },
             Self::NoSignalScale {
-                index,
+                idx,
                 slot,
                 spread,
                 noise,
             } => Self::NoSignalScale {
-                index: inputs[index],
+                idx: inputs[idx],
                 slot,
                 spread,
                 noise,
             },
-            Self::NoNoiseToWeigh { index } => Self::NoNoiseToWeigh {
-                index: inputs[index],
-            },
-            Self::UnknownGain { index } => Self::UnknownGain {
-                index: inputs[index],
-            },
+            Self::NoNoiseToWeigh { idx } => Self::NoNoiseToWeigh { idx: inputs[idx] },
+            Self::UnknownGain { idx } => Self::UnknownGain { idx: inputs[idx] },
             Self::PlaneDimensionMismatch {
-                index,
+                idx,
                 plane,
                 expected,
                 actual,
             } => Self::PlaneDimensionMismatch {
-                index: inputs[index],
+                idx: inputs[idx],
                 plane,
                 expected,
                 actual,
@@ -249,9 +241,9 @@ mod tests {
     fn a_renumbered_error_names_the_callers_frames() {
         let inputs = [0, 3, 5];
         let error = StackError::Admission(AdmissionError::RowOrderMismatch {
-            index: 2,
+            idx: 2,
             actual: RowOrder::BottomUp,
-            reference_index: 1,
+            reference_idx: 1,
             expected: RowOrder::TopDown,
         })
         .renumbered(&inputs);
@@ -259,16 +251,16 @@ mod tests {
             matches!(
                 error,
                 StackError::Admission(AdmissionError::RowOrderMismatch {
-                    index: 5,
-                    reference_index: 3,
+                    idx: 5,
+                    reference_idx: 3,
                     ..
                 })
             ),
             "{error:?}"
         );
         assert!(matches!(
-            StackError::NoNoiseToWeigh { index: 1 }.renumbered(&inputs),
-            StackError::NoNoiseToWeigh { index: 3 }
+            StackError::NoNoiseToWeigh { idx: 1 }.renumbered(&inputs),
+            StackError::NoNoiseToWeigh { idx: 3 }
         ));
         assert!(matches!(
             StackError::NoCommonCoverage.renumbered(&inputs),

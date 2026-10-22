@@ -87,12 +87,12 @@ pub(crate) struct PixelBackgrounds<'a> {
 }
 
 impl PixelBackgrounds<'_> {
-    pub(crate) fn at(&self, color: usize, position: Vec2us) -> PixelBackground {
+    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> PixelBackground {
         PixelBackground {
-            local: self.mesh.at(color, position),
-            flat_gain: self.flat_gain.map_or(1.0, |gain| {
-                gain.at(color, position.x as f32, position.y as f32)
-            }),
+            local: self.mesh.at(color, pos),
+            flat_gain: self
+                .flat_gain
+                .map_or(1.0, |gain| gain.at(color, pos.x as f32, pos.y as f32)),
         }
     }
 }

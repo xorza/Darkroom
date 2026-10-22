@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::combine::stack_config::StackConfig;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::drizzle::drizzle_run::DrizzleRun;
@@ -64,12 +64,12 @@ impl Default for DrizzleConfig {
 impl DrizzleConfig {
     /// Validate parameters before allocating or processing an output image.
     pub(crate) fn validate(&self) -> Result<(), DrizzleConfigError> {
-        ConfigValue::new("scale", self.scale)
+        ConfigField::new("scale", self.scale)
             .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::new("pixfrac", self.pixfrac)
+        ConfigField::new("pixfrac", self.pixfrac)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
-        ConfigValue::new("fill_value", self.fill_value).finite()?;
-        ConfigValue::new("min_weight_fraction", self.min_weight_fraction)
+        ConfigField::new("fill_value", self.fill_value).finite()?;
+        ConfigField::new("min_weight_fraction", self.min_weight_fraction)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
         if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {
             return Err(DrizzleConfigError::InvalidLanczosSampling {

@@ -116,8 +116,8 @@ impl Write for SyncAtomicFile {
 }
 
 impl Seek for SyncAtomicFile {
-    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        self.file.seek(position)
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.file.seek(pos)
     }
 }
 
@@ -174,8 +174,8 @@ impl AsyncWrite for AtomicFile {
 }
 
 impl AsyncSeek for AtomicFile {
-    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
-        Pin::new(&mut self.file).start_seek(position)
+    fn start_seek(mut self: Pin<&mut Self>, pos: SeekFrom) -> io::Result<()> {
+        Pin::new(&mut self.file).start_seek(pos)
     }
 
     fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {

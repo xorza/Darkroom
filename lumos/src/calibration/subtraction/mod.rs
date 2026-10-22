@@ -147,10 +147,10 @@ pub(crate) fn unmeasured(subtractors: &[Subtractor<'_>]) -> Option<PixelFlags> {
         .filter(|flags| flags.contains(QualityFlags::UNMEASURED))
         .collect();
     let size = flags.first()?.size();
-    PixelFlags::from_fn(size, |index| {
+    PixelFlags::from_fn(size, |idx| {
         if flags
             .iter()
-            .any(|flags| flags.at(index).intersects(QualityFlags::UNMEASURED))
+            .any(|flags| flags.at(idx).intersects(QualityFlags::UNMEASURED))
         {
             QualityFlags::NO_DATA
         } else {

@@ -17,8 +17,8 @@ use scenarium::EventPort;
 /// The canvas's response-derived geometry: a per-frame snapshot of every port-ish glyph plus the
 /// cross-frame node-size cache, all filled by one [`Self::rebuild`] pass polling
 /// [`Ui::response_for`] on deterministic widget ids. Rebuilt in
-/// [`crate::gui::pane::graph_ui::GraphUI::prepass`] and reused by
-/// [`crate::gui::pane::graph_ui::GraphUI::draw`]. Each glyph snapshot is sized to the four
+/// [`crate::gui::pane::graph_ui::GraphUi::prepass`] and reused by
+/// [`crate::gui::pane::graph_ui::GraphUi::draw`]. Each glyph snapshot is sized to the four
 /// bytes-and-bits we use (`layout_rect.center()`, `rect`, two edge bools) instead of the full
 /// `ResponseState`.
 ///
@@ -88,9 +88,9 @@ pub(crate) struct CanvasGeometry {
 ///   position), so when a graph is shown again — e.g. the frame after
 ///   switching back to its tab, where none of its widgets recorded last
 ///   frame — centers still resolve from `node.pos + cached_offset` and
-///   connections draw on that first frame instead of popping in one frame
+///   wires draw on that first frame instead of popping in one frame
 ///   late. Keyed by the globally-unique domain key, so it spans every open
-///   graph; on doc reload the whole `GraphUI` (and this cache) is dropped.
+///   graph; on doc reload the whole `GraphUi` (and this cache) is dropped.
 #[derive(Debug)]
 pub(crate) struct PortLayer<K> {
     live: HashMap<K, PortInfo>,
@@ -207,7 +207,7 @@ impl<K: NodeKey> PortLayer<K> {
     }
 
     /// The glyph a drag started on this frame, or `None` — what every
-    /// drag-source controller (connection, preview spawn, event wire) latches
+    /// drag-source controller (wire, preview spawn, event wire) latches
     /// on, each keeping only the kinds of glyph it starts from.
     pub(crate) const fn started_drag(&self) -> Option<K> {
         self.started_drag
@@ -245,13 +245,13 @@ struct PortInfo {
     /// geometry directly.
     screen_rect: Option<Rect>,
     /// `true` when the port should paint with its hover color. Filled
-    /// from `response.hovered` in `rebuild`; an active connection
+    /// from `response.hovered` in `rebuild`; an active wire
     /// drag's snap target gets it forced on via `set_hovered` after
-    /// `ConnectionUI::apply` (palantir's drag-capture suppression
+    /// `WireUi::apply` (palantir's drag-capture suppression
     /// otherwise hides the snap target from `response.hovered`).
     hovered: bool,
     /// One-frame edge: pointer-down → drag latched on this port this
-    /// frame. Drives connection-drag start detection.
+    /// frame. Drives wire-drag start detection.
     drag_started: bool,
     /// Continuous: a drag is currently live on this port
     /// (`drag_delta` is `Some` OR `drag_started` fired this frame).
@@ -282,7 +282,7 @@ impl CanvasGeometry {
     }
 
     /// Whether `pointer` (screen coords) is over any node body at all — the
-    /// "released into empty space" half of the connection gesture's drop.
+    /// "released into empty space" half of the wire gesture's drop.
     pub(crate) fn over_any_node(&self, pointer: Vec2) -> bool {
         self.node_screen.values().any(|r| r.contains(pointer))
     }
@@ -310,7 +310,7 @@ impl CanvasGeometry {
     /// polls live here: the body poll below is at once the node's cached size
     /// and its screen rect.
     ///
-    /// Runs in [`crate::gui::pane::graph_ui::GraphUI::prepass`]. It clears and
+    /// Runs in [`crate::gui::pane::graph_ui::GraphUi::prepass`]. It clears and
     /// refills the per-frame snapshots whole, so nothing carries over from the
     /// frame before.
     pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {

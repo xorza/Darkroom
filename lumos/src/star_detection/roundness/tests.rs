@@ -28,9 +28,9 @@ impl Gaussian {
         let size = 2 * radius + 1;
         let (sin, cos) = angle.sin_cos();
         (0..size * size)
-            .map(|index| {
-                let x = (index % size) as f64 - radius as f64 - offset.0;
-                let y = (index / size) as f64 - radius as f64 - offset.1;
+            .map(|idx| {
+                let x = (idx % size) as f64 - radius as f64 - offset.0;
+                let y = (idx / size) as f64 - radius as f64 - offset.1;
                 let (u, v) = (x * cos + y * sin, -x * sin + y * cos);
                 (-(u * u) / (2.0 * sigma.0 * sigma.0) - (v * v) / (2.0 * sigma.1 * sigma.1)).exp()
             })

@@ -5,7 +5,7 @@ use ::serde::{Deserialize, Serialize};
 use crate::graph::identity::{EventPort, NodeId};
 
 /// One event-subscription edge: `subscriber` fires when `event` triggers — the
-/// event side's [`Binding::Bind`](crate::graph::binding::Binding::Bind). Ordered
+/// event side's [`Binding::Wire`](crate::graph::binding::Binding::Wire). Ordered
 /// by event (emitter, then event index), then subscriber, so the `BTreeSet`
 /// holding these dedups and iterates deterministically — which is what lets a
 /// compile wire each emitter's subscriber lists in a fixed order.

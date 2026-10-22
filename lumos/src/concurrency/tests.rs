@@ -17,8 +17,8 @@ fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
     let items: Vec<usize> = (0..6).collect();
 
     let result = pool.install(|| {
-        try_par_map_bounded(items.len(), &mut [(); 3], |(), index| {
-            let value = &items[index];
+        try_par_map_bounded(items.len(), &mut [(); 3], |(), idx| {
+            let value = &items[idx];
             let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             max_observed.fetch_max(current, Ordering::SeqCst);
             barrier.wait();
@@ -54,8 +54,8 @@ fn bounded_map_propagates_error_and_stops_taking_work() {
     let failed = AtomicBool::new(false);
     let items: Vec<usize> = (0..1000).collect();
 
-    let result = try_par_map_bounded(items.len(), &mut [(); SLOTS], |(), index| {
-        let value = &items[index];
+    let result = try_par_map_bounded(items.len(), &mut [(); SLOTS], |(), idx| {
+        let value = &items[idx];
         started.fetch_add(1, Ordering::SeqCst);
         if *value == 0 {
             failed.store(true, Ordering::SeqCst);
@@ -81,7 +81,7 @@ fn bounded_map_propagates_error_and_stops_taking_work() {
 #[test]
 fn the_lowest_failing_index_is_reported() {
     let failed = AtomicBool::new(false);
-    let result = try_par_map_bounded(4, &mut [(); 2], |(), index| match index {
+    let result = try_par_map_bounded(4, &mut [(); 2], |(), idx| match idx {
         0 => {
             wait_for_failure(&failed);
             Err(0)
@@ -97,14 +97,14 @@ fn the_lowest_failing_index_is_reported() {
 
 #[test]
 fn bounded_map_accepts_empty_input() {
-    let result = try_par_map_bounded(0, &mut [(); 2], |(), index| Ok::<_, ()>(index));
+    let result = try_par_map_bounded(0, &mut [(); 2], |(), idx| Ok::<_, ()>(idx));
     assert_eq!(result.unwrap(), Vec::<usize>::new());
 }
 
 #[test]
 #[should_panic(expected = "a bounded map needs at least one slot")]
 fn bounded_map_rejects_zero_slots() {
-    let _refused = try_par_map_bounded(1, &mut [(); 0], |(), index| Ok::<_, ()>(index));
+    let _refused = try_par_map_bounded(1, &mut [(); 0], |(), idx| Ok::<_, ()>(idx));
 }
 
 #[test]
@@ -114,11 +114,11 @@ fn owned_map_indexes_by_input_position_and_carries_a_slot_between_items() {
     const SLOTS: usize = 2;
     let items: Vec<String> = (0..6).map(|i| format!("f{i}")).collect();
     let mut slots = vec![String::new(); SLOTS];
-    let result = try_par_map_bounded_owned(items, &mut slots, |slot, index, value| {
+    let result = try_par_map_bounded_owned(items, &mut slots, |slot, idx, value| {
         // The slot arrives holding whatever this worker last left in it, which is the whole point:
         // it outlives the item, unlike anything the closure could build per call.
         let carried = mem::replace(slot, value.clone());
-        Ok::<_, ()>(format!("{index}:{value}:{carried}"))
+        Ok::<_, ()>(format!("{idx}:{value}:{carried}"))
     });
 
     let result = result.unwrap();
@@ -145,7 +145,7 @@ fn owned_map_propagates_error_and_stops_taking_work() {
     let items: Vec<usize> = (0..1000).collect();
 
     let mut slots = vec![(); SLOTS];
-    let result = try_par_map_bounded_owned(items, &mut slots, |(), _index, value| {
+    let result = try_par_map_bounded_owned(items, &mut slots, |(), _idx, value| {
         started.fetch_add(1, Ordering::SeqCst);
         if value == 0 {
             failed.store(true, Ordering::SeqCst);

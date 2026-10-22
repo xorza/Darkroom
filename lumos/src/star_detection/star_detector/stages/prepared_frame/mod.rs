@@ -68,7 +68,7 @@ impl PreparedFrame {
             .filter(|flags| flags.contains(QualityFlags::NO_DATA))
             .map(|flags| {
                 let mut mask = resources.acquire_bit();
-                mask.fill_from_predicate(|index| flags.at(index).intersects(QualityFlags::NO_DATA));
+                mask.fill_from_predicate(|idx| flags.at(idx).intersects(QualityFlags::NO_DATA));
                 mask
             });
 
@@ -235,7 +235,7 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
 /// noise stacking weighs by, and not the MAD, which a red nebula inflates in red.
 fn channel_noise(image: &LinearImage) -> [f32; 3] {
     let flags = image.flags();
-    let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
+    let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
     [0, 1, 2].map(|channel| {
         NoisePlane {
             samples: image.channel(channel),
@@ -281,9 +281,7 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
     if image.metadata.derived.saturation_flagged() {
         match image.flags() {
             Some(flags) => {
-                mask.fill_from_predicate(|index| {
-                    flags.at(index).intersects(QualityFlags::SATURATED)
-                });
+                mask.fill_from_predicate(|idx| flags.at(idx).intersects(QualityFlags::SATURATED));
             }
             None => mask.fill(false),
         }
@@ -293,7 +291,7 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
     let channels: ArrayVec<&[f32], 3> = (0..image.channels())
         .map(|channel| image.channel(channel).pixels())
         .collect();
-    mask.fill_from_predicate(|index| channels.iter().any(|channel| channel[index] >= level));
+    mask.fill_from_predicate(|idx| channels.iter().any(|channel| channel[idx] >= level));
 }
 
 #[cfg(test)]

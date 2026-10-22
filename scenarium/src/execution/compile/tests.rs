@@ -56,7 +56,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     let bound_input = |compiled: &Compiled| {
         let e_node = compiled.node("consumer");
         assert!(
-            matches!(compiled.binding("consumer", 0), ExecutionBinding::Bind(_)),
+            matches!(compiled.binding("consumer", 0), ExecutionBinding::Wire(_)),
             "the fixture wires a binding to corrupt"
         );
         e_node.inputs.nth(0)
@@ -66,7 +66,7 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     let mut compiled = g.compile();
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let input = bound_input(&compiled);
-    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    compiled.program.inputs[input].binding = ExecutionBinding::Wire(OutputAddr {
         node_idx: past_the_end,
         port_idx: 0,
     });
@@ -82,11 +82,11 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     // A real node, one past its last output port.
     let mut compiled = g.compile();
     let input = bound_input(&compiled);
-    let ExecutionBinding::Bind(address) = compiled.program.inputs[input].binding else {
+    let ExecutionBinding::Wire(address) = compiled.program.inputs[input].binding else {
         unreachable!("bound_input selected a bind")
     };
     let port_idx = compiled.program[address.node_idx].outputs.len;
-    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    compiled.program.inputs[input].binding = ExecutionBinding::Wire(OutputAddr {
         node_idx: address.node_idx,
         port_idx,
     });
@@ -223,7 +223,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
             let binding = match &input.binding {
                 ExecutionBinding::None => "none".to_string(),
                 ExecutionBinding::Const(value) => format!("const {value:?}"),
-                ExecutionBinding::Bind(address) => format!(
+                ExecutionBinding::Wire(address) => format!(
                     "bind {:?}#{}",
                     compiled.node_ids[address.node_idx], address.port_idx
                 ),
@@ -351,10 +351,10 @@ fn places_one_node_per_authored_node_in_id_order() {
             .collect::<Vec<_>>(),
         expected
     );
-    for (position, node_id) in expected.iter().enumerate() {
+    for (pos, node_id) in expected.iter().enumerate() {
         assert_eq!(
             compiled.program.node(*node_id).unwrap(),
-            NodeIdx(position as u32)
+            NodeIdx(pos as u32)
         );
     }
 }
@@ -385,7 +385,7 @@ fn interns_a_wire_to_the_producers_dense_address() {
     let g = wired_pair(DataType::Int, DataType::Int);
     let compiled = g.compile();
 
-    let ExecutionBinding::Bind(address) = *compiled.binding("consumer", 0) else {
+    let ExecutionBinding::Wire(address) = *compiled.binding("consumer", 0) else {
         panic!(
             "expected an interned bind, got {:?}",
             compiled.binding("consumer", 0)

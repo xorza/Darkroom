@@ -28,11 +28,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     group.bench_function(BenchmarkId::new("global", field.name()), |b| {
         let frames: Vec<StoredFrame> = (0..2)
-            .map(|index| {
-                let image = field.aligned(FRAME, index).image;
+            .map(|idx| {
+                let image = field.aligned(FRAME, idx).image;
                 let coverage = Buffer2::from_fn(FRAME.width, FRAME.height, |x, y| {
                     let outside = x >= FRAME.width - DITHER[0] || y < DITHER[1];
-                    if index > 0 && outside { 0.0 } else { 1.0 }
+                    if idx > 0 && outside { 0.0 } else { 1.0 }
                 });
                 let quality = FrameQuality::Planes {
                     confidence: coverage.clone(),

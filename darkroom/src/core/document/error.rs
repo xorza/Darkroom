@@ -9,7 +9,7 @@ pub(crate) enum GraphViewValidationError {
     #[error("graph viewport must have finite pan and positive finite zoom")]
     InvalidViewport,
     #[error("view item {item:?} position must be finite")]
-    NonFinitePosition { item: NodeId },
+    NonFinitePos { item: NodeId },
     #[error("view items must match the graph's nodes and the stubs")]
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]

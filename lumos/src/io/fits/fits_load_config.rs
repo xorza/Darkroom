@@ -12,7 +12,7 @@ pub enum FitsHduSelector {
     /// Accept the file only when it contains exactly one image-bearing HDU.
     Auto,
     /// Select a zero-based HDU index.
-    Index(usize),
+    Idx(usize),
     /// Select an image extension by case-insensitive `EXTNAME` and optional `EXTVER`.
     Name {
         /// Extension name to match.
@@ -68,13 +68,13 @@ pub enum FitsChecksumPolicy {
 }
 
 impl FitsChecksumPolicy {
-    /// HDU `index`'s checksum `report` under this policy, of the file at `path`: an error where
+    /// HDU `idx`'s checksum `report` under this policy, of the file at `path`: an error where
     /// the policy refuses it, else the provenance it gives. Not for [`Self::Ignore`], which reads
     /// nothing.
     pub(crate) fn judge(
         self,
         report: ChecksumReport,
-        index: usize,
+        idx: usize,
     ) -> Result<FitsChecksumProvenance, FitsLoadError> {
         match self {
             Self::Ignore => unreachable!("ignore policy returned before verification"),
@@ -83,7 +83,7 @@ impl FitsChecksumPolicy {
                     || report.checksum == ChecksumStatus::Invalid
                 {
                     return Err(FitsLoadError::from(FitsRefusal::InvalidChecksum {
-                        hdu: index,
+                        hdu: idx,
                         report,
                     }));
                 }
@@ -93,7 +93,7 @@ impl FitsChecksumPolicy {
                     || report.checksum != ChecksumStatus::Valid
                 {
                     return Err(FitsLoadError::from(FitsRefusal::ChecksumRequired {
-                        hdu: index,
+                        hdu: idx,
                         report,
                     }));
                 }
@@ -125,7 +125,7 @@ fn checksum_provenance(report: ChecksumReport) -> FitsChecksumProvenance {
 ///
 /// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f32`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct FitsLoadOptions {
+pub struct FitsLoadConfig {
     /// Image HDU selection policy.
     pub hdu: FitsHduSelector,
     /// Three-plane cube interpretation.
@@ -145,7 +145,7 @@ pub struct FitsLoadOptions {
     pub pedestal: Pedestal,
 }
 
-impl Default for FitsLoadOptions {
+impl Default for FitsLoadConfig {
     fn default() -> Self {
         Self {
             hdu: FitsHduSelector::Auto,
@@ -160,13 +160,13 @@ impl Default for FitsLoadOptions {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::fits::fits_load_options::{
-        FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
+    use crate::io::fits::fits_load_config::{
+        FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadConfig,
     };
 
     #[test]
     fn scientific_fits_defaults_require_unambiguous_image_semantics() {
-        let options = FitsLoadOptions::default();
+        let options = FitsLoadConfig::default();
         assert_eq!(options.hdu, FitsHduSelector::Auto);
         assert_eq!(options.cube, FitsCubeInterpretation::Reject);
         assert_eq!(options.checksum, FitsChecksumPolicy::VerifyIfPresent);

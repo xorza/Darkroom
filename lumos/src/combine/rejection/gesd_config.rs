@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::MethodScratch;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::math::statistics::spread::Spread;
 
@@ -46,10 +46,10 @@ impl GesdConfig {
 
     /// Validate the significance level and the outlier cap: either at its bound disables the test.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("alpha", self.alpha)
+        ConfigField::new("alpha", self.alpha)
             .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
         match self.max_outliers {
-            Some(max_outliers) => ConfigValue::count("max_outliers", max_outliers)
+            Some(max_outliers) => ConfigField::count("max_outliers", max_outliers)
                 .must_be("at least 1", max_outliers >= 1),
             None => Ok(()),
         }
@@ -103,10 +103,10 @@ impl GesdConfig {
         let n = pass.window.len();
         let mut mean = 0.0f64;
         let mut squared_deviations = 0.0f64;
-        for (index, &value) in pass.samples().iter().enumerate() {
+        for (idx, &value) in pass.samples().iter().enumerate() {
             let value = f64::from(value);
             let delta = value - mean;
-            mean += delta / (index + 1) as f64;
+            mean += delta / (idx + 1) as f64;
             squared_deviations += delta * (value - mean);
         }
         let centre = mean as f32;

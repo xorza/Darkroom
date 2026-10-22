@@ -156,9 +156,9 @@ fn detection_weights_ignore_signal() {
     let mut rng = TestRng::new(7);
     let mut channel = |ramp: bool| -> Vec<f32> {
         (0..size * size)
-            .map(|index| {
+            .map(|idx| {
                 let gradient = if ramp {
-                    (index % size) as f32 / size as f32
+                    (idx % size) as f32 / size as f32
                 } else {
                     0.0
                 };
@@ -242,8 +242,8 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 
     let mut flagged = rgb_image(size, [vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]]);
     flagged.metadata.derived.set_saturation_flagged(true);
-    flagged.set_flags(PixelFlags::from_fn(size, |index| {
-        if index == 1 {
+    flagged.set_flags(PixelFlags::from_fn(size, |idx| {
+        if idx == 1 {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
@@ -321,17 +321,17 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     use crate::star_detection::star_detector::stages::detect::Candidates;
 
     let size = Size2us::new(128, 128);
-    let missing = |index: usize| index % size.width < 64 && index / size.width < 64;
+    let missing = |idx: usize| idx % size.width < 64 && idx / size.width < 64;
     let mut rng = TestRng::new(5);
     let pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
+        .map(|idx| {
             let noise = 0.01 * rng.next_gaussian_f32();
-            if missing(index) { 0.1 } else { 0.1 + noise }
+            if missing(idx) { 0.1 } else { 0.1 + noise }
         })
         .collect();
     let mut image = gray_image(size, pixels);
-    image.set_flags(PixelFlags::from_fn(size, |index| {
-        if missing(index) {
+    image.set_flags(PixelFlags::from_fn(size, |idx| {
+        if missing(idx) {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()

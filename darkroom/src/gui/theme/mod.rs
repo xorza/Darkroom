@@ -167,7 +167,7 @@ impl Theme {
     #[inline]
     pub(crate) const fn card_border(&self, tier: CardTier) -> RgbaF32 {
         match tier {
-            CardTier::Broken => self.colors.connection_broken,
+            CardTier::Broken => self.colors.wire_broken,
             CardTier::Selected => self.colors.selection_rect,
             CardTier::Resting => self.card.border,
         }

@@ -348,7 +348,7 @@ mod tests {
         assert!(slot.owes_blob(), "a value nothing wrote owes its blob");
 
         let failed = || -> StoreResult {
-            Err(StoreError::Directory {
+            Err(StoreError::Dir {
                 path: PathBuf::new(),
                 source: io::Error::other("disk full"),
             })

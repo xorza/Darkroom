@@ -50,9 +50,9 @@ impl Isa for Portable {
     }
 
     #[inline(always)]
-    fn lookup_f32(self, table: &[f32], index: PortableF32) -> PortableF32 {
+    fn lookup_f32(self, table: &[f32], idx: PortableF32) -> PortableF32 {
         let last = lookup_last(table);
-        PortableF32(index.0.map(|index| lookup_lane(table, last, index)))
+        PortableF32(idx.0.map(|idx| lookup_lane(table, last, idx)))
     }
 }
 

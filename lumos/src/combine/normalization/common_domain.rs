@@ -124,8 +124,8 @@ impl CommonDomain {
                 let base = span * CANCEL_POLL_CHUNK;
                 if base < pixel_count {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
-                    intersect_span(words, end - base, |index| {
-                        let pixel = base + index;
+                    intersect_span(words, end - base, |idx| {
+                        let pixel = base + idx;
                         keeps(Vec2us::new(pixel % size.width, pixel / size.width))
                     });
                 }
@@ -172,13 +172,10 @@ impl CommonDomain {
     /// is the one of rank `⌊k·n/m⌋` among the `n`.
     ///
     /// [`StratifiedSamples`]: crate::frame_store::stratified_samples::StratifiedSamples
-    pub(super) fn stratified_indices(
-        &self,
-        cancel: &CancelToken,
-    ) -> Result<Vec<usize>, StackError> {
+    pub(super) fn stratified_idxs(&self, cancel: &CancelToken) -> Result<Vec<usize>, StackError> {
         let sample_count = self.sample_count;
         let retained = sample_count.min(SAMPLE_LIMIT);
-        let mut indices = Vec::with_capacity(retained);
+        let mut idxs = Vec::with_capacity(retained);
         let mut rank = 0;
         // The mask is one row, so word `w` covers pixels `64w..64w + 64`; the cancel poll runs per
         // word group rather than per pixel.
@@ -192,18 +189,18 @@ impl CommonDomain {
             for (offset, &word) in words.iter().enumerate() {
                 let base = (group * (CANCEL_POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
                 let mut bits = word;
-                while bits != 0 && indices.len() < retained {
+                while bits != 0 && idxs.len() < retained {
                     let bit = bits.trailing_zeros() as usize;
                     bits &= bits - 1;
-                    if rank == indices.len() * sample_count / retained {
-                        indices.push(base + bit);
+                    if rank == idxs.len() * sample_count / retained {
+                        idxs.push(base + bit);
                     }
                     rank += 1;
                 }
             }
         }
-        debug_assert_eq!(indices.len(), retained);
-        Ok(indices)
+        debug_assert_eq!(idxs.len(), retained);
+        Ok(idxs)
     }
 }
 
@@ -231,7 +228,7 @@ impl ChannelCoverage<'_> {
             for frame in self.frames {
                 let gate = FrameGate::of(frame, self.channel, base..end);
                 if !gate.everywhere() {
-                    intersect_span(words, end - base, |index| gate.sample(index).is_some());
+                    intersect_span(words, end - base, |idx| gate.sample(idx).is_some());
                 }
             }
         }

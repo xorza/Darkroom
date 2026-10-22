@@ -37,6 +37,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
     });
     let size = format!("{}x{}", FRAME.width, FRAME.height);
     group.bench_function(BenchmarkId::new("color_sample_indices/rggb", size), |b| {
-        b.iter_with_large_drop(|| sampling::color_sample_indices(black_box(FRAME), cfa_type, 0));
+        b.iter_with_large_drop(|| sampling::color_sample_idxs(black_box(FRAME), cfa_type, 0));
     });
 }

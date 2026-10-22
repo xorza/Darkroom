@@ -36,9 +36,9 @@ fn kept_with(rejection: Rejection, samples: NoisySamples<'_>, min_survivors: usi
         per_unit: &zeros,
     };
     let window = rejection.surviving_window(&mut scratch, Some(noise), min_survivors);
-    let mut kept: Vec<usize> = scratch.sorted.positions()[window]
+    let mut kept: Vec<usize> = scratch.sorted.poss()[window]
         .iter()
-        .map(|&position| position as usize)
+        .map(|&pos| pos as usize)
         .collect();
     kept.sort_unstable();
     kept
@@ -212,7 +212,7 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
         .map(|_| 0.5 + 1e-3 * standard_normal(&mut rng))
         .collect();
     hot.push(1e6);
-    for (name, values, config, kept_positions) in [
+    for (name, values, config, kept_poss) in [
         (
             "ramp 2σ",
             &ramp[..],
@@ -279,7 +279,7 @@ fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
     ] {
         assert_eq!(
             kept(Rejection::SigmaClip(config), values),
-            kept_positions,
+            kept_poss,
             "{name}"
         );
     }
@@ -405,7 +405,7 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
     );
     let mut long: Vec<f32> = (0..100).map(|i| i as f32).collect();
     long[50] = 1000.0;
-    for (name, values, config, kept_positions) in [
+    for (name, values, config, kept_poss) in [
         (
             "off line",
             &[1.0, 2.0, 3.0, 4.0, 100.0, 6.0][..],
@@ -469,7 +469,7 @@ fn linear_fit_keeps_exactly_the_samples_near_its_line() {
     ] {
         assert_eq!(
             kept(Rejection::LinearFit(config), values),
-            kept_positions,
+            kept_poss,
             "{name}"
         );
     }
@@ -484,13 +484,13 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
     let mut scores = normal_scores::NormalScores::default();
     let z = scores.of_count(9).to_vec();
     let values: Vec<f32> = z.iter().map(|&z| (2.0 + 0.5 * z) as f32).collect();
-    let positions: Vec<u32> = (0..9).collect();
+    let poss: Vec<u32> = (0..9).collect();
     let pass = Pass {
         sorted: &values,
-        positions: &positions,
+        poss: &poss,
         noise: None,
         window: 0..9,
-        index: 1,
+        idx: 1,
         min_survivors: DEFAULT_MIN_SURVIVORS,
     };
     let fit = pass.rank_fit(&mut scores);
@@ -727,7 +727,7 @@ fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
 #[test]
 fn winsorized_keeps_exactly_the_samples_its_band_holds() {
     let mild = [1.0, 1.1, 1.2, 0.9, 1.0, 1.1, 0.8, 1.3, 2.0];
-    for (name, values, config, kept_positions) in [
+    for (name, values, config, kept_poss) in [
         (
             "ramp",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0][..],
@@ -773,7 +773,7 @@ fn winsorized_keeps_exactly_the_samples_its_band_holds() {
     ] {
         assert_eq!(
             kept(Rejection::Winsorized(config), values),
-            kept_positions,
+            kept_poss,
             "{name}"
         );
     }
@@ -916,9 +916,9 @@ fn gesd_matches_nist_reference_example() {
     scratch.sorted.fill(&values);
     let statistics = config.statistics(&Pass {
         sorted: scratch.sorted.values(),
-        positions: scratch.sorted.positions(),
+        poss: scratch.sorted.poss(),
         window: 0..values.len(),
-        index: 0,
+        idx: 0,
         min_survivors: DEFAULT_MIN_SURVIVORS,
         noise: None,
     });
@@ -1314,8 +1314,8 @@ fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
         .surviving_window(&mut scratch, Some(noise), DEFAULT_MIN_SURVIVORS);
         let kept = scratch.sorted.values()[window.clone()].to_vec();
         assert!(kept.is_sorted(), "{scale:?}: {kept:?}");
-        for (&value, &position) in kept.iter().zip(&scratch.sorted.positions()[window]) {
-            assert_eq!(values[position as usize], value);
+        for (&value, &pos) in kept.iter().zip(&scratch.sorted.poss()[window]) {
+            assert_eq!(values[pos as usize], value);
         }
         kept
     };

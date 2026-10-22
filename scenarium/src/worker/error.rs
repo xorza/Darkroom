@@ -10,7 +10,7 @@
 use std::fmt::Display;
 
 use crate::execution::cache::runtime_cache::error::{CacheFlushUnsupported, CacheNodeFailure};
-use crate::execution::error::Error;
+use crate::execution::error::ExecutionError;
 use crate::graph::identity::NodeId;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,7 +18,7 @@ pub enum WorkerError {
     #[error("execution failed: {error}")]
     Execution {
         #[source]
-        error: Error,
+        error: ExecutionError,
     },
     /// The nodes an eviction sweep could not clear, each still carrying its own
     /// cause. Never empty — a sweep with nothing to report sends no error.

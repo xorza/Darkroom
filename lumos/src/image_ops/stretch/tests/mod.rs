@@ -776,13 +776,13 @@ fn faint_h_alpha_keeps_its_hue() {
 fn the_auto_black_point_keeps_a_faint_color() {
     let size = Size2us::new(16, 16);
     let sky: Vec<f32> = (0..size.pixel_count())
-        .map(|index| [0.049, 0.05, 0.051][index % 3])
+        .map(|idx| [0.049, 0.05, 0.051][idx % 3])
         .collect();
     let (mut r, g, b) = (sky.clone(), sky.clone(), sky);
     r[1] = 0.055;
     let (g0, b0) = (g[1], b[1]);
     let mut intensities: Vec<f32> = (0..size.pixel_count())
-        .map(|index| (r[index] + g[index] + b[index]) * (1.0 / 3.0))
+        .map(|idx| (r[idx] + g[idx] + b[idx]) * (1.0 / 3.0))
         .collect();
     let background = MedianMad::of_mut(&mut intensities);
     let black = background.median - StretchMethod::AUTO_SHADOW_SIGMAS * background.sigma();

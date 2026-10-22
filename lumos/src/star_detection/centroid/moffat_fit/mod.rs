@@ -24,7 +24,7 @@ use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
 use crate::simd::Kernel;
 use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
 use crate::star_detection::centroid::profile_bounds::ProfileBounds;
-use crate::star_detection::centroid::profile_problem::{FitData, LMModel, PIXEL_MEAN_TOLERANCE};
+use crate::star_detection::centroid::profile_problem::{FitData, LmModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
 use crate::star_detection::centroid::{profile_problem, stamp};
@@ -38,7 +38,7 @@ pub(super) struct MoffatFit {
     /// FWHM computed from alpha and beta.
     pub(super) fwhm: f32,
     /// `√((σ_x² + σ_y²)/2)` of `pos`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)`.
-    pub(super) position_sigma: f64,
+    pub(super) pos_sigma: f64,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
     /// `pos`/`fwhm` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
@@ -138,7 +138,7 @@ impl MoffatFixedBeta {
     }
 }
 
-impl LMModel<5> for MoffatFixedBeta {
+impl LmModel<5> for MoffatFixedBeta {
     #[inline]
     fn point(&self, x: f64, y: f64, params: &[f64; 5]) -> f64 {
         let [x0, y0, amp, alpha, bg] = *params;
@@ -246,7 +246,7 @@ impl MoffatFit {
 
         Some(Self {
             pos: result_pos,
-            position_sigma: profile_problem::position_sigma(&result, fit.stamp.z.len())?,
+            pos_sigma: profile_problem::pos_sigma(&result, fit.stamp.z.len())?,
             fwhm: fwhm::from_alpha_beta(alpha, f64::from(beta)) as f32,
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result, model.quadrature.nodes().len()),

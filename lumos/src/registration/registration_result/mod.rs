@@ -1,7 +1,7 @@
 //! [`RegistrationResult`]: the transform a registration found, and the matches it rests on.
 
 use crate::registration::distortion::sip::SipPolynomial;
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 
@@ -13,7 +13,7 @@ const QUALITY_INLIER_SATURATION: f64 = 20.0;
 /// Corresponding stars in the reference and target inputs with their final fit residual.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarMatch {
-    pub indices: MatchIndices,
+    pub idxs: MatchIdxs,
     /// Distance between the transformed reference star and target star, in pixels.
     pub residual: f64,
 }
