@@ -202,8 +202,8 @@ impl Tile {
         }
         // The column phase of the red and blue sites of each row parity.
         let red_blue = [
-            pattern.color_at(Vec2us::new(0, 0)).index() & 1,
-            pattern.color_at(Vec2us::new(0, 1)).index() & 1,
+            pattern.color_at(Vec2us::new(0, 0)).idx() & 1,
+            pattern.color_at(Vec2us::new(0, 1)).idx() & 1,
         ];
         Stages {
             tile: self,
@@ -233,8 +233,8 @@ impl Tile {
                         }
                     }
                 }
-                let index = (top + row) * frame_width + left + border;
-                unsafe { out.write_row(channel, index, &self.line[border..width - border]) };
+                let idx = (top + row) * frame_width + left + border;
+                unsafe { out.write_row(channel, idx, &self.line[border..width - border]) };
             }
         }
     }
@@ -756,11 +756,11 @@ impl<'a> Split<'a> {
     fn of(planes: &'a mut [Vec<f32>; 4], phase: usize, samples: ColorSamples<'a>) -> Self {
         let mut written = None;
         let mut read: [&[f32]; 4] = [&[]; 4];
-        for (index, plane) in planes.iter_mut().enumerate() {
-            if index == phase {
+        for (idx, plane) in planes.iter_mut().enumerate() {
+            if idx == phase {
                 written = Some(plane.as_mut_slice());
             } else {
-                read[index] = plane;
+                read[idx] = plane;
             }
         }
         Self {
@@ -845,7 +845,7 @@ fn direction_ratio<V: F32x8>(a: V, b: V, floor: V) -> V {
 /// The color of a frame of `pattern` at Bayer phase `phase`.
 #[inline(always)]
 const fn phase_color(pattern: CfaPattern, phase: usize) -> usize {
-    pattern.color_at(Vec2us::new(phase % 2, phase / 2)).index()
+    pattern.color_at(Vec2us::new(phase % 2, phase / 2)).idx()
 }
 
 /// Each of `taps` at the sites from plane column `j`.

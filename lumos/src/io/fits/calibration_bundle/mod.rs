@@ -33,7 +33,7 @@ use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
 use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FlagsExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
@@ -49,7 +49,7 @@ const COLD: u8 = 1;
 
 /// Where each component's HDU sits in a bundle being read.
 #[derive(Debug, Default)]
-struct BundleIndices {
+struct BundleIdxs {
     masters: CalibrationSet<Option<usize>>,
     defects: Option<usize>,
 }
@@ -91,36 +91,35 @@ pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), Bund
     Ok(())
 }
 
-pub(crate) fn load(path: &Path, context: &LoadContext) -> Result<CalibrationMasters, BundleError> {
+pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, BundleError> {
     // Streamed, not mapped: a bundle is the user's file, and one rewritten in place while it is
     // read must fail the load, not fault the process.
     let mut bundle = BundleReader {
         reader: FitsReader::open(File::open(path)?)?,
         path,
-        context,
+        ctx,
     };
     bundle.validate_primary()?;
     bundle.verify_checksums()?;
-    let indices = bundle.indices()?;
+    let idxs = bundle.idxs()?;
 
-    if indices.masters.flat_dark.is_some() {
+    if idxs.masters.flat_dark.is_some() {
         return Err(BundleError::FlatDark);
     }
-    if indices.defects.is_some() && indices.masters.dark.is_none() && indices.masters.flat.is_none()
-    {
+    if idxs.defects.is_some() && idxs.masters.dark.is_none() && idxs.masters.flat.is_none() {
         return Err(BundleError::DefectsWithoutMaster);
     }
     // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
     // trustworthy as one just built — and neither can exist in a state the other would reject.
     let masters = CalibrationMasters::builder()
-        .bias(bundle.master(indices.masters.bias, MasterRole::Bias)?)
-        .dark(bundle.master(indices.masters.dark, MasterRole::Dark)?)
+        .bias(bundle.master(idxs.masters.bias, MasterRole::Bias)?)
+        .dark(bundle.master(idxs.masters.dark, MasterRole::Dark)?)
         .flat(
             bundle
-                .master(indices.masters.flat, MasterRole::Flat)?
+                .master(idxs.masters.flat, MasterRole::Flat)?
                 .map(PreparedFlat::from_divisor),
         )
-        .defect_map(bundle.defect_map(indices.defects)?)
+        .defect_map(bundle.defect_map(idxs.defects)?)
         .build()?;
     Ok(masters)
 }
@@ -142,7 +141,7 @@ fn bundle_primary_header() -> Result<Header, WriteError> {
 struct BundleReader<'a> {
     reader: StreamReader<File>,
     path: &'a Path,
-    context: &'a LoadContext,
+    ctx: &'a LoadCtx,
 }
 
 impl BundleReader<'_> {
@@ -178,11 +177,11 @@ impl BundleReader<'_> {
     }
 
     /// Where each component's HDU sits.
-    fn indices(&self) -> Result<BundleIndices, BundleError> {
+    fn idxs(&self) -> Result<BundleIdxs, BundleError> {
         // Each master finds its own flags when it is read; this refuses one that names none.
         FlagsExtension::check_claims(self.reader.hdus())
             .map_err(|error| BundleError::Flags(ImageError::fits_load(self.path, error)))?;
-        let mut indices = BundleIndices::default();
+        let mut idxs = BundleIdxs::default();
         for (hdu, unit) in self.reader.hdus().iter().enumerate().skip(1) {
             let extname = unit
                 .header
@@ -196,8 +195,8 @@ impl BundleReader<'_> {
                     extname: extname.to_string(),
                 })?;
             let slot = match component {
-                CalibrationComponent::Master(role) => indices.masters.get_mut(role),
-                CalibrationComponent::Defects => &mut indices.defects,
+                CalibrationComponent::Master(role) => idxs.masters.get_mut(role),
+                CalibrationComponent::Defects => &mut idxs.defects,
             };
             if slot.replace(hdu).is_some() {
                 return Err(BundleError::DuplicateExtension {
@@ -205,19 +204,19 @@ impl BundleReader<'_> {
                 });
             }
         }
-        Ok(indices)
+        Ok(idxs)
     }
 
-    /// The `role` master at HDU `index`, when the bundle holds one.
+    /// The `role` master at HDU `idx`, when the bundle holds one.
     fn master(
         &mut self,
-        index: Option<usize>,
+        idx: Option<usize>,
         role: MasterRole,
     ) -> Result<Option<CfaImage>, BundleError> {
-        let Some(index) = index else {
+        let Some(idx) = idx else {
             return Ok(None);
         };
-        let hdu = &self.reader.hdus()[index];
+        let hdu = &self.reader.hdus()[idx];
         if hdu.kind != HduKind::Image || hdu.header.bitpix()? != Bitpix::F32 {
             return Err(BundleError::MasterEncoding { role });
         }
@@ -230,12 +229,12 @@ impl BundleReader<'_> {
             datasum: FitsChecksumState::Valid,
             checksum: FitsChecksumState::Valid,
         };
-        let context = self.context;
+        let ctx = self.ctx;
         let mut master = || {
-            let selected = SelectedFits::lumos_cfa(&mut self.reader, index, context)?;
+            let selected = SelectedFits::lumos_cfa(&mut self.reader, idx, ctx)?;
             let cfa_type = selected.require_cfa()?;
             selected
-                .read(context, Checksum::Verified(checksum))?
+                .read(ctx, Checksum::Verified(checksum))?
                 .into_cfa(cfa_type)
         };
         master().map(Some).map_err(|source| match source {
@@ -247,13 +246,13 @@ impl BundleReader<'_> {
         })
     }
 
-    /// The defect map at HDU `index`, when the bundle holds one.
-    fn defect_map(&mut self, index: Option<usize>) -> Result<Option<DefectMap>, BundleError> {
-        let Some(index) = index else {
+    /// The defect map at HDU `idx`, when the bundle holds one.
+    fn defect_map(&mut self, idx: Option<usize>) -> Result<Option<DefectMap>, BundleError> {
+        let Some(idx) = idx else {
             return Ok(None);
         };
-        let header = &self.reader.hdus()[index].header;
-        if self.reader.hdus()[index].kind != HduKind::BinTable
+        let header = &self.reader.hdus()[idx].header;
+        if self.reader.hdus()[idx].kind != HduKind::BinTable
             || header.get_text(FORMAT_KEYWORD)? != Some(DEFECT_FORMAT)
             || header.get_integer(VERSION_KEYWORD)? != Some(BUNDLE_VERSION)
         {
@@ -262,7 +261,7 @@ impl BundleReader<'_> {
         let Some(dimensions) = read_defect_dimensions(header)? else {
             return Err(DefectTableError::Extent.into());
         };
-        let table = self.reader.read_table(index)?;
+        let table = self.reader.read_table(idx)?;
         let row_count = table.schema().nrows;
         let column = |name: &'static str| {
             table
@@ -273,31 +272,30 @@ impl BundleReader<'_> {
         let ColumnData::Bytes(kinds) = column("KIND")? else {
             return Err(DefectTableError::Column { column: "KIND" }.into());
         };
-        let ColumnData::I64(indices) = column("INDEX")? else {
+        let ColumnData::I64(idxs) = column("INDEX")? else {
             return Err(DefectTableError::Column { column: "INDEX" }.into());
         };
         let ColumnData::F32(excess) = column("EXCESS")? else {
             return Err(DefectTableError::Column { column: "EXCESS" }.into());
         };
-        if kinds.len() != row_count || indices.len() != row_count || excess.len() != row_count {
+        if kinds.len() != row_count || idxs.len() != row_count || excess.len() != row_count {
             return Err(DefectTableError::ColumnLength.into());
         }
         let mut hot = HotPixels::default();
         let mut cold = Vec::new();
-        for (row, ((kind, index), excess)) in kinds.into_iter().zip(indices).zip(excess).enumerate()
-        {
-            let Some(index) = usize::try_from(index)
+        for (row, ((kind, idx), excess)) in kinds.into_iter().zip(idxs).zip(excess).enumerate() {
+            let Some(idx) = usize::try_from(idx)
                 .ok()
-                .filter(|&index| index < dimensions.pixel_count())
+                .filter(|&idx| idx < dimensions.pixel_count())
             else {
-                return Err(DefectTableError::Index { row }.into());
+                return Err(DefectTableError::Idx { row }.into());
             };
             match kind {
                 HOT if excess.is_finite() && excess > 0.0 => {
-                    hot.indices.push(index);
+                    hot.idxs.push(idx);
                     hot.excess.push(excess);
                 }
-                COLD if excess.is_nan() => cold.push(index),
+                COLD if excess.is_nan() => cold.push(idx),
                 HOT | COLD => return Err(DefectTableError::Excess { row }.into()),
                 kind => return Err(DefectTableError::Kind { row, kind }.into()),
             }
@@ -315,27 +313,25 @@ struct EncodedDefectMap {
 }
 
 fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
-    let (hot, cold) = (map.hot(), map.cold_indices());
-    let rows = hot.indices.len() + cold.len();
+    let (hot, cold) = (map.hot(), map.cold_idxs());
+    let rows = hot.idxs.len() + cold.len();
     let mut kinds = Vec::with_capacity(rows);
-    kinds.resize(hot.indices.len(), HOT);
+    kinds.resize(hot.idxs.len(), HOT);
     kinds.resize(rows, COLD);
     let mut excess = Vec::with_capacity(rows);
     excess.extend_from_slice(&hot.excess);
     excess.resize(rows, f32::NAN);
-    let indices = hot
-        .indices
+    let idxs = hot
+        .idxs
         .iter()
         .chain(cold)
-        .map(|&index| {
-            i64::try_from(index).map_err(|_| BundleError::DefectIndexOutOfRange { index })
-        })
+        .map(|&idx| i64::try_from(idx).map_err(|_| BundleError::DefectIdxOutOfRange { idx }))
         .collect::<Result<Vec<_>, _>>()?;
     let table = TableBuilder::explicit(
         kinds.len(),
         [
             WriteColumn::scalar("KIND", ColumnData::Bytes(kinds)),
-            WriteColumn::scalar("INDEX", ColumnData::I64(indices)),
+            WriteColumn::scalar("INDEX", ColumnData::I64(idxs)),
             WriteColumn::scalar("EXCESS", ColumnData::F32(excess)),
         ],
     )?;

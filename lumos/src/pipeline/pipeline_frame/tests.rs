@@ -13,8 +13,8 @@ use crate::pipeline::pipeline_frame::PipelineFrame;
 /// holding what was parked, and its flags with them.
 #[test]
 fn a_parked_frame_is_read_back_whole_before_its_warp() {
-    let directory = TempDir::new("pipeline_frame_source");
-    let scratch = RunScratch::create(directory.path()).unwrap();
+    let dir = TempDir::new("pipeline_frame_source");
+    let scratch = RunScratch::create(dir.path()).unwrap();
     let dimensions = ImageDimensions::new((3, 2), ChannelLayout::Rgb);
     let mut image = LinearImage::from_planar_channels(
         dimensions,

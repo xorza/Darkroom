@@ -16,10 +16,10 @@ pub struct Id<T> {
     names: PhantomData<fn() -> T>,
 }
 
-/// What an id is on the wire: a newtype struct around its UUID.
+/// What an id is in serialized form: a newtype struct around its UUID.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "Id")]
-struct Wire(Uuid);
+struct IdRepr(Uuid);
 
 impl<T> Id<T> {
     /// A random id.
@@ -122,13 +122,13 @@ impl<T> fmt::Display for Id<T> {
 
 impl<T> Serialize for Id<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        Wire(self.uuid).serialize(serializer)
+        IdRepr(self.uuid).serialize(serializer)
     }
 }
 
 impl<'de, T> Deserialize<'de> for Id<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Wire::deserialize(deserializer).map(|Wire(uuid)| Self::of(uuid))
+        IdRepr::deserialize(deserializer).map(|IdRepr(uuid)| Self::of(uuid))
     }
 }
 

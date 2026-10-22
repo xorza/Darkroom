@@ -7,8 +7,8 @@ use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
+use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::frame_store::tier::Tier;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::ingest_run::IngestRun;
 use crate::memory::footprint::Footprint;
@@ -25,7 +25,7 @@ pub(crate) enum FrameOrigin {
     Memory,
 }
 
-/// What a drizzle run holds, which decides the [`Tier`] it keeps its drizzled frames in.
+/// What a drizzle run holds, which decides the [`StorageTier`] it keeps its drizzled frames in.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DrizzleShape {
     pub(crate) input: ImageDimensions,
@@ -44,7 +44,7 @@ impl DrizzleShape {
         stack: &StackConfig,
         run: &IngestRun,
         storage: &RunStorage,
-    ) -> Result<Tier, DrizzleError> {
+    ) -> Result<StorageTier, DrizzleError> {
         let budget = run.budget;
         let plan = RunPlan::of(
             self.frame_count,

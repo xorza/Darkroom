@@ -28,14 +28,14 @@ impl CfaType {
     pub(crate) const MAX_PERIOD: usize = 6;
 
     /// The color slot of the photosite at `pos`: its
-    /// [`CfaColor::index`](crate::image::cfa::cfa_color::CfaColor::index) under a mosaic, and 0,
+    /// [`CfaColor::idx`](crate::image::cfa::cfa_color::CfaColor::idx) under a mosaic, and 0,
     /// the one slot, on a mono sensor.
     #[inline(always)]
     pub const fn slot_at(&self, pos: Vec2us) -> usize {
         match self {
             Self::Mono => 0,
-            Self::Bayer(pattern) => pattern.color_at(pos).index(),
-            Self::XTrans(pattern) => pattern.color_at(pos).index(),
+            Self::Bayer(pattern) => pattern.color_at(pos).idx(),
+            Self::XTrans(pattern) => pattern.color_at(pos).idx(),
         }
     }
 

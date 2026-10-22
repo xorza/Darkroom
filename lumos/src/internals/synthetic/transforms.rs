@@ -16,13 +16,13 @@ pub(crate) struct StarScatter {
 
 impl StarScatter {
     /// The star positions, 50 px clear of every edge.
-    pub(crate) fn positions(self) -> Vec<DVec2> {
+    pub(crate) fn poss(self) -> Vec<DVec2> {
         self.points(50.0).collect()
     }
 
-    /// The [`positions`](Self::positions) as stars of a uniform `fwhm`.
+    /// The [`poss`](Self::poss) as stars of a uniform `fwhm`.
     pub(crate) fn stars(self, fwhm: f32) -> Vec<Star> {
-        positions_to_stars(&self.positions(), fwhm)
+        poss_to_stars(&self.poss(), fwhm)
     }
 
     /// Faint stars 10 px clear of every edge, as false detections.
@@ -56,9 +56,8 @@ impl StarScatter {
 ///
 /// Creates Star structs suitable for registration testing with default properties.
 /// The FWHM is set uniformly to allow `register()` to derive `max_sigma` correctly.
-pub(crate) fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
-    positions
-        .iter()
+pub(crate) fn poss_to_stars(poss: &[DVec2], fwhm: f32) -> Vec<Star> {
+    poss.iter()
         .enumerate()
         .map(|(i, &pos)| {
             Star::at(pos)
@@ -94,7 +93,7 @@ mod tests {
             side: 1000.0,
             seed: 12345,
         };
-        let stars = scatter.positions();
+        let stars = scatter.poss();
         assert_eq!(stars.len(), 100);
 
         // Check all stars are within bounds (with margin)
@@ -104,12 +103,12 @@ mod tests {
         }
 
         // Check reproducibility
-        assert_eq!(stars, scatter.positions());
+        assert_eq!(stars, scatter.poss());
     }
 
     #[test]
     fn star_noise_moves_positions_within_its_amplitude() {
-        let stars = positions_to_stars(&vec![DVec2::new(500.0, 500.0); 100], 3.0);
+        let stars = poss_to_stars(&vec![DVec2::new(500.0, 500.0); 100], 3.0);
         let noisy = add_star_noise(&stars, 1.0, 12345);
 
         let mut has_different = false;

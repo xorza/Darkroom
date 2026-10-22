@@ -13,7 +13,7 @@ use std::fmt::Formatter;
 
 use thiserror::Error;
 
-use crate::execution::index::NodeIdx;
+use crate::execution::idx::NodeIdx;
 use crate::execution::schedule::NodeState;
 use crate::graph::identity::NodeId;
 

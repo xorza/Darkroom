@@ -1,6 +1,6 @@
-//! [`WarpParams`]: how a warp resamples a frame, and the kernel it resamples with.
+//! [`WarpConfig`]: how a warp resamples a frame, and the kernel it resamples with.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::registration::resample::source_image::SourceImage;
@@ -39,7 +39,7 @@ impl InterpolationMethod {
 }
 
 /// The share of what a kernel's positive lobes carry that its negative lobes may take before the
-/// ringing clamp acts, in `[0, 1]`: lower clamps harder. See [`WarpParams::clamping_threshold`].
+/// ringing clamp acts, in `[0, 1]`: lower clamps harder. See [`WarpConfig::clamping_threshold`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClampingThreshold(f32);
 
@@ -54,7 +54,7 @@ impl ClampingThreshold {
     /// [`InvalidConfigField`] when `threshold` is not finite or lies outside `[0, 1]`: a NaN would
     /// turn nearly every clamped sample into NaN, and a negative one clamp every pixel.
     pub fn new(threshold: f32) -> Result<Self, InvalidConfigField> {
-        ConfigValue::new("warp clamping_threshold", threshold)
+        ConfigField::new("warp clamping_threshold", threshold)
             .finite_and("between 0 and 1", |threshold| {
                 (0.0..=1.0).contains(&threshold)
             })?;
@@ -69,7 +69,7 @@ impl ClampingThreshold {
 
 /// Configuration for inverse-mapped image resampling.
 #[derive(Debug, Clone, Copy)]
-pub struct WarpParams {
+pub struct WarpConfig {
     /// Resampling kernel.
     pub method: InterpolationMethod,
     /// Fill for source positions outside the closed source pixel footprint.
@@ -84,7 +84,7 @@ pub struct WarpParams {
     pub clamping_threshold: Option<ClampingThreshold>,
 }
 
-impl Default for WarpParams {
+impl Default for WarpConfig {
     fn default() -> Self {
         Self {
             method: InterpolationMethod::default(),
@@ -94,7 +94,7 @@ impl Default for WarpParams {
     }
 }
 
-impl WarpParams {
+impl WarpConfig {
     /// `image` warped by `transform` onto the reference frame's grid, resampled by these
     /// parameters.
     ///
@@ -135,7 +135,7 @@ impl WarpParams {
 
     /// The border value is finite; the threshold is checked when it is made.
     pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("warp border_value", self.border_value).finite()
+        ConfigField::new("warp border_value", self.border_value).finite()
     }
 }
 
@@ -146,10 +146,10 @@ pub(crate) mod internals {
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
-    use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+    use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
     use crate::registration::warp_transform::WarpTransform;
 
-    impl WarpParams {
+    impl WarpConfig {
         /// One plane warped on its own by `transform` — the shape the kernel tests and the plane
         /// benches compare.
         pub(crate) fn warp_plane(
@@ -181,13 +181,13 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use crate::registration::resample::warp_params::{
-        ClampingThreshold, InterpolationMethod, WarpParams,
+    use crate::registration::resample::warp_config::{
+        ClampingThreshold, InterpolationMethod, WarpConfig,
     };
 
     #[test]
     fn warp_params_defaults() {
-        let default = WarpParams::default();
+        let default = WarpConfig::default();
         assert_eq!(default.method, InterpolationMethod::Lanczos3);
         assert_eq!(default.border_value, 0.0);
         assert_eq!(default.clamping_threshold, Some(ClampingThreshold::DEFAULT));
@@ -205,14 +205,14 @@ mod tests {
             Some(ClampingThreshold::new(1.0).unwrap()),
             None,
         ] {
-            WarpParams {
+            WarpConfig {
                 clamping_threshold,
                 ..Default::default()
             }
             .validate()
             .unwrap();
         }
-        let nan_border = WarpParams {
+        let nan_border = WarpConfig {
             border_value: f32::NAN,
             ..Default::default()
         };

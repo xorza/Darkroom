@@ -21,7 +21,7 @@ use rayon::prelude::*;
 use crate::background_mesh::mesh_workspace::{
     DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams, MeshWorkspace,
 };
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -191,16 +191,16 @@ impl ExtractBackground {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("background extraction degree", self.degree)
+        ConfigField::count("background extraction degree", self.degree)
             .must_be("between 1 and 4", (1..=4).contains(&self.degree))?;
-        ConfigValue::count("background extraction tile_size", self.tile_size)
+        ConfigField::count("background extraction tile_size", self.tile_size)
             .must_be("at least 8", self.tile_size >= 8)?;
-        ConfigValue::new(
+        ConfigField::new(
             "background extraction rejection_sigma",
             self.rejection_sigma,
         )
         .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::new("background extraction divide_floor", self.divide_floor)
+        ConfigField::new("background extraction divide_floor", self.divide_floor)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)
     }
 }

@@ -122,7 +122,7 @@ pub(crate) fn reject(
             mono = MonoDetector::new(config, noise);
             mono.reject(
                 image.data_mut(),
-                &|index| backgrounds.at(0, size.point_of(index)),
+                &|idx| backgrounds.at(0, size.point_of(idx)),
                 kept_out.as_ref(),
             )
         }
@@ -131,7 +131,7 @@ pub(crate) fn reject(
     if count > 0 {
         image.add_flags_where(
             QualityFlags::COSMIC_RAY.union(QualityFlags::REPAIRED),
-            |index| found.get(index),
+            |idx| found.get(idx),
         );
     }
     Ok(count)

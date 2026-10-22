@@ -10,7 +10,7 @@ use palantir::Image as Raster;
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::wake::Wake;
-use crate::gui::state::preview_store::error::PreviewImageError;
+use crate::gui::state::preview_store::error::DrawablePreviewError;
 use crate::gui::state::preview_store::{
     PREVIEW_TEXTURE_DIM, capped_target, native_size, rgba8_raster,
 };
@@ -101,7 +101,7 @@ pub(crate) enum Card {
         source: DynamicValue,
     },
     /// An image no texture can hold.
-    Failed(PreviewImageError),
+    Failed(DrawablePreviewError),
 }
 
 /// A preview card's raster, and the source figures it was cut from.

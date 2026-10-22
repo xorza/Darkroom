@@ -182,7 +182,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
         // {a, b} are selected.
         h.doc_mut()
             .graph
-            .set_input_binding(InputPort::new(b, 0), Binding::bind(c, 0));
+            .set_input_binding(InputPort::new(b, 0), Binding::wire(c, 0));
         h.doc_mut().main_view.selected = [a, b].into_iter().collect();
 
         // Duplicating expands into ordinary intents: one add per clone, the
@@ -221,7 +221,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
     assert_eq!(dropped.count, 0, "the external wire is dropped");
     assert_eq!(count, 1, "the external wire is kept");
     match first {
-        Some(Binding::Bind(src)) => {
+        Some(Binding::Wire(src)) => {
             assert_eq!(src.node_id, c, "still fed by the original producer");
             assert_eq!(src.port_idx, 0);
         }

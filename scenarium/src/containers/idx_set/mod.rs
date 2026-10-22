@@ -42,15 +42,14 @@ impl<I> IdxSet<I> {
 }
 
 impl<I: Idx> IdxSet<I> {
-    pub(crate) fn insert(&mut self, index: I) {
-        debug_assert!(index.idx() < self.len, "index out of range");
-        self.words[index.idx() / u64::BITS as usize] |= 1 << (index.idx() % u64::BITS as usize);
+    pub(crate) fn insert(&mut self, idx: I) {
+        debug_assert!(idx.idx() < self.len, "index out of range");
+        self.words[idx.idx() / u64::BITS as usize] |= 1 << (idx.idx() % u64::BITS as usize);
     }
 
-    pub(crate) fn contains(&self, index: I) -> bool {
-        debug_assert!(index.idx() < self.len, "index out of range");
-        (self.words[index.idx() / u64::BITS as usize] >> (index.idx() % u64::BITS as usize)) & 1
-            != 0
+    pub(crate) fn contains(&self, idx: I) -> bool {
+        debug_assert!(idx.idx() < self.len, "index out of range");
+        (self.words[idx.idx() / u64::BITS as usize] >> (idx.idx() % u64::BITS as usize)) & 1 != 0
     }
 
     /// Ascending set indices.

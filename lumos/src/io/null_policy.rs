@@ -42,7 +42,7 @@ impl NullPolicy {
     ) -> Result<Option<PixelFlags>, NullSamples> {
         let pixel_count = size.pixel_count();
         let mut count = 0;
-        let mut first_index = None;
+        let mut first_idx = None;
         for (channel, plane) in planes.iter().enumerate() {
             #[expect(
                 clippy::debug_assert_with_mut_call,
@@ -51,21 +51,21 @@ impl NullPolicy {
             {
                 debug_assert_eq!(plane.len(), pixel_count);
             }
-            for (index, sample) in plane.iter().enumerate() {
+            for (idx, sample) in plane.iter().enumerate() {
                 if !sample.is_finite() {
                     count += 1;
-                    first_index.get_or_insert(channel * pixel_count + index);
+                    first_idx.get_or_insert(channel * pixel_count + idx);
                 }
             }
         }
-        let Some(first_index) = first_index else {
+        let Some(first_idx) = first_idx else {
             return Ok(None);
         };
         if self == Self::Reject {
-            return Err(NullSamples { count, first_index });
+            return Err(NullSamples { count, first_idx });
         }
-        let flags = PixelFlags::from_fn(size, |index| {
-            if planes.iter().any(|plane| !plane[index].is_finite()) {
+        let flags = PixelFlags::from_fn(size, |idx| {
+            if planes.iter().any(|plane| !plane[idx].is_finite()) {
                 QualityFlags::NO_DATA
             } else {
                 QualityFlags::default()
@@ -83,12 +83,12 @@ impl NullPolicy {
 
 /// Null or non-finite samples of an image, under
 /// [`NullPolicy::Reject`]: `count` of them, each channel's counted
-/// apart, the first at `first_index` of the channel-major sample space.
+/// apart, the first at `first_idx` of the channel-major sample space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{count} null/non-finite samples, first at linear index {first_index}")]
+#[error("{count} null/non-finite samples, first at linear index {first_idx}")]
 pub(crate) struct NullSamples {
     pub(crate) count: usize,
-    pub(crate) first_index: usize,
+    pub(crate) first_idx: usize,
 }
 
 /// Samples the fill's median is taken over, at most.
@@ -117,7 +117,7 @@ pub(crate) fn fill(samples: &mut [f32], null_count: usize) {
 pub(super) fn fill_flagged(samples: &mut [f32], flags: &PixelFlags) {
     let count = flags.count(QualityFlags::NO_DATA);
     if count > 0 {
-        let missing = |index: usize, _| flags.at(index).intersects(QualityFlags::NO_DATA);
+        let missing = |idx: usize, _| flags.at(idx).intersects(QualityFlags::NO_DATA);
         fill_where(
             samples,
             missing,
@@ -139,7 +139,7 @@ fn fill_where(samples: &mut [f32], missing: impl Fn(usize, f32) -> bool, missing
         samples
             .iter()
             .enumerate()
-            .filter(|&(index, &value)| !missing(index, value))
+            .filter(|&(idx, &value)| !missing(idx, value))
             .map(|(_, &value)| value)
             .step_by(sample.stride()),
     );
@@ -150,8 +150,8 @@ fn fill_where(samples: &mut [f32], missing: impl Fn(usize, f32) -> bool, missing
     } else {
         statistics::median_mut(&mut measured)
     };
-    for (index, value) in samples.iter_mut().enumerate() {
-        if missing(index, *value) {
+    for (idx, value) in samples.iter_mut().enumerate() {
+        if missing(idx, *value) {
             *value = fill;
         }
     }
@@ -187,7 +187,7 @@ mod tests {
             refused,
             NullSamples {
                 count: 2,
-                first_index: 1
+                first_idx: 1
             }
         );
 
@@ -215,8 +215,8 @@ mod tests {
         // 0.5 and 7 take it.
         let mut samples = [1.0, 0.5, 2.0, 4.0, 7.0, 10.0];
         let missing = [1, 4];
-        let flags = PixelFlags::from_fn(Size2us::new(6, 1), |index| {
-            if missing.contains(&index) {
+        let flags = PixelFlags::from_fn(Size2us::new(6, 1), |idx| {
+            if missing.contains(&idx) {
                 QualityFlags::NO_DATA
             } else {
                 QualityFlags::default()
@@ -237,7 +237,7 @@ mod tests {
         // is the mean of its two middle values (99_998 and 100_000) = 99_999. The whole ramp's
         // median is 99_999.5, so the bound costs half a unit in two hundred thousand.
         const VALID: usize = 2 * FILL_MEDIAN_SAMPLES;
-        let mut samples: Vec<f32> = (0..VALID).map(|index| index as f32).collect();
+        let mut samples: Vec<f32> = (0..VALID).map(|idx| idx as f32).collect();
         samples.push(f32::NAN);
         null_policy::fill(&mut samples, 1);
         assert_eq!(samples[VALID], 99_999.0);
@@ -246,11 +246,11 @@ mod tests {
         // first half would otherwise spend that half of the quota on pixels that are dropped
         // anyway, and draw the median from the tail alone.
         let mut lopsided: Vec<f32> = (0..VALID)
-            .map(|index| {
-                if index < VALID / 2 {
+            .map(|idx| {
+                if idx < VALID / 2 {
                     f32::NAN
                 } else {
-                    index as f32
+                    idx as f32
                 }
             })
             .collect();

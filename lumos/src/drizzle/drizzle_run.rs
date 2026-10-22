@@ -46,7 +46,7 @@ use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::progress::stacking_progress::StackingStage;
 use crate::stack_product::StackProduct;
 
@@ -58,11 +58,11 @@ pub(super) struct DrizzleRun<'a> {
     pub(super) ingest: IngestRun,
 }
 
-/// `frame`'s source decoded by `D` under `context`, through `storage`.
+/// `frame`'s source decoded by `D` under `ctx`, through `storage`.
 fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
     storage: &RunStorage,
-    context: &LoadContext,
+    ctx: &LoadCtx,
 ) -> Result<DrizzleFrame<D::Image>, DrizzleError> {
     let DrizzleFrame {
         source,
@@ -70,7 +70,7 @@ fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
         pixel_weight_map,
     } = frame;
     Ok(DrizzleFrame {
-        source: storage.decode::<D>(source.as_ref(), context)?,
+        source: storage.decode::<D>(source.as_ref(), ctx)?,
         warp,
         pixel_weight_map,
     })
@@ -84,16 +84,16 @@ impl DrizzleRun<'_> {
         frames: Vec<DrizzleFrame<P>>,
     ) -> Result<StackProduct, DrizzleError> {
         let run = &self.ingest;
-        let context = run.context.clone();
+        let ctx = run.ctx.clone();
         let storage = RunStorage::decoding(run)?;
         let sources: Vec<&Path> = frames.iter().map(|frame| frame.source.as_ref()).collect();
         let origin = FrameOrigin::Files {
-            uncached: storage.uncached::<D>(&sources, &context),
+            uncached: storage.uncached::<D>(&sources, &ctx),
         };
         // Lazy, so only the frame currently being drizzled is resident.
         let loaded = frames
             .into_iter()
-            .map(|frame| load_drizzle_frame::<D, P>(frame, &storage, &context));
+            .map(|frame| load_drizzle_frame::<D, P>(frame, &storage, &ctx));
         self.accumulate(loaded, origin, &storage)
     }
 
@@ -129,7 +129,7 @@ impl DrizzleRun<'_> {
             ingest: run,
         } = self;
         let stack = &drizzle.stack;
-        let cancel = &run.context.cancel;
+        let cancel = &run.ctx.cancel;
         // Before the first frame is pulled: for the path entry that is a full decode, spent on a
         // run the configuration already dooms.
         drizzle.validate()?;
@@ -190,26 +190,26 @@ impl DrizzleRun<'_> {
             .collect();
         let mut unconverged_points = 0;
         let mut metadata = None;
-        for (index, frame) in iter::once(Ok(first)).chain(frames).enumerate() {
+        for (idx, frame) in iter::once(Ok(first)).chain(frames).enumerate() {
             // Between frames, so a cancelled run stops before loading and drizzling the next one.
             if cancel.is_cancelled() {
                 return Err(StackError::Cancelled.into());
             }
             let frame = frame?;
-            let source_stats = intake.admit(index, &frame.source)?.into_drizzled();
+            let source_stats = intake.admit(idx, &frame.source)?.into_drizzled();
             let DrizzledPlanes {
                 pixels,
                 drops,
                 flags,
                 unconverged_points: unplaced,
-            } = drizzler.drizzle(&frame, index)?;
+            } = drizzler.drizzle(&frame, idx)?;
             unconverged_points += unplaced;
             // Each output pixel sums the drops of several source pixels.
             let mut frame_metadata = frame.source.metadata().clone();
             frame_metadata.derived.after_resample();
             let flat_gain = frame.source.flat_gain().map(|gain| {
                 Arc::new(gain.warped(
-                    |position| frame.warp.apply(grid.reference_point(position)),
+                    |pos| frame.warp.apply(grid.reference_point(pos)),
                     output.size(),
                 ))
             });
@@ -261,9 +261,9 @@ impl DrizzleRun<'_> {
             })
             .collect();
         product.fill_where(
-            |channel, index| {
+            |channel, idx| {
                 let plane = deposit.weight_plane(channel);
-                depth[plane].pixels()[index] < thresholds[plane]
+                depth[plane].pixels()[idx] < thresholds[plane]
             },
             drizzle.fill_value,
         );

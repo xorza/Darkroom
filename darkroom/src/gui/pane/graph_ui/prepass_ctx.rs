@@ -5,7 +5,7 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 
 /// What this frame's input means on the canvas, resolved once at the top of
-/// [`GraphUI::prepass`](crate::gui::pane::graph_ui::GraphUI::prepass) and read
+/// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) and read
 /// back by every phase after it: which bare-canvas gesture latched, and what
 /// Esc does.
 ///

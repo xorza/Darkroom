@@ -38,14 +38,14 @@ const fn quality(demand: &[OutputDemand]) -> QualityPlanes {
 /// The alignment reference: the frame an index names, or, unset, the frame
 /// with the lowest median FWHM among those with enough stars. A negative index
 /// names no frame.
-fn reference(index: &DynamicValue) -> InvokeResult<Reference> {
-    if matches!(index, DynamicValue::Unbound) {
+fn reference(idx: &DynamicValue) -> InvokeResult<Reference> {
+    if matches!(idx, DynamicValue::Unbound) {
         return Ok(Reference::Auto);
     }
-    let index = index.required_i64();
-    usize::try_from(index)
-        .map(Reference::Index)
-        .map_err(|_negative| InvokeError::invalid_input(REFERENCE, "a frame index", index))
+    let idx = idx.required_i64();
+    usize::try_from(idx)
+        .map(Reference::Idx)
+        .map_err(|_negative| InvokeError::invalid_input(REFERENCE, "a frame index", idx))
 }
 
 pub(crate) fn register(library: &mut Library) {
@@ -178,7 +178,7 @@ mod tests {
         ));
         assert!(matches!(
             reference(&DynamicValue::from(3_i64)),
-            Ok(Reference::Index(3))
+            Ok(Reference::Idx(3))
         ));
         assert_eq!(
             reference(&DynamicValue::from(-1_i64))

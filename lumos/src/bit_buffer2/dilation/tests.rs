@@ -17,7 +17,7 @@ fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
 fn naive_mismatch(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize) -> Option<Vec2us> {
     let size = mask.size;
     (0..size.pixel_count())
-        .map(|index| size.point_of(index))
+        .map(|idx| size.point_of(idx))
         .find(|&at| {
             let near = |sy: usize, sx: usize| {
                 sx.abs_diff(at.x).pow(2) + sy.abs_diff(at.y).pow(2) <= radius * radius

@@ -40,24 +40,24 @@ impl Size2us {
     /// # Panics
     /// Panics in debug builds if `point` is outside the grid.
     #[inline]
-    pub const fn index_of(self, point: Vec2us) -> usize {
+    pub const fn idx_of(self, point: Vec2us) -> usize {
         debug_assert!(self.contains(point), "point is outside the grid");
         point.y * self.width + point.x
     }
 
-    /// The point `index` addresses — the inverse of [`Self::index_of`].
+    /// The point `idx` addresses — the inverse of [`Self::idx_of`].
     ///
     /// # Panics
-    /// Panics in debug builds if `index` is past the last pixel.
+    /// Panics in debug builds if `idx` is past the last pixel.
     #[inline]
-    pub fn point_of(self, index: usize) -> Vec2us {
+    pub fn point_of(self, idx: usize) -> Vec2us {
         debug_assert!(
-            index < self.pixel_count(),
-            "index {index} past the last pixel of a {}x{} grid",
+            idx < self.pixel_count(),
+            "index {idx} past the last pixel of a {}x{} grid",
             self.width,
             self.height
         );
-        Vec2us::new(index % self.width, index / self.width)
+        Vec2us::new(idx % self.width, idx / self.width)
     }
 
     /// Whether `point` lies inside the grid.

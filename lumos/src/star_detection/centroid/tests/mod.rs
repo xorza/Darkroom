@@ -182,7 +182,7 @@ fn moment_star(stamp: StampAt<'_>, psf_sigma: f64, background: StarBackground) -
     let shape = metrics.moment_shape();
     Some(Star {
         pos: stamp.pos,
-        position_sigma: f64::NAN,
+        pos_sigma: f64::NAN,
         flux: metrics.flux,
         fwhm: shape.map_or(0.0, Cov2::fwhm),
         eccentricity: shape.map_or(0.0, Cov2::eccentricity),

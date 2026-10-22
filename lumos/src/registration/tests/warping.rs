@@ -11,7 +11,7 @@ use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
+use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
 
@@ -23,10 +23,10 @@ fn do_warp(
     transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
-    warp_with(input, transform, WarpParams::with_method(method))
+    warp_with(input, transform, WarpConfig::with_method(method))
 }
 
-fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpParams) -> Buffer2<f32> {
+fn warp_with(input: &Buffer2<f32>, transform: &Transform, params: WarpConfig) -> Buffer2<f32> {
     params.warp_plane(input, &WarpTransform::new(transform.inverse()))
 }
 
@@ -211,9 +211,9 @@ fn interpolation_quality_ordering() {
     let forward = Transform::similarity(DVec2::new(3.7, -2.3), 1.0_f64.to_radians(), 1.01);
     let inverse = forward.inverse();
     let psnr = |method| {
-        let params = WarpParams {
+        let params = WarpConfig {
             clamping_threshold: None,
-            ..WarpParams::with_method(method)
+            ..WarpConfig::with_method(method)
         };
         let restored = warp_with(&warp_with(&ref_buf, &forward, params), &inverse, params);
         let central = extract_central_region(&ref_buf, &restored, 50);
@@ -261,7 +261,7 @@ fn warp_preserves_output_metadata() {
     };
 
     let transform = Transform::translation(DVec2::new(5.0, 5.0));
-    let warp_config = WarpParams {
+    let warp_config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
@@ -294,7 +294,7 @@ fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> 
 
     for y in margin..(size.height - margin) {
         for x in margin..(size.width - margin) {
-            let idx = size.index_of(Vec2us::new(x, y));
+            let idx = size.idx_of(Vec2us::new(x, y));
             central_a.push(a[idx]);
             central_b.push(b[idx]);
         }
@@ -307,7 +307,7 @@ fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> 
 }
 
 /// The public `warp` samples through the SIP correction: it is the plane warp of the same
-/// `WarpTransform` bit for bit — whose positions are `T(p + c(p))` (see `RowPositions`' and
+/// `WarpTransform` bit for bit — whose positions are `T(p + c(p))` (see `RowPoss`' and
 /// `WarpTransform`'s tests) — for every method, on a field whose correction reaches past 0.1 px.
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
@@ -344,14 +344,14 @@ fn the_public_warp_samples_through_the_sip_correction() {
         pixels.pixels().to_vec(),
     );
     for method in InterpolationMethod::ALL {
-        let params = WarpParams::with_method(method);
+        let params = WarpConfig::with_method(method);
         let warped = params.warp(&image, &warp_transform).image;
         let plane = params.warp_plane(&pixels, &warp_transform);
-        for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
+        for (idx, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
             assert_eq!(
                 a.to_bits(),
                 e.to_bits(),
-                "{method:?} pixel {index}: {a} against {e}"
+                "{method:?} pixel {idx}: {a} against {e}"
             );
         }
     }
@@ -374,7 +374,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // bounds, column 13 is half-covered (its right bilinear tap is off the
     // edge), columns 14..=15 fall entirely outside.
     let transform = Transform::translation(DVec2::new(2.5, 0.0));
-    let config = WarpParams {
+    let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
@@ -384,7 +384,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| size.index_of(Vec2us::new(x, y));
+    let at = |x: usize, y: usize| size.idx_of(Vec2us::new(x, y));
 
     // Every row shares the column pattern. Two equal x taps have confidence 1²/(0.5² + 0.5²) = 2
     // and one surviving tap 0.5²/0.5² = 1; a covered pixel — the half-covered column 13 too — is
@@ -419,7 +419,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     // src = (x + 3.5, y): a Lanczos3 (6-tap) kernel reaches off the right edge
     // for x ≳ 26 and lands entirely outside by x = 31.
     let transform = Transform::translation(DVec2::new(3.5, 0.0));
-    let config = WarpParams {
+    let config = WarpConfig {
         method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
@@ -428,7 +428,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| size.index_of(Vec2us::new(x, y));
+    let at = |x: usize, y: usize| size.idx_of(Vec2us::new(x, y));
     let y = 4;
 
     // Interior: every kernel tap is in bounds, so the magnitude support fraction is 1 exactly.

@@ -73,13 +73,13 @@ impl CfaLattice {
                     if (dx, dy) == (0, 0) {
                         continue;
                     }
-                    let position = Vec2us::new(
+                    let pos = Vec2us::new(
                         (origin.x + shift).wrapping_add_signed(dx as isize),
                         (origin.y + shift).wrapping_add_signed(dy as isize),
                     );
                     let same_filter = match cfa {
                         CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
-                        CfaType::Mono | CfaType::XTrans(_) => cfa.slot_at(position) == color,
+                        CfaType::Mono | CfaType::XTrans(_) => cfa.slot_at(pos) == color,
                     };
                     let distance2 = dx * dx + dy * dy;
                     // Within the inscribed disc, every offset of a shell lies in the square.
@@ -104,12 +104,12 @@ impl CfaLattice {
         }
     }
 
-    fn stencil(&self, position: Vec2us) -> &[Tap] {
-        let phase = (position.y % self.period) * self.period + position.x % self.period;
+    fn stencil(&self, pos: Vec2us) -> &[Tap] {
+        let phase = (pos.y % self.period) * self.period + pos.x % self.period;
         &self.taps[self.starts[phase] as usize..self.starts[phase + 1] as usize]
     }
 
-    /// The median of `position`'s nearest neighbours in `plane` under its filter that the plane's
+    /// The median of `pos`'s nearest neighbours in `plane` under its filter that the plane's
     /// mask does not name, so a defect is never repaired from another: 8 with their ties for mono
     /// and Bayer, which on a Bayer sensor are the four at 2 and the four at 2√2 of its own phase,
     /// and 24 with their ties for X-Trans; fewer where the frame's edge cuts the window, or where
@@ -118,7 +118,7 @@ impl CfaLattice {
     pub(crate) fn median(
         &self,
         plane: MaskedPlane<'_>,
-        position: Vec2us,
+        pos: Vec2us,
         scratch: &mut Gathered,
     ) -> f32 {
         let MaskedPlane { pixels, mask } = plane;
@@ -127,27 +127,27 @@ impl CfaLattice {
         scratch.values.clear();
         // The distance of the last neighbour taken: the count stops only between tie groups.
         let mut last_distance = None;
-        for tap in self.stencil(position) {
+        for tap in self.stencil(pos) {
             if scratch.values.len() >= count && last_distance != Some(tap.distance2) {
                 break;
             }
             let (Some(x), Some(y)) = (
-                position.x.checked_add_signed(tap.dx as isize),
-                position.y.checked_add_signed(tap.dy as isize),
+                pos.x.checked_add_signed(tap.dx as isize),
+                pos.y.checked_add_signed(tap.dy as isize),
             ) else {
                 continue;
             };
             if x >= size.width || y >= size.height {
                 continue;
             }
-            let index = y * size.width + x;
-            if !mask.is_some_and(|mask| mask.get(index)) {
-                scratch.values.push(pixels[index]);
+            let idx = y * size.width + x;
+            if !mask.is_some_and(|mask| mask.get(idx)) {
+                scratch.values.push(pixels[idx]);
                 last_distance = Some(tap.distance2);
             }
         }
         if scratch.values.is_empty() {
-            return pixels[size.index_of(position)];
+            return pixels[size.idx_of(pos)];
         }
         statistics::median_mut(&mut scratch.values)
     }
@@ -169,8 +169,8 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::internals::cfa::XTRANS_PATTERN;
 
-    fn offsets(lattice: &CfaLattice, position: Vec2us, count: usize) -> Vec<(i32, i32)> {
-        let stencil = lattice.stencil(position);
+    fn offsets(lattice: &CfaLattice, pos: Vec2us, count: usize) -> Vec<(i32, i32)> {
+        let stencil = lattice.stencil(pos);
         let last = stencil[count - 1].distance2;
         stencil
             .iter()
@@ -261,18 +261,18 @@ mod tests {
         ] {
             let lattice = CfaLattice::new(&cfa);
             let size = Size2us::new(25, 19);
-            let level = |position: Vec2us| match cfa {
-                CfaType::Bayer(_) => 0.125 * (1 + position.x % 2 + 2 * (position.y % 2)) as f32,
-                _ => 0.125 * (cfa.slot_at(position) + 1) as f32,
+            let level = |pos: Vec2us| match cfa {
+                CfaType::Bayer(_) => 0.125 * (1 + pos.x % 2 + 2 * (pos.y % 2)) as f32,
+                _ => 0.125 * (cfa.slot_at(pos) + 1) as f32,
             };
             let pixels = Buffer2::from_fn(size.width, size.height, |x, y| level(Vec2us::new(x, y)));
             let mut scratch = Gathered::default();
             for y in 0..size.height {
                 for x in 0..size.width {
-                    let position = Vec2us::new(x, y);
+                    let pos = Vec2us::new(x, y);
                     assert_eq!(
-                        lattice.median(MaskedPlane::from(&pixels), position, &mut scratch),
-                        level(position),
+                        lattice.median(MaskedPlane::from(&pixels), pos, &mut scratch),
+                        level(pos),
                         "{cfa:?} at ({x}, {y})"
                     );
                 }
@@ -301,8 +301,8 @@ mod tests {
             505.0
         );
         let mut mask = BitBuffer2::new_default(size);
-        for index in [5, 6, 7, 8] {
-            mask.set(index, true);
+        for idx in [5, 6, 7, 8] {
+            mask.set(idx, true);
         }
         assert_eq!(
             lattice.median(
@@ -315,8 +315,8 @@ mod tests {
             ),
             10.0
         );
-        for index in [0, 1, 2, 3] {
-            mask.set(index, true);
+        for idx in [0, 1, 2, 3] {
+            mask.set(idx, true);
         }
         assert_eq!(
             lattice.median(

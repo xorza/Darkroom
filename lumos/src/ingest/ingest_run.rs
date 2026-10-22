@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::memory::budget::Budget;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_callback::ProgressCallback;
@@ -17,7 +17,7 @@ use crate::progress::progress_monitor::ProgressMonitor;
 pub(crate) struct IngestRun {
     pub(crate) budget: Budget,
     /// The decode ceiling of `memory`, the run's FITS policy, and its cancel token.
-    pub(crate) context: LoadContext,
+    pub(crate) ctx: LoadCtx,
     /// See [`IngestConfig::cache_dir`].
     pub(crate) cache_dir: PathBuf,
     /// See [`IngestConfig::keep_cache`].
@@ -47,7 +47,7 @@ impl IngestRun {
         let budget = memory.budget(workers);
         Self {
             budget,
-            context: LoadContext {
+            ctx: LoadCtx {
                 cancel,
                 memory_limit_bytes: memory.decode_ceiling(),
                 fits: config.fits.clone(),
@@ -64,12 +64,12 @@ impl IngestRun {
     /// The progress and cancel token the run took at its entry, joined again for a stage that
     /// keeps them both.
     pub(crate) fn monitor(&self) -> ProgressMonitor {
-        ProgressMonitor::new(self.progress.clone(), self.context.cancel.clone())
+        ProgressMonitor::new(self.progress.clone(), self.ctx.cancel.clone())
     }
 
     /// [`Self::monitor`], for the run's last stage, which takes it whole.
     pub(crate) fn into_monitor(self) -> ProgressMonitor {
-        ProgressMonitor::new(self.progress, self.context.cancel)
+        ProgressMonitor::new(self.progress, self.ctx.cancel)
     }
 }
 
@@ -137,15 +137,15 @@ mod tests {
             ProgressMonitor::new(progress, cancel.clone()),
         );
         assert_eq!(run.budget, Budget::new(75, 3));
-        assert_eq!(run.context.decode_threads, 3);
-        assert_eq!(run.context.memory_limit_bytes, 6_000);
-        assert_eq!(run.context.nulls, NullPolicy::Reject);
+        assert_eq!(run.ctx.decode_threads, 3);
+        assert_eq!(run.ctx.memory_limit_bytes, 6_000);
+        assert_eq!(run.ctx.nulls, NullPolicy::Reject);
         assert_eq!(run.cache_dir, Path::new("cache"));
         assert!(run.keep_cache);
 
-        assert!(!run.context.cancel.is_cancelled());
+        assert!(!run.ctx.cancel.is_cancelled());
         cancel.cancel();
-        assert!(run.context.cancel.is_cancelled());
+        assert!(run.ctx.cancel.is_cancelled());
         let monitor = run.monitor();
         assert!(monitor.cancel.is_cancelled());
         run.progress.report(1, 2, StackingStage::Loading);

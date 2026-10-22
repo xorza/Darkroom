@@ -12,17 +12,17 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::paint::node_context_menu::NodeContextMenu;
+use crate::gui::pane::graph_ui::paint::node_ctx_menu::NodeCtxMenu;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
-/// [`NodeContextMenu`]'s. "Run to this node" needs only the clicked node's id
+/// [`NodeCtxMenu`]'s. "Run to this node" needs only the clicked node's id
 /// and surfaces an [`AppCommand`]; the structural picks read the live
 /// selection off the context and push their intents onto the frame's queue,
 /// the same two builders the Ctrl+D and Delete chords drive.
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
-    menu: NodeContextMenu,
+    menu: NodeCtxMenu,
 }
 
 /// A menu pick before routing. `Run` names the node the menu opened on; the
@@ -92,7 +92,7 @@ impl NodeMenuUi {
                         incoming: IncomingWires::Drop,
                     });
                 }
-                if MenuItem::new("Duplicate with incoming connections")
+                if MenuItem::new("Duplicate with incoming wires")
                     .show(ui, popup)
                     .left
                     .clicked()

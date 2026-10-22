@@ -494,8 +494,8 @@ fn remove_duplicate_stars_matches_the_brute_force() {
         "the fixture must have duplicates to agree on"
     );
     assert_eq!(removed_hash, removed_simple);
-    let positions = |stars: &[Star]| stars.iter().map(|s| s.pos).collect::<Vec<_>>();
-    assert_eq!(positions(&stars_hash), positions(&stars_simple));
+    let poss = |stars: &[Star]| stars.iter().map(|s| s.pos).collect::<Vec<_>>();
+    assert_eq!(poss(&stars_hash), poss(&stars_simple));
 }
 
 /// Each quality test on its bound passes — every criterion rejects strictly beyond it — and a star
@@ -582,10 +582,10 @@ fn brute_force_dedup(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     }
 
     let removed = kept.iter().filter(|&&keep| !keep).count();
-    let mut index = 0;
+    let mut idx = 0;
     stars.retain(|_| {
-        index += 1;
-        kept[index - 1]
+        idx += 1;
+        kept[idx - 1]
     });
     removed
 }

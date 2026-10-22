@@ -1,6 +1,6 @@
 //! What the cosmic-ray detector thresholds against.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Laplacian-edge cosmic-ray detection parameters (van Dokkum 2001, L.A.Cosmic). Defaults match
@@ -39,16 +39,16 @@ impl CosmicRayConfig {
     /// growth fraction of the detection threshold, at least one pass, and a positive gain when one
     /// is given.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("cosmic-ray detection_sigma", self.detection_sigma)
+        ConfigField::new("cosmic-ray detection_sigma", self.detection_sigma)
             .finite_and("finite and positive", |v| v > 0.0)?;
-        ConfigValue::new("cosmic-ray contrast_limit", self.contrast_limit)
+        ConfigField::new("cosmic-ray contrast_limit", self.contrast_limit)
             .finite_and("finite and positive", |v| v > 0.0)?;
-        ConfigValue::new("cosmic-ray growth_fraction", self.growth_fraction)
+        ConfigField::new("cosmic-ray growth_fraction", self.growth_fraction)
             .finite_and("finite and in (0, 1]", |v| v > 0.0 && v <= 1.0)?;
-        ConfigValue::count("cosmic-ray max_iterations", self.max_iterations)
+        ConfigField::count("cosmic-ray max_iterations", self.max_iterations)
             .must_be("at least 1", self.max_iterations >= 1)?;
         if let NoiseEstimation::Gain { electrons_per_adu } = self.noise {
-            ConfigValue::new("cosmic-ray electrons_per_adu", electrons_per_adu)
+            ConfigField::new("cosmic-ray electrons_per_adu", electrons_per_adu)
                 .finite_and("finite and positive", |v| v > 0.0)?;
         }
         Ok(())

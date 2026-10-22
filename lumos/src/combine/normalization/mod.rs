@@ -59,14 +59,14 @@ impl SlotNorm {
         offset: 0.0,
     };
 
-    /// `gain = median_ref / median` for slot `slot` of the frame of `(index, median)` against the
-    /// reference's `(index, median)`.
+    /// `gain = median_ref / median` for slot `slot` of the frame of `(idx, median)` against the
+    /// reference's `(idx, median)`.
     ///
     /// # Errors
     /// [`StackError::NonPositiveMedian`] when a median is not positive: a ratio to it scales
     /// nothing, and unit gain in its place would combine the frame at a scale no one measured.
     pub(super) fn median_ratio(
-        (index, median): (usize, f32),
+        (idx, median): (usize, f32),
         (reference, reference_median): (usize, f32),
         slot: usize,
     ) -> Result<Self, StackError> {
@@ -76,16 +76,12 @@ impl SlotNorm {
                 offset: 0.0,
             })
         } else {
-            let (index, median) = if median > 0.0 {
+            let (idx, median) = if median > 0.0 {
                 (reference, reference_median)
             } else {
-                (index, median)
+                (idx, median)
             };
-            Err(StackError::NonPositiveMedian {
-                index,
-                slot,
-                median,
-            })
+            Err(StackError::NonPositiveMedian { idx, slot, median })
         }
     }
 }

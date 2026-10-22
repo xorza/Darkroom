@@ -331,7 +331,7 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
 
     rs.apply_report(
         WorkerReport::Error(WorkerError::Execution {
-            error: scenarium::Error::NodeSeedNotFound { node_id: node },
+            error: scenarium::ExecutionError::NodeSeedNotFound { node_id: node },
         }),
         &mut log,
     );

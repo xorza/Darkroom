@@ -23,7 +23,7 @@ fn uniform_draws_distinct_indices_and_restores_the_shuffle() {
     for _ in 0..200 {
         sampler.uniform(&mut sample);
         assert_eq!(sample.len(), 4);
-        assert!(sample.iter().all(|&index| index < n), "{sample:?}");
+        assert!(sample.iter().all(|&idx| idx < n), "{sample:?}");
         let mut sorted = sample.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -88,7 +88,7 @@ fn weighted_sampling_follows_the_weights() {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), 4, "duplicates in {sample:?}");
-        assert!(sample.iter().all(|&index| index < 20));
+        assert!(sample.iter().all(|&idx| idx < 20));
     }
 }
 
@@ -112,10 +112,10 @@ fn guided_phases_draw_from_the_most_confident_pools() {
             _ => 0,
         };
         assert!(
-            sample.iter().all(|&index| index >= floor),
+            sample.iter().all(|&idx| idx >= floor),
             "iteration {iteration}: {sample:?}"
         );
-        seen_below_ten |= sample.iter().any(|&index| index < 10);
+        seen_below_ten |= sample.iter().any(|&idx| idx < 10);
     }
     assert!(seen_below_ten, "the uniform phase reaches every pair");
 }

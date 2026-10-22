@@ -1,4 +1,4 @@
-//! [`SourcePosition`]: where an output pixel samples its source, split before it is narrowed.
+//! [`SourcePos`]: where an output pixel samples its source, split before it is narrowed.
 
 use glam::DVec2;
 
@@ -11,7 +11,7 @@ use crate::math::size2us::Size2us;
 /// would quantize it to the f32 spacing at its magnitude — 4.9e-4 px in [4096, 8192), coarser than
 /// the 2.4e-4 step the Lanczos table resolves — while the fraction, in `[0, 1]`, keeps 6e-8.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct SourcePosition {
+pub(super) struct SourcePos {
     pub(super) cell_x: i32,
     pub(super) cell_y: i32,
     /// `[0, 1]`: narrowing can round a fraction within 2⁻²⁵ of 1 up to exactly 1, which every
@@ -22,7 +22,7 @@ pub(super) struct SourcePosition {
 
 /// A sample's position along one axis: its integer cell, and the fraction within it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct AxisPosition {
+pub(super) struct AxisPos {
     pub(super) cell: i32,
     pub(super) frac: f32,
 }
@@ -30,15 +30,15 @@ pub(super) struct AxisPosition {
 /// A sample's position in a source of `size`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct SourceAt {
-    pub(super) position: SourcePosition,
+    pub(super) pos: SourcePos,
     pub(super) size: Size2us,
 }
 
-impl SourcePosition {
+impl SourcePos {
     /// The position along x.
     #[inline(always)]
-    pub(super) const fn x(self) -> AxisPosition {
-        AxisPosition {
+    pub(super) const fn x(self) -> AxisPos {
+        AxisPos {
             cell: self.cell_x,
             frac: self.fx,
         }
@@ -46,8 +46,8 @@ impl SourcePosition {
 
     /// The position along y.
     #[inline(always)]
-    pub(super) const fn y(self) -> AxisPosition {
-        AxisPosition {
+    pub(super) const fn y(self) -> AxisPos {
+        AxisPos {
             cell: self.cell_y,
             frac: self.fy,
         }
@@ -94,15 +94,15 @@ impl SourcePosition {
         clippy::cast_sign_loss,
         reason = "a position clamped to the pixel-centre grid has non-negative cells"
     )]
-    pub(super) const fn nearest_index(self, size: Size2us) -> usize {
-        let position = self.clamped_to_centers(size);
-        let x = position.cell_x as usize + (position.fx >= 0.5) as usize;
-        let y = position.cell_y as usize + (position.fy >= 0.5) as usize;
+    pub(super) const fn nearest_idx(self, size: Size2us) -> usize {
+        let pos = self.clamped_to_centers(size);
+        let x = pos.cell_x as usize + (pos.fx >= 0.5) as usize;
+        let y = pos.cell_y as usize + (pos.fy >= 0.5) as usize;
         y * size.width + x
     }
 }
 
-/// One axis of [`SourcePosition::clamped_to_centers`].
+/// One axis of [`SourcePos::clamped_to_centers`].
 #[derive(Debug, Clone, Copy)]
 struct ClampedAxis {
     cell: i32,

@@ -83,7 +83,7 @@ use crate::math::statistics::median_mad::MedianMad;
 #[derive(Debug, Clone)]
 pub(crate) struct DefectMap {
     hot: HotPixels,
-    cold_indices: Vec<usize>,
+    cold_idxs: Vec<usize>,
     /// Every defect, hot or cold, once: what a repair keeps out of its neighbours, built when
     /// the lists change rather than for every light corrected.
     mask: BitBuffer2,
@@ -95,7 +95,7 @@ pub(crate) struct DefectMap {
 /// The hot pixels of a dark: each one's flat index, and how far it stands above the dark around it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct HotPixels {
-    pub(crate) indices: Vec<usize>,
+    pub(crate) idxs: Vec<usize>,
     /// Per index, in the dark's units: its residual over the robust plane through the ring of its
     /// color's photosites around it, or over the color's mesh background where the ring has too
     /// few — the residual the detection tested. Always positive.
@@ -108,7 +108,7 @@ impl DefectMap {
     pub(crate) fn new(dimensions: Size2us) -> Self {
         Self {
             hot: HotPixels::default(),
-            cold_indices: Vec::new(),
+            cold_idxs: Vec::new(),
             mask: BitBuffer2::new_default(dimensions),
             count: 0,
             dimensions,
@@ -119,21 +119,21 @@ impl DefectMap {
     pub(crate) fn from_lists(
         dimensions: Size2us,
         hot: HotPixels,
-        cold_indices: Vec<usize>,
+        cold_idxs: Vec<usize>,
     ) -> Option<Self> {
-        debug_assert_eq!(hot.indices.len(), hot.excess.len());
+        debug_assert_eq!(hot.idxs.len(), hot.excess.len());
         let pixel_count = dimensions.pixel_count();
         if hot
-            .indices
+            .idxs
             .iter()
-            .chain(&cold_indices)
-            .any(|&index| index >= pixel_count)
+            .chain(&cold_idxs)
+            .any(|&idx| idx >= pixel_count)
         {
             return None;
         }
         let mut map = Self::new(dimensions);
         map.hot = hot;
-        map.cold_indices = cold_indices;
+        map.cold_idxs = cold_idxs;
         map.rebuild_mask();
         Some(map)
     }
@@ -150,14 +150,14 @@ impl DefectMap {
 
     /// Flat indices of cold/dead pixels — below `DEAD_PIXEL_FRACTION` of their same-color
     /// local-neighbourhood median in the flat.
-    pub(crate) fn cold_indices(&self) -> &[usize] {
-        &self.cold_indices
+    pub(crate) fn cold_idxs(&self) -> &[usize] {
+        &self.cold_idxs
     }
 
     /// Resident RAM held by the map: its hot pixels, its cold index list and its mask.
     pub(crate) const fn ram_bytes(&self) -> usize {
-        self.hot.indices.len() * (size_of::<usize>() + size_of::<f32>())
-            + self.cold_indices.len() * size_of::<usize>()
+        self.hot.idxs.len() * (size_of::<usize>() + size_of::<f32>())
+            + self.cold_idxs.len() * size_of::<usize>()
             + BitBuffer2::heap_bytes(self.mask.size)
     }
 
@@ -174,18 +174,18 @@ impl DefectMap {
             &[red, green, blue] => ColorShares::Mosaic([of(red), of(green), of(blue)]),
             other => unreachable!("a sensor has one color or three, not {}", other.len()),
         };
-        let color_of = |index: usize| cfa.slot_at(self.dimensions.point_of(index));
-        for &index in &self.hot.indices {
-            colors.slot_mut(color_of(index)).hot += 1;
+        let color_of = |idx: usize| cfa.slot_at(self.dimensions.point_of(idx));
+        for &idx in &self.hot.idxs {
+            colors.slot_mut(color_of(idx)).hot += 1;
         }
-        for &index in &self.cold_indices {
-            colors.slot_mut(color_of(index)).cold += 1;
+        for &idx in &self.cold_idxs {
+            colors.slot_mut(color_of(idx)).cold += 1;
         }
         self.mask
             .for_each_set(|point| colors.slot_mut(cfa.slot_at(point)).defective += 1);
         DefectSummary {
-            hot_pixels: self.hot.indices.len(),
-            cold_pixels: self.cold_indices.len(),
+            hot_pixels: self.hot.idxs.len(),
+            cold_pixels: self.cold_idxs.len(),
             defective_pixels: self.count,
             pixels: self.dimensions.pixel_count(),
             colors,
@@ -230,7 +230,7 @@ impl DefectMap {
         cancel: &CancelToken,
     ) -> Result<Self, CalibrationError> {
         self.assert_dimensions(flat);
-        self.cold_indices = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel)?;
+        self.cold_idxs = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel)?;
         self.rebuild_mask();
         Ok(self)
     }
@@ -247,8 +247,8 @@ impl DefectMap {
 
     fn rebuild_mask(&mut self) {
         self.mask = BitBuffer2::new_default(self.dimensions);
-        for &index in self.hot.indices.iter().chain(&self.cold_indices) {
-            self.mask.set(index, true);
+        for &idx in self.hot.idxs.iter().chain(&self.cold_idxs) {
+            self.mask.set(idx, true);
         }
         self.count = self.mask.count_ones();
     }
@@ -280,7 +280,7 @@ impl DefectMap {
         let mask = with_nulls.as_ref().unwrap_or(&self.mask);
         let lattice = CfaLattice::new(&image.cfa_type());
         let mut scratch = Gathered::default();
-        for &idx in self.hot.indices.iter().chain(&self.cold_indices) {
+        for &idx in self.hot.idxs.iter().chain(&self.cold_idxs) {
             let plane = MaskedPlane {
                 pixels: image.data(),
                 mask: Some(mask),
@@ -288,8 +288,8 @@ impl DefectMap {
             image.data_mut()[idx] =
                 lattice.median(plane, self.dimensions.point_of(idx), &mut scratch);
         }
-        for indices in [&self.hot.indices, &self.cold_indices] {
-            image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), indices);
+        for idxs in [&self.hot.idxs, &self.cold_idxs] {
+            image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), idxs);
         }
     }
 }
@@ -349,7 +349,7 @@ fn detect_hot_pixels(
     // compact same-color cluster remains an outlier instead of becoming its own local reference.
     // What it calls hot must stand as far above the ring's plane, which follows the structure the
     // tiles cannot.
-    let (indices, excess) = (0..total)
+    let (idxs, excess) = (0..total)
         .into_par_iter()
         .map_init(RingReference::default, |ring, i| {
             if cancel.is_cancelled() {
@@ -378,7 +378,7 @@ fn detect_hot_pixels(
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
-    Ok(HotPixels { indices, excess })
+    Ok(HotPixels { idxs, excess })
 }
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
@@ -418,7 +418,7 @@ fn detect_cold_pixels(
     let total = size.pixel_count();
     let lattice = CfaLattice::new(&image.cfa_type());
 
-    let indices = (0..total)
+    let idxs = (0..total)
         .into_par_iter()
         .map_init(Gathered::default, |scratch, i| {
             if cancel.is_cancelled() {
@@ -434,7 +434,7 @@ fn detect_cold_pixels(
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
-    Ok(indices)
+    Ok(idxs)
 }
 
 /// Per-CFA-color robust residual statistics used to threshold hot pixels.
@@ -475,8 +475,8 @@ fn compute_per_color_residual_stats(
         }
 
         let lower_tail = (samples.len() >= MIN_TAIL_SCALE_SAMPLES).then(|| {
-            let p1_index = (samples.len() - 1) / 100;
-            *samples.select_nth_unstable_by(p1_index, f32::total_cmp).1
+            let p1_idx = (samples.len() - 1) / 100;
+            *samples.select_nth_unstable_by(p1_idx, f32::total_cmp).1
         });
         let residual = MedianMad::of_mut(&mut samples);
         let MedianMad { median, mad, .. } = residual;

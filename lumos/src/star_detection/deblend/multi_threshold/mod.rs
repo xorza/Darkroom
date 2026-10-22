@@ -214,9 +214,9 @@ impl TreeBuffers {
             let stamp = u32::try_from(level).expect("the ladder holds at most u32 levels");
             let before = self.objects.len();
             let object_of = &self.object_of;
-            self.active.retain(|&index| {
-                pixels.pixels[index as usize].value >= threshold
-                    && object_of[index as usize] != NO_OBJECT
+            self.active.retain(|&idx| {
+                pixels.pixels[idx as usize].value >= threshold
+                    && object_of[idx as usize] != NO_OBJECT
             });
             for active in 0..self.active.len() {
                 let seed = self.active[active] as usize;
@@ -283,9 +283,9 @@ impl TreeBuffers {
         queue.clear();
         visited[seed] = stamp;
         queue.push(seed as u32);
-        while let Some(index) = queue.pop() {
-            members.push(index);
-            pixels.for_each_neighbour(index as usize, connectivity, |neighbour| {
+        while let Some(idx) = queue.pop() {
+            members.push(idx);
+            pixels.for_each_neighbour(idx as usize, connectivity, |neighbour| {
                 if visited[neighbour] != stamp && pixels.pixels[neighbour].value >= threshold {
                     visited[neighbour] = stamp;
                     queue.push(neighbour as u32);
@@ -323,14 +323,14 @@ impl TreeBuffers {
         for object in &objects[1..] {
             son_starts[object.parent as usize + 1] += 1;
         }
-        for index in 0..count {
-            son_starts[index + 1] += son_starts[index];
+        for idx in 0..count {
+            son_starts[idx + 1] += son_starts[idx];
         }
         sons.clear();
         sons.resize(count - 1, 0);
-        for (index, object) in objects.iter().enumerate().skip(1) {
+        for (idx, object) in objects.iter().enumerate().skip(1) {
             let slot = &mut son_starts[object.parent as usize];
-            sons[*slot as usize] = index as u32;
+            sons[*slot as usize] = idx as u32;
             *slot += 1;
         }
         son_starts.copy_within(0..count, 1);
@@ -339,16 +339,16 @@ impl TreeBuffers {
         let significant = |object: u32| objects[object as usize].flux_above > min_flux;
         unsplit.clear();
         unsplit.resize(count, true);
-        for index in (0..count).rev() {
-            let own = &sons[son_starts[index] as usize..son_starts[index + 1] as usize];
-            unsplit[index] = own.iter().all(|&son| unsplit[son as usize]);
+        for idx in (0..count).rev() {
+            let own = &sons[son_starts[idx] as usize..son_starts[idx + 1] as usize];
+            unsplit[idx] = own.iter().all(|&son| unsplit[son as usize]);
             if own.iter().filter(|&&son| significant(son)).count() > 1 {
                 stars.extend(
                     own.iter()
                         .copied()
                         .filter(|&son| unsplit[son as usize] && significant(son)),
                 );
-                unsplit[index] = false;
+                unsplit[idx] = false;
             }
         }
         // A split marks every ancestor split, the root among them, so an unsplit root found none.

@@ -55,7 +55,7 @@ impl Gradient {
                     0.5
                 };
                 let level = level_start + (level_end - level_start) * t;
-                pixels[size.index_of(Vec2us::new(x, y))] += level;
+                pixels[size.idx_of(Vec2us::new(x, y))] += level;
             }
         }
     }
@@ -84,7 +84,7 @@ impl Vignette {
         let size = Size2us::from(&*pixels);
         for y in 0..size.height {
             for x in 0..size.width {
-                pixels[size.index_of(Vec2us::new(x, y))] += self.at(size, x, y);
+                pixels[size.idx_of(Vec2us::new(x, y))] += self.at(size, x, y);
             }
         }
     }
@@ -148,7 +148,7 @@ impl NebulaConfig {
                 let t = r_sq / radius_sq;
 
                 let falloff = (-t * self.softness).exp();
-                pixels[size.index_of(Vec2us::new(x, y))] += self.amplitude * falloff;
+                pixels[size.idx_of(Vec2us::new(x, y))] += self.amplitude * falloff;
             }
         }
     }
@@ -196,8 +196,8 @@ mod tests {
             angle: FRAC_PI_2,
         }
         .add_to(&mut pixels);
-        for (index, &value) in pixels.iter().enumerate() {
-            assert_close!(value, (index / 64) as f32, 3.23e-6, "pixel {index}");
+        for (idx, &value) in pixels.iter().enumerate() {
+            assert_close!(value, (idx / 64) as f32, 3.23e-6, "pixel {idx}");
         }
 
         let mut pixels = Buffer2::new_default(1, 4);

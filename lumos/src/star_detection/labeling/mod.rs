@@ -54,8 +54,8 @@ impl LabelMap {
     /// The runs of the component with `label`, in raster order.
     #[inline]
     pub(super) fn runs_of(&self, label: u32) -> &[LabelRun] {
-        let index = label as usize - 1;
-        &self.runs[self.run_starts[index] as usize..self.run_starts[index + 1] as usize]
+        let idx = label as usize - 1;
+        &self.runs[self.run_starts[idx] as usize..self.run_starts[idx + 1] as usize]
     }
 
     /// The size of the mask it labels.

@@ -1,6 +1,6 @@
 //! What bounds a RANSAC search: how long it runs, and which hypotheses are physically credible.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Configuration for robust transform estimation.
@@ -55,22 +55,22 @@ impl Default for RansacConfig {
 
 impl RansacConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("ransac max_iterations", self.max_iterations)
+        ConfigField::count("ransac max_iterations", self.max_iterations)
             .must_be("at least 1", self.max_iterations >= 1)?;
         // Open at both ends: `ln(1 − p)` is 0 at 0, which asks for no iteration at all, and −∞ at
         // 1, which asks for infinitely many.
-        ConfigValue::new("ransac confidence", self.confidence)
+        ConfigField::new("ransac confidence", self.confidence)
             .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
-        ConfigValue::new("ransac min_inlier_ratio", self.min_inlier_ratio)
+        ConfigField::new("ransac min_inlier_ratio", self.min_inlier_ratio)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
         if let Some(max_rotation) = self.max_rotation {
-            ConfigValue::new("ransac max_rotation", max_rotation)
+            ConfigField::new("ransac max_rotation", max_rotation)
                 .finite_and("finite and positive", |value| value > 0.0)?;
         }
         if let Some(ScaleRange { min, max }) = self.scale_range {
-            ConfigValue::new("ransac scale_range minimum", min)
+            ConfigField::new("ransac scale_range minimum", min)
                 .finite_and("finite and positive", |value| value > 0.0)?;
-            ConfigValue::new("ransac scale_range maximum", max).must_be_against(
+            ConfigField::new("ransac scale_range maximum", max).must_be_against(
                 "finite and above the minimum",
                 min,
                 max.is_finite() && max > min,

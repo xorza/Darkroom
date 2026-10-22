@@ -30,7 +30,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     h.ui.drag_to(grab + travel);
     h.frame();
 
-    // Next frame, `NodeUI::prepass` advances the anchor the record latched.
+    // Next frame, `NodeUi::prepass` advances the anchor the record latched.
     let intents = h.frame();
     let (members, offset) = moved(&intents)
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));

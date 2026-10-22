@@ -1,7 +1,7 @@
 //! Cross-checks that every tier's packed words match the scalar reference exactly.
 
 use crate::internals::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::threshold_mask::simd::ProcessWords;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
@@ -24,7 +24,7 @@ fn sweep_widths() -> Vec<usize> {
 /// `noise` takes the `negative` shape among others, which exercises the `TEST_MIN_NOISE` clamp both
 /// paths must apply identically, and pixels are forced onto the exact threshold at both word edges
 /// and in the tail, where a strict `>` must leave them unset.
-fn assert_tier_matches_scalar(tier: Tier) {
+fn assert_tier_matches_scalar(tier: IsaTier) {
     let sigma = 3.0f32;
     for shape in DATA_SHAPES {
         for width in sweep_widths() {
@@ -32,9 +32,9 @@ fn assert_tier_matches_scalar(tier: Tier) {
             let noise = shape.row(width, 2);
             // The level the kernels all compute, so a pixel set to it lands exactly on the
             // boundary rather than near it.
-            for index in [0, 1, 63, 64, 65, width / 2, width - 1] {
-                if index < width {
-                    pixels[index] = ThresholdParams::test(sigma).level(noise[index]);
+            for idx in [0, 1, 63, 64, 65, width / 2, width - 1] {
+                if idx < width {
+                    pixels[idx] = ThresholdParams::test(sigma).level(noise[idx]);
                 }
             }
 
@@ -71,7 +71,7 @@ fn assert_tier_matches_scalar(tier: Tier) {
 /// Every tier this CPU has, against the scalar reference.
 #[test]
 fn every_tier_matches_scalar_packed() {
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         assert_tier_matches_scalar(tier);
     }
 }

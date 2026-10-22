@@ -200,8 +200,8 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     graph.insert(dst_id, Node::from(&dst));
     let into_mid = InputPort::new(mid_id, 0);
     let into_dst = InputPort::new(dst_id, 0);
-    graph.set_input_binding(into_mid, Binding::bind(src_id, 0));
-    graph.set_input_binding(into_dst, Binding::bind(mid_id, 0));
+    graph.set_input_binding(into_mid, Binding::wire(src_id, 0));
+    graph.set_input_binding(into_dst, Binding::wire(mid_id, 0));
     document::save(&Document::from(graph), &first).unwrap();
 
     let same = OpenDocument::load(first.clone(), &library).unwrap();
@@ -224,11 +224,11 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         [
             BindingEntry {
                 port: into_mid,
-                binding: Binding::bind(src_id, 0),
+                binding: Binding::wire(src_id, 0),
             },
             BindingEntry {
                 port: into_dst,
-                binding: Binding::bind(mid_id, 0),
+                binding: Binding::wire(mid_id, 0),
             },
         ],
         "the stub keeps every edge that touched it"
@@ -241,7 +241,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         .open
         .document
         .graph
-        .set_input_binding(into_dst, Binding::bind(src_id, 0));
+        .set_input_binding(into_dst, Binding::wire(src_id, 0));
     loaded.open.save_to(&stubbed).unwrap();
 
     let reattached = OpenDocument::load(stubbed, &library).unwrap();
@@ -253,7 +253,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
                 node_id: mid_id,
                 entry: BindingEntry {
                     port: into_dst,
-                    binding: Binding::bind(mid_id, 0),
+                    binding: Binding::wire(mid_id, 0),
                 },
             },
         ]
@@ -262,11 +262,11 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     assert!(doc.stubs.get(mid_id).is_none());
     assert_eq!(
         doc.graph.bindings.get(&into_mid),
-        Some(&Binding::bind(src_id, 0))
+        Some(&Binding::wire(src_id, 0))
     );
     assert_eq!(
         doc.graph.bindings.get(&into_dst),
-        Some(&Binding::bind(src_id, 0)),
+        Some(&Binding::wire(src_id, 0)),
         "the input bound while `mid` was a stub keeps its binding"
     );
 }
@@ -366,7 +366,7 @@ fn wiring_the_library_refuses_is_removed_at_load() {
     };
 
     let declared = load(&|graph| {
-        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+        graph.set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
         graph.subscribe(EventPort::new(producer, 0), consumer);
     });
     assert!(declared.report.is_empty());
@@ -393,13 +393,13 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         }
     );
     let loaded = load(&|graph| {
-        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 1));
+        graph.set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 1));
     });
     assert_eq!(
         refused(&loaded),
         Repair::RejectedBinding {
             port: InputPort::new(consumer, 0),
-            binding: Binding::bind(producer, 1),
+            binding: Binding::wire(producer, 1),
             rejection: BindingRejection::UndeclaredOutput,
         }
     );

@@ -151,7 +151,7 @@ fn a_blend_buys_no_model() {
         result
             .matched_stars()
             .iter()
-            .all(|m| m.indices.reference != 50)
+            .all(|m| m.idxs.reference != 50)
     );
     for p in [DVec2::ZERO, DVec2::splat(2000.0)] {
         assert!(result.transform().apply(p).distance(truth.apply(p)) <= 1e-9);
@@ -173,7 +173,7 @@ fn a_tight_accuracy_gate_is_a_requirement_gric_honours() {
     .stars(FWHM_TIGHT)
     .into_iter()
     .map(|star| Star {
-        position_sigma: 0.5,
+        pos_sigma: 0.5,
         ..star
     })
     .collect();

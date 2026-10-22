@@ -140,8 +140,8 @@ mod tests {
     /// what is resident — which it does both or neither of — and it reads the same either way.
     #[test]
     fn an_evicted_plane_reads_from_the_disk() {
-        let directory = TempDir::new("stored_plane_evict");
-        let scratch = RunScratch::create_evictable(directory.path()).unwrap();
+        let dir = TempDir::new("stored_plane_evict");
+        let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let samples = 1 << 20;
         let plane = scratch.store(&vec![0.5f32; samples]).unwrap();
         let written = plane.resident_share();

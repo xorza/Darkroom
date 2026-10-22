@@ -5,8 +5,8 @@ use std::f32::consts::LN_2;
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use crate::simd::isa_tier::IsaTier;
 use crate::simd::math::ASINH_LOG_FROM;
-use crate::simd::tier::Tier;
 
 /// Every tier over three planes drawn from each shape, after a black point of 0.02: the shapes put
 /// intensities below it (black on both paths), inside the curve, and above the highlight cap.
@@ -102,7 +102,7 @@ fn asinh_is_accurate_at_every_magnitude() {
         inv_beta: 1.0,
         inv_norm: 1.0,
     };
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         let mut plane = values.clone();
         tier.run(AsinhPlane {
             plane: &mut plane,
@@ -178,7 +178,7 @@ fn a_nan_sample_is_black_on_every_path() {
     }
     .run_scalar();
     assert_eq!([red, green, blue], [[0.0; 2]; 3]);
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         let mut plane = [f32::NAN, 0.5];
         tier.run(AsinhPlane {
             plane: &mut plane,

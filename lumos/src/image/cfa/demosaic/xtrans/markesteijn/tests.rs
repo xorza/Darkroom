@@ -76,7 +76,7 @@ fn markesteijn_matches_librtprocess_bit_for_bit() {
     for (passes, digests) in PASSES.into_iter().zip(DIGESTS) {
         for ((name, scene), expected) in scenes.into_iter().zip(digests) {
             let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-                scene(pattern.color_at(Vec2us::new(x, y)).index(), x, y)
+                scene(pattern.color_at(Vec2us::new(x, y)).idx(), x, y)
             });
             let planes = demosaic(
                 &MosaicView::new(&data, pattern),
@@ -113,7 +113,7 @@ fn constant_color_reconstructs_to_rounding_at_every_size() {
         let size = Size2us::new(side, side);
         for color in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-                color[pattern.color_at(Vec2us::new(x, y)).index()]
+                color[pattern.color_at(Vec2us::new(x, y)).idx()]
             });
             for passes in PASSES {
                 let planes = demosaic(
@@ -123,12 +123,12 @@ fn constant_color_reconstructs_to_rounding_at_every_size() {
                 )
                 .unwrap();
                 for (channel, plane) in planes.iter().enumerate() {
-                    for (index, &value) in plane.iter().enumerate() {
+                    for (idx, &value) in plane.iter().enumerate() {
                         assert_close!(
                             value,
                             color[channel],
                             2e-7,
-                            "{side}, {color:?}, {passes:?}, channel {channel} at {index}: {value}"
+                            "{side}, {color:?}, {passes:?}, channel {channel} at {idx}: {value}"
                         );
                     }
                 }
@@ -207,7 +207,7 @@ fn margin_is_the_least_that_reads_only_computed_colors() {
             let high = tile.interpolate_poisoned(job, place, POISON).to_vec();
             let low = tile.interpolate_poisoned(job, place, -POISON);
             let plane = TILE * TILE;
-            for (index, (a, b)) in high
+            for (idx, (a, b)) in high
                 .iter()
                 .zip(low)
                 .enumerate()
@@ -216,7 +216,7 @@ fn margin_is_the_least_that_reads_only_computed_colors() {
                 if a == b {
                     continue;
                 }
-                let (row, col) = ((index % plane) / TILE, index % TILE);
+                let (row, col) = ((idx % plane) / TILE, idx % TILE);
                 // Below `row + READ_REACH + 1`, above `M − row + READ_REACH`, or likewise for the
                 // column, the written part keeps clear of the cell.
                 let clear = (row + READ_REACH + 1)
@@ -269,8 +269,8 @@ fn markesteijn_inside_the_border_matches_a_larger_frame() {
             for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
                 for y in border..small.height - border {
                     for x in border..small.width - border {
-                        let value = part_plane[small.index_of(Vec2us::new(x, y))];
-                        let outer = whole_plane[large.index_of(Vec2us::new(x + ox, y + oy))];
+                        let value = part_plane[small.idx_of(Vec2us::new(x, y))];
+                        let outer = whole_plane[large.idx_of(Vec2us::new(x + ox, y + oy))];
                         assert_eq!(
                             value.to_bits(),
                             outer.to_bits(),

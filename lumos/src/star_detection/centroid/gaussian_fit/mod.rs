@@ -24,7 +24,7 @@ use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
 use crate::star_detection::centroid::profile_bounds::ProfileBounds;
-use crate::star_detection::centroid::profile_problem::{FitData, LMModel, PIXEL_MEAN_TOLERANCE};
+use crate::star_detection::centroid::profile_problem::{FitData, LmModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
 use crate::star_detection::centroid::{profile_problem, stamp};
@@ -38,7 +38,7 @@ pub(super) struct GaussianFit {
     /// The profile's covariance, in px².
     pub(super) covariance: Cov2,
     /// `√((σ_x² + σ_y²)/2)` of `pos`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)`.
-    pub(super) position_sigma: f64,
+    pub(super) pos_sigma: f64,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
     /// `pos`/`covariance` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
@@ -79,7 +79,7 @@ impl Gaussian2D {
     /// The largest `|b|` beside `a` and `c` within [`Self::curvature_range`] that keeps both
     /// eigenvalues `½(a + c) ± √(¼(a − c)² + b²)` in it: `b² ≤ (K − a)(K − c)` bounds the larger
     /// by `K`, and `b² ≤ (a − k)(c − k)` the smaller by `k > 0`, which keeps the matrix definite.
-    /// [`LMModel::constrain`] holds the fit there, so a fit pinned at it is told apart from a free
+    /// [`LmModel::constrain`] holds the fit there, so a fit pinned at it is told apart from a free
     /// one.
     fn max_cross_term(&self, a: f64, c: f64) -> f64 {
         let curvature = self.curvature_range();
@@ -88,7 +88,7 @@ impl Gaussian2D {
     }
 }
 
-impl LMModel<7> for Gaussian2D {
+impl LmModel<7> for Gaussian2D {
     #[inline]
     fn point(&self, x: f64, y: f64, params: &[f64; 7]) -> f64 {
         let [x0, y0, amp, a, b, c, bg] = *params;
@@ -204,7 +204,7 @@ impl GaussianFit {
         let det = a * c - b * b;
         Some(Self {
             pos: result_pos,
-            position_sigma: profile_problem::position_sigma(&result, fit.stamp.z.len())?,
+            pos_sigma: profile_problem::pos_sigma(&result, fit.stamp.z.len())?,
             covariance: Cov2 {
                 xx: c / det,
                 yy: a / det,

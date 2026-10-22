@@ -18,7 +18,7 @@ fn each_operation_gives_back_its_working_set() {
     alone(|| {
         let session = Session::on_workers("lumos_budget_image_ops", 1);
         let field = StarField::new(SIDE, 40, 0x0B5);
-        let channels = (0..3).map(|index| field.frame(index).channel(0).to_vec());
+        let channels = (0..3).map(|idx| field.frame(idx).channel(0).to_vec());
         let mut master = LinearImage::from_planar_channels(
             ImageDimensions::new((SIDE, SIDE), ChannelLayout::Rgb),
             channels,

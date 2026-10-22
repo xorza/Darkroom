@@ -35,7 +35,7 @@ impl CosmicRays {
             seed,
         } = self;
         let (width, height) = (pixels.width(), pixels.height());
-        let mut positions = Vec::with_capacity(count);
+        let mut poss = Vec::with_capacity(count);
 
         let mut rng = TestRng::new(seed);
 
@@ -58,10 +58,10 @@ impl CosmicRays {
                 }
             }
 
-            positions.push(Vec2us::new(x, y));
+            poss.push(Vec2us::new(x, y));
         }
 
-        positions
+        poss
     }
 }
 
@@ -96,14 +96,14 @@ mod tests {
     fn cosmic_rays_count() {
         let mut pixels = Buffer2::new_default(64, 64);
 
-        let positions = CosmicRays {
+        let poss = CosmicRays {
             count: 10,
             amplitude: 0.5..1.0,
             seed: 12345,
         }
         .add_to(&mut pixels);
 
-        assert_eq!(positions.len(), 10);
+        assert_eq!(poss.len(), 10);
 
         // Check that pixels were modified
         let non_zero_count = pixels.iter().filter(|&&p| p > 0.0).count();

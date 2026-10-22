@@ -19,7 +19,7 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
 use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::mosaic_preparation::MosaicPreparation;
@@ -27,7 +27,7 @@ use crate::platform::MappedFile;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::scratch_pool::Scratch;
 
@@ -67,12 +67,12 @@ fn prepare(c: &mut Criterion) {
                 notes: &notes,
             };
             let light = field.light(FRAME, cfa_type);
-            let context = LoadContext::default();
+            let ctx = LoadCtx::default();
             b.iter_batched(
                 || light.clone(),
                 |light| {
                     preparation
-                        .prepare(light, Path::new("light.fits"), &context)
+                        .prepare(light, Path::new("light.fits"), &ctx)
                         .unwrap()
                 },
                 fixture::fresh_copies(size_of_val(light.data().pixels())),
@@ -118,7 +118,7 @@ fn park(c: &mut Criterion) {
             let mut warp_parked = || {
                 let job = Warp {
                     transform: &warp,
-                    params: WarpParams::default(),
+                    params: WarpConfig::default(),
                 };
                 buffers.warp_into(&source, job, &scratch);
             };

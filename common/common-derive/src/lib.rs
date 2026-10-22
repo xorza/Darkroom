@@ -57,12 +57,12 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let mut descriptors = Vec::new();
     let mut builders = Vec::new();
-    for (index, field) in named.named.iter().enumerate() {
+    for (idx, field) in named.named.iter().enumerate() {
         let fname = field.ident.as_ref().expect("named field");
         let label = field_label(field)?;
         let kind = Kind::of(&field.ty)?;
         descriptors.push(descriptor(fname, &label, &kind));
-        builders.push(builder(index, fname, &kind));
+        builders.push(builder(idx, fname, &kind));
     }
 
     Ok(quote! {
@@ -220,9 +220,9 @@ fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     }
 }
 
-/// `#field: <read values[index]>` for the typed rebuild.
-fn builder(index: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
-    let read = kind.read(index, fname);
+/// `#field: <read values[idx]>` for the typed rebuild.
+fn builder(idx: usize, fname: &Ident, kind: &Kind) -> TokenStream2 {
+    let read = kind.read(idx, fname);
     quote!(#fname: #read)
 }
 

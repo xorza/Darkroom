@@ -18,7 +18,7 @@ use crate::gui::pane::graph_ui::paint::wire::Wire;
 #[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
     /// The live scribble, or `None` when no gesture is in flight. The `Option` is the liveness:
-    /// [`BreakerUI::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUI::probe)
+    /// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe)
     /// hands out the buffers only while its slot is latched, so a stale scribble left over from the
     /// last gesture is unreachable rather than merely ignored.
     live: Option<&'a mut Scribble>,

@@ -1,6 +1,6 @@
 //! Matched-filter FWHM selection and estimation settings.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::star_detection::convolution::filter_kernels::KernelShape;
 
@@ -83,7 +83,7 @@ impl FwhmConfig {
 
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         if let Some(mode) = self.mode {
-            ConfigValue::new(
+            ConfigField::new(
                 match mode {
                     FwhmMode::Fixed(_) => "fwhm Fixed",
                     FwhmMode::Auto { .. } => "fwhm Auto fallback",
@@ -94,13 +94,13 @@ impl FwhmConfig {
                 value > 0.0 && value <= f64::from(MAX_FWHM)
             })?;
         }
-        ConfigValue::count("fwhm min_stars", self.min_stars)
+        ConfigField::count("fwhm min_stars", self.min_stars)
             .must_be("at least 5", self.min_stars >= 5)?;
-        ConfigValue::new("fwhm estimation_sigma_factor", self.estimation_sigma_factor)
+        ConfigField::new("fwhm estimation_sigma_factor", self.estimation_sigma_factor)
             .finite_and("finite and at least 1", |value| value >= 1.0)?;
-        ConfigValue::new("psf_axis_ratio", self.psf_axis_ratio)
+        ConfigField::new("psf_axis_ratio", self.psf_axis_ratio)
             .finite_and("finite and in (0, 1]", |value| value > 0.0 && value <= 1.0)?;
-        ConfigValue::new("psf_angle", self.psf_angle).finite()?;
+        ConfigField::new("psf_angle", self.psf_angle).finite()?;
         // The narrowest filter this config can build: the fixed FWHM, or, estimated, the narrowest
         // star the estimate keeps or its fallback.
         let narrowest = match self.mode {
@@ -111,7 +111,7 @@ impl FwhmConfig {
         if let Some(fwhm) = narrowest
             && let KernelShape::Elliptical(ellipse) = KernelShape::of(self.filter_at(fwhm))
         {
-            ConfigValue::new("psf_axis_ratio", self.psf_axis_ratio).must_be(
+            ConfigField::new("psf_axis_ratio", self.psf_axis_ratio).must_be(
                 "wide enough off the pixel axes, at the narrowest FWHM, for a star: the matched \
                  filter's pixel means resolve σ down to 0.01 px across them",
                 ellipse.pixel_rule().is_some(),

@@ -3,13 +3,13 @@ use glam::DVec2;
 use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
-use crate::registration::resample::row_positions::RowPositions;
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::row_poss::RowPoss;
+use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 
 /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
-/// by `SourcePosition::within`, and positions past the footprint are `None`. A SIP row sums its
+/// by `SourcePos::within`, and positions past the footprint are `None`. A SIP row sums its
 /// polynomial in another order, so it agrees to rounding instead: the correction here reaches
 /// `1e-6·180³` ≈ 6 px, so the reordering moves it by a few 1e-15 px, and the f32 fraction of
 /// the split, under 1, rounds to half its 6e-8 spacing — 1e-7 holds both.
@@ -43,18 +43,18 @@ fn a_row_is_what_apply_gives_pixel_by_pixel() {
         ])),
         WarpTransform::with_sip(affine, sip),
     ];
-    let mut row = RowPositions::default();
+    let mut row = RowPoss::default();
     for transform in &transforms {
         let mut outside = 0;
         for y in [0, 57, 199] {
             row.fill(y, transform, source);
-            assert_eq!(row.positions().len(), 300);
-            for (x, &position) in row.positions().iter().enumerate() {
+            assert_eq!(row.poss().len(), 300);
+            for (x, &pos) in row.poss().iter().enumerate() {
                 let exact = transform.apply(DVec2::new(x as f64, y as f64));
-                let expected = SourcePosition::within(exact, source);
+                let expected = SourcePos::within(exact, source);
                 if transform.has_sip() {
-                    assert_eq!(position.is_some(), expected.is_some(), "x = {x}, y = {y}");
-                    if let Some(p) = position {
+                    assert_eq!(pos.is_some(), expected.is_some(), "x = {x}, y = {y}");
+                    if let Some(p) = pos {
                         let split = DVec2::new(
                             f64::from(p.cell_x) + f64::from(p.fx),
                             f64::from(p.cell_y) + f64::from(p.fy),
@@ -65,9 +65,9 @@ fn a_row_is_what_apply_gives_pixel_by_pixel() {
                         );
                     }
                 } else {
-                    assert_eq!(position, expected, "x = {x}, y = {y}");
+                    assert_eq!(pos, expected, "x = {x}, y = {y}");
                 }
-                outside += usize::from(position.is_none());
+                outside += usize::from(pos.is_none());
             }
         }
         assert!(outside > 0, "the rows reach past the footprint");

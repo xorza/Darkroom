@@ -6,13 +6,13 @@ pub(crate) mod disk_root;
 pub(crate) mod error;
 pub(crate) mod run_scratch;
 pub(crate) mod run_storage;
+pub(crate) mod storage_tier;
 pub(crate) mod stored_frame;
 pub(crate) mod stored_gain;
 pub(crate) mod stored_image;
 pub(crate) mod stored_layout;
 pub(crate) mod stored_plane;
 pub(crate) mod stratified_samples;
-pub(crate) mod tier;
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;

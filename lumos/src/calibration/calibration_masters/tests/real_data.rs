@@ -19,7 +19,7 @@ use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::master_stack::MasterStack;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::{init_tracing, real_data};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -32,8 +32,8 @@ fn raw_frame_info_matches_full_decode() {
     // budget would be wrong.
     let paths = real_data::calibration_frames();
     let path = &paths.darks[0];
-    let peeked = raw::cfa_frame_info(path, &LoadContext::default()).expect("peek frame info");
-    let loaded = raw::load_cfa(path, &LoadContext::default()).expect("full decode");
+    let peeked = raw::cfa_frame_info(path, &LoadCtx::default()).expect("peek frame info");
+    let loaded = raw::load_cfa(path, &LoadCtx::default()).expect("full decode");
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
         (loaded.data().width(), loaded.data().height()),
@@ -157,10 +157,10 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     let margin_y = size.height / 10;
     let at_edge = map
         .hot()
-        .indices
+        .idxs
         .iter()
-        .filter(|&&index| {
-            let p = size.point_of(index);
+        .filter(|&&idx| {
+            let p = size.point_of(idx);
             let (x, y) = (p.x, p.y);
             x < margin_x
                 || x >= size.width - margin_x
@@ -169,33 +169,33 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
         })
         .count();
     let mut bins = [0usize; BINS * BINS];
-    for &index in &map.hot().indices {
-        let p = size.point_of(index);
+    for &idx in &map.hot().idxs {
+        let p = size.point_of(idx);
         let bx = (p.x * BINS / size.width).min(BINS - 1);
         let by = (p.y * BINS / size.height).min(BINS - 1);
         bins[by * BINS + bx] += 1;
     }
 
     HotMaskMetrics {
-        hot: map.hot().indices.len(),
+        hot: map.hot().idxs.len(),
         at_edge,
         fullest_bin: *bins.iter().max().unwrap(),
     }
 }
 
 fn sorted_intersection_count(left: &[usize], right: &[usize]) -> usize {
-    let mut left_index = 0;
-    let mut right_index = 0;
+    let mut left_idx = 0;
+    let mut right_idx = 0;
     let mut count = 0;
-    while left_index < left.len() && right_index < right.len() {
-        match left[left_index].cmp(&right[right_index]) {
-            Ordering::Less => left_index += 1,
+    while left_idx < left.len() && right_idx < right.len() {
+        match left[left_idx].cmp(&right[right_idx]) {
+            Ordering::Less => left_idx += 1,
             Ordering::Equal => {
                 count += 1;
-                left_index += 1;
-                right_index += 1;
+                left_idx += 1;
+                right_idx += 1;
             }
-            Ordering::Greater => right_index += 1,
+            Ordering::Greater => right_idx += 1,
         }
     }
     count
@@ -208,13 +208,13 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         .darks
         .iter()
         .enumerate()
-        .filter_map(|(index, path)| index.is_multiple_of(2).then_some(path))
+        .filter_map(|(idx, path)| idx.is_multiple_of(2).then_some(path))
         .collect();
     let second_paths: Vec<_> = paths
         .darks
         .iter()
         .enumerate()
-        .filter_map(|(index, path)| (!index.is_multiple_of(2)).then_some(path))
+        .filter_map(|(idx, path)| (!idx.is_multiple_of(2)).then_some(path))
         .collect();
     let full_paths: Vec<_> = paths.darks.iter().collect();
 
@@ -242,17 +242,16 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     assert_eq!(second.size, first.size);
     assert_eq!(full.size, first.size);
 
-    let intersection =
-        sorted_intersection_count(&first.map.hot().indices, &second.map.hot().indices);
-    let union = first.map.hot().indices.len() + second.map.hot().indices.len() - intersection;
+    let intersection = sorted_intersection_count(&first.map.hot().idxs, &second.map.hot().idxs);
+    let union = first.map.hot().idxs.len() + second.map.hot().idxs.len() - intersection;
     let jaccard = intersection as f32 / union as f32;
     let first_metrics = hot_mask_metrics(&first.map, first.size);
     let second_metrics = hot_mask_metrics(&second.map, second.size);
     let full_metrics = hot_mask_metrics(&full.map, full.size);
     println!(
         "  alternating master-dark hot masks: {} and {}, intersection {}, Jaccard {:.4}",
-        first.map.hot().indices.len(),
-        second.map.hot().indices.len(),
+        first.map.hot().idxs.len(),
+        second.map.hot().idxs.len(),
         intersection,
         jaccard
     );

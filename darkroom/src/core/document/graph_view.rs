@@ -142,7 +142,7 @@ impl GraphView {
 
         for (key, placement) in &self.item_placements {
             if !placement.pos.is_finite() {
-                return Err(GraphViewValidationError::NonFinitePosition { item: *key });
+                return Err(GraphViewValidationError::NonFinitePos { item: *key });
             }
         }
         // A map guarantees unique keys, and the graph and stubs are disjoint,

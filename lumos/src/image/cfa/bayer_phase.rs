@@ -77,7 +77,7 @@ impl BayerPhase {
         plane.clear_to(self.size(mosaic.size));
         plane.par_rows_mut().enumerate().for_each(|(y, row)| {
             let source = mosaic.row_words(2 * y + b);
-            let half = |index: usize| source.get(index).map_or(0, |&word| even_bits(word >> a));
+            let half = |idx: usize| source.get(idx).map_or(0, |&word| even_bits(word >> a));
             for (w, word) in row.iter_mut().enumerate() {
                 *word = half(2 * w) | (half(2 * w + 1) << 32);
             }

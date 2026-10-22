@@ -37,24 +37,24 @@ struct HotDark {
 fn dark(count: usize, saturated: usize) -> HotDark {
     let hot: Vec<(Vec2us, f32)> = (0..count)
         .map(|k| {
-            let position = Vec2us::new(8 + 16 * (k % 16), 8 + 16 * (k / 16));
-            (position, 0.02 + 0.3 * k as f32 / 255.0)
+            let pos = Vec2us::new(8 + 16 * (k % 16), 8 + 16 * (k / 16));
+            (pos, 0.02 + 0.3 * k as f32 / 255.0)
         })
         .collect();
     let mut pixels = vec![DARK_CURRENT; SIZE.pixel_count()];
-    for &(position, excess) in &hot {
-        pixels[SIZE.index_of(position)] += excess;
+    for &(pos, excess) in &hot {
+        pixels[SIZE.idx_of(pos)] += excess;
     }
     let clipped: Vec<usize> = hot[count - saturated..]
         .iter()
-        .map(|&(position, _)| SIZE.index_of(position))
+        .map(|&(pos, _)| SIZE.idx_of(pos))
         .collect();
-    for &index in &clipped {
-        pixels[index] -= 0.002;
+    for &idx in &clipped {
+        pixels[idx] -= 0.002;
     }
     let mut dark = make_cfa(SIZE, pixels, CfaType::Mono);
-    dark.set_flags(PixelFlags::from_fn(SIZE, |index| {
-        if clipped.contains(&index) {
+    dark.set_flags(PixelFlags::from_fn(SIZE, |idx| {
+        if clipped.contains(&idx) {
             QualityFlags::SATURATED
         } else {
             QualityFlags::default()
@@ -90,14 +90,14 @@ impl Light {
         } = self;
         let mut rng = TestRng::new(27);
         let mut pixels: Vec<f32> = (0..SIZE.pixel_count())
-            .map(|index| {
-                let point = SIZE.point_of(index);
+            .map(|idx| {
+                let point = SIZE.point_of(idx);
                 let sky = 0.1 + 2e-4 * point.x as f32 + 1e-4 * point.y as f32;
                 BIAS + scale * DARK_CURRENT + sky + LIGHT_NOISE * rng.next_gaussian_f32()
             })
             .collect();
-        for &(position, excess) in hot {
-            pixels[SIZE.index_of(position)] += scale * excess;
+        for &(pos, excess) in hot {
+            pixels[SIZE.idx_of(pos)] += scale * excess;
         }
         for &(centre, _) in &hot[..starred] {
             for dy in -3i32..=3 {
@@ -106,7 +106,7 @@ impl Light {
                         centre.x.wrapping_add_signed(dx as isize),
                         centre.y.wrapping_add_signed(dy as isize),
                     );
-                    pixels[SIZE.index_of(at)] += 0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).exp();
+                    pixels[SIZE.idx_of(at)] += 0.2 * (-((dx * dx + dy * dy) as f32) / 2.0).exp();
                 }
             }
         }

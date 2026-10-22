@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 /// its sensor plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum DecoderKind {
-    /// [`LoadContext::linear`](crate::LoadContext::linear).
+    /// [`LoadCtx::linear`](crate::LoadCtx::linear).
     Linear,
-    /// [`LoadContext::cfa`](crate::LoadContext::cfa).
+    /// [`LoadCtx::cfa`](crate::LoadCtx::cfa).
     Cfa,
 }

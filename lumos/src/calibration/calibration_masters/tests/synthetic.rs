@@ -170,13 +170,13 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
             &CancelToken::never(),
         )
         .unwrap();
-    assert_eq!(map.hot().indices, hot);
+    assert_eq!(map.hot().idxs, hot);
 
     let flat = expose(0.8, 2);
     let map = DefectMap::new(flat.size())
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
-    assert_eq!(map.cold_indices(), dead);
+    assert_eq!(map.cold_idxs(), dead);
 }
 
 /// The σ threshold decides which tiers are hot. On a dark of 0.1 with σ 0.01 noise, three pixels
@@ -201,7 +201,7 @@ fn hot_detection_sigma_threshold_picks_its_tier() {
             .detect_hot(&dark, sigma, &CancelToken::never())
             .unwrap()
             .hot()
-            .indices
+            .idxs
             .clone()
     };
     assert_eq!(hot_at(SigmaThreshold::new(8.0).unwrap()), extreme);
@@ -224,8 +224,8 @@ fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
     bias[1300] += 0.1;
     let mut dark = vec![0.08f32; size.pixel_count()];
     patterns::add_gaussian_noise(&mut dark, 0.005, 8);
-    for index in [800, 1800] {
-        dark[index] += 0.1;
+    for idx in [800, 1800] {
+        dark[idx] += 0.1;
     }
     for (dark, bias) in dark.iter_mut().zip(&bias) {
         *dark += bias;
@@ -241,10 +241,7 @@ fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
         &CancelToken::never(),
     )
     .unwrap();
-    assert_eq!(
-        masters.defect_map.as_ref().unwrap().hot().indices,
-        [800, 1800]
-    );
+    assert_eq!(masters.defect_map.as_ref().unwrap().hot().idxs, [800, 1800]);
 }
 
 #[test]
@@ -256,7 +253,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     let hot: [(usize, usize); 2] = [(10, 10), (20, 15)];
     let mut dark = vec![0.05f32; n];
     for &(x, y) in &hot {
-        dark[size.index_of(Vec2us::new(x, y))] = 0.9;
+        dark[size.idx_of(Vec2us::new(x, y))] = 0.9;
     }
     let map = DefectMap::new(size)
         .detect_hot(
@@ -268,7 +265,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
 
     let mut img_px = vec![background; n];
     for &(x, y) in &hot {
-        img_px[size.index_of(Vec2us::new(x, y))] = 0.95;
+        img_px[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
     let mut img = make_cfa(size, img_px, CfaType::Mono);
     map.correct(&mut img);

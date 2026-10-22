@@ -9,7 +9,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::FRAME;
 use crate::registration::bench::{Correction, Pair};
-use crate::registration::resample::row_positions::RowPositions;
+use crate::registration::resample::row_poss::RowPoss;
 use crate::registration::transform::TransformType;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -24,8 +24,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, FRAME.width), |b| {
             let pair: &Pair = pair.get_or_init(Pair::typical);
             let warp = pair.fit(pair.model(transform, correction)).warp;
-            let mut positions = RowPositions::default();
-            b.iter(|| positions.fill(FRAME.height / 2, &warp, FRAME));
+            let mut poss = RowPoss::default();
+            b.iter(|| poss.fill(FRAME.height / 2, &warp, FRAME));
         });
     }
 }

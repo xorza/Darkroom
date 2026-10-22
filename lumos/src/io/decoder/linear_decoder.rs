@@ -9,9 +9,9 @@ use crate::io::error::ImageError;
 use crate::io::fits::decode as fits_decode;
 use crate::io::frame_info::FrameInfo;
 use crate::io::input_format::InputFormat;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
-/// Frames read as [`LinearImage`]s: [`LoadContext::linear`].
+/// Frames read as [`LinearImage`]s: [`LoadCtx::linear`].
 #[derive(Debug)]
 pub(crate) struct LinearDecoder;
 
@@ -19,15 +19,15 @@ impl Decoder for LinearDecoder {
     type Image = LinearImage;
     const KIND: DecoderKind = DecoderKind::Linear;
 
-    fn load(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-        context.linear(path)
+    fn load(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
+        ctx.linear(path)
     }
 
     /// A FITS header answers without a decode, the reader's chunk buffers with it. A float TIFF
     /// has no header this reads apart from its pixels.
-    fn peek(path: &Path, context: &LoadContext) -> Option<FrameInfo> {
+    fn peek(path: &Path, ctx: &LoadCtx) -> Option<FrameInfo> {
         match InputFormat::of(path).ok()? {
-            InputFormat::Fits => fits_decode::linear_info(path, context).ok(),
+            InputFormat::Fits => fits_decode::linear_info(path, ctx).ok(),
             InputFormat::CameraRaw | InputFormat::Raster(_) => None,
         }
     }

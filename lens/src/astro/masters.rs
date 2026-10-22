@@ -51,8 +51,8 @@ impl Display for Masters {
         }
 
         f.write_str("masters: ")?;
-        for (index, component) in components.enumerate() {
-            if index > 0 {
+        for (idx, component) in components.enumerate() {
+            if idx > 0 {
                 f.write_str(", ")?;
             }
             write!(f, "{component}")?;

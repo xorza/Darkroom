@@ -11,7 +11,7 @@ use crate::star_detection::centroid::moffat_fit::MoffatFit;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ProfileFit {
     pub(super) pos: DVec2,
-    pub(super) position_sigma: f64,
+    pub(super) pos_sigma: f64,
     pub(super) shape: FitShape,
 }
 
@@ -48,7 +48,7 @@ impl From<GaussianFit> for ProfileFit {
     fn from(fit: GaussianFit) -> Self {
         Self {
             pos: fit.pos,
-            position_sigma: fit.position_sigma,
+            pos_sigma: fit.pos_sigma,
             shape: FitShape::Elliptical(fit.covariance),
         }
     }
@@ -58,7 +58,7 @@ impl From<MoffatFit> for ProfileFit {
     fn from(fit: MoffatFit) -> Self {
         Self {
             pos: fit.pos,
-            position_sigma: fit.position_sigma,
+            pos_sigma: fit.pos_sigma,
             shape: FitShape::Round { fwhm: fit.fwhm },
         }
     }

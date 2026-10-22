@@ -23,7 +23,7 @@ use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime_cache::error::CacheNodeFailure;
 use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
-use crate::execution::error::{Result, RunError};
+use crate::execution::error::{ExecutionResult, RunError};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::node_status::{NodeExecutionStatus, NodeStatus};
 use crate::execution::report::run_reporter::internals::{CollectingReporter, DiscardedReports};
@@ -169,7 +169,7 @@ impl TestEngine {
         self.try_run(seeds).await.expect("the run completes")
     }
 
-    pub(crate) async fn try_run(&mut self, seeds: RunSeeds) -> Result<RunOutcome> {
+    pub(crate) async fn try_run(&mut self, seeds: RunSeeds) -> ExecutionResult<RunOutcome> {
         self.try_run_cancellable(seeds, CancelToken::never()).await
     }
 
@@ -245,7 +245,7 @@ impl TestEngine {
         &mut self,
         seeds: RunSeeds,
         cancel: CancelToken,
-    ) -> Result<RunOutcome> {
+    ) -> ExecutionResult<RunOutcome> {
         self.execute_with(&mut DiscardedReports, seeds, cancel)
             .await
     }
@@ -256,7 +256,7 @@ impl TestEngine {
         reporter: &mut dyn RunReporter,
         seeds: RunSeeds,
         cancel: CancelToken,
-    ) -> Result<RunOutcome> {
+    ) -> ExecutionResult<RunOutcome> {
         let Self {
             graph,
             engine,
@@ -288,7 +288,7 @@ impl TestEngine {
 
     /// [`plan`](Self::plan), surfacing the refusal a cycle or a bad seed
     /// raises.
-    pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> Result<PlanOutcome> {
+    pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> ExecutionResult<PlanOutcome> {
         self.engine.prepare_execution(&seeds).await?;
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))
     }

@@ -22,8 +22,8 @@ use crate::combine::{normalization, rejection, stack};
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
-use crate::frame_store::tier::{CombineBudget, Tier};
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -62,7 +62,7 @@ fn set(c: &mut Criterion) {
         let lights = lights();
         b.iter_batched(
             || lights.resident(),
-            |frames| lights.combine(frames, Tier::Resident, &StackConfig::light()),
+            |frames| lights.combine(frames, StorageTier::Resident, &StackConfig::light()),
             BatchSize::PerIteration,
         );
     });
@@ -103,7 +103,7 @@ fn set(c: &mut Criterion) {
             let lights = lights();
             b.iter_batched(
                 || lights.resident(),
-                |frames| lights.combine(frames, Tier::Resident, &config),
+                |frames| lights.combine(frames, StorageTier::Resident, &config),
                 BatchSize::PerIteration,
             );
         });
@@ -120,7 +120,7 @@ struct Lights {
 impl Lights {
     fn of(field: Field) -> Self {
         let images: Vec<LinearImage> = (0..STACKED_LIGHTS)
-            .map(|index| field.aligned(FRAME, index).image)
+            .map(|idx| field.aligned(FRAME, idx).image)
             .collect();
         let stats = images.iter().map(Admitted::measure).collect();
         Self { images, stats }
@@ -156,14 +156,19 @@ impl Lights {
             .collect();
         let budget =
             RunMemory::new(SPILLED_MACHINE_BYTES, None).budget(rayon::current_num_threads());
-        let tier = Tier::Spilled {
+        let tier = StorageTier::Spilled {
             scratch,
             combine: CombineBudget::new(budget),
         };
         Spilled { frames, tier }
     }
 
-    fn combine(&self, frames: Vec<StoredFrame>, tier: Tier, config: &StackConfig) -> StackProduct {
+    fn combine(
+        &self,
+        frames: Vec<StoredFrame>,
+        tier: StorageTier,
+        config: &StackConfig,
+    ) -> StackProduct {
         config
             .stack_stored_frames(
                 frames,
@@ -182,5 +187,5 @@ impl Lights {
 #[derive(Debug)]
 struct Spilled {
     frames: Vec<StoredFrame>,
-    tier: Tier,
+    tier: StorageTier,
 }

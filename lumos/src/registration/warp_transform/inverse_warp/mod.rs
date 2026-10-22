@@ -36,7 +36,7 @@ pub struct InverseWarp {
 /// map there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InverseMapped {
-    pub position: DVec2,
+    pub pos: DVec2,
     /// Columns are the images of the x and y steps of the target point.
     pub jacobian: DMat2,
 }
@@ -52,19 +52,19 @@ impl InverseWarp {
     /// did not converge is never returned.
     pub fn apply(&self, t: DVec2) -> Option<InverseMapped> {
         let linear = self.to_reference.jacobian(t);
-        let position = self.position(t)?;
+        let pos = self.pos(t)?;
         let jacobian = match &self.sip {
             // `r ↦ r + c(r)` has Jacobian `I + ∂c`, so its inverse at `u` has the inverse of that,
             // and the chain rule puts `T⁻¹`'s own Jacobian after it.
-            Some(sip) => sip.jacobian(position).inverse() * linear,
+            Some(sip) => sip.jacobian(pos).inverse() * linear,
             None => linear,
         };
-        Some(InverseMapped { position, jacobian })
+        Some(InverseMapped { pos, jacobian })
     }
 
     /// [`Self::apply`]'s position alone, without the Jacobian a caller that only places points
     /// would discard.
-    pub fn position(&self, t: DVec2) -> Option<DVec2> {
+    pub fn pos(&self, t: DVec2) -> Option<DVec2> {
         let u = self.to_reference.apply(t);
         let Some(sip) = &self.sip else {
             return Some(u);

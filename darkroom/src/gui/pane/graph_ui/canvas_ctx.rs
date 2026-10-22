@@ -8,7 +8,7 @@ use crate::gui::pane::graph_ui::prepass_ctx::{Escape, PrepassCtx};
 use crate::gui::theme::Theme;
 
 /// The graph canvas for this frame: the graph, plus the three facts
-/// [`GraphUI::prepass`](crate::gui::pane::graph_ui::GraphUI::prepass) resolves
+/// [`GraphUi::prepass`](crate::gui::pane::graph_ui::GraphUi::prepass) resolves
 /// once and every controller then reads — the port and node geometry, the
 /// bare-canvas gesture that latched, and whether Esc cancelled it.
 ///

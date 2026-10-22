@@ -17,13 +17,13 @@ use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
 
-/// Owns the in-flight new-connection wire — a held drag or a free-floating
+/// Owns the in-flight new wire — a held drag or a free-floating
 /// wire, see [`InFlight`]. Single-wire-at-a-time means one `Option` is
-/// enough. The permanent connections aren't state at all: they live on the
+/// enough. The permanent wires aren't state at all: they live on the
 /// authoring graph and are painted straight off it by the module-level
 /// [`draw`], which needs nothing from here.
 #[derive(Default, Debug)]
-pub(crate) struct ConnectionUI {
+pub(crate) struct WireUi {
     state: GestureSlot<InFlight>,
     /// Source port of a wire dropped on empty canvas this frame. Handed to
     /// the new-node popup so it opens; the wire then resumes *floating*
@@ -39,7 +39,7 @@ pub(crate) struct ConnectionUI {
 /// The in-flight wire being created: a [`GlyphDrag`] within the data-port
 /// domain (both ends are `PortRef`s — a wire can be pulled from either kind),
 /// plus which terminating input ends it. Both modes share one preview renderer
-/// ([`ConnectionUI::draw_in_flight`]), snap tracking, and data, so `mode` is a
+/// ([`WireUi::draw_in_flight`]), snap tracking, and data, so `mode` is a
 /// discriminant rather than distinct payloads.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct InFlight {
@@ -60,7 +60,7 @@ pub(super) enum DragMode {
     Floating,
 }
 
-impl ConnectionUI {
+impl WireUi {
     /// Drop the in-flight wire and both one-frame handoffs.
     pub(crate) fn reset(&mut self) {
         self.state.clear();
@@ -146,11 +146,11 @@ impl ConnectionUI {
 
     /// Take the source port of a wire dropped on empty canvas this frame —
     /// the canvas hands it to the new-node popup to open it.
-    pub(crate) const fn take_pending_connection(&mut self) -> Option<PortRef> {
+    pub(crate) const fn take_pending_wire(&mut self) -> Option<PortRef> {
         self.pending_open.take()
     }
 
-    /// Whether a new-connection gesture is in flight — feeds the wire-fade
+    /// Whether a new-wire gesture is in flight — feeds the wire-fade
     /// tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
     pub(crate) const fn is_dragging(&self) -> bool {
@@ -178,7 +178,7 @@ impl ConnectionUI {
         }
         self.state.clear();
         if let Some(end) = drag.snap {
-            return Some(connection(drag.from, end));
+            return Some(wire(drag.from, end));
         }
         let set_const = const_drop(ui, cx, drag.from);
         if set_const.is_none() && dropped_on_empty_canvas(ui, cx.geometry()) {
@@ -216,7 +216,7 @@ impl ConnectionUI {
         match ended {
             Some(PointerButton::Left) => {
                 self.state.clear();
-                drag.snap.map(|end| connection(drag.from, end))
+                drag.snap.map(|end| wire(drag.from, end))
             }
             Some(PointerButton::Right) => {
                 self.ended_on_secondary = true;
@@ -241,7 +241,7 @@ impl ConnectionUI {
     /// Paint the in-flight drag preview: cubic from the start port's
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
-    /// share the pan/zoom transform with permanent connections.
+    /// share the pan/zoom transform with permanent wires.
     pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         let Some(state) = self.state.get().copied() else {
@@ -271,16 +271,16 @@ impl ConnectionUI {
     }
 }
 
-/// Paint every permanent connection on the current scene retained by the
+/// Paint every permanent wire on the current scene retained by the
 /// pass's cull region, marking those the active breaker crosses as broken
 /// via `probe.mark_broken_input` for the breaker's release-frame drain.
 ///
 /// Reads nothing but committed scene state off `pass`, so it belongs to the
-/// module rather than [`ConnectionUI`] — the in-flight gesture that struct
+/// module rather than [`WireUi`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (graph_ctx, geometry) = (pass.dcx.graph_ctx(), pass.dcx.geometry());
-    for (consumer, producer) in graph_ctx.connections() {
+    for (consumer, producer) in graph_ctx.wires() {
         let (src, tgt) = (PortRef::from(producer), PortRef::from(consumer));
         let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt)) else {
             continue;
@@ -360,7 +360,7 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
     let output = producer.output_port().expect("a wire reads an output");
     let graph = graph_ctx.body();
     graph
-        .admit(graph_ctx.library(), input, &Binding::Bind(output))
+        .admit(graph_ctx.library(), input, &Binding::Wire(output))
         .is_ok()
         && !graph.produces_cycle(output.node_id, input.node_id)
 }
@@ -408,7 +408,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
 /// [`scan_snap_target`]) commits. A cycle-forming pair never reaches here —
 /// [`scan_snap_target`] refuses to snap one, and `GraphIntent::into_step`
 /// rejects any cycle-forming bind that slips through.
-fn connection(start: PortRef, end: PortRef) -> GraphIntent {
+fn wire(start: PortRef, end: PortRef) -> GraphIntent {
     let pair = start
         .input_port()
         .zip(end.output_port())
@@ -423,7 +423,7 @@ fn connection(start: PortRef, end: PortRef) -> GraphIntent {
     };
     GraphIntent::SetInput {
         input,
-        to: Some(Binding::Bind(output)),
+        to: Some(Binding::Wire(output)),
     }
 }
 

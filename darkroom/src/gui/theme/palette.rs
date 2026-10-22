@@ -63,7 +63,7 @@ pub(crate) struct Palette {
     /// Rubber-band sweep and committed selection halo.
     pub(crate) selection_rect: RgbaF32,
     /// A wire whose endpoint no longer resolves.
-    pub(crate) connection_broken: RgbaF32,
+    pub(crate) wire_broken: RgbaF32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
     /// Color for an untyped (`Any`) input port.

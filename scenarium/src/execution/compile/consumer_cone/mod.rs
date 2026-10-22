@@ -1,14 +1,14 @@
-//! Downstream cones over a program's data edges.
+//! Downstream cones over a program's wires.
 
 use crate::containers::column::Idx;
 use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::index::NodeIdx;
+use crate::execution::idx::NodeIdx;
 
 /// What a set of seed nodes reaches downstream: every node that reads a seed's
 /// outputs, transitively, plus the seeds themselves.
 ///
-/// Answering that needs the program's data edges reversed, which is a pure
+/// Answering that needs the program's wires reversed, which is a pure
 /// function of the program and so is **derived per call, never kept** — what
 /// asks it, what evicting a node reaches, is a user action, while an index held
 /// between calls would be stale the moment the graph is edited. What persists
@@ -43,7 +43,7 @@ pub(crate) struct ConsumerCone {
 
 impl ConsumerCone {
     /// The reflexive transitive closure of `seeds` over `program`'s reversed
-    /// data edges.
+    /// wires.
     ///
     /// Handed back in the dense index space rather than as ids: the caller
     /// walks the same space, and converting here would only make it convert
@@ -58,7 +58,7 @@ impl ConsumerCone {
         &self.reached
     }
 
-    /// Reverse every data edge in `program` into `readers`/`starts`.
+    /// Reverse every wire in `program` into `readers`/`starts`.
     ///
     /// Counting sort rather than a comparison sort: the key is a dense index,
     /// so one pass tallies each node's readers and a second places them.
@@ -74,7 +74,7 @@ impl ConsumerCone {
         starts.resize(node_count + 1, 0);
         for e_node in &program.e_nodes {
             for input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(address) = &input.binding {
+                if let ExecutionBinding::Wire(address) = &input.binding {
                     starts[address.node_idx.idx() + 1] += 1;
                 }
             }
@@ -89,7 +89,7 @@ impl ConsumerCone {
         filled.extend_from_slice(starts);
         for (node_idx, e_node) in program.e_nodes.iter_indexed() {
             for input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(address) = &input.binding {
+                if let ExecutionBinding::Wire(address) = &input.binding {
                     let at = &mut filled[address.node_idx.idx()];
                     readers[*at as usize] = node_idx;
                     *at += 1;

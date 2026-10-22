@@ -157,8 +157,8 @@ impl Labeler {
                 run_starts[label as usize] += 1;
             }
         }
-        for index in 1..=count {
-            run_starts[index] += run_starts[index - 1];
+        for idx in 1..=count {
+            run_starts[idx] += run_starts[idx - 1];
         }
         let total = run_starts[count] as usize;
         runs.resize(total, LabelRun::default());
@@ -167,13 +167,13 @@ impl Labeler {
         let mut placed = 0;
         for strip in strips.iter() {
             for &(y, run) in &strip.runs {
-                let index = mapping[run.label as usize] as usize - 1;
-                runs[cursor[index] as usize] = LabelRun {
+                let idx = mapping[run.label as usize] as usize - 1;
+                runs[cursor[idx] as usize] = LabelRun {
                     y,
                     start: run.start,
                     end: run.end,
                 };
-                cursor[index] += 1;
+                cursor[idx] += 1;
                 placed += 1;
             }
         }

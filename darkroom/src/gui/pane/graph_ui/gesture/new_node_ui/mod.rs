@@ -29,13 +29,13 @@ pub(crate) struct NewNodeUi {
     /// Inner-canvas pre-transform position of the current open — the
     /// spawned node lands exactly under the click. Set at open, read at pick.
     world_pos: Vec2,
-    /// Source port when a connection dropped on empty canvas opened the
+    /// Source port when a wire dropped on empty canvas opened the
     /// palette; on pick the wire resumes floating from it (rather than
     /// auto-attaching). `None` for a plain RMB / double-click. Set at open,
     /// read at pick.
     source: Option<PortRef>,
-    /// Set when a node was picked from a popup that a dropped connection
-    /// opened: the wire's source port, handed back to `ConnectionUI` so the
+    /// Set when a node was picked from a popup that a dropped wire
+    /// opened: the wire's source port, handed back to `WireUi` so the
     /// wire resumes *floating* and the user clicks the exact port to land
     /// it. Taken by the canvas next frame.
     resume_floating: Option<PortRef>,
@@ -89,7 +89,7 @@ impl NewNodeUi {
         self.menu.is_open()
     }
 
-    /// Open the palette from a bare RMB / double-click, or from a connection
+    /// Open the palette from a bare RMB / double-click, or from a wire
     /// dropped on empty canvas whose source is `pending_source`, and record it
     /// while it is open. Returns the `AddNode` a pick raises.
     pub(crate) fn apply(
@@ -101,7 +101,7 @@ impl NewNodeUi {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         // Open the palette either from a bare RMB / double-click (`NewNode`
-        // gesture) or from a connection dropped on empty canvas
+        // gesture) or from a wire dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
         let opening = if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
@@ -156,7 +156,7 @@ impl NewNodeUi {
         });
 
         if chosen.is_some() {
-            // If a dropped connection opened this popup, hand its source
+            // If a dropped wire opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the
             // exact port to land it, rather than it auto-attaching.
             self.resume_floating = self.source;
@@ -165,7 +165,7 @@ impl NewNodeUi {
     }
 
     /// Take the source of a wire whose drop spawned a node this frame — the
-    /// canvas re-floats it on `ConnectionUI`. `None` on a plain palette open.
+    /// canvas re-floats it on `WireUi`. `None` on a plain palette open.
     pub(crate) const fn take_resume_floating(&mut self) -> Option<PortRef> {
         self.resume_floating.take()
     }

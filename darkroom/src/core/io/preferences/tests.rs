@@ -42,7 +42,7 @@ fn preferences_roundtrip() {
         window: Some(WindowState {
             size: UVec2::new(1440, 900),
             maximized: true,
-            position: Some(IVec2::new(120, -40)),
+            pos: Some(IVec2::new(120, -40)),
         }),
         viewer: ViewerPreferences {
             background: ViewerBackground::Checker,
@@ -102,7 +102,7 @@ fn default_preferences() {
 #[test]
 fn partial_window_entry_fills_missing_fields_and_omits_position() {
     // A hand-edited `window` entry carrying only a size: the missing
-    // `maximized` defaults to `false` and, with no `position` key, the
+    // `maximized` defaults to `false` and, with no `pos` key, the
     // physical position stays `None` (the Wayland case).
     let partial = b"(window: Some((size: (800, 600))))";
     let cfg: Preferences = SerdeFormat::Ron
@@ -113,7 +113,7 @@ fn partial_window_entry_fills_missing_fields_and_omits_position() {
         Some(WindowState {
             size: UVec2::new(800, 600),
             maximized: false,
-            position: None,
+            pos: None,
         })
     );
 }

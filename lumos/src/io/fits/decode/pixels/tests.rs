@@ -143,7 +143,7 @@ fn the_blank_sentinel_is_a_null_and_stays_out_of_the_integer_scan() {
         scan.nulls,
         Some(NullSummary {
             count: 1,
-            first_index: 1,
+            first_idx: 1,
         })
     );
     assert_eq!(scan.scan.integer_step(1.0), 4.0);
@@ -172,7 +172,7 @@ fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
         scan.nulls,
         Some(NullSummary {
             count: 1,
-            first_index: 0,
+            first_idx: 0,
         })
     );
 }
@@ -187,7 +187,7 @@ fn nan_and_both_infinities_are_counted_after_the_divide() {
         scan.nulls,
         Some(NullSummary {
             count: 3,
-            first_index: 1,
+            first_idx: 1,
         })
     );
     // The maximum is over the finite samples only: 5/65535, not infinity.
@@ -212,21 +212,21 @@ fn summaries_from_two_chunks_combine_into_the_planes_index_space() {
     // own 0 and 3 — pixels 8 and 11 of the plane. Merged: three nulls, first at 2.
     let first = NullSummary {
         count: 1,
-        first_index: 2,
+        first_idx: 2,
     };
     let second = NullSummary {
         count: 2,
-        first_index: 0,
+        first_idx: 0,
     };
     assert_eq!(
         first.merge(second.offset_by(8)),
         NullSummary {
             count: 3,
-            first_index: 2,
+            first_idx: 2,
         }
     );
     // The offset moves only the location, and the merge takes the earlier one whichever side
     // it arrives on.
-    assert_eq!(second.offset_by(8).first_index, 8);
-    assert_eq!(second.offset_by(8).merge(first).first_index, 2);
+    assert_eq!(second.offset_by(8).first_idx, 8);
+    assert_eq!(second.offset_by(8).merge(first).first_idx, 2);
 }

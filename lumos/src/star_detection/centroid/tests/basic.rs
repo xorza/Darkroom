@@ -205,7 +205,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     #[derive(Debug)]
     struct Case {
         name: &'static str,
-        position: DVec2,
+        pos: DVec2,
         size: Size2us,
         expected: bool,
     }
@@ -215,79 +215,79 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     let cases = [
         Case {
             name: "center",
-            position: DVec2::splat(32.0),
+            pos: DVec2::splat(32.0),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "minimum valid",
-            position: DVec2::splat(radius as f64),
+            pos: DVec2::splat(radius as f64),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "maximum valid",
-            position: DVec2::splat((64 - radius - 1) as f64),
+            pos: DVec2::splat((64 - radius - 1) as f64),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "left edge",
-            position: DVec2::new((radius - 1) as f64, 32.0),
+            pos: DVec2::new((radius - 1) as f64, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "top edge",
-            position: DVec2::new(32.0, (radius - 1) as f64),
+            pos: DVec2::new(32.0, (radius - 1) as f64),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "right edge",
-            position: DVec2::new((64 - radius) as f64, 32.0),
+            pos: DVec2::new((64 - radius) as f64, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "bottom edge",
-            position: DVec2::new(32.0, (64 - radius) as f64),
+            pos: DVec2::new(32.0, (64 - radius) as f64),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative x",
-            position: DVec2::new(-1.0, 32.0),
+            pos: DVec2::new(-1.0, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative y",
-            position: DVec2::new(32.0, -1.0),
+            pos: DVec2::new(32.0, -1.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "fraction rounds in",
-            position: DVec2::new(radius as f64 + 0.4, 32.0),
+            pos: DVec2::new(radius as f64 + 0.4, 32.0),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "fraction rounds out",
-            position: DVec2::new(radius as f64 - 0.6, 32.0),
+            pos: DVec2::new(radius as f64 - 0.6, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "minimum image size",
-            position: DVec2::splat(radius as f64),
+            pos: DVec2::splat(radius as f64),
             size: Size2us::new(min_size, min_size),
             expected: true,
         },
         Case {
             name: "image too small",
-            position: DVec2::splat(radius as f64),
+            pos: DVec2::splat(radius as f64),
             size: Size2us::new(min_size - 1, min_size - 1),
             expected: false,
         },
@@ -297,7 +297,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
         let residual = Buffer2::new_filled(case.size.width, case.size.height, 0.0f32);
         let centre = StampAt {
             residual: &residual,
-            pos: case.position,
+            pos: case.pos,
             radius,
         }
         .centre();
@@ -305,7 +305,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
         if let Some(centre) = centre {
             assert_eq!(
                 (centre.x as f64, centre.y as f64),
-                (case.position.x.round(), case.position.y.round()),
+                (case.pos.x.round(), case.pos.y.round()),
                 "{}: the centre is the nearest pixel",
                 case.name
             );

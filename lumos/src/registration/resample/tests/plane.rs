@@ -11,8 +11,8 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::math::size2us::Size2us;
+use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::warp_kernel::Filter;
-use crate::registration::resample::warp_params::{InterpolationMethod, WarpParams};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 
@@ -41,7 +41,7 @@ fn integer_shifts_copy_the_source() {
             f64::from(shift.1),
         )));
         for method in InterpolationMethod::ALL {
-            let params = WarpParams::with_method(method);
+            let params = WarpConfig::with_method(method);
             let tolerance = match Filter::of(method) {
                 Some(Filter::Lanczos(order)) => {
                     let lut = order.lut();
@@ -112,7 +112,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
         }
 
         for method in InterpolationMethod::ALL {
-            let params = WarpParams {
+            let params = WarpConfig {
                 method,
                 border_value: BORDER,
                 ..Default::default()
@@ -161,7 +161,7 @@ fn an_image_smaller_than_the_kernel_reads_a_constant_back() {
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
     ] {
-        let output = WarpParams::with_method(method).warp_plane(&input, &wt);
+        let output = WarpConfig::with_method(method).warp_plane(&input, &wt);
         assert!(
             output
                 .pixels()

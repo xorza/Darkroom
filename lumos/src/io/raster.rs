@@ -21,7 +21,7 @@ use crate::image::observation_header::ObservationHeader;
 use crate::image::preview_image::PreviewImage;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::error::{ImageError, ScientificRefusal, WriteError};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullSamples;
 
 /// The image at `path`, read through imaginarium.
@@ -58,7 +58,7 @@ fn provenance(
 pub(crate) fn linear(
     path: &Path,
     format: FileFormat,
-    context: &LoadContext,
+    ctx: &LoadCtx,
 ) -> Result<LinearImage, ImageError> {
     if format != FileFormat::Tiff {
         return Err(ImageError::scientific_rejection(
@@ -67,7 +67,7 @@ pub(crate) fn linear(
         ));
     }
     let decoded = read(path)?;
-    context.check_cancelled(path)?;
+    ctx.check_cancelled(path)?;
     let desc = decoded.desc();
     if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
         return Err(ImageError::scientific_rejection(
@@ -103,11 +103,10 @@ pub(crate) fn linear(
             .planes_mut()
             .map(Buffer2::pixels_mut)
             .collect::<ArrayVec<&mut [f32], 3>>();
-        context
-            .nulls
+        ctx.nulls
             .resolve(&mut planes, size)
-            .map_err(|NullSamples { count, first_index }| {
-                ImageError::null_samples(path, count, first_index)
+            .map_err(|NullSamples { count, first_idx }| {
+                ImageError::null_samples(path, count, first_idx)
             })?
     };
     image.set_flags(flags);
@@ -130,10 +129,10 @@ pub(crate) fn linear(
 pub(crate) fn preview(
     path: &Path,
     format: FileFormat,
-    context: &LoadContext,
+    ctx: &LoadCtx,
 ) -> Result<PreviewImage, ImageError> {
     let decoded = read(path)?;
-    context.check_cancelled(path)?;
+    ctx.check_cancelled(path)?;
     let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
     let target = linear_image::f32_target_format(&decoded);
     let metadata = ImageMetadata {

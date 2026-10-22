@@ -10,17 +10,13 @@ pub(super) fn form_triangles_kdtree(
     k_neighbors: usize,
     min_height: f64,
 ) -> Vec<Triangle> {
-    let positions = tree.points();
-    let triangle_indices = form_triangles_from_neighbors(tree, k_neighbors);
+    let poss = tree.points();
+    let triangle_idxs = form_triangles_from_neighbors(tree, k_neighbors);
 
-    triangle_indices
+    triangle_idxs
         .into_iter()
         .filter_map(|[i, j, k]| {
-            Triangle::from_positions(
-                [i, j, k],
-                [positions[i], positions[j], positions[k]],
-                min_height,
-            )
+            Triangle::from_poss([i, j, k], [poss[i], poss[j], poss[k]], min_height)
         })
         .collect()
 }
@@ -35,7 +31,7 @@ pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
 
     let k = k.min(n - 1);
     let mut triangles = Vec::new();
-    // Reused across the loop to avoid a per-star allocation (mirrors `radius_indices_into`).
+    // Reused across the loop to avoid a per-star allocation (mirrors `radius_idxs_into`).
     let mut neighbors: Vec<Neighbor> = Vec::new();
 
     for i in 0..n {
@@ -44,16 +40,16 @@ pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
         tree.k_nearest_into(point_i, k + 1, &mut neighbors);
 
         for (ni, n1) in neighbors.iter().enumerate() {
-            if n1.index == i {
+            if n1.idx == i {
                 continue;
             }
             for n2 in neighbors.iter().skip(ni + 1) {
-                if n2.index == i {
+                if n2.idx == i {
                     continue;
                 }
 
                 // Sorted, so the same triangle reached from another vertex dedups.
-                let mut tri = [i, n1.index, n2.index];
+                let mut tri = [i, n1.idx, n2.idx];
                 tri.sort_unstable();
                 triangles.push(tri);
             }

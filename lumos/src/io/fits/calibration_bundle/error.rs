@@ -7,7 +7,7 @@ use crate::calibration::master_role::MasterRole;
 use crate::io::error::{ImageError, WriteError};
 
 /// Why [`writer::calibration_bundle`](crate::writer::calibration_bundle) could not write a bundle,
-/// or [`LoadContext::calibration_masters`](crate::LoadContext::calibration_masters) could not read
+/// or [`LoadCtx::calibration_masters`](crate::LoadCtx::calibration_masters) could not read
 /// one.
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
@@ -15,8 +15,8 @@ pub enum BundleError {
     #[error("calibration-master bundle: {0}")]
     Write(#[from] WriteError),
     /// A defect's pixel index past the FITS signed 64-bit range.
-    #[error("defect index {index} exceeds the FITS signed 64-bit range")]
-    DefectIndexOutOfRange { index: usize },
+    #[error("defect index {idx} exceeds the FITS signed 64-bit range")]
+    DefectIdxOutOfRange { idx: usize },
     /// A defect map's sensor extent past the FITS signed 64-bit range.
     #[error("defect map of {width}×{height} exceeds the FITS signed 64-bit range")]
     DefectExtentOutOfRange { width: usize, height: usize },
@@ -99,7 +99,7 @@ pub enum DefectTableError {
     Kind { row: usize, kind: u8 },
     /// A row's index is negative or lies outside the sensor.
     #[error("row {row} indexes no pixel of the sensor")]
-    Index { row: usize },
+    Idx { row: usize },
     /// A hot row's excess is not a positive finite number, or a cold row's is not NaN.
     #[error("row {row} has an invalid excess")]
     Excess { row: usize },

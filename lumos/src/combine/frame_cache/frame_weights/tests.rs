@@ -113,6 +113,6 @@ fn manual_and_equal_weights_and_a_noiseless_frame() {
     );
     assert!(matches!(
         noiseless,
-        Err(StackError::NoNoiseToWeigh { index: 1 })
+        Err(StackError::NoNoiseToWeigh { idx: 1 })
     ));
 }

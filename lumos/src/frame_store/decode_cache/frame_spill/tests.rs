@@ -131,7 +131,7 @@ fn metadata() -> ImageMetadata {
                     bscale: 1.0,
                     bzero: 32768.0,
                     hdu: FitsHduProvenance {
-                        index: 1,
+                        idx: 1,
                         extname: Some("SCI".to_owned()),
                         extver: Some(2),
                     },
@@ -257,8 +257,8 @@ fn sidecar_layout_is_pinned() {
 /// sigma that would poison every weight derived from it reads as nothing to reuse.
 #[test]
 fn committed_reads_back_only_a_valid_record_under_its_key() {
-    let directory = TempDir::new("frame_spill_commit");
-    let spill = FrameSpill::named(directory.path(), "frame", key(7));
+    let dir = TempDir::new("frame_spill_commit");
+    let spill = FrameSpill::named(dir.path(), "frame", key(7));
     for (stats, carries) in [
         (stats(&[(42.5, 3.25)], Some(2e-5)), Carries::NullMask),
         (
@@ -346,7 +346,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     fs::remove_file(spill.commit_path()).unwrap();
     assert!(spill.committed().is_none(), "no commit record");
 
-    let blocker = directory.join("not_a_directory");
+    let blocker = dir.join("not_a_directory");
     fs::write(&blocker, b"file").unwrap();
     let error = FrameSpill::named(&blocker, "frame", key(7))
         .commit(&decoded(Carries::Channels), digests(), &valid)

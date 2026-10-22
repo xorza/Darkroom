@@ -167,7 +167,7 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
                 let pixels = &pixels;
                 (case.tile.min.x..case.tile.max.x)
                     .filter(move |&x| !mask.get_at(Vec2us::new(x, y)))
-                    .map(move |x| pixels[size.index_of(Vec2us::new(x, y))])
+                    .map(move |x| pixels[size.idx_of(Vec2us::new(x, y))])
             })
             .collect();
         let count = expected.len().min(MAX_TILE_SAMPLES);

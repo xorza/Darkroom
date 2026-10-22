@@ -1,6 +1,6 @@
 //! [`TriangleConfig`]: how triangle matching pairs the stars of two frames.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::matching;
@@ -56,9 +56,9 @@ impl TriangleConfig {
 
     /// Validate the matching invariants this config owns.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("ratio_tolerance", self.ratio_tolerance)
+        ConfigField::new("ratio_tolerance", self.ratio_tolerance)
             .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)?;
-        ConfigValue::count("min_votes", self.min_votes).must_be("at least 1", self.min_votes >= 1)
+        ConfigField::count("min_votes", self.min_votes).must_be("at least 1", self.min_votes >= 1)
     }
 }
 

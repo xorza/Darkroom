@@ -124,7 +124,7 @@ impl Session {
 
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
         //    projection, then emit the input-derived graph mutations (drag,
-        //    pan/zoom, connection commit). Drained before the record so Pass A
+        //    pan/zoom, wire commit). Drained before the record so Pass A
         //    sees the settled doc. Driven by the panes on screen, like the
         //    record below — a pane kind that grows input handling gets an arm
         //    there rather than another question here. A canvas that just

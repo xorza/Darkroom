@@ -3,9 +3,9 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::decode::decode_options::DecodeOptions;
+use crate::decode::decode_params::DecodeParams;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::io::fits::fits_load_options::FitsLoadOptions;
+use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::null_policy::NullPolicy;
 use crate::platform::UserCache;
 
@@ -35,7 +35,7 @@ pub struct IngestConfig {
     /// system reading.
     pub memory_override: Option<u64>,
     /// How FITS frames are read; ignored for every other format.
-    pub fits: FitsLoadOptions,
+    pub fits: FitsLoadConfig,
     /// What a null sample does to a linear decode.
     pub nulls: NullPolicy,
     /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
@@ -48,7 +48,7 @@ impl Default for IngestConfig {
             cache_dir: UserCache::root(&|name| env::var_os(name)),
             keep_cache: false,
             memory_override: None,
-            fits: FitsLoadOptions::default(),
+            fits: FitsLoadConfig::default(),
             nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
         }
@@ -57,8 +57,8 @@ impl Default for IngestConfig {
 
 impl IngestConfig {
     /// The options this configuration decodes every frame under.
-    pub(crate) const fn decode_options(&self) -> DecodeOptions<'_> {
-        DecodeOptions {
+    pub(crate) const fn decode_params(&self) -> DecodeParams<'_> {
+        DecodeParams {
             fits: &self.fits,
             nulls: self.nulls,
             xtrans_passes: self.xtrans_passes,
@@ -90,10 +90,10 @@ mod tests {
 
     #[test]
     fn custom_cache_directory_preserves_other_defaults() {
-        let directory = PathBuf::from(".tmp/custom_cache");
-        let config = IngestConfig::with_cache_dir(directory.clone());
+        let dir = PathBuf::from(".tmp/custom_cache");
+        let config = IngestConfig::with_cache_dir(dir.clone());
 
-        assert_eq!(config.cache_dir, directory);
+        assert_eq!(config.cache_dir, dir);
         assert!(!config.keep_cache);
         assert_eq!(config.memory_override, None);
     }

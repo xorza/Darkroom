@@ -80,12 +80,12 @@ impl<'a> FrameGate<'a> {
         }
     }
 
-    /// The sample at `index` of the chunk when it is gathered; `None` when it is not.
+    /// The sample at `idx` of the chunk when it is gathered; `None` when it is not.
     ///
     /// A pair that agrees on where the frame has data — the invariant
     /// [`FrameQuality`] documents — gives every gathered sample a positive confidence.
     #[inline]
-    pub(crate) fn sample(&self, index: usize) -> Option<GateSample> {
+    pub(crate) fn sample(&self, idx: usize) -> Option<GateSample> {
         let whole = |confidence| GateSample {
             confidence,
             weight: 1.0,
@@ -95,15 +95,15 @@ impl<'a> FrameGate<'a> {
             Self::Planes {
                 coverage,
                 confidence,
-            } => PixelCoverage::new(coverage[index])
+            } => PixelCoverage::new(coverage[idx])
                 .contributes()
-                .then(|| whole(confidence[index])),
+                .then(|| whole(confidence[idx])),
             Self::Mask { flags, excluded } => {
-                (!QualityFlags::from_byte(flags[index]).intersects(*excluded)).then(|| whole(1.0))
+                (!QualityFlags::from_byte(flags[idx]).intersects(*excluded)).then(|| whole(1.0))
             }
-            Self::Drizzled { weight, confidence } => (weight[index] > 0.0).then(|| GateSample {
-                confidence: confidence[index],
-                weight: weight[index],
+            Self::Drizzled { weight, confidence } => (weight[idx] > 0.0).then(|| GateSample {
+                confidence: confidence[idx],
+                weight: weight[idx],
             }),
         }
     }

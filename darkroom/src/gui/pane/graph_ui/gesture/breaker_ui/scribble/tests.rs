@@ -3,7 +3,7 @@ use scenarium::EventPort;
 
 use super::*;
 
-/// A scribble started at `p`, the way `BreakerUI::apply` starts one — the
+/// A scribble started at `p`, the way `BreakerUi::apply` starts one — the
 /// unit under test in everything below, which is about the polyline rather
 /// than about the gesture that drives it.
 fn scribble_at(p: Vec2) -> Scribble {

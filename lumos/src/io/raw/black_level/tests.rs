@@ -123,7 +123,7 @@ fn a_canon_black_level_is_exact_against_a_hand_sum() {
         margin: Vec2us::new(1, 1),
     };
     let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
-        .map(|index| 2000 + (index * 37 % 9000) as u16)
+        .map(|idx| 2000 + (idx * 37 % 9000) as u16)
         .collect();
     raw[2 * 10 + 3] = 0;
     raw[10 + 1] = 6000;

@@ -71,12 +71,12 @@ pub(crate) async fn sweep(
         }
 
         // A read is planned exactly where the run loop will take one: on a
-        // `Bind` delivery, whose producer the plan runs. A **disabled**
+        // `Wire` delivery, whose producer the plan runs. A **disabled**
         // producer feeding an *optional* input leaves the consumer
         // schedulable, but never enters `process_order`, so it delivers
         // nothing and is not promoted.
         for input in &program.inputs[e_node.inputs] {
-            if let Delivery::Bind(addr) = schedule.delivery(program, input) {
+            if let Delivery::Wire(addr) = schedule.delivery(program, input) {
                 let promoted = schedule.states[addr.node_idx].promote_to_run();
                 debug_assert!(promoted, "a delivering producer is runnable");
                 schedule.outputs.add_reader(program.output_idx(addr));

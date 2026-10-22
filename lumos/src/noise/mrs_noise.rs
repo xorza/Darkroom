@@ -63,7 +63,7 @@ const TILE_BYTES_PER_PIXEL: usize = 3 * size_of::<f32>() + 2 * size_of::<f64>();
 /// residual.
 #[derive(Debug, Default)]
 struct Coefficients {
-    index: Vec<usize>,
+    idx: Vec<usize>,
     first_layer: Vec<f64>,
     significance: Vec<f64>,
     detail: Vec<f64>,
@@ -72,7 +72,7 @@ struct Coefficients {
 /// Consecutive pixels of [`Coefficients`], each column over the same run.
 #[derive(Debug, Clone, Copy)]
 struct CoefficientRun<'a> {
-    index: &'a [usize],
+    idx: &'a [usize],
     first_layer: &'a [f64],
     significance: &'a [f64],
     detail: &'a [f64],
@@ -81,7 +81,7 @@ struct CoefficientRun<'a> {
 /// The columns' places one tile writes its core pixels into.
 #[derive(Debug)]
 struct CoefficientShare<'a> {
-    index: &'a mut [usize],
+    idx: &'a mut [usize],
     first_layer: &'a mut [f64],
     significance: &'a mut [f64],
     detail: &'a mut [f64],
@@ -90,7 +90,7 @@ struct CoefficientShare<'a> {
 impl Coefficients {
     fn zeroed(len: usize) -> Self {
         Self {
-            index: vec![0; len],
+            idx: vec![0; len],
             first_layer: vec![0.0; len],
             significance: vec![0.0; len],
             detail: vec![0.0; len],
@@ -99,7 +99,7 @@ impl Coefficients {
 
     fn all(&self) -> CoefficientRun<'_> {
         CoefficientRun {
-            index: &self.index,
+            idx: &self.idx,
             first_layer: &self.first_layer,
             significance: &self.significance,
             detail: &self.detail,
@@ -108,7 +108,7 @@ impl Coefficients {
 
     /// Each tile's share, in order, as long as its core.
     fn shares(&mut self, tiles: &[Tile]) -> Vec<CoefficientShare<'_>> {
-        let mut index = self.index.as_mut_slice();
+        let mut idx = self.idx.as_mut_slice();
         let mut first_layer = self.first_layer.as_mut_slice();
         let mut significance = self.significance.as_mut_slice();
         let mut detail = self.detail.as_mut_slice();
@@ -116,13 +116,13 @@ impl Coefficients {
         for tile in tiles {
             let len = tile.core.area();
             let share;
-            (share, index) = mem::take(&mut index).split_at_mut(len);
+            (share, idx) = mem::take(&mut idx).split_at_mut(len);
             let (first, rest_first) = mem::take(&mut first_layer).split_at_mut(len);
             let (significant, rest_significance) = mem::take(&mut significance).split_at_mut(len);
             let (residual, rest_detail) = mem::take(&mut detail).split_at_mut(len);
             (first_layer, significance, detail) = (rest_first, rest_significance, rest_detail);
             shares.push(CoefficientShare {
-                index: share,
+                idx: share,
                 first_layer: first,
                 significance: significant,
                 detail: residual,
@@ -133,14 +133,14 @@ impl Coefficients {
 
     /// Move the `len` pixels from `from` onwards to `to`, in every column.
     fn move_within(&mut self, from: usize, len: usize, to: usize) {
-        self.index.copy_within(from..from + len, to);
+        self.idx.copy_within(from..from + len, to);
         self.first_layer.copy_within(from..from + len, to);
         self.significance.copy_within(from..from + len, to);
         self.detail.copy_within(from..from + len, to);
     }
 
     fn truncate(&mut self, len: usize) {
-        self.index.truncate(len);
+        self.idx.truncate(len);
         self.first_layer.truncate(len);
         self.significance.truncate(len);
         self.detail.truncate(len);
@@ -153,11 +153,11 @@ impl Samples for Coefficients {
     const BYTES: usize = size_of::<usize>() + 3 * size_of::<f64>();
 
     fn len(&self) -> usize {
-        self.index.len()
+        self.idx.len()
     }
 
     fn swap(&mut self, a: usize, b: usize) {
-        self.index.swap(a, b);
+        self.idx.swap(a, b);
         self.first_layer.swap(a, b);
         self.significance.swap(a, b);
         self.detail.swap(a, b);
@@ -167,7 +167,7 @@ impl Samples for Coefficients {
         ranges
             .iter()
             .map(|range| CoefficientRun {
-                index: &self.index[range.clone()],
+                idx: &self.idx[range.clone()],
                 first_layer: &self.first_layer[range.clone()],
                 significance: &self.significance[range.clone()],
                 detail: &self.detail[range.clone()],
@@ -198,7 +198,7 @@ pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
         + tiles.len() * (size_of::<Tile>() + size_of::<CoefficientShare<'_>>() + size_of::<usize>())
 }
 
-/// The gain a flat applied to a plane: `gain(index)` at the pixel of row-major `index`, and the
+/// The gain a flat applied to a plane: `gain(idx)` at the pixel of row-major `idx`, and the
 /// bins its gains fall in.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PixelGains<'a, G> {
@@ -251,8 +251,8 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
             return BackgroundSplit::of_sigma(self.sigma());
         };
         let size = Size2us::from(self.samples);
-        let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, position| {
-            gain(coefficients.index[position])
+        let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
+            gain(coefficients.idx[pos])
         });
         background_split::fit(&binned.measure(|run| sigma(run, size).powi(2)))
     }
@@ -296,7 +296,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
             excluded,
         } = self;
         let size = Size2us::from(*plane);
-        debug_assert_eq!(share.index.len(), tile.core.area());
+        debug_assert_eq!(share.idx.len(), tile.core.area());
         let region = tile.region;
         let (width, height) = (region.width(), region.height());
         let mut pixels = Vec::with_capacity(region.area());
@@ -341,7 +341,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
                     continue;
                 }
                 let local = (y - region.min.y) * width + (x - region.min.x);
-                share.index[kept] = y * size.width + x;
+                share.idx[kept] = y * size.width + x;
                 share.first_layer[kept] = first_layer[local];
                 share.significance[kept] = significance[local];
                 share.detail[kept] =
@@ -360,7 +360,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
 /// over the pixels its kernel lies inside the frame at, run to the same convergence and corrected
 /// for its own response; `0` when no two such pixels remain.
 fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
-    let count = coefficients.index.len();
+    let count = coefficients.idx.len();
     if count < 2 {
         return 0.0;
     }
@@ -368,15 +368,15 @@ fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
         return sigma / WHITE_NOISE_RESPONSE;
     }
     let reach = FIRST_LAYER_REACH;
-    let interior = |position: usize| {
-        let index = coefficients.index[position];
-        let (x, y) = (index % size.width, index / size.width);
+    let interior = |pos: usize| {
+        let idx = coefficients.idx[pos];
+        let (x, y) = (idx % size.width, idx / size.width);
         (reach..size.width.saturating_sub(reach)).contains(&x)
             && (reach..size.height.saturating_sub(reach)).contains(&y)
     };
     tracing::debug!(
         pixels = count,
-        interior = (0..count).filter(|&position| interior(position)).count(),
+        interior = (0..count).filter(|&pos| interior(pos)).count(),
         "the multiresolution support leaves too few noise pixels; using the k-σ estimate"
     );
     // The first layer's exact response to unit white noise, where the kernel lies inside the frame:
@@ -389,7 +389,7 @@ fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
 /// The support iteration's σ over `coefficients`, uncorrected; `None` when an iteration leaves
 /// fewer than one in [`MIN_NOISE_SHARE`] of them, or two, outside the support, or none converges.
 fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
-    let floor = coefficients.index.len().div_ceil(MIN_NOISE_SHARE).max(2);
+    let floor = coefficients.idx.len().div_ceil(MIN_NOISE_SHARE).max(2);
     let mut sigma = k_sigma(coefficients, &|_| true, START) / LAYER_SIGMA[0];
     let mut mean = None;
     for _ in 0..CONVERGENCE.iterations {

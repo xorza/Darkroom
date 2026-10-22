@@ -75,12 +75,12 @@ impl<'a> Pairs<'a> {
     fn iter(self) -> impl Iterator<Item = Pair> + 'a {
         let weights = self.weights;
         self.reference.iter().zip(self.target).enumerate().map(
-            move |(index, (&reference, &target))| Pair {
+            move |(idx, (&reference, &target))| Pair {
                 reference,
                 target,
                 weight: match weights {
                     Weights::Unit => 1.0,
-                    Weights::Each(weights) => weights[index],
+                    Weights::Each(weights) => weights[idx],
                 },
             },
         )

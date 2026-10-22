@@ -22,7 +22,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::{LinearImage, PlanesWithFlags};
 use crate::image::quality_map::QualityMap;
@@ -146,7 +146,7 @@ impl Denoise {
         let scales = self.scales.min(wavelet::max_scales(size));
         let mut scratch = DenoiseScratch::new(size);
         let PlanesWithFlags { planes, flags } = image.planes_mut_with_flags();
-        let excluded = |index: usize| flags.is_some_and(|flags| flags.is_flagged(index));
+        let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
         for (channel, plane) in planes.enumerate() {
             let noise = match noise {
                 ImageNoise::Variance(variance) => {
@@ -238,11 +238,11 @@ impl Denoise {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("denoise scales", self.scales)
+        ConfigField::count("denoise scales", self.scales)
             .must_be("at least 1", self.scales >= 1)?;
-        ConfigValue::new("denoise k", self.k)
+        ConfigField::new("denoise k", self.k)
             .finite_and("finite and positive", |value| value > 0.0)?;
-        ConfigValue::new("denoise strength", self.strength)
+        ConfigField::new("denoise strength", self.strength)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }

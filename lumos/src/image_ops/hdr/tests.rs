@@ -50,7 +50,7 @@ fn hdr_compresses_large_scale_contrast() {
     // shrinks the center-vs-corner contrast while keeping it monotone.
     let size = Size2us::new(128, 128);
     let px = dome(size);
-    let ci = size.index_of(Vec2us::new(size.width / 2, size.height / 2));
+    let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
     let in_contrast = px[ci] - px[0];
     let mut img = gray_image(size, px);
     Hdr {
@@ -72,7 +72,7 @@ fn hdr_compresses_large_scale_contrast() {
 fn hdr_amount_controls_compression() {
     let size = Size2us::new(128, 128);
     let px = dome(size);
-    let ci = size.index_of(Vec2us::new(size.width / 2, size.height / 2));
+    let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
     let contrast_at = |amount: f32| {
         let mut img = gray_image(size, px.clone());
         Hdr { scales: 3, amount }.apply(&mut img).unwrap();
@@ -259,14 +259,14 @@ fn a_halo_pixel_stays_above_black() {
     let size = Size2us::new(64, 64);
     let centre = Vec2us::new(32, 32);
     let px: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let p = size.point_of(index);
+        .map(|idx| {
+            let p = size.point_of(idx);
             let (dx, dy) = (p.x as f32 - centre.x as f32, p.y as f32 - centre.y as f32);
             if dx * dx + dy * dy <= 36.0 { 1.0 } else { 0.02 }
         })
         .collect();
     let (scales, amount) = (4, 0.8);
-    let halo = size.index_of(Vec2us::new(40, 32));
+    let halo = size.idx_of(Vec2us::new(40, 32));
     let mut img = gray_image(size, px);
     assert!(
         linear_hdr(img.channel(0), scales, amount)[halo] < 0.0,
@@ -293,8 +293,8 @@ fn near_black_pixels_keep_their_ratio() {
     let size = Size2us::new(64, 64);
     let mut px = dome(size);
     let (dim, bright) = (
-        size.index_of(Vec2us::new(2, 2)),
-        size.index_of(Vec2us::new(3, 2)),
+        size.idx_of(Vec2us::new(2, 2)),
+        size.idx_of(Vec2us::new(3, 2)),
     );
     px[dim] = 1e-4;
     px[bright] = 1e-3;
@@ -334,10 +334,10 @@ fn no_positive_intensity_is_black_on_grey_and_color() {
     };
     hdr.apply(&mut grey).unwrap();
     hdr.apply(&mut color).unwrap();
-    for index in [0, 1] {
-        assert_eq!(grey.channel(0).pixels()[index], 0.0);
+    for idx in [0, 1] {
+        assert_eq!(grey.channel(0).pixels()[idx], 0.0);
         for channel in 0..3 {
-            assert_eq!(color.channel(channel).pixels()[index], 0.0);
+            assert_eq!(color.channel(channel).pixels()[idx], 0.0);
         }
     }
 }

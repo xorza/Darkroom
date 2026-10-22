@@ -1,4 +1,4 @@
-//! Writing the image types to files: what [`LoadContext`](crate::LoadContext) reads back.
+//! Writing the image types to files: what [`LoadCtx`](crate::LoadCtx) reads back.
 
 use std::path::Path;
 
@@ -26,7 +26,7 @@ pub fn cfa_fits(image: &CfaImage, path: impl AsRef<Path>) -> Result<(), WriteErr
 
 /// Write `masters` to `path` as a versioned, checksummed multi-extension FITS bundle: the flat
 /// prepared and the dark with its bias state, so
-/// [`LoadContext::calibration_masters`](crate::LoadContext::calibration_masters) repeats neither
+/// [`LoadCtx::calibration_masters`](crate::LoadCtx::calibration_masters) repeats neither
 /// the flat's preparation nor the defect detection.
 pub fn calibration_bundle(
     masters: &CalibrationMasters,
@@ -44,7 +44,7 @@ pub fn linear_fits(image: &LinearImage, path: impl AsRef<Path>) -> Result<(), Wr
 /// Write `product` to `path` as one checksummed FITS file that astropy's `CCDData.read` loads:
 /// the image as by [`linear_fits`], its `NO_DATA` pixels as `MASK`, its inverse variance as
 /// `UNCERT`, and its coverage, weight and dispersion as `COVERAGE`, `WEIGHT` and `DISPERSION`;
-/// [`LoadContext::product`](crate::LoadContext::product) reads it back.
+/// [`LoadCtx::product`](crate::LoadCtx::product) reads it back.
 pub fn product_fits(product: &StackProduct, path: impl AsRef<Path>) -> Result<(), WriteError> {
     fits_product::save(path.as_ref(), product)
 }

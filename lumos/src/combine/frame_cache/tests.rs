@@ -14,8 +14,8 @@ use crate::frame::admitted::Admitted;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::storage_tier::CombineBudget;
 use crate::frame_store::stored_frame::SpillFrame;
-use crate::frame_store::tier::CombineBudget;
 use crate::image::background_split::BackgroundSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -171,9 +171,9 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 /// Every frame of `frames` through the per-frame checks, in order.
 fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), StackError> {
     let mut facts = SetFacts::default();
-    for (index, frame) in frames.iter().enumerate() {
+    for (idx, frame) in frames.iter().enumerate() {
         FrameCheck {
-            index,
+            idx,
             cancel: &CancelToken::never(),
         }
         .stored(frame, dimensions, &mut facts)?;
@@ -189,7 +189,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), ChannelLayout::Mono);
-    let core = || CacheCore::plain(Tier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
     let frame = |pixels: usize| {
         let image = LinearImage::from_interleaved(
             ImageDimensions::new((pixels, 1), ChannelLayout::Mono),
@@ -205,7 +205,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         matches!(
             error,
             StackError::Admission(AdmissionError::StoredFramePlaneSamples {
-                index: 1,
+                idx: 1,
                 plane: FramePlane::Channel,
                 expected: 8,
                 actual: 4,
@@ -256,7 +256,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
     );
     let stats = Admitted::measure(&image);
     let core = CacheCore::plain(
-        Tier::Resident,
+        StorageTier::Resident,
         ImageDimensions::new((4, 2), ChannelLayout::Mono),
     );
     let _cache = FrameCache::from_stored_frames(
@@ -272,7 +272,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
-    let core = || CacheCore::plain(Tier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
         let stats = Admitted::measure(&image);
@@ -301,9 +301,9 @@ fn stored_frames_must_share_one_cfa_pattern() {
             matches!(
                 error,
                 StackError::Admission(AdmissionError::CfaPatternMismatch {
-                    index: 1,
+                    idx: 1,
                     actual: a,
-                    reference_index: 0,
+                    reference_idx: 0,
                     expected: e,
                 }) if a == actual && e == expected
             ),
@@ -331,7 +331,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Mono);
-    let core = || CacheCore::plain(Tier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
             coverage: Buffer2::new(4, 1, support),
@@ -368,7 +368,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
             matches!(
                 error,
                 StackError::Admission(AdmissionError::FrameQualityPairMismatch {
-                    index: 0,
+                    idx: 0,
                     pixel: 2,
                     plane,
                     support: 1.0,
@@ -405,7 +405,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
         matches!(
             error,
             StackError::Admission(AdmissionError::InvalidQualityPlaneValue {
-                index: 0,
+                idx: 0,
                 plane: FramePlane::DropWeight,
                 pixel: 1,
                 value: -0.5,
@@ -470,8 +470,8 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         if flagged {
             frames[0]
                 .image
-                .set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |index| {
-                    if index == 0 {
+                .set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |idx| {
+                    if idx == 0 {
                         QualityFlags::SATURATED
                     } else {
                         QualityFlags::default()
@@ -524,8 +524,8 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
         (0..3)
             .map(|_| {
                 let mut image = image();
-                image.set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |index| {
-                    if index == 1 {
+                image.set_flags(PixelFlags::from_fn(Size2us::new(2, 1), |idx| {
+                    if idx == 1 {
                         QualityFlags::NO_DATA
                     } else {
                         QualityFlags::default()
@@ -768,7 +768,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             .unwrap(),
         ],
         CacheCore::plain(
-            Tier::for_plan(&RunPlan::of(1, &[frame], budget), temp_dir.path()).unwrap(),
+            StorageTier::for_plan(&RunPlan::of(1, &[frame], budget), temp_dir.path()).unwrap(),
             dims,
         ),
         Normalization::None,

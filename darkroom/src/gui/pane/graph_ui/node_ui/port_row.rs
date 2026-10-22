@@ -3,7 +3,7 @@
 //! lines up regardless of label width), a fill spacer (col 2), and the
 //! output port+label (col 3, right-aligned against the node edge). Row `i`
 //! holds input `i` and output `i`, so the two sides align. Drawn below the
-//! header by [`crate::gui::pane::graph_ui::node_ui::NodeUI`]. This module is the
+//! header by [`crate::gui::pane::graph_ui::node_ui::NodeUi`]. This module is the
 //! grid orchestration and per-cell rendering; the sensing glyph each cell
 //! terminates a wire on — circle, event triangle, hit-box growth — is the
 //! shared [`PortGlyph`] widget's.
@@ -66,7 +66,7 @@ const COL_OUTPUT: u16 = COL_SPACER + 1;
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
 const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
-/// `row_tracks` is [`NodeUI`](crate::gui::pane::graph_ui::node_ui::NodeUI)'s retained staging
+/// `row_tracks` is [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi)'s retained staging
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
 pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
     let (theme, node) = (rec.node.theme(), rec.node);
@@ -206,19 +206,19 @@ fn output_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
-    for (index, event) in node.events().iter().enumerate() {
+    for (idx, event) in node.events().iter().enumerate() {
         EventRow {
-            index,
-            row: output_count + index,
+            idx,
+            row: output_count + idx,
             event,
         }
         .show(ui, rec);
     }
 }
 
-/// The grid row of port or event row `index`.
-fn grid_row(index: usize) -> u16 {
-    u16::try_from(index).expect("a node's rows fit the grid's u16 index")
+/// The grid row of port or event row `idx`.
+fn grid_row(idx: usize) -> u16 {
+    u16::try_from(idx).expect("a node's rows fit the grid's u16 index")
 }
 
 pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
@@ -246,7 +246,7 @@ fn input_cell_wid(port: PortRef) -> WidgetId {
 /// *or* the port glyph's — the glyph senses its own `Sense::CLICK` and
 /// consumes hits over its rect, so the cell alone misses a right-click landed
 /// on the circle (no bubbling).
-fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
+fn open_port_ctx_menu(ui: &mut Ui, menu_id: WidgetId) {
     if let Some(p) = ui.pointer_pos() {
         ContextMenu::open(ui, menu_id, p);
     }
@@ -327,7 +327,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
         .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // A const-only input can't be wired, so it has no connection anchor
+            // A const-only input can't be wired, so it has no wire anchor
             // — render just the label (+ its inline const editor).
             if input.const_only() {
                 label.show(ui, theme);
@@ -353,7 +353,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
         cell.response.left.double_clicked(),
     );
     if cell_secondary || glyph.secondary_clicked {
-        open_port_context_menu(ui, menu_id);
+        open_port_ctx_menu(ui, menu_id);
     }
     // Double-click on the circle or the label toggles the binding: clear it,
     // or seed the default const when unbound.
@@ -520,13 +520,13 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
     if glyph.double_clicked {
         rec.out.extend_graph(
             ncx.graph_ctx
-                .connections()
+                .wires()
                 .filter(|(_, producer)| *producer == output.port())
                 .map(|(consumer, _)| GraphIntent::set_input(consumer, None)),
         );
     }
     if cell_secondary || glyph.secondary_clicked {
-        open_port_context_menu(ui, menu_id);
+        open_port_ctx_menu(ui, menu_id);
     }
     // "Add preview" — spawn a preview node already wired to this output. What it
     // creates is an ordinary node the user can move, delete, and undo like any
@@ -583,7 +583,7 @@ impl PreviewSpawn {
             },
             GraphIntent::SetInput {
                 input: InputPort::new(node_id, 0),
-                to: Some(Binding::Bind(port)),
+                to: Some(Binding::Wire(port)),
             },
         ]
     }
@@ -592,11 +592,11 @@ impl PreviewSpawn {
 /// One event (emitter) port row: the event name plus an event-colored triangle
 /// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
-/// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
+/// wire can be pulled from it to a subscriber pin (see `SubscriptionUi`).
 #[derive(Debug, Clone, Copy)]
 struct EventRow<'a> {
     /// The event's index among the node's events.
-    index: usize,
+    idx: usize,
     /// The grid row it sits in.
     row: usize,
     event: &'a FuncEvent,
@@ -604,17 +604,17 @@ struct EventRow<'a> {
 
 impl EventRow<'_> {
     fn show(self, ui: &mut Ui, rec: &NodeRecord<'_, '_>) {
-        let Self { index, row, event } = self;
+        let Self { idx, row, event } = self;
         let (ncx, dcx) = (rec.node, rec.draw);
         let theme = ncx.theme();
         let node_id = ncx.id;
         let overhang = theme.port_overhang();
-        let ev = EventPort::new(node_id, index);
+        let ev = EventPort::new(node_id, idx);
         let wid = event_glyph_wid(ev);
         let fill = Hover::from(dcx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
         let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
         Panel::hstack()
-            .id_salt(("event", index))
+            .id_salt(("event", idx))
             .grid_cell((grid_row(row), COL_OUTPUT))
             .align(Align::new(HAlign::Right, VAlign::Center))
             .size((Sizing::HUG, Sizing::HUG))
@@ -661,7 +661,7 @@ impl Display for TypeLabel<'_> {
             return f.write_str(&self.library.type_name(self.ty));
         };
         let mode = match cfg.mode {
-            FsPathMode::Directory => "directory",
+            FsPathMode::Dir => "directory",
             FsPathMode::ExistingFile => "file",
             FsPathMode::ExistingFiles => "files",
             FsPathMode::NewFile => "save path",
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(label(&DataType::Float), "float");
 
         // Every mode names itself, and an empty list adds no parenthetical.
-        assert_eq!(label(&path(FsPathMode::Directory, &[])), "path · directory");
+        assert_eq!(label(&path(FsPathMode::Dir, &[])), "path · directory");
         assert_eq!(label(&path(FsPathMode::ExistingFile, &[])), "path · file");
         assert_eq!(label(&path(FsPathMode::ExistingFiles, &[])), "path · files");
         assert_eq!(label(&path(FsPathMode::NewFile, &[])), "path · save path");
@@ -737,7 +737,7 @@ mod tests {
         let center = Vec2::new(100.0, 40.0);
 
         let node_id = NodeId::unique();
-        let [add, bind] = PreviewSpawn {
+        let [add, wire] = PreviewSpawn {
             port,
             pos: center + PREVIEW_SPAWN_OFFSET,
             node_id,
@@ -753,8 +753,8 @@ mod tests {
         assert_eq!(pos, Vec2::new(180.0, -20.0), "offset clear of the port");
         assert_eq!(node.func_id(), Some(func.id()));
         assert!(matches!(
-            bind,
-            GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }
+            wire,
+            GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }
                 if input == InputPort::new(node_id, 0)
                     && src == OutputPort::new(producer, 2)
         ));

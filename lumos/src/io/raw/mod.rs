@@ -21,7 +21,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::io::error::{ImageError, OverBudget};
 use crate::io::frame_info::FrameInfo;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::Libraw;
 use crate::io::raw::libraw_filters::LibrawFilters;
@@ -95,36 +95,36 @@ fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawErro
 }
 
 /// Read `path` whole and open it in LibRaw, which then parses the bytes in place, polling the
-/// cancel token of `context`. One input path on every system: LibRaw's memory datastream is its
+/// cancel token of `ctx`. One input path on every system: LibRaw's memory datastream is its
 /// simplest, and a path never meets a narrow or wide file API.
 /// A file longer than the context's memory limit is refused before it is read.
-fn open(path: &Path, context: &LoadContext) -> Result<Libraw, ImageError> {
-    context.check_cancelled(path)?;
+fn open(path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
+    ctx.check_cancelled(path)?;
     let io_error = |source| ImageError::Io {
         path: path.to_path_buf(),
         source,
     };
     let file = File::open(path).map_err(io_error)?;
     let len = file.metadata().map_err(io_error)?.len();
-    OverBudget::check(len, context.memory_limit_bytes)
+    OverBudget::check(len, ctx.memory_limit_bytes)
         .map_err(|budget| ImageError::raw(path, budget.into()))?;
     let mut bytes = Vec::with_capacity(usize::try_from(len).expect("a file within the limit"));
     // The length admitted, not what the file grew to since.
     file.take(len).read_to_end(&mut bytes).map_err(io_error)?;
-    Libraw::open(bytes, &context.cancel).map_err(|source| ImageError::raw(path, source))
+    Libraw::open(bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source))
 }
 
 /// Open and unpack `path`, once the decode along the path `route` names is admitted under the
 /// context's memory limit.
 fn open_raw(
     path: &Path,
-    context: &LoadContext,
+    ctx: &LoadCtx,
     route: impl FnOnce(&Libraw) -> Result<RawPath, RawError>,
 ) -> Result<UnpackedRaw, ImageError> {
-    let libraw = open(path, context)?;
+    let libraw = open(path, ctx)?;
     route(&libraw)
-        .and_then(|route| admit(&libraw, route, context.memory_limit_bytes))
-        .and_then(|()| UnpackedRaw::unpack(libraw, context.decode_threads))
+        .and_then(|route| admit(&libraw, route, ctx.memory_limit_bytes))
+        .and_then(|()| UnpackedRaw::unpack(libraw, ctx.decode_threads))
         .map_err(|source| ImageError::raw(path, source))
 }
 
@@ -153,27 +153,27 @@ fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
 /// the visible area alone, then a clamp — so the preview and a calibrated frame cannot disagree
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
 /// three-color CFA — is LibRaw's own processing.
-pub(super) fn load_preview(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
-    let raw = open_raw(path, context, |libraw| preview_route(libraw, context))?;
-    context.check_cancelled(path)?;
-    raw.into_linear_image(context)
+pub(super) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
+    let raw = open_raw(path, ctx, |libraw| preview_route(libraw, ctx))?;
+    ctx.check_cancelled(path)?;
+    raw.into_linear_image(ctx)
         .map_err(|source| ImageError::raw(path, source))
 }
 
 /// The path a preview of the open `libraw` takes ([`RawPath::preview`]), once a mosaic's demosaic
-/// is admitted under `context` beside its decode ([`FrameInfo::admit_demosaic`]).
-fn preview_route(libraw: &Libraw, context: &LoadContext) -> Result<RawPath, RawError> {
+/// is admitted under `ctx` beside its decode ([`FrameInfo::admit_demosaic`]).
+fn preview_route(libraw: &Libraw, ctx: &LoadCtx) -> Result<RawPath, RawError> {
     let route = RawPath::preview(libraw)?;
     if route == RawPath::Mosaic {
-        frame_info(libraw)?.admit_demosaic(context)?;
+        frame_info(libraw)?.admit_demosaic(ctx)?;
     }
     Ok(route)
 }
 
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`: the file is
 /// read whole, as every load reads it, but its sensor data is not decoded.
-pub(crate) fn cfa_frame_info(path: &Path, context: &LoadContext) -> Result<FrameInfo, ImageError> {
-    frame_info(&open(path, context)?).map_err(|source| ImageError::raw(path, source))
+pub(crate) fn cfa_frame_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, ImageError> {
+    frame_info(&open(path, ctx)?).map_err(|source| ImageError::raw(path, source))
 }
 
 /// The refusals LibRaw's identify stage settles, before any decode, which the header read and the
@@ -213,9 +213,9 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
 /// Load a raw file as its CFA frame, un-demosaiced and unclamped: the calibration and science
 /// path, where defects are repaired before any demosaic and a master's noise below its pedestal
 /// stays in.
-pub(crate) fn load_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    let raw = open_raw(path, context, |_| Ok(RawPath::Mosaic))?;
-    context.check_cancelled(path)?;
+pub(crate) fn load_cfa(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
+    let raw = open_raw(path, ctx, |_| Ok(RawPath::Mosaic))?;
+    ctx.check_cancelled(path)?;
     raw.into_cfa_image()
         .map_err(|source| ImageError::raw(path, source))
 }
@@ -226,7 +226,7 @@ pub(crate) mod internals {
 
     use crate::image::linear_image::LinearImage;
     use crate::io::error::ImageError;
-    use crate::io::load_context::LoadContext;
+    use crate::io::load_ctx::LoadCtx;
     use crate::io::raw::open_raw;
     use crate::io::raw::unpacked_raw::RawPath;
 
@@ -236,7 +236,7 @@ pub(crate) mod internals {
         path: &Path,
         user_qual: i32,
     ) -> Result<LinearImage, ImageError> {
-        let mut raw = open_raw(path, &LoadContext::default(), |_| Ok(RawPath::Processed))?;
+        let mut raw = open_raw(path, &LoadCtx::default(), |_| Ok(RawPath::Processed))?;
         raw.libraw.params_mut().user_qual = user_qual;
         raw.processed_by_libraw()
             .map_err(|source| ImageError::raw(path, source))

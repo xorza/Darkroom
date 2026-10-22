@@ -2,7 +2,7 @@
 
 use common::{Introspect, IntrospectEnum};
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
@@ -107,7 +107,7 @@ impl Scnr {
     }
 
     fn validate(self) -> Result<(), InvalidConfigField> {
-        ConfigValue::new("SCNR strength", self.strength)
+        ConfigField::new("SCNR strength", self.strength)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }

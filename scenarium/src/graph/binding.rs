@@ -10,13 +10,13 @@ use crate::graph::identity::{InputPort, NodeId, OutputPort};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
     Const(ConstValue),
-    Bind(OutputPort),
+    Wire(OutputPort),
 }
 
 impl Binding {
     /// A data binding wired to producer `node_id`'s output port `port_idx`.
-    pub const fn bind(node_id: NodeId, port_idx: usize) -> Self {
-        Self::Bind(OutputPort::new(node_id, port_idx))
+    pub const fn wire(node_id: NodeId, port_idx: usize) -> Self {
+        Self::Wire(OutputPort::new(node_id, port_idx))
     }
 
     /// Whether this edge — the binding on `port` — touches `node_id` from
@@ -24,13 +24,13 @@ impl Binding {
     /// finds the wiring it has to take with it, and how the record it
     /// produced proves it took only that.
     pub(crate) fn touches(&self, port: InputPort, node_id: NodeId) -> bool {
-        port.node_id == node_id || matches!(self, Self::Bind(src) if src.node_id == node_id)
+        port.node_id == node_id || matches!(self, Self::Wire(src) if src.node_id == node_id)
     }
 }
 
 impl From<OutputPort> for Binding {
     fn from(value: OutputPort) -> Self {
-        Self::Bind(value)
+        Self::Wire(value)
     }
 }
 

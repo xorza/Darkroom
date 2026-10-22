@@ -3,7 +3,7 @@
 //!
 //! Every controller under [`gesture`](crate::gui::pane::graph_ui::gesture)
 //! consumes only its own variant of [`CanvasGesture`], so none of them has to
-//! keep itself disjoint from the others by hand. `GraphUI::prepass` resolves
+//! keep itself disjoint from the others by hand. `GraphUi::prepass` resolves
 //! the frame's answer once and parks it; the controllers read it back out of
 //! the canvas context.
 
@@ -14,7 +14,7 @@ use crate::gui::pane::graph_ui::canvas;
 /// Whether the modifier reserving an output-port drag for spawning a preview is held. The one place
 /// that chord is decided:
 /// [`PreviewDrag`](crate::gui::pane::graph_ui::gesture::preview_drag::PreviewDrag) claims an output
-/// drag under it, and `ConnectionUI` drops the output column from its latch candidates under the
+/// drag under it, and `WireUi` drops the output column from its latch candidates under the
 /// same condition — stated once so the two cannot drift into both claiming, or neither.
 pub(crate) const fn preview_drag_modifier(ui: &mut Ui) -> bool {
     ui.modifiers().ctrl
@@ -34,7 +34,7 @@ pub(crate) enum CanvasGesture {
     Pan,
     /// Plain LMB-drag (no modifier) → rubber-band selection.
     Select,
-    /// Ctrl+LMB-drag or RMB-drag → connection breaker. Carries the button
+    /// Ctrl+LMB-drag or RMB-drag → wire breaker. Carries the button
     /// that latched it, since the breaker polls that same button for
     /// continuation/release (a Ctrl+LMB breaker must keep reading Left).
     Breaker(PointerButton),

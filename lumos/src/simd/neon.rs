@@ -80,13 +80,9 @@ impl Isa for Neon {
     }
 
     #[inline(always)]
-    fn lookup_f32(self, table: &[f32], index: NeonF32) -> NeonF32 {
+    fn lookup_f32(self, table: &[f32], idx: NeonF32) -> NeonF32 {
         let last = lookup_last(table);
-        self.load_f32(
-            &index
-                .to_array()
-                .map(|index| lookup_lane(table, last, index)),
-        )
+        self.load_f32(&idx.to_array().map(|idx| lookup_lane(table, last, idx)))
     }
 }
 

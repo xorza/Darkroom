@@ -68,9 +68,9 @@ fn the_first_frame_out_of_range_is_named_against_the_far_end() {
         CaptureConditions::check_exposures(mixed),
         Err(ConditionMismatch {
             condition: CaptureCondition::Exposure,
-            index: 1,
+            idx: 1,
             value: 300.0,
-            reference_index: 0,
+            reference_idx: 0,
             reference: 120.0,
         })
     );
@@ -86,9 +86,9 @@ fn the_first_frame_out_of_range_is_named_against_the_far_end() {
         CaptureConditions::temperature_disagreement(drifting),
         Some(ConditionMismatch {
             condition: CaptureCondition::Temperature,
-            index: 2,
+            idx: 2,
             value: -10.5,
-            reference_index: 1,
+            reference_idx: 1,
             reference: -9.4,
         })
     );

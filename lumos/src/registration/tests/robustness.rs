@@ -9,7 +9,7 @@ use crate::internals::test_rng::TestRng;
 use crate::registration::error::RegistrationError;
 use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::model_search::ModelSearch;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::RansacEstimator;
@@ -59,7 +59,7 @@ struct Scenario {
 struct Catalogs {
     reference: Vec<Star>,
     target: Vec<Star>,
-    pairs: Vec<MatchIndices>,
+    pairs: Vec<MatchIdxs>,
 }
 
 impl Scenario {
@@ -100,10 +100,10 @@ impl Scenario {
         };
         let mut target = Vec::new();
         let mut pairs = Vec::new();
-        for (index, star) in images.into_iter().enumerate() {
+        for (idx, star) in images.into_iter().enumerate() {
             if inside(&star) && drop.next_f64() >= self.missing {
-                pairs.push(MatchIndices {
-                    reference: index,
+                pairs.push(MatchIdxs {
+                    reference: idx,
                     target: target.len(),
                 });
                 target.push(star);
@@ -164,8 +164,7 @@ impl Scenario {
         let found = result.transform();
         assert_eq!(found.transform_type(), self.model, "{}", self.name);
 
-        let mut matched: Vec<MatchIndices> =
-            result.matched_stars().iter().map(|m| m.indices).collect();
+        let mut matched: Vec<MatchIdxs> = result.matched_stars().iter().map(|m| m.idxs).collect();
         matched.sort_by_key(|m| (m.reference, m.target));
         assert_eq!(matched, catalogs.pairs, "{}: matched pairs", self.name);
 

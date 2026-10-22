@@ -7,16 +7,16 @@ use common::internals;
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::real_data::raw_frames;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
 /// The first RAW light loads through the CFA entry point at the size its header declares, and
 /// demosaics to three channels of that size.
 #[test]
 fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     let path = &raw_frames("Lights")[0];
-    let context = LoadContext::default();
-    let declared = context.cfa_info(path).unwrap().dimensions;
-    let cfa = context.cfa(path).unwrap();
+    let ctx = LoadCtx::default();
+    let declared = ctx.cfa_info(path).unwrap().dimensions;
+    let cfa = ctx.cfa(path).unwrap();
     assert_eq!(
         (cfa.data().width(), cfa.data().height()),
         (declared.width(), declared.height())

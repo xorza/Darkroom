@@ -162,8 +162,8 @@ impl MeasurePlanes<'_> {
                 stamp_radius,
             ),
         };
-        let (pos, position_sigma) = fit.map_or((windowed.pos, windowed.sigma), |fit| {
-            (fit.pos, fit.position_sigma)
+        let (pos, pos_sigma) = fit.map_or((windowed.pos, windowed.sigma), |fit| {
+            (fit.pos, fit.pos_sigma)
         });
 
         if holds_no_data(pos) {
@@ -210,7 +210,7 @@ impl MeasurePlanes<'_> {
 
         Some(Star {
             pos,
-            position_sigma,
+            pos_sigma,
             flux: metrics.flux,
             fwhm,
             eccentricity,

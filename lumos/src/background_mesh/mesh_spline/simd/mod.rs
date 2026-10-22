@@ -40,8 +40,8 @@ impl Kernel for InterpolateSegment<'_> {
             // `start + i·step` per lane: a parameter stepped by repeated addition would drift
             // from the scalar one along the segment. The index is exact in f32 for any row below
             // 2²⁴ pixels.
-            let index = isa.splat_f32((chunk * F32_LANES) as f32) + lanes;
-            let t = start + index * step;
+            let idx = isa.splat_f32((chunk * F32_LANES) as f32) + lanes;
+            let t = start + idx * step;
             let basis = Basis {
                 t,
                 t_ct: t * (one - t),

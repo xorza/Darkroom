@@ -48,14 +48,14 @@ pub enum ImageError {
 
     #[error(
         "image '{path}' contains {count} null/non-finite samples, first at linear index \
-         {first_index}, and the load's NullPolicy rejects them"
+         {first_idx}, and the load's NullPolicy rejects them"
     )]
     NullSamples {
         path: PathBuf,
         /// Samples, each channel's nulls counted separately.
         count: usize,
         /// In the channel-major sample space `count` belongs to.
-        first_index: usize,
+        first_idx: usize,
     },
 }
 
@@ -84,8 +84,8 @@ impl ImageError {
             },
             FitsLoadError::Fits(source) => Self::fits(path, source),
             FitsLoadError::Refused(reason) => Self::fits_unsupported(path, reason),
-            FitsLoadError::NullSamples(NullSamples { count, first_index }) => {
-                Self::null_samples(path, count, first_index)
+            FitsLoadError::NullSamples(NullSamples { count, first_idx }) => {
+                Self::null_samples(path, count, first_idx)
             }
             FitsLoadError::Cancelled => Self::cancelled(path),
         }
@@ -114,13 +114,13 @@ impl ImageError {
         }
     }
 
-    /// The `count` null samples of the image at `path`, the first at `first_index`, under
+    /// The `count` null samples of the image at `path`, the first at `first_idx`, under
     /// [`NullPolicy::Reject`](crate::NullPolicy::Reject).
-    pub(super) fn null_samples(path: &Path, count: usize, first_index: usize) -> Self {
+    pub(super) fn null_samples(path: &Path, count: usize, first_idx: usize) -> Self {
         Self::NullSamples {
             path: path.to_path_buf(),
             count,
-            first_index,
+            first_idx,
         }
     }
 
@@ -159,7 +159,7 @@ impl From<fits_well::FitsError> for WriteError {
 }
 
 /// A decode that needs `required` bytes, past `limit`, the load's
-/// [`memory_limit_bytes`](crate::LoadContext::memory_limit_bytes).
+/// [`memory_limit_bytes`](crate::LoadCtx::memory_limit_bytes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("needs {required} bytes, past the load's memory limit of {limit} bytes")]
 pub struct OverBudget {

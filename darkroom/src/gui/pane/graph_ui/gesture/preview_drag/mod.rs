@@ -7,7 +7,7 @@
 //! Once the node exists this is an ordinary node drag, so the whole after-the-latch half is
 //! [`GroupDrag`]'s.
 //!
-//! [`ConnectionUI`](crate::gui::pane::graph_ui::gesture::connection_ui) drops the output column
+//! [`WireUi`](crate::gui::pane::graph_ui::gesture::wire_ui) drops the output column
 //! from its own latch candidates under the same modifier
 //! ([`canvas_gesture::preview_drag_modifier`]), so exactly one controller claims the press.
 

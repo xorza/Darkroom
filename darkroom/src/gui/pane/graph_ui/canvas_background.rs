@@ -52,7 +52,7 @@ impl DotKey {
 impl CanvasBackground {
     /// Draw the backdrop in the outer-canvas (screen-local) frame. Call
     /// inside the outer canvas, before the inner transformed canvas, so
-    /// it sits beneath every connection and node. `viewport` is the live
+    /// it sits beneath every wire and node. `viewport` is the live
     /// camera; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
     pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, viewport: Viewport) {

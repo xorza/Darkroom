@@ -1,7 +1,7 @@
 use glam::DVec2;
 
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_position::SourcePosition;
+use crate::registration::resample::source_pos::SourcePos;
 
 const SIZE: Size2us = Size2us::new(10, 6);
 
@@ -9,10 +9,10 @@ const SIZE: Size2us = Size2us::new(10, 6);
 /// inclusive, and anything past it or not finite is outside.
 #[test]
 fn within_splits_inside_the_footprint_only() {
-    let split = |x, y| SourcePosition::within(DVec2::new(x, y), SIZE);
+    let split = |x, y| SourcePos::within(DVec2::new(x, y), SIZE);
     assert_eq!(
         split(3.25, 4.75),
-        Some(SourcePosition {
+        Some(SourcePos {
             cell_x: 3,
             cell_y: 4,
             fx: 0.25,
@@ -21,7 +21,7 @@ fn within_splits_inside_the_footprint_only() {
     );
     assert_eq!(
         split(-0.5, 5.5),
-        Some(SourcePosition {
+        Some(SourcePos {
             cell_x: -1,
             cell_y: 5,
             fx: 0.5,
@@ -44,7 +44,7 @@ fn within_splits_inside_the_footprint_only() {
 /// fraction, while the f64 split keeps 0.123 to f32's 7.5e-9 at that magnitude.
 #[test]
 fn the_fraction_is_split_before_it_is_narrowed() {
-    let p = SourcePosition::within(DVec2::new(6000.123, 2.0), Size2us::new(8000, 4)).unwrap();
+    let p = SourcePos::within(DVec2::new(6000.123, 2.0), Size2us::new(8000, 4)).unwrap();
     assert_eq!(p.cell_x, 6000);
     assert!((f64::from(p.fx) - 0.123).abs() < 1e-8, "{}", p.fx);
     let narrowed_first = 6000.123f32 - 6000.0;
@@ -55,11 +55,11 @@ fn the_fraction_is_split_before_it_is_narrowed() {
 #[test]
 fn clamping_holds_positions_to_pixel_centres() {
     let clamp = |x, y| {
-        SourcePosition::within(DVec2::new(x, y), SIZE)
+        SourcePos::within(DVec2::new(x, y), SIZE)
             .unwrap()
             .clamped_to_centers(SIZE)
     };
-    let at = |cell_x, fx, cell_y, fy| SourcePosition {
+    let at = |cell_x, fx, cell_y, fy| SourcePos {
         cell_x,
         cell_y,
         fx,

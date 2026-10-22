@@ -8,8 +8,8 @@ use crate::math::floor_i32::FloorI32;
 use crate::math::grid;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
-use crate::registration::resample::warp_params::InterpolationMethod;
+use crate::registration::resample::source_pos::{AxisPos, SourcePos};
+use crate::registration::resample::warp_config::InterpolationMethod;
 use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
@@ -178,7 +178,7 @@ pub(crate) struct TapRange {
 }
 
 /// Lane indices, the tap offsets of one vector of weights.
-const LANE_INDEX: [f32; F32_LANES] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+const LANE_IDX: [f32; F32_LANES] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
 
 impl WarpKernel {
     /// `filter` widened by `stretch`, which is at least 1.
@@ -255,16 +255,16 @@ impl WarpKernel {
     /// `t − frac` above it.
     #[inline(always)]
     pub(super) fn weight_lanes<S: Isa>(&self, isa: S, first: i32, frac: f32) -> S::F32 {
-        let signed = isa.load_f32(&LANE_INDEX) + isa.splat_f32(first as f32) - isa.splat_f32(frac);
+        let signed = isa.load_f32(&LANE_IDX) + isa.splat_f32(first as f32) - isa.splat_f32(frac);
         let distance = signed.max(isa.splat_f32(0.0) - signed);
         let weight = match self.shape {
             KernelShape::Lanczos(_, lut) => {
                 // The scalar `LanczosLut::at` read, lane by lane.
-                let position = distance * isa.splat_f32(self.lut_scale);
-                let below = position.floor();
+                let pos = distance * isa.splat_f32(self.lut_scale);
+                let below = pos.floor();
                 let low = isa.lookup_f32(&lut.values, below);
                 let high = isa.lookup_f32(&lut.values, below + isa.splat_f32(1.0));
-                (high - low).mul_add(position - below, low)
+                (high - low).mul_add(pos - below, low)
             }
             KernelShape::Bicubic => {
                 bicubic_lanes(isa, distance * isa.splat_f32(self.inverse_stretch))
@@ -278,8 +278,8 @@ impl WarpKernel {
 
     /// The taps of the sample at `at` and their weights, into `axis`.
     #[inline(always)]
-    pub(crate) fn axis<S: Isa>(&self, isa: S, at: AxisPosition, axis: &mut TapAxis) {
-        let AxisPosition { cell, frac } = at;
+    pub(crate) fn axis<S: Isa>(&self, isa: S, at: AxisPos, axis: &mut TapAxis) {
+        let AxisPos { cell, frac } = at;
         let TapRange { first, count } = self.taps(frac);
         axis.reset(cell + first, count);
         for (chunk, offset) in (0..count)
@@ -322,7 +322,7 @@ fn frame_stretch(warp: &WarpTransform, size: Size2us) -> f32 {
             .flat_map(|y| {
                 grid::nodes(size.width, STRETCH_GRID).map(move |x| DVec2::new(x as f64, y as f64))
             })
-            .filter(|&p| SourcePosition::within(warp.apply(p), size).is_some())
+            .filter(|&p| SourcePos::within(warp.apply(p), size).is_some())
             .map(|p| largest_singular_value(warp.jacobian(p)))
             .fold(1.0, f64::max)
     };

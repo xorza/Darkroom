@@ -13,7 +13,6 @@
 
 pub(crate) mod breaker_ui;
 pub(crate) mod canvas_gesture;
-pub(crate) mod connection_ui;
 pub(crate) mod group_drag;
 pub(crate) mod new_node_ui;
 pub(crate) mod node_menu_ui;
@@ -22,3 +21,4 @@ pub(crate) mod preview_drag;
 pub(crate) mod selection_ui;
 pub(crate) mod shortcuts;
 pub(crate) mod subscription_ui;
+pub(crate) mod wire_ui;

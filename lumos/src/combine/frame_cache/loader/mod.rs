@@ -1,4 +1,4 @@
-//! Tier selection, frame loading, and persistent cache sidecars.
+//! StorageTier selection, frame loading, and persistent cache sidecars.
 
 use std::marker::PhantomData;
 use std::path::Path;
@@ -16,9 +16,9 @@ use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
 use crate::frame_store::decode_cache::kept_frame::KeptFrame;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
+use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_metadata::ImageMetadata;
@@ -27,7 +27,7 @@ use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
 use crate::progress::stacking_progress::StackingStage;
@@ -105,7 +105,7 @@ where
         paths,
         storage: &storage,
         kept: storage.kept().filter(|_| !step.changes_frames()),
-        context: &run.context,
+        ctx: &run.ctx,
         step,
         decoder: PhantomData,
     };
@@ -114,7 +114,7 @@ where
     // the format allows it, so the in-memory path can decode every frame in parallel rather than
     // decoding frame 0 serially first; otherwise take frame 0 kept from a run before, or decode it,
     // and store it below.
-    let (peek, early) = if let Some(info) = D::peek(first_path, &run.context) {
+    let (peek, early) = if let Some(info) = D::peek(first_path, &run.ctx) {
         (FramePeek::from(info), None)
     } else {
         let early = load.early::<E>()?;
@@ -140,7 +140,7 @@ where
 
     let frame_bytes = peek.resident_bytes() as u64;
     let writes = RunWrites {
-        kept: (storage.uncached::<D>(paths, &run.context) as u64).saturating_mul(frame_bytes),
+        kept: (storage.uncached::<D>(paths, &run.ctx) as u64).saturating_mul(frame_bytes),
         spilled: if load.kept.is_some() {
             0
         } else {
@@ -170,8 +170,8 @@ where
         .transpose()?;
     let start = usize::from(first.is_some());
     let mut slots = vec![(); plan.width(DECODE)];
-    let rest = intake.map(start..paths.len(), &mut slots, |(), index| {
-        store.frame::<E>(index, None)
+    let rest = intake.map(start..paths.len(), &mut slots, |(), idx| {
+        store.frame::<E>(idx, None)
     })?;
     let mut metadata = None;
     let mut frames = Vec::with_capacity(paths.len());
@@ -240,17 +240,17 @@ struct FrameLoad<'a, D, S> {
     /// The decode cache whose planes are the frames: when `keep_cache` asked for one and the step
     /// changes nothing.
     kept: Option<&'a DecodeCache>,
-    context: &'a LoadContext,
+    ctx: &'a LoadCtx,
     step: &'a S,
     decoder: PhantomData<fn() -> D>,
 }
 
 impl<D: Decoder, S: FrameStep<D::Image>> FrameLoad<'_, D, S> {
-    /// Frame `index` decoded through the storage, through the step when there is one: how a frame
+    /// Frame `idx` decoded through the storage, through the step when there is one: how a frame
     /// is taken when no decode cache holds the frames themselves.
-    fn decode<E: From<StackError> + From<S::Error>>(&self, index: usize) -> Result<D::Image, E> {
-        let mut image = stack(self.storage.decode::<D>(self.paths[index], self.context))?;
-        self.step.apply(index, &mut image)?;
+    fn decode<E: From<StackError> + From<S::Error>>(&self, idx: usize) -> Result<D::Image, E> {
+        let mut image = stack(self.storage.decode::<D>(self.paths[idx], self.ctx))?;
+        self.step.apply(idx, &mut image)?;
         Ok(image)
     }
 
@@ -264,12 +264,12 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameLoad<'_, D, S> {
                 source: None,
             }));
         };
-        let source = stack(CachedSource::of(self.paths[0], D::KIND, self.context))?;
+        let source = stack(CachedSource::of(self.paths[0], D::KIND, self.ctx))?;
         if let Some(reused) = kept.reuse(&source) {
             return Ok(Early::Kept(Box::new(reused)));
         }
         Ok(Early::Decoded(Decoded {
-            image: stack(D::load(self.paths[0], self.context))?,
+            image: stack(D::load(self.paths[0], self.ctx))?,
             source: Some(source),
         }))
     }
@@ -280,12 +280,12 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameLoad<'_, D, S> {
 #[derive(Debug)]
 struct FrameStore<'a, D, S> {
     load: &'a FrameLoad<'a, D, S>,
-    tier: &'a Tier,
+    tier: &'a StorageTier,
     intake: &'a FrameIntake<'a>,
 }
 
 impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
-    /// Frame `index` in its tier: with a decode cache, the planes it holds committed for this
+    /// Frame `idx` in its tier: with a decode cache, the planes it holds committed for this
     /// source and decoder, or a decode written there and committed; without one, a decode the tier
     /// keeps.
     ///
@@ -294,76 +294,76 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
     /// cache.
     fn frame<E: From<StackError> + From<S::Error>>(
         &self,
-        index: usize,
+        idx: usize,
         early: Option<Early<D::Image>>,
     ) -> Result<LoadedFrame, E> {
         if let Some(kept) = self.load.kept {
-            return Ok(self.kept_frame(kept, index, early)?);
+            return Ok(self.kept_frame(kept, idx, early)?);
         }
         let image = match early {
             Some(Early::Decoded(decoded)) => decoded.image,
             Some(Early::Kept(_)) => unreachable!("a frame is kept only with a decode cache"),
-            None => self.load.decode::<E>(index)?,
+            None => self.load.decode::<E>(idx)?,
         };
-        let admitted = stack(self.intake.admit(index, &image))?;
-        let metadata = (index == 0).then(|| image.metadata().clone());
+        let admitted = stack(self.intake.admit(idx, &image))?;
+        let metadata = (idx == 0).then(|| image.metadata().clone());
         let quality = FrameQuality::for_unwarped(&image);
         let frame = stack(self.tier.store(image, quality, admitted))?;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }
 
-    /// Frame `index` through the decode cache: the planes committed there for its source as it is
+    /// Frame `idx` through the decode cache: the planes committed there for its source as it is
     /// now, or a decode written there and committed. The source's identity is read before the
     /// decode and again after it, and a frame whose source changed in between is refused rather
     /// than cached under the identity it had before.
     fn kept_frame(
         &self,
         kept: &DecodeCache,
-        index: usize,
+        idx: usize,
         early: Option<Early<D::Image>>,
     ) -> Result<LoadedFrame, StackError> {
         debug_assert!(
             !self.load.step.changes_frames(),
             "a stepped run neither reads nor writes the decode cache"
         );
-        let path = self.load.paths[index];
-        let context = self.load.context;
+        let path = self.load.paths[idx];
+        let ctx = self.load.ctx;
         let (source, image) = match early {
-            Some(Early::Kept(reused)) => return self.reused(index, *reused),
+            Some(Early::Kept(reused)) => return self.reused(idx, *reused),
             Some(Early::Decoded(Decoded { image, source })) => (
                 source.expect("a decode with a decode cache reads its source"),
                 image,
             ),
             None => {
-                let source = CachedSource::of(path, D::KIND, context)?;
+                let source = CachedSource::of(path, D::KIND, ctx)?;
                 if let Some(reused) = kept.reuse(&source) {
                     tracing::debug!(source = %path.display(), "Reusing existing cache files");
-                    return self.reused(index, reused);
+                    return self.reused(idx, reused);
                 }
-                (source, D::load(path, context)?)
+                (source, D::load(path, ctx)?)
             }
         };
-        let admitted = self.intake.admit(index, &image)?;
+        let admitted = self.intake.admit(idx, &image)?;
         let written = kept.keep(&source, &image, admitted)?;
         drop(image);
-        let metadata = (index == 0).then(|| written.image.metadata.clone());
+        let metadata = (idx == 0).then(|| written.image.metadata.clone());
         let frame = written.into_frame();
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }
 
-    /// Frame `index` as a run before kept it, held to the set's shape and facts and to the planes'
+    /// Frame `idx` as a run before kept it, held to the set's shape and facts and to the planes'
     /// checks, as a decode is on admission.
-    fn reused(&self, index: usize, reused: KeptFrame) -> Result<LoadedFrame, StackError> {
+    fn reused(&self, idx: usize, reused: KeptFrame) -> Result<LoadedFrame, StackError> {
         let dimensions = self.intake.dimensions();
-        FrameDimensionMismatch::check(index, dimensions, reused.dimensions())?;
-        self.intake.check_facts(index, &reused.admitted.facts)?;
-        let metadata = (index == 0).then(|| reused.image.metadata.clone());
+        FrameDimensionMismatch::check(idx, dimensions, reused.dimensions())?;
+        self.intake.check_facts(idx, &reused.admitted.facts)?;
+        let metadata = (idx == 0).then(|| reused.image.metadata.clone());
         let frame = reused.into_frame();
         let check = FrameCheck {
-            index,
-            cancel: &self.load.context.cancel,
+            idx,
+            cancel: &self.load.ctx.cancel,
         };
         check.stored_samples(&frame.channels, dimensions.pixel_count())?;
         // Mapped from disk, so held to the pairing the combine divides by like any other planes.

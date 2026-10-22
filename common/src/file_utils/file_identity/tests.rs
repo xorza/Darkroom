@@ -21,8 +21,8 @@ fn epoch_offset_is_signed_nanoseconds() {
 /// The identity of a real file is its length and its mtime, and an append moves the length.
 #[test]
 fn identity_reads_length_and_mtime() {
-    let directory = TempDir::new("file_identity");
-    let path = directory.path().join("frame.fits");
+    let dir = TempDir::new("file_identity");
+    let path = dir.path().join("frame.fits");
     fs::write(&path, b"1234").unwrap();
     let identity = FileIdentity::of(&path).unwrap();
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
@@ -33,7 +33,7 @@ fn identity_reads_length_and_mtime() {
 
     fs::write(&path, b"12345").unwrap();
     assert_eq!(FileIdentity::of(&path).unwrap().len, 5);
-    assert!(FileIdentity::of(&directory.path().join("missing")).is_err());
+    assert!(FileIdentity::of(&dir.path().join("missing")).is_err());
 }
 
 /// The layout a digest folds, byte by byte: the length and the mtime, then a `1` and the id's
@@ -79,8 +79,8 @@ fn a_rewrite_that_restores_the_mtime_moves_the_identity() {
     use std::os::unix::fs::PermissionsExt;
     use std::thread;
 
-    let directory = TempDir::new("file_identity_rewrite");
-    let path = directory.path().join("frame.fits");
+    let dir = TempDir::new("file_identity_rewrite");
+    let path = dir.path().join("frame.fits");
     fs::write(&path, b"1234").unwrap();
     let original = FileIdentity::of(&path).unwrap();
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
@@ -111,7 +111,7 @@ fn a_rewrite_that_restores_the_mtime_moves_the_identity() {
     let chmodded = FileIdentity::of(&path).unwrap();
     assert_ne!(chmodded.changed_ns, rewritten.changed_ns);
 
-    let replacement = directory.path().join("frame.tmp");
+    let replacement = dir.path().join("frame.tmp");
     fs::write(&replacement, b"5678").unwrap();
     fs::rename(&replacement, &path).unwrap();
     assert_ne!(FileIdentity::of(&path).unwrap().file_id, original.file_id);

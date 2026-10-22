@@ -92,13 +92,13 @@ impl Sampler {
             return;
         }
         self.keys.clear();
-        self.keys.extend(pool.iter().map(|&index| {
+        self.keys.extend(pool.iter().map(|&idx| {
             let u: f64 = self.rng.random();
-            (index, u.powf(1.0 / self.weights[index]))
+            (idx, u.powf(1.0 / self.weights[idx]))
         }));
         self.keys
             .select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
-        sample.extend(self.keys[..k].iter().map(|&(index, _)| index));
+        sample.extend(self.keys[..k].iter().map(|&(idx, _)| idx));
     }
 
     /// A uniform sample of distinct pairs by a partial Fisher-Yates shuffle, O(k): the head of

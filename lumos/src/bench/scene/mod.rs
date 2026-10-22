@@ -163,23 +163,20 @@ impl Field {
         Buffer2::from_fn(side, side, |x, y| plane[(left + x, top + y)])
     }
 
-    /// Exposure `index` of a sequence on the field, calibrated, on a mono sensor of `size`, as the
+    /// Exposure `idx` of a sequence on the field, calibrated, on a mono sensor of `size`, as the
     /// warp leaves it: aligned to the field's frame. From exposure to exposure the sky brightens
     /// or fades by up to 8% and the transparency falls by up to 9%, as over a night, and the noise
     /// is the exposure's own.
-    pub(crate) fn aligned(self, size: Size2us, index: usize) -> SimFrame {
-        let shot = Shot::Sequence {
-            index,
-            aligned: true,
-        };
+    pub(crate) fn aligned(self, size: Size2us, idx: usize) -> SimFrame {
+        let shot = Shot::Sequence { idx, aligned: true };
         self.expose(Sensor::calibrated(size, CfaType::Mono), shot)
     }
 
-    /// Exposure `index` of the sequence [`Self::aligned`] gives, as the sensor saw it: placed by
+    /// Exposure `idx` of the sequence [`Self::aligned`] gives, as the sensor saw it: placed by
     /// [`dither`].
-    pub(crate) fn exposure(self, size: Size2us, index: usize) -> SimFrame {
+    pub(crate) fn exposure(self, size: Size2us, idx: usize) -> SimFrame {
         let shot = Shot::Sequence {
-            index,
+            idx,
             aligned: false,
         };
         self.expose(Sensor::calibrated(size, CfaType::Mono), shot)
@@ -226,17 +223,12 @@ impl Field {
         self.hit(Sensor::calibrated(size, cfa_type), Shot::Field)
     }
 
-    /// Exposure `index` of the sequence [`Self::exposure`] gives, calibrated, on a sensor of `size`
+    /// Exposure `idx` of the sequence [`Self::exposure`] gives, calibrated, on a sensor of `size`
     /// behind `cfa_type`'s filters, with its own cosmic-ray hits: a light of a dithered set as
     /// calibration leaves it, for a drizzle.
-    pub(crate) fn mosaic_exposure(
-        self,
-        size: Size2us,
-        cfa_type: CfaType,
-        index: usize,
-    ) -> CfaImage {
+    pub(crate) fn mosaic_exposure(self, size: Size2us, cfa_type: CfaType, idx: usize) -> CfaImage {
         let shot = Shot::Sequence {
-            index,
+            idx,
             aligned: false,
         };
         self.hit(Sensor::calibrated(size, cfa_type), shot)
@@ -248,11 +240,11 @@ impl Field {
         self.hit(Sensor::raw(size, cfa_type), Shot::Field)
     }
 
-    /// Exposure `index` of the sequence [`Self::exposure`] gives, as a sensor of `size` behind
+    /// Exposure `idx` of the sequence [`Self::exposure`] gives, as a sensor of `size` behind
     /// `cfa_type`'s filters reads it, with its own cosmic-ray hits.
-    pub(crate) fn light_exposure(self, size: Size2us, cfa_type: CfaType, index: usize) -> CfaImage {
+    pub(crate) fn light_exposure(self, size: Size2us, cfa_type: CfaType, idx: usize) -> CfaImage {
         let shot = Shot::Sequence {
-            index,
+            idx,
             aligned: false,
         };
         self.hit(Sensor::raw(size, cfa_type), shot)
@@ -265,14 +257,14 @@ impl Field {
             exposure_s: EXPOSURE_S,
             ..Observation::reference(self.seed())
         };
-        if let Shot::Sequence { index, aligned } = shot {
-            scene.background = sky(exposure_sky(index));
+        if let Shot::Sequence { idx, aligned } = shot {
+            scene.background = sky(exposure_sky(idx));
             for source in &mut scene.sources {
-                source.flux *= exposure_transparency(index);
+                source.flux *= exposure_transparency(idx);
             }
-            observation.seed ^= index as u64;
+            observation.seed ^= idx as u64;
             if !aligned {
-                observation.transform = dither(size, index);
+                observation.transform = dither(size, idx);
             }
         }
         render(&scene, &sensor.camera(), &observation)
@@ -281,14 +273,14 @@ impl Field {
     fn hit(self, sensor: Sensor, shot: Shot) -> CfaImage {
         let Sensor { size, cfa_type, .. } = sensor;
         let mut image = mosaic(self.expose(sensor, shot), cfa_type);
-        let index = match shot {
+        let idx = match shot {
             Shot::Field => 0,
-            Shot::Sequence { index, .. } => index,
+            Shot::Sequence { idx, .. } => idx,
         };
         CosmicRays {
             count: at_density(COSMIC_RAYS, size),
             amplitude: 0.3..1.0,
-            seed: self.seed() ^ 0xC05 ^ ((index as u64) << 16),
+            seed: self.seed() ^ 0xC05 ^ ((idx as u64) << 16),
         }
         .add_to(image.data_mut());
         for pixel in image.data_mut().pixels_mut() {
@@ -303,9 +295,9 @@ impl Field {
 enum Shot {
     /// The field's own frame.
     Field,
-    /// Exposure `index` of a sequence: its sky and transparency changed and its noise its own,
+    /// Exposure `idx` of a sequence: its sky and transparency changed and its noise its own,
     /// and dithered on the sensor unless `aligned` to the field's frame.
-    Sequence { index: usize, aligned: bool },
+    Sequence { idx: usize, aligned: bool },
 }
 
 /// The bias, dark and flat masters of the sensor a light of `size` behind `cfa_type` is taken on,
@@ -314,12 +306,12 @@ pub(crate) fn masters(size: Size2us, cfa_type: CfaType) -> CalibrationSet<Option
     master_frames(size, cfa_type, 0)
 }
 
-/// Frame `index` of each of the bias, dark and flat sequences [`masters`] are stacked from, each
+/// Frame `idx` of each of the bias, dark and flat sequences [`masters`] are stacked from, each
 /// with its own noise.
 pub(crate) fn master_frames(
     size: Size2us,
     cfa_type: CfaType,
-    index: usize,
+    idx: usize,
 ) -> CalibrationSet<Option<CfaImage>> {
     let expose = |role: MasterRole, seed: u64, level: f32, exposure_s: f32| {
         let scene = Scene {
@@ -329,7 +321,7 @@ pub(crate) fn master_frames(
         };
         let observation = Observation {
             exposure_s,
-            ..Observation::reference(SENSOR_SEED ^ seed ^ ((index as u64) << 8))
+            ..Observation::reference(SENSOR_SEED ^ seed ^ ((idx as u64) << 8))
         };
         let camera = Sensor::raw(size, cfa_type).camera();
         let frame = render(&scene, &camera, &observation);
@@ -345,15 +337,15 @@ pub(crate) fn master_frames(
     }
 }
 
-/// Where exposure `index` of a sequence on a frame of `size` lies: the field's frame to the
+/// Where exposure `idx` of a sequence on a frame of `size` lies: the field's frame to the
 /// sensor's. Exposure 0 is the reference; every other is dithered by up to 5 px each way and
 /// turned by up to 0.2° about the frame's centre, along the golden-ratio sequence that spreads a
 /// dither pattern evenly.
-pub(crate) fn dither(size: Size2us, index: usize) -> Transform {
-    if index == 0 {
+pub(crate) fn dither(size: Size2us, idx: usize) -> Transform {
+    if idx == 0 {
         return Transform::identity();
     }
-    let spread = |step: f64| 2.0 * (index as f64 * step).fract() - 1.0;
+    let spread = |step: f64| 2.0 * (idx as f64 * step).fract() - 1.0;
     let golden = (5.0_f64.sqrt() - 1.0) / 2.0;
     let centre = DVec2::new(size.width as f64, size.height as f64) / 2.0;
     Transform::translation(DVec2::new(
@@ -366,16 +358,16 @@ pub(crate) fn dither(size: Size2us, index: usize) -> Transform {
     ))
 }
 
-/// The sky's level in exposure `index`, against the field's frame: a cycle of five through 0.92,
+/// The sky's level in exposure `idx`, against the field's frame: a cycle of five through 0.92,
 /// 0.96, 1, 1.04 and 1.08, each the nearest f32 to its percentage.
-fn exposure_sky(index: usize) -> f32 {
-    (92 + 4 * (index * 7 % 5)) as f32 / 100.0
+fn exposure_sky(idx: usize) -> f32 {
+    (92 + 4 * (idx * 7 % 5)) as f32 / 100.0
 }
 
-/// The share of the stars' light that reaches the sensor in exposure `index`: a cycle of four
+/// The share of the stars' light that reaches the sensor in exposure `idx`: a cycle of four
 /// through 1, 0.97, 0.94 and 0.91, each the nearest f32 to its percentage.
-fn exposure_transparency(index: usize) -> f32 {
-    (100 - 3 * (index * 3 % 4)) as f32 / 100.0
+fn exposure_transparency(idx: usize) -> f32 {
+    (100 - 3 * (idx * 3 % 4)) as f32 / 100.0
 }
 
 /// How much of the sensor a frame shows.
@@ -443,17 +435,17 @@ impl Sensor {
 /// The sensor's hot and dead pixels on a frame of `size`, the same on every frame of that size.
 fn defects(size: Size2us) -> SensorDefects {
     let mut rng = TestRng::new(SENSOR_SEED);
-    let position = |rng: &mut TestRng| {
+    let pos = |rng: &mut TestRng| {
         let x = (rng.next_u64() % size.width as u64) as usize;
         let y = (rng.next_u64() % size.height as u64) as usize;
         (x, y)
     };
     let dead = (0..at_density(DEAD_PIXELS, size))
-        .map(|_| position(&mut rng))
+        .map(|_| pos(&mut rng))
         .collect();
     let hot = (0..at_density(HOT_PIXELS, size))
         .map(|_| {
-            let (x, y) = position(&mut rng);
+            let (x, y) = pos(&mut rng);
             (x, y, 0.05 + 0.45 * rng.next_f32())
         })
         .collect();

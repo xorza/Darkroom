@@ -40,16 +40,14 @@
 //! the planner keeps its scratch across runs, so a repeated plan on an unchanged graph
 //! allocates nothing.
 
-use std::result;
-
 use common::is_debug;
 
 use crate::containers::column::Column;
 use crate::containers::idx_set::IdxSet;
 use crate::data::const_value::ConstValue;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
-use crate::execution::error::{Error, Result};
-use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::error::{ExecutionError, ExecutionResult};
+use crate::execution::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::schedule::error::{RunScheduleValidationError, ScheduleColumn};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
@@ -106,7 +104,7 @@ impl NodeState {
     /// and after the sweep — which is what lets one column serve both.
     ///
     /// Every caller reads a node the walk settled: a `process_order` member, a
-    /// root, or a `Bind` producer of one. `Unvisited` is the same broken
+    /// root, or a `Wire` producer of one. `Unvisited` is the same broken
     /// schedule the exhaustive matches on this enum panic outright on — but
     /// those arms cost nothing, having to answer for the state either way,
     /// while this predicate has a total answer already and runs per node and
@@ -272,7 +270,7 @@ pub(crate) enum Delivery<'a> {
     Blocked,
     Const(&'a ConstValue),
     /// The producer port, whose producer runs or is served this run.
-    Bind(OutputAddr),
+    Wire(OutputAddr),
 }
 
 impl Delivery<'_> {
@@ -281,7 +279,7 @@ impl Delivery<'_> {
     const fn delivers(self) -> bool {
         match self {
             Self::Const(value) => !matches!(value, ConstValue::Null),
-            Self::Bind(_) => true,
+            Self::Wire(_) => true,
             Self::Unbound | Self::SetAside | Self::Blocked => false,
         }
     }
@@ -312,8 +310,8 @@ impl RunSchedule {
         match &input.binding {
             ExecutionBinding::None => Delivery::Unbound,
             ExecutionBinding::Const(value) => Delivery::Const(value),
-            ExecutionBinding::Bind(addr) => match self.states[addr.node_idx] {
-                // The walk pushes every `Bind` producer before settling its
+            ExecutionBinding::Wire(addr) => match self.states[addr.node_idx] {
+                // The walk pushes every `Wire` producer before settling its
                 // consumer, so an unvisited producer here means the schedule is
                 // broken — not an input to answer for.
                 NodeState::Unvisited => {
@@ -321,7 +319,7 @@ impl RunSchedule {
                 }
                 NodeState::Disabled => Delivery::Unbound,
                 NodeState::MissingInputs => Delivery::Blocked,
-                NodeState::Cut | NodeState::Reuse | NodeState::Run => Delivery::Bind(*addr),
+                NodeState::Cut | NodeState::Reuse | NodeState::Run => Delivery::Wire(*addr),
             },
         }
     }
@@ -335,7 +333,7 @@ impl RunSchedule {
         match self.delivery(program, input) {
             Delivery::Unbound => input.required,
             Delivery::Blocked => true,
-            Delivery::SetAside | Delivery::Const(_) | Delivery::Bind(_) => false,
+            Delivery::SetAside | Delivery::Const(_) | Delivery::Wire(_) => false,
         }
     }
 
@@ -400,7 +398,7 @@ impl RunSchedule {
     /// A [`RunSinks`](SpecialNode::RunSinks) node among a fired event's subscribers is not
     /// itself a root (it computes nothing); instead it promotes the run to include *every* sink
     /// node — the "when this event fires, re-run the whole graph" trigger.
-    fn collect_roots(&mut self, program: &CompiledGraph, seeds: &RunSeeds) -> Result<()> {
+    fn collect_roots(&mut self, program: &CompiledGraph, seeds: &RunSeeds) -> ExecutionResult<()> {
         // `reset_for_program` already emptied the column; this only adds.
 
         // Node seeds ("run to this node"): each exact execution node is a root, seeded so
@@ -408,7 +406,7 @@ impl RunSchedule {
         // id absent from the installed program is inconsistent caller state.
         for &node_id in &seeds.node_ids {
             let Some(node_idx) = program.node(node_id) else {
-                return Err(Error::NodeSeedNotFound { node_id });
+                return Err(ExecutionError::NodeSeedNotFound { node_id });
             };
             self.add_root(node_idx, RootFlags::SEEDED);
         }
@@ -463,7 +461,7 @@ impl RunSchedule {
     pub(crate) fn validate(
         &self,
         program: &CompiledGraph,
-    ) -> result::Result<(), RunScheduleValidationError> {
+    ) -> Result<(), RunScheduleValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
             return Err(RunScheduleValidationError::OrderTooLong);
         }
@@ -512,7 +510,7 @@ impl RunSchedule {
                 .get_span(e_node.inputs)
                 .ok_or(RunScheduleValidationError::InputRange { node_id })?;
             for input in inputs {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
+                if let ExecutionBinding::Wire(addr) = &input.binding {
                     // Resolve the dependency before probing the sets: an
                     // out-of-range target is the corruption to report, not a
                     // reason to index past `seen_in_order` and `node_ids`.

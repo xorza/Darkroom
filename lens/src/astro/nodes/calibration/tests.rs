@@ -10,7 +10,7 @@ use lumos::{
 };
 
 use crate::astro::nodes::calibration::{
-    CacheError, Caching, FrameSetKeyError, MastersRequest, RoleCachePaths, SourceDirectoryCache,
+    CacheError, Caching, FrameSetKeyError, MastersRequest, RoleCachePaths, SourceDirCache,
     frame_set_key,
 };
 
@@ -37,7 +37,7 @@ fn role_cache_requires_one_source_directory() {
     let error = RoleCachePaths::beside(&mixed, "master_dark.fits").unwrap_err();
     assert!(matches!(
         error,
-        CacheError::SourceDirectories {
+        CacheError::SourceDirs {
             first,
             other
         } if first == mixed[0] && other == mixed[1]
@@ -90,7 +90,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         subtracted: &[],
         recipe: MasterRecipe::of(MasterRole::Dark, &IngestConfig::default()),
     };
-    let cache = SourceDirectoryCache {
+    let cache = SourceDirCache {
         caching: Caching::BesideFrames,
         cancel: &CancelToken::never(),
     };

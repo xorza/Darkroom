@@ -57,7 +57,7 @@ pub(crate) mod error;
 mod estimate;
 mod final_fit;
 mod kd_tree;
-pub(crate) mod match_indices;
+pub(crate) mod match_idxs;
 mod model_search;
 mod point_normalization;
 mod point_pairs;

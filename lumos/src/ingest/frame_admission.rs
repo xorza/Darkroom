@@ -52,22 +52,22 @@ impl<'a> FrameAdmission<'a> {
         self.dimensions
     }
 
-    /// Check frame `index` and measure it.
+    /// Check frame `idx` and measure it.
     pub(crate) fn admit(
         &self,
-        index: usize,
+        idx: usize,
         image: &impl StackableImage,
     ) -> Result<Admitted, AdmissionError> {
-        FrameDimensionMismatch::check(index, self.dimensions, image.dimensions())?;
+        FrameDimensionMismatch::check(idx, self.dimensions, image.dimensions())?;
         let facts = FrameFacts::of(image);
-        self.check_facts(index, &facts)?;
+        self.check_facts(idx, &facts)?;
         FrameCheck {
-            index,
+            idx,
             cancel: self.cancel,
         }
         .samples(image)?;
         let stats = FrameStats::measure_as(image, self.spreads);
-        if index == 0 {
+        if idx == 0 {
             self.first_facts
                 .set(SetFacts::of_first(&facts))
                 .expect("frame 0 is admitted once");
@@ -75,15 +75,11 @@ impl<'a> FrameAdmission<'a> {
         Ok(Admitted { stats, facts })
     }
 
-    /// Check the facts of frame `index` against frame 0's, once they are known: for a frame read
+    /// Check the facts of frame `idx` against frame 0's, once they are known: for a frame read
     /// back from a kept cache, whose samples were checked when it was written.
-    pub(crate) fn check_facts(
-        &self,
-        index: usize,
-        facts: &FrameFacts,
-    ) -> Result<(), AdmissionError> {
+    pub(crate) fn check_facts(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
         match self.first_facts.get() {
-            Some(first) => first.check(index, facts),
+            Some(first) => first.check(idx, facts),
             None => Ok(()),
         }
     }

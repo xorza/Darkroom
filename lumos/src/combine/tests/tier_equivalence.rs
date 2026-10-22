@@ -21,7 +21,7 @@ use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::combine::Combine;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 
@@ -101,13 +101,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
     // the check is independent of how FITS maps u16 → f32). Mean(None) must reproduce it exactly.
     let per_frame: Vec<f32> = paths
         .iter()
-        .map(|p| {
-            LoadContext::default()
-                .linear(p)
-                .unwrap()
-                .channel(0)
-                .pixels()[0]
-        })
+        .map(|p| LoadCtx::default().linear(p).unwrap().channel(0).pixels()[0])
         .collect();
     // The combine sums in f64 and rounds once: the f64 mean of the six f32 samples, rounded.
     let expected = per_frame.iter().map(|&value| f64::from(value)).sum::<f64>() / n as f64;

@@ -4,10 +4,10 @@
 use common::FileIdentity;
 use serde::{Deserialize, Serialize};
 
-use crate::decode::decode_options::DecodeOptions;
+use crate::decode::decode_params::DecodeParams;
 use crate::decode::decode_pins::DECODE_VERSION;
 use crate::decode::decoder_kind::DecoderKind;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
 /// What a cached frame's planes were decoded from and by.
 ///
@@ -20,20 +20,20 @@ pub(crate) struct CacheKey {
     pub(crate) source: FileIdentity,
     pub(crate) decoder: DecoderKind,
     pub(crate) decode_version: u64,
-    /// FNV-1a of the decode options of the [`LoadContext`], as bitcode.
+    /// FNV-1a of the decode options of the [`LoadCtx`], as bitcode.
     pub(crate) options: u64,
 }
 
 impl CacheKey {
-    pub(crate) fn new(source: FileIdentity, decoder: DecoderKind, context: &LoadContext) -> Self {
+    pub(crate) fn new(source: FileIdentity, decoder: DecoderKind, ctx: &LoadCtx) -> Self {
         Self {
             source,
             decoder,
             decode_version: DECODE_VERSION,
-            options: DecodeOptions {
-                fits: &context.fits,
-                nulls: context.nulls,
-                xtrans_passes: context.xtrans_passes,
+            options: DecodeParams {
+                fits: &ctx.fits,
+                nulls: ctx.nulls,
+                xtrans_passes: ctx.xtrans_passes,
             }
             .digest(),
         }

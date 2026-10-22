@@ -2,7 +2,7 @@
 
 use glam::DVec2;
 
-use crate::registration::match_indices::MatchIndices;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::triangle::voting::PointMatch;
 
 /// A set of matched points as two parallel position slices, paired by index.
@@ -33,17 +33,17 @@ impl PointPairs {
         target: &[DVec2],
     ) -> Self {
         let mut pairs = Self::default();
-        pairs.refill(matches.iter().map(|m| m.indices), reference, target);
+        pairs.refill(matches.iter().map(|m| m.idxs), reference, target);
         pairs
     }
 
-    /// Refill from the points `indices` selects on both sides — a RANSAC sample or inlier set,
+    /// Refill from the points `idxs` selects on both sides — a RANSAC sample or inlier set,
     /// where one index names the pair.
-    pub(super) fn gather(&mut self, indices: &[usize], reference: &[DVec2], target: &[DVec2]) {
+    pub(super) fn gather(&mut self, idxs: &[usize], reference: &[DVec2], target: &[DVec2]) {
         self.refill(
-            indices.iter().map(|&index| MatchIndices {
-                reference: index,
-                target: index,
+            idxs.iter().map(|&idx| MatchIdxs {
+                reference: idx,
+                target: idx,
             }),
             reference,
             target,
@@ -54,7 +54,7 @@ impl PointPairs {
     /// the correspondence the estimators rely on and cannot check for themselves.
     fn refill(
         &mut self,
-        matched: impl ExactSizeIterator<Item = MatchIndices>,
+        matched: impl ExactSizeIterator<Item = MatchIdxs>,
         reference: &[DVec2],
         target: &[DVec2],
     ) {

@@ -11,7 +11,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::math::fwhm;
 use crate::simd::Kernel;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::ConvolveRow;
@@ -27,7 +27,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let row = &stages.frame.measure.pixels()[y * FRAME.width..(y + 1) * FRAME.width];
         Inputs { row, kernel }
     };
-    let tiers: Vec<Tier> = Tier::supported().collect();
+    let tiers: Vec<IsaTier> = IsaTier::supported().collect();
     let mut group = Kind::Atomic.group(c, "detection/convolution", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];

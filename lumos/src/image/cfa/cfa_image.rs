@@ -122,8 +122,8 @@ impl CfaImage {
                 existing.or_where(flags, holds);
             }
             None => {
-                self.flags = PixelFlags::from_fn(size, |index| {
-                    if holds(index) {
+                self.flags = PixelFlags::from_fn(size, |idx| {
+                    if holds(idx) {
                         flags
                     } else {
                         QualityFlags::default()
@@ -133,16 +133,16 @@ impl CfaImage {
         }
     }
 
-    /// OR `flags` into the pixels at `indices`, creating the flag plane when the image has none
+    /// OR `flags` into the pixels at `idxs`, creating the flag plane when the image has none
     /// and some index is given.
-    pub(crate) fn add_flags_at(&mut self, flags: QualityFlags, indices: &[usize]) {
+    pub(crate) fn add_flags_at(&mut self, flags: QualityFlags, idxs: &[usize]) {
         let size = self.size();
         match &mut self.flags {
             Some(existing) => {
                 debug_assert_eq!(existing.size(), size, "flags for another geometry");
-                existing.or_at(flags, indices);
+                existing.or_at(flags, idxs);
             }
-            None => self.flags = PixelFlags::at_indices(size, flags, indices),
+            None => self.flags = PixelFlags::at_idxs(size, flags, idxs),
         }
     }
 
@@ -254,9 +254,9 @@ impl CfaImage {
                 mask: Some(&mask),
             };
             let repaired = lattice.median(plane, pos, &mut scratch);
-            self.data[size.index_of(pos)] = repaired;
+            self.data[size.idx_of(pos)] = repaired;
         });
-        self.add_flags_where(QualityFlags::REPAIRED, |index| nulls.get(index));
+        self.add_flags_where(QualityFlags::REPAIRED, |idx| nulls.get(idx));
     }
 
     /// Demosaic this CFA image into a 3-channel `LinearImage`, an X-Trans one with `passes`, its
@@ -320,7 +320,7 @@ impl CfaImage {
     /// flags. A mono frame is its own proxy, its metadata whole: nothing was filled, so its
     /// quantization step and flat gain still hold.
     pub fn green_proxy(&self) -> LinearImage {
-        const GREEN: usize = CfaColor::Green.index();
+        const GREEN: usize = CfaColor::Green.idx();
         let size = self.size();
         let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
         if !self.cfa_type.is_mosaic() {
@@ -342,10 +342,10 @@ impl CfaImage {
         let rows = pixels.par_chunks_mut(size.width).enumerate();
         let fill_row = |y: usize, row: &mut [f32], mut row_flags: Option<&mut [u8]>| {
             for (x, sample) in row.iter_mut().enumerate() {
-                let index = y * size.width + x;
-                let own_flags = flags.map_or(0, |flags| flags.at(index).byte());
+                let idx = y * size.width + x;
+                let own_flags = flags.map_or(0, |flags| flags.at(idx).byte());
                 if cfa_type.slot_at(Vec2us::new(x, y)) == GREEN {
-                    *sample = self.data[index];
+                    *sample = self.data[idx];
                     if let Some(row_flags) = row_flags.as_deref_mut() {
                         row_flags[x] = own_flags;
                     }
@@ -380,7 +380,7 @@ impl CfaImage {
                 let (value, value_flags) = if weight > 0.0 {
                     ((sum / weight) as f32, carried)
                 } else {
-                    (self.data[index], own_flags)
+                    (self.data[idx], own_flags)
                 };
                 *sample = value;
                 if let Some(row_flags) = row_flags.as_deref_mut() {

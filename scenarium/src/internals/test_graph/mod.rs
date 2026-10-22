@@ -210,8 +210,8 @@ impl TestGraph {
         consumer: impl Into<NamedPort<'a>>,
     ) {
         let (producer, consumer) = (producer.into(), consumer.into());
-        let binding = Binding::bind(self.id(producer.node), producer.index);
-        self.set(consumer.node, consumer.index, binding);
+        let binding = Binding::wire(self.id(producer.node), producer.idx);
+        self.set(consumer.node, consumer.idx, binding);
     }
 
     /// Put a literal on `consumer`'s input `input`.
@@ -399,16 +399,16 @@ fn literal_type(value: &ConstValue) -> DataType {
 }
 
 /// A port of a fixture's node, by the node's name: a bare `&str` is its port 0, a
-/// `(name, index)` pair any other.
+/// `(name, idx)` pair any other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamedPort<'a> {
     pub node: &'a str,
-    pub index: usize,
+    pub idx: usize,
 }
 
 impl<'a> From<&'a str> for NamedPort<'a> {
     fn from(node: &'a str) -> Self {
-        Self { node, index: 0 }
+        Self { node, idx: 0 }
     }
 }
 
@@ -419,8 +419,8 @@ impl<'a> From<&'a String> for NamedPort<'a> {
 }
 
 impl<'a> From<(&'a str, usize)> for NamedPort<'a> {
-    fn from((node, index): (&'a str, usize)) -> Self {
-        Self { node, index }
+    fn from((node, idx): (&'a str, usize)) -> Self {
+        Self { node, idx }
     }
 }
 

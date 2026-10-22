@@ -170,7 +170,7 @@ fn admit_holds_wires_and_consts_to_the_input_type() {
     g.add("int_src", |n| n.pure().output(DataType::Int));
     g.add("str_sink", |n| n.sink().input(DataType::String));
     g.add("int_sink", |n| n.sink().input(DataType::Int));
-    let wire = Binding::bind(g.id("int_src"), 0);
+    let wire = Binding::wire(g.id("int_src"), 0);
     let admit = |sink: &str| {
         g.graph
             .admit(&g.library, InputPort::new(g.id(sink), 0), &wire)
@@ -229,7 +229,7 @@ fn removing_a_node_drops_it_and_every_edge_touching_it() {
     assert_eq!(g.graph.len(), 4);
 
     // No surviving edge references the removed node (as consumer or producer).
-    for (dst, src) in g.graph.edges() {
+    for (dst, src) in g.graph.wires() {
         assert_ne!(dst.node_id, sum);
         assert_ne!(src.node_id, sum);
     }
@@ -303,8 +303,8 @@ fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
 fn binding_conversions() {
     let nid = NodeId::unique();
     let from_port: Binding = OutputPort::new(nid, 1).into();
-    assert_eq!(from_port, Binding::bind(nid, 1));
-    assert_eq!(from_port, Binding::Bind(OutputPort::new(nid, 1)));
+    assert_eq!(from_port, Binding::wire(nid, 1));
+    assert_eq!(from_port, Binding::Wire(OutputPort::new(nid, 1)));
 
     let from_value: Binding = ConstValue::Int(7).into();
     assert_eq!(from_value, Binding::Const(ConstValue::Int(7)));
@@ -319,11 +319,11 @@ fn input_bindings_are_sparse_and_none_removes_an_entry() {
     let absent = InputPort::new(g.id("sum"), 2);
     assert_eq!(
         g.graph.bindings.get(&first),
-        Some(&Binding::bind(g.id("get_a"), 0))
+        Some(&Binding::wire(g.id("get_a"), 0))
     );
     assert_eq!(
         g.graph.bindings.get(&second),
-        Some(&Binding::bind(g.id("get_b"), 0))
+        Some(&Binding::wire(g.id("get_b"), 0))
     );
     assert!(!g.graph.bindings.contains_key(&absent));
 
@@ -406,9 +406,9 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     );
 
     let before = g.graph.clone_verbatim();
-    let edges_before = g.graph.edges().count();
+    let edges_before = g.graph.wires().count();
     let detached = g.remove("sum");
-    assert_eq!(g.graph.edges().count(), edges_before - 3);
+    assert_eq!(g.graph.wires().count(), edges_before - 3);
     assert!(!g.graph.is_subscribed(EventPort::new(get_a, 0), sum));
     assert_eq!(detached.bindings().len(), 3);
     assert_eq!(detached.subscriptions().len(), 1);
@@ -562,7 +562,7 @@ fn loading_rejects_a_corrupt_graph() {
     let mut g = TestGraph::sample();
     g.graph.set_input_binding(
         InputPort::new(g.id("sum"), 0),
-        Binding::bind(NodeId::unique(), 0),
+        Binding::wire(NodeId::unique(), 0),
     );
     let bytes = SerdeFormat::Bitcode.serialize(&g.graph).unwrap();
     let decoded: Graph = SerdeFormat::Bitcode
@@ -631,7 +631,7 @@ fn admit_refuses_undeclared_ports_events_and_a_self_subscription() {
         Err(BindingRejection::UndeclaredInput)
     );
     assert_eq!(
-        admit(0, Binding::bind(src, 7)),
+        admit(0, Binding::wire(src, 7)),
         Err(BindingRejection::UndeclaredOutput)
     );
     assert_eq!(admit(0, Binding::Const(ConstValue::Null)), Ok(()));
@@ -727,7 +727,7 @@ fn a_signature_covers_the_ports_and_nothing_else() {
         func.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
         func.build().func_ref()
     };
-    assert_eq!(path(FsPathMode::Directory), path(FsPathMode::NewFile));
+    assert_eq!(path(FsPathMode::Dir), path(FsPathMode::NewFile));
 }
 
 /// A node resolves to the func with the ports it was authored against; a func
@@ -828,14 +828,14 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
             Repair::DanglingSubscription {
                 subscription: Subscription::new(absent_event, dst),
             },
-            rejected(1, Binding::bind(src, 7), BindingRejection::UndeclaredOutput),
-            rejected(2, Binding::bind(src, 0), BindingRejection::WiredConstOnly),
+            rejected(1, Binding::wire(src, 7), BindingRejection::UndeclaredOutput),
+            rejected(2, Binding::wire(src, 0), BindingRejection::WiredConstOnly),
             rejected(
                 3,
                 Binding::Const(ConstValue::Int(1)),
                 BindingRejection::ConstMismatch
             ),
-            rejected(4, Binding::bind(src, 0), BindingRejection::WireMismatch),
+            rejected(4, Binding::wire(src, 0), BindingRejection::WireMismatch),
             rejected(
                 5,
                 Binding::Const(ConstValue::Int(1)),
@@ -876,7 +876,7 @@ fn reconcile_removes_exactly_what_the_library_cannot_hold() {
         changed_record.bindings(),
         [BindingEntry {
             port: InputPort::new(changed, 0),
-            binding: Binding::bind(gone, 0),
+            binding: Binding::wire(gone, 0),
         }],
         "detached first, so the edge to `gone` is `changed`'s"
     );

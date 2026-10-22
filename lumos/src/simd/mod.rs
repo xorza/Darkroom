@@ -2,7 +2,7 @@
 //!
 //! A kernel implements [`Kernel`]. Its body is generic over an [`Isa`] — a zero-sized token whose
 //! existence proves the CPU has the instructions — and [`Kernel::dispatch`] runs it on the widest
-//! [`Tier`] the CPU has: `Avx2Fma` on `x86_64` (lane loops on one older than Haswell), `Neon` on
+//! [`IsaTier`] the CPU has: `Avx2Fma` on `x86_64` (lane loops on one older than Haswell), `Neon` on
 //! aarch64, and `Portable` lane loops on any other CPU.
 //!
 //! Every Isa has the same logical width, [`F32_LANES`] f32 lanes and [`F64_LANES`] f64 lanes,
@@ -25,17 +25,17 @@
 
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod avx2_fma;
+pub(crate) mod isa_tier;
 pub(crate) mod math;
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod neon;
 #[cfg(any(feature = "internals", not(target_arch = "aarch64")))]
 pub(crate) mod portable;
-pub(crate) mod tier;
 
 use std::fmt::Debug;
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 
 /// f32 lanes in one [`F32x8`], on every Isa.
 pub(crate) const F32_LANES: usize = 8;
@@ -54,7 +54,7 @@ pub(crate) trait Kernel: Sized {
     /// The kernel on the widest Isa this CPU has.
     #[inline]
     fn dispatch(self) -> Self::Output {
-        Tier::widest().run(self)
+        IsaTier::widest().run(self)
     }
 }
 
@@ -76,11 +76,11 @@ pub(crate) trait Isa: Copy + Debug {
 
     fn load_f64(self, lanes: &[f64; F64_LANES]) -> Self::F64;
 
-    /// `table[⌊index⌋]` per lane, with `index` first clamped to `[0, table.len() − 1]` (a NaN to
+    /// `table[⌊idx⌋]` per lane, with `idx` first clamped to `[0, table.len() − 1]` (a NaN to
     /// 0), so no lane reads outside the table.
     ///
     /// The table holds between 1 and 2²⁴ entries, so every index in it is an exact f32.
-    fn lookup_f32(self, table: &[f32], index: Self::F32) -> Self::F32;
+    fn lookup_f32(self, table: &[f32], idx: Self::F32) -> Self::F32;
 
     /// The [`F32_LANES`] samples of `samples` from `start`.
     #[inline(always)]
@@ -245,8 +245,8 @@ fn lookup_last(table: &[f32]) -> f32 {
     clippy::cast_sign_loss,
     reason = "the index is clamped to `[0, last]` first"
 )]
-fn lookup_lane(table: &[f32], last: f32, index: f32) -> f32 {
-    let below_end = if index > last { last } else { index };
+fn lookup_lane(table: &[f32], last: f32, idx: f32) -> f32 {
+    let below_end = if idx > last { last } else { idx };
     let clamped = if below_end > 0.0 { below_end } else { 0.0 };
     table[clamped as usize]
 }

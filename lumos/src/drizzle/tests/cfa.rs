@@ -176,10 +176,10 @@ fn the_light_preset_combines_a_cfa_drizzle() {
         .map(|_| {
             let shift = DVec2::new(rng.next_f64() * 2.0, rng.next_f64() * 2.0);
             let pixels = (0..size.pixel_count())
-                .map(|index| {
-                    let position = Vec2us::new(index % size.width, index / size.width);
-                    let color = rggb.slot_at(position);
-                    sky(color, position.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
+                .map(|idx| {
+                    let pos = Vec2us::new(idx % size.width, idx / size.width);
+                    let color = rggb.slot_at(pos);
+                    sky(color, pos.x as f64 + shift.x) + SIGMA * rng.next_gaussian_f32()
                 })
                 .collect();
             DrizzleFrame::new(
@@ -266,7 +266,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
     let frame = |k: usize| {
         let (gain, offset) = affine[k];
         let pixels = (0..size.pixel_count())
-            .map(|index| gain * scene(index / size.width) + offset)
+            .map(|idx| gain * scene(idx / size.width) + offset)
             .collect();
         DrizzleFrame::new(
             make_cfa(size, pixels, rggb),
@@ -301,7 +301,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
     let bound = 16.0 * f32::EPSILON * 4.0;
     let mut compared = 0;
     for c in [0, 2] {
-        for (index, (&value, &expected)) in all
+        for (idx, (&value, &expected)) in all
             .image
             .channel(c)
             .pixels()
@@ -315,7 +315,7 @@ fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
             compared += 1;
             assert!(
                 (value - expected).abs() <= bound,
-                "channel {c} pixel {index}: {value} against {expected}"
+                "channel {c} pixel {idx}: {value} against {expected}"
             );
         }
     }
@@ -347,10 +347,10 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
         matches!(
             error,
             DrizzleError::Stack(StackError::Admission(AdmissionError::CfaPatternMismatch {
-                index: 1,
+                idx: 1,
                 expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
-                reference_index: 0,
+                reference_idx: 0,
             }))
         ),
         "{error:?}"
@@ -398,9 +398,9 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .channel(0)
             .iter()
             .enumerate()
-            .map(|(index, &value)| {
-                let position = Vec2us::new(index % size.width, index / size.width);
-                value * gains[rggb.slot_at(position)]
+            .map(|(idx, &value)| {
+                let pos = Vec2us::new(idx % size.width, idx / size.width);
+                value * gains[rggb.slot_at(pos)]
             })
             .collect();
         make_cfa(size, pixels, rggb)

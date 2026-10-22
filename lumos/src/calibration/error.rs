@@ -114,35 +114,35 @@ pub enum DarkMismatch {
 }
 
 /// Why the master a calibration stack subtracts from every frame cannot be taken from them: the
-/// master itself, or frame `index` it meets.
+/// master itself, or frame `idx` it meets.
 #[derive(Debug, thiserror::Error)]
 pub enum SubtractionError {
     /// The master a calibration stack subtracts from every frame covers another sensor area than
-    /// frame `index`.
-    #[error("frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}")]
+    /// frame `idx`.
+    #[error("frame {idx} is {frame} on its sensor, but the master it subtracts is {subtractor}")]
     SubtractorShape {
-        index: usize,
+        idx: usize,
         frame: Size2us,
         subtractor: Size2us,
     },
 
     /// The master a calibration stack subtracts from every frame is of another sensor pattern than
-    /// frame `index`.
+    /// frame `idx`.
     #[error(
-        "frame {index} has CFA pattern {frame:?}, but the master it subtracts has {subtractor:?}"
+        "frame {idx} has CFA pattern {frame:?}, but the master it subtracts has {subtractor:?}"
     )]
     SubtractorPattern {
-        index: usize,
+        idx: usize,
         frame: CfaType,
         subtractor: CfaType,
     },
 
-    /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
+    /// The master a calibration stack subtracts cannot be expressed in frame `idx`'s domain.
     #[error(
-        "frame {index} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
+        "frame {idx} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
     )]
     SubtractorDomain {
-        index: usize,
+        idx: usize,
         frame: Box<SampleDomain>,
         subtractor: Box<SampleDomain>,
     },
@@ -164,18 +164,15 @@ pub enum SubtractionError {
         subtractor: MasterRole,
     },
 
-    /// Frame `index` already lost a part of what the subtracted master holds: subtracted again,
+    /// Frame `idx` already lost a part of what the subtracted master holds: subtracted again,
     /// that part would be removed twice.
-    #[error("frame {index} already lost part of what the {subtractor} master holds")]
-    SubtractedTwice {
-        index: usize,
-        subtractor: MasterRole,
-    },
+    #[error("frame {idx} already lost part of what the {subtractor} master holds")]
+    SubtractedTwice { idx: usize, subtractor: MasterRole },
 
     /// The master holding dark signal that a calibration stack subtracts was taken under other
-    /// conditions than frame `index`.
-    #[error("frame {index} cannot take the subtracted master: {source}")]
-    SubtractorConditions { index: usize, source: DarkMismatch },
+    /// conditions than frame `idx`.
+    #[error("frame {idx} cannot take the subtracted master: {source}")]
+    SubtractorConditions { idx: usize, source: DarkMismatch },
 }
 
 /// Why one calibration role's master could not be stacked: the stack, the master its frames
@@ -288,14 +285,14 @@ impl From<SubtractionFault> for CalibrationError {
 }
 
 impl SubtractionError {
-    /// The `fault` of taking a master from frame `index` of a calibration stack.
-    pub(super) fn of_frame(index: usize, fault: SubtractionFault) -> Self {
+    /// The `fault` of taking a master from frame `idx` of a calibration stack.
+    pub(super) fn of_frame(idx: usize, fault: SubtractionFault) -> Self {
         match fault {
             SubtractionFault::Conditions { source, .. } => {
-                Self::SubtractorConditions { index, source }
+                Self::SubtractorConditions { idx, source }
             }
             SubtractionFault::Domain { frame, master, .. } => Self::SubtractorDomain {
-                index,
+                idx,
                 frame: Box::new(frame),
                 subtractor: Box::new(master),
             },

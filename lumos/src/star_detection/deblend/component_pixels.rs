@@ -114,7 +114,7 @@ impl ComponentPixels {
     }
 
     /// The index of the pixel at `pos`, when the component holds it.
-    pub(crate) fn index_of(&self, pos: Vec2us) -> Option<usize> {
+    pub(crate) fn idx_of(&self, pos: Vec2us) -> Option<usize> {
         let row = self.row(pos.y);
         row.pixels
             .binary_search_by_key(&pos.x, |pixel| pixel.pos.x)
@@ -122,23 +122,22 @@ impl ComponentPixels {
             .map(|offset| row.start + offset)
     }
 
-    /// Call `visit` with the index of each neighbour of pixel `index` that the component holds,
+    /// Call `visit` with the index of each neighbour of pixel `idx` that the component holds,
     /// under `connectivity`.
     pub(super) fn for_each_neighbour(
         &self,
-        index: usize,
+        idx: usize,
         connectivity: Connectivity,
         mut visit: impl FnMut(usize),
     ) {
         debug_assert_eq!(self.above.len(), self.pixels.len(), "the rows are linked");
-        let pos = self.pixels[index].pos;
-        if index > 0 && self.pixels[index - 1].pos == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
-            visit(index - 1);
+        let pos = self.pixels[idx].pos;
+        if idx > 0 && self.pixels[idx - 1].pos == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
+            visit(idx - 1);
         }
-        if index + 1 < self.pixels.len()
-            && self.pixels[index + 1].pos == Vec2us::new(pos.x + 1, pos.y)
+        if idx + 1 < self.pixels.len() && self.pixels[idx + 1].pos == Vec2us::new(pos.x + 1, pos.y)
         {
-            visit(index + 1);
+            visit(idx + 1);
         }
         let (low, high) = match connectivity {
             Connectivity::Four => (pos.x, pos.x),
@@ -156,13 +155,10 @@ impl ComponentPixels {
             }
         };
         if row > 0 {
-            scan(self.above[index] as usize, self.row_starts[row] as usize);
+            scan(self.above[idx] as usize, self.row_starts[row] as usize);
         }
         if row + 1 < rows {
-            scan(
-                self.below[index] as usize,
-                self.row_starts[row + 2] as usize,
-            );
+            scan(self.below[idx] as usize, self.row_starts[row + 2] as usize);
         }
     }
 }
@@ -213,16 +209,16 @@ mod tests {
         component.fill(&Component::new(&data, &pixels, &labels));
         component.link();
         assert_eq!(component.row_starts.len(), 3 + 1);
-        assert_eq!(component.index_of(Vec2us::new(7, 3)), None);
-        let arm = component.index_of(Vec2us::new(5, 4)).unwrap();
+        assert_eq!(component.idx_of(Vec2us::new(7, 3)), None);
+        let arm = component.idx_of(Vec2us::new(5, 4)).unwrap();
         let reached = |connectivity| {
-            let mut positions = Vec::new();
-            component.for_each_neighbour(arm, connectivity, |index| {
-                let pos = component.pixels[index].pos;
-                positions.push((pos.x, pos.y));
+            let mut poss = Vec::new();
+            component.for_each_neighbour(arm, connectivity, |idx| {
+                let pos = component.pixels[idx].pos;
+                poss.push((pos.x, pos.y));
             });
-            positions.sort_unstable();
-            positions
+            poss.sort_unstable();
+            poss
         };
         assert_eq!(
             reached(Connectivity::Eight),

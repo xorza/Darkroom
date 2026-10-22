@@ -17,7 +17,7 @@ pub(super) enum Orientation {
 #[derive(Debug, Clone)]
 pub(super) struct Triangle {
     /// Indices of the three points in the original list.
-    pub(super) indices: [usize; 3],
+    pub(super) idxs: [usize; 3],
     /// Invariant ratios: `(sides[0]/sides[2], sides[1]/sides[2])`, the point a triangle is
     /// matched at.
     pub(super) ratios: DVec2,
@@ -33,14 +33,10 @@ impl Triangle {
     /// short side costs them nothing; Groth's (1986) limit on the side ratio protects invariants
     /// built on the shortest side, which these are not. What a flat triangle loses is its
     /// orientation, which a height within the noise does not fix.
-    pub(super) fn from_positions(
-        indices: [usize; 3],
-        positions: [DVec2; 3],
-        min_height: f64,
-    ) -> Option<Self> {
-        let p0 = positions[0];
-        let p1 = positions[1];
-        let p2 = positions[2];
+    pub(super) fn from_poss(idxs: [usize; 3], poss: [DVec2; 3], min_height: f64) -> Option<Self> {
+        let p0 = poss[0];
+        let p1 = poss[1];
+        let p2 = poss[2];
 
         let d01 = (p1 - p0).length();
         let d12 = (p2 - p1).length();
@@ -48,7 +44,7 @@ impl Triangle {
 
         // Equal sides tie-break by vertex index, so the order is deterministic.
         let mut side_vertex_pairs = [(d01, 2), (d12, 0), (d20, 1)];
-        side_vertex_pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(indices[a.1].cmp(&indices[b.1])));
+        side_vertex_pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(idxs[a.1].cmp(&idxs[b.1])));
 
         let sides = [
             side_vertex_pairs[0].0,
@@ -67,14 +63,14 @@ impl Triangle {
 
         // Ordered by role: the vertex opposite the shortest, the middle and the longest side.
         let reordered = [
-            indices[side_vertex_pairs[0].1],
-            indices[side_vertex_pairs[1].1],
-            indices[side_vertex_pairs[2].1],
+            idxs[side_vertex_pairs[0].1],
+            idxs[side_vertex_pairs[1].1],
+            idxs[side_vertex_pairs[2].1],
         ];
 
-        let rp0 = positions[side_vertex_pairs[0].1];
-        let rp1 = positions[side_vertex_pairs[1].1];
-        let rp2 = positions[side_vertex_pairs[2].1];
+        let rp0 = poss[side_vertex_pairs[0].1];
+        let rp1 = poss[side_vertex_pairs[1].1];
+        let rp2 = poss[side_vertex_pairs[2].1];
         let orientation = if (rp1 - rp0).perp_dot(rp2 - rp0) > 0.0 {
             Orientation::CounterClockwise
         } else {
@@ -82,7 +78,7 @@ impl Triangle {
         };
 
         Some(Self {
-            indices: reordered,
+            idxs: reordered,
             ratios,
             orientation,
         })

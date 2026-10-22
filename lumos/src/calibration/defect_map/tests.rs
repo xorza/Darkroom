@@ -49,24 +49,24 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
                 }
             }
 
-            let indices =
-                sampling::color_sample_indices(Size2us::new(width, height), cfa_type, target_color);
+            let idxs =
+                sampling::color_sample_idxs(Size2us::new(width, height), cfa_type, target_color);
             assert_eq!(
-                indices.len(),
+                idxs.len(),
                 population.min(MAX_MEDIAN_SAMPLES),
                 "{width}x{height} color {target_color} must receive the full per-color cap"
             );
             assert!(
-                indices.windows(2).all(|pair| pair[0] < pair[1]),
+                idxs.windows(2).all(|pair| pair[0] < pair[1]),
                 "sample indices must be sorted and unique"
             );
 
             let mut sampled_rows = vec![false; height];
             let mut sampled_columns = vec![false; width];
             let mut sampled_phases = vec![false; period * period];
-            for index in indices {
-                let x = index % width;
-                let y = index / width;
+            for idx in idxs {
+                let x = idx % width;
+                let y = idx / width;
                 assert_eq!(cfa_type.slot_at(Vec2us::new(x, y)), target_color);
                 sampled_rows[y] = true;
                 sampled_columns[x] = true;
@@ -99,10 +99,8 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
             });
             let exact = median_mad(
                 (0..width * height)
-                    .filter(|&index| {
-                        cfa_type.slot_at(Vec2us::new(index % width, index / width)) == 0
-                    })
-                    .map(|index| data[index])
+                    .filter(|&idx| cfa_type.slot_at(Vec2us::new(idx % width, idx / width)) == 0)
+                    .map(|idx| data[idx])
                     .collect(),
             );
             let sampled = median_mad(color_samples(&data, cfa_type, 0));
@@ -155,11 +153,11 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                 quantization_step * QUANTIZATION_SIGMA_PER_STEP / (frame_count as f32).sqrt();
             for gain in [0.5f64, 4.0] {
                 let mut pixels = vec![0.05f32; size.pixel_count()];
-                for &index in &expected {
-                    pixels[index] += 6.0 * sigma;
+                for &idx in &expected {
+                    pixels[idx] += 6.0 * sigma;
                 }
-                for &index in &below_threshold {
-                    pixels[index] += 4.0 * sigma;
+                for &idx in &below_threshold {
+                    pixels[idx] += 4.0 * sigma;
                 }
 
                 let mut dark = make_cfa(size, pixels, CfaType::Mono);
@@ -173,7 +171,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                     )
                     .unwrap()
                     .hot()
-                    .indices
+                    .idxs
                     .clone();
 
                 assert_eq!(
@@ -200,11 +198,11 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
     let images: Vec<CfaImage> = (0..frame_count)
         .map(|_| {
             let mut pixels = vec![0.05f32; width * height];
-            for &index in &expected {
-                pixels[index] += 6.0 * master_sigma;
+            for &idx in &expected {
+                pixels[idx] += 6.0 * master_sigma;
             }
-            for &index in &below_threshold {
-                pixels[index] += 4.0 * master_sigma;
+            for &idx in &below_threshold {
+                pixels[idx] += 4.0 * master_sigma;
             }
             let mut image = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
             image
@@ -238,7 +236,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         )
         .unwrap()
         .hot()
-        .indices
+        .idxs
         .clone();
     assert_eq!(
         detected, expected,
@@ -257,7 +255,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
     let mut px = vec![0.5f32; size.pixel_count()];
     for &(x, y) in &hot {
-        px[size.index_of(Vec2us::new(x, y))] = 0.95;
+        px[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
     let dark = make_cfa(size, px, cfa);
     let defect_map = DefectMap::new(dark.size())
@@ -270,14 +268,14 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     let mut expected: Vec<usize> = hot.iter().map(|&(x, y)| y * size.width + x).collect();
     expected.sort_unstable();
     assert_eq!(
-        defect_map.hot().indices,
+        defect_map.hot().idxs,
         expected,
         "all six 0.95 red pixels are hot"
     );
 
     let mut light = make_cfa(size, vec![0.5f32; size.pixel_count()], cfa);
     for &(x, y) in &hot {
-        light.data_mut()[size.index_of(Vec2us::new(x, y))] = 0.95;
+        light.data_mut()[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
     defect_map.correct(&mut light);
 
@@ -301,11 +299,11 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
         let mut px = vec![0.0f32; size.pixel_count()];
         for y in 0..size.height {
             for x in 0..size.width {
-                px[size.index_of(Vec2us::new(x, y))] = color_val(cfa.slot_at(Vec2us::new(x, y)));
+                px[size.idx_of(Vec2us::new(x, y))] = color_val(cfa.slot_at(Vec2us::new(x, y)));
             }
         }
         for &(x, y) in corrupt {
-            px[size.index_of(Vec2us::new(x, y))] = 0.9;
+            px[size.idx_of(Vec2us::new(x, y))] = 0.9;
         }
         make_cfa(size, px, cfa)
     };
@@ -324,7 +322,7 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
         )
         .unwrap();
     // One R and one B, ascending: (0, 2) is index 24, (2, 0) is index 2.
-    assert_eq!(defect_map.hot().indices, [2, 24]);
+    assert_eq!(defect_map.hot().idxs, [2, 24]);
 
     let mut light = build(&[r_hot, b_hot]);
     defect_map.correct(&mut light);
@@ -355,7 +353,7 @@ fn cfa_hot_pixel_detection() {
         )
         .unwrap();
 
-    assert_eq!(defect_map.hot().indices, [0, 14, 35]);
+    assert_eq!(defect_map.hot().idxs, [0, 14, 35]);
 }
 
 /// A Bayer repair reads its own color: with red, green and blue at 100, 200 and 50, the hot red
@@ -397,8 +395,8 @@ fn cfa_hot_pixel_detection_large() {
     let pixel_count = size * size;
     let mut pixels = vec![100.0; pixel_count];
 
-    let hot_positions = [0, 500, 5000, 50000, 100_000, 200_000, 249_999];
-    for &idx in &hot_positions {
+    let hot_poss = [0, 500, 5000, 50000, 100_000, 200_000, 249_999];
+    for &idx in &hot_poss {
         pixels[idx] = 10000.0;
     }
 
@@ -415,7 +413,7 @@ fn cfa_hot_pixel_detection_large() {
         )
         .unwrap();
 
-    assert_eq!(defect_map.hot().indices, hot_positions);
+    assert_eq!(defect_map.hot().idxs, hot_poss);
 }
 
 #[test]
@@ -453,7 +451,7 @@ fn per_channel_detection_bayer() {
 
     // The hot red is the only defect: nothing green or blue, at 200 or 50, is flagged against
     // the red statistics.
-    assert_eq!(defect_map.hot().indices, [0]);
+    assert_eq!(defect_map.hot().idxs, [0]);
 }
 
 #[test]
@@ -504,7 +502,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
             let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
             let column_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
             let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
-            pixels[size.index_of(Vec2us::new(x, y))] =
+            pixels[size.idx_of(Vec2us::new(x, y))] =
                 baseline + gradient + amp_glow + column_noise + noise;
         }
     }
@@ -512,11 +510,11 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut expected: Vec<usize> = isolated
         .iter()
         .chain(&cluster)
-        .map(|&(x, y)| size.index_of(Vec2us::new(x, y)))
+        .map(|&(x, y)| size.idx_of(Vec2us::new(x, y)))
         .collect();
     expected.sort_unstable();
-    for &index in &expected {
-        pixels[index] += 0.08;
+    for &idx in &expected {
+        pixels[idx] += 0.08;
     }
 
     let dark = make_cfa(size, pixels, cfa);
@@ -529,7 +527,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
         .unwrap();
 
     assert_eq!(
-        defect_map.hot().indices,
+        defect_map.hot().idxs,
         expected,
         "smooth per-color structure must not become defects, while every injected point and \
              same-color cluster member must remain detectable"
@@ -547,7 +545,7 @@ fn cfa_no_defective_pixels() {
             &CancelToken::never(),
         )
         .unwrap();
-    assert_eq!(defect_map.hot().indices, [0usize; 0]);
+    assert_eq!(defect_map.hot().idxs, [0usize; 0]);
     assert_eq!(defect_map.summary(&CfaType::Mono).defective_pixels, 0);
 }
 
@@ -577,7 +575,7 @@ fn near_zero_median_dark_flags_only_hot_pixels() {
 
     // Exactly the hot pixels — the ~half-the-frame sub-zero pixels are not "cold defects" — and
     // so 3 of 4096 pixels: 0.0732%.
-    assert_eq!(defect_map.hot().indices, [100, 2000, 4000]);
+    assert_eq!(defect_map.hot().idxs, [100, 2000, 4000]);
     let summary = defect_map.summary(&CfaType::Mono);
     assert_eq!(summary.defective_pixels, 3);
     assert_eq!(summary.percentage(), 100.0 * 3.0 / 4096.0);
@@ -597,9 +595,9 @@ fn cold_pixels_detected_from_flat() {
 
     // The dead pixel (0.0) reads below half its uniform 0.4 neighbourhood (0.5·0.4 = 0.2);
     // every normal pixel reads its full 0.4. A flat yields no hot pixels.
-    assert_eq!(defect_map.cold_indices(), [5]);
+    assert_eq!(defect_map.cold_idxs(), [5]);
     assert_eq!(
-        defect_map.hot().indices,
+        defect_map.hot().idxs,
         [0usize; 0],
         "a flat yields no hot pixels"
     );
@@ -629,7 +627,7 @@ fn cold_detection_survives_vignetting_gradient() {
         .collect();
     for y in 6..10 {
         for x in 2..6 {
-            pixels[size.index_of(Vec2us::new(x, y))] *= 0.65;
+            pixels[size.idx_of(Vec2us::new(x, y))] *= 0.65;
         }
     }
     let dead = 8 * size.width + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
@@ -641,9 +639,9 @@ fn cold_detection_survives_vignetting_gradient() {
         .unwrap();
 
     // Only the dead pixel: not the dim edge (vignetting), not the bright one, not the dust shadow.
-    assert_eq!(defect_map.cold_indices(), [dead]);
+    assert_eq!(defect_map.cold_idxs(), [dead]);
     assert_eq!(
-        defect_map.hot().indices,
+        defect_map.hot().idxs,
         [0usize; 0],
         "a flat yields no hot pixels"
     );
@@ -672,8 +670,8 @@ fn detect_hot_and_cold_combine() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
 
-    assert_eq!(defect_map.hot().indices, [0]);
-    assert_eq!(defect_map.cold_indices(), [5]);
+    assert_eq!(defect_map.hot().idxs, [0]);
+    assert_eq!(defect_map.cold_idxs(), [5]);
     assert_eq!(defect_map.summary(&CfaType::Mono).defective_pixels, 2);
 }
 
@@ -698,7 +696,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
     assert_eq!(
         map.hot(),
         &HotPixels {
-            indices: vec![0],
+            idxs: vec![0],
             excess: vec![0.75],
         }
     );
@@ -707,7 +705,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
     let mut ramp: Vec<f32> = (0..size.pixel_count())
         .map(|i| 0.25 + (i % size.width) as f32 / 1024.0)
         .collect();
-    let hot = size.index_of(Vec2us::new(16, 16));
+    let hot = size.idx_of(Vec2us::new(16, 16));
     ramp[hot] = 1.0;
     let dark = make_cfa(size, ramp, CfaType::Mono);
     let map = DefectMap::new(dark.size())
@@ -720,7 +718,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
     assert_eq!(
         map.hot(),
         &HotPixels {
-            indices: vec![hot],
+            idxs: vec![hot],
             excess: vec![0.734_375],
         }
     );
@@ -747,9 +745,9 @@ fn xtrans_cold_pixel_detected() {
 
     // Only the dead pixel: one dead neighbour cannot drag a normal pixel's 24-sample median below
     // half of it.
-    assert_eq!(defect_map.cold_indices(), [dead]);
+    assert_eq!(defect_map.cold_idxs(), [dead]);
     assert_eq!(
-        defect_map.hot().indices,
+        defect_map.hot().idxs,
         [0usize; 0],
         "detect_cold sets no hot pixels"
     );
@@ -832,8 +830,8 @@ fn a_dense_warm_population_is_flagged() {
     let size = Size2us::new(64, 64);
     let mut rng = TestRng::new(31);
     let pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let hot = if index % 10 == 0 { 0.02 } else { 0.0 };
+        .map(|idx| {
+            let hot = if idx % 10 == 0 { 0.02 } else { 0.0 };
             0.01 + 0.001 * rng.next_gaussian_f32() + hot
         })
         .collect();
@@ -846,7 +844,7 @@ fn a_dense_warm_population_is_flagged() {
         )
         .unwrap();
     let expected: Vec<usize> = (0..size.pixel_count()).step_by(10).collect();
-    assert_eq!(map.hot().indices, expected.as_slice());
+    assert_eq!(map.hot().idxs, expected.as_slice());
 }
 
 /// The ring's plane reads a planar dark exactly where a pixel sits, in the interior and in a corner
@@ -860,7 +858,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
     let size = Size2us::new(40, 40);
     let level = |x: usize, y: usize| 0.1 + 0.001 * x as f32 + 0.002 * y as f32;
     let mut pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| level(index % size.width, index / size.width))
+        .map(|idx| level(idx % size.width, idx / size.width))
         .collect();
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
     let mut ring = RingReference::default();
@@ -896,7 +894,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
 }
 
 /// Hot pixels with an excess of 1 each, for tests about indices alone.
-fn hot(indices: Vec<usize>) -> HotPixels {
-    let excess = vec![1.0; indices.len()];
-    HotPixels { indices, excess }
+fn hot(idxs: Vec<usize>) -> HotPixels {
+    let excess = vec![1.0; idxs.len()];
+    HotPixels { idxs, excess }
 }

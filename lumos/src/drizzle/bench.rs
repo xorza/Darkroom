@@ -49,9 +49,9 @@ fn stage(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("default", set), |b| {
         let frames: &Vec<DrizzleFrame<LinearImage>> = frames.get_or_init(|| {
             (0..STACKED_LIGHTS)
-                .map(|index| {
-                    let warp = WarpTransform::new(scene::dither(SIDE, index));
-                    DrizzleFrame::new(field.exposure(SIDE, index).image, warp)
+                .map(|idx| {
+                    let warp = WarpTransform::new(scene::dither(SIDE, idx));
+                    DrizzleFrame::new(field.exposure(SIDE, idx).image, warp)
                 })
                 .collect()
         });
@@ -93,8 +93,8 @@ fn end_to_end(c: &mut Criterion) {
                     .paths
                     .iter()
                     .enumerate()
-                    .map(|(index, path)| {
-                        DrizzleFrame::new(path, WarpTransform::new(scene::dither(FRAME, index)))
+                    .map(|(idx, path)| {
+                        DrizzleFrame::new(path, WarpTransform::new(scene::dither(FRAME, idx)))
                     })
                     .collect()
             },

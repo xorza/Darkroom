@@ -17,7 +17,7 @@ use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::linear_image::LinearImage;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::io::raw::raw_files;
 use crate::{CalibrationMasters, CalibrationSet, NeutralizeBackground, Scnr, Stretch};
@@ -59,14 +59,14 @@ pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
 /// A RAW light, demosaiced without calibration: registration and detection need its stars, not
 /// its noise floor.
 pub(crate) fn raw_light(path: &Path) -> LinearImage {
-    raw::load_cfa(path, &LoadContext::default())
+    raw::load_cfa(path, &LoadCtx::default())
         .expect("load a RAW light")
         .demosaic_measured(MarkesteijnPasses::One)
 }
 
 /// The bundled stacked light master, linear — a real stack, so its bright star cores exceed 1.0.
 pub(crate) fn linear_master() -> LinearImage {
-    LoadContext::default()
+    LoadCtx::default()
         .linear(dataset_path("stacked_light.tiff"))
         .expect("load stacked_light.tiff")
 }

@@ -4,14 +4,14 @@ use imaginarium::Buffer2;
 use crate::image::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
+use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{
     Filter, TapAxis, TapRange, WarpKernel, largest_singular_value,
 };
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 use crate::simd::{Isa, Kernel};
 
 const FILTERS: [Filter; 5] = [
@@ -35,7 +35,7 @@ impl Kernel for Axis<'_> {
 
     #[inline(always)]
     fn run<S: Isa>(self, isa: S) {
-        let at = AxisPosition {
+        let at = AxisPos {
             cell: 10,
             frac: self.frac,
         };
@@ -74,7 +74,7 @@ fn vector_weights_are_the_scalar_definitions() {
     for filter in FILTERS {
         for stretch in [1.0, 1.0f32.next_up(), 1.000_05, 1.37, 2.5] {
             let kernel = WarpKernel::new(filter, stretch);
-            for tier in Tier::supported() {
+            for tier in IsaTier::supported() {
                 for &frac in &fracs {
                     tier.run(Axis {
                         kernel,
@@ -157,7 +157,7 @@ fn a_window_holds_the_taps_within_the_stretched_radius() {
         .lut()
         .at((3.0 - frac) * (LANCZOS_LUT_RESOLUTION as f32 / 1.000_05));
     assert!(unmasked > 0.0, "premise: the kernel at tap 3 is {unmasked}");
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         let mut axis = TapAxis::default();
         tier.run(Axis {
             kernel: banded,
@@ -255,9 +255,9 @@ fn nearest_rounds_a_half_up() {
         (0.5, 0.0, 20.0),
         (1.45, -0.45, 20.0),
     ] {
-        let position = SourcePosition::within(DVec2::new(x, y), size).unwrap();
+        let pos = SourcePos::within(DVec2::new(x, y), size).unwrap();
         assert_eq!(
-            input.pixels()[position.nearest_index(size)],
+            input.pixels()[pos.nearest_idx(size)],
             expected,
             "({x}, {y})"
         );

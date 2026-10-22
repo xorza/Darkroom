@@ -22,8 +22,8 @@ pub enum CfaPattern {
 
 impl MosaicPattern for CfaPattern {
     #[inline(always)]
-    fn color_at(&self, position: Vec2us) -> CfaColor {
-        self.color_at(position)
+    fn color_at(&self, pos: Vec2us) -> CfaColor {
+        self.color_at(pos)
     }
 }
 
@@ -45,7 +45,7 @@ impl CfaPattern {
     ///
     /// `"TRUE"` is not a phase. Some writers put a boolean there — "yes, this frame is mosaiced" —
     /// and say nothing about which of the four phases it carries, so it is `None` like any other
-    /// value; the FITS loader then takes the phase from `FitsLoadOptions::unstated_bayer_pattern`
+    /// value; the FITS loader then takes the phase from `FitsLoadConfig::unstated_bayer_pattern`
     /// or refuses the frame rather than guess.
     pub fn from_bayerpat(s: &str) -> Option<Self> {
         let s = s.trim();

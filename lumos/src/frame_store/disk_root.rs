@@ -20,17 +20,16 @@ pub(crate) struct DiskRoot {
 impl DiskRoot {
     /// `path`, created with its parents, refused on a memory-backed file system.
     pub(crate) fn create(path: &Path) -> Result<Self, FrameStoreError> {
-        fs::create_dir_all(path).map_err(|source| FrameStoreError::CreateDirectory {
+        fs::create_dir_all(path).map_err(|source| FrameStoreError::CreateDir {
             path: path.to_path_buf(),
             source,
         })?;
-        let resolved =
-            fs::canonicalize(path).map_err(|source| FrameStoreError::CreateDirectory {
-                path: path.to_path_buf(),
-                source,
-            })?;
+        let resolved = fs::canonicalize(path).map_err(|source| FrameStoreError::CreateDir {
+            path: path.to_path_buf(),
+            source,
+        })?;
         if let Some(filesystem) = FileSystem::memory_backed(&resolved) {
-            return Err(FrameStoreError::MemoryBackedDirectory {
+            return Err(FrameStoreError::MemoryBackedDir {
                 path: path.to_path_buf(),
                 filesystem,
             });

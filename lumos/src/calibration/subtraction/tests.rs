@@ -95,8 +95,8 @@ fn each_master_maps_into_the_frame_as_it_stands_when_it_applies() {
 #[test]
 fn a_frame_flags_its_saturation_and_a_master_keeps_its_own() {
     let mut bias = frame([0.125; 4], 0.0);
-    bias.set_flags(PixelFlags::from_fn(SIZE, |index| {
-        if index == 1 {
+    bias.set_flags(PixelFlags::from_fn(SIZE, |idx| {
+        if idx == 1 {
             QualityFlags::NO_DATA
         } else {
             QualityFlags::default()

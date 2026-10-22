@@ -13,7 +13,7 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_shape::LightShape;
 use crate::pipeline::mosaic_preparation::MosaicPreparation;
@@ -71,11 +71,9 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let cosmic_ray = match self.preparation {
             Preparation::Calibrate(MosaicPreparation { cosmic_ray, .. }) => cosmic_ray,
             Preparation::Linear => {
-                let peek = match LinearDecoder::peek(first, &run.context) {
+                let peek = match LinearDecoder::peek(first, &run.ctx) {
                     Some(info) => FramePeek::from(info),
-                    None => {
-                        FramePeek::of_decoded(&self.decode::<LinearDecoder>(first, &run.context)?)
-                    }
+                    None => FramePeek::of_decoded(&self.decode::<LinearDecoder>(first, &run.ctx)?),
                 };
                 return Ok(LightShape {
                     kept_writes: self.kept_writes::<LinearDecoder>(peek.resident_bytes(), run),
@@ -83,7 +81,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 });
             }
         };
-        let info = run.context.cfa_info(first)?;
+        let info = run.ctx.cfa_info(first)?;
         let size = info.dimensions.size();
         // Refused here, before any light is decoded, when the pass cannot run on this sensor.
         let cosmic_ray = match cosmic_ray {
@@ -101,7 +99,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         let prepared = info
             .demosaiced(
                 info.decoded().beside(cosmic_ray),
-                run.context.xtrans_passes,
+                run.ctx.xtrans_passes,
                 workers,
             )
             .beside(FrameStats::heap_bytes(dimensions, None, workers));
@@ -114,34 +112,29 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         })
     }
 
-    /// Load light `index` and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
+    /// Load light `idx` and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
     /// rays when asked, and demosaiced; a linear image as it decodes.
     pub(super) fn prepare(
         &self,
-        index: usize,
-        context: &LoadContext,
+        idx: usize,
+        ctx: &LoadCtx,
     ) -> Result<LinearImage, AlignStackError> {
-        let path = self.paths[index].as_ref();
+        let path = self.paths[idx].as_ref();
         let Preparation::Calibrate(mosaic) = &self.preparation else {
-            return self.decode::<LinearDecoder>(path, context);
+            return self.decode::<LinearDecoder>(path, ctx);
         };
-        mosaic.prepare(self.decode::<CfaDecoder>(path, context)?, path, context)
+        mosaic.prepare(self.decode::<CfaDecoder>(path, ctx)?, path, ctx)
     }
 
-    /// `path` decoded by `D` under `context` through the storage: a RAW light as its uncalibrated
+    /// `path` decoded by `D` under `ctx` through the storage: a RAW light as its uncalibrated
     /// mosaic, so a later run with other masters reuses it too.
-    fn decode<D: Decoder>(
-        &self,
-        path: &Path,
-        context: &LoadContext,
-    ) -> Result<D::Image, AlignStackError> {
-        Ok(self.storage.decode::<D>(path, context)?)
+    fn decode<D: Decoder>(&self, path: &Path, ctx: &LoadCtx) -> Result<D::Image, AlignStackError> {
+        Ok(self.storage.decode::<D>(path, ctx)?)
     }
 
     /// The bytes the lights decoded by `D` add to the decode cache of `run`, `frame_bytes` each it
     /// does not hold yet.
     fn kept_writes<D: Decoder>(&self, frame_bytes: usize, run: &IngestRun) -> u64 {
-        (self.storage.uncached::<D>(self.paths, &run.context) as u64)
-            .saturating_mul(frame_bytes as u64)
+        (self.storage.uncached::<D>(self.paths, &run.ctx) as u64).saturating_mul(frame_bytes as u64)
     }
 }

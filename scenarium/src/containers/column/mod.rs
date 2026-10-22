@@ -237,11 +237,11 @@ impl<I, T> Column<I, T> {
 }
 
 impl<I: Idx, T> Column<I, T> {
-    /// The entry at `index`, or `None` past the column's length — for callers
+    /// The entry at `idx`, or `None` past the column's length — for callers
     /// probing a column that may not span the program (an empty pre-run
     /// column, a validation bounds check). In-range access uses indexing.
-    pub(crate) fn get(&self, index: I) -> Option<&T> {
-        self.values.get(index.idx())
+    pub(crate) fn get(&self, idx: I) -> Option<&T> {
+        self.values.get(idx.idx())
     }
 
     /// The run `span` names, or `None` when it reaches past the column — the
@@ -288,14 +288,14 @@ impl<I: Idx, T> Column<I, T> {
 impl<I: Idx, T> Index<I> for Column<I, T> {
     type Output = T;
 
-    fn index(&self, index: I) -> &T {
-        &self.values[index.idx()]
+    fn index(&self, idx: I) -> &T {
+        &self.values[idx.idx()]
     }
 }
 
 impl<I: Idx, T> IndexMut<I> for Column<I, T> {
-    fn index_mut(&mut self, index: I) -> &mut T {
-        &mut self.values[index.idx()]
+    fn index_mut(&mut self, idx: I) -> &mut T {
+        &mut self.values[idx.idx()]
     }
 }
 

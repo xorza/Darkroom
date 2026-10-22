@@ -2,7 +2,7 @@
 //!
 //! How to centroid, how to take a local background, and the electrons a unit of the samples holds.
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
 /// Method for computing sub-pixel centroids.
@@ -36,7 +36,7 @@ impl CentroidMethod {
     pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         if let Self::MoffatFit { beta } = self {
             // At β ≤ 1 the profile's flux diverges: no PSF has it.
-            ConfigValue::new("Moffat beta", beta).finite_and("finite and in (1, 10]", |value| {
+            ConfigField::new("Moffat beta", beta).finite_and("finite and in (1, 10]", |value| {
                 value > 1.0 && value <= 10.0
             })?;
         }
@@ -86,7 +86,7 @@ impl MeasurementConfig {
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         self.centroid_method.validate()?;
         if let Some(electrons) = self.electrons_per_unit {
-            ConfigValue::new("electrons_per_unit", electrons)
+            ConfigField::new("electrons_per_unit", electrons)
                 .finite_and("finite and positive", |value| value > 0.0)?;
         }
         Ok(())

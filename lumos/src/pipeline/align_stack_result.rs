@@ -38,7 +38,7 @@ impl AlignStackResult {
             .iter()
             .enumerate()
             .filter(|(_, light)| !light.registration.is_stacked())
-            .map(|(index, _)| index)
+            .map(|(idx, _)| idx)
             .collect()
     }
 }

@@ -106,13 +106,13 @@ impl LocalMaximaParams {
             let crowded = (pos.y.saturating_sub(reach)..=pos.y + reach).any(|y| {
                 (pos.x.saturating_sub(reach)..=pos.x + reach).any(|x| {
                     let near = Vec2us::new(x, y);
-                    pixels.index_of(near).is_some_and(|index| occupied[index])
+                    pixels.idx_of(near).is_some_and(|idx| occupied[idx])
                         && deblend::dist_sq(pos, near) < min_sep_sq
                 })
             });
             if !crowded {
                 occupied[pixels
-                    .index_of(pos)
+                    .idx_of(pos)
                     .expect("a maximum is a pixel of the component")] = true;
                 peaks.push(candidate);
             }

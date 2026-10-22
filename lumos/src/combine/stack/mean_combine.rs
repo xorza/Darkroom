@@ -88,20 +88,18 @@ impl MeanCombine {
 
             scratch.sorted.fill(samples.values);
             let window = rejection.surviving_window(scratch, samples.noise, min_survivors);
-            let positions = &scratch.sorted.positions()[window.clone()];
+            let poss = &scratch.sorted.poss()[window.clone()];
             scratch.weights.clear();
-            scratch.weights.extend(
-                positions
-                    .iter()
-                    .map(|&position| samples.weights[position as usize]),
-            );
+            scratch
+                .weights
+                .extend(poss.iter().map(|&pos| samples.weights[pos as usize]));
             let value = sum::weighted_mean_f32(&scratch.sorted.values()[window], &scratch.weights);
             match quality {
                 SampleQuality::Measured => {
                     let mut sample = CombinedSample::from_survivors(
                         value,
                         &samples,
-                        positions.iter().map(|&position| position as usize),
+                        poss.iter().map(|&pos| pos as usize),
                     );
                     // Survivors of a band scatter as a Gaussian truncated to it.
                     sample.dispersion *= dispersion_correction;

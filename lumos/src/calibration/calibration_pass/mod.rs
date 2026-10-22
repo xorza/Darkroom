@@ -21,10 +21,10 @@ pub(crate) struct Subtracted<'a> {
 }
 
 impl Subtracted<'_> {
-    /// What the master takes from the frame at `index`.
+    /// What the master takes from the frame at `idx`.
     #[inline(always)]
-    pub(crate) fn at(&self, index: usize) -> f64 {
-        f64::from(self.samples[index]) * (self.map.gain * self.scale) + self.map.offset
+    pub(crate) fn at(&self, idx: usize) -> f64 {
+        f64::from(self.samples[idx]) * (self.map.gain * self.scale) + self.map.offset
     }
 }
 
@@ -93,14 +93,14 @@ impl CalibrationPass<'_> {
                 .map(|(y, (row, row_flags))| {
                     let mut counts = FlagCounts::default();
                     for (x, (sample, byte)) in row.iter_mut().zip(row_flags).enumerate() {
-                        let index = y * width + x;
+                        let idx = y * width + x;
                         if saturation.is_some_and(|level| *sample >= level) {
                             *byte |= QualityFlags::SATURATED.byte();
                         }
                         if let Some(imposed) = imposed {
-                            *byte |= imposed[index];
+                            *byte |= imposed[idx];
                         }
-                        *sample = self.calibrated(*sample, index);
+                        *sample = self.calibrated(*sample, idx);
                         counts.tally(QualityFlags::from_byte(*byte));
                     }
                     counts
@@ -122,15 +122,15 @@ impl CalibrationPass<'_> {
         }
     }
 
-    /// The calibrated value of `sample`, the frame's at `index`, rounded once.
+    /// The calibrated value of `sample`, the frame's at `idx`, rounded once.
     #[inline(always)]
-    fn calibrated(&self, sample: f32, index: usize) -> f32 {
+    fn calibrated(&self, sample: f32, idx: usize) -> f32 {
         let mut value = f64::from(sample);
         for term in &self.subtracted {
-            value -= term.at(index);
+            value -= term.at(idx);
         }
         if let Some(flat) = self.flat {
-            value /= f64::from(flat[index]);
+            value /= f64::from(flat[idx]);
         }
         value as f32
     }

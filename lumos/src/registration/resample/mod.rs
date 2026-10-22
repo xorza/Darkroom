@@ -18,9 +18,9 @@ use crate::registration::resample::flagged_sources::FlagScratch;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, SampleRule, WindowAxes,
 };
-use crate::registration::resample::row_positions::RowPositions;
+use crate::registration::resample::row_poss::RowPoss;
 use crate::registration::resample::source_image::SourceImage;
-use crate::registration::resample::warp_params::WarpParams;
+use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
 
@@ -28,14 +28,14 @@ mod flagged_sources;
 mod frame_sampler;
 mod interior_window;
 mod ringing_clamp;
-pub(super) mod row_positions;
+pub(super) mod row_poss;
 pub(crate) mod source_image;
-mod source_position;
+mod source_pos;
 mod tap_window;
+pub(crate) mod warp_config;
 mod warp_kernel;
-pub(crate) mod warp_params;
 
-/// Output of [`WarpParams::warp`](crate::WarpParams::warp): the aligned image plus per-pixel
+/// Output of [`WarpConfig::warp`](crate::WarpConfig::warp): the aligned image plus per-pixel
 /// support and confidence maps.
 ///
 /// `coverage[p] ∈ [0, 1]` is the share of the interpolation kernel's magnitude that lands on
@@ -89,7 +89,7 @@ impl WarpScratch {
 /// is sampling.
 #[derive(Debug, Default)]
 pub(crate) struct RowScratch {
-    positions: RowPositions,
+    poss: RowPoss,
     axes: WindowAxes,
 }
 
@@ -127,7 +127,7 @@ impl Scratch for WarpResult {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Warp<'a> {
     pub(crate) transform: &'a WarpTransform,
-    pub(crate) params: WarpParams,
+    pub(crate) params: WarpConfig,
 }
 
 impl WarpResult {
@@ -195,13 +195,13 @@ impl WarpResult {
                             channel_rows: &mut [&mut [f32]],
                             coverage_row: &mut [f32],
                             confidence_row: &mut [f32]| {
-                scratch.positions.fill(y, warp_transform, size);
-                let positions = scratch.positions.positions();
+                scratch.poss.fill(y, warp_transform, size);
+                let poss = scratch.poss.poss();
                 let flags = flag_rows.map(|rows| unsafe {
                     slice::from_raw_parts_mut(rows.get().add(y * width), width)
                 });
                 sampler.sample_row(
-                    positions,
+                    poss,
                     &mut scratch.axes,
                     RowOutput {
                         channels: channel_rows,

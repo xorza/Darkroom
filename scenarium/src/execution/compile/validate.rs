@@ -95,14 +95,14 @@ pub(super) fn validate(
                 }
                 // The executor plans no read for a set-aside input, which holds
                 // only while the target cannot be wired.
-                if matches!(e_input.binding, ExecutionBinding::Bind(_)) {
+                if matches!(e_input.binding, ExecutionBinding::Wire(_)) {
                     return Err(CompiledGraphValidationError::OverriddenBind {
                         node_id: *node_id,
                         port_idx,
                     });
                 }
             }
-            if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
+            if let ExecutionBinding::Wire(e_addr) = &e_input.binding {
                 // Unreachable while `Compiler::resolve` mints every address
                 // from a successful placement lookup — kept as the backstop if
                 // that stops holding.

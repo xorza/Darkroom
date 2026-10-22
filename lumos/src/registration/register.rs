@@ -155,26 +155,26 @@ impl<'a> PreparedPair<'a> {
 /// Every star of `catalog` carries what registration reads in a form it can use: a finite position
 /// and FWHM, and a finite, positive position σ. The other measurements are not read.
 fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), RegistrationError> {
-    for (index, star) in stars.iter().enumerate() {
+    for (idx, star) in stars.iter().enumerate() {
         if !star.pos.x.is_finite() || !star.pos.y.is_finite() {
-            return Err(RegistrationError::InvalidStarPosition {
+            return Err(RegistrationError::InvalidStarPos {
                 catalog,
-                index,
-                position: star.pos,
+                idx,
+                pos: star.pos,
             });
         }
         let fields = [
             (StarField::Fwhm, f64::from(star.fwhm), star.fwhm.is_finite()),
             (
-                StarField::PositionSigma,
-                star.position_sigma,
-                star.position_sigma.is_finite() && star.position_sigma > 0.0,
+                StarField::PosSigma,
+                star.pos_sigma,
+                star.pos_sigma.is_finite() && star.pos_sigma > 0.0,
             ),
         ];
         if let Some(&(field, value, _)) = fields.iter().find(|(_, _, valid)| !valid) {
             return Err(RegistrationError::InvalidStarField {
                 catalog,
-                index,
+                idx,
                 field,
                 value,
             });

@@ -49,7 +49,7 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     let Wired {
         producer, consumer, ..
     } = fixture();
-    connection(PortRef::input(consumer, 0), PortRef::input(producer, 0));
+    wire(PortRef::input(consumer, 0), PortRef::input(producer, 0));
 }
 
 /// The snap filter reads the input's type against the output's, whichever end
@@ -90,8 +90,8 @@ fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
 /// undos.
 fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
-    let mut connections = ConnectionUI::default();
-    connections.state.latch(InFlight {
+    let mut wires = WireUi::default();
+    wires.state.latch(InFlight {
         drag: GlyphDrag::new(start),
         mode: DragMode::Floating,
     });
@@ -105,12 +105,12 @@ fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<I
         PrepassCtx::new(fixture.graph_ctx(), CanvasInput::default()),
         &geometry,
     );
-    connections.apply(arena.ui(), ctx, &mut out);
+    wires.apply(arena.ui(), ctx, &mut out);
     assert!(
         out.document().is_empty(),
         "an untouched prepass emits nothing"
     );
-    connections.state.get().copied()
+    wires.state.get().copied()
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     assert!(
         matches!(
             released[..],
-            [GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }]
+            [GraphIntent::SetInput { input, to: Some(Binding::Wire(src)) }]
                 if input == InputPort::new(consumer, 0)
                     && src.node_id == producer
                     && src.port_idx == 0
@@ -193,7 +193,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // still green.
     h.doc_mut()
         .graph
-        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+        .set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
     let back_source = port_row::port_circle_wid(PortRef::output(consumer, 0));
     let back_drop_at = h.port_center(PortRef::input(producer, 0));
     h.advance_past_double_click();

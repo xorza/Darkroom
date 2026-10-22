@@ -61,9 +61,9 @@ impl<'a> Kernel2d<'a> {
         let radius = self.radius() as isize;
         let mut sum = 0.0f32;
         for ky in 0..self.size() {
-            let sy = mirror_index(pos.y as isize + ky as isize - radius, size.height);
+            let sy = mirror_idx(pos.y as isize + ky as isize - radius, size.height);
             for kx in 0..self.size() {
-                let sx = mirror_index(pos.x as isize + kx as isize - radius, size.width);
+                let sx = mirror_idx(pos.x as isize + kx as isize - radius, size.width);
                 sum += input[sy * size.width + sx] * self.at(ky, kx);
             }
         }
@@ -76,12 +76,12 @@ impl<'a> Kernel2d<'a> {
 /// further edge, with period `2(len − 1)`. So a kernel wider than the image is mirrored too, not
 /// clamped to an edge sample. A length of 1 maps every index to 0.
 #[inline]
-pub(super) fn mirror_index(i: isize, len: usize) -> usize {
+pub(super) fn mirror_idx(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
-    if let Ok(index) = usize::try_from(i)
-        && index < len
+    if let Ok(idx) = usize::try_from(i)
+        && idx < len
     {
-        return index;
+        return idx;
     }
     let period = 2 * (len - 1);
     if period == 0 {
@@ -104,7 +104,7 @@ fn convolve_pixel_scalar(input: &[f32], kernel: &[f32], x: usize) -> f32 {
     let radius = radius_of(kernel);
     let mut sum = 0.0f32;
     for (k, &kval) in kernel.iter().enumerate() {
-        let sx = mirror_index(x as isize + k as isize - radius as isize, input.len());
+        let sx = mirror_idx(x as isize + k as isize - radius as isize, input.len());
         sum += input[sx] * kval;
     }
     sum
@@ -198,7 +198,7 @@ impl Kernel for ConvolveColsRow<'_> {
         let radius = radius_of(kernel);
         out_row.fill(0.0);
         for (k, &weight) in kernel.iter().enumerate() {
-            let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+            let sy = mirror_idx(y as isize + k as isize - radius as isize, size.height);
             WeightedTap {
                 input: input.row(sy),
                 weight,
@@ -249,7 +249,7 @@ impl Kernel for Convolve2dRow<'_> {
         }
         inside.fill(0.0);
         for ky in 0..kernel.size() {
-            let sy = mirror_index(y as isize + ky as isize - radius as isize, size.height);
+            let sy = mirror_idx(y as isize + ky as isize - radius as isize, size.height);
             let row = input.row(sy);
             for kx in 0..kernel.size() {
                 WeightedTap {
@@ -293,7 +293,7 @@ mod internals {
     #[cfg(test)]
     use crate::math::vec2us::Vec2us;
     #[cfg(test)]
-    use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_index};
+    use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_idx};
     use crate::star_detection::convolution::simd::{ConvolveRow, convolve_pixel_scalar};
 
     impl ConvolveRow<'_> {
@@ -313,7 +313,7 @@ mod internals {
             for (x, out) in self.out_row.iter_mut().enumerate() {
                 let mut sum = 0.0f32;
                 for (k, &kval) in self.kernel.iter().enumerate() {
-                    let sy = mirror_index(
+                    let sy = mirror_idx(
                         self.y as isize + k as isize - radius as isize,
                         self.input.height(),
                     );

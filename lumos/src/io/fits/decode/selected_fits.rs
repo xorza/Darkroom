@@ -20,13 +20,13 @@ use crate::io::fits::decode::pixels::HduDecode;
 use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::fits::fits_load_options::{FitsChecksumPolicy, FitsCubeInterpretation};
+use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::fits::flags_extension::FlagsExtension;
 use crate::io::fits::gain_extension::GainExtension;
 use crate::io::fits::lumos_extension::DescribedImage;
 use crate::io::fits::{cfa, linear, metadata};
 use crate::io::frame_info::FrameInfo;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 
 /// One image HDU of an open FITS file: the reader, the HDU, its decode plan, the mosaic its header
 /// declares and the extensions beside it, each resolved once.
@@ -65,13 +65,10 @@ pub(crate) enum Checksum {
 }
 
 /// The FITS file at `path`, open for reading.
-pub(crate) fn open(
-    path: &Path,
-    context: &LoadContext,
-) -> Result<StreamReader<File>, FitsLoadError> {
-    Cancelled::check(&context.cancel)?;
+pub(crate) fn open(path: &Path, ctx: &LoadCtx) -> Result<StreamReader<File>, FitsLoadError> {
+    Cancelled::check(&ctx.cancel)?;
     let reader = FitsReader::open(File::open(path)?)?;
-    Cancelled::check(&context.cancel)?;
+    Cancelled::check(&ctx.cancel)?;
     Ok(reader)
 }
 
@@ -80,43 +77,43 @@ impl<'r> SelectedFits<'r> {
     /// container of another format is refused first.
     pub(super) fn select(
         reader: &'r mut StreamReader<File>,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         cfa::validate_container_format(reader.hdus().first().map(|hdu| &hdu.header))?;
-        let selected = selection::select_image_hdu(reader.hdus(), &context.fits.hdu)?;
-        Self::of(reader, selected, context.fits.cube, context)
+        let selected = selection::select_image_hdu(reader.hdus(), &ctx.fits.hdu)?;
+        Self::of(reader, selected, ctx.fits.cube, ctx)
     }
 
-    /// The Lumos CFA image at HDU `index` of `reader`, a calibration bundle; an HDU that is not
+    /// The Lumos CFA image at HDU `idx` of `reader`, a calibration bundle; an HDU that is not
     /// one is refused.
     pub(crate) fn lumos_cfa(
         reader: &'r mut StreamReader<File>,
-        index: usize,
-        context: &LoadContext,
+        idx: usize,
+        ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
-        if !cfa::validate_image_header(&reader.hdus()[index].header)? {
-            return Err(FitsRefusal::NotLumosCfa { hdu: index }.into());
+        if !cfa::validate_image_header(&reader.hdus()[idx].header)? {
+            return Err(FitsRefusal::NotLumosCfa { hdu: idx }.into());
         }
-        let selected = selection::selected_hdu(reader.hdus(), index)?;
-        Self::of(reader, selected, FitsCubeInterpretation::Reject, context)
+        let selected = selection::selected_hdu(reader.hdus(), idx)?;
+        Self::of(reader, selected, FitsCubeInterpretation::Reject, ctx)
     }
 
     /// The image at the primary HDU of `reader`, whatever else the file holds: a stack product's.
     pub(crate) fn primary(
         reader: &'r mut StreamReader<File>,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         let selected = selection::selected_hdu(reader.hdus(), 0)?;
-        Self::of(reader, selected, context.fits.cube, context)
+        Self::of(reader, selected, ctx.fits.cube, ctx)
     }
 
     fn of(
         reader: &'r mut StreamReader<File>,
         selected: FitsHduProvenance,
         cube: FitsCubeInterpretation,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
-        let hdu = &reader.hdus()[selected.index];
+        let hdu = &reader.hdus()[selected.idx];
         let lumos_cfa = cfa::validate_image_header(&hdu.header)?;
         let lumos_linear = linear::validate_image_header(&hdu.header)?;
         // A Lumos linear image states what its planes are: a cube of three is RGB.
@@ -125,17 +122,17 @@ impl<'r> SelectedFits<'r> {
         } else {
             cube
         };
-        let limit = context.memory_limit_bytes;
-        let plan = FitsHduDescription::from_hdu(hdu, selected.index)?.plan(
+        let limit = ctx.memory_limit_bytes;
+        let plan = FitsHduDescription::from_hdu(hdu, selected.idx)?.plan(
             cube,
-            context.fits.float_scale,
+            ctx.fits.float_scale,
             limit,
         )?;
         let cfa_type = if plan.dimensions.is_grayscale() {
             metadata::read_cfa(
                 &hdu.header,
                 plan.dimensions.height(),
-                context.fits.unstated_bayer_pattern,
+                ctx.fits.unstated_bayer_pattern,
             )?
         } else {
             None
@@ -147,11 +144,11 @@ impl<'r> SelectedFits<'r> {
             scale: Some(plan.sample_scale.divisor),
             weight_kind: None,
         };
-        let flags_hdu = FlagsExtension::locate(reader.hdus(), selected.index, &described)?;
+        let flags_hdu = FlagsExtension::locate(reader.hdus(), selected.idx, &described)?;
         if flags_hdu.is_some() {
             plan.admit_flags_extension(limit)?;
         }
-        let gain_hdu = GainExtension::locate(reader.hdus(), selected.index, &described)?;
+        let gain_hdu = GainExtension::locate(reader.hdus(), selected.idx, &described)?;
         let mut extension_bytes = ArrayVec::new();
         if flags_hdu.is_some() {
             extension_bytes.push(plan.dimensions.pixel_count() as u64);
@@ -216,47 +213,47 @@ impl<'r> SelectedFits<'r> {
     }
 
     fn header(&self) -> &Header {
-        &self.reader.hdus()[self.selected.index].header
+        &self.reader.hdus()[self.selected.idx].header
     }
 
     /// Decode the selected image, its checksum settled as `checksum` says, then its flags and gain
     /// extensions, whose checksums are always required.
     pub(crate) fn read(
         self,
-        context: &LoadContext,
+        ctx: &LoadCtx,
         checksum: Checksum,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let size = self.plan.dimensions.size();
-        let index = self.selected.index;
+        let idx = self.selected.idx;
         let header = self.header().clone();
         let decode = HduDecode {
             hdu: self.selected,
             header: &header,
             plan: &self.plan,
             cfa_type: self.cfa_type,
-            context,
+            ctx,
         };
         let mut decoded = match checksum {
             Checksum::Judged => {
                 let policy = if self.lumos_written {
                     FitsChecksumPolicy::RequireValid
                 } else {
-                    context.fits.checksum
+                    ctx.fits.checksum
                 };
                 decode.read_stream(self.reader, policy)?
             }
             Checksum::Verified(verified) => {
-                decode.read(&mut HduSections::new(self.reader, index), |_| Ok(verified))?
+                decode.read(&mut HduSections::new(self.reader, idx), |_| Ok(verified))?
             }
         };
         if let Some(flags_hdu) = self.flags_hdu {
-            Cancelled::check(&context.cancel)?;
+            Cancelled::check(&ctx.cancel)?;
             let stored = read_extension(self.reader, flags_hdu, &[0..size.width, 0..size.height])?;
             decoded.flags =
                 FlagsExtension::join(FlagsExtension::plane(stored, size), decoded.flags.as_ref())?;
         }
         if let Some(gain_hdu) = self.gain_hdu {
-            Cancelled::check(&context.cancel)?;
+            Cancelled::check(&ctx.cancel)?;
             let shape: Vec<Range<usize>> = self.reader.hdus()[gain_hdu]
                 .image()?
                 .shape
@@ -270,18 +267,18 @@ impl<'r> SelectedFits<'r> {
     }
 }
 
-/// The samples of the extension at HDU `index` of `reader` — flags or flat gain — over
+/// The samples of the extension at HDU `idx` of `reader` — flags or flat gain — over
 /// `section`, its whole shape, summed as they are read, and refused unless its checksum is valid.
 pub(crate) fn read_extension(
     reader: &mut StreamReader<File>,
-    index: usize,
+    idx: usize,
     section: &[Range<usize>],
 ) -> Result<FitsData, FitsLoadError> {
-    let mut sum = reader.begin_data_checksum(index)?;
+    let mut sum = reader.begin_data_checksum(idx)?;
     let stored = reader
-        .read_image_section_summed(index, section, &mut sum)?
+        .read_image_section_summed(idx, section, &mut sum)?
         .into_samples();
     let report = reader.finish_data_checksum(sum)?;
-    FitsChecksumPolicy::RequireValid.judge(report, index)?;
+    FitsChecksumPolicy::RequireValid.judge(report, idx)?;
     Ok(stored)
 }

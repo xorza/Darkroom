@@ -50,7 +50,7 @@ impl RingFrame<()> {
     pub(crate) fn of(data: &Buffer2<f32>) -> RingFrame<impl Fn(usize) -> f64 + Copy + '_> {
         RingFrame {
             size: Size2us::from(data),
-            value: |index: usize| f64::from(data[index]),
+            value: |idx: usize| f64::from(data[idx]),
         }
     }
 }
@@ -100,7 +100,7 @@ impl RingReference {
                     self.samples.push(RingSample {
                         dx: dx as f64,
                         dy: dy as f64,
-                        value: value(size.index_of(at)),
+                        value: value(size.idx_of(at)),
                     });
                 }
             }

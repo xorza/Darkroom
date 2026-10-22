@@ -368,8 +368,8 @@ fn structure_filling_the_frame_survives() {
     let size = Size2us::new(128, 128);
     let mut rng = TestRng::new(31);
     let pixels: Vec<f32> = (0..size.pixel_count())
-        .map(|index| {
-            let (x, y) = ((index % 128) as f32, (index / 128) as f32);
+        .map(|idx| {
+            let (x, y) = ((idx % 128) as f32, (idx / 128) as f32);
             let phase = core::f32::consts::TAU / 32.0;
             0.5 + 0.05 * (phase * x).sin() * (phase * y).sin() + 0.001 * rng.next_gaussian_f32()
         })

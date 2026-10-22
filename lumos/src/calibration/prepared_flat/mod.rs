@@ -56,9 +56,9 @@ impl PreparedFlat {
         let gain = Arc::new(FlatGain::of_divisor(
             divisor.data(),
             &divisor.cfa_type(),
-            |index| {
-                values[index] <= MIN_NORMALIZED_FLAT
-                    || flags.is_some_and(|flags| flags.is_flagged(index))
+            |idx| {
+                values[idx] <= MIN_NORMALIZED_FLAT
+                    || flags.is_some_and(|flags| flags.is_flagged(idx))
             },
         ));
         Self {
@@ -76,9 +76,9 @@ impl PreparedFlat {
         self.floored
     }
 
-    /// Whether the divisor sits at its floor at `index`.
-    pub(super) fn is_floored(&self, index: usize) -> bool {
-        self.divisor.data().pixels()[index] <= MIN_NORMALIZED_FLAT
+    /// Whether the divisor sits at its floor at `idx`.
+    pub(super) fn is_floored(&self, idx: usize) -> bool {
+        self.divisor.data().pixels()[idx] <= MIN_NORMALIZED_FLAT
     }
 
     /// Record in `image`, divided by this flat, that it lost the flat, and the gain that scaled its
@@ -153,7 +153,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
                 color: if cfa_type == CfaType::Mono {
                     None
                 } else {
-                    Some(CfaColor::from_index(color).expect("a mosaic has three colors"))
+                    Some(CfaColor::from_idx(color).expect("a mosaic has three colors"))
                 },
             });
         }

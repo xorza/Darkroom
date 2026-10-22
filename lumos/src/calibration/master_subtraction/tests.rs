@@ -78,7 +78,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     assert!(matches!(
         unscalable.apply(3, &mut frame(0.5, 2.0)),
         Err(SubtractionError::SubtractorConditions {
-            index: 3,
+            idx: 3,
             source: DarkMismatch::Exposure {
                 frame: 2.0,
                 dark: 1.0
@@ -101,7 +101,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     assert!(matches!(
         error,
         SubtractionError::SubtractedTwice {
-            index: 3,
+            idx: 3,
             subtractor: MasterRole::Bias
         }
     ));
@@ -122,7 +122,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     assert!(matches!(
         subtraction.apply(4, &mut mosaic),
         Err(SubtractionError::SubtractorPattern {
-            index: 4,
+            idx: 4,
             frame,
             subtractor: CfaType::Mono,
         }) if frame == rggb
@@ -131,7 +131,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     assert!(matches!(
         subtraction.apply(5, &mut wide),
         Err(SubtractionError::SubtractorShape {
-            index: 5,
+            idx: 5,
             frame,
             subtractor,
         }) if frame == Size2us::new(4, 2) && subtractor == Size2us::new(2, 2)

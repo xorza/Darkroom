@@ -34,20 +34,16 @@ fn construction_aligns_rows_and_preserves_fill_values() {
 #[test]
 fn linear_coordinate_and_index_access_agree() {
     let mut buffer = BitBuffer2::new_default(Size2us::new(65, 3));
-    for index in [0, 63, 64, 65, 129, 194] {
-        buffer.set(index, true);
+    for idx in [0, 63, 64, 65, 129, 194] {
+        buffer.set(idx, true);
     }
     buffer.set_at(Vec2us::new(4, 2), true);
 
     let expected = [0, 63, 64, 65, 129, 134, 194];
     assert_eq!(buffer.count_ones(), expected.len());
-    for index in 0..buffer.size.pixel_count() {
-        assert_eq!(
-            buffer.get(index),
-            expected.contains(&index),
-            "index {index}"
-        );
-        assert_eq!(buffer[index], buffer.get(index));
+    for idx in 0..buffer.size.pixel_count() {
+        assert_eq!(buffer.get(idx), expected.contains(&idx), "index {idx}");
+        assert_eq!(buffer[idx], buffer.get(idx));
     }
     assert!(buffer.get_at(Vec2us::new(4, 2)));
 

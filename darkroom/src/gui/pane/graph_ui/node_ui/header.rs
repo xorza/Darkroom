@@ -7,7 +7,7 @@
 //! The markers ride in the header band ([`show`]) beside the title; the run-time
 //! label (left) and the interactive controls (right) share the [`status_row`]
 //! below it. Drawn as the top children of each node body by
-//! [`crate::gui::pane::graph_ui::node_ui::NodeUI`].
+//! [`crate::gui::pane::graph_ui::node_ui::NodeUi`].
 
 use std::f32::consts::{FRAC_PI_4, PI};
 
@@ -79,7 +79,7 @@ const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
 /// generous-hit-box treatment the port circles get. It's both a drop
 /// target for an emitter's event wire *and* a drag source — pulling from
 /// the *protruding* half starts a subscription wire aimed at an emitter
-/// (see `SubscriptionUI`); the body-covered half yields presses to the
+/// (see `SubscriptionUi`); the body-covered half yields presses to the
 /// node (the body records after, so it hit-tests on top), while
 /// drop-snapping (rect-based) still accepts the whole box. `hover` (over
 /// while a drag snaps to it) tints the triangle as drop feedback.
@@ -104,7 +104,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
 /// subscription is whole-node, not per-port), so `CanvasGeometry` /
-/// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
+/// `SubscriptionUi` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
 pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
     wid::node("subscription_glyph", node_id)

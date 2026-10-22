@@ -24,7 +24,7 @@ use crate::builtin::worker_events_library::worker_events_library;
 use crate::data::const_value::ConstValue;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::error::Error;
+use crate::execution::error::ExecutionError;
 use crate::graph::identity::NodeId;
 use crate::internals::engine::RunOutcome;
 use crate::internals::test_graph::TestGraph;
@@ -207,7 +207,7 @@ impl TestWorker {
 
     /// The next finished run, or the error that ended it — skipping everything
     /// a run publishes on the way there.
-    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, Error> {
+    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, ExecutionError> {
         loop {
             match self.report().await {
                 WorkerReport::Completed(summary) => {

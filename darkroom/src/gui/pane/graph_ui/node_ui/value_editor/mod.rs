@@ -410,7 +410,7 @@ impl<'a> PathPreview<'a> {
                 FsPathMode::ExistingFile => "Choose file…",
                 FsPathMode::ExistingFiles => "Choose files…",
                 FsPathMode::NewFile => "Choose save path…",
-                FsPathMode::Directory => "Choose directory…",
+                FsPathMode::Dir => "Choose directory…",
             });
         }
         Self::Name(

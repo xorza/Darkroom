@@ -32,7 +32,7 @@ const fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
 }
 
 /// Index of the nearest peak to `pos` by squared Euclidean distance; the first peak wins ties.
-fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
+fn nearest_peak_idx(pos: Vec2us, peaks: &[Pixel]) -> usize {
     let mut min_dist_sq = usize::MAX;
     let mut nearest = 0;
     for (i, peak) in peaks.iter().enumerate() {

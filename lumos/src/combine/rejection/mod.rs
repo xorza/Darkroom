@@ -141,8 +141,8 @@ impl Rejection {
     /// Whether a pass that rejects nothing ends the method. Linear fit's first pass is only the
     /// robust start for the fits: an outlier the median clip keeps can still be off the fitted
     /// line.
-    const fn settles(&self, index: usize) -> bool {
-        !matches!(self, Self::LinearFit(_)) || index > 0
+    const fn settles(&self, idx: usize) -> bool {
+        !matches!(self, Self::LinearFit(_)) || idx > 0
     }
 
     fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Narrowing {
@@ -176,15 +176,15 @@ impl Rejection {
         } = scratch;
         let noise = noise.filter(|_| self.measures_spread());
         let mut window = 0..sorted.values().len();
-        for index in 0..self.passes() {
+        for idx in 0..self.passes() {
             if window.len() <= min_survivors {
                 break;
             }
             let pass = Pass {
                 sorted: sorted.values(),
-                positions: sorted.positions(),
+                poss: sorted.poss(),
                 window: window.clone(),
-                index,
+                idx,
                 min_survivors,
                 noise,
             };
@@ -193,8 +193,7 @@ impl Rejection {
                 Narrowing::Window(proposal) => proposal,
                 Narrowing::PerSample(band) => {
                     let noise = noise.expect("a per-sample band reads the noise models");
-                    let keep =
-                        |value: f32, position: u32| band.keeps(&noise, position as usize, value);
+                    let keep = |value: f32, pos: u32| band.keeps(&noise, pos as usize, value);
                     if sorted.classify(window.clone(), keep) < min_survivors {
                         window = sorted.nearest(window, band.centre, min_survivors);
                         break;
@@ -210,7 +209,7 @@ impl Rejection {
                 "a pass widened its window: {window:?} to {:?}",
                 proposal.window
             );
-            if proposal.window == window && self.settles(index) {
+            if proposal.window == window && self.settles(idx) {
                 break;
             }
             if proposal.window.len() < min_survivors {

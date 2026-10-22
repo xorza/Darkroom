@@ -27,7 +27,7 @@ use common::CancelToken;
 use crate::containers::column::Column;
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
-use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::idx::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::event_trigger::EventTrigger;
 use crate::execution::report::execution_outcome::ExecutionOutcome;
 use crate::execution::report::node_status::{NodeExecutionStatus, NodeStatus};
@@ -35,7 +35,7 @@ use crate::execution::report::run_reporter::{RunPhase, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
-use crate::runtime::context_manager::ContextManager;
+use crate::runtime::ctx_manager::CtxManager;
 use crate::runtime::log_entry::LogLevel;
 
 use crate::execution::cache::disk_store::StorePolicy;
@@ -85,7 +85,7 @@ impl NodeOutcome {
 
 #[derive(Default, Debug)]
 pub(crate) struct Executor {
-    pub(crate) ctx_manager: ContextManager,
+    pub(crate) ctx_manager: CtxManager,
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<DynamicValue>,
     /// The run's mutable copy of the resolved live binding counts. Input consumption or
@@ -363,7 +363,7 @@ struct ExecutionFrame<'a, 'r> {
     /// Per-node results for this run, distinct from the whole-run `outcome` below.
     node_outcomes: &'a mut Column<NodeIdx, NodeOutcome>,
     nodes: &'a mut Column<NodeIdx, NodeRuntime>,
-    ctx: &'a mut ContextManager,
+    ctx: &'a mut CtxManager,
     reporter: &'a mut (dyn RunReporter + 'r),
     outcome: &'a mut ExecutionOutcome,
 }
@@ -527,7 +527,7 @@ impl ExecutionFrame<'_, '_> {
 
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
-        // Attribute any logs this node emits to it (read by `ContextManager::log`).
+        // Attribute any logs this node emits to it (read by `CtxManager::log`).
         self.ctx.current_node = Some(node_id);
         let invoke_start = Instant::now();
         self.reporter
@@ -636,7 +636,7 @@ impl ExecutionFrame<'_, '_> {
         program.inputs[program[node_idx].inputs]
             .iter()
             .any(|input| {
-                matches!(&input.binding, ExecutionBinding::Bind(addr) if self.node_outcomes[addr.node_idx].error().is_some())
+                matches!(&input.binding, ExecutionBinding::Wire(addr) if self.node_outcomes[addr.node_idx].error().is_some())
             })
     }
 
@@ -673,7 +673,7 @@ impl ExecutionFrame<'_, '_> {
                     )
                 }
                 Delivery::Const(value) => value.into(),
-                Delivery::Bind(address) => {
+                Delivery::Wire(address) => {
                     let output_idx = self.program.output_idx(address);
                     let read = if self.remaining_reads.is_last(output_idx)
                         && !self.program[address.node_idx].cache.caches_in_ram()
@@ -698,7 +698,7 @@ impl ExecutionFrame<'_, '_> {
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
     fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
-            if let Delivery::Bind(address) = self.schedule.delivery(self.program, input) {
+            if let Delivery::Wire(address) = self.schedule.delivery(self.program, input) {
                 self.complete_planned_read(address);
             }
         }
@@ -735,7 +735,7 @@ impl ExecutionFrame<'_, '_> {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::executor::Executor;
-    use crate::execution::index::OutputIdx;
+    use crate::execution::idx::OutputIdx;
 
     impl Executor {
         /// How many planned reads of one output the last run left uncompleted —

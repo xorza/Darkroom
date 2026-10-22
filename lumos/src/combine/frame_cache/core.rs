@@ -9,8 +9,8 @@
 use std::{mem, thread};
 
 use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
+use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::frame_store::tier::Tier;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_pixels::LinearPixels;
@@ -24,7 +24,7 @@ use crate::recycle;
 /// [`FrameCache`](crate::combine::frame_cache::FrameCache); all frames share one tier.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
-    pub(crate) tier: Tier,
+    pub(crate) tier: StorageTier,
     /// Image dimensions (same for all frames).
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
@@ -38,7 +38,7 @@ pub(crate) struct CacheCore {
 /// the chunk in the channel being combined, its whole [`FrameChunk`], and the geometry to map a
 /// within-chunk pixel to a global frame index.
 #[derive(Debug)]
-pub(super) struct ChunkContext<'a> {
+pub(super) struct ChunkCtx<'a> {
     /// One channel slice per frame for this chunk; `frames.len()` is the frame count.
     pub(super) frames: &'a [&'a [f32]],
     /// Each frame's chunk, its quality planes and flags with it.
@@ -86,7 +86,7 @@ impl CacheCore {
     }
 
     /// Combine engine: walk the output in chunks of `chunk_rows` rows (see [`Self::chunk_rows`]),
-    /// and every channel within a chunk, and hand `(output_slice, ChunkContext)` to `process`.
+    /// and every channel within a chunk, and hand `(output_slice, ChunkCtx)` to `process`.
     ///
     /// Chunk-outer, so a frame's quality planes and flags, which every channel reads, are taken
     /// once per chunk rather than once per channel. On the disk tier a chunk is copied out of the
@@ -99,7 +99,7 @@ impl CacheCore {
         mut process: Process,
     ) -> LinearPixels
     where
-        Process: FnMut(&mut [f32], ChunkContext<'_>),
+        Process: FnMut(&mut [f32], ChunkCtx<'_>),
     {
         let dims = self.dimensions;
         let width = dims.width();
@@ -128,7 +128,7 @@ impl CacheCore {
                 samples.extend(views.iter().map(|view| view.channels[channel]));
                 process(
                     &mut output.channel_mut(channel).pixels_mut()[pixels.clone()],
-                    ChunkContext {
+                    ChunkCtx {
                         frames: &samples,
                         chunks: views,
                         width,
@@ -194,7 +194,7 @@ impl CacheCore {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::combine::frame_cache::core::CacheCore;
-    use crate::frame_store::tier::Tier;
+    use crate::frame_store::storage_tier::StorageTier;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::image_metadata::ImageMetadata;
     use crate::progress::progress_monitor::ProgressMonitor;
@@ -202,7 +202,7 @@ pub(crate) mod internals {
     impl CacheCore {
         /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
         /// reported and no cancel.
-        pub(crate) fn plain(tier: Tier, dimensions: ImageDimensions) -> Self {
+        pub(crate) fn plain(tier: StorageTier, dimensions: ImageDimensions) -> Self {
             Self {
                 tier,
                 dimensions,

@@ -124,8 +124,8 @@ fn five_taps<S: Isa>(isa: S, taps: [&[f32]; 5], out: &mut [f32]) {
     // others'; then a vector at a time, then the scalar tail.
     let (blocks, _) = out.as_chunks_mut::<{ 4 * F32_LANES }>();
     let block_len = blocks.len() * 4 * F32_LANES;
-    for (index, block) in blocks.iter_mut().enumerate() {
-        let start = index * 4 * F32_LANES;
+    for (idx, block) in blocks.iter_mut().enumerate() {
+        let start = idx * 4 * F32_LANES;
         let (vectors, _) = block.as_chunks_mut::<F32_LANES>();
         for (lane, o) in vectors.iter_mut().enumerate() {
             weights.taps(isa, taps, start + lane * F32_LANES).store(o);
@@ -134,9 +134,9 @@ fn five_taps<S: Isa>(isa: S, taps: [&[f32]; 5], out: &mut [f32]) {
     let rest = &mut out[block_len..];
     let rest_len = rest.len();
     let (vectors, tail) = rest.as_chunks_mut::<F32_LANES>();
-    for (index, o) in vectors.iter_mut().enumerate() {
+    for (idx, o) in vectors.iter_mut().enumerate() {
         weights
-            .taps(isa, taps, block_len + index * F32_LANES)
+            .taps(isa, taps, block_len + idx * F32_LANES)
             .store(o);
     }
     let done = block_len + rest_len - tail.len();

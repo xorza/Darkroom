@@ -7,7 +7,7 @@
 use hashbrown::HashMap;
 
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionNode};
-use crate::execution::index::NodeIdx;
+use crate::execution::idx::NodeIdx;
 use crate::graph::identity::NodeId;
 
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its

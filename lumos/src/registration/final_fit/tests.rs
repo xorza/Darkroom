@@ -18,21 +18,20 @@ fn rotation_about_centre(angle_deg: f64, offset: DVec2) -> Transform {
     ))
 }
 
-/// Stars at `positions`, each with position σ `sigma`.
-fn stars(positions: &[DVec2], sigma: f64) -> Vec<Star> {
-    positions
-        .iter()
+/// Stars at `poss`, each with position σ `sigma`.
+fn stars(poss: &[DVec2], sigma: f64) -> Vec<Star> {
+    poss.iter()
         .map(|&p| Star {
-            position_sigma: sigma,
+            pos_sigma: sigma,
             ..Star::at(p)
         })
         .collect()
 }
 
-fn indices(fit: &FinalFit) -> Vec<(usize, usize)> {
+fn idxs(fit: &FinalFit) -> Vec<(usize, usize)> {
     fit.matches
         .iter()
-        .map(|m| (m.indices.reference, m.indices.target))
+        .map(|m| (m.idxs.reference, m.idxs.target))
         .collect()
 }
 
@@ -48,7 +47,7 @@ fn a_seed_that_misses_stars_reaches_them_all() {
         side: 2000.0,
         seed: 42,
     }
-    .positions();
+    .poss();
     let truth = rotation_about_centre(1.0, DVec2::new(30.0, -20.0));
     let target: Vec<DVec2> = reference.iter().map(|&p| truth.apply(p)).collect();
     let seed = rotation_about_centre(0.85, DVec2::new(31.0, -20.0));
@@ -63,7 +62,7 @@ fn a_seed_that_misses_stars_reaches_them_all() {
     let fit = catalogs
         .fit(seed, FitModel::Plain(TransformType::Euclidean), 3.0)
         .unwrap();
-    assert_eq!(indices(&fit), (0..50).map(|i| (i, i)).collect::<Vec<_>>());
+    assert_eq!(idxs(&fit), (0..50).map(|i| (i, i)).collect::<Vec<_>>());
     for p in [DVec2::ZERO, DVec2::new(2000.0, 0.0), DVec2::splat(2000.0)] {
         assert!(fit.warp.transform.apply(p).distance(truth.apply(p)) < 1e-9);
     }
@@ -87,11 +86,11 @@ fn pairs_weigh_by_their_variance() {
             (0.04, -0.04 * half_root2)
         };
         reference.push(Star {
-            position_sigma: sigma,
+            pos_sigma: sigma,
             ..Star::at(r)
         });
         target.push(Star {
-            position_sigma: sigma,
+            pos_sigma: sigma,
             ..Star::at(r + DVec2::new(5.0 + offset, 0.0))
         });
     }
@@ -119,7 +118,7 @@ fn saturated_stars_and_a_blend_take_no_part() {
         side: 2000.0,
         seed: 7,
     }
-    .positions();
+    .poss();
     let truth = rotation_about_centre(0.3, DVec2::new(-12.0, 8.0));
     let mut target_points: Vec<DVec2> = reference_points.iter().map(|&p| truth.apply(p)).collect();
     target_points[11] += DVec2::new(2.0, 0.0);
@@ -135,7 +134,7 @@ fn saturated_stars_and_a_blend_take_no_part() {
         .filter(|i| ![3, 7, 11].contains(i))
         .map(|i| (i, i))
         .collect();
-    assert_eq!(indices(&fit), expected);
+    assert_eq!(idxs(&fit), expected);
     for p in [DVec2::ZERO, DVec2::splat(2000.0)] {
         assert!(fit.warp.transform.apply(p).distance(truth.apply(p)) < 1e-9);
     }
@@ -170,13 +169,13 @@ fn cauchy_variance_ratio() -> f64 {
 #[test]
 fn the_fit_reaches_the_cramer_rao_bound() {
     const DRAWS: u64 = 300;
-    let positions = StarScatter {
+    let poss = StarScatter {
         count: 2000,
         side: 2000.0,
         seed: 11,
     }
-    .positions();
-    let sigmas: Vec<f64> = (0..positions.len())
+    .poss();
+    let sigmas: Vec<f64> = (0..poss.len())
         .map(|i| 0.02 + 0.18 * (i % 10) as f64 / 9.0)
         .collect();
     let (shift, angle, scale) = (DVec2::new(14.0, -9.0), 0.6f64.to_radians(), 1.002);
@@ -190,7 +189,7 @@ fn the_fit_reaches_the_cramer_rao_bound() {
     // The Fisher information of (tx, ty, θ, s) for t = s·R(θ)·r + (tx, ty).
     let mut information = [[0.0f64; 4]; 4];
     let (sin, cos) = angle.sin_cos();
-    for (&r, &sigma) in positions.iter().zip(&sigmas) {
+    for (&r, &sigma) in poss.iter().zip(&sigmas) {
         let weight = 1.0 / ((scale * scale + 1.0) * sigma * sigma);
         let rotated = DVec2::new(cos * r.x - sin * r.y, sin * r.x + cos * r.y);
         let d_angle = DVec2::new(-scale * rotated.y, scale * rotated.x);
@@ -216,19 +215,19 @@ fn the_fit_reaches_the_cramer_rao_bound() {
                         f64::from(rng.next_gaussian_f32()),
                     )
             };
-            let reference: Vec<Star> = positions
+            let reference: Vec<Star> = poss
                 .iter()
                 .zip(&sigmas)
                 .map(|(&p, &sigma)| Star {
-                    position_sigma: sigma,
+                    pos_sigma: sigma,
                     ..Star::at(noisy(p, sigma))
                 })
                 .collect();
-            let target: Vec<Star> = positions
+            let target: Vec<Star> = poss
                 .iter()
                 .zip(&sigmas)
                 .map(|(&p, &sigma)| Star {
-                    position_sigma: sigma,
+                    pos_sigma: sigma,
                     ..Star::at(noisy(truth.apply(p), sigma))
                 })
                 .collect();
@@ -268,7 +267,7 @@ fn the_homography_minimizes_the_reprojection_error() {
         side: 2000.0,
         seed: 5,
     }
-    .positions();
+    .poss();
     let mut rng = TestRng::new(77);
     let mut pairs = WeightedPairs::default();
     for &r in &reference {

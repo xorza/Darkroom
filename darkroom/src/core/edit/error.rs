@@ -75,8 +75,8 @@ pub(crate) enum MalformedIntent {
     /// Positions reach the view verbatim, and nothing after the load repairs a
     /// non-finite one.
     #[error("{role} position {pos:?} is not finite")]
-    NonFinitePosition { role: Role, pos: Vec2 },
-    /// Same corruption path as [`Self::NonFinitePosition`], one level up.
+    NonFinitePos { role: Role, pos: Vec2 },
+    /// Same corruption path as [`Self::NonFinitePos`], one level up.
     #[error("viewport needs finite pan and positive finite zoom")]
     InvalidViewport,
 }

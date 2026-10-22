@@ -21,8 +21,7 @@ use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
 use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, Library};
 
-const WATCH_DIRECTORY_FUNC_ID: FuncId =
-    FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
+const WATCH_DIR_FUNC_ID: FuncId = FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
 
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).
@@ -53,7 +52,7 @@ enum WatchError {
         source: io::Error,
     },
     #[error("watch path is not a directory: {path:?}")]
-    NotDirectory { path: PathBuf },
+    NotDir { path: PathBuf },
     #[error("failed to create filesystem watcher: {0}")]
     Create(#[source] notify::Error),
     #[error("failed to watch {path:?}: {source}")]
@@ -71,7 +70,7 @@ impl WatchState {
             source,
         })?;
         if !metadata.is_dir() {
-            return Err(WatchError::NotDirectory {
+            return Err(WatchError::NotDir {
                 path: path.to_path_buf(),
             });
         }
@@ -134,8 +133,8 @@ const fn is_content_change(kind: EventKind) -> bool {
     }
 }
 
-fn directory_type() -> DataType {
-    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Directory)))
+fn dir_type() -> DataType {
+    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::Dir)))
 }
 
 /// A node that passes a directory path through unchanged and fires a `changed`
@@ -144,7 +143,7 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::builder(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
+        Func::builder(WATCH_DIR_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
@@ -204,7 +203,7 @@ pub fn fs_watch_library() -> Library {
                  removed, renamed, or written — ignoring access-time and other metadata-only events.",
             )
             .input(
-                FuncInput::required("Directory", directory_type())
+                FuncInput::required("Directory", dir_type())
                     .description("Directory to watch and pass through.")
                     .const_only(),
             )
@@ -224,7 +223,7 @@ pub fn fs_watch_library() -> Library {
                     .const_only(),
             )
             .output(
-                FuncOutput::new("Directory", directory_type())
+                FuncOutput::new("Directory", dir_type())
                     .description("The same directory, re-emitted on each change."),
             )
             .event(

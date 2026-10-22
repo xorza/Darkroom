@@ -50,7 +50,7 @@ fn a_ramp_leaves_the_noise_estimate() {
         noise
             .iter()
             .enumerate()
-            .map(|(index, &value)| value + (index % 512) as f32 / 512.0)
+            .map(|(idx, &value)| value + (idx % 512) as f32 / 512.0)
             .collect(),
     );
     let plain = NoisePlane {
@@ -86,7 +86,7 @@ fn excluded_pixels_leave_the_estimate() {
     );
     let sigma = NoisePlane {
         samples: &frame,
-        excluded: |index| index % 512 >= 256,
+        excluded: |idx| idx % 512 >= 256,
     }
     .sigma();
     assert!((sigma - 0.01).abs() < 0.000_3, "{sigma}");

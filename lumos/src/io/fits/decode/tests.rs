@@ -19,25 +19,25 @@ use crate::io::error::OverBudget;
 use crate::io::fits::cfa;
 use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::*;
-use crate::io::fits::fits_load_options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
+use crate::io::fits::fits_load_config::{
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 use crate::math::size2us::Size2us;
 
-fn load_context() -> LoadContext {
-    LoadContext::new(CancelToken::never(), u64::MAX)
+fn load_ctx() -> LoadCtx {
+    LoadCtx::new(CancelToken::never(), u64::MAX)
 }
 
 /// A cube read as RGB. Its float samples run to 400 with no `DATAMAX`, so they are said to be
 /// normalized: these tests are about plane layout, not scale.
-fn rgb_load_context() -> LoadContext {
-    LoadContext {
-        fits: FitsLoadOptions {
+fn rgb_load_ctx() -> LoadCtx {
+    LoadCtx {
+        fits: FitsLoadConfig {
             cube: FitsCubeInterpretation::Rgb,
             float_scale: FitsFloatScale::Normalized,
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     }
 }
 
@@ -46,9 +46,9 @@ fn image_header(bitpix: i64, shape: &[usize]) -> Header {
     header.set("SIMPLE", true).unwrap();
     header.set("BITPIX", bitpix).unwrap();
     header.set("NAXIS", shape.len() as i64).unwrap();
-    for (index, &axis) in shape.iter().enumerate() {
+    for (idx, &axis) in shape.iter().enumerate() {
         header
-            .set(&format!("NAXIS{}", index + 1), i64::try_from(axis).unwrap())
+            .set(&format!("NAXIS{}", idx + 1), i64::try_from(axis).unwrap())
             .unwrap();
     }
     header
@@ -66,12 +66,9 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
     header.set("ZIMAGE", true).unwrap();
     header.set("ZBITPIX", bitpix).unwrap();
     header.set("ZNAXIS", shape.len() as i64).unwrap();
-    for (index, &axis) in shape.iter().enumerate() {
+    for (idx, &axis) in shape.iter().enumerate() {
         header
-            .set(
-                &format!("ZNAXIS{}", index + 1),
-                i64::try_from(axis).unwrap(),
-            )
+            .set(&format!("ZNAXIS{}", idx + 1), i64::try_from(axis).unwrap())
             .unwrap();
     }
     header
@@ -330,8 +327,8 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
 
 #[test]
 fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
-    let directory = TempDir::new("fits_preflight");
-    let path = directory.join("truncated.fits");
+    let dir = TempDir::new("fits_preflight");
+    let path = dir.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
     write_fits(&path, &image, None);
     let mut bytes = fs::read(&path).unwrap();
@@ -339,7 +336,7 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
     fs::write(&path, bytes).unwrap();
 
     let reason =
-        fits_refusal(load_linear(&path, &LoadContext::new(CancelToken::never(), 1)).unwrap_err());
+        fits_refusal(load_linear(&path, &LoadCtx::new(CancelToken::never(), 1)).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::OverBudget {
@@ -351,39 +348,39 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
         }
     );
     assert!(matches!(
-        load_linear(&path, &LoadContext::new(CancelToken::never(), 10_000)).unwrap_err(),
+        load_linear(&path, &LoadCtx::new(CancelToken::never(), 10_000)).unwrap_err(),
         ImageError::Fits { .. }
     ));
 }
 
 #[test]
 fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
-    let directory = TempDir::new("fits_shape_and_rgb");
-    let zero_path = directory.join("zero.fits");
+    let dir = TempDir::new("fits_shape_and_rgb");
+    let zero_path = dir.join("zero.fits");
     write_fits(
         &zero_path,
         &Image::new([0, 2], Vec::<f32>::new()).unwrap(),
         None,
     );
     let zero_axis = FitsRefusal::ZeroAxis { shape: vec![0, 2] };
-    let reason = fits_refusal(load_linear(&zero_path, &load_context()).unwrap_err());
+    let reason = fits_refusal(load_linear(&zero_path, &load_ctx()).unwrap_err());
     assert_eq!(reason, zero_axis);
-    let reason = fits_refusal(linear_info(&zero_path, &load_context()).unwrap_err());
+    let reason = fits_refusal(linear_info(&zero_path, &load_ctx()).unwrap_err());
     assert_eq!(reason, zero_axis, "the peek refuses what the load refuses");
 
-    let rgb_path = directory.join("rgb.fits");
+    let rgb_path = dir.join("rgb.fits");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
     write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
-    let loaded = load_linear(&rgb_path, &rgb_load_context()).unwrap();
+    let loaded = load_linear(&rgb_path, &rgb_load_ctx()).unwrap();
     assert_eq!(
         loaded.dimensions(),
         ImageDimensions::new((2, 2), ChannelLayout::Rgb)
     );
     // The decode reads one channel's two rows at a time: 4 samples of 4 bytes as stored, and as
     // many swapped into words, beside the frame.
-    let peek = linear_info(&rgb_path, &rgb_load_context()).unwrap();
+    let peek = linear_info(&rgb_path, &rgb_load_ctx()).unwrap();
     assert_eq!(
         peek.dimensions,
         loaded.dimensions(),
@@ -391,7 +388,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     );
     assert_eq!(peek.decoder_bytes, 32);
 
-    let mosaic_path = directory.join("mosaic.fits");
+    let mosaic_path = dir.join("mosaic.fits");
     cfa::save(
         &mosaic_path,
         &make_cfa(
@@ -402,7 +399,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     )
     .unwrap();
     assert!(matches!(
-        linear_info(&mosaic_path, &load_context()),
+        linear_info(&mosaic_path, &load_ctx()),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::MosaicFits,
             ..
@@ -415,8 +412,8 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
 
 #[test]
 fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
-    let directory = TempDir::new("fits_compressed_rgb");
-    let path = directory.join("rgb.fits");
+    let dir = TempDir::new("fits_compressed_rgb");
+    let path = dir.join("rgb.fits");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
@@ -430,7 +427,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
         )
         .unwrap();
 
-    let loaded = load_linear(&path, &rgb_load_context()).unwrap();
+    let loaded = load_linear(&path, &rgb_load_ctx()).unwrap();
     assert_eq!(
         loaded.dimensions(),
         ImageDimensions::new((2, 2), ChannelLayout::Rgb)
@@ -442,22 +439,22 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
 
 #[test]
 fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
-    let directory = TempDir::new("fits_hdu_selection");
-    let path = directory.join("multi.fits");
+    let dir = TempDir::new("fits_hdu_selection");
+    let path = dir.join("multi.fits");
     write_named_multi_image(&path);
 
-    let reason = fits_refusal(load_linear(&path, &load_context()).unwrap_err());
+    let reason = fits_refusal(load_linear(&path, &load_ctx()).unwrap_err());
     assert_eq!(reason, FitsRefusal::SeveralImageHdus { images: 2 });
 
-    let ambiguous_name = LoadContext {
-        fits: FitsLoadOptions {
+    let ambiguous_name = LoadCtx {
+        fits: FitsLoadConfig {
             hdu: FitsHduSelector::Name {
                 extname: "sci".to_string(),
                 extver: None,
             },
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     };
     let reason = fits_refusal(load_linear(&path, &ambiguous_name).unwrap_err());
     assert_eq!(
@@ -473,37 +470,37 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         "2 HDUs match EXTNAME=\"sci\"; specify EXTVER"
     );
 
-    let first = LoadContext {
-        fits: FitsLoadOptions {
-            hdu: FitsHduSelector::Index(1),
+    let first = LoadCtx {
+        fits: FitsLoadConfig {
+            hdu: FitsHduSelector::Idx(1),
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     };
     let first = load_linear(&path, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
     let FitsTransferProvenance { hdu, checksum, .. } = fits_transfer(&first);
-    assert_eq!(hdu.index, 1);
+    assert_eq!(hdu.idx, 1);
     assert_eq!(hdu.extname.as_deref(), Some("SCI"));
     assert_eq!(hdu.extver, Some(1));
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
-    let rejected_cube = LoadContext {
-        fits: FitsLoadOptions {
+    let rejected_cube = LoadCtx {
+        fits: FitsLoadConfig {
             hdu: FitsHduSelector::Name {
                 extname: "SCI".to_string(),
                 extver: Some(2),
             },
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     };
     let reason = fits_refusal(load_linear(&path, &rejected_cube).unwrap_err());
     assert_eq!(reason, FitsRefusal::CubeNeedsRgb);
 
-    let rgb = LoadContext {
-        fits: FitsLoadOptions {
+    let rgb = LoadCtx {
+        fits: FitsLoadConfig {
             hdu: FitsHduSelector::Name {
                 extname: "SCI".to_string(),
                 extver: Some(2),
@@ -515,7 +512,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             unstated_bayer_pattern: None,
             pedestal: Pedestal::Unknown,
         },
-        ..load_context()
+        ..load_ctx()
     };
     let rgb = load_linear(&path, &rgb).unwrap();
     assert_eq!(rgb.channel(0).pixels(), &[10.0, 20.0]);
@@ -525,22 +522,22 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
 
 #[test]
 fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity() {
-    let directory = TempDir::new("fits_checksum_policy");
-    let absent_path = directory.join("absent.fits");
+    let dir = TempDir::new("fits_checksum_policy");
+    let absent_path = dir.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
     write_fits(&absent_path, &image, None);
 
-    let verified_absent = load_linear(&absent_path, &load_context()).unwrap();
+    let verified_absent = load_linear(&absent_path, &load_ctx()).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&verified_absent);
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
-    let require = LoadContext {
-        fits: FitsLoadOptions {
+    let require = LoadCtx {
+        fits: FitsLoadConfig {
             checksum: FitsChecksumPolicy::RequireValid,
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     };
     let reason = fits_refusal(load_linear(&absent_path, &require).unwrap_err());
     assert_eq!(
@@ -554,7 +551,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         }
     );
 
-    let valid_path = directory.join("valid.fits");
+    let valid_path = dir.join("valid.fits");
     FitsWriter::new(File::create(&valid_path).unwrap())
         .with_checksums()
         .write_image(&image, None)
@@ -567,7 +564,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let mut corrupt = fs::read(&valid_path).unwrap();
     corrupt[BLOCK_SIZE] ^= 0x80;
     fs::write(&valid_path, corrupt).unwrap();
-    let reason = fits_refusal(load_linear(&valid_path, &load_context()).unwrap_err());
+    let reason = fits_refusal(load_linear(&valid_path, &load_ctx()).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::InvalidChecksum {
@@ -579,12 +576,12 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         }
     );
 
-    let ignore = LoadContext {
-        fits: FitsLoadOptions {
+    let ignore = LoadCtx {
+        fits: FitsLoadConfig {
             checksum: FitsChecksumPolicy::Ignore,
             ..Default::default()
         },
-        ..load_context()
+        ..load_ctx()
     };
     let ignored = load_linear(&valid_path, &ignore).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&ignored);
@@ -594,14 +591,14 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
 
 #[test]
 fn cancellation_prevents_fits_selection() {
-    let directory = TempDir::new("fits_cancel");
-    let path = directory.join("frame.fits");
+    let dir = TempDir::new("fits_cancel");
+    let path = dir.join("frame.fits");
     write_fits(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(), None);
     let cancel = CancelToken::new();
     cancel.cancel();
-    let context = LoadContext::new(cancel, u64::MAX);
+    let ctx = LoadCtx::new(cancel, u64::MAX);
     assert!(matches!(
-        load_linear(&path, &context),
+        load_linear(&path, &ctx),
         Err(ImageError::Cancelled { .. })
     ));
 }
@@ -611,13 +608,13 @@ fn cancellation_prevents_fits_selection() {
 /// `DATAMAX` at all, and nothing is flagged.
 #[test]
 fn a_zero_datamax_is_no_saturation_level() {
-    let directory = TempDir::new("fits_datamax");
-    let path = directory.join("zero.fits");
+    let dir = TempDir::new("fits_datamax");
+    let path = dir.join("zero.fits");
     let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
     let mut header = Header::new();
     header.set("DATAMAX", 0.0).unwrap();
     write_fits(&path, &image, Some(&header));
-    let loaded = load_linear(&path, &load_context()).unwrap();
+    let loaded = load_linear(&path, &load_ctx()).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
     assert_eq!(loaded.metadata.header.data_max, None);
     assert!(loaded.flags().is_none());
@@ -628,8 +625,8 @@ fn a_zero_datamax_is_no_saturation_level() {
 /// it is no second candidate.
 #[test]
 fn a_header_only_image_extension_is_no_second_image() {
-    let directory = TempDir::new("fits_header_only");
-    let path = directory.join("one_image.fits");
+    let dir = TempDir::new("fits_header_only");
+    let path = dir.join("one_image.fits");
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
     writer.write_image(&image, None).unwrap();
@@ -642,7 +639,7 @@ fn a_header_only_image_extension_is_no_second_image() {
     writer.write_raw_hdu(&empty, &[]).unwrap();
     writer.into_inner().sync_all().unwrap();
 
-    let loaded = load_linear(&path, &load_context()).unwrap();
+    let loaded = load_linear(&path, &load_ctx()).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
-    assert_eq!(fits_transfer(&loaded).hdu.index, 0);
+    assert_eq!(fits_transfer(&loaded).hdu.idx, 0);
 }

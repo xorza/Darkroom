@@ -16,10 +16,10 @@ pub(crate) struct Pass<'a> {
     /// order, so only a method that never makes one may read ranks: the robust scales.
     pub(crate) sorted: &'a [f32],
     /// Each sorted sample's gather position, which indexes `noise`.
-    pub(crate) positions: &'a [u32],
+    pub(crate) poss: &'a [u32],
     pub(crate) window: Range<usize>,
     /// Counts from 0.
-    pub(crate) index: usize,
+    pub(crate) idx: usize,
     pub(crate) min_survivors: usize,
     /// The samples' noise models, by gather position, when the combine gathered them.
     pub(crate) noise: Option<NoiseColumns<'a>>,
@@ -52,11 +52,11 @@ pub(crate) struct SampleBand {
 }
 
 impl SampleBand {
-    /// Whether `value`, the sample at gather `position`, lies within the band, in units of its own
+    /// Whether `value`, the sample at gather `pos`, lies within the band, in units of its own
     /// model σ under `noise` at the centre, raised to the resolution there.
-    pub(crate) fn keeps(self, noise: &NoiseColumns<'_>, position: usize, value: f32) -> bool {
+    pub(crate) fn keeps(self, noise: &NoiseColumns<'_>, pos: usize, value: f32) -> bool {
         let sigma = noise
-            .variance_at(position, self.centre)
+            .variance_at(pos, self.centre)
             .sqrt()
             .max(Spread::resolution(self.centre));
         let deviation = value - self.centre;
@@ -95,12 +95,12 @@ impl Pass<'_> {
         let Some(noise) = self.noise else {
             return 0.0;
         };
-        let positions = &self.positions[self.window.clone()];
-        let variance = positions
+        let poss = &self.poss[self.window.clone()];
+        let variance = poss
             .iter()
-            .map(|&position| noise.variance_at(position as usize, centre))
+            .map(|&pos| noise.variance_at(pos as usize, centre))
             .sum::<f32>()
-            / positions.len() as f32;
+            / poss.len() as f32;
         variance.sqrt()
     }
 
@@ -118,7 +118,7 @@ impl Pass<'_> {
         bounds: SigmaBounds,
         scores: &mut NormalScores,
     ) -> Proposal {
-        let spread = if self.index == 0 {
+        let spread = if self.idx == 0 {
             Spread::of_sorted(self.samples())
         } else {
             Spread {

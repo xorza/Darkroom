@@ -6,8 +6,8 @@ use crate::internals::test_rng::TestRng;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 use crate::simd::Isa;
+use crate::simd::isa_tier::IsaTier;
 use crate::simd::portable::Portable;
-use crate::simd::tier::Tier;
 
 /// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
 /// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.
@@ -17,7 +17,7 @@ const LENGTHS: [usize; 15] = [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257, 1
 /// that a narrow accumulator would lose entirely.
 fn cancelling_values(len: usize) -> Vec<f32> {
     (0..len)
-        .map(|index| match index % 4 {
+        .map(|idx| match idx % 4 {
             0 => 1e6,
             1 => 0.25,
             2 => -1e6,
@@ -59,7 +59,7 @@ fn every_tier_sums_to_the_same_bits() {
             values: &values,
             weights: &weights,
         });
-        for tier in Tier::supported() {
+        for tier in IsaTier::supported() {
             assert_eq!(
                 tier.run(SumF32(&values)).to_bits(),
                 sum.to_bits(),

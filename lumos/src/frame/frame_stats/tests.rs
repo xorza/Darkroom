@@ -30,13 +30,11 @@ fn a_mosaic_has_a_sky_per_color() {
     let size = Size2us::new(8, 8);
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
     let pixels = (0..size.pixel_count())
-        .map(
-            |index| match cfa.slot_at(Vec2us::new(index % 8, index / 8)) {
-                0 => 0.125,
-                1 => 0.25,
-                _ => 0.375,
-            },
-        )
+        .map(|idx| match cfa.slot_at(Vec2us::new(idx % 8, idx / 8)) {
+            0 => 0.125,
+            1 => 0.25,
+            _ => 0.375,
+        })
         .collect();
     let mut image = make_cfa(size, pixels, cfa);
     image
@@ -82,8 +80,8 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
     let frame = |size: Size2us, read: f64, sky: f64| {
         let mut rng = TestRng::new(SEED);
         let pixels: Vec<f32> = (0..size.pixel_count())
-            .map(|index| {
-                let g = gain(index % size.width);
+            .map(|idx| {
+                let g = gain(idx % size.width);
                 let sigma = (read * g * g + sky * g).sqrt();
                 (0.5 + sigma * f64::from(rng.next_gaussian_f32())) as f32
             })

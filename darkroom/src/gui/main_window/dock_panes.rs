@@ -22,7 +22,7 @@ use crate::gui::frame::app_command::PrefsCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::GraphUI;
+use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::image_viewer::{self, ImageViewer, ViewerPane};
 use crate::gui::pane::preferences::PreferencesForm;
 
@@ -34,7 +34,7 @@ use crate::gui::pane::preferences::PreferencesForm;
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
     pub(crate) cx: WindowCtx<'a>,
-    pub(crate) graph_ui: &'a mut GraphUI,
+    pub(crate) graph_ui: &'a mut GraphUi,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
     pub(crate) prefs: &'a mut Preferences,
     pub(crate) out: &'a mut Requests,

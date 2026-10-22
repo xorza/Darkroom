@@ -52,16 +52,16 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "failed writes do not leave sibling temporary files"
     );
 
-    let directory_target = dir.join("nonempty-directory");
-    fs::create_dir_all(&directory_target).unwrap();
-    fs::write(directory_target.join("keep"), b"old").unwrap();
+    let dir_target = dir.join("nonempty-directory");
+    fs::create_dir_all(&dir_target).unwrap();
+    fs::write(dir_target.join("keep"), b"old").unwrap();
     assert!(
-        publish_bytes(&directory_target, b"new", PublicationMode::Cache).is_err(),
+        publish_bytes(&dir_target, b"new", PublicationMode::Cache).is_err(),
         "a file cannot replace a nonempty directory"
     );
-    assert_eq!(fs::read(directory_target.join("keep")).unwrap(), b"old");
+    assert_eq!(fs::read(dir_target.join("keep")).unwrap(), b"old");
     assert!(
-        internals::publication_temp_files(&directory_target).is_empty(),
+        internals::publication_temp_files(&dir_target).is_empty(),
         "failed replacement does not leave a sibling temporary file"
     );
 

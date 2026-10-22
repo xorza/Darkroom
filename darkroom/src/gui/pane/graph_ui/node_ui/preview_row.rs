@@ -21,7 +21,7 @@ use scenarium::NodeId;
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::state::preview_store::{PreviewImage, StoredContent};
+use crate::gui::state::preview_store::{DrawablePreview, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
@@ -109,7 +109,7 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
 /// source size — styled like a node body's memory footer
 /// ([`memory_row`](crate::gui::pane::graph_ui::node_ui::memory_row)), so every read-only fact strip
 /// in the app reads as the same kind of thing.
-fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
+fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
     Panel::hstack()
         .id_salt("preview_info")
         .size((Sizing::FILL, Sizing::HUG))

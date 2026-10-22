@@ -1,6 +1,6 @@
 //! Everything the canvas's two wire families share.
 //!
-//! **The curve.** A data connection ([`crate::gui::pane::graph_ui::gesture::connection_ui`]) and
+//! **The curve.** A data wire ([`crate::gui::pane::graph_ui::gesture::wire_ui`]) and
 //! an event wire ([`crate::gui::pane::graph_ui::gesture::subscription_ui`]) are both one
 //! [`Wire`]: two endpoints plus the interior control points its family's handle
 //! rule placed. That single value is what the cull test, the breaker probe, and
@@ -11,7 +11,7 @@
 //! **The gesture.** [`GlyphDrag`](glyph_drag::GlyphDrag) is one drag from a latched glyph to
 //! whatever compatible glyph the pointer is over, generic over the two
 //! [`PortLayer`](crate::gui::pane::graph_ui::frame::canvas_geometry::PortLayer) key domains it
-//! spans: a data connection drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
+//! spans: a data wire drags `PortRef → PortRef`, an event wire drags `EventPort → NodeId` or —
 //! started from the other end — `NodeId → EventPort`. Latching, the release edge, the fixed end's
 //! node, and where the preview's free end sits are stated once here; each family still owns which
 //! glyphs are candidates and what a release commits.
@@ -166,7 +166,7 @@ impl From<RgbaF32> for WirePaint {
 
 /// The per-frame inputs both wire renderers need, bundled so each `draw` takes
 /// one argument instead of six. Built once in
-/// [`crate::gui::pane::graph_ui::GraphUI::record_canvas`] and passed by `&mut`, so the
+/// [`crate::gui::pane::graph_ui::GraphUi::record_canvas`] and passed by `&mut`, so the
 /// breaker probe reborrows into each renderer in turn.
 ///
 /// The canvas-wide half is [`DrawCtx`] itself, not a re-declaration of its
@@ -219,7 +219,7 @@ impl WirePass<'_, '_> {
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let paint = if broken {
-            WirePaint::from(self.dcx.theme().colors.connection_broken)
+            WirePaint::from(self.dcx.theme().colors.wire_broken)
         } else {
             self.emphasis.paint(tint(), stroke.tier)
         };
@@ -267,16 +267,16 @@ impl WireTint {
 /// wires don't outshine them.
 const WIRE_REST_DIM: f32 = 0.15;
 
-/// Alpha of the standing wires while a wire gesture (new-connection drag,
+/// Alpha of the standing wires while a wire gesture (new-wire drag,
 /// subscription drag, breaker scribble) is active — dimming the plumbing so
 /// the preview, candidate ports, and broken-alarm wires pop.
 const WIRE_DRAG_FADE: f32 = 0.35;
 
 /// Width multiplier for an emphasized (hovered or broken-alarm) wire, so
-/// one connection stays traceable through a crossing.
+/// one wire stays traceable through a crossing.
 const WIRE_HOVER_WIDTH: f32 = 1.25;
 
-/// Whether any wire gesture — a new-connection drag, a subscription drag, a
+/// Whether any wire gesture — a new-wire drag, a subscription drag, a
 /// breaker scribble — is in flight this pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WireSet {

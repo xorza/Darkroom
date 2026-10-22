@@ -42,9 +42,9 @@ impl ColorResiduals<'_> {
             background,
         } = self;
         let size = Size2us::from(data);
-        color_sample_indices(size, cfa_type, target_color)
+        color_sample_idxs(size, cfa_type, target_color)
             .into_iter()
-            .map(|index| data[index] - background.at(target_color, size.point_of(index)).sky)
+            .map(|idx| data[idx] - background.at(target_color, size.point_of(idx)).sky)
             .collect()
     }
 }
@@ -52,7 +52,7 @@ impl ColorResiduals<'_> {
 /// The sorted flat indices of `target_color`'s stratified sample of a `size` frame: every
 /// photosite of the color, or [`MAX_MEDIAN_SAMPLES`] of them spread across its phases, rows and
 /// columns.
-pub(super) fn color_sample_indices(
+pub(super) fn color_sample_idxs(
     size: Size2us,
     cfa_type: CfaType,
     target_color: usize,
@@ -103,14 +103,14 @@ pub(super) fn color_sample_indices(
         allocated = next_allocated;
     }
 
-    let mut indices = Vec::with_capacity(target_sample_count);
+    let mut idxs = Vec::with_capacity(target_sample_count);
     for phase in phases {
         if phase.sample_count == phase.population {
             for row in 0..phase.rows {
                 let y = phase.y_offset + row * period;
                 for column in 0..phase.columns {
                     let x = phase.x_offset + column * period;
-                    indices.push(size.index_of(Vec2us::new(x, y)));
+                    idxs.push(size.idx_of(Vec2us::new(x, y)));
                 }
             }
             continue;
@@ -131,15 +131,15 @@ pub(super) fn color_sample_indices(
                     + rotation)
                     % phase.columns;
                 let x = phase.x_offset + column * period;
-                indices.push(size.index_of(Vec2us::new(x, y)));
+                idxs.push(size.idx_of(Vec2us::new(x, y)));
             }
         }
     }
 
-    indices.sort_unstable();
-    debug_assert_eq!(indices.len(), target_sample_count);
-    debug_assert!(indices.windows(2).all(|pair| pair[0] < pair[1]));
-    indices
+    idxs.sort_unstable();
+    debug_assert_eq!(idxs.len(), target_sample_count);
+    debug_assert!(idxs.windows(2).all(|pair| pair[0] < pair[1]));
+    idxs
 }
 
 const fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
@@ -158,19 +158,19 @@ pub(crate) mod internals {
     use crate::image::cfa::cfa_type::CfaType;
     use crate::math::size2us::Size2us;
 
-    /// The values of [`sampling::color_sample_indices`]' stratified sample of one color.
+    /// The values of [`sampling::color_sample_idxs`]' stratified sample of one color.
     pub(crate) fn color_samples(
         data: &Buffer2<f32>,
         cfa_type: CfaType,
         target_color: usize,
     ) -> Vec<f32> {
-        sampling::color_sample_indices(
+        sampling::color_sample_idxs(
             Size2us::new(data.width(), data.height()),
             cfa_type,
             target_color,
         )
         .into_iter()
-        .map(|index| data[index])
+        .map(|idx| data[idx])
         .collect()
     }
 }

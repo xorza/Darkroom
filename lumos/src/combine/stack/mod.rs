@@ -149,9 +149,9 @@ pub(crate) fn combine(
                 })
             });
             if rejection.uses_ccd_model()
-                && let Some(index) = noise.as_ref().and_then(SampleNoise::first_without_gain)
+                && let Some(idx) = noise.as_ref().and_then(SampleNoise::first_without_gain)
             {
-                return Err(StackError::UnknownGain { index });
+                return Err(StackError::UnknownGain { idx });
             }
             let request = CombineRequest {
                 weights: weights.as_ref(),

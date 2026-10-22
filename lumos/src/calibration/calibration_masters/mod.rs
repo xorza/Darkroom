@@ -268,15 +268,15 @@ impl CalibrationMasters {
             return None;
         }
         let (_, first) = self.masters().next()?;
-        PixelFlags::from_fn(first.size(), |index| {
+        PixelFlags::from_fn(first.size(), |idx| {
             let mut flags = QualityFlags::default();
             if unmeasured
                 .iter()
-                .any(|master| master.at(index).intersects(QualityFlags::UNMEASURED))
+                .any(|master| master.at(idx).intersects(QualityFlags::UNMEASURED))
             {
                 flags = flags.union(QualityFlags::NO_DATA);
             }
-            if floored.is_some_and(|flat| flat.is_floored(index)) {
+            if floored.is_some_and(|flat| flat.is_floored(idx)) {
                 flags = flags.union(QualityFlags::FLAT_FLOOR);
             }
             flags

@@ -14,15 +14,15 @@ use crate::registration::resample::frame_sampler::{
 };
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
-use crate::registration::resample::source_position::{AxisPosition, SourcePosition};
+use crate::registration::resample::source_pos::{AxisPos, SourcePos};
+use crate::registration::resample::warp_config::{
+    ClampingThreshold, InterpolationMethod, WarpConfig,
+};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
-use crate::registration::resample::warp_params::{
-    ClampingThreshold, InterpolationMethod, WarpParams,
-};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
 #[derive(Debug, Clone)]
@@ -69,7 +69,7 @@ impl Oracle<'_> {
     }
 
     /// An in-bounds tap as a pixel index.
-    fn index(x: i64, y: i64) -> (usize, usize) {
+    fn idx(x: i64, y: i64) -> (usize, usize) {
         (usize::try_from(x).unwrap(), usize::try_from(y).unwrap())
     }
 
@@ -79,7 +79,7 @@ impl Oracle<'_> {
             && (0..size.height as i64).contains(&y)
             && self
                 .validity
-                .is_none_or(|validity| Self::at(validity, Self::index(x, y)) == 1.0)
+                .is_none_or(|validity| Self::at(validity, Self::idx(x, y)) == 1.0)
     }
 
     /// The taps of `filter` at `stretch` around `at` and their f32 weights, from the
@@ -87,8 +87,8 @@ impl Oracle<'_> {
     /// is within the reach otherwise, and a tap at or past the reach weighing zero. The reach stops
     /// short of the stretched radius by where the kernel falls under `w = 2⁻²⁷`: `a·√w/(1 + √w)`
     /// for Lanczos-`a`, `√(2w)` for Catmull-Rom, `w` for the tent.
-    fn axis(filter: Filter, stretch: f32, at: AxisPosition) -> Vec<(i64, f32)> {
-        let AxisPosition { cell, frac } = at;
+    fn axis(filter: Filter, stretch: f32, at: AxisPos) -> Vec<(i64, f32)> {
+        let AxisPos { cell, frac } = at;
         let w = 2f64.powi(-27);
         let (radius, tolerance) = match filter {
             Filter::Bilinear => (1, w),
@@ -160,7 +160,7 @@ impl Oracle<'_> {
                     continue;
                 }
                 let weight = f64::from(wx) * f64::from(wy);
-                let value = f64::from(Self::at(plane, Self::index(x, y)));
+                let value = f64::from(Self::at(plane, Self::idx(x, y)));
                 total += weight * value;
                 if weight > 0.0 {
                     positive += weight * value.max(0.0);
@@ -190,9 +190,9 @@ impl Oracle<'_> {
         }
     }
 
-    /// The carried flags of pixel `index`: none on a pixel the warp excludes.
-    fn carried(&self, index: usize) -> QualityFlags {
-        let Some(flags) = self.flags.map(|flags| flags.at(index)) else {
+    /// The carried flags of pixel `idx`: none on a pixel the warp excludes.
+    fn carried(&self, idx: usize) -> QualityFlags {
+        let Some(flags) = self.flags.map(|flags| flags.at(idx)) else {
             return QualityFlags::default();
         };
         if flags.intersects(QualityFlags::RESAMPLE_EXCLUDED) {
@@ -211,7 +211,7 @@ impl Oracle<'_> {
                 let inside =
                     (0..size.width as i64).contains(&x) && (0..size.height as i64).contains(&y);
                 if inside && wx != 0.0 && wy != 0.0 {
-                    let (x, y) = Self::index(x, y);
+                    let (x, y) = Self::idx(x, y);
                     carried = carried.union(self.carried(y * size.width + x));
                 }
             }
@@ -221,16 +221,16 @@ impl Oracle<'_> {
 
     fn sample(
         &self,
-        position: Option<SourcePosition>,
+        pos: Option<SourcePos>,
         filter: Option<Stretched>,
         clamp: Option<f32>,
     ) -> Expected {
-        let Some(position) = position else {
+        let Some(pos) = pos else {
             return self.no_data();
         };
         let Some(Stretched { filter, stretch }) = filter else {
-            let index = position.nearest_index(self.size());
-            let (x, y) = (index % self.size().width, index / self.size().width);
+            let idx = pos.nearest_idx(self.size());
+            let (x, y) = (idx % self.size().width, idx / self.size().width);
             if !self.valid(x as i64, y as i64) {
                 return self.no_data();
             }
@@ -243,11 +243,11 @@ impl Oracle<'_> {
                 coverage: 1.0,
                 confidence: 1.0,
                 tolerance: 0.0,
-                flags: self.carried(index),
+                flags: self.carried(idx),
             };
         };
-        let xs = Self::axis(filter, stretch, position.x());
-        let ys = Self::axis(filter, stretch, position.y());
+        let xs = Self::axis(filter, stretch, pos.x());
+        let ys = Self::axis(filter, stretch, pos.y());
         let sums = self.sums(&xs, &ys);
         let coverage = if sums.all_in {
             1.0
@@ -258,8 +258,8 @@ impl Oracle<'_> {
         let (xs, ys, sums, clamp) = if accepted {
             (xs, ys, sums, clamp.filter(|_| filter != Filter::Bilinear))
         } else {
-            let xs = Self::axis(Filter::Bilinear, stretch, position.x());
-            let ys = Self::axis(Filter::Bilinear, stretch, position.y());
+            let xs = Self::axis(Filter::Bilinear, stretch, pos.x());
+            let ys = Self::axis(Filter::Bilinear, stretch, pos.y());
             let fallback = self.sums(&xs, &ys);
             if fallback.total <= 0.0 || coverage <= 0.0 {
                 return self.no_data();
@@ -320,18 +320,18 @@ fn fixture(size: Size2us, seed: usize) -> Buffer2<f32> {
 
 /// The positions of a rotated, enlarged grid over a `size` source: interior, edge band, the rim
 /// and outside.
-fn positions(size: Size2us) -> Vec<Option<SourcePosition>> {
-    let mut positions = Vec::new();
+fn poss(size: Size2us) -> Vec<Option<SourcePos>> {
+    let mut poss = Vec::new();
     for j in 0..26 {
         for i in 0..34 {
             let p = DVec2::new(
                 -1.7 + 0.83 * f64::from(i) + 0.11 * f64::from(j),
                 -1.3 + 0.79 * f64::from(j) - 0.07 * f64::from(i),
             );
-            positions.push(SourcePosition::within(p, size));
+            poss.push(SourcePos::within(p, size));
         }
     }
-    positions
+    poss
 }
 
 /// What [`sample`] returns: every channel's samples, the two quality values and the flags, per
@@ -344,17 +344,17 @@ struct Sampled {
     flags: Vec<u8>,
 }
 
-/// Every channel and the quality of `positions` sampled by `sampler` on `tier`.
-fn sample(tier: Tier, sampler: &FrameSampler<'_>, positions: &[Option<SourcePosition>]) -> Sampled {
-    let mut channels = vec![vec![f32::NAN; positions.len()]; sampler.sources.len()];
-    let mut coverage = vec![f32::NAN; positions.len()];
-    let mut confidence = vec![f32::NAN; positions.len()];
-    let mut flags = vec![u8::MAX; positions.len()];
+/// Every channel and the quality of `poss` sampled by `sampler` on `tier`.
+fn sample(tier: IsaTier, sampler: &FrameSampler<'_>, poss: &[Option<SourcePos>]) -> Sampled {
+    let mut channels = vec![vec![f32::NAN; poss.len()]; sampler.sources.len()];
+    let mut coverage = vec![f32::NAN; poss.len()];
+    let mut confidence = vec![f32::NAN; poss.len()];
+    let mut flags = vec![u8::MAX; poss.len()];
     let mut rows: Vec<&mut [f32]> = channels.iter_mut().map(Vec::as_mut_slice).collect();
     let mut axes = WindowAxes::default();
     tier.run(SampleRow {
         sampler,
-        positions,
+        poss,
         axes: &mut axes,
         output: RowOutput {
             channels: &mut rows,
@@ -439,20 +439,20 @@ fn methods() -> Vec<Case> {
 fn every_pixel_follows_the_rules() {
     let size = Size2us::new(24, 20);
     let planes = [fixture(size, 0), fixture(size, 5)];
-    let flags = PixelFlags::from_fn(size, |index| match index {
-        index if [5 * 24 + 7, 5 * 24 + 8, 12 * 24 + 15, 19 * 24, 9 * 24 + 23].contains(&index) => {
+    let flags = PixelFlags::from_fn(size, |idx| match idx {
+        idx if [5 * 24 + 7, 5 * 24 + 8, 12 * 24 + 15, 19 * 24, 9 * 24 + 23].contains(&idx) => {
             QualityFlags::NO_DATA
         }
-        index if index == 14 * 24 + 4 => QualityFlags::COSMIC_RAY,
-        index if [3 * 24 + 3, 3 * 24 + 4, 10 * 24 + 23, 16 * 24 + 11].contains(&index) => {
+        idx if idx == 14 * 24 + 4 => QualityFlags::COSMIC_RAY,
+        idx if [3 * 24 + 3, 3 * 24 + 4, 10 * 24 + 23, 16 * 24 + 11].contains(&idx) => {
             QualityFlags::SATURATED
         }
-        index if index == 8 * 24 + 12 => QualityFlags::FLAT_FLOOR,
-        index if index == 15 * 24 + 18 => QualityFlags::SATURATED.union(QualityFlags::COSMIC_RAY),
+        idx if idx == 8 * 24 + 12 => QualityFlags::FLAT_FLOOR,
+        idx if idx == 15 * 24 + 18 => QualityFlags::SATURATED.union(QualityFlags::COSMIC_RAY),
         _ => QualityFlags::default(),
     })
     .unwrap();
-    let positions = positions(size);
+    let poss = poss(size);
     let mut decided = [0usize; 3];
     let mut carried = [0usize; 2];
     for Case {
@@ -493,32 +493,32 @@ fn every_pixel_follows_the_rules() {
                 coverage,
                 confidence,
                 flags: sampled_flags,
-            } = sample(Tier::portable(), &sampler, &positions);
-            for (index, &position) in positions.iter().enumerate() {
-                let expected = oracle.sample(position, filter, clamp);
-                let what = format!("{filter:?} clamp {clamp:?} flagged {flagged} at {position:?}");
+            } = sample(IsaTier::portable(), &sampler, &poss);
+            for (idx, &pos) in poss.iter().enumerate() {
+                let expected = oracle.sample(pos, filter, clamp);
+                let what = format!("{filter:?} clamp {clamp:?} flagged {flagged} at {pos:?}");
                 for (channel, &value) in expected.values.iter().enumerate() {
-                    let actual = f64::from(channels[channel][index]);
+                    let actual = f64::from(channels[channel][idx]);
                     assert!(
                         (actual - value).abs() <= expected.tolerance,
                         "{what} channel {channel}: {actual} against {value}"
                     );
                 }
                 assert!(
-                    (f64::from(coverage[index]) - expected.coverage).abs() <= 1e-4,
+                    (f64::from(coverage[idx]) - expected.coverage).abs() <= 1e-4,
                     "{what}: coverage {} against {}",
-                    coverage[index],
+                    coverage[idx],
                     expected.coverage
                 );
                 assert!(
-                    (f64::from(confidence[index]) - expected.confidence).abs()
+                    (f64::from(confidence[idx]) - expected.confidence).abs()
                         <= 1e-4 * expected.confidence.max(1.0),
                     "{what}: confidence {} against {}",
-                    confidence[index],
+                    confidence[idx],
                     expected.confidence
                 );
                 assert_eq!(
-                    QualityFlags::from_byte(sampled_flags[index]),
+                    QualityFlags::from_byte(sampled_flags[idx]),
                     expected.flags,
                     "{what}: flags"
                 );
@@ -547,13 +547,13 @@ fn every_tier_samples_to_portables_bits() {
             fixture(size, 9).pixels().to_vec(),
         ],
     );
-    let flags = PixelFlags::from_fn(size, |index| match index {
-        index if index == 6 * 24 + 6 || index == 6 * 24 + 7 => QualityFlags::NO_DATA,
-        index if index == 12 * 24 + 9 => QualityFlags::SATURATED,
+    let flags = PixelFlags::from_fn(size, |idx| match idx {
+        idx if idx == 6 * 24 + 6 || idx == 6 * 24 + 7 => QualityFlags::NO_DATA,
+        idx if idx == 12 * 24 + 9 => QualityFlags::SATURATED,
         _ => QualityFlags::default(),
     })
     .unwrap();
-    let positions = positions(size);
+    let poss = poss(size);
     for Case { method, .. } in methods() {
         for flagged in [false, true] {
             let source = SourceImage::of(&rgb);
@@ -567,9 +567,9 @@ fn every_tier_samples_to_portables_bits() {
                 &source,
                 sources.as_ref(),
             );
-            let reference = sample(Tier::portable(), &sampler, &positions);
-            for tier in Tier::supported() {
-                let sampled = sample(tier, &sampler, &positions);
+            let reference = sample(IsaTier::portable(), &sampler, &poss);
+            for tier in IsaTier::supported() {
+                let sampled = sample(tier, &sampler, &poss);
                 let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
                 for (channel, expected) in sampled.channels.iter().zip(&reference.channels) {
                     assert_eq!(
@@ -601,7 +601,7 @@ fn clamped_sample(bright: f32, background: f32, threshold: Option<f32>) -> f32 {
     let size = Size2us::new(16, 9);
     let mut pixels = vec![background; size.pixel_count()];
     pixels[4 * size.width + 7] = bright;
-    let position = DVec2::new(8.5, 4.0);
+    let pos = DVec2::new(8.5, 4.0);
     let image = LinearImage::from_interleaved(
         ImageDimensions::new((size.width, 9), ChannelLayout::Mono),
         pixels,
@@ -620,8 +620,8 @@ fn clamped_sample(bright: f32, background: f32, threshold: Option<f32>) -> f32 {
         &source,
         None,
     );
-    let positions = [SourcePosition::within(position, size)];
-    sample(Tier::portable(), &sampler, &positions).channels[0][0]
+    let poss = [SourcePos::within(pos, size)];
+    sample(IsaTier::portable(), &sampler, &poss).channels[0][0]
 }
 
 /// A bright pixel under Lanczos3's first negative lobe, by hand.
@@ -722,13 +722,13 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
         &source,
         Some(&sources),
     );
-    let positions = [SourcePosition::within(DVec2::new(8.5, 8.5), size)];
+    let poss = [SourcePos::within(DVec2::new(8.5, 8.5), size)];
     let Sampled {
         channels,
         coverage,
         confidence,
         ..
-    } = sample(Tier::portable(), &sampler, &positions);
+    } = sample(IsaTier::portable(), &sampler, &poss);
     assert_eq!(channels[0][0], 98.5);
     assert_eq!(confidence[0], 2.0);
 
@@ -753,10 +753,10 @@ fn coverage_and_confidence_vanish_together() {
         ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
         fixture(size, 1).pixels().to_vec(),
     );
-    let positions = positions(size);
+    let poss = poss(size);
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            WarpParams::with_method(method),
+            WarpConfig::with_method(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );
@@ -769,7 +769,7 @@ fn coverage_and_confidence_vanish_together() {
             &source,
             None,
         );
-        let sampled = sample(Tier::portable(), &sampler, &positions);
+        let sampled = sample(IsaTier::portable(), &sampler, &poss);
         for (&coverage, &confidence) in sampled.coverage.iter().zip(&sampled.confidence) {
             assert_eq!(
                 coverage == 0.0,
@@ -801,7 +801,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
     let image =
         LinearImage::from_interleaved(ImageDimensions::new((64, 64), ChannelLayout::Mono), grating);
     let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
-    let warped = WarpParams::with_method(InterpolationMethod::Lanczos3).warp(&image, &halving);
+    let warped = WarpConfig::with_method(InterpolationMethod::Lanczos3).warp(&image, &halving);
 
     let lut = LanczosOrder::Three.lut();
     let entry = |distance: f32| f64::from(lut.at(distance * LANCZOS_LUT_RESOLUTION as f32));
@@ -837,8 +837,8 @@ fn a_halved_nyquist_grating_does_not_alias() {
         &source,
         None,
     );
-    let positions = [SourcePosition::within(DVec2::new(20.0, 20.0), size)];
-    let aliased = sample(Tier::portable(), &sampler, &positions).channels[0][0];
+    let poss = [SourcePos::within(DVec2::new(20.0, 20.0), size)];
+    let aliased = sample(IsaTier::portable(), &sampler, &poss).channels[0][0];
     assert!((aliased - 2.0).abs() < 1e-5, "{aliased}");
 }
 
@@ -883,12 +883,7 @@ fn filters_reproduce_their_polynomials() {
             &source,
             None,
         );
-        sample(
-            Tier::portable(),
-            &sampler,
-            &[SourcePosition::within(p, size)],
-        )
-        .channels[0][0]
+        sample(IsaTier::portable(), &sampler, &[SourcePos::within(p, size)]).channels[0][0]
     };
     let (plane_image, quadratic_image) = (image(&plane), image(&quadratic));
     let largest = |image: &LinearImage| {
@@ -905,7 +900,7 @@ fn filters_reproduce_their_polynomials() {
         for cell_y in 1..size.height - 2 {
             for cell_x in 1..size.width - 2 {
                 let p = DVec2::new(cell_x as f64 + fx, cell_y as f64 + fy);
-                let split = SourcePosition::within(p, size).unwrap();
+                let split = SourcePos::within(p, size).unwrap();
                 // The kernels sample the narrowed fraction, so the truth is taken there.
                 let (x, y) = (
                     f64::from(split.cell_x) + f64::from(split.fx),
@@ -938,7 +933,7 @@ fn filters_reproduce_their_polynomials() {
     let bound = 2.0 * 64.0 * epsilon * 8.0 * 2.5;
     for method in InterpolationMethod::ALL {
         let sample_method = SampleMethod::for_frame(
-            WarpParams::with_method(method),
+            WarpConfig::with_method(method),
             &WarpTransform::new(Transform::identity()),
             size,
         );
@@ -951,7 +946,7 @@ fn filters_reproduce_their_polynomials() {
             &source,
             None,
         );
-        let sampled = sample(Tier::portable(), &sampler, &positions(size));
+        let sampled = sample(IsaTier::portable(), &sampler, &poss(size));
         for (&value, &coverage) in sampled.channels[0].iter().zip(&sampled.coverage) {
             if coverage > 0.0 {
                 assert!(

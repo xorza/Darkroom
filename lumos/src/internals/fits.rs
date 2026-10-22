@@ -32,10 +32,10 @@ pub(crate) fn rewrite_fits(
     let bytes = fs::read(path).unwrap();
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
     let mut writer = FitsWriter::new(Vec::new()).with_checksums();
-    for index in 0..reader.hdus().len() {
-        let mut header = reader.hdus()[index].header.clone();
-        let mut data = reader.read_data_raw(index).unwrap().into_data();
-        if edit(index, &mut header, &mut data) {
+    for idx in 0..reader.hdus().len() {
+        let mut header = reader.hdus()[idx].header.clone();
+        let mut data = reader.read_data_raw(idx).unwrap().into_data();
+        if edit(idx, &mut header, &mut data) {
             writer.write_raw_hdu(&header, &data).unwrap();
         }
     }

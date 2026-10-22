@@ -9,10 +9,10 @@ pub(super) const AS_IS: &str = "As Is";
 /// The `Format` port's variants: [`AS_IS`], then every color format by name.
 const VARIANTS: [&str; ALL_FORMATS.len() + 1] = {
     let mut variants = [AS_IS; ALL_FORMATS.len() + 1];
-    let mut index = 0;
-    while index < ALL_FORMATS.len() {
-        variants[index + 1] = ALL_FORMATS[index].name();
-        index += 1;
+    let mut idx = 0;
+    while idx < ALL_FORMATS.len() {
+        variants[idx + 1] = ALL_FORMATS[idx].name();
+        idx += 1;
     }
     variants
 };

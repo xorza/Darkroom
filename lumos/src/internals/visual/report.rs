@@ -57,9 +57,9 @@ impl DetectionMetrics {
         detected: &[Star],
         match_radius: f64,
     ) -> Self {
-        let truth_positions: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
-        let detected_positions: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
-        let pairs = match_catalogs(&truth_positions, &detected_positions, match_radius);
+        let truth_poss: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
+        let detected_poss: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
+        let pairs = match_catalogs(&truth_poss, &detected_poss, match_radius);
         let relative = |truth: f32, measured: f32| {
             (truth > 0.0).then(|| f64::from((measured - truth).abs() / truth))
         };
@@ -73,7 +73,7 @@ impl DetectionMetrics {
             centroid: ErrorSummary::of(
                 pairs
                     .iter()
-                    .map(|&(ti, di)| truth_positions[ti].distance(detected_positions[di]))
+                    .map(|&(ti, di)| truth_poss[ti].distance(detected_poss[di]))
                     .collect(),
             ),
             mean_fwhm_error: mean(

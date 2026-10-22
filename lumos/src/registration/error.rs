@@ -32,7 +32,7 @@ pub enum StarField {
     Fwhm,
     /// The position's measurement σ, which the final fit divides each residual by: finite and
     /// positive.
-    PositionSigma,
+    PosSigma,
 }
 
 impl StarField {
@@ -40,7 +40,7 @@ impl StarField {
     pub const fn rule(self) -> &'static str {
         match self {
             Self::Fwhm => "finite",
-            Self::PositionSigma => "finite and positive",
+            Self::PosSigma => "finite and positive",
         }
     }
 }
@@ -49,7 +49,7 @@ impl Display for StarField {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Fwhm => "FWHM",
-            Self::PositionSigma => "position σ",
+            Self::PosSigma => "position σ",
         })
     }
 }
@@ -110,17 +110,17 @@ pub enum RegistrationError {
         required: usize,
     },
     /// A star has a non-finite position.
-    #[error("{catalog} star {index} position must be finite, got ({}, {})", position.x, position.y)]
-    InvalidStarPosition {
+    #[error("{catalog} star {idx} position must be finite, got ({}, {})", pos.x, pos.y)]
+    InvalidStarPos {
         catalog: RegistrationCatalog,
-        index: usize,
-        position: DVec2,
+        idx: usize,
+        pos: DVec2,
     },
     /// A star has a measurement registration cannot use: see [`StarField::rule`].
-    #[error("{catalog} star {index} {field} must be {}, got {value}", field.rule())]
+    #[error("{catalog} star {idx} {field} must be {}, got {value}", field.rule())]
     InvalidStarField {
         catalog: RegistrationCatalog,
-        index: usize,
+        idx: usize,
         field: StarField,
         value: f64,
     },

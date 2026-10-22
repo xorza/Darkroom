@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewPixels, RAW_EXTENSIONS};
+use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, PreviewPixels, RAW_EXTENSIONS};
 use scenarium::{
     DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, FuncInput, FuncOutput,
     Invocation, Library, async_lambda,
@@ -43,11 +43,11 @@ pub(crate) fn register(library: &mut Library) {
 
                 let path = inputs[0].required_fs_path().to_owned();
                 let image = runtime::run_cancellable(cancel, move |cancel| {
-                    let context = LoadContext {
+                    let ctx = LoadCtx {
                         cancel,
                         ..Default::default()
                     };
-                    context.preview(&path)
+                    ctx.preview(&path)
                 })
                 .await?;
 

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use common::TempDir;
 use glam::DVec2;
 use lumos::{
-    FitsFloatScale, ImageDimensions, IngestConfig, LinearImage, Transform, WarpParams,
+    FitsFloatScale, ImageDimensions, IngestConfig, LinearImage, Transform, WarpConfig,
     WarpTransform,
 };
 
@@ -84,7 +84,7 @@ impl Session {
             ImageDimensions::new((8, 8), ChannelLayout::Mono),
             [vec![0.0; 64]],
         );
-        WarpParams::default().warp(
+        WarpConfig::default().warp(
             &image,
             &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
         );

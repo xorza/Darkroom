@@ -7,7 +7,7 @@
 //! wires and shapes are recorded.
 //!
 //! Both ids live here rather than with
-//! [`GraphUI`](crate::gui::pane::graph_ui::GraphUI) because almost everything
+//! [`GraphUi`](crate::gui::pane::graph_ui::GraphUi) because almost everything
 //! under the pane needs one: the gestures poll the outer response, and the
 //! backdrop and the cull read its rect. Keeping them together is what stops
 //! two callers disagreeing about which canvas they mean. The transform
@@ -26,7 +26,7 @@ pub(crate) fn outer_wid() -> WidgetId {
 }
 
 /// Stable id for the inner (transformed) canvas. Used as the widget seed and
-/// for resolving the canvas's pre-transform origin in connection draws.
+/// for resolving the canvas's pre-transform origin in wire draws.
 pub(super) fn inner_wid() -> WidgetId {
     WidgetId::from_hash("graph.canvas.inner")
 }

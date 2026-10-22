@@ -10,7 +10,7 @@ use crate::gui::widgets::gesture_slot::GestureSlot;
 /// open-time and read at pick-time.
 ///
 /// Carries what both controllers need: the Esc-to-close guard, the identical
-/// `Popup` chrome (the `context_menu` theme slot's panel, padding, and width
+/// `Popup` chrome (the `ctx_menu` theme slot's panel, padding, and width
 /// floor, hug sizing, click-outside dismiss), and the "a pick or an outside
 /// dismiss closes the menu" resolution.
 #[derive(Default, Debug)]
@@ -68,9 +68,9 @@ impl AnchoredMenu {
         // `resp.dismissed`) — no separate Escape poll here.
         //
         // Chrome, padding, and the width floor all come off the same theme
-        // slot `ContextMenu::show` reads, so a canvas menu and a menu-bar
+        // slot `CtxMenu::show` reads, so a canvas menu and a menu-bar
         // menu are the same object; these popups only opt out of
-        // `ContextMenu` for its per-trigger open lifecycle, not its look.
+        // `CtxMenu` for its per-trigger open lifecycle, not its look.
         let ctx = &ui.theme().context_menu;
         let chrome = ctx.panel.clone();
         let padding = ctx.padding;

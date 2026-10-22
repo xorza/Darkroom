@@ -6,8 +6,8 @@
 
 use crate::containers::idx_set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::error::Result;
-use crate::execution::index::NodeIdx;
+use crate::execution::error::ExecutionResult;
+use crate::execution::idx::NodeIdx;
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::execution::seeds::RunSeeds;
 
@@ -49,7 +49,7 @@ impl Planner {
         program: &CompiledGraph,
         seeds: &RunSeeds,
         schedule: &mut RunSchedule,
-    ) -> Result<()> {
+    ) -> ExecutionResult<()> {
         schedule.reset_for_program(program);
         self.reset_for_program(program);
 
@@ -64,7 +64,7 @@ impl Planner {
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
     /// consumers) and resolves each node's structural [`NodeState`].
-    /// The state is set in the `Done` arm, i.e. in post-order, so every `Bind`
+    /// The state is set in the `Done` arm, i.e. in post-order, so every `Wire`
     /// producer is done, with its own state set, when a consumer reads it.
     fn walk_backward_collect_order(&mut self, program: &CompiledGraph, schedule: &mut RunSchedule) {
         self.stack.extend(schedule.roots().map(Visit::Discover));
@@ -116,7 +116,7 @@ impl Planner {
             self.stack.push(Visit::Done(node_idx));
 
             for e_input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(addr) = &e_input.binding {
+                if let ExecutionBinding::Wire(addr) = &e_input.binding {
                     self.stack.push(Visit::Discover(addr.node_idx));
                 }
             }

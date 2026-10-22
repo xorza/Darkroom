@@ -18,7 +18,7 @@ pub struct FitsTransferProvenance {
 /// The HDU an image was read from: its position in the file, and the name and version it states.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FitsHduProvenance {
-    pub index: usize,
+    pub idx: usize,
     pub extname: Option<String>,
     pub extver: Option<i64>,
 }

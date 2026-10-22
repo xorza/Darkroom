@@ -54,35 +54,32 @@ impl StarField {
         Self { side, stars }
     }
 
-    /// The dither of exposure `index`: rows of three, 3 px apart on each axis.
-    pub(crate) fn dither(index: usize) -> [f32; 2] {
-        [
-            (index % 3) as f32 * 3.0 - 3.0,
-            (index / 3) as f32 * 3.0 - 1.5,
-        ]
+    /// The dither of exposure `idx`: rows of three, 3 px apart on each axis.
+    pub(crate) fn dither(idx: usize) -> [f32; 2] {
+        [(idx % 3) as f32 * 3.0 - 3.0, (idx / 3) as f32 * 3.0 - 1.5]
     }
 
     /// `count` exposures at [`Self::dither`], each with noise of its own, written under `scratch`
     /// as `layout` says.
     pub(crate) fn expose(&self, scratch: &TempDir, count: usize, layout: Layout) -> Vec<PathBuf> {
         (0..count)
-            .map(|index| {
-                let path = scratch.join(format!("exposure_{index}.fits"));
-                self.write(&path, index, layout);
+            .map(|idx| {
+                let path = scratch.join(format!("exposure_{idx}.fits"));
+                self.write(&path, idx, layout);
                 path
             })
             .collect()
     }
 
-    /// Exposure `index` as a mono frame in memory, as [`Self::expose`] writes it.
-    pub(crate) fn frame(&self, index: usize) -> LinearImage {
+    /// Exposure `idx` as a mono frame in memory, as [`Self::expose`] writes it.
+    pub(crate) fn frame(&self, idx: usize) -> LinearImage {
         LinearImage::from_planar_channels(
             ImageDimensions::new((self.side, self.side), ChannelLayout::Mono),
-            [self.render(index)],
+            [self.render(idx)],
         )
     }
 
-    fn write(&self, path: &Path, index: usize, layout: Layout) {
+    fn write(&self, path: &Path, idx: usize, layout: Layout) {
         let mut header = Header::new();
         if layout == Layout::Mosaic {
             header.set("BAYERPAT", "RGGB").unwrap();
@@ -90,19 +87,19 @@ impl StarField {
         let mut writer = FitsWriter::new(File::create(path).unwrap());
         writer
             .write_image(
-                &FitsImage::new([self.side, self.side], self.render(index)).unwrap(),
+                &FitsImage::new([self.side, self.side], self.render(idx)).unwrap(),
                 Some(&header),
             )
             .unwrap();
         writer.into_inner().sync_all().unwrap();
     }
 
-    /// The pixels of exposure `index`: the stars at its dither over the sky, and noise drawn from
+    /// The pixels of exposure `idx`: the stars at its dither over the sky, and noise drawn from
     /// its index.
-    fn render(&self, index: usize) -> Vec<f32> {
+    fn render(&self, idx: usize) -> Vec<f32> {
         let side = self.side;
-        let shift = Self::dither(index);
-        let mut rng = ChaCha8Rng::seed_from_u64(index as u64);
+        let shift = Self::dither(idx);
+        let mut rng = ChaCha8Rng::seed_from_u64(idx as u64);
         let mut pixels = vec![SKY; side * side];
         // A Gaussian's FWHM is 2·√(2·ln 2) of its σ.
         let sigma = FWHM / (8.0 * LN_2).sqrt();

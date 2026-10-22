@@ -9,7 +9,7 @@ use tokio::sync::Notify;
 use tokio::task;
 use tokio::time::{Duration, Instant, sleep, timeout};
 
-use crate::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
+use crate::fs_watch::{WATCH_DIR_FUNC_ID, WatchState, fs_watch_library};
 
 /// One Watch Directory node, called again and again the way a node runs across
 /// graph runs: its state persists between calls.
@@ -63,11 +63,11 @@ async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
 }
 
 #[test]
-fn registers_watch_directory_func() {
+fn registers_watch_dir_func() {
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").expect("func registered");
 
-    assert_eq!(func.id(), WATCH_DIRECTORY_FUNC_ID);
+    assert_eq!(func.id(), WATCH_DIR_FUNC_ID);
     assert_eq!(func.inputs().len(), 3);
     assert_eq!(func.inputs()[0].name, "Directory");
     assert_eq!(func.inputs()[1].name, "Recursive");

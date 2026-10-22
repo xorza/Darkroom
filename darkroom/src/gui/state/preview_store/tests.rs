@@ -93,12 +93,12 @@ fn native_size_refuses_an_edge_no_texture_holds() {
         assert!(
             matches!(
                 size(width, height),
-                Err(PreviewImageError::EdgeTooLong { width: w, height: h }) if (w, h) == (width, height)
+                Err(DrawablePreviewError::EdgeTooLong { width: w, height: h }) if (w, h) == (width, height)
             ),
             "{width}×{height}",
         );
     }
-    assert!(matches!(size(0, 3), Err(PreviewImageError::Empty)));
+    assert!(matches!(size(0, 3), Err(DrawablePreviewError::Empty)));
 }
 
 /// An image's source becomes a full-resolution texture only when a viewer

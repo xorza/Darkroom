@@ -101,7 +101,7 @@ impl QualityFlags {
     /// # Panics
     ///
     /// If `self` is not a single flag.
-    pub(crate) const fn index(self) -> usize {
+    pub(crate) const fn idx(self) -> usize {
         assert!(self.0.is_power_of_two(), "a single flag");
         self.0.trailing_zeros() as usize
     }

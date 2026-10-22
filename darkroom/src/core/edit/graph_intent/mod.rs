@@ -42,7 +42,7 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::node_presence::{NodePresence, NodeState};
+use crate::core::edit::step::node_presence::{NodePresence, PresenceState};
 use crate::core::edit::step::raise::Raise;
 use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::set_input::SetInput;
@@ -199,8 +199,8 @@ impl GraphIntent {
 
     /// Clone `doc`'s current selection: each node gets a fresh id and an
     /// offset position, const-value bindings copy verbatim, the data and
-    /// event connections *among* the selected nodes are recreated against the
-    /// clones, and the copies end up selected. A `Bind` whose source is
+    /// event wires *among* the selected nodes are recreated against the
+    /// clones, and the copies end up selected. A `Wire` whose source is
     /// *outside* the selection goes as `incoming` says: dropped, or kept
     /// pointing at the original external producer. Empty when nothing is
     /// selected.
@@ -253,14 +253,14 @@ impl GraphIntent {
             for (port, binding) in graph.input_bindings(old_id) {
                 let input = InputPort::new(new_id, port.port_idx);
                 match binding {
-                    Binding::Bind(source) => match clones.get(&source.node_id) {
+                    Binding::Wire(source) => match clones.get(&source.node_id) {
                         Some(&new_source) => internal.push(Self::SetInput {
                             input,
-                            to: Some(Binding::bind(new_source, source.port_idx)),
+                            to: Some(Binding::wire(new_source, source.port_idx)),
                         }),
                         None if incoming == IncomingWires::Keep => bindings.push(BindingEntry {
                             port: input,
-                            binding: Binding::Bind(*source),
+                            binding: Binding::Wire(*source),
                         }),
                         None => {}
                     },
@@ -330,7 +330,7 @@ impl GraphIntent {
                 bindings,
             } => {
                 validate::fresh_node_id(doc, node_id)?;
-                validate::finite_position(pos, Role::AddNode)?;
+                validate::finite_pos(pos, Role::AddNode)?;
                 let func = validate::resolving_node(library, &node)?;
                 validate::seed_bindings(
                     graph,
@@ -358,7 +358,7 @@ impl GraphIntent {
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                let Some(state) = NodeState::capture(doc, node_id) else {
+                let Some(state) = PresenceState::capture(doc, node_id) else {
                     return Ok(None);
                 };
                 UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
@@ -369,7 +369,7 @@ impl GraphIntent {
                 let mut moves = Vec::with_capacity(members.len());
                 for member in members.iter() {
                     let to = member.pos + offset;
-                    validate::finite_position(to, Role::MoveSelection)?;
+                    validate::finite_pos(to, Role::MoveSelection)?;
                     // Drag-sourced (spans frames): a member whose item
                     // vanished mid-gesture (node removed) drops quietly.
                     let Some(placement) = view.item_placements.get(&member.node) else {
@@ -404,7 +404,7 @@ impl GraphIntent {
                 // Only a write is admitted: clearing removes a binding wherever
                 // it sits, which is never worse than keeping it.
                 if let Some(binding) = &to {
-                    if let Binding::Bind(source) = binding {
+                    if let Binding::Wire(source) = binding {
                         // A wire held across frames can outlive its producer,
                         // and the bind would leave the graph with a dangling
                         // edge.

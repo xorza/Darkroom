@@ -18,12 +18,12 @@ pub(super) fn largest_step<'a>(
     frame_norms: Option<&[FrameNorm]>,
 ) -> Option<f32> {
     let mut largest = None;
-    for (index, stats) in stats.into_iter().enumerate() {
+    for (idx, stats) in stats.into_iter().enumerate() {
         let sigma = stats
             .quantization_sigma
             .filter(|sigma| sigma.is_finite() && *sigma > 0.0)?;
         let scaled = frame_norms.map_or(sigma, |norms| {
-            norms[index]
+            norms[idx]
                 .slots
                 .iter()
                 .map(|slot| slot.gain.abs() * sigma)

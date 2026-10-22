@@ -69,20 +69,20 @@ impl<'a> MasterSubtraction<'a> {
 impl FrameStep<CfaImage> for MasterSubtraction<'_> {
     type Error = SubtractionError;
 
-    /// Check every subtractor against frame `index`, then remove them all in one pass.
-    fn apply(&self, index: usize, frame: &mut CfaImage) -> Result<(), SubtractionError> {
+    /// Check every subtractor against frame `idx`, then remove them all in one pass.
+    fn apply(&self, idx: usize, frame: &mut CfaImage) -> Result<(), SubtractionError> {
         for subtractor in &self.subtractors {
             let master = subtractor.master;
             if master.cfa_type() != frame.cfa_type() {
                 return Err(SubtractionError::SubtractorPattern {
-                    index,
+                    idx,
                     frame: frame.cfa_type(),
                     subtractor: master.cfa_type(),
                 });
             }
             if master.size() != frame.size() {
                 return Err(SubtractionError::SubtractorShape {
-                    index,
+                    idx,
                     frame: frame.size(),
                     subtractor: master.size(),
                 });
@@ -94,13 +94,13 @@ impl FrameStep<CfaImage> for MasterSubtraction<'_> {
                 .overlaps(subtractor.removes())
             {
                 return Err(SubtractionError::SubtractedTwice {
-                    index,
+                    idx,
                     subtractor: subtractor.role,
                 });
             }
         }
         Subtraction::resolve(frame, self.subtractors.iter().copied())
-            .map_err(|fault| SubtractionError::of_frame(index, fault))?
+            .map_err(|fault| SubtractionError::of_frame(idx, fault))?
             .apply(frame, self.imposed.as_ref(), Saturation::Detect);
         Ok(())
     }

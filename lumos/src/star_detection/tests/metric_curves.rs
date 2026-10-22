@@ -13,7 +13,7 @@ use crate::internals::synthetic::scene::{BackgroundField, Placement, Scene};
 use crate::math::size2us::Size2us;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{
-    MATCH_RADIUS, Scenario, detected_positions, synthetic_config, truth_positions,
+    MATCH_RADIUS, Scenario, detected_poss, synthetic_config, truth_poss,
 };
 
 #[test]
@@ -25,8 +25,8 @@ fn completeness_and_reliability_high_for_bright_field() {
     }
     .frame();
     let score = score_detection(
-        &truth_positions(&frame),
-        &detected_positions(&frame, &synthetic_config()),
+        &truth_poss(&frame),
+        &detected_poss(&frame, &synthetic_config()),
         MATCH_RADIUS,
     );
     assert!(
@@ -52,8 +52,8 @@ fn astrometric_rms_is_subpixel_on_bright_stars() {
     }
     .frame();
     let rms = astrometric_rms(
-        &truth_positions(&frame),
-        &detected_positions(&frame, &synthetic_config()),
+        &truth_poss(&frame),
+        &detected_poss(&frame, &synthetic_config()),
         MATCH_RADIUS,
     );
     assert!(
@@ -82,14 +82,14 @@ fn completeness_falls_for_fainter_sources() {
     .frame();
 
     let bright_c = score_detection(
-        &truth_positions(&bright),
-        &detected_positions(&bright, &config),
+        &truth_poss(&bright),
+        &detected_poss(&bright, &config),
         MATCH_RADIUS,
     )
     .completeness();
     let faint_c = score_detection(
-        &truth_positions(&faint),
-        &detected_positions(&faint, &config),
+        &truth_poss(&faint),
+        &detected_poss(&faint, &config),
         MATCH_RADIUS,
     )
     .completeness();
@@ -150,14 +150,14 @@ fn completeness_falls_with_crowding() {
     }
     .frame();
     let sparse_c = score_detection(
-        &truth_positions(&sparse),
-        &detected_positions(&sparse, &config),
+        &truth_poss(&sparse),
+        &detected_poss(&sparse, &config),
         MATCH_RADIUS,
     )
     .completeness();
     let crowded_c = score_detection(
-        &truth_positions(&crowded),
-        &detected_positions(&crowded, &config),
+        &truth_poss(&crowded),
+        &detected_poss(&crowded, &config),
         MATCH_RADIUS,
     )
     .completeness();
@@ -186,8 +186,8 @@ fn min_snr_knob_gates_faint_detections() {
     permissive.filter.min_snr = 5.0;
     let mut strict = synthetic_config();
     strict.filter.min_snr = 30.0;
-    let n_permissive = detected_positions(&frame, &permissive).len();
-    let n_strict = detected_positions(&frame, &strict).len();
+    let n_permissive = detected_poss(&frame, &permissive).len();
+    let n_strict = detected_poss(&frame, &strict).len();
     assert!(
         n_permissive > n_strict,
         "raising min_snr must reject faint detections: {n_permissive} (snr≥5) vs {n_strict} (snr≥30)"

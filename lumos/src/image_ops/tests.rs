@@ -28,8 +28,8 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
         let mut image = LinearImage::from_interleaved(
             dimensions,
             (0..dimensions.sample_count())
-                .map(|index| {
-                    let (pixel, channel) = (index / 3, index % 3);
+                .map(|idx| {
+                    let (pixel, channel) = (idx / 3, idx % 3);
                     let (x, y) = (pixel % 128, pixel / 128);
                     0.1 + 0.05 * channel as f32
                         + x as f32 / 2048.0

@@ -12,11 +12,11 @@ const fn dim_value(p: DVec2, dim: usize) -> f64 {
 /// A nearest-neighbor result: the original point index and squared distance to the query.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Neighbor {
-    pub(super) index: usize,
+    pub(super) idx: usize,
     pub(super) dist_sq: f64,
 }
 
-/// One subtree of the implicit layout: the `indices` range `[start, end)` it occupies, and the
+/// One subtree of the implicit layout: the `idxs` range `[start, end)` it occupies, and the
 /// depth it hangs at — which is what fixes its split dimension.
 ///
 /// Carried as a unit by both walks over the tree, the iterative build and the recursive descent,
@@ -84,7 +84,7 @@ pub(crate) struct KdTree {
     /// Permuted point indices forming the implicit tree structure.
     /// For a range [start, end), the node is at index `mid = (start + end) / 2`.
     /// Left subtree is [start, mid), right subtree is [mid+1, end).
-    indices: Vec<usize>,
+    idxs: Vec<usize>,
     points: Vec<DVec2>,
 }
 
@@ -99,9 +99,9 @@ impl KdTree {
             return None;
         }
 
-        let mut indices: Vec<usize> = (0..points.len()).collect();
+        let mut idxs: Vec<usize> = (0..points.len()).collect();
 
-        let mut stack: Vec<Subtree> = vec![Subtree::root(indices.len())];
+        let mut stack: Vec<Subtree> = vec![Subtree::root(idxs.len())];
 
         while let Some(subtree) = stack.pop() {
             if subtree.len() <= 1 {
@@ -109,12 +109,9 @@ impl KdTree {
             }
 
             let split_dim = subtree.split_dim();
-            indices[subtree.start..subtree.end].select_nth_unstable_by(
-                subtree.len() / 2,
-                |&a, &b| {
-                    dim_value(points[a], split_dim).total_cmp(&dim_value(points[b], split_dim))
-                },
-            );
+            idxs[subtree.start..subtree.end].select_nth_unstable_by(subtree.len() / 2, |&a, &b| {
+                dim_value(points[a], split_dim).total_cmp(&dim_value(points[b], split_dim))
+            });
 
             // The stack is LIFO: right goes first so left is processed first.
             let [left, right] = subtree.children();
@@ -126,7 +123,7 @@ impl KdTree {
             }
         }
 
-        Some(Self { indices, points })
+        Some(Self { idxs, points })
     }
 
     /// Find the `k` nearest neighbors to `query`, filling `out` (cleared first) instead of
@@ -142,7 +139,7 @@ impl KdTree {
             capacity: k,
             items: out,
         };
-        self.descend(Subtree::root(self.indices.len()), query, &mut heap);
+        self.descend(Subtree::root(self.idxs.len()), query, &mut heap);
         out.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
     }
 
@@ -152,10 +149,10 @@ impl KdTree {
     /// tracker with no heap or Vec allocation.
     pub(super) fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
         let mut best = NearestOne(Neighbor {
-            index: 0,
+            idx: 0,
             dist_sq: f64::INFINITY,
         });
-        self.descend(Subtree::root(self.indices.len()), query, &mut best);
+        self.descend(Subtree::root(self.idxs.len()), query, &mut best);
         best.0.dist_sq.is_finite().then_some(best.0)
     }
 
@@ -163,13 +160,13 @@ impl KdTree {
     ///
     /// The buffer is cleared before use. This avoids allocations when
     /// called repeatedly in a loop. The results are in traversal order, not sorted.
-    pub(super) fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
-        indices.clear();
+    pub(super) fn radius_idxs_into(&self, query: DVec2, radius: f64, idxs: &mut Vec<usize>) {
+        idxs.clear();
         let mut within = WithinRadius {
             radius_sq: radius * radius,
-            indices,
+            idxs,
         };
-        self.descend(Subtree::root(self.indices.len()), query, &mut within);
+        self.descend(Subtree::root(self.idxs.len()), query, &mut within);
     }
 
     /// Offer `visitor` every point under `subtree` it cannot rule out: visit the median, recurse
@@ -185,7 +182,7 @@ impl KdTree {
             return;
         }
 
-        let point_idx = self.indices[subtree.mid()];
+        let point_idx = self.idxs[subtree.mid()];
         let point = self.points[point_idx];
         visitor.visit(point_idx, (query - point).length_squared());
 
@@ -225,8 +222,8 @@ impl KdTree {
 /// The three queries differ only in these two answers, so they are what the descent takes instead
 /// of being written into three copies of it.
 trait Descent {
-    /// Offer the point at `index`, `dist_sq` away from the query. Keeping it is the visitor's call.
-    fn visit(&mut self, index: usize, dist_sq: f64);
+    /// Offer the point at `idx`, `dist_sq` away from the query. Keeping it is the visitor's call.
+    fn visit(&mut self, idx: usize, dist_sq: f64);
 
     /// Squared distance past which no point can still be wanted, so a subtree whose split plane is
     /// at least that far away need not be entered. `INFINITY` while nothing bounds the search yet.
@@ -234,8 +231,8 @@ trait Descent {
 }
 
 impl Descent for BoundedMaxHeap<'_> {
-    fn visit(&mut self, index: usize, dist_sq: f64) {
-        self.push(Neighbor { index, dist_sq });
+    fn visit(&mut self, idx: usize, dist_sq: f64) {
+        self.push(Neighbor { idx, dist_sq });
     }
 
     fn prune_radius_sq(&self) -> f64 {
@@ -254,9 +251,9 @@ impl Descent for BoundedMaxHeap<'_> {
 struct NearestOne(Neighbor);
 
 impl Descent for NearestOne {
-    fn visit(&mut self, index: usize, dist_sq: f64) {
+    fn visit(&mut self, idx: usize, dist_sq: f64) {
         if dist_sq < self.0.dist_sq {
-            self.0 = Neighbor { index, dist_sq };
+            self.0 = Neighbor { idx, dist_sq };
         }
     }
 
@@ -270,13 +267,13 @@ impl Descent for NearestOne {
 #[derive(Debug)]
 struct WithinRadius<'a> {
     radius_sq: f64,
-    indices: &'a mut Vec<usize>,
+    idxs: &'a mut Vec<usize>,
 }
 
 impl Descent for WithinRadius<'_> {
-    fn visit(&mut self, index: usize, dist_sq: f64) {
+    fn visit(&mut self, idx: usize, dist_sq: f64) {
         if dist_sq <= self.radius_sq {
-            self.indices.push(index);
+            self.idxs.push(idx);
         }
     }
 

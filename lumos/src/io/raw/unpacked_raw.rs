@@ -17,7 +17,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::observation_header::ObservationHeader;
 use crate::image::quality_flags::SATURATION_FRACTION;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::black_level::{
     BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
 };
@@ -298,7 +298,7 @@ impl UnpackedRaw {
     fn channel_map(&self) -> impl Fn(usize, usize) -> usize + Sync + use<> {
         let (cfa_type, filters) = (self.cfa_type, self.visible_filters);
         move |x: usize, y: usize| match cfa_type {
-            Some(CfaType::XTrans(pattern)) => pattern.color_at(Vec2us::new(x, y)).index(),
+            Some(CfaType::XTrans(pattern)) => pattern.color_at(Vec2us::new(x, y)).idx(),
             Some(CfaType::Bayer(_)) => raw::filter_color(filters, y, x),
             Some(CfaType::Mono) | None => 0,
         }
@@ -340,7 +340,7 @@ impl UnpackedRaw {
     }
 
     /// [`raw::load_preview`] past the open: the CFA path and a clamp, or LibRaw's own processing.
-    pub(super) fn into_linear_image(self, context: &LoadContext) -> Result<LinearImage, RawError> {
+    pub(super) fn into_linear_image(self, ctx: &LoadCtx) -> Result<LinearImage, RawError> {
         if self.cfa_type.is_none() {
             let idata = &self.libraw.data().idata;
             if idata.colors == 4 {
@@ -353,7 +353,7 @@ impl UnpackedRaw {
         }
         let cfa = self.into_cfa_image()?;
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
-        let mut image = cfa.demosaic(context.xtrans_passes, noise, &context.cancel)?;
+        let mut image = cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?;
         // The demosaic's own reach leaves the range, ~1.06 out of RCD and ~1.16 out of
         // Markesteijn at a step edge, and the frame arrives with its noise below black: the
         // preview clamps both, after the demosaic, so the interpolation sees the samples as

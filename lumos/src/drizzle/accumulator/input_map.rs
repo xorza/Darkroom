@@ -63,13 +63,10 @@ impl InputMap {
     /// Where input point `p` lands on the output grid, or `None` when the SIP inverse does not
     /// converge there.
     #[inline]
-    pub(super) fn position(&self, p: DVec2) -> Option<DVec2> {
+    pub(super) fn pos(&self, p: DVec2) -> Option<DVec2> {
         match self {
             Self::Transform { to_output, .. } => Some(to_output.apply(p)),
-            Self::Sip(sip) => sip
-                .inverse
-                .position(p)
-                .map(|position| sip.grid.apply(position)),
+            Self::Sip(sip) => sip.inverse.pos(p).map(|pos| sip.grid.apply(pos)),
         }
     }
 

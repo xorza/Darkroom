@@ -111,7 +111,7 @@ fn extract_stamp_coordinates() {
 }
 
 #[test]
-fn extract_stamp_fractional_position() {
+fn extract_stamp_fractional_pos() {
     let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
     // Fractional position 32.3, 32.7 rounds to 32, 33, so the top-left pixel is (30, 31) and the

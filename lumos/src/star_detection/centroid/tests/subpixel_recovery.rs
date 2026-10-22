@@ -56,9 +56,9 @@ fn noisy_stars_land_within_their_reported_sigma() {
         for (method, star) in [("moments", moments), ("fit", fit)] {
             let error = (star.pos - truth).abs().max_element();
             assert!(
-                error <= 5.0 * star.position_sigma,
+                error <= 5.0 * star.pos_sigma,
                 "{truth}, A {amplitude}, {method}: {error} > 5 × {}",
-                star.position_sigma
+                star.pos_sigma
             );
         }
     }
@@ -125,7 +125,7 @@ fn the_position_sigma_matches_the_scatter() {
                 windowed_scatter: (windowed.pos - truth).length_squared() / 2.0,
                 windowed_reported: windowed.sigma * windowed.sigma,
                 fit_scatter: (fit.pos - truth).length_squared() / 2.0,
-                fit_reported: fit.position_sigma * fit.position_sigma,
+                fit_reported: fit.pos_sigma * fit.pos_sigma,
             }
         })
         .collect();

@@ -64,8 +64,8 @@ const PATT: [[i8; 16]; 2] = [
 
 impl MosaicPattern for XTransPattern {
     #[inline(always)]
-    fn color_at(&self, position: Vec2us) -> CfaColor {
-        self.color_at(position)
+    fn color_at(&self, pos: Vec2us) -> CfaColor {
+        self.color_at(pos)
     }
 }
 
@@ -134,7 +134,7 @@ impl XTransPattern {
         while row < 6 {
             let mut column = 0;
             while column < 6 {
-                colors[row][column] = match CfaColor::from_index(rows[row][column] as usize) {
+                colors[row][column] = match CfaColor::from_idx(rows[row][column] as usize) {
                     Some(color) => color,
                     None => unreachable!(),
                 };
@@ -158,7 +158,7 @@ impl XTransPattern {
         while row < 6 {
             let mut column = 0;
             while column < 6 {
-                rows[row][column] = self.colors[row][column].index() as u8;
+                rows[row][column] = self.colors[row][column].idx() as u8;
                 column += 1;
             }
             row += 1;

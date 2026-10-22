@@ -1,4 +1,4 @@
-//! [`ConfigValue`]: a configuration field's value, checked against the range its algorithm
+//! [`ConfigField`]: a configuration field's value, checked against the range its algorithm
 //! accepts.
 
 use crate::error::InvalidConfigField;
@@ -8,12 +8,12 @@ use crate::error::InvalidConfigField;
 /// Each check is the Result-returning counterpart to `assert!` for config validation: `expected`
 /// completes the sentence "`<field>` must be …".
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ConfigValue {
+pub(crate) struct ConfigField {
     field: &'static str,
     value: f64,
 }
 
-impl ConfigValue {
+impl ConfigField {
     /// `value` of `field`, named as [`InvalidConfigField::field`] says.
     pub(crate) fn new(field: &'static str, value: impl Into<f64>) -> Self {
         Self {
@@ -100,11 +100,11 @@ fn exact(count: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::config_value::ConfigValue;
+    use crate::config_field::ConfigField;
 
     #[test]
     fn a_rejection_states_the_field_the_range_and_the_value() {
-        let plain = ConfigValue::new("sigma_threshold", 0.0f32)
+        let plain = ConfigField::new("sigma_threshold", 0.0f32)
             .must_be("finite and positive", false)
             .unwrap_err();
         assert_eq!(
@@ -114,7 +114,7 @@ mod tests {
         assert_eq!(plain.bound, None);
 
         // A count widens exactly, and prints without a fractional part.
-        let counted = ConfigValue::count("tile_size", 300)
+        let counted = ConfigField::count("tile_size", 300)
             .must_be("between 16 and 256", false)
             .unwrap_err();
         assert_eq!(
@@ -122,7 +122,7 @@ mod tests {
             "tile_size must be between 16 and 256, got 300"
         );
 
-        let against = ConfigValue::new("max_area", 3u32)
+        let against = ConfigField::new("max_area", 3u32)
             .must_be_against("at least min_area", 5u32, false)
             .unwrap_err();
         assert_eq!(
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(against.bound, Some(5.0));
 
         // `must_be` takes the caller's verdict alone; `finite_and` adds finiteness to it.
-        let nan = ConfigValue::new("sigma_threshold", f32::NAN);
+        let nan = ConfigField::new("sigma_threshold", f32::NAN);
         assert_eq!(nan.must_be("finite and positive", true), Ok(()));
         let rejected = nan.finite_and("finite and positive", |_| true).unwrap_err();
         assert_eq!(
@@ -141,17 +141,17 @@ mod tests {
         );
         assert!(rejected.value.is_nan());
         assert_eq!(
-            ConfigValue::new("alpha", 0.5).finite_and("finite and in (0, 1)", |v| v < 1.0),
+            ConfigField::new("alpha", 0.5).finite_and("finite and in (0, 1)", |v| v < 1.0),
             Ok(())
         );
         assert!(
-            ConfigValue::new("alpha", 1.5)
+            ConfigField::new("alpha", 1.5)
                 .finite_and("finite and in (0, 1)", |v| v < 1.0)
                 .is_err()
         );
-        assert_eq!(ConfigValue::new("gain", -3.0).finite(), Ok(()));
+        assert_eq!(ConfigField::new("gain", -3.0).finite(), Ok(()));
         assert_eq!(
-            ConfigValue::new("gain", f64::INFINITY)
+            ConfigField::new("gain", f64::INFINITY)
                 .finite()
                 .unwrap_err()
                 .to_string(),

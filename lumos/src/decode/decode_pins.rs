@@ -8,18 +8,18 @@ use crate::decode::fnv1a;
 /// patterns of an `x86_64` AVX2/FMA host.
 #[derive(Debug)]
 pub(crate) struct DecodePins {
-    /// [`LoadContext::linear`](crate::LoadContext::linear) on a FITS image.
+    /// [`LoadCtx::linear`](crate::LoadCtx::linear) on a FITS image.
     pub(crate) fits_linear: &'static str,
-    /// [`LoadContext::linear`](crate::LoadContext::linear) on a floating-point TIFF.
+    /// [`LoadCtx::linear`](crate::LoadCtx::linear) on a floating-point TIFF.
     pub(crate) float_tiff: &'static str,
-    /// [`LoadContext::cfa`](crate::LoadContext::cfa) on a mosaic FITS — its plane, flags
+    /// [`LoadCtx::cfa`](crate::LoadCtx::cfa) on a mosaic FITS — its plane, flags
     /// and quantization σ.
     pub(crate) fits_cfa: &'static str,
-    /// [`LoadContext::cfa`](crate::LoadContext::cfa) on a camera RAW — its plane, flags
+    /// [`LoadCtx::cfa`](crate::LoadCtx::cfa) on a camera RAW — its plane, flags
     /// and quantization σ — pinned on the `real-data` dataset and checked only with that feature.
     pub(crate) raw_cfa: &'static str,
     /// [`CfaImage::demosaic`](crate::CfaImage), which
-    /// [`LoadContext::linear`](crate::LoadContext::linear) runs on a camera RAW and on a
+    /// [`LoadCtx::linear`](crate::LoadCtx::linear) runs on a camera RAW and on a
     /// mosaic FITS, of a calibrated Bayer light and of an X-Trans one at each pass count.
     pub(crate) demosaic: &'static str,
     /// `FrameStats::measure`, which a kept frame is committed with, on a mono, a mosaic and a

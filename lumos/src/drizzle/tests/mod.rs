@@ -28,7 +28,7 @@ use crate::image::quality_map::QualityMap;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::images::gray_image;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;

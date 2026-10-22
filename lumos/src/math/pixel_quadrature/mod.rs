@@ -156,7 +156,7 @@ impl PixelQuadrature {
             (1..=MAX_ORDER).contains(&order),
             "a pixel quadrature has 1 to {MAX_ORDER} points, not {order}"
         );
-        RULES.get_or_init(|| array::from_fn(|index| Self::solved(index + 1)))[order - 1]
+        RULES.get_or_init(|| array::from_fn(|idx| Self::solved(idx + 1)))[order - 1]
     }
 
     /// The rule of `order` points, its nodes found by Newton's method.

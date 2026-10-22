@@ -70,12 +70,12 @@ impl ColorMesh {
         Self { colors, x, y }
     }
 
-    /// The sky and noise of `color` at `position`, bilinear between the four nearest tile centres,
+    /// The sky and noise of `color` at `pos`, bilinear between the four nearest tile centres,
     /// and continued linearly past the outer ones.
-    pub(crate) fn at(&self, color: usize, position: Vec2us) -> LocalBackground {
+    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> LocalBackground {
         let tiles = &self.colors[color];
-        let x = self.x[position.x];
-        let y = self.y[position.y];
+        let x = self.x[pos.x];
+        let y = self.y[pos.y];
         let corner = |tx: usize, ty: usize| tiles[(tx, ty)];
         let lerp = |a: f32, b: f32, t: f32| a + t * (b - a);
         let mix = |get: fn(TileStats) -> f32| {
@@ -112,16 +112,16 @@ fn spans(length: usize, centres: &[f32]) -> Vec<Span> {
         ];
     }
     (0..length)
-        .map(|position| {
-            let position = position as f32;
+        .map(|pos| {
+            let pos = pos as f32;
             let upper = centres
-                .partition_point(|&centre| centre <= position)
+                .partition_point(|&centre| centre <= pos)
                 .clamp(1, centres.len() - 1);
             let lower = upper - 1;
             Span {
                 lower,
                 upper,
-                fraction: (position - centres[lower]) / (centres[upper] - centres[lower]),
+                fraction: (pos - centres[lower]) / (centres[upper] - centres[lower]),
             }
         })
         .collect()

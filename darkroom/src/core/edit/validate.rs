@@ -107,7 +107,7 @@ pub(super) fn seed_bindings(
         if port.node_id != node_id {
             return Err(MalformedIntent::ForeignSeedBinding { port });
         }
-        if let Binding::Bind(source) = binding {
+        if let Binding::Wire(source) = binding {
             // The one cycle an insertion can author: nothing reads the new
             // node yet, so the only loop it can close is through itself.
             if source.node_id == node_id {
@@ -137,9 +137,9 @@ fn present_node(graph: &Graph, node_id: NodeId, role: Role) -> Result<(), Malfor
 
 /// Positions reach the view verbatim, and nothing after the load repairs a
 /// non-finite one.
-pub(super) fn finite_position(pos: Vec2, role: Role) -> Result<(), MalformedIntent> {
+pub(super) fn finite_pos(pos: Vec2, role: Role) -> Result<(), MalformedIntent> {
     if !pos.is_finite() {
-        return Err(MalformedIntent::NonFinitePosition { role, pos });
+        return Err(MalformedIntent::NonFinitePos { role, pos });
     }
     Ok(())
 }

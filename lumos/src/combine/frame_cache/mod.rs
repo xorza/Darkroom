@@ -18,7 +18,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
-use crate::combine::frame_cache::core::{CacheCore, ChunkContext};
+use crate::combine::frame_cache::core::{CacheCore, ChunkCtx};
 use crate::combine::frame_cache::frame_step::{FrameStep, SteppedPaths};
 use crate::combine::frame_cache::frame_weights::FrameWeights;
 use crate::combine::frame_cache::loader::LoadedCache;
@@ -35,9 +35,9 @@ use crate::combine::stack::planned_combine::PlannedCombine;
 use crate::combine::stack_frame::StackFrame;
 use crate::error::Cancelled;
 use crate::frame::capture_conditions::CaptureConditions;
+use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::frame_store::tier::Tier;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::dark_comparison::DarkComparison;
@@ -140,9 +140,9 @@ impl FrameCache {
         // every plane in from disk once before the combine reads it again. What the frames' sources
         // stated (domain, row order, pattern) is the input's, and is checked here always.
         let mut facts = SetFacts::default();
-        for (index, frame) in frames.iter().enumerate() {
+        for (idx, frame) in frames.iter().enumerate() {
             Cancelled::check(&core.monitor.cancel)?;
-            facts.admit(index, &frame.facts)?;
+            facts.admit(idx, &frame.facts)?;
             #[expect(
                 clippy::debug_assert_with_mut_call,
                 reason = "the facts it writes are a fresh set the check owns"
@@ -150,12 +150,12 @@ impl FrameCache {
             {
                 debug_assert!(
                     FrameCheck {
-                        index,
+                        idx,
                         cancel: &CancelToken::never(),
                     }
                     .stored(frame, core.dimensions, &mut SetFacts::default())
                     .is_ok(),
-                    "stored frame {index} breaks the pipeline's own frame contract"
+                    "stored frame {idx} breaks the pipeline's own frame contract"
                 );
             }
         }
@@ -175,13 +175,13 @@ impl FrameCache {
 
         // Width and height before the shared check, which a stored plane can only compare by
         // sample count: a 4×2 frame in a 2×4 set has the right count and the wrong shape.
-        for (index, frame) in frames.iter().enumerate() {
-            FrameDimensionMismatch::check(index, dimensions, frame.image.dimensions())?;
+        for (idx, frame) in frames.iter().enumerate() {
+            FrameDimensionMismatch::check(idx, dimensions, frame.image.dimensions())?;
             for (kind, plane) in frame.quality.present() {
                 let actual = Size2us::from(plane);
                 if actual != dimensions.size() {
                     return Err(StackError::PlaneDimensionMismatch {
-                        index,
+                        idx,
                         plane: kind,
                         expected: dimensions.size(),
                         actual,
@@ -194,9 +194,9 @@ impl FrameCache {
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.admitted))
             .collect::<Vec<_>>();
         let mut facts = SetFacts::default();
-        for (index, frame) in stored.iter().enumerate() {
+        for (idx, frame) in stored.iter().enumerate() {
             FrameCheck {
-                index,
+                idx,
                 cancel: &monitor.cancel,
             }
             .stored(frame, dimensions, &mut facts)?;
@@ -204,7 +204,7 @@ impl FrameCache {
         Self::measured(
             stored,
             CacheCore {
-                tier: Tier::Resident,
+                tier: StorageTier::Resident,
                 dimensions,
                 metadata,
                 monitor,
@@ -375,7 +375,7 @@ impl FrameCache {
         let pixels = self
             .core
             .process_chunks(&self.frames, chunking.units, |output_slice, ctx| {
-                let ChunkContext {
+                let ChunkCtx {
                     frames,
                     chunks,
                     width,
@@ -726,8 +726,8 @@ impl FrameCache {
         // The loader ran each frame's own checks as it decoded, and its facts against frame 0's;
         // the facts a later frame states first are compared here, in order.
         let mut facts = SetFacts::default();
-        for (index, frame) in frames.iter().enumerate() {
-            facts.admit(index, &frame.facts)?;
+        for (idx, frame) in frames.iter().enumerate() {
+            facts.admit(idx, &frame.facts)?;
         }
         Self::measured(frames, core, normalization)
     }
@@ -740,8 +740,8 @@ pub(crate) mod internals {
     use crate::combine::normalization::Normalization;
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::FrameQuality;
+    use crate::frame_store::storage_tier::StorageTier;
     use crate::frame_store::stored_frame::StoredFrame;
-    use crate::frame_store::tier::Tier;
     use crate::image::stackable_image::StackableImage;
 
     impl FrameCache {
@@ -752,7 +752,7 @@ pub(crate) mod internals {
             images: Vec<I>,
             normalization: Normalization,
         ) -> Self {
-            let mut core = CacheCore::plain(Tier::Resident, images[0].dimensions());
+            let mut core = CacheCore::plain(StorageTier::Resident, images[0].dimensions());
             core.metadata = images[0].metadata().clone();
             let frames = images
                 .into_iter()

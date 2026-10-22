@@ -73,12 +73,9 @@ fn isolated(points: &[DVec2], others: &[DVec2], size: Size2us) -> Vec<DVec2> {
         .collect()
 }
 
-/// How many of `positions` lie within `radius` of `at`.
-fn near(at: DVec2, positions: &[DVec2], radius: f64) -> usize {
-    positions
-        .iter()
-        .filter(|&&p| p.distance(at) <= radius)
-        .count()
+/// How many of `poss` lie within `radius` of `at`.
+fn near(at: DVec2, poss: &[DVec2], radius: f64) -> usize {
+    poss.iter().filter(|&&p| p.distance(at) <= radius).count()
 }
 
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
@@ -91,12 +88,12 @@ fn synthetic_config() -> StarDetectionConfig {
 }
 
 /// True source positions of a rendered frame.
-fn truth_positions(frame: &SimFrame) -> Vec<DVec2> {
+fn truth_poss(frame: &SimFrame) -> Vec<DVec2> {
     frame.truth.sources.iter().map(|s| s.pos).collect()
 }
 
 /// Detect on `frame.image` with `config` and return the detected star positions.
-fn detected_positions(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
+fn detected_poss(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
     StarDetector::from_config(config.clone())
         .unwrap()
         .detect(&frame.image)

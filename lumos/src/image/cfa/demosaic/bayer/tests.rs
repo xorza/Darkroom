@@ -105,8 +105,8 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
         Size2us::new(96, 80)
     };
     let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-        let index = y * size.width + x;
-        ((index * 37 + y * 11) % 1_024) as f32 / 1_023.0
+        let idx = y * size.width + x;
+        ((idx * 37 + y * 11) % 1_024) as f32 / 1_023.0
     });
     let bayer = MosaicView::new(&data, CfaPattern::Rggb);
 
@@ -140,7 +140,7 @@ fn mosaic(
 ) -> Buffer2<f32> {
     Buffer2::from_fn(size.width, size.height, |x, y| {
         let pos = Vec2us::new(x, y);
-        scene(pos, pattern.color_at(pos).index())
+        scene(pos, pattern.color_at(pos).idx())
     })
 }
 
@@ -158,11 +158,11 @@ fn constant_color_reconstructs_on_every_phase() {
         for color in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
             let data = mosaic(size, pattern, |_, channel| color[channel]);
             let planes = demosaic(&data, pattern);
-            for (index, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
-                let native = pattern.color_at(pos).index();
-                assert_eq!(planes[native][index].to_bits(), color[native].to_bits());
+            for (idx, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
+                let native = pattern.color_at(pos).idx();
+                assert_eq!(planes[native][idx].to_bits(), color[native].to_bits());
                 for channel in 0..3 {
-                    let value = planes[channel][index];
+                    let value = planes[channel][idx];
                     assert_close!(
                         value,
                         color[channel],
@@ -194,8 +194,8 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
         // An even offset keeps the crop on the larger frame's phase.
         let part = demosaic(&crop, pattern);
         for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
-            for (index, value) in part_plane.iter().enumerate() {
-                let pos = small.point_of(index);
+            for (idx, value) in part_plane.iter().enumerate() {
+                let pos = small.point_of(idx);
                 let distance = pos
                     .x
                     .min(pos.y)
@@ -204,7 +204,7 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
                 if distance < INTERPOLATED_BORDER {
                     continue;
                 }
-                let outer = large.index_of(Vec2us::new(pos.x + offset, pos.y + offset));
+                let outer = large.idx_of(Vec2us::new(pos.x + offset, pos.y + offset));
                 assert_eq!(
                     value.to_bits(),
                     whole_plane[outer].to_bits(),
@@ -234,19 +234,19 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
                          size: Size2us,
                          case: &str| {
         for (channel, plane) in planes.iter().enumerate() {
-            for (index, &value) in plane.iter().enumerate() {
+            for (idx, &value) in plane.iter().enumerate() {
                 assert!(
                     value.is_finite(),
-                    "{case} channel {channel} at {index} = {value}"
+                    "{case} channel {channel} at {idx} = {value}"
                 );
             }
         }
-        for (index, &sample) in data.iter().enumerate() {
-            let channel = color(size.point_of(index));
+        for (idx, &sample) in data.iter().enumerate() {
+            let channel = color(size.point_of(idx));
             assert_eq!(
-                planes[channel][index].to_bits(),
+                planes[channel][idx].to_bits(),
                 sample.to_bits(),
-                "{case}: native sample changed at {index}"
+                "{case}: native sample changed at {idx}"
             );
         }
     };
@@ -256,7 +256,7 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         assert_native(
             &demosaic(&data, pattern),
             &data,
-            &|pos| pattern.color_at(pos).index(),
+            &|pos| pattern.color_at(pos).idx(),
             size,
             &format!("{pattern:?}"),
         );
@@ -339,7 +339,7 @@ fn rcd_is_the_same_on_every_bayer_phase() {
     let mosaic = |pattern: CfaPattern, dx: usize, dy: usize| -> Buffer2<f32> {
         let (cw, ch) = (w - dx, h - dy);
         Buffer2::from_fn(cw, ch, |x, y| {
-            scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)).index())
+            scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)).idx())
         })
     };
 
@@ -396,8 +396,8 @@ fn rcd_interpolates_along_an_edge() {
         for (name, across) in axes {
             let data = mosaic(size, pattern, |pos, _| side(across(pos)));
             let planes = demosaic(&data, pattern);
-            for index in 0..size.pixel_count() {
-                let pos = size.point_of(index);
+            for idx in 0..size.pixel_count() {
+                let pos = size.point_of(idx);
                 if pos
                     .x
                     .min(pos.y)
@@ -410,7 +410,7 @@ fn rcd_interpolates_along_an_edge() {
                 let expected = side(across(pos));
                 for (channel, plane) in planes.iter().enumerate() {
                     assert_close!(
-                        plane[index],
+                        plane[idx],
                         expected,
                         expected * ROUNDING,
                         "{pattern:?} {name} edge, channel {channel} at {pos:?}"
@@ -431,8 +431,8 @@ fn rcd_reproduces_a_linear_ramp_inside_the_border() {
     let ramp = |pos: Vec2us| 0.1 + 0.015 * pos.x as f32 + 0.01 * pos.y as f32;
     for pattern in CfaPattern::ALL {
         let planes = demosaic(&mosaic(size, pattern, |pos, _| ramp(pos)), pattern);
-        for index in 0..size.pixel_count() {
-            let pos = size.point_of(index);
+        for idx in 0..size.pixel_count() {
+            let pos = size.point_of(idx);
             if pos
                 .x
                 .min(pos.y)
@@ -444,7 +444,7 @@ fn rcd_reproduces_a_linear_ramp_inside_the_border() {
             }
             for (channel, plane) in planes.iter().enumerate() {
                 assert_close!(
-                    plane[index],
+                    plane[idx],
                     ramp(pos),
                     ramp(pos) * ROUNDING,
                     "{pattern:?} channel {channel} at {pos:?}"
@@ -499,11 +499,11 @@ fn rcd_is_odd() {
         let planes = demosaic(&data, pattern);
         let mirrored = demosaic(&negated, pattern);
         for (channel, (plane, mirror)) in planes.iter().zip(&mirrored).enumerate() {
-            for (index, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
+            for (idx, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
                 assert_eq!(
                     (-value).to_bits(),
                     negative.to_bits(),
-                    "{pattern:?} channel {channel} at {index}"
+                    "{pattern:?} channel {channel} at {idx}"
                 );
             }
         }

@@ -44,9 +44,9 @@ use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::error::{ImageError, OverBudget, ScientificRefusal};
 use crate::io::fits::decode;
 use crate::io::fits::error::{FitsAllocation, FitsRefusal};
-use crate::io::fits::fits_load_options::{FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions};
+use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale, FitsLoadConfig};
 use crate::io::frame_info::FrameInfo;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
@@ -62,7 +62,7 @@ fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> 
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = dir.join(format!("{name}.fits"));
     write_fits(&path, image, None);
-    decode::load_linear(&path, &LoadContext::default())
+    decode::load_linear(&path, &LoadCtx::default())
 }
 
 /// Write `image` with `header`'s cards to `path`.
@@ -77,7 +77,7 @@ fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, Ima
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
-    decode::load_linear(&path, &LoadContext::default())
+    decode::load_linear(&path, &LoadCtx::default())
 }
 
 fn one_pixel_header() -> Header {
@@ -196,9 +196,9 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
-    for (index, &value) in raw.iter().enumerate() {
+    for (idx, &value) in raw.iter().enumerate() {
         let expected = f32::from(value) / 65_535.0;
-        assert_close!(pixels[index], expected, 1e-7, "sample {index}: {pixels:?}");
+        assert_close!(pixels[idx], expected, 1e-7, "sample {idx}: {pixels:?}");
     }
 }
 
@@ -219,12 +219,12 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         &Header::new(),
     );
 
-    let with_scale = |scale| LoadContext {
-        fits: FitsLoadOptions {
+    let with_scale = |scale| LoadCtx {
+        fits: FitsLoadConfig {
             float_scale: scale,
             ..Default::default()
         },
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
 
     // No DATAMAX, so `Auto` takes the samples as normalized, and they reach 65535: refused, which is
@@ -281,7 +281,7 @@ fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
     let sigma_of = |name: &str, raw: &[u16]| {
         let image = Image::from_u16(vec![raw.len(), 1], raw).unwrap();
         let path = write_with_header(dir.join(format!("{name}.fits")), &image, &header);
-        decode::load_cfa(&path, &LoadContext::default())
+        decode::load_cfa(&path, &LoadCtx::default())
             .unwrap()
             .metadata
             .derived
@@ -319,12 +319,12 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     );
     let dir = TempDir::new("lumos-fits-roundtrip");
     let bare_path = write_with_header(dir.join("float32_bare.fits"), &image, &Header::new());
-    let normalized_options = LoadContext {
-        fits: FitsLoadOptions {
+    let normalized_options = LoadCtx {
+        fits: FitsLoadConfig {
             float_scale: FitsFloatScale::Normalized,
             ..Default::default()
         },
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
     let bare = decode::load_linear(&bare_path, &normalized_options).unwrap();
     assert_eq!(bare.channel(0).pixels(), &*pixels);
@@ -338,7 +338,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         &image,
         &normalized_header,
     );
-    assert!(decode::load_linear(&contradicted, &LoadContext::default()).is_err());
+    assert!(decode::load_linear(&contradicted, &LoadCtx::default()).is_err());
     let unit_pixels = vec![-0.25f32, 0.0, 0.5, 1.0];
     let unit_image = Image::new(vec![4, 1], unit_pixels.clone()).unwrap();
     let normalized_path = write_with_header(
@@ -346,7 +346,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         &unit_image,
         &normalized_header,
     );
-    let normalized = decode::load_linear(&normalized_path, &LoadContext::default()).unwrap();
+    let normalized = decode::load_linear(&normalized_path, &LoadCtx::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &*unit_pixels);
     assert_eq!(normalized.metadata.header.data_max, Some(1.0));
 
@@ -355,7 +355,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let mut adu_header = Header::new();
     adu_header.set("DATAMAX", 65_535.0).unwrap();
     let adu_path = write_with_header(dir.join("float32_datamax_adu.fits"), &image, &adu_header);
-    let adu = decode::load_linear(&adu_path, &LoadContext::default()).unwrap();
+    let adu = decode::load_linear(&adu_path, &LoadCtx::default()).unwrap();
     let decoded = adu.channel(0).pixels();
     assert_close!(decoded[0], -7.629_511e-5, 1e-9, "{decoded:?}");
     assert_eq!(decoded[1], 0.0);
@@ -393,8 +393,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         stack_paths(&[&normalized_path, &adu_path]),
         Err(StackError::Admission(
             AdmissionError::SampleDomainMismatch {
-                index: 1,
-                reference_index: 0,
+                idx: 1,
+                reference_idx: 0,
                 ..
             }
         ))
@@ -473,8 +473,8 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 linear_set(&other_span),
                 Err(StackError::Admission(
                     AdmissionError::SampleDomainMismatch {
-                        index: 1,
-                        reference_index: 0,
+                        idx: 1,
+                        reference_idx: 0,
                         ..
                     }
                 ))
@@ -485,8 +485,8 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             matches!(
                 linear_set(&mirrored),
                 Err(StackError::Admission(AdmissionError::RowOrderMismatch {
-                    index: 1,
-                    reference_index: 0,
+                    idx: 1,
+                    reference_idx: 0,
                     ..
                 }))
             ),
@@ -509,8 +509,8 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             matches!(
                 cfa_set,
                 Err(StackError::Admission(AdmissionError::CfaPatternMismatch {
-                    index: 1,
-                    reference_index: 0,
+                    idx: 1,
+                    reference_idx: 0,
                     actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
                     expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 }))
@@ -542,7 +542,7 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
         let mut header = Header::new();
         header.set("BUNIT", bunit).unwrap();
         let path = write_with_header(dir.join(format!("{name}.fits")), &image, &header);
-        decode::load_linear(&path, &LoadContext::default())
+        decode::load_linear(&path, &LoadCtx::default())
             .unwrap()
             .metadata
             .derived
@@ -590,14 +590,14 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let float_path = write_with_header(dir.join("float32_null.fits"), &float_image, &Header::new());
     // ADU with no declared scale, which `Auto` refuses; the caller says how to read them.
-    let float_context = LoadContext {
-        fits: FitsLoadOptions {
+    let float_ctx = LoadCtx {
+        fits: FitsLoadConfig {
             float_scale: FitsFloatScale::Normalized,
             ..Default::default()
         },
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
-    let float = decode::load_linear(&float_path, &float_context).unwrap();
+    let float = decode::load_linear(&float_path, &float_ctx).unwrap();
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
     // stored value to NaN, which is the same thing the float file handed over.
@@ -613,18 +613,18 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     .unwrap();
     let integer_path =
         write_with_header(dir.join("int16_blank.fits"), &integer_image, &Header::new());
-    let integer = decode::load_linear(&integer_path, &LoadContext::default()).unwrap();
+    let integer = decode::load_linear(&integer_path, &LoadCtx::default()).unwrap();
 
     for (name, image) in [("float", &float), ("integer", &integer)] {
         let nulls = image
             .flags()
             .unwrap_or_else(|| panic!("{name} frame must carry a mask"));
         assert_eq!(nulls.count(QualityFlags::NO_DATA), 1, "{name}");
-        for index in 0..6 {
+        for idx in 0..6 {
             assert_eq!(
-                nulls.mask_of(QualityFlags::NO_DATA).get(index),
-                index == 2,
-                "{name} index {index}"
+                nulls.mask_of(QualityFlags::NO_DATA).get(idx),
+                idx == 2,
+                "{name} index {idx}"
             );
         }
     }
@@ -646,9 +646,9 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     assert_close!(integer_filled[2], expected, 1e-9, "{integer_filled:?}");
 
     // And the policy that refuses them still does, naming how many and where the first one is.
-    let strict = LoadContext {
+    let strict = LoadCtx {
         nulls: NullPolicy::Reject,
-        ..float_context.clone()
+        ..float_ctx.clone()
     };
     let refused = decode::load_linear(&float_path, &strict).unwrap_err();
     assert!(
@@ -656,7 +656,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             refused,
             ImageError::NullSamples {
                 count: 1,
-                first_index: 2,
+                first_idx: 2,
                 ..
             }
         ),
@@ -671,16 +671,12 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         normalization: Normalization::None,
         ..StackConfig::light()
     };
-    let ingest = |context: &LoadContext| IngestConfig {
-        fits: context.fits.clone(),
-        nulls: context.nulls,
+    let ingest = |ctx: &LoadCtx| IngestConfig {
+        fits: ctx.fits.clone(),
+        nulls: ctx.nulls,
         ..IngestConfig::with_cache_dir(dir.join("cache"))
     };
-    let stacked = config.stack_paths(
-        &paths,
-        &ingest(&float_context),
-        ProgressMonitor::unattended(),
-    );
+    let stacked = config.stack_paths(&paths, &ingest(&float_ctx), ProgressMonitor::unattended());
     assert!(stacked.is_ok(), "{stacked:?}");
     let refused = config.stack_paths(&paths, &ingest(&strict), ProgressMonitor::unattended());
     assert!(
@@ -688,7 +684,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             refused,
             Err(StackError::ImageLoad(ImageError::NullSamples {
                 count: 1,
-                first_index: 2,
+                first_idx: 2,
                 ..
             }))
         ),
@@ -708,7 +704,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             Err(DrizzleError::Stack(StackError::ImageLoad(
                 ImageError::NullSamples {
                     count: 1,
-                    first_index: 2,
+                    first_idx: 2,
                     ..
                 }
             )))
@@ -724,12 +720,12 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(dir.join("float32_all_null.fits"), &image, &Header::new());
-    let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
+    let loaded = decode::load_linear(&path, &LoadCtx::default()).unwrap();
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
     let nulls = loaded.flags().unwrap();
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 4);
-    assert!((0..4).all(|index| nulls.mask_of(QualityFlags::NO_DATA).get(index)));
+    assert!((0..4).all(|idx| nulls.mask_of(QualityFlags::NO_DATA).get(idx)));
 }
 
 #[test]
@@ -746,16 +742,16 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     let low_path = write_with_header(dir.join("datamax_100.fits"), &image, &low_header);
     let high_path = write_with_header(dir.join("datamax_65535.fits"), &image, &high_header);
 
-    let low = decode::load_linear(&low_path, &LoadContext::default()).unwrap();
-    let high = decode::load_linear(&high_path, &LoadContext::default()).unwrap();
+    let low = decode::load_linear(&low_path, &LoadCtx::default()).unwrap();
+    let high = decode::load_linear(&high_path, &LoadCtx::default()).unwrap();
 
     // BITPIX = 16, BSCALE = 1 → divisor 65535, and the samples are identical either way.
     let pixels = low.channel(0).pixels();
     assert_eq!(high.channel(0).pixels(), pixels);
     assert_eq!(pixels[1], 0.0);
-    for (index, physical) in [-7.0f32, 0.0, 41.0, 300.0].into_iter().enumerate() {
+    for (idx, physical) in [-7.0f32, 0.0, 41.0, 300.0].into_iter().enumerate() {
         let expected = physical / 65_535.0;
-        assert_close!(pixels[index], expected, 1e-9, "sample {index}: {pixels:?}");
+        assert_close!(pixels[idx], expected, 1e-9, "sample {idx}: {pixels:?}");
     }
 
     // 100 / 65535 = 1.5259e-3; 65535 / 65535 = 1 exactly.
@@ -774,7 +770,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     mono_header.set("CFATYPE", "MONO").unwrap();
     let mono = Image::new(vec![2, 2], vec![0.125f32, 0.25, 0.375, 0.5]).unwrap();
     let path = write_with_header(dir.join("mono_sensor.fits"), &mono, &mono_header);
-    let loaded = LoadContext::default().linear(&path).unwrap();
+    let loaded = LoadCtx::default().linear(&path).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.125, 0.25, 0.375, 0.5]);
     assert_eq!(
         loaded.metadata.derived.provenance().unwrap().color,
@@ -786,14 +782,14 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let samples: Vec<f32> = (0..12).map(|i| i as f32 / 16.0).collect();
     let cube = Image::new(vec![2, 2, 3], samples.clone()).unwrap();
     let path = write_with_header(dir.join("stale_cube.fits"), &cube, &stale);
-    let context = LoadContext {
-        fits: FitsLoadOptions {
+    let ctx = LoadCtx {
+        fits: FitsLoadConfig {
             cube: FitsCubeInterpretation::Rgb,
-            ..FitsLoadOptions::default()
+            ..FitsLoadConfig::default()
         },
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
-    let loaded = context.linear(&path).unwrap();
+    let loaded = ctx.linear(&path).unwrap();
     for channel in 0..3 {
         assert_eq!(
             loaded.channel(channel).pixels(),
@@ -820,22 +816,22 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let path = write_with_header(dir.join("bayer_cfa.fits"), &image, &header);
 
     assert!(matches!(
-        LoadContext::default().linear(&path),
+        LoadCtx::default().linear(&path),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::MosaicFits,
             ..
         })
     ));
-    let mut loaded = LoadContext::default().cfa(&path).unwrap();
+    let mut loaded = LoadCtx::default().cfa(&path).unwrap();
     assert_eq!(loaded.data().pixels(), pixels);
     assert_eq!(loaded.cfa_type(), pattern);
-    let cache_loaded = CfaDecoder::load(&path, &LoadContext::default()).unwrap();
+    let cache_loaded = CfaDecoder::load(&path, &LoadCtx::default()).unwrap();
     assert_eq!(cache_loaded.data(), loaded.data());
     assert_eq!(cache_loaded.cfa_type(), loaded.cfa_type());
     // The reader holds the whole frame as one chunk beside it: 1024 samples of 4 bytes as
     // stored, and as many swapped into words.
     assert_eq!(
-        CfaDecoder::peek(&path, &LoadContext::default()),
+        CfaDecoder::peek(&path, &LoadCtx::default()),
         Some(FrameInfo {
             dimensions: ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
             cfa_type: pattern,
@@ -843,7 +839,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         })
     );
 
-    let preview = LoadContext::default().preview(&path).unwrap();
+    let preview = LoadCtx::default().preview(&path).unwrap();
     assert!(matches!(
         &preview.metadata.derived.provenance(),
         Some(crate::ImageProvenance {
@@ -854,14 +850,14 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     assert!(
         matches!(
-            LoadContext::default().preview(&path).unwrap().into_pixels(),
+            LoadCtx::default().preview(&path).unwrap().into_pixels(),
             PreviewPixels::Planes(_)
         ),
         "a demosaiced decode hands back its planes"
     );
     // The preview is admitted with its demosaic, from the header: refused one byte short of the
     // way's peak, past what the decode alone holds.
-    let info = CfaDecoder::peek(&path, &LoadContext::default()).unwrap();
+    let info = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap();
     let way = u64::try_from(
         info.demosaiced(
             info.decoded(),
@@ -872,7 +868,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     )
     .unwrap();
     assert!(way > u64::try_from(info.decoded().peak).unwrap(), "{way}");
-    let limited = |limit| LoadContext::new(CancelToken::never(), limit);
+    let limited = |limit| LoadCtx::new(CancelToken::never(), limit);
     limited(way).preview(&path).unwrap();
     assert_eq!(
         fits_refusal(limited(way - 1).preview(&path).unwrap_err()),
@@ -891,7 +887,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         for x in 6..size.width - 6 {
             let channel = pattern.slot_at(Vec2us::new(x, y));
             assert_eq!(
-                preview_pixels[(size.index_of(Vec2us::new(x, y))) * 3 + channel],
+                preview_pixels[(size.idx_of(Vec2us::new(x, y))) * 3 + channel],
                 target[channel] + dark_value
             );
         }
@@ -944,7 +940,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             let channel = pattern.slot_at(Vec2us::new(x, y));
             let expected = (target[channel] + dark_value) - dark_value;
             assert_eq!(
-                demosaiced.channel(channel)[size.index_of(Vec2us::new(x, y))],
+                demosaiced.channel(channel)[size.idx_of(Vec2us::new(x, y))],
                 expected
             );
         }
@@ -964,14 +960,14 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(dir.join("nan_inf.fits"), &image, &Header::new());
 
-    let masked = decode::load_linear(&path, &LoadContext::default()).unwrap();
+    let masked = decode::load_linear(&path, &LoadCtx::default()).unwrap();
     let nulls = masked.flags().unwrap();
     assert_eq!(nulls.count(QualityFlags::NO_DATA), 3);
-    for index in 0..size.pixel_count() {
+    for idx in 0..size.pixel_count() {
         assert_eq!(
-            nulls.mask_of(QualityFlags::NO_DATA).get(index),
-            matches!(index, 0 | 5 | 10),
-            "index {index}"
+            nulls.mask_of(QualityFlags::NO_DATA).get(idx),
+            matches!(idx, 0 | 5 | 10),
+            "index {idx}"
         );
     }
     // Thirteen finite samples, all 0.3, so the median they fill with is 0.3 and the frame comes out
@@ -989,7 +985,7 @@ fn demosaic_uniform_bayer_recovers_color() {
     let mut mosaic = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            mosaic[size.index_of(Vec2us::new(x, y))] = rgb[cfa.slot_at(Vec2us::new(x, y))];
+            mosaic[size.idx_of(Vec2us::new(x, y))] = rgb[cfa.slot_at(Vec2us::new(x, y))];
         }
     }
     let image = make_cfa(size, mosaic, cfa).demosaic_measured(MarkesteijnPasses::One);
@@ -1008,7 +1004,7 @@ fn demosaic_uniform_bayer_recovers_color() {
         let mut sum = 0.0f64;
         for y in 6..size.height - 6 {
             for x in 6..size.width - 6 {
-                let v = ch[size.index_of(Vec2us::new(x, y))];
+                let v = ch[size.idx_of(Vec2us::new(x, y))];
                 sum += f64::from(v);
                 devs.push((v - true_c).abs());
             }
@@ -1046,7 +1042,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
                 assert!(pixels.iter().all(|sample| sample.is_finite()));
                 for y in 8..size.height - 8 {
                     for x in 8..size.width - 8 {
-                        let actual = pixels[size.index_of(Vec2us::new(x, y))];
+                        let actual = pixels[size.idx_of(Vec2us::new(x, y))];
                         assert_close!(
                             actual,
                             expected,
@@ -1071,16 +1067,16 @@ fn a_fits_datamax_flags_saturation_at_decode() {
     let mut header = Header::new();
     header.set("DATAMAX", 4000.0).unwrap();
     let path = write_with_header(dir.join("uint16_datamax.fits"), &image, &header);
-    let loaded = decode::load_linear(&path, &LoadContext::default()).unwrap();
+    let loaded = decode::load_linear(&path, &LoadCtx::default()).unwrap();
     assert!(loaded.metadata.derived.saturation_flagged());
     let flags = loaded.flags().unwrap();
     let saturated: Vec<bool> = (0..4)
-        .map(|index| flags.at(index).intersects(QualityFlags::SATURATED))
+        .map(|idx| flags.at(idx).intersects(QualityFlags::SATURATED))
         .collect();
     assert_eq!(saturated, [false, false, true, true]);
 
     let path = write_with_header(dir.join("uint16_bare.fits"), &image, &Header::new());
-    let bare = decode::load_linear(&path, &LoadContext::default()).unwrap();
+    let bare = decode::load_linear(&path, &LoadCtx::default()).unwrap();
     assert!(!bare.metadata.derived.saturation_flagged());
     assert!(bare.flags().is_none());
 }

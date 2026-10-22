@@ -363,13 +363,13 @@ mod internals {
     impl BitBuffer2 {
         /// Every bit in row-major order, padding skipped.
         pub(crate) fn iter(&self) -> impl Iterator<Item = bool> + '_ {
-            (0..self.size.pixel_count()).map(|index| self.get(index))
+            (0..self.size.pixel_count()).map(|idx| self.get(idx))
         }
 
         /// The mask `data` holds, a bit a pixel.
         pub(crate) fn from_plane(data: &Buffer2<bool>) -> Self {
             let mut buffer = Self::new_default(Size2us::from(data));
-            buffer.fill_from_predicate(|index| data[index]);
+            buffer.fill_from_predicate(|idx| data[idx]);
             buffer
         }
 

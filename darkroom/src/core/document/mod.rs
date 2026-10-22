@@ -294,7 +294,7 @@ fn reattach_stubs(
         for entry in record.bindings() {
             let ends_held = graph.find(entry.port.node_id).is_some()
                 && match &entry.binding {
-                    Binding::Bind(source) => graph.find(source.node_id).is_some(),
+                    Binding::Wire(source) => graph.find(source.node_id).is_some(),
                     Binding::Const(_) => true,
                 };
             if ends_held && !graph.bindings.contains_key(&entry.port) {
@@ -345,7 +345,7 @@ fn repair_view(
     for (&node_id, placement) in placements.iter_mut() {
         if !placement.pos.is_finite() {
             placement.pos = Vec2::ZERO;
-            repairs.push(DocumentRepair::PositionReset { node_id });
+            repairs.push(DocumentRepair::PosReset { node_id });
         }
     }
     let mut unplaced: Vec<NodeId> = graph
@@ -525,7 +525,7 @@ mod tests {
             [
                 DocumentRepair::ViewportReset,
                 DocumentRepair::PlacementDropped { node_id: ghost },
-                DocumentRepair::PositionReset { node_id: shown },
+                DocumentRepair::PosReset { node_id: shown },
                 DocumentRepair::Placed { node_id: unplaced },
                 DocumentRepair::ViewerClosed { node_id: shown },
             ]

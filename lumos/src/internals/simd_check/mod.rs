@@ -13,7 +13,7 @@ pub(crate) mod data_shape;
 
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::test_rng::TestRng;
-use crate::simd::tier::Tier;
+use crate::simd::isa_tier::IsaTier;
 
 /// The inputs every SIMD cross-check runs over. Adding one here covers every kernel at once,
 /// which is the point — the per-module copies could not do that.
@@ -140,7 +140,7 @@ impl ScalarSimd {
     }
 }
 
-/// Run `kernels` on every tier this CPU has (see [`Tier::supported`]), over every shape in
+/// Run `kernels` on every tier this CPU has (see [`IsaTier::supported`]), over every shape in
 /// [`DATA_SHAPES`] at every width in `widths`, asserting that each tier agrees with the scalar
 /// reference to `tol` (see [`ScalarSimd`]; `0.0` demands equality).
 ///
@@ -149,10 +149,10 @@ impl ScalarSimd {
 pub(crate) fn assert_simd_matches_scalar(
     widths: &[usize],
     tol: f32,
-    kernels: impl Fn(Tier, &DataShape, usize) -> ScalarSimd,
+    kernels: impl Fn(IsaTier, &DataShape, usize) -> ScalarSimd,
 ) {
     let tol = f64::from(tol);
-    for tier in Tier::supported() {
+    for tier in IsaTier::supported() {
         for shape in DATA_SHAPES {
             for &width in widths {
                 let out = kernels(tier, shape, width);
@@ -182,7 +182,7 @@ mod tests {
     use crate::internals::simd_check::{
         DATA_SHAPES, SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar,
     };
-    use crate::simd::tier::Tier;
+    use crate::simd::isa_tier::IsaTier;
 
     #[test]
     fn every_shape_fills_the_requested_width_and_varies_with_seed() {
@@ -230,7 +230,7 @@ mod tests {
         });
         assert_eq!(
             calls.get(),
-            Tier::supported().count() * DATA_SHAPES.len() * 2
+            IsaTier::supported().count() * DATA_SHAPES.len() * 2
         );
     }
 }

@@ -1,4 +1,4 @@
-//! [`Tier`]: where a run keeps its frames, decided once from its memory plan.
+//! [`StorageTier`]: where a run keeps its frames, decided once from its memory plan.
 
 use std::path::Path;
 
@@ -17,7 +17,7 @@ use crate::memory::run_plan::RunPlan;
 /// memory maps. Chosen once from the run's [`RunPlan`], and the one value every stage that stores a
 /// frame or sizes a combine chunk reads, so no two of them can disagree.
 #[derive(Debug)]
-pub(crate) enum Tier {
+pub(crate) enum StorageTier {
     /// Every plane in RAM: the combine walks whole planes and needs no budget.
     Resident,
     /// Planes in `scratch`, memory-mapped back and read in row chunks `combine` budgets.
@@ -48,7 +48,7 @@ impl CombineBudget {
     }
 }
 
-impl Tier {
+impl StorageTier {
     /// Resident when `plan` keeps the run in memory; spilled to a scratch under `cache_dir`
     /// otherwise, its combine budgeted against the plan's budget. The disk is checked by
     /// [`RunStorage::tier`](crate::frame_store::run_storage::RunStorage::tier), which knows

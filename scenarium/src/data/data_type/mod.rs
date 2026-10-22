@@ -28,7 +28,7 @@ pub enum FsPathMode {
     ExistingFile,
     ExistingFiles,
     NewFile,
-    Directory,
+    Dir,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
@@ -72,7 +72,7 @@ impl DataType {
             Self::String => ConstValue::String(String::new()),
             Self::FsPath(config) => match config.mode {
                 FsPathMode::ExistingFiles => ConstValue::FsPaths(Vec::new()),
-                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Dir => {
                     ConstValue::FsPath(String::new())
                 }
             },
@@ -147,7 +147,7 @@ impl DataType {
             Self::String => matches!(value, ConstValue::String(_)),
             Self::FsPath(config) => match config.mode {
                 FsPathMode::ExistingFiles => matches!(value, ConstValue::FsPaths(_)),
-                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Dir => {
                     matches!(value, ConstValue::FsPath(_))
                 }
             },

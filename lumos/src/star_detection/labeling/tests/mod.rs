@@ -101,8 +101,8 @@ fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
         next += 1;
         labels[start] = next;
         queue.push_back(start);
-        while let Some(index) = queue.pop_front() {
-            let (x, y) = ((index % width) as isize, (index / width) as isize);
+        while let Some(idx) = queue.pop_front() {
+            let (x, y) = ((idx % width) as isize, (idx / width) as isize);
             for &(dx, dy) in neighbours(connectivity) {
                 let (nx, ny) = (x + dx, y + dy);
                 if nx < 0 || ny < 0 || nx >= width as isize || ny >= height as isize {
@@ -181,11 +181,11 @@ fn a_reused_map_relabels_as_a_fresh_one() {
         Mask::from_fn(size, |x, y| (x + y) % 7 < 3).bits(),
         Mask::from_fn(size, |x, y| (x * y) % 5 == 0).bits(),
     ];
-    for (index, mask) in masks.iter().enumerate() {
+    for (idx, mask) in masks.iter().enumerate() {
         let reused = labeler.label(mask, Connectivity::Eight);
         let fresh = LabelMap::from_mask(mask, Connectivity::Eight);
         assert!(fresh.num_labels() > 0);
-        assert_eq!(reused.labels(), fresh.labels(), "mask {index}");
-        assert_eq!(reused.num_labels(), fresh.num_labels(), "mask {index}");
+        assert_eq!(reused.labels(), fresh.labels(), "mask {idx}");
+        assert_eq!(reused.num_labels(), fresh.num_labels(), "mask {idx}");
     }
 }

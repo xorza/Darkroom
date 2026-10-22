@@ -32,22 +32,22 @@ impl ExtensionClaims {
     pub(crate) fn of(hdus: &[Hdu], extension: LumosExtension) -> Result<Self, FitsLoadError> {
         let mut images = Vec::new();
         let mut claims = Vec::new();
-        for (index, hdu) in hdus.iter().enumerate() {
+        for (idx, hdu) in hdus.iter().enumerate() {
             if extension.names(&hdu.header)? {
                 let image = metadata::read_text(&hdu.header, IMAGE_KEYWORD)?.ok_or_else(|| {
                     FitsLoadError::from(FitsRefusal::ClaimsNoImage {
                         extension,
-                        hdu: index,
+                        hdu: idx,
                     })
                 })?;
-                claims.push(Claim { hdu: index, image });
+                claims.push(Claim { hdu: idx, image });
             } else if Self::holds_image(hdu)?
-                && let Some(name) = image_name(hdus, index)?
+                && let Some(name) = image_name(hdus, idx)?
             {
                 images.push(name);
             }
         }
-        for (position, claim) in claims.iter().enumerate() {
+        for (pos, claim) in claims.iter().enumerate() {
             let same = |name: &String| name.eq_ignore_ascii_case(&claim.image);
             if !images.iter().any(same) {
                 return Err(FitsLoadError::from(FitsRefusal::ClaimsMissingImage {
@@ -56,10 +56,7 @@ impl ExtensionClaims {
                     image: claim.image.clone(),
                 }));
             }
-            if claims[..position]
-                .iter()
-                .any(|earlier| same(&earlier.image))
-            {
+            if claims[..pos].iter().any(|earlier| same(&earlier.image)) {
                 return Err(FitsLoadError::from(FitsRefusal::DuplicateClaim {
                     extension,
                     image: claim.image.clone(),
@@ -103,12 +100,12 @@ impl ExtensionClaims {
     }
 }
 
-/// The name an extension refers to the image at HDU `index` by: its `EXTNAME`, or [`PRIMARY`] for
+/// The name an extension refers to the image at HDU `idx` by: its `EXTNAME`, or [`PRIMARY`] for
 /// an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(hdus: &[Hdu], index: usize) -> Result<Option<String>, FitsLoadError> {
-    let extname = metadata::read_text(&hdus[index].header, "EXTNAME")?;
+fn image_name(hdus: &[Hdu], idx: usize) -> Result<Option<String>, FitsLoadError> {
+    let extname = metadata::read_text(&hdus[idx].header, "EXTNAME")?;
     Ok(match extname {
         Some(extname) => Some(extname),
-        None => (index == 0).then(|| PRIMARY.to_owned()),
+        None => (idx == 0).then(|| PRIMARY.to_owned()),
     })
 }

@@ -13,9 +13,9 @@ pub struct FuncInput {
     /// editor (units, range, meaning). Display-only — execution never reads it.
     pub description: Option<String>,
     /// When set, this input may only hold a `Const` literal — wiring an upstream
-    /// output into it (a `Bind`) is rejected by graph validation and blocked in
+    /// output into it (a `Wire`) is rejected by graph validation and blocked in
     /// the editor. For inputs a node reads as configuration, so a stray
-    /// connection can't silently defeat that.
+    /// wire can't silently defeat that.
     pub const_only: bool,
     pub default_value: Option<ConstValue>,
     pub value_variants: Vec<ValueVariant>,
@@ -69,7 +69,7 @@ impl FuncInput {
         self
     }
 
-    /// Restrict this input to a `Const` literal — no upstream `Bind`. See
+    /// Restrict this input to a `Const` literal — no upstream `Wire`. See
     /// [`FuncInput::const_only`].
     #[must_use]
     pub const fn const_only(mut self) -> Self {

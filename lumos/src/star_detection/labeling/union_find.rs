@@ -141,15 +141,15 @@ impl UnionFind {
         // its root, since its parent's entry is already final. The lookups below are then O(1),
         // where walking each chain would be quadratic on a comb-shaped mask.
         let parent = &mut self.parent[..label_count];
-        for index in 0..label_count {
-            let direct = *parent[index].get_mut() as usize;
+        for idx in 0..label_count {
+            let direct = *parent[idx].get_mut() as usize;
             debug_assert!(
-                (1..=index + 1).contains(&direct),
+                (1..=idx + 1).contains(&direct),
                 "parent {direct} of label {}",
-                index + 1
+                idx + 1
             );
             let root = *parent[direct - 1].get_mut();
-            *parent[index].get_mut() = root;
+            *parent[idx].get_mut() = root;
         }
 
         map.clear();

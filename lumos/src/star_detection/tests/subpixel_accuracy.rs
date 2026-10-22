@@ -13,9 +13,7 @@ use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
-use crate::star_detection::tests::{
-    MATCH_RADIUS, detected_positions, synthetic_config, truth_positions,
-};
+use crate::star_detection::tests::{MATCH_RADIUS, detected_poss, synthetic_config, truth_poss};
 
 /// Median per-axis shift between two matched detection catalogs (`shifted − reference`).
 /// The median over many stars averages down per-star centroid scatter.
@@ -51,8 +49,8 @@ fn subpixel_shift_recovered_across_offsets() {
     let config = synthetic_config();
 
     let reference = render(&scene, &camera, &Observation::reference(3));
-    let ref_det = detected_positions(&reference, &config);
-    let comp = score_detection(&truth_positions(&reference), &ref_det, MATCH_RADIUS).completeness();
+    let ref_det = detected_poss(&reference, &config);
+    let comp = score_detection(&truth_poss(&reference), &ref_det, MATCH_RADIUS).completeness();
     assert!(comp >= 0.95, "reference completeness {comp:.3}");
 
     let shifts = [
@@ -71,7 +69,7 @@ fn subpixel_shift_recovered_across_offsets() {
             transform: Transform::translation(shift),
             ..Observation::reference(seed)
         };
-        let shifted_det = detected_positions(&render(&scene, &camera, &shifted), &config);
+        let shifted_det = detected_poss(&render(&scene, &camera, &shifted), &config);
         let recovered = median_shift(&ref_det, &shifted_det);
         assert!(
             (recovered - shift).length() < 0.1,

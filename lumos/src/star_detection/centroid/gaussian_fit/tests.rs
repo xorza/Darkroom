@@ -23,7 +23,7 @@ use crate::star_detection::centroid::tests::perturbation::Perturbation;
 /// rounding of those samples: 2⁻²⁴ ≈ 6e-8 of each value, so of `A + B`, which reaches the
 /// parameters relative to the amplitude — an error of `(A + B)/A` times that, carried at up to a
 /// few times more (measured: ≤ 4e-7 at A + B ≈ A). [`EXACT`] times `(A + B)/A` bounds it. A spoiled
-/// stamp is held to the position's Cramér–Rao bound instead (see [`RecoveryCase::position_bound`]).
+/// stamp is held to the position's Cramér–Rao bound instead (see [`RecoveryCase::pos_bound`]).
 #[derive(Debug)]
 struct RecoveryCase {
     name: &'static str,
@@ -51,7 +51,7 @@ impl RecoveryCase {
     /// Five standard deviations of the position under the stamp's perturbation: for a Gaussian
     /// profile in white noise σₙ the Fisher information on each centre coordinate is
     /// `(A/σₙ)²·π/2`, whatever its width, so `σ_pos = √(2/π)·σₙ/A`.
-    fn position_bound(&self) -> f64 {
+    fn pos_bound(&self) -> f64 {
         5.0 * (2.0 / PI).sqrt() * f64::from(self.perturbation.rms()) / f64::from(self.amplitude)
     }
 
@@ -410,14 +410,14 @@ fn gaussian_fit_recovers_known_parameters() {
         })
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
 
-        let position_error = (result.pos - case.center).length();
+        let pos_error = (result.pos - case.center).length();
         if matches!(case.perturbation, Perturbation::None) {
             let relative = |got: f32, want: f32| f64::from((got - want).abs() / want);
             let sigma = result.axis_sigma();
             let scale = f64::from(case.amplitude + case.background);
             let bound = EXACT * scale / f64::from(case.amplitude);
             for (what, error) in [
-                ("position", position_error),
+                ("position", pos_error),
                 ("σx", relative(sigma.x, case.sigma.x)),
                 ("σy", relative(sigma.y, case.sigma.y)),
                 ("cross term", result.covariance.xy.abs()),
@@ -447,10 +447,10 @@ fn gaussian_fit_recovers_known_parameters() {
             assert_eq!(result.debug.order, order, "{}: quadrature order", case.name);
         } else {
             assert!(
-                position_error <= case.position_bound(),
-                "{}: position off by {position_error} against {}",
+                pos_error <= case.pos_bound(),
+                "{}: position off by {pos_error} against {}",
                 case.name,
-                case.position_bound()
+                case.pos_bound()
             );
         }
     }
@@ -633,7 +633,7 @@ fn batch_normal_equations_match_reference() {
 
 #[test]
 fn gaussian_evaluate_and_jacobian_consistency() {
-    use crate::star_detection::centroid::profile_problem::LMModel;
+    use crate::star_detection::centroid::profile_problem::LmModel;
 
     let mut model = Gaussian2D::new(ProfileBounds::of_stamp(15.0), 1e-6);
     model.integrate_at(3);

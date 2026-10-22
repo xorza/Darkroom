@@ -34,7 +34,7 @@ use arrayvec::ArrayVec;
 use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::math::lstsq::Lstsq;
 use crate::registration::distortion::sip::sip_order::SipOrder;
@@ -71,8 +71,8 @@ impl Default for SipConfig {
 impl SipConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         if let Some(reference_point) = self.reference_point {
-            ConfigValue::new("SIP reference_point x", reference_point.x).finite()?;
-            ConfigValue::new("SIP reference_point y", reference_point.y).finite()?;
+            ConfigField::new("SIP reference_point x", reference_point.x).finite()?;
+            ConfigField::new("SIP reference_point y", reference_point.y).finite()?;
         }
         Ok(())
     }

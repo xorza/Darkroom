@@ -21,7 +21,7 @@ use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::preview_image::PreviewPixels;
 use crate::image::quality_flags::QualityFlags;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 
 #[test]
@@ -88,7 +88,7 @@ fn convert_fits_to_imaginarium_image() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let astro = LoadContext::default().linear(path).unwrap();
+    let astro = LoadCtx::default().linear(path).unwrap();
     let image: Image = astro.into();
 
     let desc = image.desc();
@@ -103,7 +103,7 @@ fn load_full_example_fits() {
         env!("CARGO_MANIFEST_DIR"),
         "/test_resources/full_example.fits"
     );
-    let image = LoadContext::default().linear(path).unwrap();
+    let image = LoadCtx::default().linear(path).unwrap();
 
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
@@ -117,7 +117,7 @@ fn load_full_example_fits() {
     // recoverable. The sample is that quotient narrowed once.
     let physical_scale = image.metadata.derived.domain().unwrap().scale;
     assert_eq!(physical_scale, 4_294_967_295.0);
-    let pixel = image.channel(0)[image.dimensions().size().index_of(Vec2us::new(5, 20))];
+    let pixel = image.channel(0)[image.dimensions().size().idx_of(Vec2us::new(5, 20))];
     assert_eq!(pixel, (152.0 / 4_294_967_295.0_f64) as f32);
     assert_close!(f64::from(pixel) * physical_scale, 152.0, 1e-5, "{pixel}");
 
@@ -165,7 +165,7 @@ fn saved_tiff_round_trips_its_samples() {
     ] {
         let output_path = dir.join(name);
         writer::raster(&image, &output_path).unwrap();
-        let loaded = LoadContext::default().linear(&output_path).unwrap();
+        let loaded = LoadCtx::default().linear(&output_path).unwrap();
         assert_eq!(loaded.dimensions(), image.dimensions(), "{name}");
         for channel in 0..image.channels() {
             assert_eq!(
@@ -192,15 +192,15 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
     .save_file(&path)
     .unwrap();
 
-    let masked = LoadContext::default().linear(&path).unwrap();
+    let masked = LoadCtx::default().linear(&path).unwrap();
     assert_eq!(masked.channel(0).pixels(), &[0.25, 0.5, 0.5, 0.75]);
     let flags = masked.flags().unwrap();
     assert_eq!(flags.at(1), QualityFlags::NO_DATA);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
 
-    let strict = LoadContext {
+    let strict = LoadCtx {
         nulls: NullPolicy::Reject,
-        ..LoadContext::default()
+        ..LoadCtx::default()
     };
     let refused = strict.linear(&path).unwrap_err();
     assert!(
@@ -208,7 +208,7 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
             refused,
             ImageError::NullSamples {
                 count: 1,
-                first_index: 1,
+                first_idx: 1,
                 ..
             }
         ),
@@ -228,14 +228,14 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .unwrap();
     float_image.save_file(&float_path).unwrap();
 
-    let scientific = LoadContext::default().linear(&float_path).unwrap();
+    let scientific = LoadCtx::default().linear(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
-    let preview = LoadContext::default().preview(&float_path).unwrap();
+    let preview = LoadCtx::default().preview(&float_path).unwrap();
     assert!(
         matches!(preview.into_pixels(), PreviewPixels::Interleaved(_)),
         "a raster decode stays interleaved"
     );
-    let preview: Image = LoadContext::default().preview(&float_path).unwrap().into();
+    let preview: Image = LoadCtx::default().preview(&float_path).unwrap().into();
     assert_eq!(preview.desc().color_format, ColorFormat::L_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
@@ -267,15 +267,15 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     ] {
         integer_image.save_file(path).unwrap();
         for error in [
-            LoadContext::default().linear(path).unwrap_err(),
-            LinearDecoder::load(path, &LoadContext::default()).unwrap_err(),
+            LoadCtx::default().linear(path).unwrap_err(),
+            LinearDecoder::load(path, &LoadCtx::default()).unwrap_err(),
         ] {
             assert!(
                 matches!(&error, ImageError::ScientificInputRejected { reason, .. } if *reason == refusal),
                 "{path:?}: {error:?}"
             );
         }
-        LoadContext::default().preview(path).unwrap();
+        LoadCtx::default().preview(path).unwrap();
     }
 
     let alpha_path = dir.join("alpha.tiff");
@@ -288,13 +288,13 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     .save_file(&alpha_path)
     .unwrap();
     assert!(matches!(
-        LoadContext::default().linear(&alpha_path),
+        LoadCtx::default().linear(&alpha_path),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::AlphaChannel,
             ..
         })
     ));
-    let alpha_preview = LoadContext::default().preview(&alpha_path).unwrap();
+    let alpha_preview = LoadCtx::default().preview(&alpha_path).unwrap();
     assert!(matches!(
         alpha_preview.metadata.derived.provenance(),
         Some(ImageProvenance {
@@ -307,7 +307,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(
-        LoadContext::default().linear(&nonexistent_raw),
+        LoadCtx::default().linear(&nonexistent_raw),
         Err(ImageError::ScientificInputRejected {
             reason: ScientificRefusal::CameraRaw,
             ..

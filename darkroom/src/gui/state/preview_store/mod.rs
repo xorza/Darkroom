@@ -23,7 +23,7 @@ use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
 use crate::core::wake::Wake;
-use crate::gui::state::preview_store::error::PreviewImageError;
+use crate::gui::state::preview_store::error::DrawablePreviewError;
 use crate::gui::state::preview_store::preview_converter::{
     Card, Converted, Job, Jobs, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
 };
@@ -47,8 +47,8 @@ pub(crate) struct PreviewStore {
 #[derive(Debug)]
 pub(crate) enum StoredContent {
     Text(String),
-    Image(PreviewImage),
-    Error(PreviewImageError),
+    Image(DrawablePreview),
+    Error(DrawablePreviewError),
 }
 
 impl StoredContent {
@@ -56,7 +56,7 @@ impl StoredContent {
     /// for a value that failed to prepare. The single downcast both readers —
     /// the preview card and the image viewer — go through, so a new variant can't
     /// be handled by one and silently fall through the other.
-    pub(crate) const fn image(&self) -> Option<&PreviewImage> {
+    pub(crate) const fn image(&self) -> Option<&DrawablePreview> {
         match self {
             Self::Image(image) => Some(image),
             Self::Text(_) | Self::Error(_) => None,
@@ -89,7 +89,7 @@ pub(crate) enum PreviewMessage<'a> {
     /// reader's own invitation before any value has arrived.
     Text(&'a str),
     /// Why the value on hand could not be prepared as an image.
-    Failure(&'a PreviewImageError),
+    Failure(&'a DrawablePreviewError),
 }
 
 impl fmt::Display for PreviewMessage<'_> {
@@ -102,7 +102,7 @@ impl fmt::Display for PreviewMessage<'_> {
 }
 
 #[derive(Debug)]
-pub(crate) struct PreviewImage {
+pub(crate) struct DrawablePreview {
     /// The card's thumbnail, registered the moment the value arrives — and
     /// where the native metadata lives, since the full-resolution texture is
     /// prepared from the same source and so is described by the same figures.
@@ -143,7 +143,7 @@ enum FullImage {
     Pending(DynamicValue),
     Converting { texels: UVec2 },
     Resident(ImageHandle),
-    Failed(PreviewImageError),
+    Failed(DrawablePreviewError),
 }
 
 /// What a viewer draws for a stored image: the full-resolution texture, or,
@@ -338,7 +338,7 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
                 native_format,
             } = thumbnail;
             match ui.load_image(&raster) {
-                Ok(handle) => StoredContent::Image(PreviewImage {
+                Ok(handle) => StoredContent::Image(DrawablePreview {
                     preview: DrawableImage {
                         texels: handle.size(),
                         handle,
@@ -358,7 +358,7 @@ fn land_card(landing: Landing<'_>, ui: &Ui, node_id: NodeId, ticket: Ticket, car
     entries.insert(node_id, content);
 }
 
-impl PreviewImage {
+impl DrawablePreview {
     /// What a viewer draws for this image. The first ask queues the
     /// full-resolution conversion, and until it lands the thumbnail stands in
     /// at the full texture's size.
@@ -377,7 +377,7 @@ impl PreviewImage {
     /// A failure is stored, not just returned: it is terminal, so a broken
     /// image is diagnosed once rather than retried on every frame that draws
     /// it.
-    pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, PreviewImageError> {
+    pub(crate) fn full(&self, ui: &Ui) -> Result<FullView, DrawablePreviewError> {
         let mut full = self.full.borrow_mut();
         if let FullImage::Pending(source) = &*full {
             let texels = capped_target(self.preview.native_size, ui.max_image_dimension());
@@ -421,13 +421,13 @@ impl PreviewImage {
 }
 
 /// The texel size of an image `desc` describes, or why no texture holds it.
-fn native_size(desc: ImageDesc) -> Result<UVec2, PreviewImageError> {
+fn native_size(desc: ImageDesc) -> Result<UVec2, DrawablePreviewError> {
     let (width, height) = (desc.width, desc.height);
     let (Ok(x), Ok(y)) = (u32::try_from(width), u32::try_from(height)) else {
-        return Err(PreviewImageError::EdgeTooLong { width, height });
+        return Err(DrawablePreviewError::EdgeTooLong { width, height });
     };
     if x == 0 || y == 0 {
-        return Err(PreviewImageError::Empty);
+        return Err(DrawablePreviewError::Empty);
     }
     Ok(UVec2::new(x, y))
 }
@@ -558,10 +558,10 @@ pub(crate) mod internals {
     }
 
     #[cfg(test)]
-    impl PreviewImage {
+    impl DrawablePreview {
         /// Whether the full-resolution texture has been uploaded yet.
         ///
-        /// The one question a test can't ask through [`PreviewImage::full`],
+        /// The one question a test can't ask through [`DrawablePreview::full`],
         /// since asking that *is* what queues it.
         pub(crate) fn is_full_resident(&self) -> bool {
             matches!(&*self.full.borrow(), FullImage::Resident(_))

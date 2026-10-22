@@ -14,7 +14,7 @@ use crate::math::lm_controller::LmFit;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
 use crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA;
-use crate::star_detection::centroid::profile_problem::{FitData, LMModel};
+use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
 
 /// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
@@ -244,7 +244,7 @@ impl StampFit {
     /// a profile needing more runs again from its result at that order, until the order suffices
     /// for the profile it lands on; the order only rises, so this ends by the order the narrowest
     /// admitted profile needs.
-    pub(super) fn fit<M: LMModel<N>, const N: usize>(
+    pub(super) fn fit<M: LmModel<N>, const N: usize>(
         &mut self,
         model: &mut M,
         grid: &StampGrid,
@@ -270,7 +270,7 @@ impl StampFit {
     /// Neyman's χ² — which biases amplitude and width low; one pass of iteratively reweighted least
     /// squares replaces that noise in the weights with the much smaller error of the first fit. A
     /// failed first fit has no model to reweight from, and a failed second one leaves the first.
-    fn fit_at_order<M: LMModel<N>, const N: usize>(
+    fn fit_at_order<M: LmModel<N>, const N: usize>(
         &mut self,
         model: &M,
         grid: &StampGrid,

@@ -180,11 +180,11 @@ struct Rectangles {
 fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
     let mut residual = Buffer2::new_filled(size.width, size.height, 0.0f32);
     let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-    for (index, rect) in rects.iter().enumerate() {
+    for (idx, rect) in rects.iter().enumerate() {
         for y in rect.min.1..rect.max.1 {
             for x in rect.min.0..rect.max.0 {
                 residual[(x, y)] = 0.1;
-                labels[(x, y)] = index as u32 + 1;
+                labels[(x, y)] = idx as u32 + 1;
             }
         }
         for &(x, y) in rect.peaks {

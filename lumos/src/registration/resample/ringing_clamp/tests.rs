@@ -1,5 +1,5 @@
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights, RingingClamp};
-use crate::registration::resample::warp_params::ClampingThreshold;
+use crate::registration::resample::warp_config::ClampingThreshold;
 
 const LOBES: LobeWeights = LobeWeights {
     positive: 1.6,

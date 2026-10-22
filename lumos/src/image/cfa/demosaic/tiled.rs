@@ -37,11 +37,11 @@ impl TilePlace {
     }
 }
 
-/// One pixel of the frame a kernel writes: its flat `index`, its `native` color, and the `sample`
+/// One pixel of the frame a kernel writes: its flat `idx`, its `native` color, and the `sample`
 /// the input holds there.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct NativePixel {
-    pub(crate) index: usize,
+    pub(crate) idx: usize,
     pub(crate) native: usize,
     pub(crate) sample: f32,
 }
@@ -73,7 +73,7 @@ impl Tiling {
                 .saturating_sub(2 * self.inset + self.tile)
                 .div_ceil(step)
                 + 1;
-            (0..count).map(move |index| self.inset + index * step)
+            (0..count).map(move |idx| self.inset + idx * step)
         };
         starts(size.height)
             .flat_map(|top| {
@@ -101,19 +101,19 @@ impl OutputPlanes {
         }
     }
 
-    /// `values` into plane `channel` from `index` on, as they are: native samples, and values
+    /// `values` into plane `channel` from `idx` on, as they are: native samples, and values
     /// [`Self::unbalanced`] brought back.
     ///
     /// # Safety
     ///
-    /// The planes cover the frame, and no other tile writes the pixels from `index` to
-    /// `index + values.len()`.
+    /// The planes cover the frame, and no other tile writes the pixels from `idx` to
+    /// `idx + values.len()`.
     #[inline(always)]
-    pub(super) const unsafe fn write_row(self, channel: usize, index: usize, values: &[f32]) {
+    pub(super) const unsafe fn write_row(self, channel: usize, idx: usize, values: &[f32]) {
         unsafe {
             self.planes[channel]
                 .get()
-                .add(index)
+                .add(idx)
                 .copy_from_nonoverlapping(values.as_ptr(), values.len());
         }
     }
@@ -135,7 +135,7 @@ impl OutputPlanes {
     #[inline(always)]
     pub(super) unsafe fn write_pixel(self, pixel: NativePixel, values: [f32; 3]) {
         let NativePixel {
-            index,
+            idx,
             native,
             sample,
         } = pixel;
@@ -145,7 +145,7 @@ impl OutputPlanes {
             } else {
                 self.unbalanced(channel, value)
             };
-            unsafe { self.planes[channel].get().add(index).write(value) };
+            unsafe { self.planes[channel].get().add(idx).write(value) };
         }
     }
 }

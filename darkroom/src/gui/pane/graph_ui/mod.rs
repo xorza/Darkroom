@@ -8,9 +8,9 @@
 //! ids and the coordinate space between them — the one thing every one of
 //! those needs.
 //!
-//! This file is [`GraphUI`] and nothing else: the state a graph pane keeps
-//! across frames, the two phases that drive it ([`GraphUI::prepass`] and
-//! [`GraphUI::draw`]), and the cache sweep ([`GraphUI::retain_nodes`]) that
+//! This file is [`GraphUi`] and nothing else: the state a graph pane keeps
+//! across frames, the two phases that drive it ([`GraphUi::prepass`] and
+//! [`GraphUi::draw`]), and the cache sweep ([`GraphUi::retain_nodes`]) that
 //! runs outside them.
 
 pub(crate) mod canvas;
@@ -37,22 +37,22 @@ use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts, Selection};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
-use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUI;
+use crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::gesture::connection_ui::ConnectionUI;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::NewNodeUi;
 use crate::gui::pane::graph_ui::gesture::node_menu_ui::NodeMenuUi;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph_ui::gesture::preview_drag::PreviewDrag;
-use crate::gui::pane::graph_ui::gesture::selection_ui::SelectionUI;
-use crate::gui::pane::graph_ui::gesture::subscription_ui::SubscriptionUI;
-use crate::gui::pane::graph_ui::gesture::{connection_ui, shortcuts, subscription_ui};
-use crate::gui::pane::graph_ui::node_ui::{NodeDrawOutcome, NodePass, NodeUI};
+use crate::gui::pane::graph_ui::gesture::selection_ui::SelectionUi;
+use crate::gui::pane::graph_ui::gesture::subscription_ui::SubscriptionUi;
+use crate::gui::pane::graph_ui::gesture::wire_ui::WireUi;
+use crate::gui::pane::graph_ui::gesture::{shortcuts, subscription_ui, wire_ui};
+use crate::gui::pane::graph_ui::node_ui::{NodeDrawOutcome, NodePass, NodeUi};
 use crate::gui::pane::graph_ui::paint::inspectors::Inspectors;
 use crate::gui::pane::graph_ui::paint::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, Escape, PrepassCtx};
 
-/// The graph pane's UI state: the cross-frame geometry, the `NodeUI` that
+/// The graph pane's UI state: the cross-frame geometry, the `NodeUi` that
 /// renders graph nodes, the inspection panels, and the in-flight gesture
 /// controllers.
 ///
@@ -84,7 +84,7 @@ use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, Escape, PrepassCtx};
 /// first, so a gesture only reaches the bare canvas (and this
 /// classification) when it missed every node/port.
 #[derive(Default, Debug)]
-pub(crate) struct GraphUI {
+pub(crate) struct GraphUi {
     /// The *record* frame this canvas last ran [`Self::prepass`] on, or `None`
     /// before its first ever one.
     ///
@@ -109,7 +109,7 @@ pub(crate) struct GraphUI {
     ///
     /// Private: every production reader reaches it through a [`CanvasCtx`],
     /// which is the only thing that pairs it with the gesture it was settled
-    /// beside. Tests read it through `internals`' `GraphUI::geometry`.
+    /// beside. Tests read it through `internals`' `GraphUi::geometry`.
     geometry: CanvasGeometry,
     /// Open inspection panels, keyed by node. Outside the gesture group so
     /// they survive a tab switch — an open panel is a standing request about a
@@ -127,27 +127,27 @@ pub(crate) struct GraphUI {
     // breaker's point and broken-target vectors, the palette's folded search),
     // and each controller knows which of its own state is a buffer and which
     // is the gesture.
-    node_ui: NodeUI,
-    breaker_ui: BreakerUI,
-    connection_ui: ConnectionUI,
+    node_ui: NodeUi,
+    breaker_ui: BreakerUi,
+    wire_ui: WireUi,
     preview_drag: PreviewDrag,
-    subscription_ui: SubscriptionUI,
+    subscription_ui: SubscriptionUi,
     new_node_ui: NewNodeUi,
     node_menu: NodeMenuUi,
-    selection_ui: SelectionUI,
+    selection_ui: SelectionUi,
     /// The camera's input in flight: a pan drag's latch, and the run of
     /// wheel or pinch input. Input bookkeeping, not viewport state.
     camera: CameraGesture,
 }
 
-impl GraphUI {
+impl GraphUi {
     /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
     /// document still holds — the cross-frame geometry and the open inspection
     /// panels.
     ///
     /// Both deliberately outlive the scene, so absence from it is no grounds
     /// on its own and neither can do this itself; see
-    /// [`CanvasGeometry::retain_nodes`]. Swept together because `GraphUI` owns
+    /// [`CanvasGeometry::retain_nodes`]. Swept together because `GraphUi` owns
     /// both, so a new one lands here rather than in a fourth call site.
     pub(crate) fn retain_nodes(&mut self, document: &Document) {
         self.geometry
@@ -164,7 +164,7 @@ impl GraphUI {
     /// close on an outside action instead ([`Inspectors::apply`]).
     ///
     /// Destructured rather than assigned wholesale so the compiler makes the
-    /// call: a field added to [`GraphUI`] does not compile until it is either
+    /// call: a field added to [`GraphUi`] does not compile until it is either
     /// dropped here or explicitly named as surviving. The `_`-bound arms below
     /// are the survivors — cross-frame caches and per-frame facts that the
     /// next frame overwrites anyway.
@@ -172,7 +172,7 @@ impl GraphUI {
         let Self {
             node_ui,
             breaker_ui,
-            connection_ui,
+            wire_ui,
             preview_drag,
             subscription_ui,
             new_node_ui,
@@ -190,7 +190,7 @@ impl GraphUI {
         } = self;
         node_ui.reset();
         breaker_ui.reset();
-        connection_ui.reset();
+        wire_ui.reset();
         preview_drag.reset();
         subscription_ui.reset();
         new_node_ui.reset();
@@ -208,7 +208,7 @@ impl GraphUI {
         let Self {
             node_ui,
             breaker_ui,
-            connection_ui,
+            wire_ui,
             preview_drag,
             subscription_ui,
             new_node_ui,
@@ -223,7 +223,7 @@ impl GraphUI {
         } = self;
         node_ui.in_flight()
             || breaker_ui.in_flight()
-            || connection_ui.in_flight()
+            || wire_ui.in_flight()
             || preview_drag.in_flight()
             || subscription_ui.in_flight()
             || new_node_ui.in_flight()
@@ -239,7 +239,7 @@ impl GraphUI {
     /// latched while the canvas was away would otherwise resume when it
     /// comes back. The inspection panels and the cross-frame caches survive —
     /// notably
-    /// [`CanvasGeometry`]'s port-offset table, so connections still anchor on
+    /// [`CanvasGeometry`]'s port-offset table, so wires still anchor on
     /// the first frame after a switch.
     ///
     /// Whether this prepass is the canvas's first after being away — the
@@ -317,11 +317,11 @@ impl GraphUI {
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         if let Some(start) = self.new_node_ui.take_resume_floating() {
-            self.connection_ui.resume(start, graph_ctx);
+            self.wire_ui.resume(start, graph_ctx);
         }
-        self.connection_ui.apply(ui, cx, out);
+        self.wire_ui.apply(ui, cx, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
-        // the same pre-record reasons as the connection gesture above; an
+        // the same pre-record reasons as the wire gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
         self.subscription_ui.apply(ui, cx, out);
@@ -329,7 +329,7 @@ impl GraphUI {
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
         // `cx` — nothing below may read one.
-        self.connection_ui.bake_snap_hover(&mut self.geometry);
+        self.wire_ui.bake_snap_hover(&mut self.geometry);
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
@@ -400,14 +400,14 @@ impl GraphUI {
         // rebuild needed.
         self.selection_ui.apply(ui, cx, out);
         self.breaker_ui.apply(ui, cx, out);
-        // A connection released over empty canvas (detected in `prepass`)
+        // A wire released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
-        // the connection controller holds the dropped wire's source.
-        let pending_connection = self.connection_ui.take_pending_connection();
+        // the wire controller holds the dropped wire's source.
+        let pending_connection = self.wire_ui.take_pending_wire();
         // A right-click that just ended a floating wire shouldn't also open
         // the palette — suppress the `NewNode` gesture for this frame, by
         // handing the popup a context whose gesture slot is empty.
-        let popup_cx = if self.connection_ui.ended_on_secondary() {
+        let popup_cx = if self.wire_ui.ended_on_secondary() {
             cx.without_gesture()
         } else {
             cx
@@ -493,7 +493,7 @@ impl GraphUI {
                             &viewport,
                         );
                         // Painted first so it sits beneath the
-                        // connections and node bodies.
+                        // wires and node bodies.
                         self.selection_ui.draw(ui, theme);
                         // One bundle for everything the canvas records: the
                         // node bodies below, and the inspection
@@ -512,7 +512,7 @@ impl GraphUI {
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
-                            let set = if self.connection_ui.is_dragging()
+                            let set = if self.wire_ui.is_dragging()
                                 || self.subscription_ui.in_flight()
                                 || probe.is_active()
                             {
@@ -533,7 +533,7 @@ impl GraphUI {
                                 probe: &mut probe,
                                 emphasis: &emphasis,
                             };
-                            connection_ui::draw(ui, &mut wires);
+                            wire_ui::draw(ui, &mut wires);
                             subscription_ui::draw(ui, &mut wires);
                             // Node bodies paint back-to-front by each
                             // placement's depth (`GraphView::paint_order`), so
@@ -553,7 +553,7 @@ impl GraphUI {
                         // the inner-canvas transform.
                         self.inspectors.draw_panels(ui, dcx);
                         self.breaker_ui.draw(ui, theme);
-                        self.connection_ui.draw_in_flight(ui, cx, canvas_origin);
+                        self.wire_ui.draw_in_flight(ui, cx, canvas_origin);
                         self.subscription_ui.draw_in_flight(ui, cx, canvas_origin);
                     });
             });
@@ -638,7 +638,7 @@ mod tests {
         let input = InputPort::new(consumer, 0);
         h.doc_mut()
             .graph
-            .set_input_binding(input, Binding::bind(producer, 0));
+            .set_input_binding(input, Binding::wire(producer, 0));
         // Two frames so the circle has a widget id and a measured rect to aim at.
         h.prime(2);
         // Nudged off the circle's exact center: an input port hangs half its
@@ -675,7 +675,7 @@ mod tests {
     #[test]
     fn appearing_is_a_frame_gap_not_a_repeat_or_a_step() {
         let mut h = UiHarness::arena();
-        let mut graph_ui = GraphUI::default();
+        let mut graph_ui = GraphUi::default();
 
         assert!(
             graph_ui.appearing(h.ui()),

@@ -223,11 +223,11 @@ fn markesteijn_is_odd() {
         let planes = demosaic(&data);
         let mirrored = demosaic(&negated);
         for (channel, (plane, mirror)) in planes.iter().zip(&mirrored).enumerate() {
-            for (index, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
+            for (idx, (&value, &negative)) in plane.iter().zip(mirror).enumerate() {
                 assert_eq!(
                     (-value).to_bits(),
                     negative.to_bits(),
-                    "{passes:?} channel {channel} at {index}"
+                    "{passes:?} channel {channel} at {idx}"
                 );
             }
         }
@@ -270,8 +270,8 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let size = Size2us::new(18, 18);
     let pedestal = 0.375;
     let base = Buffer2::from_fn(size.width, size.height, |x, y| {
-        let index = y * size.width + x;
-        0.2 + (index * 37 % 101) as f32 / 200.0
+        let idx = y * size.width + x;
+        0.2 + (idx * 37 % 101) as f32 / 200.0
     });
     let shifted = Buffer2::new(
         size.width,

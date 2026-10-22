@@ -16,7 +16,7 @@ const MIN_POINT_DISTANCE: f32 = 4.0;
 /// 500 segments, which bounds the per-frame intersection work.
 const MAX_BREAKER_LENGTH: f32 = 2000.0;
 /// Bezier sampling resolution for hit-testing: 16 chords per wire, cheap
-/// enough to redo every frame for every visible connection.
+/// enough to redo every frame for every visible wire.
 const BEZIER_SAMPLES: usize = 16;
 
 /// The breaker scribble: its samples, how far they run, and the three target
@@ -26,19 +26,19 @@ const BEZIER_SAMPLES: usize = 16;
 /// endpoints.
 ///
 /// **Buffers, not gesture state.** This sits beside
-/// [`BreakerUI`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUI)'s slot rather than
+/// [`BreakerUi`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi)'s slot rather than
 /// inside it, so a gesture that ends returns four allocations to the *next* one instead of to the
-/// allocator — the same bargain `SelectionUI::swept` and `NodeUI::row_tracks` already make. What
+/// allocator — the same bargain `SelectionUi::swept` and `NodeUi::row_tracks` already make. What
 /// makes that safe is the slot:
-/// [`BreakerUI::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUI::probe) only
+/// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe) only
 /// hands these out while it is latched, so between gestures the leftovers are unreachable rather
 /// than merely stale. [`Self::restart`] is where a fresh gesture claims them.
 ///
 /// The three `broken_*` collections are each filled by one render pass's
 /// hit-test (via `BreakerProbe::mark_broken_*`) and drained by
-/// `BreakerUI::apply` on release into the matching severing `GraphIntent`. All
+/// `BreakerUi::apply` on release into the matching severing `GraphIntent`. All
 /// three are cleared together at the start of every frame's probing
-/// (`begin_frame`, called from `BreakerUI::probe`) rather than each
+/// (`begin_frame`, called from `BreakerUi::probe`) rather than each
 /// renderer clearing its own — every render pass visits its own targets at
 /// most once per frame, so within-frame duplicates aren't possible either
 /// way.
@@ -77,7 +77,7 @@ impl Scribble {
 
     /// Clear every `broken_*` collection at the start of a frame's probing. The single point where
     /// this happens — called once from
-    /// [`BreakerUI::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUI::probe) —
+    /// [`BreakerUi::probe`](crate::gui::pane::graph_ui::gesture::breaker_ui::BreakerUi::probe) —
     /// rather than each renderer clearing its own field, which is easy to forget.
     pub(super) fn begin_frame(&mut self) {
         self.broken.clear();
@@ -135,14 +135,14 @@ impl Scribble {
         if self.points.iter().any(|&p| inside(p)) {
             return true;
         }
-        let edges = [
+        let wires = [
             (Vec2::new(min.x, min.y), Vec2::new(max.x, min.y)),
             (Vec2::new(max.x, min.y), Vec2::new(max.x, max.y)),
             (Vec2::new(max.x, max.y), Vec2::new(min.x, max.y)),
             (Vec2::new(min.x, max.y), Vec2::new(min.x, min.y)),
         ];
         for (a, b) in self.segments() {
-            for &(e0, e1) in &edges {
+            for &(e0, e1) in &wires {
                 if segments_intersect((a, b), (e0, e1)) {
                     return true;
                 }
@@ -153,7 +153,7 @@ impl Scribble {
 
     /// True if any sample-segment of `wire` crosses any breaker segment.
     /// Samples the cubic into `BEZIER_SAMPLES` chords; this runs once per
-    /// connection per frame while the gesture is active, so we don't cache.
+    /// wire per frame while the gesture is active, so we don't cache.
     pub(super) fn intersects_wire(&self, wire: &Wire) -> bool {
         let Wire { p0, p1, p2, p3 } = *wire;
         // A cubic stays inside its control points' box, and so does every

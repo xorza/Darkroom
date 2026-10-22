@@ -15,7 +15,7 @@ pub(crate) struct ChromeColors {
     /// node border, so "in the selection" reads as one color from sweep to
     /// committed halo (palette accent).
     pub(crate) selection_rect: RgbaF32,
-    pub(crate) connection_broken: RgbaF32,
+    pub(crate) wire_broken: RgbaF32,
     pub(crate) breaker_stroke: RgbaF32,
     /// Muted secondary foreground (palette `text_muted`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
@@ -52,7 +52,7 @@ impl ChromeColors {
     pub(super) fn from_palette(p: &Palette) -> Self {
         Self {
             selection_rect: p.selection_rect,
-            connection_broken: p.connection_broken,
+            wire_broken: p.wire_broken,
             breaker_stroke: p.breaker_stroke,
             text_muted: p.text_muted,
             chrome_fill: p.chrome_fill,

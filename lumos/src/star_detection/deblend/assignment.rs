@@ -66,9 +66,9 @@ impl Assignment {
         self.cursor
             .extend_from_slice(&self.cell_starts[..cell_count]);
         // In index order, so each cell's run keeps its peaks in index order too.
-        for (index, peak) in peaks.iter().enumerate() {
+        for (idx, peak) in peaks.iter().enumerate() {
             let cell = self.cell_of(peak.pos);
-            self.by_cell[self.cursor[cell] as usize] = index as u32;
+            self.by_cell[self.cursor[cell] as usize] = idx as u32;
             self.cursor[cell] += 1;
         }
     }
@@ -80,12 +80,12 @@ impl Assignment {
     }
 
     /// The index of the peak nearest `pos` by squared distance, the first among equals — what
-    /// `deblend::nearest_peak_index` returns, found ring by ring of cells. A peak in a ring further
+    /// `deblend::nearest_peak_idx` returns, found ring by ring of cells. A peak in a ring further
     /// out than `r` lies at least `r·cell + 1` away, so once the best is strictly nearer than that
     /// no later peak can win, not even a tie with a lower index.
     pub(super) fn nearest(&self, pos: Vec2us, peaks: &[Pixel]) -> usize {
         if peaks.len() <= FULL_SEARCH_PEAKS {
-            return deblend::nearest_peak_index(pos, peaks);
+            return deblend::nearest_peak_idx(pos, peaks);
         }
         let home = Vec2us::new(
             (pos.x - self.origin.x) / self.cell,
@@ -95,11 +95,8 @@ impl Assignment {
         let offer = |cell_x: usize, cell_y: usize, best: &mut (usize, usize)| {
             let cell = cell_y * self.cells.x + cell_x;
             let run = self.cell_starts[cell] as usize..self.cell_starts[cell + 1] as usize;
-            for &index in &self.by_cell[run] {
-                let candidate = (
-                    deblend::dist_sq(pos, peaks[index as usize].pos),
-                    index as usize,
-                );
+            for &idx in &self.by_cell[run] {
+                let candidate = (deblend::dist_sq(pos, peaks[idx as usize].pos), idx as usize);
                 *best = (*best).min(candidate);
             }
         };

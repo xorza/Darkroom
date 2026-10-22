@@ -258,9 +258,9 @@ impl EllipticalGaussian {
             .expect("validation keeps the matched filter's ellipse within the pixel rules");
         let rule = PixelQuadrature::gauss_legendre(order);
         let cell = 1.0 / subdivision as f64;
-        let mean = |index: usize| {
-            let x = (index % size) as f64 - radius as f64;
-            let y = (index / size) as f64 - radius as f64;
+        let mean = |idx: usize| {
+            let x = (idx % size) as f64 - radius as f64;
+            let y = (idx / size) as f64 - radius as f64;
             let mut sum = 0.0;
             for row in 0..subdivision {
                 let cell_y = y - 0.5 + (row as f64 + 0.5) * cell;
@@ -275,7 +275,7 @@ impl EllipticalGaussian {
         };
         let sum: f64 = (0..size * size).map(mean).sum();
         weights.clear();
-        weights.extend((0..size * size).map(|index| (mean(index) / sum) as f32));
+        weights.extend((0..size * size).map(|idx| (mean(idx) / sum) as f32));
         size
     }
 }

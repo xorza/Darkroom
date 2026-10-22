@@ -15,7 +15,7 @@ use crate::math::statistics::float;
 pub(crate) struct SortedSamples {
     keys: Vec<u64>,
     values: Vec<f32>,
-    positions: Vec<u32>,
+    poss: Vec<u32>,
     /// Whether each sample of the window [`Self::classify`] last saw is kept, from its start.
     kept: Vec<bool>,
 }
@@ -25,7 +25,7 @@ impl SortedSamples {
     pub(crate) fn reserve(&mut self, count: usize) {
         self.keys.reserve(count);
         self.values.reserve(count);
-        self.positions.reserve(count);
+        self.poss.reserve(count);
         self.kept.reserve(count);
     }
 
@@ -34,17 +34,19 @@ impl SortedSamples {
         debug_assert!(values.iter().all(|value| value.is_finite()));
         debug_assert!(u32::try_from(values.len()).is_ok());
         self.keys.clear();
-        self.keys
-            .extend(values.iter().enumerate().map(|(position, &value)| {
-                (u64::from(float::unsigned_key(value)) << 32) | position as u64
-            }));
+        self.keys.extend(
+            values
+                .iter()
+                .enumerate()
+                .map(|(pos, &value)| (u64::from(float::unsigned_key(value)) << 32) | pos as u64),
+        );
         self.keys.sort_unstable();
         self.values.clear();
-        self.positions.clear();
+        self.poss.clear();
         for &key in &self.keys {
-            let position = key as u32;
-            self.values.push(values[position as usize]);
-            self.positions.push(position);
+            let pos = key as u32;
+            self.values.push(values[pos as usize]);
+            self.poss.push(pos);
         }
     }
 
@@ -53,8 +55,8 @@ impl SortedSamples {
     }
 
     /// Each sorted sample's position in the gather it came from.
-    pub(crate) fn positions(&self) -> &[u32] {
-        &self.positions
+    pub(crate) fn poss(&self) -> &[u32] {
+        &self.poss
     }
 
     /// Decide once, by `keep` on each one's value and gather position, which samples of `window`
@@ -66,7 +68,7 @@ impl SortedSamples {
     ) -> usize {
         self.kept.clear();
         self.kept
-            .extend(window.map(|index| keep(self.values[index], self.positions[index])));
+            .extend(window.map(|idx| keep(self.values[idx], self.poss[idx])));
         self.kept.iter().filter(|&&kept| kept).count()
     }
 
@@ -76,10 +78,9 @@ impl SortedSamples {
     /// order: nothing reads them again. The sort keys serve as the scratch, so nothing allocates.
     pub(crate) fn partition(&mut self, window: Range<usize>, centre: f32) -> Range<usize> {
         debug_assert_eq!(self.kept.len(), window.len(), "the window classified");
-        let pack =
-            |value: f32, position: u32| (u64::from(value.to_bits()) << 32) | u64::from(position);
-        let side = |index: usize, kept: bool| {
-            let value = self.values[index];
+        let pack = |value: f32, pos: u32| (u64::from(value.to_bits()) << 32) | u64::from(pos);
+        let side = |idx: usize, kept: bool| {
+            let value = self.values[idx];
             match (kept, value < centre) {
                 (true, _) => 1,
                 (false, true) => 0,
@@ -88,21 +89,20 @@ impl SortedSamples {
         };
         self.keys.clear();
         let mut counts = [0; 3];
-        for (offset, index) in window.clone().enumerate() {
-            counts[side(index, self.kept[offset])] += 1;
+        for (offset, idx) in window.clone().enumerate() {
+            counts[side(idx, self.kept[offset])] += 1;
         }
         for wanted in 0..3 {
-            for (offset, index) in window.clone().enumerate() {
-                if side(index, self.kept[offset]) == wanted {
-                    self.keys
-                        .push(pack(self.values[index], self.positions[index]));
+            for (offset, idx) in window.clone().enumerate() {
+                if side(idx, self.kept[offset]) == wanted {
+                    self.keys.push(pack(self.values[idx], self.poss[idx]));
                 }
             }
         }
         debug_assert_eq!(self.keys.len(), window.len());
         for (offset, &key) in self.keys.iter().enumerate() {
             self.values[window.start + offset] = f32::from_bits((key >> 32) as u32);
-            self.positions[window.start + offset] = key as u32;
+            self.poss[window.start + offset] = key as u32;
         }
         let [low, kept, _] = counts;
         window.start + low..window.start + low + kept
@@ -141,8 +141,8 @@ mod tests {
         permute(&mut permutation, 0, &mut |values| {
             samples.fill(values);
             assert_eq!(samples.values(), ascending);
-            for (value, &position) in samples.values().iter().zip(samples.positions()) {
-                assert_eq!(values[position as usize].to_bits(), value.to_bits());
+            for (value, &pos) in samples.values().iter().zip(samples.poss()) {
+                assert_eq!(values[pos as usize].to_bits(), value.to_bits());
             }
             count += 1;
         });
@@ -150,7 +150,7 @@ mod tests {
 
         samples.fill(&[2.0, 1.0, 2.0, 1.0]);
         assert_eq!(samples.values(), [1.0, 1.0, 2.0, 2.0]);
-        assert_eq!(samples.positions(), [1, 3, 0, 2]);
+        assert_eq!(samples.poss(), [1, 3, 0, 2]);
     }
 
     /// A partition moves each rejected sample to the end on its side of the centre and keeps the
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(samples.partition(0..6, 3.5), 1..5);
         assert_eq!(calls.get(), 6, "each sample classified once");
         assert_eq!(samples.values(), [2.0, 1.0, 3.0, 4.0, 6.0, 5.0]);
-        assert_eq!(samples.positions(), [3, 1, 5, 2, 0, 4]);
+        assert_eq!(samples.poss(), [3, 1, 5, 2, 0, 4]);
     }
 
     /// Call `visit` once for every ordering of `values[start..]`, each remaining value swapped to
@@ -180,10 +180,10 @@ mod tests {
             visit(values);
             return;
         }
-        for index in start..values.len() {
-            values.swap(start, index);
+        for idx in start..values.len() {
+            values.swap(start, idx);
             permute(values, start + 1, visit);
-            values.swap(start, index);
+            values.swap(start, idx);
         }
     }
 }

@@ -816,7 +816,7 @@ mod tests {
     use crate::image::cfa::demosaic::xtrans::markesteijn::TILE;
     use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{PlaneStages, Tile};
     use crate::internals::test_rng::TestRng;
-    use crate::simd::tier::Tier;
+    use crate::simd::isa_tier::IsaTier;
 
     /// The plane stages compute the same derivatives and homogeneity, bit for bit, on every Isa
     /// the CPU has, over every direction of a full tile and of one cut short on both axes, whose
@@ -829,7 +829,7 @@ mod tests {
             for rgb in &mut seeded.rgb {
                 *rgb = [rng.next_f32(), rng.next_f32(), rng.next_f32()];
             }
-            let run = |tier: Tier| {
+            let run = |tier: IsaTier| {
                 let mut tile = Tile::new(directions);
                 tile.rgb.clone_from(&seeded.rgb);
                 tier.run(PlaneStages {
@@ -839,9 +839,9 @@ mod tests {
                 });
                 (tile.drv, tile.homo)
             };
-            let portable = run(Tier::portable());
+            let portable = run(IsaTier::portable());
             assert!(portable.1.iter().any(|&hits| hits != 0 && hits != 9));
-            for tier in Tier::supported() {
+            for tier in IsaTier::supported() {
                 let (drv, homo) = run(tier);
                 assert!(
                     drv.iter()

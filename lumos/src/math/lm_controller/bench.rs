@@ -37,18 +37,18 @@ impl Stamp {
     fn new() -> Self {
         let noise = fixture::gaussian(STAMP * STAMP, 13);
         let pixels = (0..STAMP * STAMP)
-            .map(|index| {
-                let terms = Self::terms(&TRUTH, index);
-                terms.model + 0.01 * f64::from(noise[index])
+            .map(|idx| {
+                let terms = Self::terms(&TRUTH, idx);
+                terms.model + 0.01 * f64::from(noise[idx])
             })
             .collect();
         Self { pixels }
     }
 
-    /// The model at pixel `index` and its derivatives by each parameter.
-    fn terms(params: &[f64; 5], index: usize) -> Terms {
+    /// The model at pixel `idx` and its derivatives by each parameter.
+    fn terms(params: &[f64; 5], idx: usize) -> Terms {
         let [amplitude, cx, cy, sigma, background] = *params;
-        let (dx, dy) = ((index % STAMP) as f64 - cx, (index / STAMP) as f64 - cy);
+        let (dx, dy) = ((idx % STAMP) as f64 - cx, (idx / STAMP) as f64 - cy);
         let r2 = dx * dx + dy * dy;
         let s2 = sigma * sigma;
         let profile = (-r2 / (2.0 * s2)).exp();
@@ -79,8 +79,8 @@ impl LmProblem<5> for Stamp {
             gradient: [0.0; 5],
             chi2: 0.0,
         };
-        for (index, &pixel) in self.pixels.iter().enumerate() {
-            let Terms { model, jacobian } = Self::terms(params, index);
+        for (idx, &pixel) in self.pixels.iter().enumerate() {
+            let Terms { model, jacobian } = Self::terms(params, idx);
             let residual = pixel - model;
             for i in 0..5 {
                 equations.gradient[i] += jacobian[i] * residual;
@@ -98,7 +98,7 @@ impl LmProblem<5> for Stamp {
         self.pixels
             .iter()
             .enumerate()
-            .map(|(index, &pixel)| (pixel - Self::terms(params, index).model).powi(2))
+            .map(|(idx, &pixel)| (pixel - Self::terms(params, idx).model).powi(2))
             .sum()
     }
 

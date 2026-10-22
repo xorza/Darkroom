@@ -41,13 +41,9 @@ impl Comparison<'_> {
             match_radius,
         } = *self;
         let mut image = gray_to_rgb(pixels, ToneMap::Clamp);
-        let truth_positions: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();
-        let detected_positions: Vec<glam::DVec2> = detected.iter().map(|s| s.pos).collect();
-        let pairs = match_catalogs(
-            &truth_positions,
-            &detected_positions,
-            f64::from(match_radius),
-        );
+        let truth_poss: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();
+        let detected_poss: Vec<glam::DVec2> = detected.iter().map(|s| s.pos).collect();
+        let pairs = match_catalogs(&truth_poss, &detected_poss, f64::from(match_radius));
         let matched_truth: Vec<usize> = pairs.iter().map(|&(ti, _)| ti).collect();
         let matched_detected: Vec<usize> = pairs.iter().map(|&(_, di)| di).collect();
 

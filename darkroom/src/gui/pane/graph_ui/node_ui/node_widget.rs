@@ -11,7 +11,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::gesture::group_drag::{self, Grab};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::{
-    NodePass, NodeUI, header, memory_row, port_row, preview_row, wid,
+    NodePass, NodeUi, header, memory_row, port_row, preview_row, wid,
 };
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::{CardTier, Theme};
@@ -38,17 +38,17 @@ pub(super) struct NodeResponse {
 ///
 /// A builder in palantir's shape — `new(..).show(ui, ..)` — but taking its
 /// state `&mut` rather than keeping it in `ui.state_or_default()`, because none of
-/// what [`NodeUI`] holds is per-node: there is one pointer so one drag, and
+/// what [`NodeUi`] holds is per-node: there is one pointer so one drag, and
 /// `row_tracks` is deliberately one buffer the whole frame slices out of.
 /// Per-widget state would reintroduce the allocation it exists to avoid.
 #[derive(Debug)]
 pub(super) struct NodeWidget<'a> {
-    state: &'a mut NodeUI,
+    state: &'a mut NodeUi,
     ncx: NodeCtx<'a>,
 }
 
 impl<'a> NodeWidget<'a> {
-    pub(super) const fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
+    pub(super) const fn new(state: &'a mut NodeUi, ncx: NodeCtx<'a>) -> Self {
         Self { state, ncx }
     }
 

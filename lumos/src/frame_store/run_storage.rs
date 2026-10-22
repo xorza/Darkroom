@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::{FrameStoreError, LoadError};
-use crate::frame_store::tier::Tier;
+use crate::frame_store::storage_tier::StorageTier;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::Decoder;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::memory::run_plan::RunPlan;
 
 /// Where one run reads its frames from and writes them to: the decode cache, when the run keeps
@@ -57,7 +57,7 @@ impl RunStorage {
         self.kept.as_ref()
     }
 
-    /// `path` decoded by `D` under `context`, whole in RAM: through the decode cache when the run
+    /// `path` decoded by `D` under `ctx`, whole in RAM: through the decode cache when the run
     /// keeps one ([`DecodeCache::decode`]).
     ///
     /// # Errors
@@ -66,24 +66,20 @@ impl RunStorage {
     pub(crate) fn decode<D: Decoder>(
         &self,
         path: &Path,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<D::Image, LoadError> {
         match &self.kept {
-            Some(kept) => kept.decode::<D>(path, context),
-            None => Ok(D::load(path, context)?),
+            Some(kept) => kept.decode::<D>(path, ctx),
+            None => Ok(D::load(path, ctx)?),
         }
     }
 
-    /// How many of `paths` the decode cache does not hold decoded by `D` under `context`: the
+    /// How many of `paths` the decode cache does not hold decoded by `D` under `ctx`: the
     /// frames the run writes to it. None without a cache.
-    pub(crate) fn uncached<D: Decoder>(
-        &self,
-        paths: &[impl AsRef<Path>],
-        context: &LoadContext,
-    ) -> usize {
+    pub(crate) fn uncached<D: Decoder>(&self, paths: &[impl AsRef<Path>], ctx: &LoadCtx) -> usize {
         self.kept
             .as_ref()
-            .map_or(0, |kept| kept.missing::<D>(paths, context))
+            .map_or(0, |kept| kept.missing::<D>(paths, ctx))
     }
 
     /// The tier `plan` keeps the run's frames in, once the disk is known to hold what the run
@@ -92,8 +88,12 @@ impl RunStorage {
     /// # Errors
     ///
     /// The scratch cannot be made, or [`FrameStoreError::InsufficientSpace`].
-    pub(crate) fn tier(&self, plan: &RunPlan, writes: RunWrites) -> Result<Tier, FrameStoreError> {
-        let tier = Tier::for_plan(plan, &self.cache_dir)?;
+    pub(crate) fn tier(
+        &self,
+        plan: &RunPlan,
+        writes: RunWrites,
+    ) -> Result<StorageTier, FrameStoreError> {
+        let tier = StorageTier::for_plan(plan, &self.cache_dir)?;
         match (tier.scratch(), &self.kept) {
             (Some(scratch), _) => scratch.ensure_space(writes.kept.saturating_add(writes.spilled)),
             (None, Some(kept)) => kept.ensure_space(writes.kept),
@@ -127,15 +127,15 @@ mod tests {
     /// of 10.
     #[test]
     fn the_disk_holds_everything_the_run_writes_or_the_run_is_refused() {
-        let directory = TempDir::new("run_storage_disk");
+        let dir = TempDir::new("run_storage_disk");
         let ingest = IngestConfig {
             keep_cache: true,
-            ..IngestConfig::with_cache_dir(directory.path().to_path_buf())
+            ..IngestConfig::with_cache_dir(dir.path().to_path_buf())
         };
         let storage =
             RunStorage::decoding(&IngestRun::planned(RunMemory::new(1 << 30, None), &ingest))
                 .unwrap();
-        let free = FileSystem::free_space(directory.path()).expect("the test's disk is read");
+        let free = FileSystem::free_space(dir.path()).expect("the test's disk is read");
         let share = free / 10 * 6;
         let frame = [Stage {
             kept: 48,

@@ -1,7 +1,7 @@
 //! Record-time visibility culling for the graph canvas. Only items that
 //! intersect the viewport are recorded, so an off-screen
 //! graph costs no measure/arrange/paint work. Pure world-space math;
-//! [`crate::gui::pane::graph_ui::GraphUI::draw`] resolves one [`CullRegion`] per
+//! [`crate::gui::pane::graph_ui::GraphUi::draw`] resolves one [`CullRegion`] per
 //! frame and threads the same policy through every recorded canvas item.
 
 use glam::Vec2;

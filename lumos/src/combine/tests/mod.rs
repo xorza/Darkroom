@@ -78,7 +78,7 @@ fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
 /// Overwrite one pixel of one frame with a bright cosmic-ray-like spike.
 fn inject_spike(sim: &mut SimFrame, pos: Vec2us, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
-    px[Size2us::new(W, H).index_of(pos)] = value;
+    px[Size2us::new(W, H).idx_of(pos)] = value;
     sim.image =
         LinearImage::from_planar_channels(ImageDimensions::new((W, H), ChannelLayout::Mono), [px]);
 }

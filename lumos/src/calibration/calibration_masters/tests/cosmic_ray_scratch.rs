@@ -61,10 +61,10 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
     let size = Size2us::new(64, 64);
     let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
-    data[size.index_of(Vec2us::new(32, 32))] = 0.95;
+    data[size.idx_of(Vec2us::new(32, 32))] = 0.95;
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
-    // pass that never reaches `Repair::apply`'s snapshot buffer.
+    // pass that never reaches `PixelRepair::apply`'s snapshot buffer.
     let repaired = cosmic_ray::reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig::default(),

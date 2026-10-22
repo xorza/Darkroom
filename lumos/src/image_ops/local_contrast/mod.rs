@@ -9,7 +9,7 @@ use common::Introspect;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::config_value::ConfigValue;
+use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
@@ -79,11 +79,11 @@ impl LocalContrast {
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigValue::count("local contrast tiles", self.tiles)
+        ConfigField::count("local contrast tiles", self.tiles)
             .must_be("at least 1", self.tiles >= 1)?;
-        ConfigValue::new("local contrast clip_limit", self.clip_limit)
+        ConfigField::new("local contrast clip_limit", self.clip_limit)
             .finite_and("finite and at least 1", |value| value >= 1.0)?;
-        ConfigValue::new("local contrast strength", self.strength)
+        ConfigField::new("local contrast strength", self.strength)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
 }
@@ -247,9 +247,9 @@ impl TileGrid {
     reason = "the value is clamped into [0, 1] first"
 )]
 fn map_through(lut: &TileLut, v: f32) -> f32 {
-    let position = v.clamp(0.0, 1.0) * N_BINS as f32;
-    let bin = (position as usize).min(N_BINS - 1);
-    let fraction = position - bin as f32;
+    let pos = v.clamp(0.0, 1.0) * N_BINS as f32;
+    let bin = (pos as usize).min(N_BINS - 1);
+    let fraction = pos - bin as f32;
     lut[bin] + fraction * (lut[bin + 1] - lut[bin])
 }
 

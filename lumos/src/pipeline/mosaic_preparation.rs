@@ -8,7 +8,7 @@ use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::linear_image::LinearImage;
-use crate::io::load_context::LoadContext;
+use crate::io::load_ctx::LoadCtx;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::error::AlignStackError;
@@ -29,7 +29,7 @@ impl MosaicPreparation<'_> {
         &self,
         mut cfa: CfaImage,
         path: &Path,
-        context: &LoadContext,
+        ctx: &LoadCtx,
     ) -> Result<LinearImage, AlignStackError> {
         let outcome =
             self.masters
@@ -50,7 +50,7 @@ impl MosaicPreparation<'_> {
         }
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
         // The demosaic polls the cancel token between its passes.
-        cfa.demosaic(context.xtrans_passes, noise, &context.cancel)
+        cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
 }
