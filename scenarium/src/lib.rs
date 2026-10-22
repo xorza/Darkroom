@@ -38,7 +38,7 @@ pub use graph::detached::{DetachedNode, DetachedNodeParts};
 pub use graph::error::{
     BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
 };
-pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult, OverrideRule};
+pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
 pub use graph::func::func_input::FuncInput;

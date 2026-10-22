@@ -19,10 +19,6 @@ pub struct FuncInput {
     pub const_only: bool,
     pub default_value: Option<ConstValue>,
     pub value_variants: Vec<ValueVariant>,
-    /// The input this one overrides: while this input delivers a value, the
-    /// target is set aside — not delivered, not digested, not required. The
-    /// target is `const_only`, so setting it aside never strands a producer.
-    pub overrides: Option<usize>,
 }
 
 impl FuncInput {
@@ -36,7 +32,6 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
-            overrides: None,
         }
     }
 
@@ -51,7 +46,6 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
-            overrides: None,
         }
     }
 
@@ -74,13 +68,6 @@ impl FuncInput {
     #[must_use]
     pub const fn const_only(mut self) -> Self {
         self.const_only = true;
-        self
-    }
-
-    /// Override input `target` of the same func. See [`FuncInput::overrides`].
-    #[must_use]
-    pub const fn overrides(mut self, target: usize) -> Self {
-        self.overrides = Some(target);
         self
     }
 

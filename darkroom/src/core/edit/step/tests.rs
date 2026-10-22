@@ -16,10 +16,10 @@ use crate::core::document::internals::DocFixture;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::node_presence::{NodePresence, PresenceState};
 use crate::core::edit::step::raise::Raise;
 use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::set_input::SetInput;
+use crate::core::edit::step::set_node::{NodeEntry, SetNode};
 use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
@@ -73,11 +73,11 @@ fn node_property(node_id: NodeId, from: CacheMode, to: CacheMode) -> UndoStep {
 
 /// A removal of a real node — the one kind that can only be built by reading a
 /// document, since it carries everything the graph held about the node.
-fn node_presence() -> UndoStep {
+fn node_removal() -> UndoStep {
     let mut fixture = DocFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
-    let state = PresenceState::capture(&fixture.doc, node_id).expect("the fixture placed it");
-    UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
+    let entry = NodeEntry::capture(&fixture.doc, node_id).expect("the fixture placed it");
+    UndoStep::SetNode(Box::new(SetNode::removal(entry)))
 }
 
 /// The exit prompt's split: camera, selection and stacking are navigation and
@@ -111,7 +111,7 @@ fn dirties_document_splits_edits_from_navigation() {
     }
 
     let content = [
-        node_presence(),
+        node_removal(),
         UndoStep::RenameNode(RenameNode {
             node_id,
             name: Change {
@@ -132,10 +132,10 @@ fn dirties_document_splits_edits_from_navigation() {
 /// Only a node coming or going changes the node set; every other kind leaves
 /// the canvas's node caches as they were, so a drag frame sweeps nothing.
 #[test]
-fn changes_node_set_splits_node_presence_from_everything_else() {
+fn changes_node_set_splits_adds_and_removals_from_everything_else() {
     let node_id = NodeId::unique();
     let every_kind = [
-        (node_presence(), true),
+        (node_removal(), true),
         (
             set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
             false,
@@ -254,7 +254,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         set_input(port, Some(cst(1.0)), None),
         // A node arriving — or coming back on an undo — has no cached port
         // offsets for its wires to anchor to.
-        node_presence(),
+        node_removal(),
     ];
     for step in &resizes {
         assert!(

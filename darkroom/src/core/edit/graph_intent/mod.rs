@@ -42,15 +42,16 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::node_presence::{NodePresence, PresenceState};
 use crate::core::edit::step::raise::Raise;
 use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::set_input::SetInput;
+use crate::core::edit::step::set_node::{NodeEntry, SetNode};
 use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_viewport::SetViewport;
 use crate::core::edit::step::undo_step::UndoStep;
+use crate::core::edit::unwired;
 use crate::core::edit::validate;
 use crate::core::edit::validate::Insertion;
 
@@ -201,9 +202,10 @@ impl GraphIntent {
     /// offset position, const-value bindings copy verbatim, the data and
     /// event wires *among* the selected nodes are recreated against the
     /// clones, and the copies end up selected. A `Wire` whose source is
-    /// *outside* the selection goes as `incoming` says: dropped, or kept
-    /// pointing at the original external producer. Empty when nothing is
-    /// selected.
+    /// *outside* the selection goes as `incoming` says: dropped, leaving the
+    /// input's declared default as a wire removed on its own does
+    /// ([`unwired::binding`]), or kept pointing at the original external
+    /// producer. Empty when nothing is selected.
     ///
     /// A list rather than an intent of its own: duplicating is an editor
     /// command built out of the vocabulary, not a graph primitive. The whole
@@ -218,7 +220,11 @@ impl GraphIntent {
     /// node context menu's two Duplicate picks all act on it, the latter
     /// because a right-click selects the node it landed on first. A selected
     /// stub is skipped: a copy of a node that cannot run has little use.
-    pub(crate) fn duplicate(doc: &Document, incoming: IncomingWires) -> Vec<Self> {
+    pub(crate) fn duplicate(
+        doc: &Document,
+        library: &Library,
+        incoming: IncomingWires,
+    ) -> Vec<Self> {
         let (graph, view) = (&doc.graph, &doc.main_view);
         // Resolve the whole set first, in selection order: an edge is only
         // recognisable as internal once both of its endpoints have a fresh id,
@@ -252,23 +258,26 @@ impl GraphIntent {
             let mut bindings = Vec::new();
             for (port, binding) in graph.input_bindings(old_id) {
                 let input = InputPort::new(new_id, port.port_idx);
-                match binding {
-                    Binding::Wire(source) => match clones.get(&source.node_id) {
-                        Some(&new_source) => internal.push(Self::SetInput {
-                            input,
-                            to: Some(Binding::wire(new_source, source.port_idx)),
-                        }),
-                        None if incoming == IncomingWires::Keep => bindings.push(BindingEntry {
-                            port: input,
-                            binding: Binding::Wire(*source),
-                        }),
-                        None => {}
-                    },
-                    other @ Binding::Const(_) => bindings.push(BindingEntry {
-                        port: input,
-                        binding: other.clone(),
-                    }),
-                }
+                let seed = match binding {
+                    Binding::Wire(source) => {
+                        if let Some(&new_source) = clones.get(&source.node_id) {
+                            internal.push(Self::SetInput {
+                                input,
+                                to: Some(Binding::wire(new_source, source.port_idx)),
+                            });
+                            continue;
+                        }
+                        match incoming {
+                            IncomingWires::Keep => Some(Binding::Wire(*source)),
+                            IncomingWires::Drop => unwired::binding(graph, library, port),
+                        }
+                    }
+                    Binding::Const(_) => Some(binding.clone()),
+                };
+                bindings.extend(seed.map(|binding| BindingEntry {
+                    port: input,
+                    binding,
+                }));
             }
             intents.push(Self::AddNode {
                 pos,
@@ -354,14 +363,14 @@ impl GraphIntent {
                     bindings,
                     subscriptions: Vec::new(),
                 })?;
-                UndoStep::NodePresence(Box::new(NodePresence::insertion(detached, placement)))
+                UndoStep::SetNode(Box::new(SetNode::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                let Some(state) = PresenceState::capture(doc, node_id) else {
+                let Some(entry) = NodeEntry::capture(doc, node_id) else {
                     return Ok(None);
                 };
-                UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
+                UndoStep::SetNode(Box::new(SetNode::removal(entry)))
             }
             Self::MoveSelection {
                 members, offset, ..
@@ -401,6 +410,12 @@ impl GraphIntent {
                 if validate::live_node(graph, input.node_id, Role::SetInputDestination)?.is_none() {
                     return Ok(None);
                 }
+                let to = match to {
+                    None if matches!(graph.bindings.get(&input), Some(Binding::Wire(_))) => {
+                        unwired::binding(graph, library, input)
+                    }
+                    to => to,
+                };
                 // Only a write is admitted: clearing removes a binding wherever
                 // it sits, which is never worse than keeping it.
                 if let Some(binding) = &to {
@@ -536,9 +551,12 @@ impl GraphIntent {
     /// Build, no-op-filter, and apply one intent against `doc` in a single
     /// call — the entry every frontend drives its per-intent loop through.
     ///
-    /// Returns the committed [`UndoStep`] (the caller records it and reads its
-    /// signals), or `Ok(None)` when nothing came of the intent and nothing was
-    /// written — a stale anchor, a cycle-forming bind, or a no-op. Only a
+    /// Pushes each committed [`UndoStep`] onto `steps`, in the order it
+    /// applied (the caller records them and reads their signals): none when
+    /// nothing came of the intent and nothing was written — a stale anchor, a
+    /// cycle-forming bind, or a no-op. A node's removal is followed by a
+    /// [`Self::SetInput`] for each input it fed that takes its default back,
+    /// as a wire removed on its own leaves it ([`unwired::binding`]). Only a
     /// payload that could never have applied is an `Err` (see
     /// [`Self::into_step`]).
     ///
@@ -549,26 +567,61 @@ impl GraphIntent {
         self,
         doc: &mut Document,
         library: &Library,
-    ) -> Result<Option<UndoStep>, MalformedIntent> {
+        steps: &mut Vec<UndoStep>,
+    ) -> Result<(), MalformedIntent> {
+        let fed: Vec<InputPort> = match &self {
+            Self::RemoveNode { node_id } => doc
+                .graph
+                .wires()
+                .filter(|(_, producer)| producer.node_id == *node_id)
+                .map(|(consumer, _)| consumer)
+                .collect(),
+            _ => Vec::new(),
+        };
         let Some(step) = self.into_step(doc, library)? else {
-            return Ok(None);
+            return Ok(());
         };
         if step.is_noop() {
-            return Ok(None);
+            return Ok(());
         }
         step.apply(doc);
-        Ok(Some(step))
+        steps.push(step);
+        for input in fed {
+            if let Some(to) = unwired::binding(&doc.graph, library, input) {
+                Self::SetInput {
+                    input,
+                    to: Some(to),
+                }
+                .commit(doc, library, steps)?;
+            }
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use glam::Vec2;
-    use scenarium::{Node, NodeId};
+    use scenarium::{Library, Node, NodeId};
 
+    use crate::core::document::Document;
+    use crate::core::edit::error::MalformedIntent;
     use crate::core::edit::graph_intent::GraphIntent;
+    use crate::core::edit::step::undo_step::UndoStep;
 
     impl GraphIntent {
+        /// [`Self::commit`] of an intent that commits at most one step.
+        pub(crate) fn commit_one(
+            self,
+            doc: &mut Document,
+            library: &Library,
+        ) -> Result<Option<UndoStep>, MalformedIntent> {
+            let mut steps = Vec::new();
+            self.commit(doc, library, &mut steps)?;
+            assert!(steps.len() <= 1, "the intent committed {steps:?}");
+            Ok(steps.pop())
+        }
+
         /// An `AddNode` of `node` at `pos` under `node_id`, seeding no binding.
         pub(crate) const fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Self {
             Self::AddNode {

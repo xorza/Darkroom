@@ -49,7 +49,7 @@ use crate::data::data_type::DataType;
 use crate::exec::compile::compiled_graph::{
     CompiledGraph, ExecBinding, ExecEvent, ExecInput, ExecNode,
 };
-use crate::exec::idx::{InputIdx, NodeIdx, OutputAddr};
+use crate::exec::idx::{NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
@@ -178,17 +178,11 @@ impl Compiler {
             //
             // Each input is resolved as it is appended, so it is whole the moment
             // it enters the pool rather than being revisited by index afterwards.
-            let base = compiled.inputs.len();
             let node_inputs = compiled.inputs.append(func.inputs().iter().enumerate().map(
-                |(port_idx, func_input)| {
-                    ExecInput {
-                        required: func_input.required,
-                        stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
-                        binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
-                        overridden_by: func
-                            .overrider_of(port_idx)
-                            .map(|by| InputIdx::from_idx(base + by)),
-                    }
+                |(port_idx, func_input)| ExecInput {
+                    required: func_input.required,
+                    stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
+                    binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
                 },
             ));
 

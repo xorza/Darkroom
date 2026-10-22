@@ -21,7 +21,7 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 const STACK_LIGHTS_FUNC_ID: FuncId = FuncId::literal("b02f5c42-7bda-48f6-81dd-81338efbb126");
 
 /// The input the reference frame index arrives on.
-const REFERENCE: usize = 8;
+const REFERENCE: usize = 5;
 
 /// The ancillary planes a run computes: coverage and weight for a reader of
 /// their outputs, and never the inverse variance or the dispersion, which the node
@@ -49,9 +49,6 @@ fn reference(idx: &DynamicValue) -> InvokeResult<Reference> {
 }
 
 pub(crate) fn register(library: &mut Library) {
-    DetectionPreset::register(library);
-    RegistrationPreset::register(library);
-    CombineMethodChoice::register(library);
     library.add(
         Func::builder(
             STACK_LIGHTS_FUNC_ID,
@@ -60,17 +57,17 @@ pub(crate) fn register(library: &mut Library) {
                 cancel = ctx.cancel_flag(),
                 quality = quality(demand),
             } => {
-                debug_assert_eq!(inputs.len(), 9);
+                debug_assert_eq!(inputs.len(), 6);
                 debug_assert_eq!(outputs.len(), 3);
 
                 let lights = inputs[0].required_fs_paths().to_vec();
                 let masters_value = inputs[1].clone();
-                let mut stack = CombineMethodChoice::resolve(&inputs[6], &inputs[7]);
+                let mut stack = CombineMethodChoice::resolve(&inputs[4]);
                 stack.quality = quality;
                 let reference = reference(&inputs[REFERENCE])?;
                 let config = AlignStackConfig {
-                    detection: DetectionPreset::resolve(&inputs[2], &inputs[3]),
-                    registration: RegistrationPreset::resolve(&inputs[4], &inputs[5]),
+                    detection: DetectionPreset::resolve(&inputs[2]),
+                    registration: RegistrationPreset::resolve(&inputs[3]),
                     stack,
                     reference,
                     ..AlignStackConfig::default()
@@ -122,12 +119,9 @@ pub(crate) fn register(library: &mut Library) {
             FuncInput::optional("Masters", MASTERS_DATA_TYPE)
                 .description("Optional calibration masters. Unwired means no calibration."),
         )
-        .input(DetectionPreset::picker("Detection"))
-        .input(DetectionPreset::config_input("Detection Config", 2))
-        .input(RegistrationPreset::picker("Registration"))
-        .input(RegistrationPreset::config_input("Registration Config", 4))
-        .input(CombineMethodChoice::picker("Combine"))
-        .input(CombineMethodChoice::config_input("Combine Config", 6))
+        .input(DetectionPreset::input("Detection"))
+        .input(RegistrationPreset::input("Registration"))
+        .input(CombineMethodChoice::input("Combine"))
         .input(FuncInput::optional("Reference", DataType::Int).description(
             "Alignment reference frame index; unset picks the frame with the lowest \
                      median FWHM among those with enough stars.",
@@ -184,7 +178,7 @@ mod tests {
             reference(&DynamicValue::from(-1_i64))
                 .unwrap_err()
                 .to_string(),
-            "input 8 must be a frame index, got -1"
+            "input 5 must be a frame index, got -1"
         );
     }
 }

@@ -327,7 +327,7 @@ fn missing_inputs(
     let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
         .iter()
         .enumerate()
-        .filter(|(_, input)| schedule.input_missing(program, input))
+        .filter(|(_, input)| schedule.input_missing(input))
         .map(|(port_idx, _)| port_idx)
         .collect();
     debug_assert!(
@@ -654,11 +654,10 @@ impl ExecFrame<'_, '_> {
     fn collect_inputs(&mut self, node_idx: NodeIdx) {
         self.inputs.clear();
         for input in &self.program.inputs[self.program[node_idx].inputs] {
-            let value = match self.schedule.delivery(self.program, input) {
-                // No read was planned for either: a set-aside input is a
-                // const-only target, and a bound input reads as unbound only
+            let value = match self.schedule.delivery(input) {
+                // No read was planned: a bound input reads as unbound only
                 // when the run skips its producer.
-                Delivery::Unbound | Delivery::SetAside => DynamicValue::Unbound,
+                Delivery::Unbound => DynamicValue::Unbound,
                 Delivery::Blocked => {
                     unreachable!(
                         "a node with a blocked input is verdicted missing, so it does not run"
@@ -690,7 +689,7 @@ impl ExecFrame<'_, '_> {
     /// non-RAM producer values to be released as soon as their remaining readers disappear.
     fn abandon_input_reads(&mut self, consumer_idx: NodeIdx) {
         for input in &self.program.inputs[self.program[consumer_idx].inputs] {
-            if let Delivery::Wire(address) = self.schedule.delivery(self.program, input) {
+            if let Delivery::Wire(address) = self.schedule.delivery(input) {
                 self.complete_planned_read(address);
             }
         }

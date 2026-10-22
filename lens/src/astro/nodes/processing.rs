@@ -1,9 +1,8 @@
 //! Per-frame astronomical processing nodes.
 //!
-//! Each takes an image and one quick knob — a preset picker, or for an op
-//! tuned by a single strength that strength — beside an optional `Config`
-//! port declared to override the knob, so a wired config is what runs and the
-//! editor shows the knob set aside.
+//! Each takes an image and its config: one input that holds a preset or a
+//! wired detailed config, or for an op with a few plain knobs those knobs as
+//! inputs of their own.
 
 use std::{fmt, mem};
 
@@ -13,13 +12,13 @@ use lumos::{
     ScnrProtection, Stretch,
 };
 use scenarium::{
-    DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
+    Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
 };
 
 use crate::astro::config::preset::Preset;
 use crate::astro::config::processing::StretchMethodChoice;
 use crate::astro::nodes::runtime;
-use crate::config_node::ConfigValue;
+use crate::config_node::FieldInputs;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::node_spec::NodeSpec;
 
@@ -32,9 +31,6 @@ const HDR_COMPRESSION_FUNC_ID: FuncId = FuncId::literal("300a2ec5-0ccd-47ec-b282
 const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-0a91d385458a");
 
 pub(crate) fn register(library: &mut Library) {
-    StretchMethodChoice::register(library);
-    BgMode::register(library);
-    ScnrProtection::register(library);
     library.add(preset_func::<StretchMethodChoice>(
         NodeSpec {
             id: AUTO_STRETCH_FUNC_ID,
@@ -59,54 +55,33 @@ pub(crate) fn register(library: &mut Library) {
         },
         "Protection",
     ));
-    library.add(strength_func(
+    let denoise = fields_func::<Denoise>(
+        library,
         NodeSpec {
             id: DENOISE_FUNC_ID,
             name: "Denoise",
             description: "Wavelet denoise (starlet coefficient thresholding).",
         },
-        Knob {
-            name: "Strength",
-            description: "Denoise strength in [0, 1].",
-            default: Denoise::default().strength,
-        },
-        |strength| Denoise {
-            strength,
-            ..Default::default()
-        },
-    ));
-    library.add(strength_func(
+    );
+    library.add(denoise);
+    let hdr = fields_func::<Hdr>(
+        library,
         NodeSpec {
             id: HDR_COMPRESSION_FUNC_ID,
             name: "HDR Compression",
             description: "Compresses large-scale dynamic range (multiscale HDR).",
         },
-        Knob {
-            name: "Amount",
-            description: "Compression amount in [0, 1].",
-            default: Hdr::default().amount,
-        },
-        |amount| Hdr {
-            amount,
-            ..Default::default()
-        },
-    ));
-    library.add(strength_func(
+    );
+    library.add(hdr);
+    let local_contrast = fields_func::<LocalContrast>(
+        library,
         NodeSpec {
             id: LOCAL_CONTRAST_FUNC_ID,
             name: "Local Contrast",
             description: "Local contrast enhancement (CLAHE).",
         },
-        Knob {
-            name: "Strength",
-            description: "Local-contrast strength in [0, 1].",
-            default: LocalContrast::default().strength,
-        },
-        |strength| LocalContrast {
-            strength,
-            ..Default::default()
-        },
-    ));
+    );
+    library.add(local_contrast);
     library.add(processing_func(
         NodeSpec {
             id: NEUTRALIZE_BG_FUNC_ID,
@@ -165,24 +140,19 @@ impl FrameOp for LocalContrast {
     }
 }
 
-/// A node over `P`'s configs: the image, `P`'s picker named `pick`, and the
-/// config overriding it.
-fn preset_func<P>(spec: NodeSpec, pick: &str) -> Func
+/// A node over `P`'s configs: the image, and `P`'s input named `name`.
+fn preset_func<P>(spec: NodeSpec, name: &str) -> Func
 where
     P: Preset,
     P::Config: FrameOp,
 {
     processing_func(
         spec,
-        vec![
-            Image::input("Image"),
-            P::picker(pick),
-            P::config_input("Config", 1),
-        ],
+        vec![Image::input("Image"), P::input(name)],
         async_lambda!(move |Invocation {
                                 inputs, outputs, ..
                             }| {
-            let config = P::resolve(&inputs[1], &inputs[2]);
+            let config = P::resolve(&inputs[1]);
             let value = mem::take(&mut inputs[0]);
             outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
             Ok(())
@@ -190,38 +160,24 @@ where
     )
 }
 
-/// The one strength an op is tuned by, as a node's quick knob.
-#[derive(Debug, Clone, Copy)]
-struct Knob {
-    name: &'static str,
-    description: &'static str,
-    /// The op's own default, so the knob starts where the op does.
-    default: f32,
-}
-
-/// A node over a config tuned by one strength: the image, the strength, and
-/// the config overriding it; `with` builds the config a strength stands for.
-fn strength_func<T>(spec: NodeSpec, knob: Knob, with: fn(f32) -> T) -> Func
+/// A node over a `T` of a few plain knobs: the image, and `T`'s fields as
+/// inputs of their own, each starting at the op's default.
+fn fields_func<T>(library: &mut Library, spec: NodeSpec) -> Func
 where
     T: FrameOp + Introspect + Clone + fmt::Debug + Sync,
 {
+    let fields = FieldInputs::<T>::new(library);
+    let mut inputs = vec![Image::input("Image")];
+    inputs.extend(fields.inputs());
     processing_func(
         spec,
-        vec![
-            Image::input("Image"),
-            FuncInput::required(knob.name, DataType::Float)
-                .const_only()
-                .description(knob.description)
-                .default(f64::from(knob.default)),
-            ConfigValue::<T>::input("Config", 1),
-        ],
+        inputs,
         async_lambda!(move |Invocation {
                                 inputs, outputs, ..
                             }| {
-            let config = match inputs[2].as_custom::<ConfigValue<T>>() {
-                Some(config) => config.0.clone(),
-                None => with(inputs[1].required_f64() as f32),
-            };
+            fields = fields.clone(),
+        } => {
+            let config = fields.build(&inputs[1..])?;
             let value = mem::take(&mut inputs[0]);
             outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
             Ok(())

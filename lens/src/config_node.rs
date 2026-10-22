@@ -16,6 +16,7 @@
 
 use std::any::Any;
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
@@ -28,7 +29,7 @@ use scenarium::{InvokeError, Library, TypeEntry};
 use crate::node_spec::NodeSpec;
 
 /// A config type's wire type id, parsed once at compile time from its `TYPE_ID`.
-pub(crate) const fn wire_type_id<T: Introspect>() -> TypeId {
+const fn wire_type_id<T: Introspect>() -> TypeId {
     const { TypeId::literal(T::TYPE_ID) }
 }
 
@@ -50,16 +51,6 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> CustomValue for
     }
 }
 
-impl<T: Introspect> ConfigValue<T> {
-    /// An optional detailed config of `T` named `name`, declared to override
-    /// input `overrides`: while one is wired, that knob is set aside.
-    pub(crate) fn input(name: &str, overrides: usize) -> FuncInput {
-        FuncInput::optional(name, config_data_type::<T>())
-            .overrides(overrides)
-            .description("Detailed config; overrides the quick knob while wired.")
-    }
-}
-
 impl<T: fmt::Debug> fmt::Display for ConfigValue<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)
@@ -75,38 +66,83 @@ pub(crate) const fn config_data_type<T: Introspect>() -> DataType {
 impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> {
     /// The node that builds a `T`: one labeled input per introspected field
     /// and a single `Config` output of [`config_data_type::<T>`]. Registers
-    /// `T`'s output type and its fields' enum types on `library`, so the editor
-    /// can render them. The caller adds the node, under its own category.
+    /// `T`'s output type on `library`, so the editor can render it. The caller
+    /// adds the node, under its own category.
     pub(crate) fn builder(library: &mut Library, spec: NodeSpec) -> FuncBuilder {
-        let fields = T::fields();
         library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
+        let fields = FieldInputs::<T>::new(library);
+        let inputs = fields.inputs();
+        let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
+            fields = fields.clone(),
+        } => {
+            outputs[0] = DynamicValue::from_custom(Self(fields.build(inputs)?));
+            Ok(())
+        });
+        spec.builder(lambda)
+            .pure()
+            .inputs(inputs)
+            .output(FuncOutput::new("Config", config_data_type::<T>()))
+    }
+}
+
+/// `T`'s introspected fields as a node's inputs, one labeled input per field
+/// that starts at the field's default, and the `T` those inputs hold.
+#[derive(Debug)]
+pub(crate) struct FieldInputs<T> {
+    kinds: Arc<[FieldKind]>,
+    config: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for FieldInputs<T> {
+    fn clone(&self) -> Self {
+        Self {
+            kinds: Arc::clone(&self.kinds),
+            config: PhantomData,
+        }
+    }
+}
+
+impl<T: Introspect> FieldInputs<T> {
+    /// `T`'s fields, with their enum types registered on `library`, so the
+    /// editor can render them.
+    pub(crate) fn new(library: &mut Library) -> Self {
+        let fields = T::fields();
         for field in &fields {
             register_field_enum(library, &field.kind);
         }
-        let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
-        let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
-            kinds = Arc::clone(&kinds),
-        } => {
-            let values: Vec<FieldValue> = kinds
-                .iter()
-                .zip(inputs)
-                .map(|(kind, input)| field_value(kind, input))
-                .collect();
-            let config = T::from_fields(&values).map_err(InvokeError::external)?;
-            outputs[0] = DynamicValue::from_custom(Self(config));
-            Ok(())
-        });
-        let mut func = spec.builder(lambda).pure();
-        for field in &fields {
-            let data_type = data_type(&field.kind);
-            let input = if field.required {
-                FuncInput::required(field.label, data_type)
-            } else {
-                FuncInput::optional(field.label, data_type)
-            };
-            func = func.input(input.default(const_value(&field.default)));
+        Self {
+            kinds: fields.iter().map(|field| field.kind).collect(),
+            config: PhantomData,
         }
-        func.output(FuncOutput::new("Config", config_data_type::<T>()))
+    }
+
+    /// The inputs, one per field in declaration order. Read once, as a func
+    /// is declared, so the fields are read again rather than kept.
+    pub(crate) fn inputs(&self) -> Vec<FuncInput> {
+        T::fields()
+            .iter()
+            .map(|field| {
+                let data_type = data_type(&field.kind);
+                let input = if field.required {
+                    FuncInput::required(field.label, data_type)
+                } else {
+                    FuncInput::optional(field.label, data_type)
+                };
+                input.default(const_value(&field.default))
+            })
+            .collect()
+    }
+
+    /// The `T` that `values`, one per field in declaration order, hold.
+    pub(crate) fn build(&self, values: &[DynamicValue]) -> Result<T, InvokeError> {
+        debug_assert_eq!(values.len(), self.kinds.len());
+        let values: Vec<FieldValue> = self
+            .kinds
+            .iter()
+            .zip(values)
+            .map(|(kind, value)| field_value(kind, value))
+            .collect();
+        T::from_fields(&values).map_err(InvokeError::external)
     }
 }
 
@@ -128,7 +164,7 @@ fn data_type(kind: &FieldKind) -> DataType {
 /// Register the enum type(s) a `kind` references on `library`. One enum can
 /// appear across several config builders; `register_type` takes the identical
 /// registration again and panics on conflicting metadata.
-pub(crate) fn register_field_enum(library: &mut Library, kind: &FieldKind) {
+fn register_field_enum(library: &mut Library, kind: &FieldKind) {
     match kind {
         FieldKind::Enum {
             type_id,

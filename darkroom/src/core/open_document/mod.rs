@@ -193,16 +193,17 @@ impl OpenDocument {
                 }
             };
             let frame_of = intent.gesture();
-            let step = match intent.commit(&mut self.document, library) {
-                Ok(Some(step)) => step,
-                Ok(None) => continue,
-                Err(malformed) => {
-                    self.batch.clear();
-                    return Err(malformed);
-                }
-            };
-            signals.fold(&step);
-            self.batch.push(step);
+            let committed = self.batch.len();
+            if let Err(malformed) = intent.commit(&mut self.document, library, &mut self.batch) {
+                self.batch.clear();
+                return Err(malformed);
+            }
+            if self.batch.len() == committed {
+                continue;
+            }
+            for step in &self.batch[committed..] {
+                signals.fold(step);
+            }
             gesture = frame_of;
         }
         let gesture = gesture.filter(|_| self.batch.len() == 1);

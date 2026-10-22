@@ -49,6 +49,7 @@ pub(crate) fn emit(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
     if duplicate {
         out.extend_graph(GraphIntent::duplicate(
             graph_ctx.document(),
+            graph_ctx.library(),
             IncomingWires::Drop,
         ));
     }

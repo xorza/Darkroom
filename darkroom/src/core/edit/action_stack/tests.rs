@@ -65,7 +65,10 @@ impl History {
     /// document and applied before the next is built, exactly as
     /// `drain_requests` does with a frame's worth.
     fn batch(&mut self, intents: impl IntoIterator<Item = GraphIntent>) {
-        let mut steps: Vec<UndoStep> = intents.into_iter().map(|i| self.apply(i)).collect();
+        let mut steps = Vec::new();
+        for intent in intents {
+            self.apply(intent, &mut steps);
+        }
         self.stack.push(&mut steps, None);
         assert!(steps.is_empty(), "the stack takes the whole batch");
     }
@@ -74,17 +77,19 @@ impl History {
     fn frame(&mut self, intent: GraphIntent) {
         let gesture = intent.gesture();
         assert!(gesture.is_some(), "a frame names its gesture");
-        let step = self.apply(intent);
-        self.stack.push(&mut vec![step], gesture);
+        let mut steps = Vec::new();
+        self.apply(intent, &mut steps);
+        assert_eq!(steps.len(), 1, "a frame commits one step");
+        self.stack.push(&mut steps, gesture);
     }
 
-    fn apply(&mut self, intent: GraphIntent) -> UndoStep {
-        let step = intent
-            .into_step(&self.doc, &self.library)
-            .unwrap()
-            .expect("a test commits every intent");
-        step.apply(&mut self.doc);
-        step
+    /// Commit `intent` onto `steps`, as `drain_requests` does.
+    fn apply(&mut self, intent: GraphIntent, steps: &mut Vec<UndoStep>) {
+        let committed = steps.len();
+        intent
+            .commit(&mut self.doc, &self.library, steps)
+            .expect("the intent is well formed");
+        assert!(steps.len() > committed, "a test commits every intent");
     }
 
     /// A drag gesture of `members`, latched where they sit now.
@@ -259,7 +264,15 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     use scenarium::{Binding, InputPort};
 
     let mut h = History::sample();
-    let (a, b) = (h.node(0), h.node(1));
+    let named = |h: &History, name: &str| {
+        h.doc
+            .graph
+            .iter()
+            .find(|node| node.name == name)
+            .expect("the sample holds the node")
+            .id
+    };
+    let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
     h.doc
         .graph

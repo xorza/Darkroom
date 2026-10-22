@@ -1,8 +1,6 @@
 use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
-use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, EventPort, FuncId, Graph, InputPort, Node, internals,
-};
+use scenarium::{CacheMode, DataType, EventPort, FuncId, Graph, Node, internals};
 
 use crate::core::document::internals::DocFixture;
 use crate::core::document::tab_ref::TabRef;
@@ -240,56 +238,4 @@ fn impure_flag_reads_from_func_behavior() {
         "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
-}
-
-/// An input reads as set aside exactly while the input declared to override
-/// it holds something: unbound or `Null` leaves the knob in force, a
-/// constant or a wire from an enabled node sets it aside and names the
-/// overrider, and a wire from a disabled node leaves it in force again.
-#[test]
-fn an_input_reads_as_set_aside_while_its_overrider_holds_something() {
-    let mut g = TestGraph::new();
-    let knob = g.add("knob", |n| {
-        n.input(DataType::Float)
-            .const_only()
-            .optional(DataType::Float)
-            .overrides(0)
-    });
-    let feed = g.add("feed", |n| n.output(DataType::Float));
-    let config = InputPort::new(knob, 1);
-    let mut fixture = GraphCtxFixture::over(g);
-    let set_aside = |fixture: &mut GraphCtxFixture, binding: Option<Binding>| {
-        fixture
-            .open
-            .document
-            .graph
-            .set_input_binding(config, binding);
-        let graph_ctx = fixture.graph_ctx();
-        let node = graph_ctx.node(knob).unwrap();
-        (
-            node.input(0).unwrap().overridden_by().map(str::to_owned),
-            node.input(1).unwrap().overridden_by().map(str::to_owned),
-        )
-    };
-
-    assert_eq!(set_aside(&mut fixture, None), (None, None));
-    assert_eq!(
-        set_aside(&mut fixture, Some(Binding::Const(ConstValue::Null))),
-        (None, None)
-    );
-    assert_eq!(
-        set_aside(&mut fixture, Some(Binding::Const(ConstValue::Float(2.0)))),
-        (Some("in1".to_owned()), None),
-        "a constant sets the knob aside, and the overrider itself is never set aside"
-    );
-    assert_eq!(
-        set_aside(&mut fixture, Some(Binding::wire(feed, 0))),
-        (Some("in1".to_owned()), None)
-    );
-    fixture.open.document.graph.find_mut(feed).unwrap().disabled = true;
-    assert_eq!(
-        set_aside(&mut fixture, Some(Binding::wire(feed, 0))),
-        (None, None),
-        "a disabled producer delivers nothing, so the knob is in force"
-    );
 }

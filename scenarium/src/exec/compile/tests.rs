@@ -98,28 +98,6 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
         ),
         "a bind past the producer's last port is out of range"
     );
-
-    // The override backstops: a set-aside input must be overridden from its
-    // own node, and must not be wired, since no read is planned for it.
-    let mut compiled = g.compile();
-    let input = bound_input(&compiled);
-    compiled.program.inputs[input].overridden_by = Some(input);
-    assert!(
-        matches!(
-            validate::validate(&compiled.program, &g.library),
-            Err(CompiledGraphValidationError::OverriddenBind { port_idx: 0, .. })
-        ),
-        "an overridden input that is wired is refused"
-    );
-    let outside = InputIdx(compiled.program.inputs.len() as u32);
-    compiled.program.inputs[input].overridden_by = Some(outside);
-    assert!(
-        matches!(
-            validate::validate(&compiled.program, &g.library),
-            Err(CompiledGraphValidationError::OverrideOutsideNode { port_idx: 0, .. })
-        ),
-        "an override from past the node's inputs is refused"
-    );
 }
 
 /// One sort settles the program's dense node order. Ids are uuids, so the order

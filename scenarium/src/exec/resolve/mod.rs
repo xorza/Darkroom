@@ -76,7 +76,7 @@ pub(crate) async fn sweep(
         // schedulable, but never enters `process_order`, so it delivers
         // nothing and is not promoted.
         for input in &program.inputs[e_node.inputs] {
-            if let Delivery::Wire(addr) = schedule.delivery(program, input) {
+            if let Delivery::Wire(addr) = schedule.delivery(input) {
                 let promoted = schedule.states[addr.node_idx].promote_to_run();
                 debug_assert!(promoted, "a delivering producer is runnable");
                 schedule.outputs.add_reader(program.output_idx(addr));

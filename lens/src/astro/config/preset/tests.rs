@@ -4,29 +4,28 @@ use lumos::{
     BgMode, ColorMode, Combine, ExtractBg, RegistrationConfig, Scnr, ScnrProtection, StackConfig,
     StarDetectionConfig, Stretch, StretchMethod,
 };
-use scenarium::{ConstValue, DataType, DynamicValue, TypeId};
+use scenarium::{ConstValue, DynamicValue};
 
 use crate::astro::config::preset::Preset;
 use crate::astro::config::processing::{StretchKnobs, StretchMethodChoice};
 use crate::astro::config::stacking::{CombineMethodChoice, DetectionPreset, RegistrationPreset};
 use crate::config_node::{ConfigValue, config_data_type};
 
-/// The stored strings and the labels a picker shows, pinned once per family:
-/// a stored string is what a saved graph holds, so a rename is a format change.
+/// The stored strings and the labels the input offers, pinned once per
+/// family: a stored string is what a saved graph holds, so a rename is a
+/// format change. The input is required and wireable, of the detailed
+/// config's wire type, and starts on the first pick.
 #[test]
-fn each_picker_offers_its_variants_under_their_labels() {
+fn each_input_offers_its_variants_under_their_labels() {
     fn offered<P: Preset>() -> Vec<(String, &'static str)> {
-        let picker = P::picker("Pick");
-        assert!(picker.const_only, "only a wired config overrides a pick");
+        let input = P::input("Pick");
+        assert!(input.required && !input.const_only);
+        assert_eq!(input.data_type, config_data_type::<P::Knobs>());
         assert_eq!(
-            picker.data_type,
-            DataType::Enum(TypeId::literal(P::TYPE_ID))
-        );
-        assert_eq!(
-            picker.default_value,
+            input.default_value,
             Some(ConstValue::Enum(P::VARIANTS[0].to_owned()))
         );
-        picker
+        input
             .value_variants
             .iter()
             .map(|variant| {
@@ -74,15 +73,6 @@ fn each_picker_offers_its_variants_under_their_labels() {
         names(offered::<CombineMethodChoice>()),
         ["sigma_clipped", "winsorized", "median", "mean"]
     );
-}
-
-/// The config input overrides the picker it names and carries the knobs.
-#[test]
-fn the_config_input_overrides_the_picker() {
-    let input = StretchMethodChoice::config_input("Config", 1);
-    assert!(!input.required);
-    assert_eq!(input.overrides, Some(1));
-    assert_eq!(input.data_type, config_data_type::<StretchKnobs>());
 }
 
 /// Each pick builds exactly the lumos preset it names.
@@ -170,15 +160,15 @@ fn each_pick_builds_the_preset_it_names() {
     }
 }
 
-/// A wired config is what runs; without one, the pick is.
+/// The input runs what it holds: a pick, or a wired config.
 #[test]
-fn a_wired_config_wins_over_the_pick() {
+fn the_input_runs_its_pick_or_its_wired_config() {
     let pick = DynamicValue::from(ConstValue::Enum("auto_stf".to_owned()));
-    let picked = StretchMethodChoice::resolve(&pick, &DynamicValue::Unbound);
+    let picked = StretchMethodChoice::resolve(&pick);
     assert!(matches!(picked.method, StretchMethod::AutoStf { .. }));
 
     let wired = DynamicValue::from_custom(ConfigValue(StretchKnobs::default()));
-    let configured = StretchMethodChoice::resolve(&DynamicValue::Unbound, &wired);
+    let configured = StretchMethodChoice::resolve(&wired);
     assert!(matches!(configured.method, StretchMethod::AutoAsinh { .. }));
     assert_eq!(configured.color, ColorMode::ColorPreserving);
 }
