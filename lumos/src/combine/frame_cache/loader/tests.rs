@@ -12,7 +12,7 @@ use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
-use crate::frame_store::decode_cache::frame_spill::{Carries, FrameSpill};
+use crate::frame_store::decode_cache::frame_spill::FrameSpill;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -153,7 +153,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
         poke(&plane, 2, value);
         spill.reseal();
         let committed = spill.committed().unwrap();
-        assert_eq!(committed.decoded.carries, Carries::Channels);
+        assert_eq!(committed.decoded.flags, None);
         let mut sentinel = committed.admitted;
         sentinel.stats.medians[0] = 99.0;
         spill

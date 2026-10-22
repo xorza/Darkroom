@@ -755,7 +755,7 @@ pub(crate) mod internals {
                 .into_iter()
                 .map(|image| {
                     let admitted = Admitted::measure(&image);
-                    let quality = FrameQuality::for_unwarped(&image);
+                    let quality = FrameQuality::for_unwarped(image.flag_counts());
                     StoredFrame::from_memory(image, quality, admitted)
                 })
                 .collect();

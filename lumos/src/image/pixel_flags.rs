@@ -134,7 +134,7 @@ impl PixelFlags {
 
     /// Whether any pixel holds a flag other than those in `except`.
     pub(crate) const fn contains_other_than(&self, except: QualityFlags) -> bool {
-        self.contains(QualityFlags::from_byte(!except.byte()))
+        self.counts.any_other_than(except)
     }
 
     /// Flags from a plane of their bytes, as [`Self::bytes`] holds them; `None` when no pixel holds
@@ -183,6 +183,11 @@ impl PixelFlags {
     /// If `flag` is not a single flag.
     pub const fn count(&self, flag: QualityFlags) -> u64 {
         self.counts.count(flag)
+    }
+
+    /// How many pixels hold each flag.
+    pub(crate) const fn counts(&self) -> &FlagCounts {
+        &self.counts
     }
 
     /// Whether any pixel holds a flag of `flags`.

@@ -22,7 +22,7 @@ use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
-use crate::frame_store::stored_frame::SpillFrame;
+use crate::frame_store::stored_frame::{FrameWrite, SetKind};
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -41,6 +41,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::quality_map::QualityMap;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
@@ -229,13 +230,14 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 let stored = frames
                     .into_iter()
                     .map(|f| {
-                        SpillFrame {
+                        FrameWrite {
                             image: &f.image,
-                            quality: &f.quality,
-                            admitted: f.admitted,
+                            quality: f.quality.as_ref(),
+                            set: SetKind::Unwarped,
                         }
-                        .spill(&run_scratch)
+                        .write(&run_scratch)
                         .unwrap()
+                        .into_frame(f.admitted)
                     })
                     .collect();
                 config
@@ -2289,7 +2291,7 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
     let frames = vec![
         stack_frame(
             reference.clone(),
-            FrameQuality::for_reference(reference.flags()),
+            FrameQuality::for_reference(reference.flag_counts()),
         ),
         StackFrame::registered(
             &reference,

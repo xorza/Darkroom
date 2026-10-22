@@ -39,12 +39,12 @@ fn reuse(spill: &FrameSpill<'_>) -> Option<KeptFrame> {
 
 /// The frame `spill` commits, as the image it was decoded to.
 fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
-    KeptFrame::reuse_image(spill, spill.committed()?)
+    KeptFrame::reuse_image(spill, spill.committed()?).map(|kept| kept.image)
 }
 
-/// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
-/// back with none. Its files have no name while it lives where a scratch file keeps none, and none
-/// outlive it anywhere.
+/// A parked image reads back with its pixels, metadata and null mask, its flags counted as they
+/// were written; one with no nulls reads back with none. Its files have no name while it lives
+/// where a scratch file keeps none, and none outlive it anywhere.
 #[test]
 fn a_parked_image_reads_back_and_leaves_no_file() {
     let dir = TempDir::new("frame_store_image");
@@ -53,7 +53,7 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
     let mut image = LinearImage::from_interleaved(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.header.exposure_time = Some(30.0);
 
-    let stored = StoredImage::spill(&scratch, &image).unwrap();
+    let stored = StoredImage::write(&image, image.flags(), &scratch).unwrap();
     if !ScratchFile::KEEPS_NAME {
         assert_eq!(dir.entry_count(), 0, "a parked plane kept its name");
     }
@@ -62,23 +62,28 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
         [&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6][..]]
     );
     assert_eq!(stored.metadata.header.exposure_time, Some(30.0));
-    assert!(stored.flags().is_none());
+    assert!(stored.flags.is_none());
 
     // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
     image.set_flags(PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
     ));
-    let masked = StoredImage::spill(&scratch, &image).unwrap();
-    let nulls = masked.flags().expect("the mask is spilled with the planes");
-    assert_eq!(nulls.count(QualityFlags::NO_DATA), 2);
+    let masked = StoredImage::write(&image, image.flags(), &scratch).unwrap();
+    let counts = masked
+        .flag_counts()
+        .expect("the mask is spilled with the planes");
+    assert_eq!(counts.count(QualityFlags::NO_DATA), 2);
+    let read: LinearImage = masked.into_image(None);
+    let nulls = read.flags().unwrap();
+    assert_eq!(nulls.counts(), image.flags().unwrap().counts());
     assert_eq!(
         (0..6)
             .map(|idx| nulls.mask_of(QualityFlags::NO_DATA).get(idx))
             .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
-    drop((stored, masked));
+    drop((stored, read));
     assert_eq!(dir.entry_count(), 0, "a parked plane outlived its frame");
 }
 
@@ -156,7 +161,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 
     // A frame whose source declared nothing undefined carries no planes at all — the case that
     // keeps this free for every RAW frame and almost every camera FITS.
-    assert!(FrameQuality::for_unwarped(&image).is_none());
+    assert!(FrameQuality::<Buffer2<f32>>::for_unwarped(image.flag_counts()).is_none());
 
     // Declaring pixel 2 null makes the frame a mask of its nulls, which the stored frame keeps its
     // flags for: the combine gathers every pixel but 2, each at unit confidence, as nothing was
@@ -165,7 +170,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
         dimensions.size(),
         &[&[1.0, 2.0, f32::NAN, 4.0]],
     ));
-    let quality = FrameQuality::for_unwarped(&image);
+    let quality = FrameQuality::<Buffer2<f32>>::for_unwarped(image.flag_counts());
     assert_eq!(quality.mask(), Some(QualityFlags::NO_DATA));
     let frame = StoredFrame::from_memory(image.clone(), quality, Admitted::measure(&image));
     let gate = FrameGate::of(&frame, 0, 0..4);

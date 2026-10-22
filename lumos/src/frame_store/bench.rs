@@ -14,7 +14,7 @@ use crate::combine::frame_read::frame_chunk::ChunkCopy;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
+use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
 use crate::image::linear_image::LinearImage;
 
 /// The rows of a chunk: what a 30-frame stack of warped mono lights gets on a 1 GiB combine
@@ -100,12 +100,13 @@ impl Warped {
     }
 
     fn spill(&self, stats: Admitted) -> StoredFrame {
-        SpillFrame {
+        FrameWrite {
             image: &self.image,
-            quality: &self.quality,
-            admitted: stats,
+            quality: self.quality.as_ref(),
+            set: SetKind::Unwarped,
         }
-        .spill(&self.scratch)
+        .write(&self.scratch)
         .unwrap()
+        .into_frame(stats)
     }
 }

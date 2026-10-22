@@ -8,6 +8,7 @@
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
+use arrayvec::ArrayVec;
 use bytemuck::Pod;
 use common::{SerdeFormat, fs};
 use serde::de::DeserializeOwned;
@@ -18,10 +19,12 @@ use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
-use crate::frame_store::decode_cache::kept_frame::KeptPlanes;
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::stored_gain::StoredGain;
+use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::channel_layout::ChannelLayout;
+use crate::image::flag_counts::FlagCounts;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::math::size2us::Size2us;
@@ -30,7 +33,7 @@ use crate::math::size2us::Size2us;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every commit carries.
-const SIDECAR_PIN: &str = "52be17bb48c4c692";
+const SIDECAR_PIN: &str = "138b840bca3cefa1";
 
 /// The tag every commit carries.
 const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN]);
@@ -121,7 +124,7 @@ impl<'a> FrameSpill<'a> {
                 width: decoded.dimensions.width(),
                 height: decoded.dimensions.height(),
                 channels: decoded.dimensions.channels(),
-                carries: decoded.carries,
+                flags: decoded.flags,
                 gain_channels: decoded.gain_channels,
                 digests,
                 metadata: decoded.metadata.clone(),
@@ -157,7 +160,7 @@ impl<'a> FrameSpill<'a> {
             },
             decoded: Decoded {
                 dimensions,
-                carries: commit.carries,
+                flags: commit.flags,
                 gain_channels: commit.gain_channels,
                 metadata: commit.metadata,
             },
@@ -167,15 +170,16 @@ impl<'a> FrameSpill<'a> {
 }
 
 /// The record that commits a kept frame: the key its planes were decoded under, the source they
-/// are of, the frame's shape, which planes it wrote beside its channels, what those planes held,
-/// the decode's metadata, which a later run takes the frame back with, and what its admission found
-/// of it: its statistics and its facts.
+/// are of, the frame's shape, how many pixels hold each flag of the flags it wrote, what its
+/// planes held, the decode's metadata, which a later run takes the frame back with, and what its
+/// admission found of it: its statistics and its facts.
 ///
-/// The carried planes are what make a frame whose flags are gone a cache to rebuild rather than a
+/// The flag counts are what make a frame whose flags are gone a cache to rebuild rather than a
 /// frame with no nulls: reusing its channels without them would put the fill under every null, or
-/// a saturated value, into the stack as data. The digests are what make a plane changed under its
-/// name, or one a power loss left zeroed behind its commit, a cache to rebuild too. The metadata
-/// holds no flat gain: its nodes are planes of their own, mapped on reuse.
+/// a saturated value, into the stack as data. They also give a reuse the frame's quality, by the
+/// rule its keep wrote it by, without a read of the plane. The digests are what make a plane
+/// changed under its name, or one a power loss left zeroed behind its commit, a cache to rebuild
+/// too. The metadata holds no flat gain: its nodes are planes of their own, mapped on reuse.
 #[derive(Debug, Serialize, Deserialize)]
 struct Commit {
     key: CacheKey,
@@ -184,7 +188,7 @@ struct Commit {
     width: usize,
     height: usize,
     channels: usize,
-    carries: Carries,
+    flags: Option<FlagCounts>,
     gain_channels: usize,
     digests: PlaneDigests,
     metadata: ImageMetadata,
@@ -192,20 +196,20 @@ struct Commit {
     facts: FrameFacts,
 }
 
-/// What a decode left beside its planes, which a commit records: the frame's shape, the planes it
-/// wrote beside its channels, the channels of its flat gain, none for a frame no flat divided, and
-/// its metadata with no flat gain.
+/// What a decode left beside its planes, which a commit records: the frame's shape, the counts of
+/// the flags it wrote, none for a frame with no flag set, the channels of its flat gain, none for a
+/// frame no flat divided, and its metadata with no flat gain.
 #[derive(Debug, Clone)]
 pub(crate) struct Decoded {
     pub(crate) dimensions: ImageDimensions,
-    pub(crate) carries: Carries,
+    pub(crate) flags: Option<FlagCounts>,
     pub(crate) gain_channels: usize,
     pub(crate) metadata: ImageMetadata,
 }
 
 /// The blake3 digest of each plane a reuse reads: every channel, the flags plane when the frame
 /// carries one, each slot's samples, and each channel's gain nodes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PlaneDigests {
     pub(crate) channels: Vec<[u8; 32]>,
     pub(crate) flags: Option<[u8; 32]>,
@@ -214,36 +218,24 @@ pub(crate) struct PlaneDigests {
 }
 
 impl PlaneDigests {
-    /// The digests of `planes` as they hold now.
-    pub(crate) fn of(planes: &KeptPlanes) -> Self {
-        let digest = |plane: &StoredPlane| -> [u8; 32] { blake3::hash(plane.bytes()).into() };
+    /// The digests of `image`'s planes and of `samples`, as they hold now.
+    pub(crate) fn of(image: &StoredImage, samples: Option<&ArrayVec<StoredPlane, 3>>) -> Self {
+        let digest = |bytes: &[u8]| -> [u8; 32] { blake3::hash(bytes).into() };
+        let plane = |plane: &StoredPlane| digest(plane.bytes());
         Self {
-            channels: planes.channels.iter().map(digest).collect(),
-            flags: planes
+            channels: image.channels.iter().map(plane).collect(),
+            flags: image
                 .flags
                 .as_ref()
-                .map(|plane| blake3::hash(plane.bytes()).into()),
-            samples: planes.samples.iter().flatten().map(digest).collect(),
-            gain: planes.gain.iter().map(digest).collect(),
+                .map(|flags| digest(flags.plane.bytes())),
+            samples: samples.into_iter().flatten().map(plane).collect(),
+            gain: image
+                .flat_gain
+                .iter()
+                .flat_map(StoredGain::planes)
+                .map(plane)
+                .collect(),
         }
-    }
-}
-
-/// What a kept frame wrote beside its channels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum Carries {
-    /// Nothing: a frame with no flag set.
-    Channels,
-    /// Its flags plane, holding no `NO_DATA`.
-    Flags,
-    /// Its flags plane, whose `NO_DATA` flags are the frame's quality mask.
-    NullMask,
-}
-
-impl Carries {
-    /// Whether a flags plane is among the files.
-    pub(crate) const fn flags(self) -> bool {
-        matches!(self, Self::Flags | Self::NullMask)
     }
 }
 

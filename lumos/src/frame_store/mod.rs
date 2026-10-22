@@ -5,6 +5,8 @@ pub(crate) mod decode_cache;
 pub(crate) mod disk_root;
 pub(crate) mod error;
 pub(crate) mod file_set;
+pub(crate) mod frame_buffers;
+pub(crate) mod plane_sink;
 pub(crate) mod run_scratch;
 pub(crate) mod run_storage;
 pub(crate) mod storage_tier;

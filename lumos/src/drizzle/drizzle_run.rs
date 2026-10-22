@@ -37,7 +37,9 @@ use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::file_set::FileSet;
+use crate::frame_store::frame_buffers::NewFrame;
 use crate::frame_store::run_storage::RunStorage;
+use crate::frame_store::stored_frame::SetKind;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
@@ -72,7 +74,7 @@ fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
         ..
     } = frame;
     Ok(DrizzleFrame {
-        source: files.decode(idx, ctx)?,
+        source: files.decode(idx, ctx)?.image,
         warp,
         pixel_weight_map,
     })
@@ -238,9 +240,14 @@ impl DrizzleRun<'_> {
             image.metadata = frame_metadata;
             image.set_flags(flags);
             image.set_flat_gain(flat_gain);
+            let buffers = NewFrame {
+                image,
+                quality: FrameQuality::Drizzled { drops },
+            };
             stored.push(
-                tier.store(image, FrameQuality::Drizzled { drops }, source_stats)
-                    .map_err(DrizzleError::from)?,
+                tier.store(buffers, source_stats, SetKind::Registered)
+                    .map_err(DrizzleError::from)?
+                    .frame,
             );
             intake.complete_one();
         }

@@ -99,44 +99,13 @@ check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
 Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
-set, 4, the warp working set, and 5, each input read once, landed. Dependencies: batch 7 needs the
-`Stored` return of batch 6. The other batches are independent.
-
-### 6. One stored-frame writer; kept frames parked in place
-
-Files: `frame_store/{stored_frame.rs, stored_image.rs, storage_tier.rs, stored_gain.rs,
-file_set.rs}`, `frame_store/decode_cache/kept_frame.rs`, `pipeline/{frame_parking.rs,
-light_files.rs, align_stack_run.rs, pipeline_frame/}`, `image/flag_counts.rs`.
-
-- [ ] `frame_store/stored_frame.rs:41-65,101-133`, `decode_cache/kept_frame.rs:78-128`,
-  `stored_image.rs:98-122`, `pipeline/frame_parking.rs:70-101` — four writers decide which
-  planes a frame keeps, and `FrameParking::store` repeats `StorageTier::store`. They already
-  disagree: a reference parked on disk gets `samples: None` (`stored_image.rs:115`), but the
-  same reference stored through `tier.store` (`frame_parking.rs:113-117`) writes 3 sample
-  planes that no normalization of a registered set reads. Target: one `StoredFrame` writer over
-  a plane sink (the run scratch, or the decode cache by name, which returns the digest of the
-  write). `StorageTier::store` returns `Stored { frame, returned }` as the target design says.
-  `KeptFrame::keep` becomes that writer with `FrameQuality::for_unwarped` and the commit, and
-  `FrameParking::store` goes.
-- [ ] `frame_store/stored_image.rs:35` with `decode_cache/kept_frame.rs:28,64,68-71,207` — the
-  gain has two representations: `Option<Arc<FlatGain>>` on `StoredImage`, and its own
-  `Option<StoredGain>` on `KeptFrame`, which `reuse_image` copies out of the maps
-  (`stored_gain.rs:81-97`). Target: `StoredImage.flat_gain: Option<StoredGain>`, with no
-  `KeptFrame` field.
-- [ ] `frame_store/file_set.rs` `FileSet::decode` with `pipeline/frame_parking.rs:52` — a linear light
-  with `keep_cache` on the spill tier is read from the cache into RAM for detection, and then
-  `StoredImage::spill` writes the same bytes again. That is 312 MB written for each RGB light.
-  Target: `prepare` also returns the kept `StoredImage`, and parking takes it as
-  `PipelineFrame::Spilled`. A mosaic light changes in its preparation and still spills.
-- [ ] `frame_store/stored_image.rs:104` — `into_reference_frame` copies the whole mapped flag
-  plane (`:85-93`, 24 MB) only to test `contains` and `keeps`. Target: keep the `FlagCounts`
-  with the flag plane at the write, and read them here and in `into_image`.
+set, 4, the warp working set, 5, each input read once, and 6, one stored-frame writer, landed, and
+with batch 6 the warp's slot from batch 7. The other batches are independent.
 
 ### 7. Reuse across frames and jobs
 
-Needs batch 6. Files: `drizzle/{accumulator/mod.rs, drizzle_run.rs, input_map.rs}`,
-`concurrency/mod.rs`, `scratch_pool/mod.rs`, `pipeline/{frame_registrar.rs, frame_parking.rs,
-align_stack_run.rs}`, `registration/resample/mod.rs`, `noise/mrs_noise.rs`,
+Files: `drizzle/{accumulator/mod.rs, drizzle_run.rs, input_map.rs}`, `concurrency/mod.rs`,
+`ingest/frame_intake.rs`, `noise/mrs_noise.rs`,
 `combine/normalization/{norm_fit.rs, photometric_gain.rs, slot_planes.rs}`,
 `frame_store/stratified_samples.rs`, `combine/frame_cache/{loader/mod.rs, sample/mod.rs}`,
 `combine/rejection/{scratch_buffers.rs, sorted_samples.rs}`, `image/{pixel_flags.rs,
@@ -145,17 +114,12 @@ cfa/cfa_image.rs}`, `io/{raw/unpacked_raw.rs, fits/decode/mod.rs}`, `pipeline/mo
 - [ ] `drizzle/accumulator/mod.rs:121-145` with `drizzle_run.rs:228-238` — `drizzle` builds a
   new `OutputSums` for each frame, and on the spill tier the store writes it and frees it. That
   is C + 2W output planes for each frame (1.9 GB at 2× of 24 MP RGB) faulted in again each time.
-  The warp recycles its output for this reason (`frame_parking.rs:66-69`). Target: the
-  `Drizzler` keeps the `OutputSums` that the store returns and zeroes it in parallel before the
-  next frame. The spilled plan already charges one frame in flight.
-- [ ] `concurrency/mod.rs:145-148`, `pipeline/frame_registrar.rs:27,90,136`,
-  `scratch_pool/mod.rs:182-195`, `pipeline/align_stack_run.rs:250` — the bounded map's doc says
-  the warp keeps its output in the slot. The code passes `vec![(); warp_width]` and keeps the
-  output in a `ScratchPool<WarpResult>`, whose only production `into_inner` caller is
-  `frame_parking.rs:81`. Target: the slot holds `Option<WarpResult>` (with the detector on the
-  one-pass route), and the store's `returned` refills it. Remove the pool,
-  `impl Scratch for WarpResult` and the unsafe `into_inner`. The unit-slot idiom here and in
-  `loader/mod.rs:172` becomes a width argument.
+  The warp recycles its output for this reason (`FrameRegistrar::park`). Target: the `Drizzler`
+  keeps the `OutputSums` that the store returns (`FrameBuffers`) and zeroes it in parallel before
+  the next frame. The spilled plan already charges one frame in flight.
+- [ ] `combine/frame_cache/loader/mod.rs:155` — the decode map's workers carry nothing, and it
+  passes `vec![(); width]` as their slots. Target: a width argument for a map whose workers
+  carry no state.
 - [ ] `noise/mrs_noise.rs:288-335` — `tile_coefficients` allocates `pixels`, `smooth`, `next`
   and two f64 vectors for each tile (about 2.8 MB each, 80–320 allocations for each light).
   `heap_bytes` (`:183-197`) already prices one set for each worker. Target: one tile scratch
@@ -241,12 +205,11 @@ Small items, each local. Files as named.
   (`NO_DATA && !REPAIRED`) for `nulls`, and one mask that `calibrate` builds and shares.
 - [ ] `calibration/calibration_masters/mod.rs:255-282` and `calibration/subtraction/mod.rs:143-160`
   — two builders of the `NO_DATA`-where-unmeasured plane. Target: one builder.
-- [ ] `frame_store/stored_image.rs:52`, `decode_cache/kept_frame.rs:113`,
-  `frame_spill/mod.rs:127-129`, `combine/frame_cache/loader/mod.rs:309,350,362`,
-  `drizzle/drizzle_run.rs:208` — `ImageMetadata` is cloned where the owner can move it or the
-  commit can serialize a borrow. In the drizzle it is built for each frame and kept only for
+- [ ] `StoredImage::write`, `KeptFrame::reuse_image`, `FrameSpill::commit`, the loader's
+  `FrameStore::frame`, `kept_frame` and `reused`, and `drizzle/drizzle_run.rs:208` —
+  `ImageMetadata` is cloned where the owner can move it or the commit can serialize a borrow. In the drizzle it is built for each frame and kept only for
   frame 0.
-- [ ] `pipeline/align_stack_run.rs:344-357` — the one-pass route maps `others: Vec<usize>`
+- [ ] `AlignStackRun::stack_in_one_pass` — the one-pass route maps `others: Vec<usize>`
   through `map_owned`, with a `Mutex` cell for each index, then inserts the reference. Target:
   `map` over an index range.
 - [ ] `math/wavelet/mod.rs:33` — `atrous_smooth` is a third separable-filter design beside the

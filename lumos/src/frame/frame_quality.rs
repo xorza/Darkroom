@@ -8,12 +8,10 @@
 //! engine serve every case.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
 
 use crate::frame::frame_plane::FramePlane;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
-use crate::image::stackable_image::StackableImage;
 
 /// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
 /// interpolation that produced it was.
@@ -76,8 +74,8 @@ impl<P> DropPlanes<P> {
     }
 }
 
-impl FrameQuality<Buffer2<f32>> {
-    /// The quality a frame that was never warped carries.
+impl<P> FrameQuality<P> {
+    /// The quality a frame that was never warped carries, of its `flags`' counts.
     ///
     /// [`None`](Self::None) unless its source declared pixels with no measurement, in which case
     /// a [`Mask`](Self::Mask) of its nulls: zero coverage exactly where a pixel is null, one
@@ -87,26 +85,25 @@ impl FrameQuality<Buffer2<f32>> {
     /// The `None` case is what keeps this free for the frames that dominate: a sensor reports a
     /// value for every photosite, so no RAW frame and almost no camera FITS allocates anything
     /// here.
-    pub(crate) fn for_unwarped(image: &impl StackableImage) -> Self {
-        Self::excluding(image.flags(), QualityFlags::NO_DATA)
+    pub(crate) const fn for_unwarped(flags: Option<&FlagCounts>) -> Self {
+        Self::excluding(flags, QualityFlags::NO_DATA)
     }
 
-    /// The quality the reference of a registered stack carries, from its flags: zero coverage
-    /// wherever a flag of [`QualityFlags::RESAMPLE_EXCLUDED`] stands, as the warp of every other
-    /// frame leaves those pixels out. The reference is the frame a warp would sample at whole
+    /// The quality the reference of a registered stack carries, of its `flags`' counts: zero
+    /// coverage wherever a flag of [`QualityFlags::RESAMPLE_EXCLUDED`] stands, as the warp of every
+    /// other frame leaves those pixels out. The reference is the frame a warp would sample at whole
     /// pixels, where every other tap weighs exactly zero, so its excluded pixels are left out
     /// exactly, and its carried flags stand where they are.
-    pub(crate) fn for_reference(flags: Option<&PixelFlags>) -> Self {
+    pub(crate) const fn for_reference(flags: Option<&FlagCounts>) -> Self {
         Self::excluding(flags, QualityFlags::RESAMPLE_EXCLUDED)
     }
 
     /// The [`Mask`](Self::Mask) of `excluded` when a pixel of `flags` holds one, and
     /// [`None`](Self::None) when none does.
-    fn excluding(flags: Option<&PixelFlags>, excluded: QualityFlags) -> Self {
-        if flags.is_some_and(|flags| flags.contains(excluded)) {
-            Self::Mask { excluded }
-        } else {
-            Self::None
+    const fn excluding(flags: Option<&FlagCounts>, excluded: QualityFlags) -> Self {
+        match flags {
+            Some(flags) if flags.any_of(excluded) => Self::Mask { excluded },
+            Some(_) | None => Self::None,
         }
     }
 }
@@ -149,10 +146,37 @@ impl<P> FrameQuality<P> {
         }
     }
 
-    /// Whether a stored frame of this quality keeps `flags`: a mask reads them, and otherwise they
-    /// are kept when they hold any flag but `NO_DATA`, which the quality already holds.
-    pub(crate) const fn keeps(&self, flags: &PixelFlags) -> bool {
-        self.mask().is_some() || flags.contains_other_than(QualityFlags::NO_DATA)
+    /// Whether a stored frame of this quality keeps flags of `counts`: a mask reads them, and
+    /// otherwise they are kept when they hold any flag but `NO_DATA`, which the quality already
+    /// holds.
+    pub(crate) const fn keeps(&self, counts: &FlagCounts) -> bool {
+        self.mask().is_some() || counts.any_other_than(QualityFlags::NO_DATA)
+    }
+
+    /// Each plane borrowed.
+    pub(crate) fn as_ref(&self) -> FrameQuality<&P> {
+        match self {
+            Self::None => FrameQuality::None,
+            Self::Mask { excluded } => FrameQuality::Mask {
+                excluded: *excluded,
+            },
+            Self::Drizzled { drops } => FrameQuality::Drizzled {
+                drops: drops
+                    .iter()
+                    .map(|drops| DropPlanes {
+                        weight: &drops.weight,
+                        confidence: &drops.confidence,
+                    })
+                    .collect(),
+            },
+            Self::Planes {
+                coverage,
+                confidence,
+            } => FrameQuality::Planes {
+                coverage,
+                confidence,
+            },
+        }
     }
 
     pub(crate) fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> FrameQuality<Q> {
@@ -218,10 +242,6 @@ impl<P> FrameQuality<P> {
 
     /// Convert each plane by reference, tagging it with the [`FramePlane`] it is. Which plane is
     /// which is stated here alone, so a writer and a later reader cannot disagree.
-    ///
-    /// Borrows rather than consumes because its one caller writes the planes to disk and maps them
-    /// back — it never needed to own them, and leaving them with the caller is what lets a warped
-    /// frame's buffers be reused for the next frame instead of being freed and faulted in again.
     pub(crate) fn try_map<'s, Q, E>(
         &'s self,
         mut convert: impl FnMut(FramePlane, &'s P) -> Result<Q, E>,

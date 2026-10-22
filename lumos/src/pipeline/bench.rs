@@ -28,7 +28,6 @@ use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
-use crate::scratch_pool::Scratch;
 
 /// The stage benches, then the entry point end to end.
 pub(crate) fn integration(c: &mut Criterion) {
@@ -96,8 +95,7 @@ fn park(c: &mut Criterion) {
             let dir = TempDir::new("lumos-bench-park");
             let scratch = RunScratch::create_evictable(dir.path()).unwrap();
             let light = field.render(FRAME).image;
-            let parked = StoredImage::spill(&scratch, &light).unwrap();
-            let flags = parked.flags();
+            let parked = StoredImage::write(&light, light.flags(), &scratch).unwrap();
             let source = SourceImage {
                 dimensions: parked.dimensions,
                 metadata: &light.metadata,
@@ -108,11 +106,11 @@ fn park(c: &mut Criterion) {
                         width: FRAME.width,
                     })
                     .collect(),
-                flags: flags.as_ref(),
+                flags: light.flags(),
                 flat_gain: None,
             };
             let warp = Pair::typical().similarity_warp();
-            let mut buffers = WarpResult::build(parked.dimensions);
+            let mut buffers = WarpResult::new(parked.dimensions);
             let scratch = WarpScratch::default();
             let mut warp_parked = || {
                 let job = Warp {

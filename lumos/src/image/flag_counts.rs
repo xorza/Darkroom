@@ -3,12 +3,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::image::quality_flags::QualityFlags;
 
 /// How many pixels or samples hold each of the [`QualityFlags`]. One that holds two flags counts
 /// under both.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlagCounts([u64; 8]);
 
 impl FlagCounts {
@@ -46,6 +47,11 @@ impl FlagCounts {
     /// Whether any holds a flag at all.
     pub(crate) const fn any(&self) -> bool {
         self.any_of(QualityFlags::from_byte(u8::MAX))
+    }
+
+    /// Whether any holds a flag other than those in `except`.
+    pub(crate) const fn any_other_than(&self, except: QualityFlags) -> bool {
+        self.any_of(QualityFlags::from_byte(!except.byte()))
     }
 
     /// Count one more under each flag `flags` holds.

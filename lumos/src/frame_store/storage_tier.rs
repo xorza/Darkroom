@@ -2,14 +2,11 @@
 
 use std::path::Path;
 
-use imaginarium::Buffer2;
-
 use crate::frame::admitted::Admitted;
-use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
-use crate::image::stackable_image::StackableImage;
+use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
 
@@ -37,6 +34,14 @@ pub(crate) struct CombineBudget {
     pub(crate) beside_bytes: usize,
     pub(crate) prior_overcommit: u64,
     pub(crate) planned_peak_bytes: Option<u64>,
+}
+
+/// A frame a tier stored, and the buffers it came in when the tier wrote them rather than moved
+/// them in, for their producer to fill again.
+#[derive(Debug)]
+pub(crate) struct Stored<B> {
+    pub(crate) frame: StoredFrame,
+    pub(crate) returned: Option<B>,
 }
 
 impl CombineBudget {
@@ -125,22 +130,35 @@ impl StorageTier {
         }
     }
 
-    /// Keep one frame: moved in whole on the resident tier, written to the scratch and mapped
-    /// back on the spilled one.
-    pub(crate) fn store(
+    /// Keep one frame of a set of `set`, as its admission found it: moved in whole on the
+    /// resident tier, written to the scratch and mapped back on the spilled one, which hands its
+    /// buffers back.
+    pub(crate) fn store<B: FrameBuffers>(
         &self,
-        image: impl StackableImage,
-        quality: FrameQuality<Buffer2<f32>>,
+        buffers: B,
         admitted: Admitted,
-    ) -> Result<StoredFrame, FrameStoreError> {
+        set: SetKind,
+    ) -> Result<Stored<B>, FrameStoreError> {
         match self {
-            Self::Resident { .. } => Ok(StoredFrame::from_memory(image, quality, admitted)),
-            Self::Spilled { scratch, .. } => SpillFrame {
-                image: &image,
-                quality: &quality,
-                admitted,
+            Self::Resident { .. } => {
+                let NewFrame { image, quality } = buffers.into_new();
+                Ok(Stored {
+                    frame: StoredFrame::from_memory(image, quality, admitted),
+                    returned: None,
+                })
             }
-            .spill(scratch),
+            Self::Spilled { scratch, .. } => {
+                let written = FrameWrite {
+                    image: buffers.image(),
+                    quality: buffers.quality(),
+                    set,
+                }
+                .write(scratch)?;
+                Ok(Stored {
+                    frame: written.into_frame(admitted),
+                    returned: Some(buffers),
+                })
+            }
         }
     }
 }

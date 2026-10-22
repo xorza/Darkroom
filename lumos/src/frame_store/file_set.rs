@@ -7,9 +7,10 @@ use crate::frame::admitted::Admitted;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
 use crate::frame_store::decode_cache::frame_spill::Committed;
-use crate::frame_store::decode_cache::kept_frame::KeptFrame;
+use crate::frame_store::decode_cache::kept_frame::{KeptFrame, KeptImage};
 use crate::frame_store::error::{FrameStoreError, LoadError};
 use crate::frame_store::run_storage::RunStorage;
+use crate::frame_store::stored_image::StoredImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::stackable_image::StackableImage;
 use crate::io::decoder::{Decoder, Peek};
@@ -82,6 +83,14 @@ pub(crate) struct SetPeek {
     pub(crate) idx: usize,
     pub(crate) info: FrameInfo,
     pub(crate) held: usize,
+}
+
+/// A frame of a set in RAM, and its planes where the decode cache keeps them, for a run that keeps
+/// one.
+#[derive(Debug)]
+pub(crate) struct Loaded<I> {
+    pub(crate) image: I,
+    pub(crate) kept: Option<StoredImage>,
 }
 
 /// A frame of a set taken through a decode cache: kept by a run before, or decoded, with its
@@ -174,27 +183,37 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         Ok(SetPeek { idx, info, held })
     }
 
-    /// Frame `idx` in RAM, under `ctx`: read back from the decode cache when it holds the frame
-    /// for the source as it is now, decoded and kept there otherwise; decoded without a cache.
+    /// Frame `idx` in RAM, under `ctx`, with its planes where the decode cache keeps them: read
+    /// back from the cache when it holds the frame for the source as it is now, decoded and kept
+    /// there otherwise; decoded, and kept nowhere, without a cache.
     ///
     /// # Errors
     ///
     /// The decode, or the cache.
-    pub(crate) fn decode(&self, idx: usize, ctx: &LoadCtx) -> Result<D::Image, LoadError> {
+    pub(crate) fn decode(&self, idx: usize, ctx: &LoadCtx) -> Result<Loaded<D::Image>, LoadError> {
         let path = self.path(idx);
         let early = self.take_early(idx);
         let Some(cache) = self.storage.kept() else {
-            return load(early, path, ctx);
+            return Ok(Loaded {
+                image: load(early, path, ctx)?,
+                kept: None,
+            });
         };
         let Resolved { source, committed } = self.resolve(cache, idx, early.is_some(), ctx)?;
-        if let Some(image) =
+        if let Some(KeptImage { image, stored }) =
             committed.and_then(|committed| KeptFrame::reuse_image(&cache.spill(&source), committed))
         {
-            return Ok(image);
+            return Ok(Loaded {
+                image,
+                kept: Some(stored),
+            });
         }
         let image = load(early, path, ctx)?;
-        cache.keep(&source, &image, Admitted::measure(&image))?;
-        Ok(image)
+        let kept = cache.keep(&source, &image, Admitted::measure(&image))?;
+        Ok(Loaded {
+            image,
+            kept: Some(kept.image),
+        })
     }
 
     /// Frame `idx` through the decode cache, under `ctx`: its planes as a run before kept them for
@@ -316,7 +335,7 @@ mod tests {
 
     use common::{TempDir, fs};
 
-    use crate::frame_store::file_set::{FileSet, SetPeek};
+    use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
     use crate::frame_store::run_storage::RunStorage;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::channel_layout::ChannelLayout;
@@ -351,13 +370,26 @@ mod tests {
     }
 
     /// The level of channel 0's first sample.
-    fn level(image: &LinearImage) -> f32 {
-        image.channel(0).pixels()[0]
+    fn level(loaded: &Loaded<LinearImage>) -> f32 {
+        loaded.image.channel(0).pixels()[0]
+    }
+
+    /// The level of channel 0's first sample in the planes the decode cache keeps, which hold
+    /// what the image holds; `None` when it keeps none.
+    fn kept_level(loaded: &Loaded<LinearImage>) -> Option<f32> {
+        let kept = loaded.kept.as_ref()?;
+        assert!(
+            kept.planes()
+                .enumerate()
+                .all(|(channel, kept)| kept == loaded.image.channel(channel).pixels())
+        );
+        kept.planes().next().map(|plane| plane[0])
     }
 
     /// A format with no header to read is decoded for the plan, and that decode is the one its
     /// frame takes: the frame decodes after its file is gone. The set holds it until then, 3 × 2
-    /// pixels of three 4-byte samples and a flag byte, 78 B.
+    /// pixels of three 4-byte samples and a flag byte, 78 B. Without a decode cache, no planes
+    /// are kept.
     #[test]
     fn the_decode_for_the_plan_is_the_one_its_frame_takes() {
         let dir = TempDir::new("file_set_early");
@@ -383,7 +415,8 @@ mod tests {
         );
         fs::remove_file(&paths[0]).unwrap();
         assert_eq!(level(&files.decode(0, &ctx).unwrap()), 0.25);
-        assert_eq!(level(&files.decode(1, &ctx).unwrap()), 0.5);
+        let second = files.decode(1, &ctx).unwrap();
+        assert_eq!((level(&second), kept_level(&second)), (0.5, None));
         assert!(
             files.decode(0, &ctx).is_err(),
             "taken once, then read again"
@@ -395,7 +428,8 @@ mod tests {
     /// same files finds all three held: it reads its shape off frame 0's commit, with no decoder,
     /// and holds nothing. Once frame 1 is rewritten, as 4 × 2, it alone is uncached, and the peek
     /// decodes it. A frame rewritten after the set probed it, frame 2, is probed again at its
-    /// decode, and decodes as it now is.
+    /// decode, and decodes as it now is. Each decode comes with the planes the cache keeps of it,
+    /// whether it kept them then or a set before did.
     #[test]
     fn the_cache_is_probed_once_and_the_peek_reads_the_first_frame_it_lacks() {
         let dir = TempDir::new("file_set_cache");
@@ -410,8 +444,9 @@ mod tests {
         let first = set();
         assert_eq!(first.uncached(), 3);
         assert_eq!(first.peek(&ctx).unwrap().idx, 0);
-        for idx in 0..3 {
-            first.decode(idx, &ctx).unwrap();
+        for (idx, expected) in [0.25, 0.5, 0.75].into_iter().enumerate() {
+            let loaded = first.decode(idx, &ctx).unwrap();
+            assert_eq!(kept_level(&loaded), Some(expected), "{idx}");
         }
 
         let held = set();
@@ -440,9 +475,10 @@ mod tests {
         );
         tiff(dir.path(), "2.tiff", 3, 0.0625);
         for (idx, expected) in [(0, 0.25), (1, 0.125), (2, 0.0625)] {
+            let loaded = changed.decode(idx, &ctx).unwrap();
             assert_eq!(
-                level(&changed.decode(idx, &ctx).unwrap()),
-                expected,
+                (level(&loaded), kept_level(&loaded)),
+                (expected, Some(expected)),
                 "{idx}"
             );
         }

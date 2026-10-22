@@ -22,7 +22,7 @@ use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::SpillFrame;
+use crate::frame_store::stored_frame::{FrameWrite, SetKind};
 use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
@@ -1117,13 +1117,14 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         )
     };
     let store = |image: &LinearImage| {
-        SpillFrame {
+        FrameWrite {
             image,
-            quality: &FrameQuality::<Buffer2<f32>>::None,
-            admitted: Admitted::measure(image),
+            quality: FrameQuality::None,
+            set: SetKind::Unwarped,
         }
-        .spill(&run_scratch)
+        .write(&run_scratch)
         .unwrap()
+        .into_frame(Admitted::measure(image))
     };
     check(
         (0..4)
@@ -1147,13 +1148,14 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
         (0..4)
             .map(|frame| {
                 let image = mosaic(frame);
-                SpillFrame {
+                FrameWrite {
                     image: &image,
-                    quality: &FrameQuality::<Buffer2<f32>>::None,
-                    admitted: Admitted::measure(&image),
+                    quality: FrameQuality::None,
+                    set: SetKind::Unwarped,
                 }
-                .spill(&run_scratch)
+                .write(&run_scratch)
                 .unwrap()
+                .into_frame(Admitted::measure(&image))
             })
             .collect(),
         ImageDimensions::new(size, ChannelLayout::Mono),

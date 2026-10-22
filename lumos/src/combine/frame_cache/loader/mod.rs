@@ -14,9 +14,10 @@ use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::kept_frame::KeptFrame;
 use crate::frame_store::file_set::{FileSet, SetPeek, Taken};
+use crate::frame_store::frame_buffers::NewFrame;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::storage_tier::StorageTier;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_metadata::ImageMetadata;
@@ -207,12 +208,17 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
         if let Some(kept) = self.kept {
             return Ok(self.kept_frame(kept, idx)?);
         }
-        let mut image = stack(self.files.decode(idx, self.ctx))?;
+        let mut image = stack(self.files.decode(idx, self.ctx))?.image;
         self.step.apply(idx, &mut image)?;
         let admitted = stack(self.intake.admit(idx, &image))?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
-        let quality = FrameQuality::for_unwarped(&image);
-        let frame = stack(self.tier.store(image, quality, admitted))?;
+        let quality = FrameQuality::for_unwarped(image.flag_counts());
+        let frame = stack(self.tier.store(
+            NewFrame { image, quality },
+            admitted,
+            SetKind::Unwarped,
+        ))?
+        .frame;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }

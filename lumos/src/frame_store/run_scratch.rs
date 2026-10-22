@@ -9,6 +9,7 @@ use common::{Eviction, ScratchFile};
 
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_plane::StoredPlane;
 
 /// The files one run parks frames in, private to it and gone when it ends, however it ends: each
@@ -73,6 +74,17 @@ impl RunScratch {
                 Err(source) => return Err(FrameStoreError::OpenFile { path, source }),
             }
         }
+    }
+}
+
+/// Every plane in a file of its own, whatever its role.
+impl PlaneSink for &RunScratch {
+    fn write<T: Pod>(
+        &mut self,
+        _: PlaneRole,
+        pixels: &[T],
+    ) -> Result<StoredPlane<T>, FrameStoreError> {
+        self.store(pixels)
     }
 }
 

@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use common::{MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
-use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
@@ -23,7 +22,7 @@ use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
-use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
+use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -144,13 +143,14 @@ impl Lights {
             .iter()
             .zip(&self.stats)
             .map(|(image, stats)| {
-                SpillFrame {
+                FrameWrite {
                     image,
-                    quality: &FrameQuality::<Buffer2<f32>>::None,
-                    admitted: stats.clone(),
+                    quality: FrameQuality::None,
+                    set: SetKind::Unwarped,
                 }
-                .spill(&scratch)
+                .write(&scratch)
                 .unwrap()
+                .into_frame(stats.clone())
             })
             .collect();
         let budget =

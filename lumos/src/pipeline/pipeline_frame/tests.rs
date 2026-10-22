@@ -28,7 +28,7 @@ fn a_parked_frame_is_read_back_whole_before_its_warp() {
         dimensions.size(),
         &[&[0.0, 0.0, f32::NAN, 0.0, 0.0, 0.0]],
     ));
-    let stored = StoredImage::spill(&scratch, &image).unwrap();
+    let stored = StoredImage::write(&image, image.flags(), &scratch).unwrap();
     let mapped: Vec<*const f32> = stored.planes().map(<[f32]>::as_ptr).collect();
     let resident = PipelineFrame::Spilled(stored).into_resident();
     assert_eq!(resident.dimensions(), dimensions);

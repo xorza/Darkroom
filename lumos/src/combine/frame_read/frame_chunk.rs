@@ -153,7 +153,7 @@ mod tests {
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::{DropPlanes, FrameQuality};
     use crate::frame_store::run_scratch::RunScratch;
-    use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
+    use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
@@ -191,21 +191,23 @@ mod tests {
         let drizzled = FrameQuality::Drizzled { drops };
         let stats = Admitted::measure(&image);
         let frames = vec![
-            SpillFrame {
+            FrameWrite {
                 image: &image,
-                quality: &warped,
-                admitted: stats.clone(),
+                quality: warped.as_ref(),
+                set: SetKind::Registered,
             }
-            .spill(&scratch)
-            .unwrap(),
-            SpillFrame {
+            .write(&scratch)
+            .unwrap()
+            .into_frame(stats.clone()),
+            FrameWrite {
                 image: &image,
-                quality: &drizzled,
-                admitted: stats.clone(),
+                quality: drizzled.as_ref(),
+                set: SetKind::Registered,
             }
-            .spill(&scratch)
-            .unwrap(),
-            StoredFrame::from_memory(image.clone(), drizzled.clone(), stats),
+            .write(&scratch)
+            .unwrap()
+            .into_frame(stats.clone()),
+            StoredFrame::from_memory(image.clone(), drizzled, stats),
         ];
         let mut copy = ChunkCopy::new(&frames, 3);
         copy.fill(&frames, 2..5);
