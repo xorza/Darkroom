@@ -82,7 +82,7 @@ impl TryFrom<FlatGainRecord> for FlatGain {
         let shaped = (1..=3).contains(&record.nodes.len())
             && record.bins.len() == record.nodes.len()
             && record.nodes.iter().all(|plane| {
-                plane.len() == grid.columns * grid.rows
+                plane.len() == grid.cols * grid.rows
                     && plane.iter().all(|gain| gain.is_finite() && *gain > 0.0)
             });
         if !shaped {
@@ -94,7 +94,7 @@ impl TryFrom<FlatGainRecord> for FlatGain {
             nodes: record
                 .nodes
                 .into_iter()
-                .map(|plane| Buffer2::new(grid.columns, grid.rows, plane))
+                .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
                 .collect(),
             bins: record.bins.into_iter().collect(),
         })
@@ -113,19 +113,19 @@ impl FlatGain {
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> Self {
         let size = Size2us::from(divisor);
-        let columns = nodes_along(size.width);
+        let cols = nodes_along(size.width);
         let rows = nodes_along(size.height);
         let flat = NormalizedFlat {
             divisor,
             cfa_type,
             excluded,
         };
-        let nodes = (0..cfa_type.num_colors())
+        let nodes = (0..cfa_type.color_count())
             .map(|color| {
-                let mut plane = Buffer2::new_default(columns, rows);
+                let mut plane = Buffer2::new_default(cols, rows);
                 plane
                     .pixels_mut()
-                    .par_chunks_mut(columns)
+                    .par_chunks_mut(cols)
                     .enumerate()
                     .for_each(|(j, row)| {
                         for (i, node) in row.iter_mut().enumerate() {
@@ -145,7 +145,7 @@ impl FlatGain {
         debug_assert!(
             nodes
                 .iter()
-                .all(|plane| plane.width() == grid.columns && plane.height() == grid.rows)
+                .all(|plane| plane.width() == grid.cols && plane.height() == grid.rows)
         );
         let bins = nodes
             .iter()
@@ -170,7 +170,7 @@ impl FlatGain {
         let points: Vec<GainPoint> = (0..grid.rows)
             .into_par_iter()
             .flat_map_iter(|j| {
-                (0..grid.columns).map(move |i| {
+                (0..grid.cols).map(move |i| {
                     let source = to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64));
                     source_grid.point(source.x as f32, source.y as f32)
                 })
@@ -180,13 +180,13 @@ impl FlatGain {
             .nodes
             .iter()
             .map(|source| {
-                let mut plane = Buffer2::new_default(grid.columns, grid.rows);
+                let mut plane = Buffer2::new_default(grid.cols, grid.rows);
                 plane
                     .pixels_mut()
                     .par_iter_mut()
                     .zip(&points)
                     .for_each(|(node, point)| {
-                        *node = point.read(source.pixels(), source_grid.columns, 0);
+                        *node = point.read(source.pixels(), source_grid.cols, 0);
                     });
                 plane
             })
@@ -219,7 +219,7 @@ impl FlatGain {
     pub(crate) fn at(&self, channel: usize, x: f32, y: f32) -> f32 {
         self.grid
             .point(x, y)
-            .read(self.nodes[channel].pixels(), self.grid.columns, 0)
+            .read(self.nodes[channel].pixels(), self.grid.cols, 0)
     }
 
     /// The colors or channels the gain covers.
@@ -237,7 +237,7 @@ impl FlatGain {
 /// The node grid over an image: its columns and rows of nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct GainGrid {
-    pub(crate) columns: usize,
+    pub(crate) cols: usize,
     pub(crate) rows: usize,
 }
 
@@ -245,7 +245,7 @@ impl GainGrid {
     /// The grid over an image of `size`.
     pub(crate) const fn of(size: Size2us) -> Self {
         Self {
-            columns: nodes_along(size.width),
+            cols: nodes_along(size.width),
             rows: nodes_along(size.height),
         }
     }
@@ -263,7 +263,7 @@ impl GainGrid {
     /// size, so located once for all of them.
     pub(crate) fn point(self, x: f32, y: f32) -> GainPoint {
         GainPoint {
-            column: AxisPoint::locate(x, self.columns),
+            col: AxisPoint::locate(x, self.cols),
             row: AxisPoint::locate(y, self.rows),
         }
     }
@@ -272,20 +272,20 @@ impl GainGrid {
 /// A pixel's place among a grid's nodes on both axes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GainPoint {
-    column: AxisPoint,
+    col: AxisPoint,
     row: AxisPoint,
 }
 
 impl GainPoint {
     /// The gain at this point, bilinear between the four nodes around it, of `plane`: a grid's
-    /// node rows `first..`, `columns` nodes each, row-major.
-    fn read(self, plane: &[f32], columns: usize, first: usize) -> f32 {
-        let Self { column, row } = self;
-        let node = |i: usize, j: usize| plane[(j - first) * columns + i];
-        let top = node(column.low, row.low)
-            + (node(column.high, row.low) - node(column.low, row.low)) * column.fraction;
-        let bottom = node(column.low, row.high)
-            + (node(column.high, row.high) - node(column.low, row.high)) * column.fraction;
+    /// node rows `first..`, `cols` nodes each, row-major.
+    fn read(self, plane: &[f32], cols: usize, first: usize) -> f32 {
+        let Self { col, row } = self;
+        let node = |i: usize, j: usize| plane[(j - first) * cols + i];
+        let top = node(col.low, row.low)
+            + (node(col.high, row.low) - node(col.low, row.low)) * col.fraction;
+        let bottom = node(col.low, row.high)
+            + (node(col.high, row.high) - node(col.low, row.high)) * col.fraction;
         top + (bottom - top) * row.fraction
     }
 }
@@ -312,7 +312,7 @@ impl<'a> GainRows<'a> {
 
     /// The gain of `channel` at `point`, which these rows must reach.
     pub(crate) fn at(&self, channel: usize, point: GainPoint) -> f32 {
-        point.read(self.planes[channel], self.grid.columns, self.first)
+        point.read(self.planes[channel], self.grid.cols, self.first)
     }
 }
 

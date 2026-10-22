@@ -40,7 +40,7 @@ fn the_windowed_centroid_converges_and_the_fits_ignore_the_seed() {
                 pixels: &measured.residual,
                 pos: seed,
                 grid: &grid,
-                background: 0.0,
+                bg: 0.0,
                 noise: None,
             })
             .expect("the Gaussian fit lands")
@@ -52,7 +52,7 @@ fn the_windowed_centroid_converges_and_the_fits_ignore_the_seed() {
                     pixels: &measured.residual,
                     pos: seed,
                     grid: &grid,
-                    background: 0.0,
+                    bg: 0.0,
                     noise: None,
                 },
                 2.5,

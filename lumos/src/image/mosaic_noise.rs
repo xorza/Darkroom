@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 
 /// The white noise of each color of the mosaic a frame was demosaiced from, measured before the
 /// interpolation correlated neighbouring pixels: a measurement of the demosaiced frame reads less
@@ -14,8 +14,8 @@ use crate::image::background_split::BackgroundSplit;
 pub struct MosaicNoise {
     /// Each color's white-noise variance where no flat amplified it, over the photosites no flag
     /// names, split by how a flat amplified it: unflattened for a mosaic no flat divided.
-    pub background: [BackgroundSplit; 3],
-    /// Each color's median, the level `background` was measured at.
+    pub bg: [BgSplit; 3],
+    /// Each color's median, the level `bg` was measured at.
     pub sky: [f32; 3],
     /// The mosaic's quantization σ, the floor of every color's noise. The demosaic clears the
     /// frame's own.

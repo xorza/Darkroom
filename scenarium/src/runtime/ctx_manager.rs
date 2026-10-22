@@ -7,8 +7,8 @@ use crate::runtime::log_entry::{LogEntry, LogLevel};
 pub struct CtxManager {
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
-    pub(crate) current_node: Option<NodeId>,
-    /// Log lines emitted this run, drained into `ExecutionOutcome` when the
+    pub(crate) cur_node: Option<NodeId>,
+    /// Log lines emitted this run, drained into `ExecOutcome` when the
     /// run finishes.
     pub(crate) logs: Vec<LogEntry>,
     /// The run's cooperative cancel token (the executor polls it between
@@ -43,17 +43,17 @@ impl CtxManager {
     ///
     /// # Panics
     /// Outside a node invoke — on a hand-built manager, or after a run.
-    pub const fn current_node(&self) -> NodeId {
-        self.current_node
+    pub const fn cur_node(&self) -> NodeId {
+        self.cur_node
             .expect("current_node is only readable inside a lambda invoke")
     }
 
     /// Emit a log line attributed to the node currently executing, and
     /// mirror it to `tracing` at the matching level so headless runs
     /// still surface output. No-op when called outside a node invoke
-    /// (`current_node` unset).
+    /// (`cur_node` unset).
     pub fn log(&mut self, level: LogLevel, msg: impl Into<String>) {
-        let Some(node_id) = self.current_node else {
+        let Some(node_id) = self.cur_node else {
             return;
         };
         self.log_node(node_id, level, msg);
@@ -61,7 +61,7 @@ impl CtxManager {
 
     /// [`log`](Self::log) for a node the caller names, rather than the one
     /// mid-invoke — what the executor reports *about* a node before or instead
-    /// of running it, where `current_node` is not yet set and the no-op above
+    /// of running it, where `cur_node` is not yet set and the no-op above
     /// would swallow the line.
     pub(crate) fn log_node(&mut self, node_id: NodeId, level: LogLevel, msg: impl Into<String>) {
         let message = msg.into();
@@ -96,9 +96,9 @@ pub(crate) mod internals {
 
     impl CtxManager {
         /// Stand in for the executor's per-invoke attribution, so a lambda that
-        /// reads [`CtxManager::current_node`] can be tested without a run.
-        pub const fn set_current_node(&mut self, node_id: NodeId) {
-            self.current_node = Some(node_id);
+        /// reads [`CtxManager::cur_node`] can be tested without a run.
+        pub const fn set_cur_node(&mut self, node_id: NodeId) {
+            self.cur_node = Some(node_id);
         }
     }
 }

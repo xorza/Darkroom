@@ -4,9 +4,9 @@
 use glam::Vec2;
 
 use crate::internals::init_tracing;
-use crate::internals::synthetic::backgrounds::{Gradient, NebulaConfig, Vignette};
+use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::PsfModel;
-use crate::internals::synthetic::scene::{BackgroundField, Placement};
+use crate::internals::synthetic::scene::{BgField, Placement};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::tests::Scenario;
 use crate::star_detection::tests::pipeline_tests::PipelineCase;
@@ -15,7 +15,7 @@ use crate::star_detection::tests::pipeline_tests::PipelineCase;
 fn crowded_cluster() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 150,
+        star_count: 150,
         placement: Placement::Cluster,
         ..Default::default()
     }
@@ -33,7 +33,7 @@ fn crowded_cluster() {
 fn very_dense() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 200,
+        star_count: 200,
         ..Default::default()
     }
     .frame();
@@ -50,7 +50,7 @@ fn very_dense() {
 fn uniform_tracking_error() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         psf: Some(PsfModel::Gaussian {
             fwhm: 4.0,
             eccentricity: 0.5,
@@ -72,7 +72,7 @@ fn uniform_tracking_error() {
 fn cosmic_rays() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 25,
+        star_count: 25,
         cosmic_rays: 25,
         ..Default::default()
     }
@@ -90,7 +90,7 @@ fn cosmic_rays() {
 fn bayer_pattern() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 25,
+        star_count: 25,
         bayer: true,
         ..Default::default()
     }
@@ -109,7 +109,7 @@ fn saturated_stars() {
     init_tracing();
     // Bright sources clip at the well — flux-driven saturation.
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         flux: (8.0, 250.0),
         ..Default::default()
     }
@@ -124,11 +124,11 @@ fn saturated_stars() {
 }
 
 #[test]
-fn gradient_background() {
+fn gradient_bg() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 25,
-        background: BackgroundField::Gradient(Gradient {
+        star_count: 25,
+        bg: BgField::Gradient(Gradient {
             start: 0.05,
             end: 0.25,
             angle: 0.3,
@@ -146,11 +146,11 @@ fn gradient_background() {
 }
 
 #[test]
-fn vignette_background() {
+fn vignette_bg() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 25,
-        background: BackgroundField::Vignette(Vignette {
+        star_count: 25,
+        bg: BgField::Vignette(Vignette {
             center: 0.2,
             edge: 0.05,
             falloff: 2.0,
@@ -168,11 +168,11 @@ fn vignette_background() {
 }
 
 #[test]
-fn nebula_background() {
+fn nebula_bg() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 30,
-        background: BackgroundField::Nebula(NebulaConfig {
+        star_count: 30,
+        bg: BgField::Nebula(NebulaConfig {
             center: Vec2::splat(0.5),
             radius: 0.35,
             amplitude: 0.35,
@@ -196,7 +196,7 @@ fn nebula_background() {
 fn edge_stars() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         placement: Placement::Uniform { margin: 5.0 },
         ..Default::default()
     }
@@ -215,10 +215,10 @@ fn faint_in_noise() {
     init_tracing();
     // Faint stars over a shallow, noisy sensor.
     let frame = Scenario {
-        num_stars: 20,
+        star_count: 20,
         flux: (1.5, 6.0),
         full_well_e: 5_000.0,
-        background: BackgroundField::Uniform { level: 0.15 },
+        bg: BgField::Uniform { level: 0.15 },
         ..Default::default()
     }
     .frame();
@@ -238,12 +238,12 @@ fn faint_in_noise() {
 fn very_low_snr() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 20,
+        star_count: 20,
         fwhm: 4.0,
         flux: (1.0, 4.0),
         full_well_e: 2_000.0,
         read_noise_e: 20.0,
-        background: BackgroundField::Uniform { level: 0.15 },
+        bg: BgField::Uniform { level: 0.15 },
         ..Default::default()
     }
     .frame();
@@ -264,7 +264,7 @@ fn combined_challenges() {
     init_tracing();
     // Cluster + elliptical PSF + cosmic rays + bright/saturated + gradient sky.
     let frame = Scenario {
-        num_stars: 50,
+        star_count: 50,
         flux: (7.0, 200.0),
         placement: Placement::Cluster,
         psf: Some(PsfModel::Gaussian {
@@ -272,7 +272,7 @@ fn combined_challenges() {
             eccentricity: 0.4,
             angle: 0.3,
         }),
-        background: BackgroundField::Gradient(Gradient {
+        bg: BgField::Gradient(Gradient {
             start: 0.08,
             end: 0.18,
             angle: 0.5,

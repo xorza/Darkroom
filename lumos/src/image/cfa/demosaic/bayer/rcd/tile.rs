@@ -35,7 +35,7 @@ const _: () = assert!(
 /// The working buffers of one tile, kept from tile to tile by the worker that holds it.
 ///
 /// A set of four planes holds one value per photosite of the crop, a plane per Bayer phase
-/// `2·(row parity) + column parity`, a crop row `r` at the plane's row `r/2`. The stages run on the
+/// `2·(row parity) + col parity`, a crop row `r` at the plane's row `r/2`. The stages run on the
 /// crop as on a frame of its size. A cell no stage writes for this tile keeps what the last tile
 /// left: only pixels within [`INTERPOLATED_BORDER`] of the crop's edge read such cells, and the
 /// tile does not write those.
@@ -186,8 +186,7 @@ impl Tile {
             let at = (row / 2) * STRIDE;
             let parity = 2 * (row % 2);
             // A tile starts on the frame's phase, so the crop's colors are the frame's.
-            let [even_gain, odd_gain] =
-                [0, 1].map(|column| bayer.gain_at(Vec2us::new(column, row)));
+            let [even_gain, odd_gain] = [0, 1].map(|col| bayer.gain_at(Vec2us::new(col, row)));
             let [even, odd] = self.cfa.get_disjoint_mut([parity, parity + 1]).unwrap();
             let (even, odd) = (&mut even[at..at + STRIDE], &mut odd[at..at + STRIDE]);
             let input = bayer.samples(top + row, left..left + width);
@@ -220,11 +219,11 @@ impl Tile {
             let input = bayer.samples(top + row, left..left + width);
             let at = (row / 2) * STRIDE;
             for (channel, planes) in self.rgb.iter().enumerate() {
-                for column in 0..2 {
-                    let phase = 2 * (row % 2) + column;
-                    let line = self.line[..width].iter_mut().skip(column).step_by(2);
+                for col in 0..2 {
+                    let phase = 2 * (row % 2) + col;
+                    let line = self.line[..width].iter_mut().skip(col).step_by(2);
                     if phase_color(pattern, phase) == channel {
-                        for (out, &sample) in line.zip(input.iter().skip(column).step_by(2)) {
+                        for (out, &sample) in line.zip(input.iter().skip(col).step_by(2)) {
                             *out = sample;
                         }
                     } else {
@@ -248,10 +247,10 @@ impl Tile {
         // Each row's vertical filter as it comes into reach, and a row's direction map once the
         // rows on both sides have theirs.
         for row in (BORDER - 1)..=(height - BORDER) {
-            for (column, v_hpf) in self.v_hpf[row % 3].iter_mut().enumerate() {
+            for (col, v_hpf) in self.v_hpf[row % 3].iter_mut().enumerate() {
                 let [m3, m2, m1, centre, p1, p2, p3] = Tap::all(
                     cfa,
-                    column,
+                    col,
                     [
                         (row - 3, 0),
                         (row - 2, 0),
@@ -262,7 +261,7 @@ impl Tile {
                         (row + 3, 0),
                     ],
                 );
-                for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+                for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                     let j = span.start;
                     let line = [m3, m2, m1, centre, p1, p2, p3].map(|tap| tap.load(isa, j));
                     squared_high_pass(line, three, six).store_partial(&mut v_hpf[span]);
@@ -272,10 +271,10 @@ impl Tile {
                 continue;
             }
             let row = row - 1;
-            for (column, h_hpf) in self.h_hpf.iter_mut().enumerate() {
+            for (col, h_hpf) in self.h_hpf.iter_mut().enumerate() {
                 let [m3, m2, m1, centre, p1, p2, p3] = Tap::all(
                     cfa,
-                    column,
+                    col,
                     [
                         (row, -3),
                         (row, -2),
@@ -286,7 +285,7 @@ impl Tile {
                         (row, 3),
                     ],
                 );
-                for span in Vectors::over(columns(column, BORDER - 1..width - BORDER + 1)) {
+                for span in Vectors::over(cols(col, BORDER - 1..width - BORDER + 1)) {
                     let j = span.start;
                     let line = [m3, m2, m1, centre, p1, p2, p3].map(|tap| tap.load(isa, j));
                     squared_high_pass(line, three, six).store_partial(&mut h_hpf[span]);
@@ -294,15 +293,15 @@ impl Tile {
             }
             let [above, here, below] = [row - 1, row, row + 1];
             let h_row = view(&self.h_hpf);
-            for column in 0..2 {
-                let up = Tap::new(view(&self.v_hpf[above % 3]), column, 0);
-                let centre_v = Tap::new(view(&self.v_hpf[here % 3]), column, 0);
-                let down = Tap::new(view(&self.v_hpf[below % 3]), column, 0);
-                let left = Tap::new(h_row, column, -1);
-                let centre_h = Tap::new(h_row, column, 0);
-                let right = Tap::new(h_row, column, 1);
-                let out = row_mut(&mut self.vh_dir[2 * (row % 2) + column], row);
-                for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+            for col in 0..2 {
+                let up = Tap::new(view(&self.v_hpf[above % 3]), col, 0);
+                let centre_v = Tap::new(view(&self.v_hpf[here % 3]), col, 0);
+                let down = Tap::new(view(&self.v_hpf[below % 3]), col, 0);
+                let left = Tap::new(h_row, col, -1);
+                let centre_h = Tap::new(h_row, col, 0);
+                let right = Tap::new(h_row, col, 1);
+                let out = row_mut(&mut self.vh_dir[2 * (row % 2) + col], row);
+                for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                     let j = span.start;
                     let v_stat = up.load(isa, j) + centre_v.load(isa, j) + down.load(isa, j);
                     let h_stat = left.load(isa, j) + centre_h.load(isa, j) + right.load(isa, j);
@@ -324,10 +323,10 @@ impl Tile {
         let cfa = view(&self.cfa);
         let (half, quarter) = (isa.splat_f32(0.5), isa.splat_f32(0.25));
         for row in 2..height - 2 {
-            let column = red_blue[row % 2];
+            let col = red_blue[row % 2];
             let [n, s, w, centre, e, nw, ne, sw, se] = Tap::all(
                 cfa,
-                column,
+                col,
                 [
                     (row - 1, 0),
                     (row + 1, 0),
@@ -341,7 +340,7 @@ impl Tile {
                 ],
             );
             let out = row_mut(&mut self.red_blue[row % 2], row);
-            for span in Vectors::over(columns(column, 2..width - 2)) {
+            for span in Vectors::over(cols(col, 2..width - 2)) {
                 let j = span.start;
                 let lpf = centre.load(isa, j)
                     + half * (n.load(isa, j) + s.load(isa, j) + w.load(isa, j) + e.load(isa, j))
@@ -355,10 +354,10 @@ impl Tile {
         let vh_dir = view(&self.vh_dir);
         let eps = isa.splat_f32(EPS);
         for row in BORDER..height - BORDER {
-            let column = red_blue[row % 2];
+            let col = red_blue[row % 2];
             let vertical = Tap::all(
                 cfa,
-                column,
+                col,
                 [
                     (row - 4, 0),
                     (row - 3, 0),
@@ -372,7 +371,7 @@ impl Tile {
             );
             let horizontal = Tap::all(
                 cfa,
-                column,
+                col,
                 [
                     (row, -4),
                     (row, -3),
@@ -387,13 +386,13 @@ impl Tile {
             );
             let [lpf_n, lpf_s, lpf_w, lpf_centre, lpf_e] = Tap::all(
                 lpf,
-                column,
+                col,
                 [(row - 2, 0), (row + 2, 0), (row, -2), (row, 0), (row, 2)],
             );
-            let vh_centre = Tap::at(vh_dir, column, (row, 0));
-            let vh_diagonals = diagonals(vh_dir, row, column);
-            let out = row_mut(&mut self.rgb[1][2 * (row % 2) + column], row);
-            for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+            let vh_centre = Tap::at(vh_dir, col, (row, 0));
+            let vh_diagonals = diagonals(vh_dir, row, col);
+            let out = row_mut(&mut self.rgb[1][2 * (row % 2) + col], row);
+            for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                 let j = span.start;
                 let [n4, n3, n2, n1, s1, s2, s3, s4] = load_all(isa, vertical, j);
                 let [w4, w3, w2, w1, cfai, e1, e2, e3, e4] = load_all(isa, horizontal, j);
@@ -448,12 +447,12 @@ impl Tile {
         let cfa = view(&self.cfa);
         let (three, six, epssq) = (isa.splat_f32(3.0), isa.splat_f32(6.0), isa.splat_f32(EPSSQ));
         for row in 3..height - 3 {
-            let column = red_blue[row % 2];
-            let centre = Tap::at(cfa, column, (row, 0));
+            let col = red_blue[row % 2];
+            let centre = Tap::at(cfa, col, (row, 0));
             // The P diagonal runs down to the right, the Q one down to the left.
             let [p_m3, p_m2, p_m1, p_p1, p_p2, p_p3] = Tap::all(
                 cfa,
-                column,
+                col,
                 [
                     (row - 3, -3),
                     (row - 2, -2),
@@ -465,7 +464,7 @@ impl Tile {
             );
             let [q_m3, q_m2, q_m1, q_p1, q_p2, q_p3] = Tap::all(
                 cfa,
-                column,
+                col,
                 [
                     (row - 3, 3),
                     (row - 2, 2),
@@ -477,7 +476,7 @@ impl Tile {
             );
             let p_hpf = &mut self.p_hpf[row % 3];
             let q_hpf = &mut self.q_hpf[row % 3];
-            for span in Vectors::over(columns(column, 3..width - 3)) {
+            for span in Vectors::over(cols(col, 3..width - 3)) {
                 let j = span.start;
                 let c = centre.load(isa, j);
                 let [p_m3, p_m2, p_m1, p_p1, p_p2, p_p3] =
@@ -493,15 +492,15 @@ impl Tile {
                 continue;
             }
             let row = row - 1;
-            let column = red_blue[row % 2];
-            let p_nw = Tap::new(ring_row(&self.p_hpf, row - 1), column, -1);
-            let p_centre = Tap::new(ring_row(&self.p_hpf, row), column, 0);
-            let p_se = Tap::new(ring_row(&self.p_hpf, row + 1), column, 1);
-            let q_ne = Tap::new(ring_row(&self.q_hpf, row - 1), column, 1);
-            let q_centre = Tap::new(ring_row(&self.q_hpf, row), column, 0);
-            let q_sw = Tap::new(ring_row(&self.q_hpf, row + 1), column, -1);
+            let col = red_blue[row % 2];
+            let p_nw = Tap::new(ring_row(&self.p_hpf, row - 1), col, -1);
+            let p_centre = Tap::new(ring_row(&self.p_hpf, row), col, 0);
+            let p_se = Tap::new(ring_row(&self.p_hpf, row + 1), col, 1);
+            let q_ne = Tap::new(ring_row(&self.q_hpf, row - 1), col, 1);
+            let q_centre = Tap::new(ring_row(&self.q_hpf, row), col, 0);
+            let q_sw = Tap::new(ring_row(&self.q_hpf, row + 1), col, -1);
             let out = row_mut(&mut self.red_blue[row % 2], row);
-            for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+            for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                 let j = span.start;
                 let p_stat = p_nw.load(isa, j) + p_centre.load(isa, j) + p_se.load(isa, j);
                 let q_stat = q_ne.load(isa, j) + q_centre.load(isa, j) + q_sw.load(isa, j);
@@ -522,8 +521,8 @@ impl Tile {
         let cfa = view(&self.cfa);
         let pq_dir = red_blue_view(&self.red_blue);
         let eps = isa.splat_f32(EPS);
-        for (parity, &column) in red_blue.iter().enumerate() {
-            let phase = 2 * parity + column;
+        for (parity, &col) in red_blue.iter().enumerate() {
+            let phase = 2 * parity + col;
             // A red site takes blue and a blue one red; the diagonal reads land on that color's
             // own samples.
             let color = 2 - phase_color(pattern, phase);
@@ -537,17 +536,17 @@ impl Tile {
             let dst = if color == 0 { red } else { blue };
             let Split { written, read: dst } = Split::of(dst, phase, samples(color));
             for row in (BORDER + parity..height - BORDER).step_by(2) {
-                let pq_centre = Tap::at(pq_dir, column, (row, 0));
-                let pq_diagonals = diagonals(pq_dir, row, column);
-                let [d_nw, d_ne, d_sw, d_se] = diagonals(dst, row, column);
+                let pq_centre = Tap::at(pq_dir, col, (row, 0));
+                let pq_diagonals = diagonals(pq_dir, row, col);
+                let [d_nw, d_ne, d_sw, d_se] = diagonals(dst, row, col);
                 let [d_nw3, d_ne3, d_sw3, d_se3] = Tap::all(
                     dst,
-                    column,
+                    col,
                     [(row - 3, -3), (row - 3, 3), (row + 3, -3), (row + 3, 3)],
                 );
                 let [g_centre, g_nw2, g_ne2, g_sw2, g_se2] = Tap::all(
                     green,
-                    column,
+                    col,
                     [
                         (row, 0),
                         (row - 2, -2),
@@ -556,9 +555,9 @@ impl Tile {
                         (row + 2, 2),
                     ],
                 );
-                let [g_nw, g_ne, g_sw, g_se] = diagonals(green, row, column);
+                let [g_nw, g_ne, g_sw, g_se] = diagonals(green, row, col);
                 let out = row_mut(written, row);
-                for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+                for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                     let j = span.start;
                     let pq_disc = discriminate(
                         isa,
@@ -612,8 +611,8 @@ impl Tile {
         let vh_dir = view(&self.vh_dir);
         let eps = isa.splat_f32(EPS);
         for (parity, &red_blue) in red_blue.iter().enumerate() {
-            let column = 1 - red_blue;
-            let phase = 2 * parity + column;
+            let col = 1 - red_blue;
+            let phase = 2 * parity + col;
             let [red, green, blue] = &mut self.rgb;
             let samples = |color| ColorSamples {
                 cfa,
@@ -624,23 +623,23 @@ impl Tile {
             let mut red = Split::of(red, phase, samples(0));
             let mut blue = Split::of(blue, phase, samples(2));
             for row in (BORDER + parity..height - BORDER).step_by(2) {
-                let vh_centre = Tap::at(vh_dir, column, (row, 0));
-                let vh_diagonals = diagonals(vh_dir, row, column);
+                let vh_centre = Tap::at(vh_dir, col, (row, 0));
+                let vh_diagonals = diagonals(vh_dir, row, col);
                 let [g_centre, g_n2, g_s2, g_w2, g_e2] = Tap::all(
                     green,
-                    column,
+                    col,
                     [(row, 0), (row - 2, 0), (row + 2, 0), (row, -2), (row, 2)],
                 );
                 let g_neighbours = Tap::all(
                     green,
-                    column,
+                    col,
                     [(row - 1, 0), (row + 1, 0), (row, -1), (row, 1)],
                 );
                 let mut planes = [
-                    Neighbours::new(&mut red, row, column),
-                    Neighbours::new(&mut blue, row, column),
+                    Neighbours::new(&mut red, row, col),
+                    Neighbours::new(&mut blue, row, col),
                 ];
-                for span in Vectors::over(columns(column, BORDER..width - BORDER)) {
+                for span in Vectors::over(cols(col, BORDER..width - BORDER)) {
                     let j = span.start;
                     let vh_disc = discriminate(
                         isa,
@@ -702,22 +701,22 @@ impl Kernel for Stages<'_> {
 }
 
 impl<'a> Tap<'a> {
-    /// The photosite `dx` crop columns from each site of column phase `column`, in the row whose
+    /// The photosite `dx` crop columns from each site of column phase `col`, in the row whose
     /// two column phases are `rows`.
     #[inline(always)]
-    const fn new(rows: [&'a [f32]; 2], column: usize, dx: isize) -> Self {
-        let col = column as isize + dx;
+    const fn new(rows: [&'a [f32]; 2], col: usize, dx: isize) -> Self {
+        let col = col as isize + dx;
         Self {
             row: rows[col.rem_euclid(2) as usize],
             offset: col.div_euclid(2),
         }
     }
 
-    /// The photosite `dx` crop columns from each site of column phase `column` in crop row `row`
+    /// The photosite `dx` crop columns from each site of column phase `col` in crop row `row`
     /// of `planes`, as one of [`Tap::all`]'s steps.
     #[inline(always)]
-    fn at(planes: [&'a [f32]; 4], column: usize, (row, dx): (usize, isize)) -> Self {
-        let col = column as isize + dx;
+    fn at(planes: [&'a [f32]; 4], col: usize, (row, dx): (usize, isize)) -> Self {
+        let col = col as isize + dx;
         let start = (row / 2) * STRIDE;
         Self {
             row: &planes[2 * (row % 2) + col.rem_euclid(2) as usize][start..start + STRIDE],
@@ -729,7 +728,7 @@ impl<'a> Tap<'a> {
     #[inline(always)]
     fn all<const N: usize>(
         planes: [&'a [f32]; 4],
-        column: usize,
+        col: usize,
         steps: [(usize, isize); N],
     ) -> [Self; N] {
         let mut taps = [Self {
@@ -737,7 +736,7 @@ impl<'a> Tap<'a> {
             offset: 0,
         }; N];
         for (tap, (row, dx)) in taps.iter_mut().zip(steps) {
-            *tap = Self::at(planes, column, (row, dx));
+            *tap = Self::at(planes, col, (row, dx));
         }
         taps
     }
@@ -771,12 +770,12 @@ impl<'a> Split<'a> {
 }
 
 impl<'a> Neighbours<'a> {
-    /// The neighbours in `color` of the green sites of column phase `column` in crop row `row`.
+    /// The neighbours in `color` of the green sites of column phase `col` in crop row `row`.
     #[inline(always)]
-    fn new(color: &'a mut Split<'_>, row: usize, column: usize) -> Self {
+    fn new(color: &'a mut Split<'_>, row: usize, col: usize) -> Self {
         let [n3, n1, s1, s3, w3, w1, e1, e3] = Tap::all(
             color.read,
-            column,
+            col,
             [
                 (row - 3, 0),
                 (row - 1, 0),
@@ -804,10 +803,10 @@ impl<'a> Neighbours<'a> {
 
 impl Vectors {
     #[inline(always)]
-    const fn over(columns: Range<usize>) -> Self {
+    const fn over(cols: Range<usize>) -> Self {
         Self {
-            next: columns.start,
-            end: columns.end,
+            next: cols.start,
+            end: cols.end,
         }
     }
 }
@@ -904,21 +903,21 @@ fn row_mut(plane: &mut [f32], row: usize) -> &mut [f32] {
     &mut plane[start..start + STRIDE]
 }
 
-/// The four diagonal neighbours of the sites of column phase `column` in crop row `row`: NW, NE,
+/// The four diagonal neighbours of the sites of column phase `col` in crop row `row`: NW, NE,
 /// SW, SE.
 #[inline(always)]
-fn diagonals(planes: [&[f32]; 4], row: usize, column: usize) -> [Tap<'_>; 4] {
+fn diagonals(planes: [&[f32]; 4], row: usize, col: usize) -> [Tap<'_>; 4] {
     Tap::all(
         planes,
-        column,
+        col,
         [(row - 1, -1), (row - 1, 1), (row + 1, -1), (row + 1, 1)],
     )
 }
 
-/// The plane columns of the sites of column phase `column` among crop columns `cols`.
+/// The plane columns of the sites of column phase `col` among crop columns `cols`.
 #[inline(always)]
-const fn columns(column: usize, cols: Range<usize>) -> Range<usize> {
-    cols.start.saturating_sub(column).div_ceil(2)..cols.end.saturating_sub(column).div_ceil(2)
+const fn cols(col: usize, cols: Range<usize>) -> Range<usize> {
+    cols.start.saturating_sub(col).div_ceil(2)..cols.end.saturating_sub(col).div_ceil(2)
 }
 
 #[cfg(test)]

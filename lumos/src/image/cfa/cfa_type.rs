@@ -63,12 +63,12 @@ impl CfaType {
         per_color: usize,
     ) -> impl Iterator<Item = usize> + use<> {
         let period = self.period();
-        let step = (size.pixel_count() / (self.num_colors() * per_color)).max(1);
+        let step = (size.pixel_count() / (self.color_count() * per_color)).max(1);
         (0..size.height).filter(move |y| (y / period).is_multiple_of(step))
     }
 
     /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
-    pub const fn num_colors(&self) -> usize {
+    pub const fn color_count(&self) -> usize {
         self.color_layout().count()
     }
 
@@ -84,7 +84,7 @@ impl CfaType {
     /// How many photosites of each color, by [`Self::slot_at`]'s index, a sensor of `size`
     /// holds.
     pub(crate) fn photosites_per_color(&self, size: Size2us) -> ArrayVec<usize, 3> {
-        (0..self.num_colors())
+        (0..self.color_count())
             .map(|color| ColorRaster::new(self, size, color).count())
             .collect()
     }

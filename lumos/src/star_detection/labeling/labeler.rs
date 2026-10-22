@@ -45,7 +45,7 @@ struct Strip {
     /// Runs of the band's last row, for stitching to the band below.
     last_row_runs: Vec<Run>,
     prev_runs: Vec<Run>,
-    curr_runs: Vec<Run>,
+    cur_runs: Vec<Run>,
 }
 
 impl Labeler {
@@ -55,17 +55,17 @@ impl Labeler {
     /// nothing to do — small inputs take the same path as large ones.
     pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> &LabelMap {
         let height = mask.size.height;
-        let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
-        self.label_in_strips(mask, connectivity, num_strips)
+        let strip_count = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
+        self.label_in_strips(mask, connectivity, strip_count)
     }
 
-    /// [`Self::label`] cut into `num_strips` bands of `height / num_strips` rows, the last taking
+    /// [`Self::label`] cut into `strip_count` bands of `height / strip_count` rows, the last taking
     /// the remainder. At least one, and at most one per row.
     fn label_in_strips(
         &mut self,
         mask: &BitBuffer2,
         connectivity: Connectivity,
-        num_strips: usize,
+        strip_count: usize,
     ) -> &LabelMap {
         let width = mask.size.width;
         let height = mask.size.height;
@@ -86,12 +86,12 @@ impl Labeler {
         }
 
         debug_assert!(
-            (1..=height).contains(&num_strips),
+            (1..=height).contains(&strip_count),
             "between one strip and one per row"
         );
-        let rows_per_strip = height / num_strips;
+        let rows_per_strip = height / strip_count;
         let strip_rows = |strip_idx: usize| {
-            let end = if strip_idx == num_strips - 1 {
+            let end = if strip_idx == strip_count - 1 {
                 height
             } else {
                 (strip_idx + 1) * rows_per_strip
@@ -102,10 +102,10 @@ impl Labeler {
         // The foreground pixel count bounds the provisional labels exactly: each run is at least
         // one foreground pixel and takes one label.
         union_find.reset(mask.count_ones());
-        if strips.len() < num_strips {
-            strips.resize_with(num_strips, Strip::default);
+        if strips.len() < strip_count {
+            strips.resize_with(strip_count, Strip::default);
         }
-        let strips = &mut strips[..num_strips];
+        let strips = &mut strips[..strip_count];
         let join = RunJoin {
             union_find,
             connectivity,
@@ -193,7 +193,7 @@ impl Strip {
             first_row_runs,
             last_row_runs,
             prev_runs,
-            curr_runs,
+            cur_runs,
         } = self;
         runs.clear();
         first_row_runs.clear();
@@ -203,25 +203,25 @@ impl Strip {
         let first = rows.start;
         let last = rows.end - 1;
         for y in rows {
-            curr_runs.clear();
-            run::extract_runs_from_row(mask.row_words(y), mask.size.width, curr_runs);
+            cur_runs.clear();
+            run::extract_runs_from_row(mask.row_words(y), mask.size.width, cur_runs);
 
-            if curr_runs.is_empty() {
+            if cur_runs.is_empty() {
                 prev_runs.clear();
                 continue;
             }
 
-            join.merge_with_prev(curr_runs, prev_runs);
-            runs.extend(curr_runs.iter().map(|&run| (y as u32, run)));
+            join.merge_with_prev(cur_runs, prev_runs);
+            runs.extend(cur_runs.iter().map(|&run| (y as u32, run)));
 
             if y == first {
-                first_row_runs.clone_from(curr_runs);
+                first_row_runs.clone_from(cur_runs);
             }
             if y == last {
-                last_row_runs.clone_from(curr_runs);
+                last_row_runs.clone_from(cur_runs);
             }
 
-            mem::swap(prev_runs, curr_runs);
+            mem::swap(prev_runs, cur_runs);
         }
     }
 }
@@ -242,16 +242,16 @@ pub(crate) mod internals {
         }
     }
 
-    /// Label `mask` in exactly `num_strips` bands, whatever the thread count — so a test reaches
+    /// Label `mask` in exactly `strip_count` bands, whatever the thread count — so a test reaches
     /// the stitch across band boundaries on any machine.
     #[cfg(test)]
     pub(crate) fn label_in_strips(
         mask: &BitBuffer2,
         connectivity: Connectivity,
-        num_strips: usize,
+        strip_count: usize,
     ) -> LabelMap {
         let mut labeler = Labeler::default();
-        labeler.label_in_strips(mask, connectivity, num_strips);
+        labeler.label_in_strips(mask, connectivity, strip_count);
         labeler.into_map()
     }
 }

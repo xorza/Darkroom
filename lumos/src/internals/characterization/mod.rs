@@ -341,7 +341,7 @@ fn frame_stats_snapshot() {
             .f32s(&stats.medians)
             .f32s(
                 &stats
-                    .background
+                    .bg
                     .iter()
                     .map(|split| split.sigma())
                     .collect::<Vec<_>>(),
@@ -390,7 +390,7 @@ fn register_snapshot() {
     let mut snapshot = Snapshot::default();
     snapshot
         .f64s(result.transform().matrix())
-        .count(result.num_inliers())
+        .count(result.inlier_count())
         .f64s(&[result.rms_error()]);
     assert_snapshot("registration", &snapshot, "f6beeb64b73e5f9d");
 }

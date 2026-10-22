@@ -8,16 +8,16 @@
 /// In f64, which holds the square of a σ at the frame's floor in any domain.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StarNoise {
-    pub(super) background_sigma: f64,
+    pub(super) bg_sigma: f64,
     pub(super) electrons_per_unit: Option<f64>,
 }
 
 impl StarNoise {
     pub(super) fn variance(self, signal: f64) -> f64 {
-        let background = self.background_sigma * self.background_sigma;
+        let bg = self.bg_sigma * self.bg_sigma;
         match self.electrons_per_unit {
-            Some(electrons) => background + signal.max(0.0) / electrons,
-            None => background,
+            Some(electrons) => bg + signal.max(0.0) / electrons,
+            None => bg,
         }
     }
 
@@ -28,11 +28,11 @@ impl StarNoise {
     pub(super) fn snr(self, flux: f64, pixels: usize, sky_samples: Option<usize>) -> f64 {
         let n = pixels as f64;
         let sky_error = sky_samples.map_or(0.0, |samples| n / samples as f64);
-        let background = n * self.background_sigma * self.background_sigma * (1.0 + sky_error);
+        let bg = n * self.bg_sigma * self.bg_sigma * (1.0 + sky_error);
         let source = self
             .electrons_per_unit
             .map_or(0.0, |electrons| flux.max(0.0) / electrons);
-        flux / (background + source).sqrt()
+        flux / (bg + source).sqrt()
     }
 }
 
@@ -46,14 +46,14 @@ mod tests {
     /// is 0.0004 + 0.0005, and below the sky the background's alone.
     #[test]
     fn the_ccd_equation_counts_each_term_once() {
-        let background = StarNoise {
-            background_sigma: 0.02,
+        let bg = StarNoise {
+            bg_sigma: 0.02,
             electrons_per_unit: None,
         };
-        assert!((background.snr(2.0, 4, None) - 50.0).abs() < 1e-12);
+        assert!((bg.snr(2.0, 4, None) - 50.0).abs() < 1e-12);
         let gain = StarNoise {
             electrons_per_unit: Some(1000.0),
-            ..background
+            ..bg
         };
         assert!((gain.snr(2.0, 4, None) - 2.0 / 0.0036f64.sqrt()).abs() < 1e-12);
         assert!((gain.snr(2.0, 4, Some(16)) - 2.0 / 0.004f64.sqrt()).abs() < 1e-12);

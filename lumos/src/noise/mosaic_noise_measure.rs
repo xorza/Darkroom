@@ -63,7 +63,7 @@ impl<'a> MosaicNoiseMeasure<'a> {
             quantization_sigma,
         } = self;
         assert_eq!(
-            cfa_type.num_colors(),
+            cfa_type.color_count(),
             3,
             "a mosaic of three colors, not {cfa_type:?}"
         );
@@ -73,9 +73,9 @@ impl<'a> MosaicNoiseMeasure<'a> {
             excluded: |idx| flags.is_some_and(|flags| flags.is_flagged(idx)),
             per_color: MAX_STATISTIC_SAMPLES,
         };
-        let background = sampling.backgrounds(mosaic, flat_gain);
+        let bg = sampling.bgs(mosaic, flat_gain);
         MosaicNoise {
-            background: background.into_inner().expect("a split per color"),
+            bg: bg.into_inner().expect("a split per color"),
             sky: color_medians(mosaic, &sampling),
             quantization_sigma,
         }

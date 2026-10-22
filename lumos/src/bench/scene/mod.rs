@@ -15,10 +15,10 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::CosmicRays;
-use crate::internals::synthetic::backgrounds::{Gradient, Vignette};
+use crate::internals::synthetic::bgs::{Gradient, Vignette};
 use crate::internals::synthetic::camera::{Camera, SensorDefects};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
@@ -36,8 +36,8 @@ const FILTER_GAIN: [f32; 3] = [1.0 / 2.13, 1.0, 1.0 / 1.71];
 
 /// The sky of every field, `level` times the first exposure's: a gradient, as light pollution or
 /// the moon lays one.
-const fn sky(level: f32) -> BackgroundField {
-    BackgroundField::Gradient(Gradient {
+const fn sky(level: f32) -> BgField {
+    BgField::Gradient(Gradient {
         start: 0.08 * level,
         end: 0.12 * level,
         angle: 0.6,
@@ -199,7 +199,7 @@ impl Field {
             .enumerate()
             .map(|(channel, level)| {
                 let mut light = scene.clone();
-                light.background = sky(level);
+                light.bg = sky(level);
                 for (source, &color) in light.sources.iter_mut().zip(&colors) {
                     // A red star (0) is 1.3 in red and 0.7 in blue, a blue one (1) the reverse.
                     source.flux *= 1.0 + 0.3 * (1.0 - 2.0 * color) * (1.0 - channel as f32);
@@ -258,7 +258,7 @@ impl Field {
             ..Observation::reference(self.seed())
         };
         if let Shot::Sequence { idx, aligned } = shot {
-            scene.background = sky(exposure_sky(idx));
+            scene.bg = sky(exposure_sky(idx));
             for source in &mut scene.sources {
                 source.flux *= exposure_transparency(idx);
             }
@@ -317,7 +317,7 @@ pub(crate) fn master_frames(
         let scene = Scene {
             size,
             sources: Vec::new(),
-            background: BackgroundField::Uniform { level },
+            bg: BgField::Uniform { level },
         };
         let observation = Observation {
             exposure_s,

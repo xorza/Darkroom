@@ -18,13 +18,13 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerRep
         .iter()
         .map(|&(node_id, elapsed_secs)| NodeStatus {
             node_id,
-            status: Some(NodeExecutionStatus::Executed { elapsed_secs }),
+            status: Some(NodeExecStatus::Executed { elapsed_secs }),
             ram: RamUsage::default(),
         })
         .collect::<Vec<_>>();
     nodes.extend(errored.iter().map(|&node_id| NodeStatus {
         node_id,
-        status: Some(NodeExecutionStatus::Errored {
+        status: Some(NodeExecStatus::Errored {
             error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
                 "test error",
             )))),
@@ -299,7 +299,7 @@ fn completed_snapshot_replaces_the_previous_run() {
         WorkerReport::Completed(Arc::new(RunSummary {
             nodes: vec![NodeStatus {
                 node_id: executed,
-                status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1] }),
+                status: Some(NodeExecStatus::MissingInputs { ports: vec![1] }),
                 ram: RamUsage::default(),
             }],
             ..RunSummary::default()
@@ -330,8 +330,8 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
     assert_eq!(rs.status(node), ExecStatus::Executed(1.0));
 
     rs.apply_report(
-        WorkerReport::Error(WorkerError::Execution {
-            error: scenarium::ExecutionError::NodeSeedNotFound { node_id: node },
+        WorkerReport::Error(WorkerError::Exec {
+            error: scenarium::ExecError::NodeSeedNotFound { node_id: node },
         }),
         &mut log,
     );

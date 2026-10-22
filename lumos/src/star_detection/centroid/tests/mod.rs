@@ -12,11 +12,11 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use std::f32::consts::FRAC_PI_4;
 
-use crate::internals::synthetic::{background_map, patterns};
+use crate::internals::synthetic::{bg_map, patterns};
 use crate::math::fwhm;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::urect::URect;
-use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::star_detection::bg::bg_estimate::BgEstimate;
 use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::stamp::{FitInputs, StampGrid};
@@ -25,7 +25,7 @@ use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, Windo
 use crate::star_detection::centroid::*;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::measurement_config::MeasurementConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
@@ -47,12 +47,12 @@ const EXACT_FIT_PX2: f64 = 1e-6;
 
 /// The background `measure_star` measures against where no annulus measured the sky: no offset,
 /// the map's noise at the nearest pixel held to the floor, and no gain.
-fn global_background(sky: &SkyNoise, pos: DVec2) -> StarBackground {
+fn global_bg(sky: &SkyNoise, pos: DVec2) -> StarBg {
     let pixel = (pos.x.round() as usize, pos.y.round() as usize);
-    StarBackground {
+    StarBg {
         offset: 0.0,
         noise: StarNoise {
-            background_sigma: f64::from(sky.noise[pixel].max(sky.floor)),
+            bg_sigma: f64::from(sky.noise[pixel].max(sky.floor)),
             electrons_per_unit: None,
         },
         sky_samples: None,
@@ -97,11 +97,11 @@ struct Measured {
 }
 
 impl Measured {
-    /// `pixels` less `background`.
-    fn of(pixels: &Buffer2<f32>, background: &BackgroundEstimate) -> Self {
+    /// `pixels` less `bg`.
+    fn of(pixels: &Buffer2<f32>, bg: &BgEstimate) -> Self {
         Self {
-            residual: background.residual_of(pixels),
-            sky: background.sky_noise(),
+            residual: bg.residual_of(pixels),
+            sky: bg.sky_noise(),
             saturation: unsaturated(pixels),
         }
     }
@@ -109,7 +109,7 @@ impl Measured {
     /// `pixels` less a flat sky of `level`, with noise `noise`.
     fn flat(pixels: &Buffer2<f32>, level: f32, noise: f32) -> Self {
         let size = Size2us::new(pixels.width(), pixels.height());
-        Self::of(pixels, &background_map::uniform(size, level, noise))
+        Self::of(pixels, &bg_map::uniform(size, level, noise))
     }
 
     /// The region detection hands `measure_star` for a lone star near `pos`: its 11×11
@@ -153,7 +153,7 @@ impl Measured {
                 start,
                 offset: 0.0,
                 noise: StarNoise {
-                    background_sigma: 0.01,
+                    bg_sigma: 0.01,
                     electrons_per_unit: None,
                 },
             },
@@ -170,15 +170,15 @@ impl Measured {
                 radius,
             },
             MeasureGrid::new(TEST_EXPECTED_FWHM).window_sigma,
-            global_background(&self.sky, pos),
+            global_bg(&self.sky, pos),
         )
     }
 }
 
 /// The star `measure_star` makes where no fit measured it: [`StampMetrics`] over `stamp` against
-/// `background` and a PSF of `psf_sigma`, its shape from the windowed moments, and no position σ.
-fn moment_star(stamp: StampAt<'_>, psf_sigma: f64, background: StarBackground) -> Option<Star> {
-    let metrics = StampMetrics::measure(stamp, psf_sigma, background)?;
+/// `bg` and a PSF of `psf_sigma`, its shape from the windowed moments, and no position σ.
+fn moment_star(stamp: StampAt<'_>, psf_sigma: f64, bg: StarBg) -> Option<Star> {
+    let metrics = StampMetrics::measure(stamp, psf_sigma, bg)?;
     let shape = metrics.moment_shape();
     Some(Star {
         pos: stamp.pos,

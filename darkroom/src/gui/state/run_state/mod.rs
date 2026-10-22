@@ -45,7 +45,7 @@ use crate::core::wake::Wake;
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
-use scenarium::NodeExecutionStatus;
+use scenarium::NodeExecStatus;
 use scenarium::NodeId;
 use scenarium::RamUsage;
 use scenarium::WorkerActivity;
@@ -249,7 +249,7 @@ impl RunState {
                 self.clear();
             }
             WorkerReport::Error(error) => {
-                if matches!(&error, WorkerError::Execution { .. }) {
+                if matches!(&error, WorkerError::Exec { .. }) {
                     self.clear();
                 }
                 status.error(StatusFamily::Run, error.to_string());
@@ -320,14 +320,14 @@ impl RunState {
             assert_reported(&compiled, node.node_id);
             if let Some(status) = &node.status {
                 let status = match status {
-                    NodeExecutionStatus::Cached => ExecStatus::Cached,
-                    NodeExecutionStatus::Executed { elapsed_secs } => {
+                    NodeExecStatus::Cached => ExecStatus::Cached,
+                    NodeExecStatus::Executed { elapsed_secs } => {
                         ExecStatus::Executed(*elapsed_secs)
                     }
-                    NodeExecutionStatus::MissingInputs { ports } => {
+                    NodeExecStatus::MissingInputs { ports } => {
                         ExecStatus::MissingInputs(ports.clone())
                     }
-                    NodeExecutionStatus::Errored { error } => {
+                    NodeExecStatus::Errored { error } => {
                         ExecStatus::Errored(Some(error.to_string()))
                     }
                 };

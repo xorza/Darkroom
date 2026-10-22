@@ -33,14 +33,14 @@ pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
 
-use crate::background_mesh::color_mesh::ColorMesh;
+use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::bayer::BayerDetector;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
+use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -50,7 +50,7 @@ use crate::math::size2us::Size2us;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per color.
-const BACKGROUND_TILE_SIZE: usize = 64;
+const BG_TILE_SIZE: usize = 64;
 
 /// Floor for the **noise-normalized** fine structure `F/noise` in the contrast test (in σ units).
 /// Matches astroscrappy's `f.clip(min=0.01)` — bounds the `S'/(F/noise)` ratio where fine structure
@@ -102,11 +102,11 @@ pub(crate) fn reject(
             mask: kept_out.as_ref().map(|kept_out| &kept_out.never_flagged),
         },
         &image.cfa_type(),
-        BACKGROUND_TILE_SIZE,
+        BG_TILE_SIZE,
     );
     // Shared, as the pixels below are borrowed apart from it.
     let flat_gain = image.flat_gain().cloned();
-    let backgrounds = PixelBackgrounds {
+    let bgs = PixelBgs {
         mesh: &mesh,
         flat_gain: flat_gain.as_deref(),
     };
@@ -116,13 +116,13 @@ pub(crate) fn reject(
     let found = match layout {
         Layout::Bayer(pattern) => {
             bayer = BayerDetector::new(config, noise, pattern);
-            bayer.reject(image.data_mut(), &backgrounds, kept_out.as_ref())
+            bayer.reject(image.data_mut(), &bgs, kept_out.as_ref())
         }
         Layout::Mono => {
             mono = MonoDetector::new(config, noise);
             mono.reject(
                 image.data_mut(),
-                &|idx| backgrounds.at(0, size.point_of(idx)),
+                &|idx| bgs.at(0, size.point_of(idx)),
                 kept_out.as_ref(),
             )
         }

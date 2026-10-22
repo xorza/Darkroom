@@ -36,7 +36,7 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>) {
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.
-        .background(support::footer_background(theme, r))
+        .background(support::footer_bg(theme, r))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")

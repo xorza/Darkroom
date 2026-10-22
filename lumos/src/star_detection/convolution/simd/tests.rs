@@ -131,17 +131,17 @@ fn convolve_row_impulse_response_is_the_reversed_kernel() {
 
     for (label, output) in [("simd", &simd), ("scalar", &scalar)] {
         for tap in 0..kernel.len() {
-            let column = centre - radius + tap;
+            let col = centre - radius + tap;
             assert_eq!(
-                output[column],
+                output[col],
                 kernel[2 * radius - tap],
-                "{label}: column {column}"
+                "{label}: column {col}"
             );
         }
         // Everything outside the kernel's reach stays zero.
-        for (column, &value) in output.iter().enumerate() {
-            if column < centre - radius || column > centre + radius {
-                assert_eq!(value, 0.0, "{label}: column {column}");
+        for (col, &value) in output.iter().enumerate() {
+            if col < centre - radius || col > centre + radius {
+                assert_eq!(value, 0.0, "{label}: column {col}");
             }
         }
     }

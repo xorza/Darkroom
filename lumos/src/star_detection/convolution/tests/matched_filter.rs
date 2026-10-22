@@ -10,11 +10,11 @@
 
 use imaginarium::Buffer2;
 
-use crate::internals::synthetic::background_map;
+use crate::internals::synthetic::bg_map;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use crate::star_detection::tests::Scenario;
 
@@ -32,8 +32,7 @@ impl Filtered {
         let frame = frame.frame();
         let pixels = frame.image.channel(0).clone();
         let (width, height) = (pixels.width(), pixels.height());
-        let residual =
-            background_map::estimate(&pixels, &BackgroundConfig::default()).residual_of(&pixels);
+        let residual = bg_map::estimate(&pixels, &BgConfig::default()).residual_of(&pixels);
 
         let mut output = Buffer2::new_default(width, height);
         let mut temp = Buffer2::new_default(width, height);
@@ -84,7 +83,7 @@ impl Filtered {
 fn matched_filter_lifts_every_star() {
     let filtered = Filtered::of(
         &Scenario {
-            num_stars: 25,
+            star_count: 25,
             fwhm: 3.5,
             ..Default::default()
         },
@@ -110,7 +109,7 @@ fn matched_filter_lifts_every_star() {
 #[test]
 fn matched_kernel_maximises_snr() {
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         ..Default::default()
     };
     let snr = |kernel_fwhm: f32| Filtered::of(&frame, kernel_fwhm, None).mean_snr();
@@ -126,7 +125,7 @@ fn matched_kernel_maximises_snr() {
 fn matched_filter_keeps_noisy_stars_detectable() {
     let filtered = Filtered::of(
         &Scenario {
-            num_stars: 20,
+            star_count: 20,
             fwhm: 3.5,
             full_well_e: 4_000.0,
             read_noise_e: 150.0,

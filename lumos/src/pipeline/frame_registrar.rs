@@ -124,13 +124,13 @@ impl<'a> FrameRegistrar<'a> {
         tracing::info!(
             light = idx,
             total = self.count,
-            inliers = registration.num_inliers(),
+            inliers = registration.inlier_count(),
             rms = format!("{:.3}", registration.rms_error()),
             quality = format!("{:.3}", registration.quality_score()),
             transform = %registration.transform(),
             "registered"
         );
-        let inliers = registration.num_inliers();
+        let inliers = registration.inlier_count();
         let rms_error = registration.rms_error();
         let warp = registration.into_warp();
         let mut warped = self.warps.acquire();

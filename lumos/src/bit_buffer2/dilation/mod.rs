@@ -50,11 +50,11 @@ pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut Bi
                 let reach = reaches[source_y.abs_diff(y)];
                 let row = &source[source_y * words_per_row..][..used_words];
                 for (word_idx, out) in out_row[..used_words].iter_mut().enumerate() {
-                    let previous = if word_idx > 0 { row[word_idx - 1] } else { 0 };
+                    let prev = if word_idx > 0 { row[word_idx - 1] } else { 0 };
                     let next = row.get(word_idx + 1).copied().unwrap_or(0);
-                    let current = row[word_idx];
-                    if previous | current | next != 0 {
-                        *out |= smear(previous, current, next, reach);
+                    let cur = row[word_idx];
+                    if prev | cur | next != 0 {
+                        *out |= smear(prev, cur, next, reach);
                     }
                 }
             }
@@ -62,12 +62,12 @@ pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut Bi
         });
 }
 
-/// `current` smeared `reach` bits either way, the bits `previous` and `next` reach into it
+/// `cur` smeared `reach` bits either way, the bits `prev` and `next` reach into it
 /// included (`reach` ≤ 63).
 #[inline]
-fn smear(previous: u64, current: u64, next: u64, reach: usize) -> u64 {
-    let up = smear_up((u128::from(current) << 64) | u128::from(previous), reach) >> 64;
-    let down = smear_down((u128::from(next) << 64) | u128::from(current), reach);
+fn smear(prev: u64, cur: u64, next: u64, reach: usize) -> u64 {
+    let up = smear_up((u128::from(cur) << 64) | u128::from(prev), reach) >> 64;
+    let down = smear_down((u128::from(next) << 64) | u128::from(cur), reach);
     (up | down) as u64
 }
 

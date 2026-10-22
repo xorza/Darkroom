@@ -13,7 +13,7 @@ use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 /// The default value seeded into `func`'s model-path input (index 1),
 /// read back through the published library.
 fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
-    host.library.current().by_name(func).unwrap().inputs()[1]
+    host.library.cur().by_name(func).unwrap().inputs()[1]
         .default_value
         .clone()
 }
@@ -26,7 +26,7 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     let mut host = RuntimeHost::new(Arc::new(|| {}), &Preferences::default());
     let func = host
         .library
-        .current()
+        .cur()
         .by_name("ML Denoise")
         .expect("built-in present");
     let mut graph = Graph::default();
@@ -40,7 +40,7 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
             .is_empty(),
         "a node the program has no work for reaches nothing"
     );
-    assert_eq!(status.current(), None);
+    assert_eq!(status.cur(), None);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     let mut memory_only = Graph::default();
     let func = host
         .library
-        .current()
+        .cur()
         .by_name("ML Denoise")
         .expect("built-in present");
     let node = memory_only.add_func_node(func);
@@ -133,7 +133,7 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
 fn only_gaining_a_first_root_owes_the_worker_a_flush() {
     let a = Path::new("/docs/a.darkroom-cache");
     let b = Path::new("/docs/b.darkroom-cache");
-    for (previous, current, expected, why) in [
+    for (prev, cur, expected, why) in [
         (None, None, CacheRootChange::Unchanged, "still unsaved"),
         (Some(a), Some(a), CacheRootChange::Unchanged, "a re-save"),
         (None, Some(a), CacheRootChange::Gained, "the first save"),
@@ -146,9 +146,9 @@ fn only_gaining_a_first_root_owes_the_worker_a_flush() {
         (Some(a), None, CacheRootChange::Repointed, "File ▸ New"),
     ] {
         assert_eq!(
-            CacheRootChange::of(previous, current),
+            CacheRootChange::of(prev, cur),
             expected,
-            "{why}: {previous:?} -> {current:?}"
+            "{why}: {prev:?} -> {cur:?}"
         );
     }
 }

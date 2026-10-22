@@ -20,8 +20,8 @@ fn distortion_map_translation() {
     // Nodes every 20 px and on the last pixel: 0, 20, 40, 60, 80, 99 — none past the frame,
     // where the old rule put its last node at 100.
     assert_eq!(map.grid, Size2us::new(6, 6));
-    assert_eq!(map.columns, [0, 20, 40, 60, 80, 99]);
-    assert_eq!(map.rows, map.columns);
+    assert_eq!(map.cols, [0, 20, 40, 60, 80, 99]);
+    assert_eq!(map.rows, map.cols);
 
     // For pure translation, every grid point should have distortion ~(5, 3)
     for gy in 0..map.grid.height {

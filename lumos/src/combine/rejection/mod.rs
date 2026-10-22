@@ -20,7 +20,7 @@ pub(crate) mod winsorized_clip_config;
 
 use std::ops::Range;
 
-use crate::combine::reducer::pixel_samples::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseCols;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::pass::{Narrowing, Pass, Proposal};
@@ -167,7 +167,7 @@ impl Rejection {
     pub(super) fn surviving_window(
         &self,
         scratch: &mut ScratchBuffers,
-        noise: Option<NoiseColumns<'_>>,
+        noise: Option<NoiseCols<'_>>,
         min_survivors: usize,
     ) -> Range<usize> {
         debug_assert!(min_survivors >= 1);

@@ -244,8 +244,8 @@ impl<'a> Search<'a> {
             }
 
             iteration_bound = self.iteration_bound(candidate.inliers.len());
-            if let Some(previous) = best.replace(candidate) {
-                scratch = previous.inliers;
+            if let Some(prev) = best.replace(candidate) {
+                scratch = prev.inliers;
             }
         }
 
@@ -309,13 +309,13 @@ impl<'a> Search<'a> {
     /// the acceptance test at the end for why that guard is not optional.
     fn local_optimization(&self, hypothesis: &mut ScoredHypothesis, buffers: &mut LocalOptBuffers) {
         let min_samples = self.transform_type.min_points();
-        let mut current_transform = hypothesis.transform;
+        let mut cur_transform = hypothesis.transform;
 
         // `inlier_buf` holds the current best's inliers, `scored` the refit being scored. The
         // hypothesis beat the running best, so its score is complete and is where LO starts.
         buffers.inlier_buf.clear();
         buffers.inlier_buf.extend_from_slice(&hypothesis.inliers);
-        let mut current_score = hypothesis.score;
+        let mut cur_score = hypothesis.score;
 
         for _ in 0..self.estimator.config.local_max_iterations {
             if buffers.inlier_buf.len() < min_samples {
@@ -327,24 +327,24 @@ impl<'a> Search<'a> {
             else {
                 break;
             };
-            let new_score = self.score(&refined, &mut buffers.scored, current_score);
+            let new_score = self.score(&refined, &mut buffers.scored, cur_score);
 
             // A refit is taken on its score alone (Chum 2003). Scoring stops once the loss passes
             // the current score's, so a refit that did not beat it has a cut-short inlier list
             // whose count means nothing.
-            if new_score <= current_score {
+            if new_score <= cur_score {
                 break;
             }
-            current_transform = refined;
+            cur_transform = refined;
             mem::swap(&mut buffers.inlier_buf, &mut buffers.scored);
-            current_score = new_score;
+            cur_score = new_score;
         }
 
         // Commit only a refit that improved the score, each one plausible; otherwise `hypothesis`
         // keeps its complete pre-LO inliers.
-        if current_score > hypothesis.score {
-            hypothesis.transform = current_transform;
-            hypothesis.score = current_score;
+        if cur_score > hypothesis.score {
+            hypothesis.transform = cur_transform;
+            hypothesis.score = cur_score;
             mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
         }
     }

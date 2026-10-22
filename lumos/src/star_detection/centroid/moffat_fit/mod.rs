@@ -205,12 +205,7 @@ impl MoffatFit {
     /// ([`profile_problem::fit_is_plausible`]), or an amplitude or α pinned at one of
     /// [`MoffatFixedBeta::constrain`]'s bounds.
     pub(super) fn new(inputs: FitInputs<'_>, beta: f32) -> Option<Self> {
-        let FitInputs {
-            pos,
-            grid,
-            background,
-            ..
-        } = inputs;
+        let FitInputs { pos, grid, bg, .. } = inputs;
         let mut fit = StampFit::prepare::<5>(inputs)?;
         let amplitude_seed = fit.amplitude_seed()?;
 
@@ -229,7 +224,7 @@ impl MoffatFit {
             fit.local_pos.y,
             amplitude_seed,
             initial_alpha,
-            f64::from(background),
+            f64::from(bg),
         ];
 
         let result = fit.fit(&mut model, grid, initial_params)?;
@@ -294,7 +289,7 @@ mod internals {
         /// Core width parameter (alpha).
         pub(super) alpha: f32,
         /// Background level.
-        pub(super) background: f32,
+        pub(super) bg: f32,
         /// The quadrature order the fit ended at.
         pub(super) order: usize,
     }
@@ -303,11 +298,11 @@ mod internals {
         /// Derive the diagnostics from the optimizer's report. Gated with the struct, so a
         /// release build runs none of this.
         pub(super) fn of(result: &LmFit<5>, order: usize) -> Self {
-            let [_, _, amplitude, alpha, background] = result.params;
+            let [_, _, amplitude, alpha, bg] = result.params;
             Self {
                 amplitude: amplitude as f32,
                 alpha: alpha as f32,
-                background: background as f32,
+                bg: bg as f32,
                 order,
             }
         }

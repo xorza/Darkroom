@@ -36,7 +36,7 @@ use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
 
 use crate::core::document::Document;
 use crate::core::document::viewport::Viewport;
-use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
+use crate::core::io::preferences::{ViewerBg, ViewerPreferences};
 use crate::gui::pane::image_viewer::camera::VIEWER_ZOOM;
 use crate::gui::pane::image_viewer::glyph::Swatch;
 use crate::gui::pane::image_viewer::toolbar::{BACKDROPS, Controls, Readout};
@@ -239,7 +239,7 @@ impl ImageViewer {
         self.apply_gestures(ui, source.image().map(FullView::image), pane);
 
         // The checker draws over the theme's backdrop.
-        let fill = glyph::flat_fill(theme, prefs.background).unwrap_or(theme.canvas.bg);
+        let fill = glyph::flat_fill(theme, prefs.bg).unwrap_or(theme.canvas.bg);
         let mut prefs_changed = false;
         Panel::zstack()
             .id(pane_wid(self.node_id))
@@ -248,7 +248,7 @@ impl ImageViewer {
             .clip_rect()
             .background(Background::fill(fill))
             .show(ui, |ui| {
-                if prefs.background == ViewerBackground::Checker
+                if prefs.bg == ViewerBg::Checker
                     && let Some(pane) = pane
                 {
                     self.draw_checker(ui, pane);
@@ -379,12 +379,12 @@ impl ImageViewer {
                 let appearance = Panel::vstack().id(controls.wid("pill_appearance"));
                 pill::dress(appearance, theme).show(ui, |ui| {
                     for (mode, key, tip) in BACKDROPS {
-                        let state = Toggle::from(prefs.background == mode);
+                        let state = Toggle::from(prefs.bg == mode);
                         if Chip::new(controls.wid(key), tip).show(ui, theme, |ui, s, _| {
                             Swatch { mode, state }.draw(ui, s, theme);
                         }) && state == Toggle::Off
                         {
-                            prefs.background = mode;
+                            prefs.bg = mode;
                             changed = true;
                         }
                     }

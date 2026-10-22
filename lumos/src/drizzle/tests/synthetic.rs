@@ -9,7 +9,7 @@ use glam::DVec2;
 use super::*;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene, TrueSource};
+use crate::internals::synthetic::scene::{BgField, Scene, TrueSource};
 
 /// One rendered frame per dither offset, and the transform that registers each.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ fn drizzle_conserves_total_flux() {
             pos: DVec2::new(32.0, 32.0),
             flux: 5.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
     let mean_flux = frames
@@ -138,7 +138,7 @@ fn drizzle_places_star_at_its_reference_position() {
             pos: DVec2::new(28.0, 36.0),
             flux: 5.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
     let scale = 2.0;
@@ -167,7 +167,7 @@ fn drizzle_dithering_recovers_resolution() {
             pos: DVec2::new(24.3, 24.7),
             flux: 2.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let offs = [-1.0 / 3.0, 0.0, 1.0 / 3.0];
     let dithers: Vec<DVec2> = offs
@@ -212,7 +212,7 @@ fn drizzle_quality_maps_have_their_closed_form() {
             pos: DVec2::new(32.0, 32.0),
             flux: 5.0,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let mut frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
     for image in &mut frames.images {

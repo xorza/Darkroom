@@ -190,12 +190,12 @@ impl Denoise {
             strength,
             ..
         } = *self;
-        let DenoiseScratch { c_curr, c_next } = scratch;
+        let DenoiseScratch { c_cur, c_next } = scratch;
 
-        c_curr.pixels_mut().copy_from_slice(plane);
+        c_cur.pixels_mut().copy_from_slice(plane);
         for j in 0..scales {
             let step = 1usize << j;
-            wavelet::atrous_smooth(c_curr, c_next, step);
+            wavelet::atrous_smooth(c_cur, c_next, step);
 
             // The detail plane w_j = c_j − c_{j+1} is never materialized: the threshold-removed
             // part is computed inline, saving a full read+write pass over the plane each scale.
@@ -209,10 +209,10 @@ impl Denoise {
                     let t = per_sigma * sigma;
                     plane
                         .par_chunks_mut(SAMPLES_PER_BLOCK)
-                        .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .zip(c_cur.pixels().par_chunks(SAMPLES_PER_BLOCK))
                         .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                        .for_each(|((plane, curr), next)| {
-                            for ((p, &cc), &cn) in plane.iter_mut().zip(curr).zip(next) {
+                        .for_each(|((plane, cur), next)| {
+                            for ((p, &cc), &cn) in plane.iter_mut().zip(cur).zip(next) {
                                 removed(p, cc, cn, t);
                             }
                         });
@@ -220,12 +220,12 @@ impl Denoise {
                 PlaneNoise::Variance(variance) => {
                     plane
                         .par_chunks_mut(SAMPLES_PER_BLOCK)
-                        .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                        .zip(c_cur.pixels().par_chunks(SAMPLES_PER_BLOCK))
                         .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
                         .zip(variance.par_chunks(SAMPLES_PER_BLOCK))
-                        .for_each(|(((plane, curr), next), variance)| {
+                        .for_each(|(((plane, cur), next), variance)| {
                             for (((p, &cc), &cn), &v) in
-                                plane.iter_mut().zip(curr).zip(next).zip(variance)
+                                plane.iter_mut().zip(cur).zip(next).zip(variance)
                             {
                                 removed(p, cc, cn, per_sigma * v.max(0.0).sqrt());
                             }
@@ -233,7 +233,7 @@ impl Denoise {
                 }
             }
 
-            mem::swap(c_curr, c_next);
+            mem::swap(c_cur, c_next);
         }
     }
 
@@ -276,7 +276,7 @@ enum PlaneNoise<'a> {
 #[derive(Debug)]
 struct DenoiseScratch {
     /// Current smooth `c_j` (and, after the loop, the coarse residual `c_J`).
-    c_curr: Buffer2<f32>,
+    c_cur: Buffer2<f32>,
     /// Next smooth `c_{j+1}`.
     c_next: Buffer2<f32>,
 }
@@ -284,7 +284,7 @@ struct DenoiseScratch {
 impl DenoiseScratch {
     fn new(size: Size2us) -> Self {
         Self {
-            c_curr: Buffer2::new_default(size.width, size.height),
+            c_cur: Buffer2::new_default(size.width, size.height),
             c_next: Buffer2::new_default(size.width, size.height),
         }
     }

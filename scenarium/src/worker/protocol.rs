@@ -4,9 +4,9 @@ use crate::worker::error::WorkerError;
 use tokio::sync::oneshot;
 
 use crate::data::ram_usage::RamUsage;
-use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::report::run_reporter::RunPhase;
+use crate::exec::cache::disk_store::DiskStore;
+use crate::exec::compile::compiled_graph::CompiledGraph;
+use crate::exec::report::run_reporter::RunPhase;
 use crate::graph::identity::NodeId;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::run_summary::RunSummary;

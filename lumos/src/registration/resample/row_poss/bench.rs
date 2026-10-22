@@ -14,7 +14,7 @@ use crate::registration::transform::TransformType;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
-    let mut group = Kind::Atomic.group(c, "registration/row_positions", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/row_poss", Scale::Sample);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     for (name, transform, correction) in [
         ("affine", TransformType::Similarity, Correction::Linear),

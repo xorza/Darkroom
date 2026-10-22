@@ -98,7 +98,7 @@ async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
 /// A `Sync` sent behind a run is acknowledged only after the run reported:
 /// the completion is already queued when `settle` returns.
 #[tokio::test]
-async fn sync_fires_after_execution() {
+async fn sync_fires_after_exec() {
     let mut w = TestWorker::frames();
 
     w.settle([w.update(), w.fire("Frame Event", 0)]).await;

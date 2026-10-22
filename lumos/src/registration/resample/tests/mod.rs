@@ -3,7 +3,7 @@ use std::sync::Arc;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
@@ -295,14 +295,14 @@ fn warp_into_overwrites_dirty_buffers_completely() {
         let plain = LinearImage::from_interleaved(dimensions, signed_pixels(size, channels));
         let mut masked = plain.clone();
         masked.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
-        let mut previous = LinearImage::from_interleaved(
+        let mut prev = LinearImage::from_interleaved(
             dimensions,
             signed_pixels(size, channels)
                 .into_iter()
                 .map(|value| value * -3.0)
                 .collect(),
         );
-        previous.set_flags(PixelFlags::from_fn(size, |idx| match idx {
+        prev.set_flags(PixelFlags::from_fn(size, |idx| match idx {
             30 | 31 => QualityFlags::NO_DATA,
             100..=103 => QualityFlags::SATURATED,
             _ => QualityFlags::default(),
@@ -331,7 +331,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
 
                     let mut reused = WarpResult::build(dimensions);
                     reused.warp_into(
-                        &SourceImage::of(&previous),
+                        &SourceImage::of(&prev),
                         Warp {
                             transform: &transforms[0],
                             params,
@@ -582,7 +582,7 @@ fn only_the_nearest_pixel_keeps_the_quantization_step() {
     let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
     image.metadata.derived.set_quantization_sigma(Some(0.25));
     let mosaic_noise = MosaicNoise {
-        background: [0.1, 0.2, 0.3].map(BackgroundSplit::of_sigma),
+        bg: [0.1, 0.2, 0.3].map(BgSplit::of_sigma),
         sky: [1.0; 3],
         quantization_sigma: Some(0.25),
     };

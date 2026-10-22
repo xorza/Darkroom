@@ -6,12 +6,12 @@
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-use crate::background_mesh::color_mesh::LocalBackground;
+use crate::bg_mesh::color_mesh::LocalBg;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::mono::PixelRepair;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
-use crate::calibration::cosmic_ray::noise_model::PixelBackground;
+use crate::calibration::cosmic_ray::noise_model::PixelBg;
 use crate::calibration::cosmic_ray::*;
 use crate::image::pixel_flags::PixelFlags;
 use crate::internals::assertions::bits;
@@ -384,8 +384,8 @@ fn a_repair_matches_a_snapshot_reference() {
 
     let sky = 0.5;
     let want = repair_via_snapshot(&pixels, &mask, sky);
-    let local = |_| PixelBackground {
-        local: LocalBackground { sky, noise: 1.0 },
+    let local = |_| PixelBg {
+        local: LocalBg { sky, noise: 1.0 },
         flat_gain: 1.0,
     };
     let repair = |pixels: &Buffer2<f32>, mask: &BitBuffer2| {

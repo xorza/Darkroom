@@ -80,7 +80,7 @@ fn from_libraw_classifies_the_sensor() {
         .cfa_type(),
         Err(XTransPatternError::Value {
             row: 0,
-            column: 0,
+            col: 0,
             value: 3
         })
     ));

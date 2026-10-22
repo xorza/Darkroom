@@ -83,7 +83,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
             reports
                 .lock()
                 .unwrap()
-                .push((report.stage, report.current, report.total));
+                .push((report.stage, report.cur, report.total));
         }
     });
     let result = config
@@ -153,7 +153,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         reports
             .iter()
             .filter(|(stage, ..)| *stage == wanted)
-            .map(|(_, current, _)| *current)
+            .map(|(_, cur, _)| *cur)
             .collect::<Vec<usize>>()
     };
     let totals = |wanted: StackingStage| {
@@ -1021,7 +1021,7 @@ fn both_front_ends_report_the_same_stages() {
                 reports
                     .lock()
                     .unwrap()
-                    .push((progress.stage, progress.current, progress.total));
+                    .push((progress.stage, progress.cur, progress.total));
             }
         });
         (reports, callback)
@@ -1091,7 +1091,7 @@ fn both_front_ends_report_the_same_stages() {
         .unwrap()
         .iter()
         .filter(|(stage, ..)| *stage == StackingStage::Preparing)
-        .map(|&(_, current, total)| (current, total))
+        .map(|&(_, cur, total)| (cur, total))
         .collect();
     assert_eq!(preparing, [(1, 3), (2, 3), (3, 3)]);
 }

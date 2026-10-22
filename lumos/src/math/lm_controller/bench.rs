@@ -47,14 +47,14 @@ impl Stamp {
 
     /// The model at pixel `idx` and its derivatives by each parameter.
     fn terms(params: &[f64; 5], idx: usize) -> Terms {
-        let [amplitude, cx, cy, sigma, background] = *params;
+        let [amplitude, cx, cy, sigma, bg] = *params;
         let (dx, dy) = ((idx % STAMP) as f64 - cx, (idx / STAMP) as f64 - cy);
         let r2 = dx * dx + dy * dy;
         let s2 = sigma * sigma;
         let profile = (-r2 / (2.0 * s2)).exp();
         let peak = amplitude * profile;
         Terms {
-            model: peak + background,
+            model: peak + bg,
             jacobian: [
                 profile,
                 peak * dx / s2,

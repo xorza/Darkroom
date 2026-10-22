@@ -85,8 +85,8 @@ impl Dlt {
                 [0.0, 0.0, 0.0, -x, -y, -1.0, x * t.y, y * t.y, t.y],
             ];
             for (offset, row) in rows.iter().enumerate() {
-                for (column, &value) in row.iter().enumerate() {
-                    design[(2 * i + offset, column)] = root * value;
+                for (col, &value) in row.iter().enumerate() {
+                    design[(2 * i + offset, col)] = root * value;
                 }
             }
         }

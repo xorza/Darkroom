@@ -25,8 +25,8 @@ impl Stubs {
     ///
     /// If a stub already holds its node id.
     pub(crate) fn insert(&mut self, record: DetachedNode) {
-        let previous = self.0.insert(record.node_id(), record);
-        assert!(previous.is_none(), "a stub's node id is unique");
+        let prev = self.0.insert(record.node_id(), record);
+        assert!(prev.is_none(), "a stub's node id is unique");
     }
 
     pub(crate) fn remove(&mut self, node_id: NodeId) -> Option<DetachedNode> {

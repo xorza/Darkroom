@@ -9,7 +9,7 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::internals::synthetic::background_map;
+use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::observe::SimFrame;
 use crate::internals::visual::comparison::Comparison;
 use crate::internals::visual::report::{DetectionMetrics, save_metrics};
@@ -112,12 +112,11 @@ impl PipelineCase<'_> {
                     .map(|ray| DVec2::new(ray.x as f64, ray.y as f64)),
             )
             .collect();
-        let background = background_map::estimate(pixels, &config.background);
+        let bg = bg_map::estimate(pixels, &config.bg);
         let saturation = frame.image.metadata.header.saturation_level();
         let k = config.extraction.sigma_threshold;
-        let sigma_at = |x: usize, y: usize| background.sky.noise[(x, y)].max(background.sky.floor);
-        let residual_at =
-            |x: usize, y: usize| frame.truth.clean[(x, y)] - background.background[(x, y)];
+        let sigma_at = |x: usize, y: usize| bg.sky.noise[(x, y)].max(bg.sky.floor);
+        let residual_at = |x: usize, y: usize| frame.truth.clean[(x, y)] - bg.bg[(x, y)];
         // What the threshold is applied to: the residual itself, or its matched-filtered image,
         // which lifts a smooth plateau by 2√π·s against noise, twice what it lifts a star's peak
         // by.

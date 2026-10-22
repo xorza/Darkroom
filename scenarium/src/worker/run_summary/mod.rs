@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::data::ram_usage::RamUsage;
-use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::node_status::NodeStatus;
+use crate::exec::report::exec_outcome::ExecOutcome;
+use crate::exec::report::node_status::NodeStatus;
 use crate::runtime::log_entry::LogEntry;
 use crate::worker::activity::WorkerActivity;
 
@@ -36,7 +36,7 @@ impl RunSummaryPublisher {
     pub(crate) fn publish(
         &mut self,
         activity: WorkerActivity,
-        outcome: &mut ExecutionOutcome,
+        outcome: &mut ExecOutcome,
     ) -> Arc<RunSummary> {
         // A summary still queued at the host cannot be written into, and `Arc::make_mut` would
         // deep-clone the vectors cleared below, so publish into a fresh one instead.

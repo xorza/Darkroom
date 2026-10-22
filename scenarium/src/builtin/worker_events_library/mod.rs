@@ -19,7 +19,7 @@ pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x714dbc9a_ac0a_428b_9
 #[derive(Debug)]
 struct FpsEventState {
     period: Option<Duration>,
-    last_execution: Instant,
+    last_exec: Instant,
     last_fps_emit: Instant,
     frame_no: i64,
 }
@@ -103,11 +103,11 @@ pub fn worker_events_library() -> Library {
                         let frame_no;
                         {
                             let mut event_state = event_state.lock().await;
-                            if let Some(previous) = event_state.get_mut::<FpsEventState>() {
-                                delta = previous.last_execution.elapsed().as_secs_f64();
-                                frame_no = previous.frame_no;
-                                previous.period = period;
-                                previous.last_execution = now;
+                            if let Some(prev) = event_state.get_mut::<FpsEventState>() {
+                                delta = prev.last_exec.elapsed().as_secs_f64();
+                                frame_no = prev.frame_no;
+                                prev.period = period;
+                                prev.last_exec = now;
                                 // `last_fps_emit` belongs to
                                 // `wait_for_fps_event`, which stamps it when
                                 // it emits: stamped here too, every execution
@@ -115,13 +115,13 @@ pub fn worker_events_library() -> Library {
                                 // subscriber re-reading this source faster
                                 // than the period would postpone the event
                                 // indefinitely.
-                                previous.frame_no += 1;
+                                prev.frame_no += 1;
                             } else {
                                 delta = period.map_or(0.0, |period| period.as_secs_f64());
                                 frame_no = 1;
                                 event_state.set(FpsEventState {
                                     period,
-                                    last_execution: now,
+                                    last_exec: now,
                                     last_fps_emit: now,
                                     frame_no: 2,
                                 });

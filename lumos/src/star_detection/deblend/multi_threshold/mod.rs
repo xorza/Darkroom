@@ -1,7 +1,7 @@
 //! Multi-threshold deblending, after SExtractor (Bertin & Arnouts 1996, A&AS 117, 393) as SEP
 //! implements it in `deblend.c`.
 //!
-//! 1. Cut the component at `n_thresholds − 1` levels spaced exponentially between the detection
+//! 1. Cut the component at `threshold_count − 1` levels spaced exponentially between the detection
 //!    threshold and its peak. At each level, every object of the level below splits into the
 //!    connected regions of its pixels above the level that hold at least `min_area` pixels.
 //! 2. An object is significant when its flux above its own level, `Σv − t·n`, exceeds
@@ -26,7 +26,7 @@ const NO_OBJECT: u32 = u32::MAX;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MultiThresholdParams {
     /// The levels of the ladder, the detection threshold included.
-    pub(crate) n_thresholds: usize,
+    pub(crate) threshold_count: usize,
     /// A branch's share of the component's flux.
     pub(crate) min_contrast: f32,
     /// Minimum distance between the peaks of two stars of one component, in pixels.
@@ -52,7 +52,10 @@ impl MultiThresholdParams {
         let params = self;
         let floor = params.floor;
         debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
-        debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
+        debug_assert!(
+            params.threshold_count >= 1,
+            "the ladder has at least one step"
+        );
         let DeblendBuffers {
             pixels,
             peaks,
@@ -78,7 +81,7 @@ impl MultiThresholdParams {
                 ladder: ThresholdLadder {
                     low: floor,
                     high: peak.value,
-                    n_thresholds: params.n_thresholds,
+                    threshold_count: params.threshold_count,
                 },
                 min_area: params.min_area,
                 connectivity: params.connectivity,
@@ -151,7 +154,7 @@ pub(crate) struct TreeBuffers {
 struct ThresholdLadder {
     low: f32,
     high: f32,
-    n_thresholds: usize,
+    threshold_count: usize,
 }
 
 /// What a tree is cut by: its root, the whole component with its brightest pixel; the ladder of
@@ -174,15 +177,15 @@ struct LevelCut {
 }
 
 impl ThresholdLadder {
-    /// Level `i` of `0..n_thresholds`: `low` itself at 0.
+    /// Level `i` of `0..threshold_count`: `low` itself at 0.
     fn level(self, i: usize) -> f32 {
-        self.low * (self.high / self.low).powf(i as f32 / self.n_thresholds as f32)
+        self.low * (self.high / self.low).powf(i as f32 / self.threshold_count as f32)
     }
 }
 
 impl TreeBuffers {
     /// Build the tree of `pixels`, whose brightest is `cut.root`: the root is the whole
-    /// component, and levels `1..n_thresholds` cut every object of the level below into its
+    /// component, and levels `1..threshold_count` cut every object of the level below into its
     /// regions above the level holding at least `min_area` pixels. Exponential spacing puts the
     /// levels densest at the faint end, where neighbours first separate.
     fn build(&mut self, pixels: &mut ComponentPixels, cut: TreeCut) {
@@ -209,7 +212,7 @@ impl TreeBuffers {
         self.active.clear();
         self.active
             .extend(0..u32::try_from(count).expect("a component cannot exceed u32 pixels"));
-        for level in 1..ladder.n_thresholds {
+        for level in 1..ladder.threshold_count {
             let threshold = ladder.level(level);
             let stamp = u32::try_from(level).expect("the ladder holds at most u32 levels");
             let before = self.objects.len();

@@ -264,8 +264,8 @@ impl EllipticalGaussian {
             let mut sum = 0.0;
             for row in 0..subdivision {
                 let cell_y = y - 0.5 + (row as f64 + 0.5) * cell;
-                for column in 0..subdivision {
-                    let cell_x = x - 0.5 + (column as f64 + 0.5) * cell;
+                for col in 0..subdivision {
+                    let cell_x = x - 0.5 + (col as f64 + 0.5) * cell;
                     sum += rule.integrate(0.0, 0.0, |u, v| {
                         profile(cell_x + u * cell, cell_y + v * cell)
                     });

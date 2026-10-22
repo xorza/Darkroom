@@ -22,8 +22,8 @@ pub(crate) mod scene;
 use criterion::Criterion;
 
 use crate::{
-    background_mesh, bit_buffer2, calibration, combine, drizzle, frame, frame_store, image,
-    image_ops, io, math, noise, pipeline, registration, star_detection,
+    bg_mesh, bit_buffer2, calibration, combine, drizzle, frame, frame_store, image, image_ops, io,
+    math, noise, pipeline, registration, star_detection,
 };
 
 /// Every bench, atomic first, a top-level module at a time.
@@ -36,7 +36,7 @@ pub fn run(c: &mut Criterion) {
     frame::bench::atomic(c);
     frame_store::bench::atomic(c);
     star_detection::bench::atomic(c);
-    background_mesh::bench::atomic(c);
+    bg_mesh::bench::atomic(c);
     bit_buffer2::bench::atomic(c);
     registration::bench::atomic(c);
     combine::bench::atomic(c);

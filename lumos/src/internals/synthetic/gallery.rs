@@ -21,12 +21,12 @@ use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::artifacts::CosmicRays;
-use crate::internals::synthetic::backgrounds::{Gradient, NebulaConfig, Vignette};
+use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette};
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::internals::synthetic::fixtures::{cluster_field, star_field};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene, TrueSource};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -46,8 +46,8 @@ fn save_frame(frame: &SimFrame, name: &str, tone: ToneMap) {
     save(frame.image.channel(0), name, tone);
 }
 
-/// A representative populated star field over `background`.
-fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
+/// A representative populated star field over `bg`.
+fn demo_field(size: Size2us, bg: BgField, seed: u64) -> Scene {
     Scene::scatter(
         size,
         Scatter {
@@ -56,7 +56,7 @@ fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
             placement: Placement::Uniform { margin: 16.0 },
             seed,
         },
-        background,
+        bg,
     )
 }
 
@@ -89,17 +89,17 @@ fn dithered<'a>(
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
-fn gallery_backgrounds() {
+fn gallery_bgs() {
     let size = Size2us::new(256, 256);
-    let cases: [(&str, BackgroundField, ToneMap); 6] = [
+    let cases: [(&str, BgField, ToneMap); 6] = [
         (
             "backgrounds/uniform",
-            BackgroundField::Uniform { level: 0.1 },
+            BgField::Uniform { level: 0.1 },
             ToneMap::Clamp,
         ),
         (
             "backgrounds/gradient_0deg",
-            BackgroundField::Gradient(Gradient {
+            BgField::Gradient(Gradient {
                 start: 0.02,
                 end: 0.4,
                 angle: 0.0,
@@ -108,7 +108,7 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/gradient_45deg",
-            BackgroundField::Gradient(Gradient {
+            BgField::Gradient(Gradient {
                 start: 0.02,
                 end: 0.4,
                 angle: FRAC_PI_4,
@@ -117,7 +117,7 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/vignette",
-            BackgroundField::Vignette(Vignette {
+            BgField::Vignette(Vignette {
                 center: 0.3,
                 edge: 0.05,
                 falloff: 2.0,
@@ -126,12 +126,12 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/nebula",
-            BackgroundField::Nebula(NebulaConfig::default()),
+            BgField::Nebula(NebulaConfig::default()),
             ToneMap::Asinh,
         ),
         (
             "backgrounds/nebula_elongated",
-            BackgroundField::Nebula(NebulaConfig {
+            BgField::Nebula(NebulaConfig {
                 center: Vec2::new(0.4, 0.55),
                 radius: 0.35,
                 amplitude: 0.3,
@@ -151,7 +151,7 @@ fn gallery_backgrounds() {
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_psf_models() {
     let size = Size2us::new(64, 64);
-    let dark = BackgroundField::Uniform { level: 0.0 };
+    let dark = BgField::Uniform { level: 0.0 };
     let cases: [(&str, PsfModel); 6] = [
         ("psf/gaussian_fwhm3", PsfModel::gaussian(3.0)),
         ("psf/gaussian_fwhm6", PsfModel::gaussian(6.0)),
@@ -215,7 +215,7 @@ fn gallery_noise() {
     let flat = Scene {
         size,
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.2 },
+        bg: BgField::Uniform { level: 0.2 },
     };
     // A uniform field: linear tone makes the noise grain (or its absence) visible.
     save_frame(
@@ -230,7 +230,7 @@ fn gallery_noise() {
     );
 
     // A populated field across shot-noise (well depth) and read-noise levels.
-    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 7);
+    let field = demo_field(size, BgField::Uniform { level: 0.05 }, 7);
     let well = |full_well_e: f32, read_noise_e: f32| Camera {
         full_well_e,
         read_noise_e,
@@ -281,7 +281,7 @@ fn gallery_sensor() {
     let sky = Scene {
         size,
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.3 },
+        bg: BgField::Uniform { level: 0.3 },
     };
     let vignetted = Camera {
         flat: vignette_flat,
@@ -294,7 +294,7 @@ fn gallery_sensor() {
     );
 
     // Defects + bias on a star field: hot pixels, a dead pixel block, a bad column.
-    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 9);
+    let field = demo_field(size, BgField::Uniform { level: 0.05 }, 9);
     let defects = SensorDefects {
         hot: (0..40)
             .map(|i| ((i * 53 + 7) % size.width, (i * 97 + 3) % size.height, 0.7))
@@ -305,7 +305,7 @@ fn gallery_sensor() {
     };
     let bias = BiasField {
         offset: 0.04,
-        bad_columns: vec![(128, 0.25), (190, 0.15)],
+        bad_cols: vec![(128, 0.25), (190, 0.15)],
     };
     let camera = Camera {
         defects,
@@ -332,7 +332,7 @@ fn gallery_scenes() {
             placement: Placement::Uniform { margin: 20.0 },
             seed: 1,
         },
-        BackgroundField::Uniform { level: 0.05 },
+        BgField::Uniform { level: 0.05 },
     );
     save_frame(
         &render(&sparse, &Camera::ideal(3.5), &Observation::reference(1)),
@@ -340,14 +340,14 @@ fn gallery_scenes() {
         ToneMap::Asinh,
     );
 
-    let dense = demo_field(size, BackgroundField::Uniform { level: 0.06 }, 2);
+    let dense = demo_field(size, BgField::Uniform { level: 0.06 }, 2);
     save_frame(
         &render(&dense, &Camera::realistic(3.5), &Observation::reference(2)),
         "scenes/dense_realistic",
         ToneMap::Asinh,
     );
 
-    let over_nebula = demo_field(size, BackgroundField::Nebula(NebulaConfig::default()), 3);
+    let over_nebula = demo_field(size, BgField::Nebula(NebulaConfig::default()), 3);
     save_frame(
         &render(
             &over_nebula,
@@ -382,7 +382,7 @@ fn gallery_scenes() {
             placement: Placement::Uniform { margin: 20.0 },
             seed: 5,
         },
-        BackgroundField::Uniform { level: 0.05 },
+        BgField::Uniform { level: 0.05 },
     );
     save_frame(
         &render(&bright, &Camera::realistic(3.5), &Observation::reference(6)),
@@ -410,7 +410,7 @@ fn gallery_scenes() {
 )]
 fn gallery_seeing() {
     let size = Size2us::new(256, 256);
-    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 11);
+    let field = demo_field(size, BgField::Uniform { level: 0.05 }, 11);
     for scale in [1.0f32, 1.5, 2.5] {
         let obs = Observation {
             seeing_scale: scale,
@@ -429,7 +429,7 @@ fn gallery_seeing() {
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_dither() {
     let size = Size2us::new(256, 256);
-    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 13);
+    let field = demo_field(size, BgField::Uniform { level: 0.05 }, 13);
     let dithers = [
         DVec2::new(0.0, 0.0),
         DVec2::new(12.0, -6.0),

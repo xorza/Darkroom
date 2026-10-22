@@ -20,7 +20,7 @@ use crate::image::linear_image::LinearImage;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::io::raw::raw_files;
-use crate::{CalibrationMasters, CalibrationSet, NeutralizeBackground, Scnr, Stretch};
+use crate::{CalibrationMasters, CalibrationSet, NeutralizeBg, Scnr, Stretch};
 
 mod milky_way;
 
@@ -75,7 +75,7 @@ pub(crate) fn linear_master() -> LinearImage {
 /// green removed — the input the display enhancers and the ML filters take.
 pub(crate) fn display_master() -> LinearImage {
     let mut img = linear_master();
-    NeutralizeBackground.apply(&mut img).unwrap();
+    NeutralizeBg.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     img

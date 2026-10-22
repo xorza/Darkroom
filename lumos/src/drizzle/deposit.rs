@@ -46,7 +46,7 @@ impl Deposit {
     pub(super) const fn weight_planes(self) -> usize {
         match self {
             Self::Channels(_) => 1,
-            Self::Mosaic(cfa_type) => cfa_type.num_colors(),
+            Self::Mosaic(cfa_type) => cfa_type.color_count(),
         }
     }
 

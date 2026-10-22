@@ -52,7 +52,7 @@ pub(crate) struct Preferences {
 /// viewer toolbar's swatch row. A frontend-agnostic persisted choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ViewerBackground {
+pub(crate) enum ViewerBg {
     /// The editor's canvas fill — the resting default.
     #[default]
     Theme,
@@ -67,7 +67,7 @@ pub(crate) enum ViewerBackground {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct ViewerPreferences {
-    pub(crate) background: ViewerBackground,
+    pub(crate) bg: ViewerBg,
     /// Magnification sampling for the shown image. Defaults to `Nearest`
     /// for pixel peeping; zoomed-out minification always stays linear.
     pub(crate) mag_filter: ImageFilter,
@@ -76,7 +76,7 @@ pub(crate) struct ViewerPreferences {
 impl Default for ViewerPreferences {
     fn default() -> Self {
         Self {
-            background: ViewerBackground::default(),
+            bg: ViewerBg::default(),
             mag_filter: ImageFilter::Nearest,
         }
     }

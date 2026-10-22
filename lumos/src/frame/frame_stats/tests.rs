@@ -3,7 +3,7 @@ use std::sync::Arc;
 use imaginarium::Buffer2;
 
 use crate::frame::frame_stats::FrameStats;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
@@ -57,13 +57,13 @@ fn a_mosaic_has_a_sky_per_color() {
     assert_eq!(
         stats.ccd_noise(2),
         CcdNoise {
-            background: BackgroundSplit::unflattened(0.0),
+            bg: BgSplit::unflattened(0.0),
             quantization_variance: 1.0 / 256.0,
             sky: 0.375,
             electrons_per_unit: Some(2000.0),
         }
     );
-    assert_eq!(stats.ccd_noise(2).at(1.0).background, 1.0 / 256.0);
+    assert_eq!(stats.ccd_noise(2).at(1.0).bg, 1.0 / 256.0);
 }
 
 /// A frame whose noise follows `A·g² + S·g` across a flat whose gain rises from 1 to 3 along
@@ -93,7 +93,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
     for (read, sky) in [(1e-4f64, 1e-4f64), (2e-4, 0.0), (0.0, 2e-4)] {
         let expected_share = (read / (read + sky)) as f32;
         let check = |stats: FrameStats, variance_tolerance: f32, share_tolerance: f32| {
-            for (slot, split) in stats.background.iter().enumerate() {
+            for (slot, split) in stats.bg.iter().enumerate() {
                 let (variance, share) = (split.variance, split.read_share);
                 assert!(
                     (variance / 2e-4 - 1.0).abs() <= variance_tolerance,

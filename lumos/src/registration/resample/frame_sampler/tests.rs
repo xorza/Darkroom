@@ -594,12 +594,12 @@ fn every_tier_samples_to_portables_bits() {
     }
 }
 
-/// A Lanczos3 window on a source of `16 × 9` at `background`, but for a `bright` pixel at (7, 4),
+/// A Lanczos3 window on a source of `16 × 9` at `bg`, but for a `bright` pixel at (7, 4),
 /// sampled at (8.5, 4), whose taps 6..=11 put the bright one 1.5 px away, with the clamp at
 /// `threshold`.
-fn clamped_sample(bright: f32, background: f32, threshold: Option<f32>) -> f32 {
+fn clamped_sample(bright: f32, bg: f32, threshold: Option<f32>) -> f32 {
     let size = Size2us::new(16, 9);
-    let mut pixels = vec![background; size.pixel_count()];
+    let mut pixels = vec![bg; size.pixel_count()];
     pixels[4 * size.width + 7] = bright;
     let pos = DVec2::new(8.5, 4.0);
     let image = LinearImage::from_interleaved(
@@ -660,26 +660,25 @@ fn a_bright_pixel_keeps_its_undershoot_within_the_clamp() {
     let total = positive + negative;
     let tolerance = |scale: f64| 40.0 * f64::from(f32::EPSILON) * scale;
 
-    let (bright, background) = (1000.0, 10.0);
-    let unclamped = clamped_sample(bright, background, None);
-    let expected = f64::from(background) + f64::from(bright - background) * row[1] / total;
+    let (bright, bg) = (1000.0, 10.0);
+    let unclamped = clamped_sample(bright, bg, None);
+    let expected = f64::from(bg) + f64::from(bright - bg) * row[1] / total;
     assert!(
         (f64::from(unclamped) - expected).abs() < tolerance(1000.0) + 1e-4,
         "{unclamped} against {expected}"
     );
     assert!(unclamped < -120.0, "{unclamped}");
-    let clamped = clamped_sample(bright, background, Some(0.3));
-    assert!((clamped - background).abs() < 1e-3, "{clamped}");
+    let clamped = clamped_sample(bright, bg, Some(0.3));
+    assert!((clamped - bg).abs() < 1e-3, "{clamped}");
 
     let soft_bright = 36.8;
-    let light_positive = f64::from(background) * positive;
-    let light_negative =
-        f64::from(background) * negative + f64::from(soft_bright - background) * row[1];
+    let light_positive = f64::from(bg) * positive;
+    let light_negative = f64::from(bg) * negative + f64::from(soft_bright - bg) * row[1];
     let ratio = -light_negative / light_positive;
     assert!((ratio - 0.5).abs() < 1e-3, "{ratio}");
     let keep = 1.0 - ((ratio - 0.3) / 0.7).powi(2);
     let expected = (light_positive + keep * light_negative) / (positive + keep * negative);
-    let soft = clamped_sample(soft_bright, background, Some(0.3));
+    let soft = clamped_sample(soft_bright, bg, Some(0.3));
     assert!(
         (f64::from(soft) - expected).abs() < tolerance(40.0) + 1e-5,
         "{soft} against {expected}"

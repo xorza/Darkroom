@@ -9,7 +9,7 @@ use crate::star_detection::roundness::{Roundness, RoundnessStamp};
 /// of the star's pixels, and how many samples the sky was measured from, when an annulus measured
 /// it.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct StarBackground {
+pub(super) struct StarBg {
     pub(super) offset: f32,
     pub(super) noise: StarNoise,
     pub(super) sky_samples: Option<usize>,
@@ -32,20 +32,16 @@ pub(super) struct StampMetrics<'a> {
 }
 
 impl<'a> StampMetrics<'a> {
-    /// The metrics over `stamp` against `background`, the roundness against a PSF of `psf_sigma`.
+    /// The metrics over `stamp` against `bg`, the roundness against a PSF of `psf_sigma`.
     /// `None` when the stamp leaves the frame or holds no star — no net or no positive light, a
     /// non-finite flux or SNR, or a marginal with no height.
-    pub(super) fn measure(
-        stamp: StampAt<'a>,
-        psf_sigma: f64,
-        background: StarBackground,
-    ) -> Option<Self> {
+    pub(super) fn measure(stamp: StampAt<'a>, psf_sigma: f64, bg: StarBg) -> Option<Self> {
         let StampAt {
             residual,
             pos,
             radius: stamp_radius,
         } = stamp;
-        let offset = background.offset;
+        let offset = bg.offset;
         let centre = stamp.centre()?;
 
         // Flux and core flux sum the *signed* residual: sky noise is zero-mean, and clipping each
@@ -87,7 +83,7 @@ impl<'a> StampMetrics<'a> {
         }
 
         let npix = stamp_size * stamp_size;
-        let snr = background.noise.snr(flux, npix, background.sky_samples);
+        let snr = bg.noise.snr(flux, npix, bg.sky_samples);
         if !flux.is_finite() || !snr.is_finite() {
             return None;
         }

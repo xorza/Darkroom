@@ -2,7 +2,7 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::internals::init_tracing;
@@ -35,7 +35,7 @@ fn stretch_stacked_light() {
     let mut image = real_data::linear_master();
     assert!(image.width() > 0 && image.height() > 0);
 
-    NeutralizeBackground.apply(&mut image).unwrap();
+    NeutralizeBg.apply(&mut image).unwrap();
 
     // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits
     // at zero (a near-zero median — symmetric read noise dips some background pixels slightly

@@ -20,9 +20,9 @@ struct OnePixel {
 }
 
 impl OnePixel {
-    /// An image of `background` with this pixel set.
-    fn on(self, size: Size2us, background: f32) -> LinearImage {
-        let mut pixels = vec![background; size.pixel_count()];
+    /// An image of `bg` with this pixel set.
+    fn on(self, size: Size2us, bg: f32) -> LinearImage {
+        let mut pixels = vec![bg; size.pixel_count()];
         pixels[size.idx_of(self.at)] = self.value;
         gray_image(size, pixels)
     }

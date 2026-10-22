@@ -22,7 +22,7 @@ pub(super) const GAIN_VERSION: i64 = 1;
 const STEP_KEYWORD: &str = "LUMGSTEP";
 
 /// The flat gain of one image as a `BITPIX = −32` image extension of shape
-/// `[columns, rows, channels]`: each color's or channel's node grid, as [`FlatGain`] holds it.
+/// `[cols, rows, channels]`: each color's or channel's node grid, as [`FlatGain`] holds it.
 ///
 /// Without it, a frame a flat divided reloads with its record of the division and no gain, and
 /// its noise model would read every pixel as undivided.
@@ -51,7 +51,7 @@ impl GainExtension {
             .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))?;
         let grid = GainGrid::of(gain.size());
         let nodes: Vec<f32> = gain.planes().flatten().copied().collect();
-        let image = Image::new([grid.columns, grid.rows, gain.channels()], nodes)?;
+        let image = Image::new([grid.cols, grid.rows, gain.channels()], nodes)?;
         Ok(Some(Self { image, header }))
     }
 
@@ -82,7 +82,7 @@ impl GainExtension {
             unreachable!("`check` admitted only BITPIX = -32");
         };
         let grid = GainGrid::of(size);
-        let per_plane = grid.columns * grid.rows;
+        let per_plane = grid.cols * grid.rows;
         debug_assert_eq!(nodes.len() % per_plane, 0);
         if let Some(idx) = nodes
             .iter()
@@ -95,7 +95,7 @@ impl GainExtension {
         }
         let planes: ArrayVec<Buffer2<f32>, 3> = nodes
             .chunks(per_plane)
-            .map(|plane| Buffer2::new(grid.columns, grid.rows, plane.to_vec()))
+            .map(|plane| Buffer2::new(grid.cols, grid.rows, plane.to_vec()))
             .collect();
         Ok(FlatGain::from_nodes(size, planes))
     }

@@ -40,9 +40,9 @@ enum DecodeError {
     #[error("image byte count does not fit in the cache format")]
     ByteCountOverflow,
     #[error("image cache payload length overflow")]
-    LengthOverflow,
+    LenOverflow,
     #[error("image cache payload has length {byte_len}, expected {expected}")]
-    LengthMismatch { byte_len: u64, expected: u64 },
+    LenMismatch { byte_len: u64, expected: u64 },
     #[error("invalid cached image: {0}")]
     InvalidImage(#[from] imaginarium::Error),
     #[error("planar image cache payload has format {0}")]
@@ -108,9 +108,9 @@ impl CustomValueCodec for ImageCodec {
             .ok_or(DecodeError::DimensionsOverflow)?;
         let expected_len = HEADER_LEN
             .checked_add(u64::try_from(pixel_len).map_err(|_| DecodeError::ByteCountOverflow)?)
-            .ok_or(DecodeError::LengthOverflow)?;
+            .ok_or(DecodeError::LenOverflow)?;
         if byte_len != expected_len {
-            return Err(DecodeError::LengthMismatch {
+            return Err(DecodeError::LenMismatch {
                 byte_len,
                 expected: expected_len,
             }

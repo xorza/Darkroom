@@ -39,14 +39,14 @@
 //! (render + `FrameTruth`), [`noise`] (physical Poisson + read noise), [`fixtures`]
 //! (ready-made field builders), [`metrics`] (graders).
 //!
-//! Building blocks: [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields),
+//! Building blocks: [`star_profiles`] (PSF kernels), [`bgs`] (background fields),
 //! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (random star fields for
 //! registration), [`distortion`] (radial lens fields for SIP), [`patterns`] (warp/interpolation
-//! fixtures), [`background_map`] (`BackgroundEstimate` fixtures).
+//! fixtures), [`bg_map`] (`BgEstimate` fixtures).
 
 pub(crate) mod artifacts;
-pub(crate) mod background_map;
-pub(crate) mod backgrounds;
+pub(crate) mod bg_map;
+pub(crate) mod bgs;
 pub(crate) mod camera;
 pub(crate) mod distortion;
 pub(crate) mod fixtures;

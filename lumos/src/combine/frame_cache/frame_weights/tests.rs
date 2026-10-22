@@ -7,17 +7,13 @@ use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SlotNorm};
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::stack_product::weight_kind::WeightKind;
 
 fn stats(noise: &[f32]) -> FrameStats {
     FrameStats {
         medians: noise.iter().map(|_| 0.5).collect(),
-        background: noise
-            .iter()
-            .copied()
-            .map(BackgroundSplit::of_sigma)
-            .collect(),
+        bg: noise.iter().copied().map(BgSplit::of_sigma).collect(),
         sky: noise.iter().map(|_| 0.5).collect(),
         spread: None,
         quantization_sigma: None,

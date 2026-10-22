@@ -21,7 +21,7 @@ pub(super) struct Outline {
     pub(super) reach: f64,
     /// Whether its columns bound a scan: a closed-form outline's do, and a SIP map's sampled one
     /// does not, as `FrameSource::band_scan` states.
-    pub(super) bounds_columns: bool,
+    pub(super) bounds_cols: bool,
 }
 
 impl Outline {
@@ -43,7 +43,7 @@ impl Outline {
         clippy::cast_sign_loss,
         reason = "each bound is held at 0 or above first, and the cast saturates at the top"
     )]
-    fn columns(&self, row: usize, width: usize) -> Range<usize> {
+    fn cols(&self, row: usize, width: usize) -> Range<usize> {
         let low = row as f64 - self.reach - STRIP_GUARD;
         let high = row as f64 + self.reach + STRIP_GUARD;
         let mut extent = [f64::INFINITY, f64::NEG_INFINITY];
@@ -109,7 +109,7 @@ impl BandScan {
         let end = (last.ceil() + 1.0).max(0.0) as usize;
         Self {
             rows: start..end.min(height).max(start),
-            outline: outline.bounds_columns.then_some(outline),
+            outline: outline.bounds_cols.then_some(outline),
             width,
         }
     }
@@ -120,15 +120,15 @@ impl BandScan {
     }
 
     /// The input columns the band scans in `row`.
-    pub(super) fn columns(&self, row: usize) -> Range<usize> {
+    pub(super) fn cols(&self, row: usize) -> Range<usize> {
         match &self.outline {
-            Some(outline) => outline.columns(row, self.width),
+            Some(outline) => outline.cols(row, self.width),
             None => 0..self.width,
         }
     }
 
     /// Whether the band scans input pixel `pixel`.
     pub(super) fn contains(&self, pixel: Vec2us) -> bool {
-        self.rows.contains(&pixel.y) && self.columns(pixel.y).contains(&pixel.x)
+        self.rows.contains(&pixel.y) && self.cols(pixel.y).contains(&pixel.x)
     }
 }

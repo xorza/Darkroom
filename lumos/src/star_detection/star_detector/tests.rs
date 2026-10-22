@@ -211,7 +211,7 @@ fn auto_fwhm_recovers_wide_stars() {
         let scale = fwhm * fwhm / 16.0;
         let frame = Scenario {
             size: Size2us::new(384, 384),
-            num_stars: 20,
+            star_count: 20,
             flux: (5.0 * scale, 14.0 * scale),
             fwhm,
             placement: Placement::Uniform { margin: 40.0 },
@@ -239,7 +239,7 @@ fn auto_fwhm_recovers_wide_stars() {
 fn auto_estimated_fwhm_is_used_for_final_measurement() {
     for (actual_fwhm, configured_seed, flux) in [(2.5, 8.0, (3.0, 8.0)), (7.0, 1.0, (10.0, 30.0))] {
         let frame = Scenario {
-            num_stars: 40,
+            star_count: 40,
             flux,
             fwhm: actual_fwhm,
             ..Default::default()

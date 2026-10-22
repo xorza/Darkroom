@@ -33,14 +33,14 @@ struct RecoveryCase {
     amplitude: f32,
     /// Per-axis sigma; equal components render through the circular Gaussian path.
     sigma: Vec2,
-    background: f32,
+    bg: f32,
     /// Starting point handed to the fitter, deliberately offset from `center` in some cases.
     guess: DVec2,
     fit_radius: usize,
     perturbation: Perturbation,
     /// Background handed to the fitter. `None` gives it the true one; `Some` deliberately lies
     /// to it, since background is itself a fitted parameter.
-    fit_background: Option<f32>,
+    fit_bg: Option<f32>,
 }
 
 /// The relative error a clean stamp's fitted parameters keep where the star dominates its
@@ -77,11 +77,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.25, 10.25),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "half_pixel",
@@ -89,11 +89,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.5, 10.5),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "three_quarter_pixel",
@@ -101,11 +101,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.75, 10.75),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "mixed_offset",
@@ -113,11 +113,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(9.7, 10.4),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     // Fainter than the absolute amplitude floor the fit once had, 0.01 in data units: a faint
     // star in normalized data.
@@ -127,11 +127,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.3, 9.8),
         amplitude: 0.005,
         sigma: Vec2::splat(2.0),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "milli_amplitude",
@@ -139,11 +139,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 0.001,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "centered",
@@ -151,11 +151,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "subpixel_offset",
@@ -163,11 +163,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.3, 10.7),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::new(10.0, 11.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "asymmetric",
@@ -175,11 +175,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::new(2.0, 3.0),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "high_snr",
@@ -187,11 +187,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.25, 10.35),
         amplitude: 100.0,
         sigma: Vec2::splat(2.0),
-        background: 1.0,
+        bg: 1.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Amplitude is clamped to a 0.01 floor, so this only pins that a fit comes back at all.
@@ -200,11 +200,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 0.05,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "large_sigma",
@@ -212,11 +212,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(15.0, 15.0),
         amplitude: 1.0,
         sigma: Vec2::splat(5.0),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(15.0),
         fit_radius: 12,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Sigma 1.0 is close to Nyquist: fewer lit pixels, so position is looser.
@@ -225,11 +225,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(7.0, 7.0),
         amplitude: 1.0,
         sigma: Vec2::splat(1.0),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(7.0),
         fit_radius: 5,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Near the narrowest σ the fit admits: the seed's moments read it wider, so the fit starts
@@ -239,11 +239,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(7.2, 6.9),
         amplitude: 1.0,
         sigma: Vec2::splat(0.55),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(7.0),
         fit_radius: 5,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "zero_background",
@@ -251,11 +251,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.0,
+        bg: 0.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "high_background",
@@ -263,11 +263,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 10.0,
+        bg: 10.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "sawtooth_noise",
@@ -275,11 +275,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::Sawtooth { amplitude: 0.02 },
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Noise sigma is 5% of amplitude.
@@ -288,14 +288,14 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::Gaussian {
             sigma: 0.05,
             seed: 12345,
         },
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // 15% noise: must still converge, position just gets looser.
@@ -304,14 +304,14 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::Gaussian {
             sigma: 0.15,
             seed: 54321,
         },
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // SNR ~0.2. Makes no accuracy claim — it pins only that the fit stays finite instead of
@@ -321,11 +321,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 0.1,
         sigma: Vec2::splat(2.5),
-        background: 0.5,
+        bg: 0.5,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Fitter is handed a background 20% too high; it should recover the true one anyway,
@@ -335,11 +335,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: Some(0.12),
+        fit_bg: Some(0.12),
     },
     RecoveryCase {
         // Guess starts 2px off in both axes and needs the longer budget to walk back.
@@ -348,11 +348,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::new(8.0, 12.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         name: "very_high_amplitude",
@@ -360,11 +360,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 10000.0,
         sigma: Vec2::splat(2.5),
-        background: 100.0,
+        bg: 100.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Sigma 0.8 is below the pixel scale — barely resolved.
@@ -373,11 +373,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(0.8),
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
     RecoveryCase {
         // Wide and faint at once: the loosest position bound in the table.
@@ -386,11 +386,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         center: DVec2::new(20.0, 20.0),
         amplitude: 0.1,
         sigma: Vec2::splat(8.0),
-        background: 0.05,
+        bg: 0.05,
         guess: DVec2::splat(20.0),
         fit_radius: 15,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     },
 ];
 
@@ -398,14 +398,14 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
 fn gaussian_fit_recovers_known_parameters() {
     for case in RECOVERY_CASES {
         let mut pixels = SyntheticStar::new(case.center.as_vec2(), case.amplitude, case.profile())
-            .stamp(Size2us::new(case.stamp, case.stamp), case.background);
+            .stamp(Size2us::new(case.stamp, case.stamp), case.bg);
         case.perturbation.apply(&mut pixels);
 
         let result = GaussianFit::new(FitInputs {
             pixels: &pixels,
             pos: case.guess,
             grid: &StampGrid::new(case.fit_radius),
-            background: case.fit_background.unwrap_or(case.background),
+            bg: case.fit_bg.unwrap_or(case.bg),
             noise: None,
         })
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
@@ -414,7 +414,7 @@ fn gaussian_fit_recovers_known_parameters() {
         if matches!(case.perturbation, Perturbation::None) {
             let relative = |got: f32, want: f32| f64::from((got - want).abs() / want);
             let sigma = result.axis_sigma();
-            let scale = f64::from(case.amplitude + case.background);
+            let scale = f64::from(case.amplitude + case.bg);
             let bound = EXACT * scale / f64::from(case.amplitude);
             for (what, error) in [
                 ("position", pos_error),
@@ -427,8 +427,7 @@ fn gaussian_fit_recovers_known_parameters() {
                 ),
                 (
                     "background",
-                    f64::from((result.debug.background - case.background).abs())
-                        / f64::from(case.amplitude),
+                    f64::from((result.debug.bg - case.bg).abs()) / f64::from(case.amplitude),
                 ),
             ] {
                 assert!(error <= bound, "{}: {what} off by {error:e}", case.name);
@@ -440,7 +439,7 @@ fn gaussian_fit_recovers_known_parameters() {
                 1.0 / f64::from(case.sigma.x).powi(2),
                 0.0,
                 1.0 / f64::from(case.sigma.y).powi(2),
-                f64::from(case.background),
+                f64::from(case.bg),
             ];
             let order = Gaussian2D::new(ProfileBounds::of_stamp(case.fit_radius as f64), 1e-6)
                 .sufficient_order(&truth);
@@ -563,7 +562,7 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
             pixels: &pixels,
             pos: case.seed,
             grid: &StampGrid::new(case.radius),
-            background: 0.1,
+            bg: 0.1,
             noise: None,
         });
         assert_eq!(fit.is_some(), case.lands, "{}", case.name);
@@ -598,7 +597,7 @@ fn gaussian_fit_rms_residual() {
             pixels: &pixels,
             pos: DVec2::splat(10.0),
             grid: &StampGrid::new(8),
-            background: 0.1,
+            bg: 0.1,
             noise: None,
         })
         .unwrap();
@@ -702,7 +701,7 @@ fn gaussian_fit_converges_as_fast_on_a_round_star() {
             pixels: &pixels,
             pos: DVec2::new(15.3, 14.8),
             grid: &StampGrid::new(8),
-            background: 0.1,
+            bg: 0.1,
             noise: None,
         })
         .expect("the fit lands");

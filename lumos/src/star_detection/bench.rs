@@ -11,11 +11,11 @@ use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
 use crate::star_detection::star_detector::stages::{detect, filter};
 use crate::star_detection::{
-    background, centroid, convolution, labeling, median_filter, star_detector, threshold_mask,
+    bg, centroid, convolution, labeling, median_filter, star_detector, threshold_mask,
 };
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    background::bench::atomic(c);
+    bg::bench::atomic(c);
     median_filter::simd::bench::atomic(c);
     threshold_mask::simd::bench::atomic(c);
     convolution::simd::bench::atomic(c);

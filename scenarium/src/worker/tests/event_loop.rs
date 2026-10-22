@@ -177,7 +177,7 @@ async fn one_task_panicking_stops_the_loop() {
             | WorkerReport::Cleared
             | WorkerReport::Progress { .. }
             | WorkerReport::Error(
-                WorkerError::Execution { .. }
+                WorkerError::Exec { .. }
                 | WorkerError::CacheEviction { .. }
                 | WorkerError::CacheFlush { .. },
             ) => {}

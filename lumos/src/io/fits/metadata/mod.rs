@@ -594,8 +594,8 @@ fn read_xtrans_pattern(header: &Header) -> Result<XTransPattern, FitsLoadError> 
         if value.len() != 6 {
             return Err(refused());
         }
-        for (column, byte) in value.bytes().enumerate() {
-            values[column] = match byte {
+        for (col, byte) in value.bytes().enumerate() {
+            values[col] = match byte {
                 b'0'..=b'2' => byte - b'0',
                 _ => return Err(refused()),
             };

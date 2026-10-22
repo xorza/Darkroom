@@ -119,13 +119,13 @@ fn hdr_preserves_fine_detail() {
 
 /// The starlet residual of `plane` over `scales`, as `Hdr::compress` smooths it.
 fn residual(plane: &Buffer2<f32>, scales: usize) -> Buffer2<f32> {
-    let mut c_curr = plane.clone();
+    let mut c_cur = plane.clone();
     let mut c_next = Buffer2::new_default(plane.width(), plane.height());
     for j in 0..scales {
-        wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
-        mem::swap(&mut c_curr, &mut c_next);
+        wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
+        mem::swap(&mut c_cur, &mut c_next);
     }
-    c_curr
+    c_cur
 }
 
 /// What compressing a linear base by subtraction gives: `I − amount·(residual − mean)`, the
@@ -144,22 +144,22 @@ fn linear_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
 /// algebraically. Every input here is above the log floor.
 fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
     let size = Size2us::from(px);
-    let mut c_curr = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
+    let mut c_cur = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
     let mut c_next = Buffer2::new_default(size.width, size.height);
     let mut layers: Vec<Vec<f32>> = Vec::new();
     for j in 0..scales {
-        wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
+        wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
         layers.push(
-            c_curr
+            c_cur
                 .pixels()
                 .iter()
                 .zip(c_next.pixels())
                 .map(|(&c, &n)| c - n)
                 .collect(),
         );
-        mem::swap(&mut c_curr, &mut c_next);
+        mem::swap(&mut c_cur, &mut c_next);
     }
-    let residual = c_curr.pixels();
+    let residual = c_cur.pixels();
     let mean = (residual.iter().map(|&v| f64::from(v)).sum::<f64>() / residual.len() as f64) as f32;
     let keep = 1.0 - amount;
     (0..size.pixel_count())

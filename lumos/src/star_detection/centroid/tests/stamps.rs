@@ -24,7 +24,7 @@ fn sigma_seed_is_the_truncated_second_moment() {
             pixels: &pixels,
             pos: DVec2::splat(10.0),
             grid: &StampGrid::new(radius),
-            background: SKY,
+            bg: SKY,
             noise: None,
         })
         .expect("21x21 stamp at its centre");
@@ -57,7 +57,7 @@ fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit>
         pixels,
         pos,
         grid: &StampGrid::new(radius),
-        background: 0.0,
+        bg: 0.0,
         noise: None,
     })
 }
@@ -132,7 +132,7 @@ fn stamp_too_small_for_the_parameter_count_is_rejected() {
             pixels: &pixels,
             pos: DVec2::splat(32.0),
             grid: &grid,
-            background: 0.0,
+            bg: 0.0,
             noise: None
         })
         .is_some()
@@ -143,7 +143,7 @@ fn stamp_too_small_for_the_parameter_count_is_rejected() {
             pixels: &pixels,
             pos: DVec2::splat(32.0),
             grid: &point,
-            background: 0.0,
+            bg: 0.0,
             noise: None
         })
         .is_none()
@@ -179,18 +179,18 @@ fn local_annulus_removes_a_sky_the_map_left() {
     let truth = Measured::flat(&pixels, 0.1, 0.01);
     let offset = Measured::flat(&pixels, 0.1 - PEDESTAL, 0.01);
     let region = truth.region_at(DVec2::new(64.3, 63.6));
-    let measure = |measured: &Measured, local_background| {
+    let measure = |measured: &Measured, local_bg| {
         let config = MeasurementConfig {
-            local_background,
+            local_bg,
             ..Default::default()
         };
         measured
             .measure(&region, &config, fwhm)
             .expect("the star measures")
     };
-    let exact = measure(&truth, LocalBackgroundMethod::GlobalMap);
-    let global = measure(&offset, LocalBackgroundMethod::GlobalMap);
-    let annulus = measure(&offset, LocalBackgroundMethod::LocalAnnulus);
+    let exact = measure(&truth, LocalBgMethod::GlobalMap);
+    let global = measure(&offset, LocalBgMethod::GlobalMap);
+    let annulus = measure(&offset, LocalBgMethod::LocalAnnulus);
 
     assert!((global.pos - exact.pos).length() <= 2e-6, "{}", global.pos);
     assert!(
@@ -222,7 +222,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
 fn local_annulus_needs_ten_pixels_in_the_frame() {
     let annulus = |width| {
         let residual = Buffer2::new_filled(width, 5, 0.25f32);
-        StampBackground::measure(
+        StampBg::measure(
             MaskedPlane::from(&residual),
             DVec2::splat(1.0),
             AnnulusRadii { inner: 1, outer: 2 },
@@ -252,13 +252,12 @@ fn the_annulus_reads_the_sky_around_the_star() {
     }
     for fwhm in [4.0, 20.0] {
         let grid = MeasureGrid::new(fwhm);
-        let sky =
-            StampBackground::measure(MaskedPlane::from(&residual), centre, grid.annulus).unwrap();
+        let sky = StampBg::measure(MaskedPlane::from(&residual), centre, grid.annulus).unwrap();
         assert_eq!((sky.offset, sky.noise), (0.25, 0.0), "FWHM {fwhm}");
     }
     let outside = DVec2::splat(-200.0);
     assert!(
-        StampBackground::measure(
+        StampBg::measure(
             MaskedPlane::from(&residual),
             outside,
             MeasureGrid::new(4.0).annulus

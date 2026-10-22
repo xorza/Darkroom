@@ -163,7 +163,7 @@ impl FitCatalogs {
         let mut warp = WarpTransform::new(hypothesis);
         let mut gate = Gate::Radius(radius);
         let mut candidates = Vec::new();
-        let mut previous: Vec<MatchIdxs> = Vec::new();
+        let mut prev: Vec<MatchIdxs> = Vec::new();
         let mut normalized = Vec::new();
         let mut pairs = WeightedPairs::default();
         let mut scale = 1.0;
@@ -200,7 +200,7 @@ impl FitCatalogs {
             let same_pairs = candidates
                 .iter()
                 .map(|candidate| candidate.idxs)
-                .eq(previous.iter().copied());
+                .eq(prev.iter().copied());
             let moved = pairs
                 .reference
                 .iter()
@@ -210,8 +210,8 @@ impl FitCatalogs {
             if same_pairs && moved <= CONVERGED_PX {
                 break;
             }
-            previous.clear();
-            previous.extend(candidates.iter().map(|candidate| candidate.idxs));
+            prev.clear();
+            prev.extend(candidates.iter().map(|candidate| candidate.idxs));
             gate = Gate::Scale(scale);
         }
 

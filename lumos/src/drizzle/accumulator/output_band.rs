@@ -24,7 +24,7 @@ const LATTICE_CORNERS: [[usize; 2]; 4] = [[0, 0], [1, 0], [1, 1], [0, 1]];
 /// `2·(2r + 1)` evaluations rather than one per tap, and the same values exactly.
 #[derive(Debug, Default)]
 pub(super) struct RadialScratch {
-    columns: Vec<f32>,
+    cols: Vec<f32>,
     rows: Vec<f32>,
 }
 
@@ -187,7 +187,7 @@ impl OutputBand<'_> {
         let scan = &self.scans[self.idx];
         for iy in scan.rows() {
             let row = iy * width;
-            for ix in scan.columns(iy) {
+            for ix in scan.cols(iy) {
                 let pixel = InputPixel {
                     pos: Vec2us::new(ix, iy),
                     idx: row + ix,
@@ -377,8 +377,8 @@ impl OutputBand<'_> {
                 let centre_row = nearest_row as isize;
                 let centre_col = nearest_col as isize;
                 let offsets = -radius..=radius;
-                scratch.columns.clear();
-                scratch.columns.extend(
+                scratch.cols.clear();
+                scratch.cols.extend(
                     offsets
                         .clone()
                         .map(|dx| kernel(dx, nearest_col - drop.centre.x)),
@@ -389,7 +389,7 @@ impl OutputBand<'_> {
                         .clone()
                         .map(|dy| kernel(dy, nearest_row - drop.centre.y)),
                 );
-                let total = scratch.columns.iter().sum::<f32>() * scratch.rows.iter().sum::<f32>();
+                let total = scratch.cols.iter().sum::<f32>() * scratch.rows.iter().sum::<f32>();
                 debug_assert!(total > 0.0, "a radial kernel's taps sum to {total}");
                 let fluxes = source.fluxes(pixel);
                 let normalizer = (drop.weight / f64::from(total)) as f32;
@@ -402,19 +402,13 @@ impl OutputBand<'_> {
                         continue;
                     }
                     let base = band.row_base(oy);
-                    for (ox, &column_value) in offsets
-                        .clone()
-                        .map(|dx| centre_col + dx)
-                        .zip(&scratch.columns)
+                    for (ox, &col_value) in
+                        offsets.clone().map(|dx| centre_col + dx).zip(&scratch.cols)
                     {
                         if let Ok(ox) = usize::try_from(ox)
                             && ox < band.width
                         {
-                            band.accumulate(
-                                &fluxes,
-                                base + ox,
-                                column_value * row_value * normalizer,
-                            );
+                            band.accumulate(&fluxes, base + ox, col_value * row_value * normalizer);
                         }
                     }
                 }
@@ -556,11 +550,11 @@ mod tests {
                 idx: y * size.width + x,
             };
             let rows_first = (0..size.height).flat_map(|y| (0..size.width).map(move |x| (x, y)));
-            let columns_first = (0..size.width).flat_map(|x| (0..size.height).map(move |y| (x, y)));
+            let cols_first = (0..size.width).flat_map(|x| (0..size.height).map(move |y| (x, y)));
             let mut unconverged = 0;
             for (order, walk) in [
                 ("rows", rows_first.collect::<Vec<_>>()),
-                ("columns", columns_first.collect()),
+                ("columns", cols_first.collect()),
             ] {
                 let mut lattice = CornerLattice::build(size.width);
                 for (x, y) in walk {

@@ -55,13 +55,13 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
         ));
     };
 
-    let mut descriptors = Vec::new();
+    let mut descs = Vec::new();
     let mut builders = Vec::new();
     for (idx, field) in named.named.iter().enumerate() {
         let fname = field.ident.as_ref().expect("named field");
         let label = field_label(field)?;
         let kind = Kind::of(&field.ty)?;
-        descriptors.push(descriptor(fname, &label, &kind));
+        descs.push(desc(fname, &label, &kind));
         builders.push(builder(idx, fname, &kind));
     }
 
@@ -72,7 +72,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
             fn fields() -> ::std::vec::Vec<::common::FieldDesc> {
                 let d = <Self as ::core::default::Default>::default();
-                ::std::vec![ #(#descriptors),* ]
+                ::std::vec![ #(#descs),* ]
             }
 
             fn from_fields(
@@ -203,7 +203,7 @@ fn snake_case(ident: &str) -> String {
 
 /// A `FieldDesc { name, label, kind, default, required }`. `d` (the `Default`
 /// instance) is in scope at the call site.
-fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
+fn desc(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     let name = LitStr::new(&fname.to_string(), Span::call_site());
     let label = LitStr::new(label, Span::call_site());
     let required = kind.is_required();

@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::execution::error::RunError;
-use crate::execution::report::node_status::NodeExecutionStatus;
+use crate::exec::error::RunError;
+use crate::exec::report::node_status::NodeExecStatus;
 use crate::graph::func::lambda::internals;
 use crate::graph::identity::NodeId;
 use crate::runtime::log_entry::LogLevel;
@@ -18,17 +18,17 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
     let rows = vec![
         NodeStatus {
             node_id: executed,
-            status: Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 }),
+            status: Some(NodeExecStatus::Executed { elapsed_secs: 0.5 }),
             ram: RamUsage { cpu: 3, gpu: 0 },
         },
         NodeStatus {
             node_id: missing,
-            status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1, 3] }),
+            status: Some(NodeExecStatus::MissingInputs { ports: vec![1, 3] }),
             ram: RamUsage::default(),
         },
         NodeStatus {
             node_id: failed,
-            status: Some(NodeExecutionStatus::Errored {
+            status: Some(NodeExecStatus::Errored {
                 error: RunError::Invoke(Arc::new(internals::failure("failed"))),
             }),
             ram: RamUsage::default(),
@@ -39,7 +39,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
             ram: RamUsage { cpu: 5, gpu: 7 },
         },
     ];
-    let mut outcome = ExecutionOutcome {
+    let mut outcome = ExecOutcome {
         nodes: rows.clone(),
         executed_node_count: 2,
         logs: vec![LogEntry {
@@ -49,7 +49,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
         }],
         cancelled: true,
         cache_ram: RamUsage { cpu: 13, gpu: 17 },
-        ..ExecutionOutcome::default()
+        ..ExecOutcome::default()
     };
     let summary = RunSummaryPublisher::default().publish(WorkerActivity::EventLoop, &mut outcome);
 
@@ -65,16 +65,16 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
         assert_eq!(published.ram, produced.ram);
         match (&published.status, &produced.status) {
             (
-                Some(NodeExecutionStatus::Executed { elapsed_secs: a }),
-                Some(NodeExecutionStatus::Executed { elapsed_secs: b }),
+                Some(NodeExecStatus::Executed { elapsed_secs: a }),
+                Some(NodeExecStatus::Executed { elapsed_secs: b }),
             ) => assert_eq!(a, b),
             (
-                Some(NodeExecutionStatus::MissingInputs { ports: a }),
-                Some(NodeExecutionStatus::MissingInputs { ports: b }),
+                Some(NodeExecStatus::MissingInputs { ports: a }),
+                Some(NodeExecStatus::MissingInputs { ports: b }),
             ) => assert_eq!(a, b, "the exact unfed ports survive publication"),
             (
-                Some(NodeExecutionStatus::Errored { error: a }),
-                Some(NodeExecutionStatus::Errored { error: b }),
+                Some(NodeExecStatus::Errored { error: a }),
+                Some(NodeExecStatus::Errored { error: b }),
             ) => assert_eq!(a.to_string(), b.to_string()),
             (None, None) => {}
             (published, produced) => panic!("row changed shape: {produced:?} → {published:?}"),
@@ -93,11 +93,11 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
 fn a_dropped_summary_is_reused_and_a_held_one_is_left_alone() {
     let row = || NodeStatus {
         node_id: NodeId::unique(),
-        status: Some(NodeExecutionStatus::Cached),
+        status: Some(NodeExecStatus::Cached),
         ram: RamUsage::default(),
     };
     let mut publisher = RunSummaryPublisher::default();
-    let mut outcome = ExecutionOutcome::default();
+    let mut outcome = ExecOutcome::default();
 
     outcome.nodes.push(row());
     let first = publisher.publish(WorkerActivity::Idle, &mut outcome);

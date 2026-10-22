@@ -56,7 +56,7 @@ pub(crate) struct ObservedSource {
 /// Ground truth captured alongside a rendered frame.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameTruth {
-    /// Noiseless, flat-fielded signal `(background + sources) × flat` — the detection target.
+    /// Noiseless, flat-fielded signal `(bg + sources) × flat` — the detection target.
     pub(crate) clean: Buffer2<f32>,
     /// Sources as they land on the sensor (post-transform).
     pub(crate) sources: Vec<ObservedSource>,
@@ -78,7 +78,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     let height = scene.size.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let mut clean = scene.background.render(scene.size);
+    let mut clean = scene.bg.render(scene.size);
     let mut observed = Vec::with_capacity(scene.sources.len());
     let psf = camera.psf.with_seeing(obs.seeing_scale);
     let recovered_fwhm = psf.fwhm();
@@ -126,7 +126,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
             *p += camera.bias.offset;
         }
     }
-    for &(col, excess) in &camera.bias.bad_columns {
+    for &(col, excess) in &camera.bias.bad_cols {
         if col < width {
             for y in 0..height {
                 raw[y * width + col] += excess;

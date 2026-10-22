@@ -20,16 +20,16 @@ use common::CancelToken;
 
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
-use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::cache::runtime_cache::error::CacheNodeFailure;
-use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
-use crate::execution::error::{ExecutionResult, RunError};
-use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::node_status::{NodeExecutionStatus, NodeStatus};
-use crate::execution::report::run_reporter::internals::{CollectingReporter, DiscardedReports};
-use crate::execution::report::run_reporter::{RunPhase, RunReporter};
-use crate::execution::schedule::NodeState;
-use crate::execution::seeds::RunSeeds;
+use crate::exec::cache::disk_store::DiskStore;
+use crate::exec::cache::runtime_cache::error::CacheNodeFailure;
+use crate::exec::engine::{ExecEngine, ExecuteRequest};
+use crate::exec::error::{ExecResult, RunError};
+use crate::exec::report::exec_outcome::ExecOutcome;
+use crate::exec::report::node_status::{NodeExecStatus, NodeStatus};
+use crate::exec::report::run_reporter::internals::{CollectingReporter, DiscardedReports};
+use crate::exec::report::run_reporter::{RunPhase, RunReporter};
+use crate::exec::schedule::NodeState;
+use crate::exec::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::internals::test_graph::TestGraph;
@@ -42,8 +42,8 @@ use crate::worker::run_summary::RunSummary;
 #[derive(Debug)]
 pub(crate) struct TestEngine {
     pub(crate) graph: TestGraph,
-    pub(crate) engine: ExecutionEngine,
-    outcome: ExecutionOutcome,
+    pub(crate) engine: ExecEngine,
+    outcome: ExecOutcome,
     /// Where [`attach_disk_store`](Self::attach_disk_store) pointed the cache's
     /// disk tier, so [`reopen`](Self::reopen) can point a fresh engine at the
     /// same blobs.
@@ -55,8 +55,8 @@ impl TestEngine {
     pub(crate) fn over(graph: TestGraph) -> Self {
         let mut engine = Self {
             graph,
-            engine: ExecutionEngine::default(),
-            outcome: ExecutionOutcome::default(),
+            engine: ExecEngine::default(),
+            outcome: ExecOutcome::default(),
             disk_root: None,
         };
         engine.reinstall();
@@ -169,7 +169,7 @@ impl TestEngine {
         self.try_run(seeds).await.expect("the run completes")
     }
 
-    pub(crate) async fn try_run(&mut self, seeds: RunSeeds) -> ExecutionResult<RunOutcome> {
+    pub(crate) async fn try_run(&mut self, seeds: RunSeeds) -> ExecResult<RunOutcome> {
         self.try_run_cancellable(seeds, CancelToken::never()).await
     }
 
@@ -245,7 +245,7 @@ impl TestEngine {
         &mut self,
         seeds: RunSeeds,
         cancel: CancelToken,
-    ) -> ExecutionResult<RunOutcome> {
+    ) -> ExecResult<RunOutcome> {
         self.execute_with(&mut DiscardedReports, seeds, cancel)
             .await
     }
@@ -256,7 +256,7 @@ impl TestEngine {
         reporter: &mut dyn RunReporter,
         seeds: RunSeeds,
         cancel: CancelToken,
-    ) -> ExecutionResult<RunOutcome> {
+    ) -> ExecResult<RunOutcome> {
         let Self {
             graph,
             engine,
@@ -288,8 +288,8 @@ impl TestEngine {
 
     /// [`plan`](Self::plan), surfacing the refusal a cycle or a bad seed
     /// raises.
-    pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> ExecutionResult<PlanOutcome> {
-        self.engine.prepare_execution(&seeds).await?;
+    pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> ExecResult<PlanOutcome> {
+        self.engine.prepare_exec(&seeds).await?;
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))
     }
 
@@ -374,7 +374,7 @@ pub(crate) struct RunOutcome {
 }
 
 impl RunOutcome {
-    fn snapshot(graph: &TestGraph, engine: &ExecutionEngine, outcome: &ExecutionOutcome) -> Self {
+    fn snapshot(graph: &TestGraph, engine: &ExecEngine, outcome: &ExecOutcome) -> Self {
         let names = NameMap::of(graph);
         Self {
             ran: engine
@@ -433,7 +433,7 @@ impl RunOutcome {
             cache_ram: status.cache_ram,
         };
         outcome.ran = outcome
-            .with_status(|status| matches!(status, NodeExecutionStatus::Executed { .. }))
+            .with_status(|status| matches!(status, NodeExecStatus::Executed { .. }))
             .into_iter()
             .map(str::to_owned)
             .collect();
@@ -454,15 +454,15 @@ impl RunOutcome {
     /// Sorted by name, like every set-shaped accessor here; only
     /// [`ran`](Self::ran) keeps an order, because *its* order is the answer.
     pub(crate) fn cached(&self) -> Vec<&str> {
-        self.with_status(|status| matches!(status, NodeExecutionStatus::Cached))
+        self.with_status(|status| matches!(status, NodeExecStatus::Cached))
     }
 
     pub(crate) fn errored(&self) -> Vec<&str> {
-        self.with_status(|status| matches!(status, NodeExecutionStatus::Errored { .. }))
+        self.with_status(|status| matches!(status, NodeExecStatus::Errored { .. }))
     }
 
     pub(crate) fn missing_inputs(&self) -> Vec<&str> {
-        self.with_status(|status| matches!(status, NodeExecutionStatus::MissingInputs { .. }))
+        self.with_status(|status| matches!(status, NodeExecStatus::MissingInputs { .. }))
     }
 
     /// Names still holding RAM after the run, sorted.
@@ -476,14 +476,14 @@ impl RunOutcome {
         self.logs.iter().map(String::as_str).collect()
     }
 
-    pub(crate) fn status(&self, name: &str) -> Option<&NodeExecutionStatus> {
+    pub(crate) fn status(&self, name: &str) -> Option<&NodeExecStatus> {
         let row = self.row(name)?;
         row.status.as_ref()
     }
 
     pub(crate) fn error(&self, name: &str) -> Option<&RunError> {
         match self.status(name)? {
-            NodeExecutionStatus::Errored { error, .. } => Some(error),
+            NodeExecStatus::Errored { error, .. } => Some(error),
             _ => None,
         }
     }
@@ -492,7 +492,7 @@ impl RunOutcome {
     /// had none.
     pub(crate) fn missing_ports(&self, name: &str) -> &[usize] {
         match self.status(name) {
-            Some(NodeExecutionStatus::MissingInputs { ports }) => ports,
+            Some(NodeExecStatus::MissingInputs { ports }) => ports,
             _ => &[],
         }
     }
@@ -508,7 +508,7 @@ impl RunOutcome {
     /// settles that order is not something a test states or should have to
     /// predict, while a name list is readable and stable across a fixture whose
     /// ids move.
-    fn with_status(&self, matches: impl Fn(&NodeExecutionStatus) -> bool) -> Vec<&str> {
+    fn with_status(&self, matches: impl Fn(&NodeExecStatus) -> bool) -> Vec<&str> {
         sorted_names(&self.rows, |row| row.status.as_ref().is_some_and(&matches))
     }
 }
@@ -521,7 +521,7 @@ pub(crate) struct PlanOutcome {
 }
 
 impl PlanOutcome {
-    fn snapshot(graph: &TestGraph, engine: &ExecutionEngine) -> Self {
+    fn snapshot(graph: &TestGraph, engine: &ExecEngine) -> Self {
         let compiled = engine.compiled();
         let names = NameMap::of(graph);
         let states = compiled

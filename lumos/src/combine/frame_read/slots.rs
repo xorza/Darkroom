@@ -18,7 +18,7 @@ impl Slots {
         let mosaic = cfa_type.filter(CfaType::is_mosaic);
         Self {
             mosaic,
-            count: mosaic.map_or(channels, |cfa| cfa.num_colors()),
+            count: mosaic.map_or(channels, |cfa| cfa.color_count()),
         }
     }
 

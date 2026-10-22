@@ -1,0 +1,28 @@
+//! Node-graph execution as an explicit three-phase pipeline:
+//!
+//! 1. **compile** — the [`Compiler`](compile::Compiler) walks the authoring
+//!    `Graph` straight into an immutable
+//!    [`CompiledGraph`](compile::compiled_graph::CompiledGraph), which lives
+//!    beside it. Runs on the *host's* thread and cannot fail: the host keeps
+//!    the graph one the library can run, which the compile asserts. The
+//!    artifact is installed into the engine via
+//!    [`engine::ExecEngine::install`], which cannot fail either.
+//! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
+//!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
+//!    reachability + topological order + missing-input verdicts, no cache/digest state.
+//! 3. **execute** — the [`RuntimeCache`](cache::runtime_cache::RuntimeCache) prepares filesystem
+//!    identities on the blocking pool; [`resolve::sweep`] stamps
+//!    content digests, then derives cache-aware liveness, exact output demand, and reader
+//!    counts in one consumer-first sweep, refining that same schedule. The
+//!    [`Executor`](executor::Executor) walks the surviving schedule producer-first.
+
+pub(crate) mod cache;
+pub(crate) mod compile;
+pub(crate) mod engine;
+pub(crate) mod error;
+pub(crate) mod executor;
+pub(crate) mod idx;
+pub(crate) mod report;
+pub(crate) mod resolve;
+pub(crate) mod schedule;
+pub(crate) mod seeds;

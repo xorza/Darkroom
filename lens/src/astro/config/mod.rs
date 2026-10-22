@@ -8,7 +8,7 @@ pub(crate) mod stacking;
 use std::fmt;
 
 use common::Introspect;
-use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, Scnr};
+use lumos::{Denoise, ExtractBg, Hdr, LocalContrast, Scnr};
 use scenarium::{FuncId, Library};
 
 use crate::astro::config::processing::StretchKnobs;
@@ -16,8 +16,7 @@ use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationK
 use crate::config_node::ConfigValue;
 use crate::node_spec::NodeSpec;
 
-const BUILD_BACKGROUND_CONFIG_FUNC_ID: FuncId =
-    FuncId::literal("9cda0462-1b8e-4c50-83d6-4db470df22d9");
+const BUILD_BG_CONFIG_FUNC_ID: FuncId = FuncId::literal("9cda0462-1b8e-4c50-83d6-4db470df22d9");
 const BUILD_DETECTION_CONFIG_FUNC_ID: FuncId =
     FuncId::literal("6c6f92e7-0f74-454c-acc4-68691cb8462f");
 const BUILD_REGISTRATION_CONFIG_FUNC_ID: FuncId =
@@ -34,10 +33,10 @@ const BUILD_STRETCH_CONFIG_FUNC_ID: FuncId =
 const BUILD_SCNR_CONFIG_FUNC_ID: FuncId = FuncId::literal("d07742d1-4469-4739-b2ff-78b4dcf64132");
 
 pub(crate) fn register_builders(library: &mut Library) {
-    add_builder::<ExtractBackground>(
+    add_builder::<ExtractBg>(
         library,
         NodeSpec {
-            id: BUILD_BACKGROUND_CONFIG_FUNC_ID,
+            id: BUILD_BG_CONFIG_FUNC_ID,
             name: "Build Background Config",
             description: "Builds a detailed background-extraction config",
         },

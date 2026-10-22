@@ -9,12 +9,12 @@ use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::noise::mrs_noise::NoisePlane;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::sky_noise::SkyNoise;
+use crate::star_detection::bg::sky_noise::SkyNoise;
 use crate::star_detection::centroid::MeasurePlanes;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec, Prefilter};
-use crate::star_detection::refined_background::RefinedBackground;
+use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
@@ -73,7 +73,7 @@ impl PreparedFrame {
             });
 
         // The sources are found at the FWHM the configuration starts from.
-        let refined = RefinedBackground::measure(
+        let refined = RefinedBg::measure(
             &plane,
             PlaneSpec {
                 prefilter,
@@ -82,7 +82,7 @@ impl PreparedFrame {
                     .mode
                     .map(|mode| config.fwhm.filter_at(mode.seed())),
                 mask: no_data.as_deref(),
-                background: &config.background,
+                bg: &config.bg,
             },
             resources,
         );
@@ -135,7 +135,7 @@ impl PreparedFrame {
                 prefilter: self.prefilter,
                 matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
                 mask: self.sources.as_deref().or(self.no_data.as_deref()),
-                background: &config.background,
+                bg: &config.bg,
             },
             resources,
         )
@@ -155,7 +155,7 @@ impl PreparedFrame {
                 prefilter: self.prefilter,
                 matched: fwhm.map(|fwhm| config.fwhm.filter_at(fwhm)),
                 mask: sources.as_deref().or(self.no_data.as_deref()),
-                background: &config.background,
+                bg: &config.bg,
             },
             resources,
         )

@@ -26,9 +26,9 @@ pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
     pub(super) eff_weights: Vec<f32>,
     pub(super) sample_flags: Vec<u8>,
-    /// The columns of [`NoiseColumns`](crate::combine::reducer::pixel_samples::NoiseColumns),
+    /// The columns of [`NoiseCols`](crate::combine::reducer::pixel_samples::NoiseCols),
     /// filled only when the combine asked for noise.
-    pub(super) noise_background: Vec<f32>,
+    pub(super) noise_bg: Vec<f32>,
     pub(super) noise_sky: Vec<f32>,
     pub(super) noise_per_unit: Vec<f32>,
     pub(super) buffers: ScratchBuffers,
@@ -48,7 +48,7 @@ impl Scratch for CombineScratch {
         self.values.resize(frame_count, 0.0);
         self.eff_weights.resize(frame_count, 0.0);
         self.sample_flags.resize(frame_count, 0);
-        self.noise_background.resize(frame_count, 0.0);
+        self.noise_bg.resize(frame_count, 0.0);
         self.noise_sky.resize(frame_count, 0.0);
         self.noise_per_unit.resize(frame_count, 0.0);
         self.buffers.reserve(frame_count);
@@ -59,7 +59,7 @@ impl Scratch for CombineScratch {
             self.values.len(),
             self.eff_weights.len(),
             self.sample_flags.len(),
-            self.noise_background.len(),
+            self.noise_bg.len(),
             self.noise_sky.len(),
             self.noise_per_unit.len(),
         ] == [frame_count; 6]
@@ -80,7 +80,7 @@ pub(super) struct GatheredSamples<'a> {
     pub(super) values: &'a mut [f32],
     pub(super) eff_weights: &'a mut [f32],
     pub(super) sample_flags: &'a mut [u8],
-    pub(super) noise_background: &'a mut [f32],
+    pub(super) noise_bg: &'a mut [f32],
     pub(super) noise_sky: &'a mut [f32],
     pub(super) noise_per_unit: &'a mut [f32],
 }
@@ -122,7 +122,7 @@ impl GatheredSamples<'_> {
                 self.values[write] = self.values[read];
                 self.eff_weights[write] = self.eff_weights[read];
                 self.sample_flags[write] = self.sample_flags[read];
-                self.noise_background[write] = self.noise_background[read];
+                self.noise_bg[write] = self.noise_bg[read];
                 self.noise_sky[write] = self.noise_sky[read];
                 self.noise_per_unit[write] = self.noise_per_unit[read];
                 write += 1;

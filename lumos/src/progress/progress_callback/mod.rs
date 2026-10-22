@@ -21,13 +21,9 @@ impl ProgressCallback {
     }
 
     /// Report one step of `stage`. A default callback reports nowhere.
-    pub(crate) fn report(&self, current: usize, total: usize, stage: StackingStage) {
+    pub(crate) fn report(&self, cur: usize, total: usize, stage: StackingStage) {
         if let Some(callback) = &self.callback {
-            callback(StackingProgress {
-                current,
-                total,
-                stage,
-            });
+            callback(StackingProgress { cur, total, stage });
         }
     }
 }

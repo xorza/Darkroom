@@ -27,7 +27,7 @@ use imaginarium::drawing::{draw_circle, draw_cross};
 fn sharpness_rejects_isolated_cosmic_rays() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         cosmic_rays: 15,
         ..Default::default()
     }

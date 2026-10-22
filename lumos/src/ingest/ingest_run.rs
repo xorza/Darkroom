@@ -119,7 +119,7 @@ mod tests {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let progress = ProgressCallback::new({
             let reports = Arc::clone(&reports);
-            move |report| reports.lock().unwrap().push((report.current, report.total))
+            move |report| reports.lock().unwrap().push((report.cur, report.total))
         });
         let cancel = CancelToken::new();
         let mut config = IngestConfig {

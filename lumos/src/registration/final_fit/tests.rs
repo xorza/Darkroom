@@ -193,10 +193,10 @@ fn the_fit_reaches_the_cramer_rao_bound() {
         let weight = 1.0 / ((scale * scale + 1.0) * sigma * sigma);
         let rotated = DVec2::new(cos * r.x - sin * r.y, sin * r.x + cos * r.y);
         let d_angle = DVec2::new(-scale * rotated.y, scale * rotated.x);
-        let columns = [DVec2::X, DVec2::Y, d_angle, rotated];
+        let cols = [DVec2::X, DVec2::Y, d_angle, rotated];
         for i in 0..4 {
             for j in 0..4 {
-                information[i][j] += weight * columns[i].dot(columns[j]);
+                information[i][j] += weight * cols[i].dot(cols[j]);
             }
         }
     }

@@ -63,15 +63,11 @@ fn scorer_loss_hand_values() {
 #[test]
 fn scorer_loss_is_monotone() {
     let scorer = WelschScorer::new(1.5);
-    let mut previous = 0.0;
+    let mut prev = 0.0;
     for step in 0..=400 {
         let loss = scorer.loss(f64::from(step) * 0.1);
-        assert!(
-            loss >= previous,
-            "loss fell at r² = {}",
-            f64::from(step) * 0.1
-        );
-        previous = loss;
+        assert!(loss >= prev, "loss fell at r² = {}", f64::from(step) * 0.1);
+        prev = loss;
     }
 }
 

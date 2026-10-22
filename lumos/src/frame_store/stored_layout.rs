@@ -63,7 +63,7 @@ impl StoredLayout {
         let pixels = dimensions.pixel_count();
         (self.channels + self.quality_planes) * size_of::<f32>() * pixels
             + self.flags as usize * pixels
-            + self.gain_channels * grid.columns * grid.rows * size_of::<f32>()
+            + self.gain_channels * grid.cols * grid.rows * size_of::<f32>()
     }
 
     /// The bytes a chunk of this layout reads for each pixel of its rows.

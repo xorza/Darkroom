@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
-use crate::combine::reducer::pixel_samples::{NoiseColumns, PixelSamples};
+use crate::combine::reducer::pixel_samples::{NoiseCols, PixelSamples};
 use crate::combine::reducer::sample_quality::SampleQuality;
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
@@ -89,7 +89,7 @@ pub(crate) struct Block {
     /// Pixel by pixel, each pixel's samples frame by frame.
     pub(crate) samples: Vec<f32>,
     pub(crate) weights: Vec<f32>,
-    background: Vec<f32>,
+    bg: Vec<f32>,
     sky: Vec<f32>,
     per_unit: Vec<f32>,
 }
@@ -99,13 +99,13 @@ impl Block {
         let tile = Field::Typical.tile(BLOCK.width);
         let read = READ_NOISE_E / FULL_WELL_E;
         let sky = 0.1;
-        let background: Vec<f32> = (0..frames)
+        let bg: Vec<f32> = (0..frames)
             .map(|frame| (read * read + sky / FULL_WELL_E) * (0.9 + 0.05 * (frame % 5) as f32))
             .collect();
         let mut rng = TestRng::new(0xB10C);
         let mut samples = Vec::with_capacity(BLOCK.pixel_count() * frames);
         for &level in tile.pixels() {
-            samples.extend(background.iter().map(|&variance| {
+            samples.extend(bg.iter().map(|&variance| {
                 let sigma = (variance + (level - sky).max(0.0) / FULL_WELL_E).sqrt();
                 let hit = if rng.next_f32() < 0.01 {
                     0.3 + 0.7 * rng.next_f32()
@@ -117,16 +117,16 @@ impl Block {
         }
         Self {
             samples,
-            weights: background.iter().map(|variance| 1.0 / variance).collect(),
+            weights: bg.iter().map(|variance| 1.0 / variance).collect(),
             sky: vec![sky; frames],
             per_unit: vec![1.0 / FULL_WELL_E; frames],
-            background,
+            bg,
         }
     }
 
-    pub(crate) fn noise(&self) -> NoiseColumns<'_> {
-        NoiseColumns {
-            background: &self.background,
+    pub(crate) fn noise(&self) -> NoiseCols<'_> {
+        NoiseCols {
+            bg: &self.bg,
             sky: &self.sky,
             per_unit: &self.per_unit,
         }

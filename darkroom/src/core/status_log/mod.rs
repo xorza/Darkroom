@@ -99,7 +99,7 @@ impl StatusLog {
     }
 
     /// The line the status bar shows.
-    pub(crate) fn current(&self) -> Option<StatusMessage<'_>> {
+    pub(crate) fn cur(&self) -> Option<StatusMessage<'_>> {
         self.slot.as_ref().map(|entry| StatusMessage {
             severity: entry.severity,
             line: &entry.line,

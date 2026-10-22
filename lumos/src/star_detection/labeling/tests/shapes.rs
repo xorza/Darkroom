@@ -209,7 +209,7 @@ fn larger_shapes_count_as_worked_out() {
     ] {
         let labelled = check(&mask);
         assert_eq!(
-            (labelled.four.num_labels(), labelled.eight.num_labels()),
+            (labelled.four.label_count(), labelled.eight.label_count()),
             (four, eight),
             "{name}"
         );
@@ -220,7 +220,7 @@ fn larger_shapes_count_as_worked_out() {
 fn zero_sized_masks_have_no_components() {
     for size in [Size2us::new(0, 10), Size2us::new(10, 0)] {
         let labelled = check(&Mask::from_fn(size, |_, _| true));
-        assert_eq!(labelled.four.num_labels(), 0, "{size:?}");
-        assert_eq!(labelled.eight.num_labels(), 0, "{size:?}");
+        assert_eq!(labelled.four.label_count(), 0, "{size:?}");
+        assert_eq!(labelled.eight.label_count(), 0, "{size:?}");
     }
 }

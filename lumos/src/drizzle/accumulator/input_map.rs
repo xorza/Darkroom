@@ -107,7 +107,7 @@ impl InputMap {
                 Some(Outline {
                     vertices: corners.map(|corner| to_input.apply(corner)).to_vec(),
                     reach: input_margin,
-                    bounds_columns: true,
+                    bounds_cols: true,
                 })
             }
             Self::Sip(sip) => {
@@ -136,7 +136,7 @@ impl InputMap {
                         .map(back)
                         .collect(),
                     reach: input_margin + 1.0,
-                    bounds_columns: false,
+                    bounds_cols: false,
                 })
             }
         }

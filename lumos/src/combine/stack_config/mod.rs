@@ -15,7 +15,7 @@ use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
 use crate::combine::stack;
 use crate::combine::stack::planned_combine::PlannedCombine;
-use crate::combine::stack::{CombinePlan, FrameSet, FrameSource};
+use crate::combine::stack::{CombinePlan, FrameOrigin, FrameSet};
 use crate::combine::stack_config::combine::Combine;
 use crate::combine::stack_config::combine_method::CombineMethod;
 use crate::combine::stack_config::small_n::SmallN;
@@ -252,7 +252,7 @@ impl StackConfig {
     ) -> Result<StackProduct, StackError> {
         let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
         let set = FrameSet {
-            source: FrameSource::Paths,
+            source: FrameOrigin::Paths,
             count: paths.len(),
         };
         // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
@@ -292,7 +292,7 @@ impl StackConfig {
         monitor: ProgressMonitor,
     ) -> Result<StackProduct, StackError> {
         let set = FrameSet {
-            source: FrameSource::Memory,
+            source: FrameOrigin::Memory,
             count: frames.len(),
         };
         self.combine_cached(set, || {
@@ -307,7 +307,7 @@ impl StackConfig {
         core: CacheCore,
     ) -> Result<StackProduct, StackError> {
         let set = FrameSet {
-            source: FrameSource::FrameStore,
+            source: FrameOrigin::FrameStore,
             count: frames.len(),
         };
         self.combine_cached(set, || {

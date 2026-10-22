@@ -15,7 +15,7 @@ struct DistortionMap {
     /// The distance between nodes, in pixels; the last cell of an axis may be narrower.
     spacing: usize,
     /// The pixel each column of nodes sits on, ending on the image's last column.
-    columns: Vec<usize>,
+    cols: Vec<usize>,
     /// The pixel each row of nodes sits on, ending on the image's last row.
     rows: Vec<usize>,
     /// The distortion at each node, row by row.
@@ -37,15 +37,15 @@ impl DistortionMap {
     /// `spacing` pixels and the last pixel of each axis ([`grid::nodes`]), so the statistics
     /// cover the frame and nothing past it, where a spline grows like `r² ln r`.
     fn from_tps(tps: &ThinPlateSpline, image: Size2us, spacing: usize) -> Self {
-        let columns: Vec<usize> = grid::nodes(image.width, spacing).collect();
+        let cols: Vec<usize> = grid::nodes(image.width, spacing).collect();
         let rows: Vec<usize> = grid::nodes(image.height, spacing).collect();
-        let grid = Size2us::new(columns.len(), rows.len());
+        let grid = Size2us::new(cols.len(), rows.len());
 
         let mut vectors = Vec::with_capacity(grid.pixel_count());
         let mut max_magnitude = 0.0f64;
         let mut sum_magnitude = 0.0;
         for &y in &rows {
-            for &x in &columns {
+            for &x in &cols {
                 let p = DVec2::new(x as f64, y as f64);
                 let d = tps.transform(p) - p;
                 let magnitude = d.length();
@@ -59,7 +59,7 @@ impl DistortionMap {
         Self {
             grid,
             spacing,
-            columns,
+            cols,
             rows,
             vectors,
             max_magnitude,
@@ -77,7 +77,7 @@ impl DistortionMap {
     /// Interpolate the distortion at an arbitrary position: bilinear inside the grid, and the
     /// nearest edge's value past it, never a zero the map did not measure.
     fn interpolate(&self, p: DVec2) -> DVec2 {
-        let x = self.cell(&self.columns, p.x);
+        let x = self.cell(&self.cols, p.x);
         let y = self.cell(&self.rows, p.y);
         let at = |x, y| self.vectors[self.grid.idx_of(Vec2us::new(x, y))];
         let (v00, v10, v01, v11) = (

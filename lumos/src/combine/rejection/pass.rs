@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::combine::reducer::pixel_samples::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseCols;
 use crate::combine::rejection::normal_scores::NormalScores;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::math::statistics::spread::Spread;
@@ -22,7 +22,7 @@ pub(crate) struct Pass<'a> {
     pub(crate) idx: usize,
     pub(crate) min_survivors: usize,
     /// The samples' noise models, by gather position, when the combine gathered them.
-    pub(crate) noise: Option<NoiseColumns<'a>>,
+    pub(crate) noise: Option<NoiseCols<'a>>,
 }
 
 /// The window a pass keeps, and the centre that the survivor rule measures nearness from when the
@@ -54,7 +54,7 @@ pub(crate) struct SampleBand {
 impl SampleBand {
     /// Whether `value`, the sample at gather `pos`, lies within the band, in units of its own
     /// model σ under `noise` at the centre, raised to the resolution there.
-    pub(crate) fn keeps(self, noise: &NoiseColumns<'_>, pos: usize, value: f32) -> bool {
+    pub(crate) fn keeps(self, noise: &NoiseCols<'_>, pos: usize, value: f32) -> bool {
         let sigma = noise
             .variance_at(pos, self.centre)
             .sqrt()

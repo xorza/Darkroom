@@ -171,8 +171,8 @@ impl FlaggedSources<'_> {
         let size = self.flags.size();
         let mut carried = QualityFlags::default();
         for row in weighed_taps(y, size.height) {
-            for column in weighed_taps(x, size.width) {
-                carried = carried.union(self.carried_at(row * size.width + column));
+            for col in weighed_taps(x, size.width) {
+                carried = carried.union(self.carried_at(row * size.width + col));
             }
         }
         carried

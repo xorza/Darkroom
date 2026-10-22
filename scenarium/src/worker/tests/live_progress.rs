@@ -18,7 +18,7 @@ async fn node_patches_stream_before_completion() {
     let mut started = 0;
     let mut node_finished = 0;
     let mut installed = false;
-    let mut execution_started = false;
+    let mut exec_started = false;
     loop {
         match w.report().await {
             WorkerReport::Installed {
@@ -36,11 +36,11 @@ async fn node_patches_stream_before_completion() {
             }
             WorkerReport::Activity(WorkerActivity::Executing) => {
                 assert!(installed, "execution started before installation");
-                assert!(!execution_started, "execution started more than once");
-                execution_started = true;
+                assert!(!exec_started, "execution started more than once");
+                exec_started = true;
             }
             WorkerReport::Progress { node_id, phase } => {
-                assert!(execution_started, "node progress arrived before execution");
+                assert!(exec_started, "node progress arrived before execution");
                 assert_eq!(node_id, print, "progress names the node");
                 match phase {
                     RunPhase::Started { .. } => started += 1,

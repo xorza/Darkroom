@@ -53,7 +53,7 @@
 //! # }
 //! ```
 
-pub(crate) mod background;
+pub(crate) mod bg;
 mod centroid;
 mod convolution;
 mod deblend;
@@ -61,7 +61,7 @@ pub(crate) mod detection_plane;
 pub(crate) mod duplicates;
 mod labeling;
 mod median_filter;
-pub(crate) mod refined_background;
+pub(crate) mod refined_bg;
 pub(crate) mod resources;
 pub(crate) mod roundness;
 pub(crate) mod star;

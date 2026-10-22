@@ -10,20 +10,20 @@ fn median_filter_row_matches_scalar() {
     let widths: Vec<usize> = (3..10).chain(SWEEP_WIDTHS.iter().copied()).collect();
     assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
         let above = shape.row(width, 0);
-        let curr = shape.row(width, 1);
+        let cur = shape.row(width, 1);
         let below = shape.row(width, 2);
         let mut scalar = vec![0.0f32; width];
         let mut simd = vec![0.0f32; width];
         MedianRow {
             above: &above,
-            curr: &curr,
+            cur: &cur,
             below: &below,
             output: &mut scalar,
         }
         .run_scalar();
         tier.run(MedianRow {
             above: &above,
-            curr: &curr,
+            cur: &cur,
             below: &below,
             output: &mut simd,
         });
@@ -36,13 +36,13 @@ fn median_filter_row_matches_scalar() {
 fn scalar_row_matches_a_hand_taken_neighbourhood_median() {
     let width = 16;
     let row_above: Vec<f32> = (0..width).map(|i| (i % 10) as f32 * 0.1).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| ((i + 3) % 10) as f32 * 0.1).collect();
+    let row_cur: Vec<f32> = (0..width).map(|i| ((i + 3) % 10) as f32 * 0.1).collect();
     let row_below: Vec<f32> = (0..width).map(|i| ((i + 7) % 10) as f32 * 0.1).collect();
     let mut output = vec![0.0f32; width];
 
     MedianRow {
         above: &row_above,
-        curr: &row_curr,
+        cur: &row_cur,
         below: &row_below,
         output: &mut output,
     }
@@ -53,9 +53,9 @@ fn scalar_row_matches_a_hand_taken_neighbourhood_median() {
         row_above[x - 1],
         row_above[x],
         row_above[x + 1],
-        row_curr[x - 1],
-        row_curr[x],
-        row_curr[x + 1],
+        row_cur[x - 1],
+        row_cur[x],
+        row_cur[x + 1],
         row_below[x - 1],
         row_below[x],
         row_below[x + 1],

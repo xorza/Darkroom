@@ -280,6 +280,6 @@ pub(crate) mod internals {
             output_width,
             reach,
         );
-        scan.rows().map(move |row| (row, scan.columns(row)))
+        scan.rows().map(move |row| (row, scan.cols(row)))
     }
 }

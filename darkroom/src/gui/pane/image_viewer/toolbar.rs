@@ -11,7 +11,7 @@ use palantir::prelude::*;
 use palantir::{ImageFilter, TextInput};
 use scenarium::NodeId;
 
-use crate::core::io::preferences::ViewerBackground;
+use crate::core::io::preferences::ViewerBg;
 use crate::gui::pane::image_viewer::glyph;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
@@ -21,15 +21,11 @@ use crate::gui::widgets::toggle::Toggle;
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
 /// table behind the controls loop and the swatch ids.
-pub(super) const BACKDROPS: [(ViewerBackground, &str, &str); 4] = [
-    (ViewerBackground::Theme, "bg_theme", "Theme background"),
-    (ViewerBackground::Black, "bg_black", "Black background"),
-    (ViewerBackground::White, "bg_white", "White background"),
-    (
-        ViewerBackground::Checker,
-        "bg_checker",
-        "Checkerboard background",
-    ),
+pub(super) const BACKDROPS: [(ViewerBg, &str, &str); 4] = [
+    (ViewerBg::Theme, "bg_theme", "Theme background"),
+    (ViewerBg::Black, "bg_black", "Black background"),
+    (ViewerBg::White, "bg_white", "White background"),
+    (ViewerBg::Checker, "bg_checker", "Checkerboard background"),
 ];
 
 /// One viewer's control panel as its widgets are stamped out: the node keying
@@ -86,7 +82,7 @@ impl Readout<'_> {
         panel
             .size((Sizing::HUG, Sizing::HUG))
             .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-            .background(pill::background(theme))
+            .background(pill::bg(theme))
             .show(ui, |ui| {
                 let style = support::muted_text(ui, theme, theme.text.body);
                 Text::new(text).style(&style).show(ui);

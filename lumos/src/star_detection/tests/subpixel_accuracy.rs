@@ -10,7 +10,7 @@ use glam::DVec2;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{match_catalogs, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
 use crate::star_detection::tests::{MATCH_RADIUS, detected_poss, synthetic_config, truth_poss};
@@ -43,7 +43,7 @@ fn subpixel_shift_recovered_across_offsets() {
             placement: Placement::Uniform { margin: 16.0 },
             seed: 42,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let camera = Camera::realistic(4.0);
     let config = synthetic_config();

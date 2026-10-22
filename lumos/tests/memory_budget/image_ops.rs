@@ -1,7 +1,7 @@
 //! The operations on a stacked master, which plan nothing: each must give back its working set
 //! before the next one starts.
 
-use lumos::{Denoise, ExtractBackground, ImageDimensions, LinearImage, Stretch};
+use lumos::{Denoise, ExtractBg, ImageDimensions, LinearImage, Stretch};
 
 use crate::alone::alone;
 use crate::session::Session;
@@ -28,7 +28,7 @@ fn each_operation_gives_back_its_working_set() {
         };
         // Tiles of 64 give 4 × 4 samples, enough for the default quadratic's 6 terms.
         apply("background extraction", |master| {
-            ExtractBackground {
+            ExtractBg {
                 tile_size: 64,
                 ..Default::default()
             }

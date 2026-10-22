@@ -5,8 +5,8 @@ use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
-use crate::execution::report::run_reporter::RunPhase;
-use crate::execution::report::run_reporter::RunReporter;
+use crate::exec::report::run_reporter::RunPhase;
+use crate::exec::report::run_reporter::RunReporter;
 use crate::graph::identity::NodeId;
 use crate::worker::batch_intent::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};

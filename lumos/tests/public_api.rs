@@ -4,7 +4,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use lumos::ChannelLayout;
 use lumos::{
-    AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BackgroundConfig,
+    AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BgConfig,
     CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern,
     Combine, CombineMethod, Coverage, DefectSummary, DerivedFacts, DetectionDiagnostics, DomainMap,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig,
@@ -159,7 +159,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(registration.matching.required_stars(registration.model), 10);
 
     let detection = StarDetectionConfig {
-        background: BackgroundConfig::default(),
+        bg: BgConfig::default(),
         extraction: ExtractionConfig::default(),
         fwhm: FwhmConfig::default(),
         measurement: MeasurementConfig::default(),
@@ -365,7 +365,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         report: RunReport {
             excluded_samples: FlagCounts::default(),
             kept_flagged_samples: FlagCounts::default(),
-            variance_background_only: true,
+            variance_bg_only: true,
             ..RunReport::default()
         },
     };

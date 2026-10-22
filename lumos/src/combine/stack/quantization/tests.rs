@@ -3,15 +3,15 @@ use arrayvec::ArrayVec;
 use crate::combine::normalization::{FrameNorm, SlotNorm};
 use crate::combine::stack::quantization;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::math::statistics;
 
 fn stats(quantization_sigma: Option<f32>) -> FrameStats {
     FrameStats {
         medians: [0.5].into_iter().collect(),
-        background: [statistics::internals::mad_to_sigma(0.1)]
+        bg: [statistics::internals::mad_to_sigma(0.1)]
             .into_iter()
-            .map(BackgroundSplit::of_sigma)
+            .map(BgSplit::of_sigma)
             .collect(),
         sky: [0.5].into_iter().collect(),
         spread: None,

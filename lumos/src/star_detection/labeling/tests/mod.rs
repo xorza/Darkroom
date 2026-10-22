@@ -124,7 +124,7 @@ fn verify_components(label_map: &LabelMap) {
     let size = label_map.size();
     let scanned = LabelMap::from_raw(
         &Buffer2::new(size.width, size.height, label_map.labels()),
-        label_map.num_labels(),
+        label_map.label_count(),
     );
     assert_eq!(label_map.components().len(), scanned.components().len());
     for (from_runs, from_scan) in label_map.components().iter().zip(scanned.components()) {
@@ -152,7 +152,7 @@ fn check(mask: &Mask) -> Labelings {
                 expected,
                 "{connectivity:?} in {strips} bands differs from the reference"
             );
-            assert_eq!(map.num_labels(), count);
+            assert_eq!(map.label_count(), count);
             verify_components(&map);
         }
         let map = LabelMap::from_mask(&bits, connectivity);
@@ -184,8 +184,8 @@ fn a_reused_map_relabels_as_a_fresh_one() {
     for (idx, mask) in masks.iter().enumerate() {
         let reused = labeler.label(mask, Connectivity::Eight);
         let fresh = LabelMap::from_mask(mask, Connectivity::Eight);
-        assert!(fresh.num_labels() > 0);
+        assert!(fresh.label_count() > 0);
         assert_eq!(reused.labels(), fresh.labels(), "mask {idx}");
-        assert_eq!(reused.num_labels(), fresh.num_labels(), "mask {idx}");
+        assert_eq!(reused.label_count(), fresh.label_count(), "mask {idx}");
     }
 }

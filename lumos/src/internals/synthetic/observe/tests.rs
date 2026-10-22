@@ -1,8 +1,8 @@
-use crate::internals::synthetic::backgrounds::Vignette;
+use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::observe::*;
-use crate::internals::synthetic::scene::{BackgroundField, TrueSource};
+use crate::internals::synthetic::scene::{BgField, TrueSource};
 use crate::math::size2us::Size2us;
 
 /// Where the brightest pixel is.
@@ -33,7 +33,7 @@ fn ideal_render_equals_clean() {
             pos: DVec2::new(32.0, 32.0),
             flux: 2.0,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let frame = render(&scene, &Camera::ideal(3.0), &Observation::reference(1));
     let img = frame.image.channel(0).pixels();
@@ -52,7 +52,7 @@ fn source_lands_at_transformed_position() {
             pos: DVec2::new(20.0, 20.0),
             flux: 5.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let obs = Observation {
         transform: Transform::translation(DVec2::new(5.0, -3.0)),
@@ -72,7 +72,7 @@ fn flux_conserved_in_clean() {
             pos: DVec2::new(40.0, 40.0),
             flux: 50.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let frame = render(&scene, &Camera::ideal(4.0), &Observation::reference(1));
     let sum: f32 = frame.truth.clean.pixels().iter().sum();
@@ -85,7 +85,7 @@ fn flat_applied_to_clean_truth() {
     let scene = Scene {
         size: Size2us::new(64, 64),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.3 },
+        bg: BgField::Uniform { level: 0.3 },
     };
     let camera = Camera {
         flat: FlatField {
@@ -112,7 +112,7 @@ fn noise_raises_variance_but_keeps_mean() {
     let scene = Scene {
         size: Size2us::new(128, 128),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.2 },
+        bg: BgField::Uniform { level: 0.2 },
     };
     let ideal = render(&scene, &Camera::ideal(3.0), &Observation::reference(7));
     let noisy = render(&scene, &Camera::realistic(3.0), &Observation::reference(7));
@@ -136,7 +136,7 @@ fn dither_shifts_peak() {
             pos: DVec2::new(20.0, 32.0),
             flux: 5.0,
         },
-        BackgroundField::Uniform { level: 0.0 },
+        BgField::Uniform { level: 0.0 },
     );
     let frame = |dx: f64| {
         let obs = Observation {
@@ -158,12 +158,12 @@ fn bias_and_defects_applied() {
     let scene = Scene {
         size: Size2us::new(32, 32),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.2 },
+        bg: BgField::Uniform { level: 0.2 },
     };
     let camera = Camera {
         bias: BiasField {
             offset: 0.05,
-            bad_columns: vec![],
+            bad_cols: vec![],
         },
         defects: SensorDefects {
             hot: vec![(10, 10, 0.5)],
@@ -189,7 +189,7 @@ fn saturation_clamps_bright_source() {
             pos: DVec2::new(32.0, 32.0),
             flux: 20.0,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let camera = Camera {
         saturation: 0.8,
@@ -225,12 +225,12 @@ fn bad_columns_raise_their_column() {
     let scene = Scene {
         size: Size2us::new(32, 32),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.1 },
+        bg: BgField::Uniform { level: 0.1 },
     };
     let camera = Camera {
         bias: BiasField {
             offset: 0.0,
-            bad_columns: vec![(7, 0.2)],
+            bad_cols: vec![(7, 0.2)],
         },
         ..Camera::ideal(3.0)
     };
@@ -252,13 +252,13 @@ fn bad_columns_raise_their_column() {
 }
 
 #[test]
-fn exposure_scales_dark_current() {
+fn exposure_scales_dark_cur() {
     // Dark pedestal = dark_rate·exposure/full_well. With read noise off and an empty sky, the
     // mean pixel is that pedestal, so a 100× exposure scales it ~100×.
     let scene = Scene {
         size: Size2us::new(128, 128),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.0 },
+        bg: BgField::Uniform { level: 0.0 },
     };
     let camera = Camera {
         read_noise_e: 0.0,

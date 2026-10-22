@@ -71,8 +71,8 @@ impl StampGrid {
         let mut x = ArrayVec::new();
         let mut y = ArrayVec::new();
         for row in 0..side {
-            for column in 0..side {
-                x.push(column as f64);
+            for col in 0..side {
+                x.push(col as f64);
                 y.push(row as f64);
             }
         }
@@ -96,13 +96,13 @@ pub(super) struct StampData {
 }
 
 /// What a profile fit is fit to: the stamp of `pixels` of `grid`'s radius about `pos`, above the
-/// sky `background`, each pixel weighted by `1/σ²` from `noise` when it is set.
+/// sky `bg`, each pixel weighted by `1/σ²` from `noise` when it is set.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FitInputs<'a> {
     pub(super) pixels: &'a Buffer2<f32>,
     pub(super) pos: DVec2,
     pub(super) grid: &'a StampGrid,
-    pub(super) background: f32,
+    pub(super) bg: f32,
     pub(super) noise: Option<StarNoise>,
 }
 
@@ -163,7 +163,7 @@ impl StampFit {
             pixels,
             pos,
             grid,
-            background,
+            bg,
             noise,
         } = inputs;
         let radius = grid.radius;
@@ -184,7 +184,7 @@ impl StampFit {
         let frac_x = pos.x - centre.x as f64;
         let frac_y = pos.y - centre.y as f64;
         let reach = radius as f64;
-        let sky = f64::from(background);
+        let sky = f64::from(bg);
 
         let mut z = ArrayVec::new();
         // Filled only for a weighted fit, but an empty `ArrayVec` costs nothing to carry: its

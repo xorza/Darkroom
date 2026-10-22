@@ -12,7 +12,7 @@ use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 #[derive(Debug)]
 pub(super) struct MedianRow<'a> {
     pub(super) above: &'a [f32],
-    pub(super) curr: &'a [f32],
+    pub(super) cur: &'a [f32],
     pub(super) below: &'a [f32],
     pub(super) output: &'a mut [f32],
 }
@@ -24,7 +24,7 @@ impl Kernel for MedianRow<'_> {
     fn run<S: Isa>(self, isa: S) {
         let width = self.output.len();
         debug_assert!(
-            [self.above, self.curr, self.below]
+            [self.above, self.cur, self.below]
                 .iter()
                 .all(|row| row.len() == width),
             "three rows as wide as the output"
@@ -33,7 +33,7 @@ impl Kernel for MedianRow<'_> {
             return;
         }
         let interior = width - 2;
-        let rows = [self.above, self.curr, self.below];
+        let rows = [self.above, self.cur, self.below];
 
         if interior < F32_LANES {
             let mut window = [isa.splat_f32(0.0); 9];
@@ -129,7 +129,7 @@ mod internals {
         pub(super) fn run_scalar(self) {
             let Self {
                 above,
-                curr,
+                cur,
                 below,
                 output,
             } = self;
@@ -138,9 +138,9 @@ mod internals {
                     above[x - 1],
                     above[x],
                     above[x + 1],
-                    curr[x - 1],
-                    curr[x],
-                    curr[x + 1],
+                    cur[x - 1],
+                    cur[x],
+                    cur[x + 1],
                     below[x - 1],
                     below[x],
                     below[x + 1],

@@ -8,12 +8,12 @@ use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
-use crate::execution::cache::runtime_cache::cache_flush_report::CacheFlushReport;
-use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
-use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::run_reporter::RunPhase;
-use crate::execution::report::run_reporter::RunReporter;
-use crate::execution::seeds::RunSeeds;
+use crate::exec::cache::runtime_cache::cache_flush_report::CacheFlushReport;
+use crate::exec::engine::{ExecEngine, ExecuteRequest};
+use crate::exec::report::exec_outcome::ExecOutcome;
+use crate::exec::report::run_reporter::RunPhase;
+use crate::exec::report::run_reporter::RunReporter;
+use crate::exec::seeds::RunSeeds;
 use crate::graph::identity::EventPort;
 use crate::graph::identity::NodeId;
 use crate::worker::active_event_loop::{
@@ -105,22 +105,22 @@ enum WorkerWake {
 /// spawned it: the message stream, where reports go, and the two tokens the
 /// handle trips.
 #[derive(Debug)]
-pub(crate) struct WorkerLinks<ExecutionCallback> {
+pub(crate) struct WorkerLinks<ExecCallback> {
     pub(crate) message_rx: UnboundedReceiver<WorkerMessage>,
-    pub(crate) callback: ExecutionCallback,
+    pub(crate) callback: ExecCallback,
     pub(crate) run_cancel: CancelToken,
     pub(crate) shutdown: CancellationToken,
 }
 
 #[derive(Debug)]
-pub(crate) struct WorkerTask<ExecutionCallback> {
+pub(crate) struct WorkerTask<ExecCallback> {
     message_rx: UnboundedReceiver<WorkerMessage>,
-    callback: ExecutionCallback,
+    callback: ExecCallback,
     run_cancel: CancelToken,
     shutdown: CancellationToken,
-    engine: ExecutionEngine,
+    engine: ExecEngine,
     summary: RunSummaryPublisher,
-    outcome: ExecutionOutcome,
+    outcome: ExecOutcome,
     intent: BatchIntent,
     messages: Vec<WorkerMessage>,
     event_buffer: Vec<EventPort>,
@@ -128,11 +128,11 @@ pub(crate) struct WorkerTask<ExecutionCallback> {
     event_loop_pause_gate: PauseGate,
 }
 
-impl<ExecutionCallback> WorkerTask<ExecutionCallback>
+impl<ExecCallback> WorkerTask<ExecCallback>
 where
-    ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
+    ExecCallback: Fn(WorkerReport) + Send + Sync + 'static,
 {
-    pub(crate) fn new(links: WorkerLinks<ExecutionCallback>) -> Self {
+    pub(crate) fn new(links: WorkerLinks<ExecCallback>) -> Self {
         let WorkerLinks {
             message_rx,
             callback,
@@ -144,9 +144,9 @@ where
             callback,
             run_cancel,
             shutdown,
-            engine: ExecutionEngine::default(),
+            engine: ExecEngine::default(),
             summary: RunSummaryPublisher::default(),
-            outcome: ExecutionOutcome::default(),
+            outcome: ExecOutcome::default(),
             intent: BatchIntent::default(),
             messages: Vec::new(),
             event_buffer: Vec::with_capacity(EVENT_LOOP_BACKPRESSURE),
@@ -371,7 +371,7 @@ where
             Err(error) => {
                 let activity = self.resting_activity();
                 (self.callback)(WorkerReport::Activity(activity));
-                (self.callback)(WorkerReport::Error(WorkerError::Execution { error }));
+                (self.callback)(WorkerReport::Error(WorkerError::Exec { error }));
             }
         }
     }

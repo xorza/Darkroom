@@ -132,7 +132,7 @@ impl Editor {
     /// The made graph over the shipped library, every preview publishing an image.
     fn new() -> Self {
         let runtime = RuntimeLibrary::new(&MlModelPaths::default());
-        let library = Arc::clone(runtime.current());
+        let library = Arc::clone(runtime.cur());
         let func = |name: &str| -> Func {
             library
                 .by_name(name)
@@ -203,7 +203,7 @@ impl Editor {
         let Some(sizes) = sizes.into_iter().collect::<Option<Vec<_>>>() else {
             return false;
         };
-        let columns: Vec<f32> = sizes
+        let cols: Vec<f32> = sizes
             .iter()
             .scan(0.0, |x, rect| {
                 let at = *x;
@@ -214,16 +214,16 @@ impl Editor {
         let row = sizes.iter().map(|r| r.size.h).fold(0.0, f32::max) + GAP;
         let placements = &mut self.session.open.document.main_view.item_placements;
         for (chain, nodes) in self.chains.iter().enumerate() {
-            for (column, node) in nodes.iter().enumerate() {
+            for (col, node) in nodes.iter().enumerate() {
                 placements
                     .get_mut(node)
                     .expect("every graph node is placed")
-                    .pos = Vec2::new(columns[column], chain as f32 * row);
+                    .pos = Vec2::new(cols[col], chain as f32 * row);
             }
         }
         self.dragged = Arc::new([DragStart {
             node: self.chains[DRAGGED_CHAIN][BLEND],
-            pos: Vec2::new(columns[BLEND], DRAGGED_CHAIN as f32 * row),
+            pos: Vec2::new(cols[BLEND], DRAGGED_CHAIN as f32 * row),
         }]);
         true
     }

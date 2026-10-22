@@ -20,7 +20,7 @@ use scenarium::DiskStore;
 use scenarium::NodeId;
 use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
 
-use crate::core::background_runtime::BackgroundRuntime;
+use crate::core::bg_runtime::BgRuntime;
 use crate::core::wake::Wake;
 
 /// Every command here answers whether the worker took it. A send only fails
@@ -30,7 +30,7 @@ use crate::core::wake::Wake;
 pub(crate) struct WorkerBridge {
     worker: Worker,
     rx: Receiver<WorkerReport>,
-    runtime: BackgroundRuntime,
+    runtime: BgRuntime,
 }
 
 impl Debug for WorkerBridge {
@@ -46,7 +46,7 @@ impl WorkerBridge {
     /// it forwards the result over `tx` and asks the host to paint, so the next
     /// frame drains it.
     pub(crate) fn new(wake: Wake) -> Self {
-        let runtime = BackgroundRuntime::new().expect("build worker runtime");
+        let runtime = BgRuntime::new().expect("build worker runtime");
         let (tx, rx) = channel::<WorkerReport>();
         // `Worker`'s `tokio::spawn` needs an ambient runtime.
         let worker = runtime.enter(|| Worker::new(move |report| deliver(&tx, &wake, report)));

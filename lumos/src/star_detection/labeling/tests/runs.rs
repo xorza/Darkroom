@@ -108,7 +108,7 @@ fn run_patterns_count_as_worked_out() {
     for (name, mask, four, eight) in cases {
         let labelled = check(&mask);
         assert_eq!(
-            (labelled.four.num_labels(), labelled.eight.num_labels()),
+            (labelled.four.label_count(), labelled.eight.label_count()),
             (four, eight),
             "{name}"
         );

@@ -29,7 +29,7 @@ use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::slot_planes::SlotPlanes;
 use crate::combine::normalization::{FrameNorm, Normalization};
 use crate::combine::reducer::combined_sample::CombinedSample;
-use crate::combine::reducer::pixel_samples::{NoiseColumns, PixelSamples};
+use crate::combine::reducer::pixel_samples::{NoiseCols, PixelSamples};
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::planned_combine::PlannedCombine;
 use crate::combine::stack_frame::StackFrame;
@@ -478,7 +478,7 @@ impl FrameCache {
                             values,
                             eff_weights,
                             sample_flags,
-                            noise_background,
+                            noise_bg,
                             noise_sky,
                             noise_per_unit,
                             buffers,
@@ -486,7 +486,7 @@ impl FrameCache {
                         let values = values.as_mut_slice();
                         let eff_weights = eff_weights.as_mut_slice();
                         let sample_flags = sample_flags.as_mut_slice();
-                        let noise_background = noise_background.as_mut_slice();
+                        let noise_bg = noise_bg.as_mut_slice();
                         let noise_sky = noise_sky.as_mut_slice();
                         let noise_per_unit = noise_per_unit.as_mut_slice();
                         let mut row_tallies = FlagTallies::default();
@@ -524,7 +524,7 @@ impl FrameCache {
                                             .as_ref()
                                             .map_or(1.0, |rows| rows.at(slot, gain_point));
                                         let model = noise.model(frame_idx, slot).at(gain).over(q);
-                                        noise_background[covered] = model.background;
+                                        noise_bg[covered] = model.bg;
                                         noise_sky[covered] = model.sky;
                                         noise_per_unit[covered] = model.per_unit;
                                     }
@@ -536,7 +536,7 @@ impl FrameCache {
                                     values: &mut *values,
                                     eff_weights: &mut *eff_weights,
                                     sample_flags: &mut *sample_flags,
-                                    noise_background: &mut *noise_background,
+                                    noise_bg: &mut *noise_bg,
                                     noise_sky: &mut *noise_sky,
                                     noise_per_unit: &mut *noise_per_unit,
                                 }
@@ -559,8 +559,8 @@ impl FrameCache {
                                     PixelSamples {
                                         values: &mut values[..kept],
                                         weights: &eff_weights[..kept],
-                                        noise: noise.map(|_| NoiseColumns {
-                                            background: &noise_background[..kept],
+                                        noise: noise.map(|_| NoiseCols {
+                                            bg: &noise_bg[..kept],
                                             sky: &noise_sky[..kept],
                                             per_unit: &noise_per_unit[..kept],
                                         }),
@@ -618,7 +618,7 @@ impl FrameCache {
                 excluded_samples: excluded.totals(),
                 kept_flagged_samples: kept_flagged.totals(),
                 small_n_fallback_pixels: fallback_pixels.into_inner(),
-                variance_background_only: planes.inverse_variance
+                variance_bg_only: planes.inverse_variance
                     && noise.is_some_and(|noise| noise.first_without_gain().is_some()),
                 overcommit_bytes: chunking.overcommit_bytes,
                 spilled_frames: if self.core.tier.spills() {

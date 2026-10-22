@@ -10,7 +10,7 @@ use crate::gui::theme::type_scale::TypeScale;
 /// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
 /// reads the same palette as darkroom-owned chrome. Two notes on the
 /// mapping:
-/// - `window_background` is the window clear and the selected tab chip —
+/// - `window_bg` is the window clear and the selected tab chip —
 ///   the graph canvas, so a chip dissolves into the pane below it.
 /// - `element` and `node_fill` are one color by design: nodes and
 ///   palantir's own surfaces sit on the same tier.
@@ -104,7 +104,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     tabs.radius = r.corner_radius;
     tabs.accent_idle = r.header_fill;
     tabs.badge = r.warning;
-    // The selected chip keeps palantir's `window_background` fill, which is
+    // The selected chip keeps palantir's `window_bg` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
     let chip = |fill: RgbaF32| Background::rounded(fill, top);

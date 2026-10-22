@@ -67,7 +67,7 @@ impl OnnxModel {
         let outputs = self.session.run(ort::inputs![tensor])?;
         let (_shape, tile) = outputs[0].try_extract_tensor::<f32>()?;
         if tile.len() != output.len() {
-            return Err(MlError::OutputLength { len: tile.len() });
+            return Err(MlError::OutputLen { len: tile.len() });
         }
         output.copy_from_slice(tile);
         Ok(())

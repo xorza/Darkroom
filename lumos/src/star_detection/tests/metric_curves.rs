@@ -9,7 +9,7 @@
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{astrometric_rms, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scene};
 use crate::math::size2us::Size2us;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{
@@ -19,7 +19,7 @@ use crate::star_detection::tests::{
 #[test]
 fn completeness_and_reliability_high_for_bright_field() {
     let frame = Scenario {
-        num_stars: 20,
+        star_count: 20,
         flux: (8.0, 14.0),
         ..Default::default()
     }
@@ -47,7 +47,7 @@ fn completeness_and_reliability_high_for_bright_field() {
 #[test]
 fn astrometric_rms_is_subpixel_on_bright_stars() {
     let frame = Scenario {
-        num_stars: 20,
+        star_count: 20,
         ..Default::default()
     }
     .frame();
@@ -67,13 +67,13 @@ fn completeness_falls_for_fainter_sources() {
     let config = synthetic_config();
 
     let bright = Scenario {
-        num_stars: 20,
+        star_count: 20,
         flux: (10.0, 14.0),
         ..Default::default()
     }
     .frame();
     let faint = Scenario {
-        num_stars: 20,
+        star_count: 20,
         flux: (0.2, 1.0),
         // Shallow well → the faint sources sit near the noise floor.
         full_well_e: 1_500.0,
@@ -109,7 +109,7 @@ fn negligible_false_positives_on_source_free_noise() {
     let scene = Scene {
         size: Size2us::new(256, 256),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.1 },
+        bg: BgField::Uniform { level: 0.1 },
     };
     // Average over several seeds so the bound reflects the threshold, not one lucky noise draw.
     let total: usize = (1u64..=4)
@@ -139,12 +139,12 @@ fn completeness_falls_with_crowding() {
     let config = synthetic_config();
     // Same star count and brightness, sparse-uniform vs packed-cluster placement.
     let sparse = Scenario {
-        num_stars: 40,
+        star_count: 40,
         ..Default::default()
     }
     .frame();
     let crowded = Scenario {
-        num_stars: 40,
+        star_count: 40,
         placement: Placement::Cluster,
         ..Default::default()
     }
@@ -176,7 +176,7 @@ fn completeness_falls_with_crowding() {
 fn min_snr_knob_gates_faint_detections() {
     // A bright→faint field over a shallow (noisy) well, so `min_snr` decides the faint end.
     let frame = Scenario {
-        num_stars: 40,
+        star_count: 40,
         flux: (1.0, 10.0),
         full_well_e: 2_000.0,
         ..Default::default()

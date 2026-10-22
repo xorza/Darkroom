@@ -73,7 +73,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     samples: black_box(&plane),
                     excluded: |_| false,
                 }
-                .background(Some(PixelGains {
+                .bg(Some(PixelGains {
                     gain: |idx| gains[idx],
                     bins: &bins,
                 }))

@@ -74,7 +74,7 @@ impl WindowedCentroid {
             )
         };
         let mut pos = start;
-        let mut previous_step: Option<f64> = None;
+        let mut prev_step: Option<f64> = None;
         for _ in 0..MAX_STEPS {
             let moments = Moments::about(&stamp_at(pos)?, inputs.offset)?;
             let mean = moments.mean();
@@ -92,9 +92,9 @@ impl WindowedCentroid {
             // step: a point-symmetric stamp cancels its mean only to rounding.
             let rounding = 1e3 * f64::EPSILON * pos.abs().max_element().max(1.0);
             let settled = length <= rounding
-                || previous_step.is_some_and(|previous| {
-                    length < previous && {
-                        let contraction = length / previous;
+                || prev_step.is_some_and(|prev| {
+                    length < prev && {
+                        let contraction = length / prev;
                         contraction / (1.0 - contraction) * length <= TOLERANCE
                     }
                 });
@@ -102,7 +102,7 @@ impl WindowedCentroid {
                 let sigma = centre_sigma(&stamp_at(pos)?, inputs, gain)?;
                 return Some(Self { pos, sigma });
             }
-            previous_step = Some(length);
+            prev_step = Some(length);
         }
         None
     }
@@ -131,14 +131,14 @@ fn centre_sigma(stamp: &WindowedStamp<'_>, inputs: WindowedInputs, gain: [f64; 3
     let mean = moments.mean();
     let mut spread = [0.0f64; 3];
     for row in stamp.rows() {
-        for ((&pixel, &column_weight), &dx) in row
+        for ((&pixel, &col_weight), &dx) in row
             .pixels
             .iter()
-            .zip(stamp.column_weights())
-            .zip(stamp.column_offsets())
+            .zip(stamp.col_weights())
+            .zip(stamp.col_offsets())
         {
             let variance = inputs.noise.variance(f64::from(pixel - inputs.offset));
-            let w = column_weight * row.weight;
+            let w = col_weight * row.weight;
             let (ex, ey) = (dx - mean.x, row.dy - mean.y);
             let scale = w * w * variance;
             spread[0] += scale * ex * ex;

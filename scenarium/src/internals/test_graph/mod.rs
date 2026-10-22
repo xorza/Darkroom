@@ -287,7 +287,7 @@ impl TestGraph {
     pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut FuncBuilder)) {
         self.edit_func(name, edit);
         let func_id = self.func_id(name);
-        let current = self.library.by_id(func_id).unwrap().func_ref();
+        let cur = self.library.by_id(func_id).unwrap().func_ref();
         let nodes: Vec<NodeId> = self
             .graph
             .iter()
@@ -295,7 +295,7 @@ impl TestGraph {
             .map(|node| node.id)
             .collect();
         for node in nodes {
-            self.graph.find_mut(node).unwrap().kind = NodeKind::Func(current);
+            self.graph.find_mut(node).unwrap().kind = NodeKind::Func(cur);
         }
     }
 
@@ -373,8 +373,8 @@ impl TestGraph {
     }
 
     fn bind_name(&mut self, name: &str, node_id: NodeId) {
-        let previous = self.ids.insert(name.to_owned(), node_id);
-        assert!(previous.is_none(), "a fixture reused the name {name:?}");
+        let prev = self.ids.insert(name.to_owned(), node_id);
+        assert!(prev.is_none(), "a fixture reused the name {name:?}");
     }
 }
 
@@ -652,8 +652,8 @@ pub(crate) mod compiled;
 mod internals {
     use std::sync::Arc;
 
-    use crate::execution::compile::Compiler;
-    use crate::execution::compile::compiled_graph::CompiledGraph;
+    use crate::exec::compile::Compiler;
+    use crate::exec::compile::compiled_graph::CompiledGraph;
     use crate::graph::identity::{EventPort, NodeId};
     use crate::internals::test_graph::TestGraph;
     use crate::internals::test_graph::compiled::Compiled;

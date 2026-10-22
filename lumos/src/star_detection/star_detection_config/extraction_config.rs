@@ -30,24 +30,24 @@ pub enum Deblend {
         /// relative height, not a prominence — no saddle to the brighter peak is measured.
         min_relative_height: f32,
     },
-    /// SExtractor's tree: the component is thresholded at `n_thresholds` levels spaced
+    /// SExtractor's tree: the component is thresholded at `threshold_count` levels spaced
     /// exponentially between the detection threshold and its peak residual, and a branch is its
     /// own star when it holds at least `min_contrast` of the component's residual flux above
     /// that threshold.
     MultiThreshold {
         /// Levels in the tree, between 2 and 256.
-        n_thresholds: usize,
+        threshold_count: usize,
         /// A branch's share of the component's residual flux, in `[0, 1]`.
         min_contrast: f32,
     },
 }
 
-/// Upper bound for [`Deblend::MultiThreshold`]'s `n_thresholds`.
+/// Upper bound for [`Deblend::MultiThreshold`]'s `threshold_count`.
 ///
 /// Each level of the multi-threshold tree is a pass over the component's pixels that stood above
 /// the level below, so the cap bounds the passes one component costs. 256 levels is already eight
 /// times SExtractor's default of 32.
-pub(super) const MAX_DEBLEND_N_THRESHOLDS: usize = 256;
+pub(super) const MAX_DEBLEND_THRESHOLD_COUNT: usize = 256;
 
 /// Configuration for candidate detection, deblending, and region filtering.
 #[derive(Debug, Clone)]
@@ -98,13 +98,13 @@ impl ExtractionConfig {
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }
             Deblend::MultiThreshold {
-                n_thresholds,
+                threshold_count,
                 min_contrast,
             } => {
-                ConfigField::count("deblend n_thresholds", n_thresholds).must_be_against_count(
+                ConfigField::count("deblend n_thresholds", threshold_count).must_be_against_count(
                     "between 2 and the deblend level cap",
-                    MAX_DEBLEND_N_THRESHOLDS,
-                    (2..=MAX_DEBLEND_N_THRESHOLDS).contains(&n_thresholds),
+                    MAX_DEBLEND_THRESHOLD_COUNT,
+                    (2..=MAX_DEBLEND_THRESHOLD_COUNT).contains(&threshold_count),
                 )?;
                 ConfigField::new("deblend min_contrast", min_contrast)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;

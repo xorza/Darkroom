@@ -22,9 +22,9 @@ use tokio::time::{Duration, timeout};
 use crate::builtin::system_library::system_library;
 use crate::builtin::worker_events_library::worker_events_library;
 use crate::data::const_value::ConstValue;
-use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::error::ExecutionError;
+use crate::exec::cache::disk_store::DiskStore;
+use crate::exec::compile::compiled_graph::CompiledGraph;
+use crate::exec::error::ExecError;
 use crate::graph::identity::NodeId;
 use crate::internals::engine::RunOutcome;
 use crate::internals::test_graph::TestGraph;
@@ -207,13 +207,13 @@ impl TestWorker {
 
     /// The next finished run, or the error that ended it — skipping everything
     /// a run publishes on the way there.
-    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, ExecutionError> {
+    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, ExecError> {
         loop {
             match self.report().await {
                 WorkerReport::Completed(summary) => {
                     return Ok(RunOutcome::published(&self.graph, &summary));
                 }
-                WorkerReport::Error(WorkerError::Execution { error }) => return Err(error),
+                WorkerReport::Error(WorkerError::Exec { error }) => return Err(error),
                 WorkerReport::Installed { .. }
                 | WorkerReport::Cleared
                 | WorkerReport::Activity(_)

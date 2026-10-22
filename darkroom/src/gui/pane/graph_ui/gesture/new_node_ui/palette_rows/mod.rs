@@ -36,7 +36,7 @@ impl PaletteRow {
 pub(super) struct PaletteRows {
     rows: Vec<PaletteRow>,
     /// One range of `rows` per category, in order.
-    columns: Vec<Range<usize>>,
+    cols: Vec<Range<usize>>,
 }
 
 impl PaletteRows {
@@ -52,7 +52,7 @@ impl PaletteRows {
         query_lc: &str,
     ) {
         self.rows.clear();
-        self.columns.clear();
+        self.cols.clear();
         self.rows.extend(
             entries
                 .filter(|entry| {
@@ -78,15 +78,15 @@ impl PaletteRows {
             if end == self.rows.len()
                 || entry(&self.rows[end]).category() != entry(&self.rows[start]).category()
             {
-                self.columns.push(start..end);
+                self.cols.push(start..end);
                 start = end;
             }
         }
     }
 
     /// Each category's rows, in order.
-    pub(super) fn columns(&self) -> impl Iterator<Item = &[PaletteRow]> {
-        self.columns.iter().map(|run| &self.rows[run.clone()])
+    pub(super) fn cols(&self) -> impl Iterator<Item = &[PaletteRow]> {
+        self.cols.iter().map(|run| &self.rows[run.clone()])
     }
 }
 

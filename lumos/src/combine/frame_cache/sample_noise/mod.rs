@@ -4,7 +4,7 @@
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_read::slots::Slots;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::noise::ccd_noise::CcdNoise;
 
 /// Each frame's [`CcdNoise`] per slot, carried through its normalization into the units the frames
@@ -31,7 +31,7 @@ impl SampleNoise {
         let mut models = Vec::new();
         let mut first_without_gain = None;
         for (frame, stats) in stats.into_iter().enumerate() {
-            debug_assert_eq!(stats.background.len(), slots.count());
+            debug_assert_eq!(stats.bg.len(), slots.count());
             if stats.electrons_per_unit.is_none() {
                 first_without_gain.get_or_insert(frame);
             }
@@ -58,9 +58,9 @@ impl SampleNoise {
     fn normalized(model: CcdNoise, gain: f32, offset: f32) -> CcdNoise {
         debug_assert!(gain > 0.0, "a normalization gain is positive, not {gain}");
         CcdNoise {
-            background: BackgroundSplit {
-                variance: model.background.variance * gain * gain,
-                ..model.background
+            bg: BgSplit {
+                variance: model.bg.variance * gain * gain,
+                ..model.bg
             },
             quantization_variance: model.quantization_variance * gain * gain,
             sky: model.sky * gain + offset,
