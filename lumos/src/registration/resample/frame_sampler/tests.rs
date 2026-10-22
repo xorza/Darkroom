@@ -8,7 +8,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::math::size2us::Size2us;
-use crate::registration::resample::flagged_sources::{FlagScratch, FlaggedSources};
+use crate::registration::resample::flagged_sources::{FlagScratch, FlaggedSources, Validity};
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, SampleRule, WindowAxes,
 };
@@ -40,7 +40,7 @@ struct Expected {
 #[derive(Debug)]
 struct Oracle<'a> {
     planes: Vec<SourcePlane<'a>>,
-    validity: Option<SourcePlane<'a>>,
+    validity: Option<Validity<'a>>,
     flags: Option<&'a PixelFlags>,
     size: Size2us,
     border: f32,
@@ -77,9 +77,10 @@ impl Oracle<'_> {
         let size = self.size();
         (0..size.width as i64).contains(&x)
             && (0..size.height as i64).contains(&y)
-            && self
-                .validity
-                .is_none_or(|validity| Self::at(validity, Self::idx(x, y)) == 1.0)
+            && self.validity.is_none_or(|validity| {
+                let (x, y) = Self::idx(x, y);
+                validity.holds(y * size.width + x)
+            })
     }
 
     /// The taps of `filter` at `stretch` around `at` and their f32 weights, from the

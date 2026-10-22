@@ -61,3 +61,14 @@
   a galaxy or a nebula gives the room back after it, and a pixel is 12 bytes. Refused: keeping the
   largest component's room for the run, which a nebula of millions of pixels pinned per slot.
 
+- **A warp reads which taps hold data off the flag bytes.** A window near an excluded pixel builds
+  its lanes of 1 and 0 from the bytes (`Validity`), the same values the f32 validity plane held, so
+  every sample is the same bits. Refused: the validity plane, 4 B a pixel per warp slot for a copy
+  of the flags; a select of the weights in place of the product, whose `+0.0` against `0 × w =
+  −0.0` under a negative lobe changes the sums' bits.
+- **A dilation grows the columns a strip at a time.** The vertical van Herk pass runs on a strip
+  of `STRIP_WIDTH` columns down the whole height in place, so a worker holds two strips' block
+  ORs whatever the reach, and a warp's flag scratch drops from 8 B a pixel to 2. Refused: two
+  whole planes of block ORs, 48 MB at 24 MP; bands of rows, whose scratch grows with the window,
+  and a warp's window grows with its stretch, which no plan knows. A strip writes its own columns
+  of each row through a raw pointer, as the warp writes its rows.

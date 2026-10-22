@@ -24,7 +24,7 @@ use arrayvec::ArrayVec;
 use crate::image::pixel_flags::Reach;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
-use crate::registration::resample::flagged_sources::FlaggedSources;
+use crate::registration::resample::flagged_sources::{FlaggedSources, Validity};
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::ringing_clamp::RingingClamp;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};
@@ -163,7 +163,7 @@ impl<'a> FrameSampler<'a> {
         if self
             .flagged
             .and_then(FlaggedSources::validity)
-            .is_some_and(|validity| validity.pixels[idx] == 0.0)
+            .is_some_and(|validity| !validity.holds(idx))
         {
             return self.no_data(out);
         }
@@ -202,12 +202,12 @@ struct PixelOut<'c, 'r> {
     x: usize,
 }
 
-/// A window's taps summed into a sample: the window, the validity plane its sums are masked by
-/// near an excluded pixel, the weights that normalize it, and the clamp that holds its ringing.
+/// A window's taps summed into a sample: the window, the validity its sums are masked by near an
+/// excluded pixel, the weights that normalize it, and the clamp that holds its ringing.
 #[derive(Debug, Clone, Copy)]
 struct WindowSum<'w> {
     window: &'w TapWindow<'w>,
-    validity: Option<SourcePlane<'w>>,
+    validity: Option<Validity<'w>>,
     weights: WindowWeights,
     clamp: Option<RingingClamp>,
 }

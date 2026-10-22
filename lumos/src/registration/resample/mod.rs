@@ -78,10 +78,11 @@ pub(crate) struct WarpScratch {
 }
 
 impl WarpScratch {
-    /// The bytes one warp of a `size` frame holds here at the most, its flag planes: a row's
-    /// scratch is a few bytes a pixel of one row, which a plan counts nowhere.
-    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
-        FlagScratch::heap_bytes(size)
+    /// The bytes one warp of a `size` frame on `workers` holds here at the most, its flag planes
+    /// and their growth's block ORs: a row's scratch is a few bytes a pixel of one row, which a
+    /// plan counts nowhere.
+    pub(crate) const fn heap_bytes(size: Size2us, workers: usize) -> usize {
+        FlagScratch::heap_bytes(size, workers)
     }
 }
 

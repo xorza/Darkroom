@@ -8,9 +8,9 @@
 //!   at all. The warp samples over the other taps alone, normalized by their weight (normalized
 //!   convolution), and the share of the kernel's magnitude they hold is the pixel's coverage: the
 //!   space-telescope pipelines' rule, which gives such a pixel no weight. A window near one masks
-//!   its sums by the validity plane, lane by lane, so the value under an excluded pixel, a NaN
-//!   fill among them, never enters a sum, and the validity plane's own sums are the weights of the
-//!   taps that remain.
+//!   its sums lane by lane by the [`Validity`] of its taps, read off their flag bytes, so the value
+//!   under an excluded pixel, a NaN fill among them, never enters a sum, and the weights of the
+//!   taps that remain are the window's.
 //! - A bound, at saturation or the flat's floor ([`QualityFlags::RESAMPLE_CARRIED`]), is still
 //!   the best figure for its pixel, and where every frame clips a star's core the only one. The
 //!   warp samples it like any other and carries its flag to every output pixel whose sample gave
@@ -22,19 +22,16 @@ use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
-use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;
+use crate::simd::{F32_LANES, Isa};
 
 /// A flagged frame's sources as the warp samples them, prepared once per frame in a
 /// [`FlagScratch`].
 #[derive(Debug)]
 pub(crate) struct FlaggedSources<'a> {
     flags: &'a PixelFlags,
-    /// 1 where the source holds a measurement, 0 at an excluded pixel; for a frame that excludes
-    /// any.
-    validity: Option<&'a Buffer2<f32>>,
     /// The flags grown by the kernel's window: a source cell holds every flag a window sampling
     /// from it can read. A window near none is a product of its axes like any other. For a filter
     /// alone: the nearest pixel reads its own flags.
@@ -46,7 +43,6 @@ pub(crate) struct FlaggedSources<'a> {
 /// frame would pay their whole area in allocation and first-touch page faults each time.
 #[derive(Debug, Default)]
 pub(crate) struct FlagScratch {
-    validity: Option<Buffer2<f32>>,
     near: Option<Buffer2<u8>>,
     dilation: DilationScratch,
     /// A plane for the warped flags, kept from a frame that carried none.
@@ -54,12 +50,11 @@ pub(crate) struct FlagScratch {
 }
 
 impl FlagScratch {
-    /// The bytes the scratch holds beside a `size` frame's warp at the most: its validity plane,
-    /// its flags grown by the kernel's window, that growth's planes, and the plane for the warped
+    /// The bytes the scratch holds beside a `size` frame's warp on `workers` at the most: its
+    /// flags grown by the kernel's window, that growth's block ORs, and the plane for the warped
     /// flags, which it keeps from a frame whose warp carried none.
-    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
-        size.pixel_count() * (size_of::<f32>() + 2 * size_of::<u8>())
-            + DilationScratch::heap_bytes(size)
+    pub(crate) const fn heap_bytes(size: Size2us, workers: usize) -> usize {
+        2 * size.pixel_count() * size_of::<u8>() + DilationScratch::heap_bytes(size, workers)
     }
 
     /// `flags`' sources prepared in this scratch, for windows that read `reach` around their
@@ -69,29 +64,18 @@ impl FlagScratch {
         flags: &'a PixelFlags,
         reach: Option<Reach>,
     ) -> FlaggedSources<'a> {
-        let size = flags.size();
-        if flags.contains(QualityFlags::RESAMPLE_EXCLUDED) {
-            flags.validity_into(
-                QualityFlags::RESAMPLE_EXCLUDED,
-                sized(&mut self.validity, size),
-            );
-        }
         if let Some(reach) = reach {
             flags.dilated_into(
                 DilationSpec {
                     reach,
                     fixed: QualityFlags::default(),
                 },
-                sized(&mut self.near, size),
-                &mut self.dilation,
+                sized(&mut self.near, flags.size()),
+                &self.dilation,
             );
         }
         FlaggedSources {
             flags,
-            validity: self
-                .validity
-                .as_ref()
-                .filter(|_| flags.contains(QualityFlags::RESAMPLE_EXCLUDED)),
             near: self.near.as_ref().filter(|_| reach.is_some()),
         }
     }
@@ -127,7 +111,7 @@ impl FlagScratch {
 impl Shapeless for FlagScratch {}
 
 /// The plane in `slot`, made for `size` when it holds none of that size.
-fn sized<T: Default + Clone>(slot: &mut Option<Buffer2<T>>, size: Size2us) -> &mut Buffer2<T> {
+fn sized(slot: &mut Option<Buffer2<u8>>, size: Size2us) -> &mut Buffer2<u8> {
     if slot
         .as_ref()
         .is_none_or(|plane| Size2us::from(plane) != size)
@@ -138,9 +122,14 @@ fn sized<T: Default + Clone>(slot: &mut Option<Buffer2<T>>, size: Size2us) -> &m
 }
 
 impl FlaggedSources<'_> {
-    /// The validity plane, when the frame excludes any pixel.
-    pub(crate) fn validity(&self) -> Option<SourcePlane<'_>> {
-        self.validity.map(plane)
+    /// Which sources hold a measurement, when the frame excludes any pixel.
+    pub(super) fn validity(&self) -> Option<Validity<'_>> {
+        self.flags
+            .contains(QualityFlags::RESAMPLE_EXCLUDED)
+            .then(|| Validity {
+                flags: self.flags.bytes(),
+                width: self.flags.size().width,
+            })
     }
 
     /// The flags a window sampling `pos` can read. A position in the footprint's rim takes
@@ -200,9 +189,33 @@ fn weighed_taps(axis: &TapAxis, length: usize) -> impl Iterator<Item = usize> + 
         .map(|(tap, _)| tap as usize)
 }
 
-fn plane(buffer: &Buffer2<f32>) -> SourcePlane<'_> {
-    SourcePlane {
-        pixels: buffer.pixels(),
-        width: buffer.width(),
+/// Which source pixels hold a measurement, read off their flag bytes: none of
+/// [`QualityFlags::RESAMPLE_EXCLUDED`].
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Validity<'a> {
+    flags: &'a [u8],
+    pub(super) width: usize,
+}
+
+impl Validity<'_> {
+    /// Whether source pixel `idx` holds a measurement.
+    #[inline]
+    pub(super) const fn holds(self, idx: usize) -> bool {
+        !QualityFlags::from_byte(self.flags[idx]).intersects(QualityFlags::RESAMPLE_EXCLUDED)
+    }
+
+    /// One lane for each of the `count` source pixels from `idx`, at most a vector's: 1 where it
+    /// holds a measurement, 0 where it does not and past them. The factor the masked weight sums
+    /// take, and the mask the values take.
+    #[inline(always)]
+    pub(super) fn lanes<S: Isa>(self, isa: S, idx: usize, count: usize) -> S::F32 {
+        debug_assert!(count <= F32_LANES, "{count} taps in a vector");
+        let mut lanes = [0.0; F32_LANES];
+        for (lane, offset) in lanes.iter_mut().zip(0..count) {
+            if self.holds(idx + offset) {
+                *lane = 1.0;
+            }
+        }
+        isa.load_f32(&lanes)
     }
 }
