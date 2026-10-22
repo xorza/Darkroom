@@ -7,12 +7,11 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::sample_domain::ScaleOrigin;
 use crate::io::error::OverBudget;
+use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
-
-pub(super) const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 /// Above this, a floating-point HDU's `DATAMAX` is read as declaring an ADU saturation level rather
 /// than a normalized one. Siril's threshold, and well clear of both the `[0, 1]` convention and the
@@ -69,7 +68,7 @@ impl<'a> FitsHduDescription<'a> {
         let row_f32_bytes = row_samples
             .checked_mul(size_of::<f32>())
             .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
-        let rows_per_chunk = (FITS_DECODE_CHUNK_BYTES / row_f32_bytes.max(1))
+        let rows_per_chunk = (CHUNK_BYTES / row_f32_bytes.max(1))
             .max(1)
             .min(dimensions.height());
         let chunk_samples = row_samples

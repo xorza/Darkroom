@@ -15,7 +15,6 @@ use arrayvec::ArrayVec;
 use common::fs;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Data as FitsData, Image};
 use fits_well::io::StreamReader;
 use imaginarium::Buffer2;
 
@@ -27,11 +26,12 @@ use crate::io::error::{ImageError, OverBudget, WriteError};
 use crate::io::fits::decode::selected_fits::{self, Checksum, SelectedFits};
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
-use crate::io::fits::flags_extension::FlagsExtension;
-use crate::io::fits::gain_extension::GainExtension;
-use crate::io::fits::linear::{self, LinearFitsHdu};
+use crate::io::fits::flags_extension;
+use crate::io::fits::gain_extension;
+use crate::io::fits::linear;
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
+use crate::io::fits::plane_hdu::{FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
 use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
@@ -70,10 +70,11 @@ const PLANES: [LumosExtension; 5] = [
     LumosExtension::Dispersion,
 ];
 
-/// Write `product` to `path` as one checksummed FITS file.
+/// Write `product` to `path` as one checksummed FITS file, each HDU streamed from the planes the
+/// product holds.
 pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError> {
     let image = &product.image;
-    let mut primary = LinearFitsHdu::encode(image, product.cfa_type)?;
+    let mut primary = linear::hdu(image, product.cfa_type)?;
     primary.header.set(PRODUCT_KEYWORD, PRODUCT_VERSION)?;
     report_keywords::write(&mut primary.header, &product.report)?;
     primary
@@ -82,18 +83,26 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     if let Some(Coverage::Uniform { value, .. }) = &product.coverage {
         primary.header.set(UNIFORM_COVERAGE, f64::from(*value))?;
     }
-    let flags = FlagsExtension::encode(image.flags(), None, 1)?;
-    let gain = GainExtension::encode(image.flat_gain().map(Arc::as_ref), None)?;
+    let flags = flags_extension::encode(image.flags(), None, 1)?;
+    let gain = gain_extension::encode(image.flat_gain().map(Arc::as_ref), None)?;
     let described = DescribedImage {
         size: image.dimensions().size(),
         channels: image.channels(),
         scale: image_scale(image),
         weight_kind: Some(product.weight_kind),
     };
-    let mut planes = Vec::with_capacity(PLANES.len());
-    if let Some(mask) = mask(image) {
-        planes.push(encode_plane(LumosExtension::Mask, mask, &described)?);
-    }
+    let mask = image
+        .flags()
+        .filter(|flags| flags.contains(QualityFlags::NO_DATA))
+        .map(|flags| {
+            plane_hdu(
+                LumosExtension::Mask,
+                image_shape(described.size, described.channels),
+                NoDataMask(flags),
+                &described,
+            )
+        })
+        .transpose()?;
     let maps = [
         (
             LumosExtension::Uncertainty,
@@ -108,23 +117,24 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
         ),
         (LumosExtension::Weight, product.weight.as_ref()),
         (LumosExtension::Dispersion, product.dispersion.as_ref()),
-    ];
-    for (extension, map) in maps {
-        if let Some(map) = map {
-            planes.push(encode_plane(extension, map_samples(map), &described)?);
-        }
-    }
+    ]
+    .into_iter()
+    .filter_map(|(extension, map)| map.map(|map| map_hdu(extension, map, &described)))
+    .collect::<Result<ArrayVec<_, 4>, _>>()?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer.write_image(&primary.image, Some(&primary.header))?;
+        primary.write(&mut writer)?;
         if let Some(flags) = &flags {
-            writer.write_image(&flags.image, Some(&flags.header))?;
+            flags.write(&mut writer)?;
         }
         if let Some(gain) = &gain {
-            writer.write_image(&gain.image, Some(&gain.header))?;
+            gain.write(&mut writer)?;
         }
-        for plane in &planes {
-            writer.write_image(&plane.image, Some(&plane.header))?;
+        if let Some(mask) = &mask {
+            mask.write(&mut writer)?;
+        }
+        for map in &maps {
+            map.write(&mut writer)?;
         }
         Ok(())
     })
@@ -254,21 +264,6 @@ struct QualityPlanesRead {
     dispersion: Option<StoredPlanes<f32>>,
 }
 
-/// One quality plane's HDU, as written.
-#[derive(Debug)]
-struct EncodedPlane {
-    image: Image,
-    header: Header,
-}
-
-/// A plane's samples and shape: the image's width and height, then its channels when it has more
-/// than one.
-#[derive(Debug)]
-struct PlaneSamples<T> {
-    shape: Vec<usize>,
-    samples: Vec<T>,
-}
-
 /// The value [`WEIGHT_KIND`] names `kind` with.
 fn weight_kind_name(kind: WeightKind) -> &'static str {
     WEIGHT_KINDS
@@ -300,60 +295,40 @@ fn image_scale(image: &LinearImage) -> Option<f64> {
     image.metadata.derived.domain().map(|domain| domain.scale)
 }
 
-/// The image's `NO_DATA` pixels as the mask astropy reads, a byte each, 1 where the pixel holds
-/// no measurement, in every channel: `CCDData` takes a mask of the image's own shape. `None` when
-/// every pixel holds one.
-fn mask(image: &LinearImage) -> Option<PlaneSamples<u8>> {
-    let flags = image
-        .flags()
-        .filter(|flags| flags.contains(QualityFlags::NO_DATA))?;
-    let plane: Vec<u8> = flags
-        .bytes()
-        .iter()
-        .map(|&byte| u8::from(QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA)))
-        .collect();
-    let mut samples = Vec::with_capacity(image.sample_count());
-    for _ in 0..image.channels() {
-        samples.extend_from_slice(&plane);
-    }
-    Some(PlaneSamples {
-        shape: image_shape(image.dimensions().size(), image.channels()),
-        samples,
-    })
-}
-
-fn map_samples(map: &QualityMap) -> PlaneSamples<f32> {
-    let (planes, channels) = match map {
-        QualityMap::Shared(plane) => (std::slice::from_ref(plane), 1),
-        QualityMap::PerChannel(planes) => (planes.as_slice(), 3),
-    };
-    let size = Size2us::new(planes[0].width(), planes[0].height());
-    let mut samples = Vec::with_capacity(size.pixel_count() * channels);
-    for plane in planes {
-        samples.extend_from_slice(plane.pixels());
-    }
-    PlaneSamples {
-        shape: image_shape(size, channels),
-        samples,
-    }
-}
-
-fn image_shape(size: Size2us, channels: usize) -> Vec<usize> {
-    if channels == 1 {
-        vec![size.width, size.height]
-    } else {
-        vec![size.width, size.height, channels]
-    }
-}
-
-fn encode_plane<T>(
+/// The HDU of `map`, the `extension` plane of `image`: one plane shared by every channel, or one
+/// per channel.
+fn map_hdu<'a>(
     extension: LumosExtension,
-    plane: PlaneSamples<T>,
+    map: &'a QualityMap,
     image: &DescribedImage,
-) -> Result<EncodedPlane, WriteError>
-where
-    Vec<T>: Into<FitsData>,
-{
+) -> Result<PlaneHdu<FloatPlanes<'a>>, WriteError> {
+    let planes: ArrayVec<&[f32], 3> = match map {
+        QualityMap::Shared(plane) => [plane.pixels()].into_iter().collect(),
+        QualityMap::PerChannel(planes) => planes.iter().map(Buffer2::pixels).collect(),
+    };
+    plane_hdu(
+        extension,
+        image_shape(image.size, planes.len()),
+        FloatPlanes::new(planes),
+        image,
+    )
+}
+
+/// An image's width and height, then its `channels` when it has more than one.
+fn image_shape(size: Size2us, channels: usize) -> ArrayVec<usize, 3> {
+    [size.width, size.height]
+        .into_iter()
+        .chain((channels > 1).then_some(channels))
+        .collect()
+}
+
+/// The `extension` plane of `image` in `shape`, its samples from `source`.
+fn plane_hdu<S: PlaneSource>(
+    extension: LumosExtension,
+    shape: ArrayVec<usize, 3>,
+    source: S,
+    image: &DescribedImage,
+) -> Result<PlaneHdu<S>, WriteError> {
     let mut header = Header::new();
     header
         .set("EXTNAME", extension.extname())
@@ -363,8 +338,12 @@ where
     if extension == LumosExtension::Uncertainty {
         header.set(UNCERTAINTY_TYPE, INVERSE_VARIANCE)?;
     }
-    let image = Image::new_scaled(plane.shape, plane.samples, extension.scaling(image))?;
-    Ok(EncodedPlane { image, header })
+    Ok(PlaneHdu {
+        header,
+        shape,
+        scaling: extension.scaling(image),
+        source,
+    })
 }
 
 /// Refuse the `extension` plane at HDU `idx` unless it is its format's for `image`

@@ -1,9 +1,13 @@
-//! [`GainExtension`]: the `LUMGAIN` image extension that keeps an image's [`FlatGain`] beside it
-//! in a FITS file.
+//! The `LUMGAIN` image extension that keeps an image's [`FlatGain`] beside it in a FITS file: a
+//! `BITPIX = −32` image of shape `[cols, rows, channels]`, each color's or channel's node grid as
+//! [`FlatGain`] holds it.
+//!
+//! Without it, a frame a flat divided reloads with its record of the division and no gain, and
+//! its noise model would read every pixel as undivided.
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::Image;
+use fits_well::image::Scaling;
 use fits_well::io::Hdu;
 use imaginarium::Buffer2;
 
@@ -13,6 +17,7 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
+use crate::io::fits::plane_hdu::{FloatPlanes, PlaneHdu};
 use crate::math::size2us::Size2us;
 
 pub(super) const GAIN_EXTNAME: &str = "LUMGAIN";
@@ -21,85 +26,77 @@ pub(super) const GAIN_VERSION: i64 = 1;
 /// The keyword that states the pixels between nodes, which a reader must share.
 const STEP_KEYWORD: &str = "LUMGSTEP";
 
-/// The flat gain of one image as a `BITPIX = −32` image extension of shape
-/// `[cols, rows, channels]`: each color's or channel's node grid, as [`FlatGain`] holds it.
-///
-/// Without it, a frame a flat divided reloads with its record of the division and no gain, and
-/// its noise model would read every pixel as undivided.
-#[derive(Debug)]
-pub(crate) struct GainExtension {
-    pub(crate) image: Image,
-    pub(crate) header: Header,
+/// The extension for `gain` of the image HDU named `image_name`; `None` for an image no flat
+/// divided.
+pub(crate) fn encode<'a>(
+    gain: Option<&'a FlatGain>,
+    image_name: Option<&str>,
+) -> Result<Option<PlaneHdu<FloatPlanes<'a>>>, WriteError> {
+    let Some(gain) = gain else {
+        return Ok(None);
+    };
+    let mut header = Header::new();
+    header
+        .set("EXTNAME", GAIN_EXTNAME)
+        .and_then(|header| header.set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY)))
+        .and_then(|header| header.set(FORMAT_KEYWORD, GAIN_FORMAT))
+        .and_then(|header| header.set(VERSION_KEYWORD, GAIN_VERSION))
+        .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))?;
+    let grid = GainGrid::of(gain.size());
+    Ok(Some(PlaneHdu {
+        header,
+        shape: [grid.cols, grid.rows, gain.channels()]
+            .into_iter()
+            .collect(),
+        scaling: Scaling::IDENTITY,
+        source: FloatPlanes::new(gain.planes().collect()),
+    }))
 }
 
-impl GainExtension {
-    /// The extension for `gain` of the image HDU named `image_name`; `None` for an image no flat
-    /// divided.
-    pub(crate) fn encode(
-        gain: Option<&FlatGain>,
-        image_name: Option<&str>,
-    ) -> Result<Option<Self>, WriteError> {
-        let Some(gain) = gain else {
-            return Ok(None);
-        };
-        let mut header = Header::new();
-        header
-            .set("EXTNAME", GAIN_EXTNAME)
-            .and_then(|header| header.set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY)))
-            .and_then(|header| header.set(FORMAT_KEYWORD, GAIN_FORMAT))
-            .and_then(|header| header.set(VERSION_KEYWORD, GAIN_VERSION))
-            .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))?;
-        let grid = GainGrid::of(gain.size());
-        let nodes: Vec<f32> = gain.planes().flatten().copied().collect();
-        let image = Image::new([grid.cols, grid.rows, gain.channels()], nodes)?;
-        Ok(Some(Self { image, header }))
-    }
-
-    /// The gain extension of the image at HDU `image`, checked to fit `described`; `None` when it
-    /// has none. Refused when a gain extension names no image of the file, two name one, it is not
-    /// its format's ([`LumosExtension::check`]), or its nodes are spaced other than this reader's.
-    pub(crate) fn locate(
-        file: &[Hdu],
-        image: usize,
-        described: &DescribedImage,
-    ) -> Result<Option<usize>, FitsLoadError> {
-        let found = ExtensionClaims::of(file, LumosExtension::Gain)?.for_image(file, image)?;
-        if let Some(idx) = found {
-            let hdu = &file[idx];
-            LumosExtension::Gain.check(hdu, described)?;
-            let step = hdu.header.get_integer(STEP_KEYWORD)?;
-            if step != Some(flat_gain::STEP as i64) {
-                return Err(FitsRefusal::GainStep { step }.into());
-            }
+/// The gain extension of the image at HDU `image`, checked to fit `described`; `None` when it
+/// has none. Refused when a gain extension names no image of the file, two name one, it is not
+/// its format's ([`LumosExtension::check`]), or its nodes are spaced other than this reader's.
+pub(crate) fn locate(
+    file: &[Hdu],
+    image: usize,
+    described: &DescribedImage,
+) -> Result<Option<usize>, FitsLoadError> {
+    let found = ExtensionClaims::of(file, LumosExtension::Gain)?.for_image(file, image)?;
+    if let Some(idx) = found {
+        let hdu = &file[idx];
+        LumosExtension::Gain.check(hdu, described)?;
+        let step = hdu.header.get_integer(STEP_KEYWORD)?;
+        if step != Some(flat_gain::STEP as i64) {
+            return Err(FitsRefusal::GainStep { step }.into());
         }
-        Ok(found)
     }
+    Ok(found)
+}
 
-    /// The gain `nodes` hold — each channel's plane of the HDU [`Self::locate`] found — over a
-    /// `size` image. Refused when a node is not a finite gain above zero: no flat multiplies by
-    /// that. A node is named by its index over the channels' planes in turn, as the HDU stores it.
-    pub(crate) fn decode(
-        nodes: ArrayVec<Vec<f32>, 3>,
-        size: Size2us,
-    ) -> Result<FlatGain, FitsLoadError> {
-        let grid = GainGrid::of(size);
-        let per_plane = grid.cols * grid.rows;
-        debug_assert!(nodes.iter().all(|plane| plane.len() == per_plane));
-        if let Some((idx, &value)) = nodes
-            .iter()
-            .flatten()
-            .enumerate()
-            .find(|&(_, &gain)| !gain.is_finite() || gain <= 0.0)
-        {
-            return Err(FitsLoadError::from(FitsRefusal::NotAGain {
-                node: idx,
-                value,
-            }));
-        }
-        let planes = nodes
-            .into_iter()
-            .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
-            .collect();
-        Ok(FlatGain::from_nodes(size, planes))
+/// The gain `nodes` hold — each channel's plane of the HDU [`locate`] found — over a
+/// `size` image. Refused when a node is not a finite gain above zero: no flat multiplies by
+/// that. A node is named by its index over the channels' planes in turn, as the HDU stores it.
+pub(crate) fn decode(
+    nodes: ArrayVec<Vec<f32>, 3>,
+    size: Size2us,
+) -> Result<FlatGain, FitsLoadError> {
+    let grid = GainGrid::of(size);
+    let per_plane = grid.cols * grid.rows;
+    debug_assert!(nodes.iter().all(|plane| plane.len() == per_plane));
+    if let Some((idx, &value)) = nodes
+        .iter()
+        .flatten()
+        .enumerate()
+        .find(|&(_, &gain)| !gain.is_finite() || gain <= 0.0)
+    {
+        return Err(FitsLoadError::from(FitsRefusal::NotAGain {
+            node: idx,
+            value,
+        }));
     }
+    let planes = nodes
+        .into_iter()
+        .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
+        .collect();
+    Ok(FlatGain::from_nodes(size, planes))
 }

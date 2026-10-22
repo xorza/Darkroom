@@ -16,14 +16,15 @@ use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
+use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::pixels::HduDecode;
-use crate::io::fits::decode::plan::{FITS_DECODE_CHUNK_BYTES, FitsDecodePlan, FitsHduDescription};
+use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
-use crate::io::fits::flags_extension::FlagsExtension;
-use crate::io::fits::gain_extension::GainExtension;
+use crate::io::fits::flags_extension;
+use crate::io::fits::gain_extension;
 use crate::io::fits::lumos_extension::DescribedImage;
 use crate::io::fits::{cfa, linear, metadata};
 use crate::io::frame_info::FrameInfo;
@@ -145,11 +146,11 @@ impl<'r> SelectedFits<'r> {
             scale: Some(plan.sample_scale.divisor),
             weight_kind: None,
         };
-        let flags_hdu = FlagsExtension::locate(reader.hdus(), selected.idx, &described)?;
+        let flags_hdu = flags_extension::locate(reader.hdus(), selected.idx, &described)?;
         if flags_hdu.is_some() {
             plan.admit_flags_extension(limit)?;
         }
-        let gain_hdu = GainExtension::locate(reader.hdus(), selected.idx, &described)?;
+        let gain_hdu = gain_extension::locate(reader.hdus(), selected.idx, &described)?;
         let mut extension_bytes = ArrayVec::new();
         if flags_hdu.is_some() {
             extension_bytes.push(plan.dimensions.pixel_count() as u64);
@@ -253,12 +254,12 @@ impl<'r> SelectedFits<'r> {
                 .pop()
                 .expect("a flags extension is one plane");
             decoded.flags =
-                FlagsExtension::join(FlagsExtension::plane(bytes, size), decoded.flags.as_ref())?;
+                flags_extension::join(flags_extension::plane(bytes, size), decoded.flags.as_ref())?;
         }
         if let Some(gain_hdu) = self.gain_hdu {
             Cancelled::check(&ctx.cancel)?;
             let nodes = read_extension::<f32>(self.reader, gain_hdu)?;
-            decoded.flat_gain = Some(Arc::new(GainExtension::decode(nodes, size)?));
+            decoded.flat_gain = Some(Arc::new(gain_extension::decode(nodes, size)?));
         }
         Ok(decoded)
     }
@@ -297,7 +298,7 @@ pub(crate) fn read_extension<T: ExtensionSample>(
     reader: &mut StreamReader<File>,
     idx: usize,
 ) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
-    read_extension_in_chunks(reader, idx, FITS_DECODE_CHUNK_BYTES)
+    read_extension_in_chunks(reader, idx, CHUNK_BYTES)
 }
 
 /// [`read_extension`], a chunk of rows of at most `chunk_bytes` at a time, one row at least.

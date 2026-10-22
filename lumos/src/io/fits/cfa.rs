@@ -4,17 +4,16 @@ use std::sync::Arc;
 use common::fs;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::Image;
 
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::quality_flags::QualityFlags;
 use crate::io::error::WriteError;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::fits::flags_extension::FlagsExtension;
-use crate::io::fits::gain_extension::GainExtension;
+use crate::io::fits::flags_extension;
+use crate::io::fits::gain_extension;
 use crate::io::fits::linear::LINEAR_FITS_FORMAT;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD, domain_keywords};
+use crate::io::fits::plane_hdu::{FloatPlanes, PlaneHdu};
 
 pub(super) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
 /// 5: every flag is kept, in a `LUMFLAGS` extension, and the header records each part calibration
@@ -28,12 +27,6 @@ pub(crate) struct CfaFitsHduMetadata<'a> {
     pub(crate) extname: Option<&'a str>,
     pub(crate) image_type: Option<&'a str>,
     pub(crate) prepared: bool,
-}
-
-#[derive(Debug)]
-pub(crate) struct CfaFitsHdu {
-    pub(crate) image: Image,
-    pub(crate) header: Header,
 }
 
 /// Refuse a file whose `primary` header names a Lumos container of other than one image, such as
@@ -65,7 +58,7 @@ pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadErro
 }
 
 pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
-    let encoded = CfaFitsHdu::encode(
+    let primary = hdu(
         image,
         CfaFitsHduMetadata {
             extname: None,
@@ -73,62 +66,49 @@ pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
             prepared: false,
         },
     )?;
-    let flags = FlagsExtension::encode(image.flags(), None, 1)?;
-    let gain = GainExtension::encode(image.flat_gain().map(Arc::as_ref), None)?;
+    let flags = flags_extension::encode(image.flags(), None, 1)?;
+    let gain = gain_extension::encode(image.flat_gain().map(Arc::as_ref), None)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer.write_image(&encoded.image, Some(&encoded.header))?;
+        primary.write(&mut writer)?;
         if let Some(flags) = &flags {
-            writer.write_image(&flags.image, Some(&flags.header))?;
+            flags.write(&mut writer)?;
         }
         if let Some(gain) = &gain {
-            writer.write_image(&gain.image, Some(&gain.header))?;
+            gain.write(&mut writer)?;
         }
         Ok(())
     })
 }
 
-impl CfaFitsHdu {
-    /// Build the image and header a CFA HDU writes, from `cfa` plus the per-HDU metadata.
-    pub(crate) fn encode(
-        cfa: &CfaImage,
-        hdu_metadata: CfaFitsHduMetadata<'_>,
-    ) -> Result<Self, WriteError> {
-        let mut header = Header::new();
-        header
-            .set(FORMAT_KEYWORD, CFA_FITS_FORMAT)
-            .and_then(|header| header.set(VERSION_KEYWORD, CFA_FITS_VERSION))?;
-        if let Some(extname) = hdu_metadata.extname {
-            header.set("EXTNAME", extname)?;
-            header.set("LUMROLE", extname)?;
-        }
-        if hdu_metadata.prepared {
-            header.set("LUMPREP", true)?;
-        }
-        metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)?;
-        metadata::write_row_order(&mut header, &cfa.metadata)?;
-        metadata::write_cfa(&mut header, &cfa.metadata, cfa.cfa_type())?;
-
-        let mut samples = cfa.data().pixels().to_vec();
-        if let Some(flags) = cfa
-            .flags()
-            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
-        {
-            // Back out as the standard's own flag, which every FITS reader understands. This is
-            // written with a floating-point `BITPIX`, for which IEEE NaN *is* the blank. Without it
-            // the samples under those pixels — a decoder fill, or the same-color median
-            // `CfaImage::repair_nulls` put there — would reload as measurements in a reader that
-            // does not know the `LUMFLAGS` extension.
-            let width = cfa.data().width();
-            flags
-                .mask_of(QualityFlags::NO_DATA)
-                .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
-        }
-        let image = Image::new_scaled(
-            [cfa.data().width(), cfa.data().height()],
-            samples,
-            domain_keywords::scaling(&cfa.metadata),
-        )?;
-        Ok(Self { image, header })
+/// The HDU of `cfa`, with the per-HDU `hdu_metadata`: its mosaic, `NO_DATA` backed out as NaN, the
+/// standard's own blank, which every FITS reader understands. Without it the samples under those
+/// pixels — a decoder fill, or the same-color median `CfaImage::repair_nulls` put there — would
+/// reload as measurements in a reader that does not know the `LUMFLAGS` extension.
+pub(crate) fn hdu<'a>(
+    cfa: &'a CfaImage,
+    hdu_metadata: CfaFitsHduMetadata<'_>,
+) -> Result<PlaneHdu<FloatPlanes<'a>>, WriteError> {
+    let mut header = Header::new();
+    header
+        .set(FORMAT_KEYWORD, CFA_FITS_FORMAT)
+        .and_then(|header| header.set(VERSION_KEYWORD, CFA_FITS_VERSION))?;
+    if let Some(extname) = hdu_metadata.extname {
+        header.set("EXTNAME", extname)?;
+        header.set("LUMROLE", extname)?;
     }
+    if hdu_metadata.prepared {
+        header.set("LUMPREP", true)?;
+    }
+    metadata::write_image(&mut header, &cfa.metadata, hdu_metadata.image_type)?;
+    metadata::write_row_order(&mut header, &cfa.metadata)?;
+    metadata::write_cfa(&mut header, &cfa.metadata, cfa.cfa_type())?;
+    Ok(PlaneHdu {
+        header,
+        shape: [cfa.data().width(), cfa.data().height()]
+            .into_iter()
+            .collect(),
+        scaling: domain_keywords::scaling(&cfa.metadata),
+        source: FloatPlanes::blanking([cfa.data().pixels()].into_iter().collect(), cfa.flags()),
+    })
 }

@@ -8,7 +8,7 @@ const BUDGET_PERCENT: u64 = 75;
 /// The heap no plan charges: the combine's reduction scratch on each worker, the frame list and
 /// the result vectors, and each worker's own bookkeeping. None grows with a frame's pixels; at the
 /// peak of a spilled registered run they held 31 KB.
-const UNPLANNED_BYTES: u64 = 64 << 10;
+pub(crate) const UNPLANNED_BYTES: u64 = 64 << 10;
 
 /// A run's `memory_override`: the memory it plans as if the machine had.
 #[derive(Debug, Clone, Copy)]
