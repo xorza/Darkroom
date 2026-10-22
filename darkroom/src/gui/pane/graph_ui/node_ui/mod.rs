@@ -134,28 +134,28 @@ impl NodeUi {
         graph_ctx.paint_order(&mut order);
         for item in &order {
             let n = graph_ctx
-                .node(item.id)
+                .node(item.node_id)
                 .expect("the paint order lists the context's own placements");
-            let keeps_focus = ui.is_focus_within(wid::body(n.id));
+            let keeps_focus = ui.is_focus_within(wid::body(n.node_id));
             if keeps_focus {
-                focus_kept = Some(n.id);
+                focus_kept = Some(n.node_id);
             }
             if !draw_ctx
                 .cull()
                 .keeps_node(draw_ctx.geometry().node_world_rect(n))
                 && !keeps_focus
-                && self.focus_kept_last != Some(n.id)
+                && self.focus_kept_last != Some(n.node_id)
             {
                 continue;
             }
-            let node_ctx = n.with_hover(wid::hover(ui, n.id));
+            let node_ctx = n.with_hover(wid::hover(ui, n.node_id));
             let node = node_widget::NodeWidget::new(self, node_ctx).show(ui, pass);
             if node.inspect_toggled {
-                outcome.inspect_toggled.get_or_insert(n.id);
+                outcome.inspect_toggled.get_or_insert(n.node_id);
             }
             outcome.body_acted |= node.body_acted;
             if node.menu_opened {
-                outcome.menu_opened.get_or_insert(n.id);
+                outcome.menu_opened.get_or_insert(n.node_id);
             }
         }
         self.paint_order = order;

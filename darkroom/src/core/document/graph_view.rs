@@ -16,7 +16,7 @@ use crate::core::document::viewport::Viewport;
 /// raising it changes `z` and nothing else. Keeping the stacking order as a
 /// *value* here rather than as the position of an entry in an ordered map is
 /// what lets [`GraphView`] derive its equality and serde, and what makes
-/// `Raise` a field write instead of a reorder.
+/// [`SetDepth`](crate::core::edit::step::set_depth::SetDepth) a field write instead of a reorder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ItemPlacement {
     /// Canvas-world position of the body's top-left corner.
@@ -39,7 +39,7 @@ pub(crate) struct ItemPlacement {
 pub(crate) struct StackedItem {
     /// Paint depth: higher paints later, so it sits in front.
     pub(crate) z: u32,
-    pub(crate) id: NodeId,
+    pub(crate) node_id: NodeId,
 }
 
 /// Editor-side view metadata for the document's graph: per-item placements,
@@ -76,7 +76,7 @@ impl GraphView {
         Self {
             item_placements: graph
                 .iter()
-                .map(|node| (node.id, ItemPlacement::default()))
+                .map(|node| (node.node_id, ItemPlacement::default()))
                 .collect(),
             ..Self::default()
         }
@@ -98,7 +98,7 @@ impl GraphView {
                 .iter()
                 .map(|(id, placement)| StackedItem {
                     z: placement.z,
-                    id: *id,
+                    node_id: *id,
                 }),
         );
         out.sort_unstable();
@@ -114,19 +114,19 @@ impl GraphView {
             .map_or(0, |top| top.saturating_add(1))
     }
 
-    /// The depth that puts `key` in front of every *other* item, or its own depth when it already
+    /// The depth that puts `node_id` in front of every *other* item, or its own depth when it already
     /// paints last. Paint order is `(z, NodeId)`, so a tie on depth puts the higher id in front.
-    /// `None` when `key` has no placement.
-    pub(crate) fn raised_z(&self, key: NodeId) -> Option<u32> {
-        let own = self.item_placements.get(&key)?.z;
+    /// `None` when `node_id` has no placement.
+    pub(crate) fn raised_z(&self, node_id: NodeId) -> Option<u32> {
+        let own = self.item_placements.get(&node_id)?.z;
         let top_other = self
             .item_placements
             .iter()
-            .filter(|(id, _)| **id != key)
+            .filter(|(id, _)| **id != node_id)
             .map(|(id, placement)| (placement.z, *id))
             .max();
         Some(match top_other {
-            Some((top_z, top_id)) if (top_z, top_id) > (own, key) => top_z.saturating_add(1),
+            Some((top_z, top_id)) if (top_z, top_id) > (own, node_id) => top_z.saturating_add(1),
             _ => own,
         })
     }
@@ -140,9 +140,9 @@ impl GraphView {
             return Err(GraphViewValidationError::InvalidViewport);
         }
 
-        for (key, placement) in &self.item_placements {
+        for (node_id, placement) in &self.item_placements {
             if !placement.pos.is_finite() {
-                return Err(GraphViewValidationError::NonFinitePos { item: *key });
+                return Err(GraphViewValidationError::NonFinitePos { node_id: *node_id });
             }
         }
         // A map guarantees unique keys, and the graph and stubs are disjoint,
@@ -153,16 +153,16 @@ impl GraphView {
         }
         let ids = graph
             .iter()
-            .map(|node| node.id)
+            .map(|node| node.node_id)
             .chain(stubs.iter().map(DetachedNode::node_id));
         for node_id in ids {
             if !self.item_placements.contains_key(&node_id) {
                 return Err(GraphViewValidationError::MissingNode { node_id });
             }
         }
-        for key in &self.selected {
-            if !self.item_placements.contains_key(key) {
-                return Err(GraphViewValidationError::MissingSelectedItem { item: *key });
+        for node_id in &self.selected {
+            if !self.item_placements.contains_key(node_id) {
+                return Err(GraphViewValidationError::MissingSelectedItem { node_id: *node_id });
             }
         }
         Ok(())
@@ -191,7 +191,10 @@ mod tests {
         let mut order = Vec::new();
         view.paint_order(&mut order);
         assert_eq!(
-            order.iter().map(|item| item.id).collect::<Vec<_>>(),
+            order
+                .iter()
+                .map(|node_id| node_id.node_id)
+                .collect::<Vec<_>>(),
             [low, high],
             "equal depths break by id, not by insertion"
         );
@@ -200,7 +203,10 @@ mod tests {
         view.item_placements.get_mut(&low).unwrap().z = view.front_z();
         view.paint_order(&mut order);
         assert_eq!(
-            order.iter().map(|item| item.id).collect::<Vec<_>>(),
+            order
+                .iter()
+                .map(|node_id| node_id.node_id)
+                .collect::<Vec<_>>(),
             [high, low],
             "raising the lower id lifts it past the higher one"
         );

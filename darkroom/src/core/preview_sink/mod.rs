@@ -64,9 +64,9 @@ pub(crate) fn func(sink: Arc<PreviewSink>) -> Func {
         "Preview",
         async_lambda!(
             move |Invocation { ctx, inputs, .. }| { sink = Arc::clone(&sink) } => {
-                // `cur_node` is the only thing in the invocation that says
+                // `cur_node_id` is the only thing in the invocation that says
                 // *which* preview this is — the editor routes on it.
-                sink.publish(ctx.cur_node(), mem::take(&mut inputs[0]));
+                sink.publish(ctx.cur_node_id(), mem::take(&mut inputs[0]));
                 Ok(())
             }
         ),

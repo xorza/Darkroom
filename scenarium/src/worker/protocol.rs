@@ -45,13 +45,13 @@ pub enum WorkerMessage {
     },
     Clear,
     EvictCache {
-        nodes: Vec<NodeId>,
+        node_ids: Vec<NodeId>,
     },
     /// Persist these nodes' resident disk-backed values now, rather than waiting
     /// for a run that recomputes them. Raised when a node's cache mode gains its
     /// disk bit while a value is already in RAM.
     FlushCache {
-        nodes: Vec<NodeId>,
+        node_ids: Vec<NodeId>,
     },
     /// The same, over every installed node: what a store owes values computed
     /// while there was nowhere to persist them — an unsaved document that has
@@ -74,7 +74,7 @@ pub enum WorkerMessage {
     /// the program does not hold fails the run, unless a later `Update` or
     /// `Clear` in the same batch replaced the program it was named against.
     RunNodes {
-        nodes: Vec<NodeId>,
+        node_ids: Vec<NodeId>,
     },
     /// Run the subscribers of these events, as if the event loop fired them.
     #[cfg(test)]

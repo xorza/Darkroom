@@ -31,20 +31,20 @@ fn batch_intent_accumulates_simple_flags() {
         WorkerMessage::Clear,
         WorkerMessage::StartEventLoop,
         WorkerMessage::EvictCache {
-            nodes: vec![node_id],
+            node_ids: vec![node_id],
         },
         WorkerMessage::FlushCache {
-            nodes: vec![node_id],
+            node_ids: vec![node_id],
         },
         WorkerMessage::RunSinks,
         WorkerMessage::FireEvents {
             events: vec![event],
         },
         WorkerMessage::RunNodes {
-            nodes: vec![node_id],
+            node_ids: vec![node_id],
         },
         WorkerMessage::RunNodes {
-            nodes: vec![node_id],
+            node_ids: vec![node_id],
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -127,15 +127,17 @@ fn batch_intent_accumulates_unique_cache_nodes_in_order() {
     let third = NodeId::from_u128(3);
     let intent = batch_intent([
         WorkerMessage::EvictCache {
-            nodes: vec![first, second],
+            node_ids: vec![first, second],
         },
         WorkerMessage::EvictCache {
-            nodes: vec![second, first],
+            node_ids: vec![second, first],
         },
         WorkerMessage::FlushCache {
-            nodes: vec![third, first],
+            node_ids: vec![third, first],
         },
-        WorkerMessage::FlushCache { nodes: vec![first] },
+        WorkerMessage::FlushCache {
+            node_ids: vec![first],
+        },
     ]);
 
     assert_eq!(
@@ -163,7 +165,7 @@ fn batch_intent_graph_op_drops_node_seeds_its_program_lacks() {
         compiled: Arc::clone(compiled),
     };
     let run = |node_id| WorkerMessage::RunNodes {
-        nodes: vec![node_id],
+        node_ids: vec![node_id],
     };
 
     // `deleted` was named against `both`; `without_deleted` replaced it.

@@ -292,7 +292,7 @@ impl TestGraph {
             .graph
             .iter()
             .filter(|node| node.func_id() == Some(func_id))
-            .map(|node| node.id)
+            .map(|node| node.node_id)
             .collect();
         for node in nodes {
             self.graph.find_mut(node).unwrap().kind = NodeKind::Func(cur);

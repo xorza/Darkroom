@@ -61,7 +61,7 @@ fn func_nodes_keep_identity() {
 
     assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());
     for node in e.graph.graph.iter() {
-        assert!(e.engine.compiled().contains(node.id), "id preserved");
+        assert!(e.engine.compiled().contains(node.node_id), "id preserved");
     }
 }
 

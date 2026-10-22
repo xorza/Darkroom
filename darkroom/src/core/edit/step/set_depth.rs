@@ -13,17 +13,17 @@ use crate::core::edit::step::reversible::Reversible;
 /// list, so no neighbour moves and the two directions are the same write with
 /// a different number — which a positional reorder could not promise.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Raise {
-    pub(crate) key: NodeId,
+pub(crate) struct SetDepth {
+    pub(crate) node_id: NodeId,
     pub(crate) z: Change<u32>,
 }
 
-impl Reversible for Raise {
+impl Reversible for SetDepth {
     fn write(&self, document: &mut Document, dir: Direction) {
         document
             .main_view
             .item_placements
-            .get_mut(&self.key)
+            .get_mut(&self.node_id)
             .expect("history replays a raise against the item it recorded")
             .z = *self.z.half(dir);
     }

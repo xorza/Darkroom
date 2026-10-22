@@ -266,7 +266,7 @@ impl CanvasGeometry {
     /// undo) culls, band-hits, and breaker-hits where it is today, not where
     /// it last recorded. `None` until the node's first record.
     pub(crate) fn node_world_rect(&self, node: NodeCtx<'_>) -> Option<Rect> {
-        let size = *self.node_sizes.get(&node.id)?;
+        let size = *self.node_sizes.get(&node.node_id)?;
         Some(Rect {
             min: node.pos,
             size,
@@ -326,12 +326,12 @@ impl CanvasGeometry {
             // ancestor-shared canvas-origin term cancels) and combine
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
-            let body = ui.response_for(wid::body(n.id));
+            let body = ui.response_for(wid::body(n.node_id));
             if let Some(r) = body.layout_rect {
-                self.node_sizes.insert(n.id, r.size);
+                self.node_sizes.insert(n.node_id, r.size);
             }
             if let Some(r) = body.rect {
-                self.node_screen.insert(n.id, r);
+                self.node_screen.insert(n.node_id, r);
             }
             // A node that didn't record has no glyph that did either — they
             // are its descendants — so every one of their responses is the
@@ -362,8 +362,8 @@ impl CanvasGeometry {
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
-                let r = ui.response_for(header::subscription_glyph_wid(n.id));
-                self.subs.record(n.id, r, place);
+                let r = ui.response_for(header::subscription_glyph_wid(n.node_id));
+                self.subs.record(n.node_id, r, place);
             }
         }
     }
@@ -383,7 +383,7 @@ impl CanvasGeometry {
             self.events.replay(ev, n.pos);
         }
         if n.sink() {
-            self.subs.replay(n.id, n.pos);
+            self.subs.replay(n.node_id, n.pos);
         }
     }
 }

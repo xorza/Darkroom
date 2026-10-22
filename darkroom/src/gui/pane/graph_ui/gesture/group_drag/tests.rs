@@ -41,7 +41,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         (members, offset),
         (
             &[DragStart {
-                node: dragged,
+                node_id: dragged,
                 pos: start
             }][..],
             travel
@@ -49,7 +49,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         "the drag moves only the grabbed node, from its start by the travel"
     );
     assert!(
-        !members.iter().any(|member| member.node == bystander),
+        !members.iter().any(|member| member.node_id == bystander),
         "an unselected neighbour is not dragged along"
     );
 

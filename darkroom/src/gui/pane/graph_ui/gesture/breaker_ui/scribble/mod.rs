@@ -56,7 +56,7 @@ pub(crate) struct Scribble {
     pub(super) broken: Vec<InputPort>,
     /// Nodes whose body rect the breaker crosses this frame, drained on
     /// release into `GraphIntent::RemoveNode`.
-    pub(super) broken_nodes: Vec<NodeId>,
+    pub(super) broken_node_ids: Vec<NodeId>,
     /// Event subscriptions whose wire the breaker intersects this frame,
     /// drained on release into `SetSubscription { subscribe: false }`.
     pub(super) broken_subscriptions: Vec<Subscription>,
@@ -81,7 +81,7 @@ impl Scribble {
     /// rather than each renderer clearing its own field, which is easy to forget.
     pub(super) fn begin_frame(&mut self) {
         self.broken.clear();
-        self.broken_nodes.clear();
+        self.broken_node_ids.clear();
         self.broken_subscriptions.clear();
     }
 

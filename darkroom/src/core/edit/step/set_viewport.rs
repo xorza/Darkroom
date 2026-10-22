@@ -8,7 +8,7 @@ use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
 /// The distance below which two pan/zoom samples are the same camera — it
-/// keeps idle pan/zoom from polluting the undo stack with sub-pixel deltas.
+/// keeps idle pan/zoom from polluting the undo history with sub-pixel deltas.
 pub(super) const VIEWPORT_EPS: f32 = 1e-4;
 
 /// The graph camera, before and after.

@@ -127,7 +127,7 @@ impl Graph {
     pub fn iter(&self) -> impl Iterator<Item = NodeRef<'_>> {
         self.nodes
             .iter()
-            .map(|(id, node)| NodeRef { id: *id, node })
+            .map(|(id, node)| NodeRef { node_id: *id, node })
     }
 
     /// The node with `id`, or `None` if this graph has none — which is the
@@ -682,7 +682,7 @@ pub(crate) mod internals {
             self.nodes
                 .iter()
                 .find(|(_, node)| node.name == name)
-                .map(|(id, node)| NodeRef { id: *id, node })
+                .map(|(id, node)| NodeRef { node_id: *id, node })
         }
 
         /// Clone keeping every node id exactly as it is — the reason `Graph`

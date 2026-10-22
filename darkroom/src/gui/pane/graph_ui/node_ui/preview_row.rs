@@ -55,10 +55,10 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node_ctx = record.node;
     let theme = node_ctx.theme();
     let node = node_ctx;
-    let stored = node_ctx.graph_ctx.run_state().previews.get(node.id);
+    let stored = node_ctx.graph_ctx.run_state().previews.get(node.node_id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
-        .id(preview_image_wid(node.id))
+        .id(preview_image_wid(node.node_id))
         .size((Sizing::FILL, Sizing::fixed(PREVIEW_CONTENT_HEIGHT)))
         .padding(Spacing::all(6.0))
         .child_align(Align::CENTER)
@@ -97,7 +97,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     // open just activates it.
     if content.left.clicked() {
         record.out.push_view(DockOperation::OpenTab {
-            tab: TabRef::ImageViewer(node.id),
+            tab: TabRef::ImageViewer(node.node_id),
         });
     }
     if let Some(image) = stored.and_then(StoredContent::image) {

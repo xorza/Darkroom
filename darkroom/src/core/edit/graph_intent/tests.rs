@@ -21,7 +21,7 @@ use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::core::edit::step::undo_step::UndoStep;
 
 fn member(node: NodeId, pos: Vec2) -> DragStart {
-    DragStart { node, pos }
+    DragStart { node_id: node, pos }
 }
 
 /// One frame of a drag: every member moves to its start plus `offset`.
@@ -71,21 +71,21 @@ fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphInten
 fn click_raises_unless_shift_deselects() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
     let sel = |ids: &[NodeId]| ids.iter().copied().collect::<BTreeSet<_>>();
-    let click = |mode, selected: BTreeSet<NodeId>, key| {
-        GraphIntent::click(mode, &selected, key).collect::<Vec<_>>()
+    let click = |mode, selected: BTreeSet<NodeId>, node_id| {
+        GraphIntent::click(mode, &selected, node_id).collect::<Vec<_>>()
     };
 
     // Plain click on an unselected node: select it, then raise it.
     let out = click(ClickMode::Replace, sel(&[]), a);
     assert_eq!(out.len(), 2);
     assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
-    assert!(matches!(out[1], GraphIntent::Raise { key } if key == a));
+    assert!(matches!(out[1], GraphIntent::Raise { node_id } if node_id == a));
 
     // Plain click on an already-selected node still raises it.
     let out = click(ClickMode::Replace, sel(&[a]), a);
     assert!(
         out.iter()
-            .any(|i| matches!(i, GraphIntent::Raise { key } if *key == a)),
+            .any(|i| matches!(i, GraphIntent::Raise { node_id } if *node_id == a)),
         "a plain click always lifts its node to the front"
     );
 
@@ -93,7 +93,7 @@ fn click_raises_unless_shift_deselects() {
     let out = click(ClickMode::Toggle, sel(&[a]), b);
     assert!(
         out.iter()
-            .any(|i| matches!(i, GraphIntent::Raise { key } if *key == b)),
+            .any(|i| matches!(i, GraphIntent::Raise { node_id } if *node_id == b)),
         "shift-adding a node raises it"
     );
 
@@ -268,10 +268,7 @@ fn a_wire_that_goes_leaves_its_input_on_its_default() {
         [GraphIntent::RemoveNode { node_id: producer }],
     );
     assert!(
-        matches!(
-            removal.as_slice(),
-            [UndoStep::SetNode(_), UndoStep::SetInput(_)]
-        ),
+        matches!(removal.as_slice(), [UndoStep::Node(_), UndoStep::Input(_)]),
         "the removal, then the one input with a default taking it back: {removal:?}"
     );
     assert_eq!(bindings(&document), [seven(), None]);
@@ -385,7 +382,7 @@ fn redo_restores_the_depth_an_add_had() {
         .unwrap()
         .expect("adding a fresh node commits");
     let x_z = document.main_view.item_placements[&x].z;
-    let raise = GraphIntent::Raise { key: y }
+    let raise = GraphIntent::Raise { node_id: y }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("y is behind x, so raising it is a real change");
@@ -394,7 +391,7 @@ fn redo_restores_the_depth_an_add_had() {
         "the raise put y in front"
     );
 
-    // Undo both, then redo both — the order the action stack replays in.
+    // Undo both, then redo both — the order the undo history replays in.
     raise.revert(&mut document);
     add.revert(&mut document);
     add.apply(&mut document);
@@ -419,8 +416,13 @@ fn raising_the_frontmost_item_records_no_step() {
     let first = fixture.node_at(Vec2::ZERO);
     let second = fixture.node_at(Vec2::new(50.0, 0.0));
     let mut document = fixture.document;
-    for key in [first, second] {
-        document.main_view.item_placements.get_mut(&key).unwrap().z = 4;
+    for node_id in [first, second] {
+        document
+            .main_view
+            .item_placements
+            .get_mut(&node_id)
+            .unwrap()
+            .z = 4;
     }
     let (low, high) = if first < second {
         (first, second)
@@ -430,7 +432,7 @@ fn raising_the_frontmost_item_records_no_step() {
 
     for _ in 0..3 {
         assert!(
-            GraphIntent::Raise { key: high }
+            GraphIntent::Raise { node_id: high }
                 .commit_one(&mut document, &fixture.library)
                 .unwrap()
                 .is_none(),
@@ -439,13 +441,13 @@ fn raising_the_frontmost_item_records_no_step() {
     }
     assert_eq!(document.main_view.item_placements[&high].z, 4);
 
-    let step = GraphIntent::Raise { key: low }
+    let step = GraphIntent::Raise { node_id: low }
         .commit_one(&mut document, &fixture.library)
         .unwrap()
         .expect("the lower id is behind at a tied depth");
     assert_eq!(document.main_view.item_placements[&low].z, 5);
     assert!(
-        GraphIntent::Raise { key: low }
+        GraphIntent::Raise { node_id: low }
             .commit_one(&mut document, &fixture.library)
             .unwrap()
             .is_none(),
@@ -501,7 +503,7 @@ fn clone_of(document: &Document, origin: Vec2, originals: &BTreeSet<NodeId>) -> 
     document
         .graph
         .iter()
-        .map(|node| node.id)
+        .map(|node| node.node_id)
         .find(|id| {
             !originals.contains(id)
                 && document.main_view.item_placements[id].pos == origin + DUPLICATE_OFFSET
@@ -535,7 +537,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     let clones: BTreeSet<NodeId> = document
         .graph
         .iter()
-        .map(|node| node.id)
+        .map(|node| node.node_id)
         .filter(|id| !originals.contains(id))
         .collect();
     assert_eq!(clones.len(), 2, "both selected nodes were cloned");
@@ -1116,7 +1118,7 @@ fn stale_references_still_refuse_quietly() {
                 to: NodeProperty::Disabled(true),
             },
         ),
-        ("Raise", GraphIntent::Raise { key: gone }),
+        ("Raise", GraphIntent::Raise { node_id: gone }),
         (
             "SetInput onto a vanished node",
             GraphIntent::SetInput {
@@ -1175,7 +1177,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     .commit_one(&mut document, &fixture.library)
     .unwrap()
     .expect("a selection with one live member commits");
-    let UndoStep::SetSelection(step) = &step else {
+    let UndoStep::Selection(step) = &step else {
         panic!("expected a SetSelection step, got {step:?}");
     };
     assert_eq!(
@@ -1194,11 +1196,11 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     .commit_one(&mut document, &fixture.library)
     .unwrap()
     .expect("a move with one live member commits");
-    let UndoStep::MoveSelection(step) = &step else {
-        panic!("expected a MoveSelection step, got {step:?}");
+    let UndoStep::Positions(step) = &step else {
+        panic!("expected a SetPositions step, got {step:?}");
     };
     assert_eq!(step.moves.len(), 1, "only the surviving member is recorded");
-    assert_eq!(step.moves[0].key, live);
+    assert_eq!(step.moves[0].node_id, live);
     assert_eq!(
         (step.moves[0].pos.from, step.moves[0].pos.to),
         (Vec2::ZERO, Vec2::new(5.0, 6.0))

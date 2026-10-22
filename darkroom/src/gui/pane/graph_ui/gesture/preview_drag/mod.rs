@@ -87,12 +87,12 @@ impl PreviewDrag {
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
         let members = Arc::from([DragStart {
-            node: node_id,
+            node_id,
             pos: center,
         }]);
         self.drag.latch(
             Grab {
-                node: node_id,
+                node_id,
                 members,
                 handle: port_row::port_circle_wid(port),
             },

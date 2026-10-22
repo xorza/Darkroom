@@ -80,7 +80,7 @@ impl WorkerBridge {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
             WorkerMessage::EvictCache {
-                nodes: vec![node_id],
+                node_ids: vec![node_id],
             },
             WorkerMessage::StopEventLoop,
         ])
@@ -103,7 +103,7 @@ impl WorkerBridge {
         self.worker.send_many([
             WorkerMessage::Update { compiled },
             WorkerMessage::FlushCache {
-                nodes: vec![node_id],
+                node_ids: vec![node_id],
             },
         ])
     }
@@ -121,7 +121,7 @@ impl WorkerBridge {
         node_ids: impl IntoIterator<Item = NodeId>,
     ) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::RunNodes {
-            nodes: node_ids.into_iter().collect(),
+            node_ids: node_ids.into_iter().collect(),
         })
     }
 

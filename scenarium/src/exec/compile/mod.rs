@@ -269,7 +269,7 @@ impl Compiler {
             totals.outputs += func.outputs().len();
             totals.events += func.events().len();
             placed.push(PendingNode {
-                node_id: node.id,
+                node_id: node.node_id,
                 disabled: node.disabled,
             });
         }

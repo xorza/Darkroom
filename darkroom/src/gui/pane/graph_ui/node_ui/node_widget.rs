@@ -75,9 +75,9 @@ impl<'a> NodeWidget<'a> {
             .node_world_rect(node)
             .is_some_and(|r| probe.crosses_rect(r));
         if broken {
-            probe.mark_broken_node(node.id);
+            probe.mark_broken_node(node.node_id);
         }
-        let selected = draw_ctx.is_selected(node_ctx.id);
+        let selected = draw_ctx.is_selected(node_ctx.node_id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes: the breaker alarm wins,
@@ -112,7 +112,7 @@ impl<'a> NodeWidget<'a> {
             header::subscription_pin(
                 ui,
                 node,
-                Hover::from(draw_ctx.geometry().subs.is_hovered(node.id)),
+                Hover::from(draw_ctx.geometry().subs.is_hovered(node.node_id)),
             );
         }
 
@@ -120,7 +120,7 @@ impl<'a> NodeWidget<'a> {
         // with the drag latch below, which reads a different field.
         let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
-            .id(wid::body(node.id))
+            .id(wid::body(node.node_id))
             .pos(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
@@ -178,7 +178,7 @@ impl<'a> NodeWidget<'a> {
             out.extend_graph(GraphIntent::click(
                 click_mode,
                 node_ctx.graph_ctx.selected(),
-                node.id,
+                node.node_id,
             ));
         }
 
@@ -189,7 +189,7 @@ impl<'a> NodeWidget<'a> {
         // and converts `drag_delta` into a `MoveSelection` applied to
         // `Document` before the record reads it back.
         if let Some(handle) =
-            wid::drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
+            wid::drag_handles(node.node_id).find(|w| ui.response_for(*w).left.drag.started())
         {
             // Grabbing a node already in the selection drags the whole
             // group together;
@@ -201,16 +201,16 @@ impl<'a> NodeWidget<'a> {
                 out.extend_graph(GraphIntent::click(
                     ClickMode::Replace,
                     node_ctx.graph_ctx.selected(),
-                    node.id,
+                    node.node_id,
                 ));
                 Arc::from([DragStart {
-                    node: node.id,
+                    node_id: node.node_id,
                     pos: node.pos,
                 }])
             };
             state.drag.latch(
                 Grab {
-                    node: node.id,
+                    node_id: node.node_id,
                     members,
                     handle,
                 },

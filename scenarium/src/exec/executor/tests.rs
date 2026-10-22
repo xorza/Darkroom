@@ -312,7 +312,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
         let probe = Arc::clone(seen);
         async_lambda!(
             move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe) } => {
-                seen.lock().unwrap().push(ctx.cur_node());
+                seen.lock().unwrap().push(ctx.cur_node_id());
                 outputs[0] = DynamicValue::Static(ConstValue::Int(wrote));
                 Ok(())
             }

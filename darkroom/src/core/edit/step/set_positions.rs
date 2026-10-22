@@ -11,7 +11,7 @@ use crate::core::edit::step::reversible::Reversible;
 /// One dragged member: where it sat, and where the drag put it.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Move {
-    pub(crate) key: NodeId,
+    pub(crate) node_id: NodeId,
     pub(crate) pos: Change<Vec2>,
 }
 
@@ -20,7 +20,7 @@ pub(crate) struct Move {
 /// A multi-select drag moves the whole group as a single undo entry; a plain
 /// drag carries just the one grabbed body.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct MoveSelection {
+pub(crate) struct SetPositions {
     /// One entry per member that still had a placement when the step was
     /// built, in the drag's member order. A member whose node vanished
     /// mid-drag is dropped rather than refusing the whole move, so this can be
@@ -29,7 +29,7 @@ pub(crate) struct MoveSelection {
     pub(crate) moves: Vec<Move>,
 }
 
-impl MoveSelection {
+impl SetPositions {
     /// Fold `next`, a later frame of the same drag, into this step: keep each
     /// member's `from` and adopt its latest `to`.
     ///
@@ -40,7 +40,7 @@ impl MoveSelection {
     pub(crate) fn absorb(&mut self, next: &Self) {
         let mut later = next.moves.iter().peekable();
         for moved in &mut self.moves {
-            if let Some(update) = later.next_if(|update| update.key == moved.key) {
+            if let Some(update) = later.next_if(|update| update.node_id == moved.node_id) {
                 moved.pos.to = update.pos.to;
             }
         }
@@ -57,13 +57,13 @@ impl MoveSelection {
     }
 }
 
-impl Reversible for MoveSelection {
+impl Reversible for SetPositions {
     fn write(&self, document: &mut Document, dir: Direction) {
         for moved in &self.moves {
             document
                 .main_view
                 .item_placements
-                .get_mut(&moved.key)
+                .get_mut(&moved.node_id)
                 .expect("history replays a move against the items it recorded")
                 .pos = *moved.pos.half(dir);
         }

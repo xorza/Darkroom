@@ -38,7 +38,7 @@ pub(crate) struct GroupDrag {
 pub(crate) struct Grab {
     /// The node the pointer grabbed, which [`GroupDrag::advance`] checks
     /// against the scene.
-    pub(crate) node: NodeId,
+    pub(crate) node_id: NodeId,
     /// Every node moving with this drag, at its position when the drag
     /// latched: the whole selection when the grabbed node was already
     /// selected, else just the grabbed one. Includes the grabbed node itself.
@@ -99,7 +99,7 @@ impl GroupDrag {
         if self
             .anchor
             .as_ref()
-            .is_some_and(|anchor| !graph_ctx.contains(anchor.grab.node))
+            .is_some_and(|anchor| !graph_ctx.contains(anchor.grab.node_id))
         {
             self.anchor = None;
         }
@@ -151,9 +151,9 @@ pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Arc<[DragStart]> {
     draw_ctx
         .graph_ctx()
         .nodes()
-        .filter(|n| draw_ctx.is_selected(n.id))
+        .filter(|n| draw_ctx.is_selected(n.node_id))
         .map(|n| DragStart {
-            node: n.id,
+            node_id: n.node_id,
             pos: n.pos,
         })
         .collect()

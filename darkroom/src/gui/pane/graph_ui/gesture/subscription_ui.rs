@@ -246,8 +246,8 @@ fn scan_subscription_target(ui: &mut Ui, ctx: CanvasCtx<'_>, emitter: EventPort)
     let candidates = ctx
         .graph_ctx()
         .nodes()
-        .filter(|n| n.id != emitter.node_id && n.sink())
-        .map(|n| n.id);
+        .filter(|n| n.node_id != emitter.node_id && n.sink())
+        .map(|n| n.node_id);
     ctx.geometry().subs.first_containing(pointer, candidates)
 }
 
@@ -260,7 +260,7 @@ fn scan_emitter_target(ui: &mut Ui, ctx: CanvasCtx<'_>, subscriber: NodeId) -> O
     let candidates = ctx
         .graph_ctx()
         .nodes()
-        .filter(|n| n.id != subscriber)
+        .filter(|n| n.node_id != subscriber)
         .flat_map(NodeCtx::event_ports);
     ctx.geometry().events.first_containing(pointer, candidates)
 }

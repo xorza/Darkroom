@@ -11,9 +11,8 @@
 //!     than as asides inside the fold.
 //!   - [`step`] — the reversible primitives, each carrying both halves of
 //!     what it wrote so a replay in either direction is one call.
-//!   - [`action_stack`] — the packed undo history those steps are stored in.
+//!   - [`undo_history`] — the packed undo history those steps are stored in.
 
-pub(crate) mod action_stack;
 pub(crate) mod document_queue;
 pub(crate) mod document_request;
 pub(crate) mod error;
@@ -21,5 +20,6 @@ pub(crate) mod gesture_id;
 pub(crate) mod graph_intent;
 pub(crate) mod relayout;
 pub(crate) mod step;
+pub(crate) mod undo_history;
 mod unwired;
 mod validate;

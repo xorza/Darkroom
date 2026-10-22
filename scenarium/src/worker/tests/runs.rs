@@ -53,7 +53,12 @@ async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
     let mut w = TestWorker::over(graph);
     let sum = w.id("sum");
 
-    w.send_many([w.update(), WorkerMessage::RunNodes { nodes: vec![sum] }]);
+    w.send_many([
+        w.update(),
+        WorkerMessage::RunNodes {
+            node_ids: vec![sum],
+        },
+    ]);
 
     let run = w.run().await;
     assert_eq!(

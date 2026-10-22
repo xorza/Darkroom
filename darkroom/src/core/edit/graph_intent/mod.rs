@@ -41,12 +41,12 @@ use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::core::edit::step::change::Change;
-use crate::core::edit::step::move_selection::{Move, MoveSelection};
-use crate::core::edit::step::raise::Raise;
-use crate::core::edit::step::rename_node::RenameNode;
+use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
+use crate::core::edit::step::set_node_name::SetNodeName;
 use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
+use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_viewport::SetViewport;
@@ -121,7 +121,7 @@ pub(crate) enum GraphIntent {
     /// view state, so it persists across save/load and tab switches and walks
     /// with undo/redo.
     Raise {
-        key: NodeId,
+        node_id: NodeId,
     },
     /// Set one scalar property of a node — its `disabled` flag or its cache
     /// mode. See [`NodeProperty`].
@@ -145,9 +145,9 @@ pub(crate) enum GraphIntent {
 }
 
 impl GraphIntent {
-    /// The intents a click on `key` produces: the selection change, plus a
+    /// The intents a click on `node_id` produces: the selection change, plus a
     /// lift to the top of the paint stack so a clicked node comes to the
-    /// front. The raise is skipped only when a toggling click *removes* `key`
+    /// front. The raise is skipped only when a toggling click *removes* `node_id`
     /// from the selection — a node you just deselected shouldn't jump
     /// forward. Shared by the node body, its header title and its port
     /// labels, so clicking any of them behaves like clicking the body.
@@ -158,25 +158,25 @@ impl GraphIntent {
     pub(crate) fn click(
         mode: ClickMode,
         selected: &BTreeSet<NodeId>,
-        key: NodeId,
+        node_id: NodeId,
     ) -> impl Iterator<Item = Self> {
-        let deselecting = mode == ClickMode::Toggle && selected.contains(&key);
-        iter::once(Self::select_click(mode, selected, key))
-            .chain((!deselecting).then_some(Self::Raise { key }))
+        let deselecting = mode == ClickMode::Toggle && selected.contains(&node_id);
+        iter::once(Self::select_click(mode, selected, node_id))
+            .chain((!deselecting).then_some(Self::Raise { node_id }))
     }
 
-    /// The [`Self::SetSelection`] a click on `key` produces: a replacing click
+    /// The [`Self::SetSelection`] a click on `node_id` produces: a replacing click
     /// selects only it, a toggling one flips its membership. A click that
     /// changes nothing is dropped at commit as a no-op.
-    fn select_click(mode: ClickMode, selected: &BTreeSet<NodeId>, key: NodeId) -> Self {
+    fn select_click(mode: ClickMode, selected: &BTreeSet<NodeId>, node_id: NodeId) -> Self {
         let mut to = match mode {
             ClickMode::Replace => BTreeSet::new(),
             ClickMode::Toggle => selected.clone(),
         };
-        if mode == ClickMode::Toggle && selected.contains(&key) {
-            to.remove(&key);
+        if mode == ClickMode::Toggle && selected.contains(&node_id) {
+            to.remove(&node_id);
         } else {
-            to.insert(key);
+            to.insert(node_id);
         }
         Self::SetSelection { to }
     }
@@ -363,14 +363,14 @@ impl GraphIntent {
                     bindings,
                     subscriptions: Vec::new(),
                 })?;
-                UndoStep::SetNode(Box::new(SetNode::insertion(detached, placement)))
+                UndoStep::Node(Box::new(SetNode::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
                 let Some(entry) = NodeEntry::capture(document, node_id) else {
                     return Ok(None);
                 };
-                UndoStep::SetNode(Box::new(SetNode::removal(entry)))
+                UndoStep::Node(Box::new(SetNode::removal(entry)))
             }
             Self::MoveSelection {
                 members, offset, ..
@@ -381,24 +381,24 @@ impl GraphIntent {
                     validate::finite_pos(to, Role::MoveSelection)?;
                     // Drag-sourced (spans frames): a member whose item
                     // vanished mid-gesture (node removed) drops quietly.
-                    let Some(placement) = view.item_placements.get(&member.node) else {
+                    let Some(placement) = view.item_placements.get(&member.node_id) else {
                         continue;
                     };
                     moves.push(Move {
-                        key: member.node,
+                        node_id: member.node_id,
                         pos: Change {
                             from: placement.pos,
                             to,
                         },
                     });
                 }
-                UndoStep::MoveSelection(MoveSelection { moves })
+                UndoStep::Positions(SetPositions { moves })
             }
             Self::RenameNode { node_id, to } => {
                 let Some(node) = validate::live_node(graph, node_id, Role::RenameNode)? else {
                     return Ok(None);
                 };
-                UndoStep::RenameNode(RenameNode {
+                UndoStep::NodeName(SetNodeName {
                     node_id,
                     name: Change {
                         from: node.name.clone(),
@@ -443,7 +443,7 @@ impl GraphIntent {
                         }
                     })?;
                 }
-                UndoStep::SetInput(SetInput {
+                UndoStep::Input(SetInput {
                     input,
                     binding: Change {
                         from: graph.bindings.get(&input).cloned(),
@@ -451,7 +451,7 @@ impl GraphIntent {
                     },
                 })
             }
-            Self::SetSelection { to } => UndoStep::SetSelection(SetSelection {
+            Self::SetSelection { to } => UndoStep::Selection(SetSelection {
                 selection: Change {
                     from: view.selected.clone(),
                     // The rubber band snapshots identities when the drag
@@ -460,18 +460,18 @@ impl GraphIntent {
                     // rather than recording a selection the view can't render.
                     to: to
                         .into_iter()
-                        .filter(|key| view.item_placements.contains_key(key))
+                        .filter(|node_id| view.item_placements.contains_key(node_id))
                         .collect(),
                 },
             }),
-            Self::Raise { key } => {
+            Self::Raise { node_id } => {
                 let (Some(placement), Some(to)) =
-                    (view.item_placements.get(&key), view.raised_z(key))
+                    (view.item_placements.get(&node_id), view.raised_z(node_id))
                 else {
                     return Ok(None);
                 };
-                UndoStep::Raise(Raise {
-                    key,
+                UndoStep::Depth(SetDepth {
+                    node_id,
                     z: Change {
                         from: placement.z,
                         to,
@@ -488,7 +488,7 @@ impl GraphIntent {
                     NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
                     NodeProperty::RuntimeCache(_) => NodeProperty::RuntimeCache(node.cache),
                 };
-                UndoStep::SetNodeProperty(SetNodeProperty {
+                UndoStep::NodeProperty(SetNodeProperty {
                     node_id,
                     property: Change { from, to },
                 })
@@ -497,7 +497,7 @@ impl GraphIntent {
                 if !to.is_valid() {
                     return Err(MalformedIntent::InvalidViewport);
                 }
-                UndoStep::SetViewport(SetViewport {
+                UndoStep::Viewport(SetViewport {
                     viewport: Change {
                         from: view.viewport,
                         to,
@@ -527,7 +527,7 @@ impl GraphIntent {
                             rejection,
                         })?;
                 }
-                UndoStep::SetSubscription(SetSubscription {
+                UndoStep::Subscription(SetSubscription {
                     subscription,
                     subscribed: Change {
                         from: graph.is_subscribed(event, subscriber),
@@ -561,7 +561,7 @@ impl GraphIntent {
     /// [`Self::into_step`]).
     ///
     /// [`Self::into_step`] and [`UndoStep::apply`] stay separate for the
-    /// undo-stack redo path, which applies a stored step without rebuilding it
+    /// undo-history redo path, which applies a stored step without rebuilding it
     /// (a redo replays already-valid history).
     pub(crate) fn commit(
         self,

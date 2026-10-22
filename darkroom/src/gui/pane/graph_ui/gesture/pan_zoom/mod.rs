@@ -95,7 +95,7 @@ fn node_bounds(
 ) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in graph_ctx.nodes() {
-        if bounded == Bounded::Selected && !graph_ctx.is_selected(n.id) {
+        if bounded == Bounded::Selected && !graph_ctx.is_selected(n.node_id) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {

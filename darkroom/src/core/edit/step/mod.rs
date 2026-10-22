@@ -15,13 +15,13 @@
 //! the fold a held gesture's frames take.
 
 pub(crate) mod change;
-pub(crate) mod move_selection;
-pub(crate) mod raise;
-pub(crate) mod rename_node;
 pub(crate) mod reversible;
+pub(crate) mod set_depth;
 pub(crate) mod set_input;
 pub(crate) mod set_node;
+pub(crate) mod set_node_name;
 pub(crate) mod set_node_property;
+pub(crate) mod set_positions;
 pub(crate) mod set_selection;
 pub(crate) mod set_subscription;
 pub(crate) mod set_viewport;

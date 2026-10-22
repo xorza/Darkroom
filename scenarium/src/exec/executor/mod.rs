@@ -233,7 +233,7 @@ impl Executor {
             }
         }
 
-        self.ctx_manager.cur_node = None;
+        self.ctx_manager.cur_node_id = None;
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
@@ -520,7 +520,7 @@ impl ExecFrame<'_, '_> {
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
         // Attribute any logs this node emits to it (read by `CtxManager::log`).
-        self.ctx.cur_node = Some(node_id);
+        self.ctx.cur_node_id = Some(node_id);
         let invoke_start = Instant::now();
         self.reporter
             .progress(node_id, RunPhase::Started { at: invoke_start });
