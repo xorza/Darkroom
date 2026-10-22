@@ -234,6 +234,7 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
         dimensions: ImageDimensions::new(layout.active, ChannelLayout::Mono),
         cfa_type,
         decoder: decoder_bytes(libraw, &layout),
+        gain_bytes: 0,
     })
 }
 

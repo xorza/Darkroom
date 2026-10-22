@@ -77,23 +77,35 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     }
 
     /// The run's shape, from a light's header — or, for a linear format with none to read, its
-    /// decode — which that light's preparation then takes ([`FileSet::peek`]), with the bytes the
-    /// lights the decode cache does not hold yet write to it.
+    /// decode — which that light's preparation then takes ([`FileSet::peek`]), with the source gains
+    /// the lights share and the bytes the lights the decode cache does not hold yet write to it,
+    /// a gain each at the most.
     pub(super) fn shape(&self, run: &IngestRun) -> Result<LightShape, AlignStackError> {
         let workers = run.budget.workers();
         let (files, mosaic) = match self {
             Self::Calibrate { files, mosaic } => (files, mosaic),
             Self::Linear(files) => {
-                let SetPeek { info, held, .. } = files.peek(&run.ctx)?;
+                let SetPeek {
+                    info, held, gains, ..
+                } = files.peek(&run.ctx)?;
                 let peek = FramePeek::from(info);
                 return Ok(LightShape {
-                    kept_writes: kept_writes(files.uncached(), peek.resident_bytes()),
+                    kept_writes: kept_writes(
+                        files.uncached(),
+                        peek.resident_bytes() + info.gain_bytes,
+                    ),
                     peeked: held,
+                    gains,
                     ..LightShape::decoded(peek, files.len(), workers)
                 });
             }
         };
-        let SetPeek { idx, info, held } = files.peek(&run.ctx)?;
+        let SetPeek {
+            idx,
+            info,
+            held,
+            gains,
+        } = files.peek(&run.ctx)?;
         let size = info.dimensions.size();
         // Refused here, before any light is prepared, when the pass cannot run on this sensor.
         let cosmic_ray = match mosaic.cosmic_ray {
@@ -121,7 +133,8 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             prepared,
             held: 0,
             peeked: held,
-            kept_writes: kept_writes(files.uncached(), info.decoded().kept),
+            gains,
+            kept_writes: kept_writes(files.uncached(), info.decoded().kept + info.gain_bytes),
         })
     }
 

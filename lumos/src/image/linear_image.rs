@@ -1,12 +1,11 @@
 use std::slice;
-use std::sync::Arc;
 
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_pixels::LinearPixels;
@@ -24,8 +23,8 @@ pub struct LinearImage {
     /// fill, not data.
     flags: Option<PixelFlags>,
     /// The gain a flat applied to each pixel's value and noise, in this image's own pixels — see
-    /// [`FlatGain`]. `None` for an image no flat divided, and for a master, which the combine made.
-    flat_gain: Option<Arc<FlatGain>>,
+    /// [`FrameGain`]. `None` for an image no flat divided, and for a master, which the combine made.
+    flat_gain: Option<FrameGain>,
 }
 
 impl LinearImage {
@@ -147,12 +146,12 @@ impl LinearImage {
     }
 
     /// The gain a flat applied to the pixels, for an image a flat divided.
-    pub const fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+    pub const fn flat_gain(&self) -> Option<&FrameGain> {
         self.flat_gain.as_ref()
     }
 
     /// Replace the flat gain with `gain`, which covers these pixels and channels.
-    pub(crate) fn set_flat_gain(&mut self, gain: Option<Arc<FlatGain>>) {
+    pub(crate) fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
         debug_assert!(
             gain.as_ref()
                 .is_none_or(|gain| gain.covers(self.dimensions().size(), self.channels())),
@@ -341,7 +340,7 @@ impl StackableImage for LinearImage {
         image
     }
 
-    fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+    fn flat_gain(&self) -> Option<&FrameGain> {
         Self::flat_gain(self)
     }
 }

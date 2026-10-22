@@ -19,7 +19,6 @@
 
 use std::iter;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
@@ -41,6 +40,7 @@ use crate::frame_store::frame_buffers::NewFrame;
 use crate::frame_store::run_storage::RunStorage;
 use crate::frame_store::stored_frame::SetKind;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
@@ -87,6 +87,7 @@ impl DrizzleRun<'_> {
         &self,
         frames: Vec<DrizzleFrame<P>>,
     ) -> Result<StackProduct, DrizzleError> {
+        self.validate(frames.len())?;
         let run = &self.ingest;
         let ctx = run.ctx.clone();
         let sources: Vec<PathBuf> = frames
@@ -96,6 +97,7 @@ impl DrizzleRun<'_> {
         let files = FileSet::<_, D>::new(&sources, RunStorage::decoding(run)?, &ctx);
         let origin = FrameOrigin::Files {
             uncached: files.uncached(),
+            gains: files.peek(&ctx)?.gains,
         };
         // Lazy, so only the frame currently being drizzled is resident.
         let loaded = frames
@@ -110,6 +112,7 @@ impl DrizzleRun<'_> {
         &self,
         frames: Vec<DrizzleFrame<I>>,
     ) -> Result<StackProduct, DrizzleError> {
+        self.validate(frames.len())?;
         self.accumulate(
             frames.into_iter().map(Ok),
             FrameOrigin::Memory,
@@ -117,8 +120,22 @@ impl DrizzleRun<'_> {
         )
     }
 
+    /// Refuse a run of `frame_count` frames the configuration dooms, before any frame is read: for
+    /// the path entry, its plan's peek and its first frame are a decode.
+    fn validate(&self, frame_count: usize) -> Result<(), DrizzleError> {
+        if frame_count == 0 {
+            return Err(StackError::NoFrames.into());
+        }
+        self.config.validate()?;
+        self.config
+            .stack
+            .validate(frame_count)
+            .map_err(StackError::from)?;
+        Ok(())
+    }
+
     /// Drizzle every frame on its own, store it, combine the stored frames, and gate the product —
-    /// the body every entry point shares.
+    /// the body every entry point shares, once [`Self::validate`] passed.
     ///
     /// Frames arrive as a lazy fallible iterator so the path entries keep one input image resident:
     /// an item is produced, drizzled, stored, and dropped before the next is loaded.
@@ -129,19 +146,13 @@ impl DrizzleRun<'_> {
         storage: &RunStorage,
     ) -> Result<StackProduct, DrizzleError> {
         let frame_count = frames.len();
-        if frame_count == 0 {
-            return Err(StackError::NoFrames.into());
-        }
+        debug_assert!(frame_count > 0, "each entry refuses an empty set");
         let Self {
             config: drizzle,
             ingest: run,
         } = self;
         let stack = &drizzle.stack;
         let cancel = &run.ctx.cancel;
-        // Before the first frame is pulled: for the path entry that is a full decode, spent on a
-        // run the configuration already dooms.
-        drizzle.validate()?;
-        stack.validate(frame_count).map_err(StackError::from)?;
 
         let first = frames.next().expect("frame_count is non-zero")?;
         let input_dims = first.source.dimensions();
@@ -216,10 +227,10 @@ impl DrizzleRun<'_> {
             let mut frame_metadata = frame.source.metadata().clone();
             frame_metadata.derived.after_resample();
             let flat_gain = frame.source.flat_gain().map(|gain| {
-                Arc::new(gain.warped(
+                FrameGain::Own(Box::new(gain.warped(
                     |pos| frame.warp.apply(grid.reference_point(pos)),
                     output.size(),
-                ))
+                )))
             });
             if let Deposit::Mosaic(cfa_type) = deposit {
                 color_planes(&mut frame_metadata, cfa_type);

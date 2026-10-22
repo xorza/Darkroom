@@ -56,7 +56,7 @@ impl StoredFrame {
             samples: None,
             quality: quality.map(StoredPlane::Memory),
             flags,
-            flat_gain: flat_gain.map(StoredGain::Resident),
+            flat_gain: flat_gain.map(StoredGain::from),
             source_stats: stats,
             facts,
         }
@@ -96,7 +96,8 @@ pub(crate) struct WrittenFrame {
 impl<I: StackableImage> FrameWrite<'_, I> {
     /// Write the planes the frame keeps to `sink` and map them back: its channels, its flags when
     /// its quality [keeps](FrameQuality::keeps) them, each slot's samples when it has no quality
-    /// in a set of [`SetKind::Unwarped`], its quality planes and its flat gain.
+    /// in a set of [`SetKind::Unwarped`], its quality planes and its own flat gain; a shared gain
+    /// stays the handle the run holds.
     ///
     /// Borrows everything it writes: the caller keeps its buffers, which is what lets a producer
     /// fill the same ones for its next frame rather than a fresh set that has to be faulted in.

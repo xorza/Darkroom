@@ -231,6 +231,12 @@ pub enum FitsRefusal {
     GainStep {
         step: Option<i64>,
     },
+    /// A gain extension's stated key, `text`, which is no 64 hex digits.
+    GainKeyText {
+        text: String,
+    },
+    /// A gain extension whose nodes are not the gain its stated key names.
+    GainKeyMismatch,
     /// A gain extension's `node` holding `value`, which is not a finite gain above zero.
     NotAGain {
         node: usize,
@@ -530,6 +536,16 @@ impl Display for FitsRefusal {
                 "{}: no node spacing stated; this reader takes {}",
                 LumosExtension::Gain,
                 flat_gain::STEP
+            ),
+            Self::GainKeyText { text } => write!(
+                f,
+                "{} states the key {text:?}, which is no 64 hex digits",
+                LumosExtension::Gain
+            ),
+            Self::GainKeyMismatch => write!(
+                f,
+                "{}: the nodes are not the gain its key states",
+                LumosExtension::Gain
             ),
             Self::NotAGain { node, value } => write!(
                 f,

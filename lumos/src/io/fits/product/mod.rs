@@ -9,7 +9,6 @@ mod report_keywords;
 
 use std::fs::File;
 use std::path::Path;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use common::fs;
@@ -19,6 +18,7 @@ use fits_well::io::StreamReader;
 use imaginarium::Buffer2;
 
 use crate::error::Cancelled;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::quality_map::QualityMap;
@@ -84,7 +84,7 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
         primary.header.set(UNIFORM_COVERAGE, f64::from(*value))?;
     }
     let flags = flags_extension::encode(image.flags(), None, 1)?;
-    let gain = gain_extension::encode(image.flat_gain().map(Arc::as_ref), None)?;
+    let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
     let described = DescribedImage {
         size: image.dimensions().size(),
         channels: image.channels(),
@@ -175,7 +175,9 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
 
     let selected = SelectedFits::primary(&mut reader, ctx)?;
     let cfa_type = selected.cfa_type();
-    let image = selected.read(ctx, Checksum::Judged)?.into_linear()?;
+    let image = selected
+        .read(ctx, Checksum::Judged, &SharedGains::default())?
+        .into_linear()?;
 
     let mut found = Vec::with_capacity(PLANES.len());
     for extension in PLANES {

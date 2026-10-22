@@ -13,6 +13,7 @@ use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::vec2us::Vec2us;
 
@@ -97,7 +98,7 @@ impl PreparedFlat {
             .metadata
             .derived
             .record_removal(CalibrationState::FLAT);
-        image.set_flat_gain(Some(Arc::clone(&self.gain)));
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&self.gain))));
     }
 }
 

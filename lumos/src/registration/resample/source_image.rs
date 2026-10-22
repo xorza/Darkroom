@@ -1,7 +1,5 @@
 //! [`SourceImage`]: the frame a warp reads, wherever its planes are.
 
-use std::sync::Arc;
-
 use arrayvec::ArrayVec;
 
 use crate::image::flat_gain::FlatGain;
@@ -19,7 +17,7 @@ pub(crate) struct SourceImage<'a> {
     pub(crate) metadata: &'a ImageMetadata,
     pub(crate) planes: ArrayVec<SourcePlane<'a>, 3>,
     pub(crate) flags: Option<&'a PixelFlags>,
-    pub(crate) flat_gain: Option<&'a Arc<FlatGain>>,
+    pub(crate) flat_gain: Option<&'a FlatGain>,
 }
 
 /// One plane of a [`SourceImage`]: its samples row by row, and the row length.
@@ -42,7 +40,7 @@ impl<'a> SourceImage<'a> {
                 })
                 .collect(),
             flags: image.flags(),
-            flat_gain: image.flat_gain(),
+            flat_gain: image.flat_gain().map(|gain| &**gain),
         }
     }
 

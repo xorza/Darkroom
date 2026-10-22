@@ -451,7 +451,8 @@ fn cache_frame_dimension_mismatch() {
 /// holds 49 000 more in work, beside the 30 000 B file the peek read for its frame's decode; the
 /// normalization holds nothing; the combine holds the image and its flag byte, 5 B a pixel,
 /// 50 000 B, and a row copies three frames of 5 B a pixel over 100 pixels into each of its two
-/// chunk copies, 3000 B.
+/// chunk copies, 3000 B. The frames share a flat gain of the three colors, 26 × 26 nodes of 4 B
+/// each, 8112 B, which every stage holds beside it.
 #[test]
 fn stages_charge_the_decode_the_normalization_and_the_combine() {
     let peek = SetPeek {
@@ -460,8 +461,10 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
             dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
             cfa_type: CfaType::Bayer(CfaPattern::Rggb),
             decoder: DecoderBytes::default(),
+            gain_bytes: 8112,
         },
         held: 30_000,
+        gains: 8112,
     };
     let combine = PlannedCombine {
         normalization: Normalization::None,
@@ -473,19 +476,19 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
         [
             Stage {
                 kept,
-                held: 30_000,
+                held: 38_112,
                 in_flight: 49_000,
                 units: Units::Frames,
             },
             Stage {
                 kept,
-                held: 0,
+                held: 8112,
                 in_flight: 0,
                 units: Units::Whole,
             },
             Stage {
                 kept,
-                held: 50_000,
+                held: 58_112,
                 in_flight: 3000,
                 units: Units::Rows(100),
             },

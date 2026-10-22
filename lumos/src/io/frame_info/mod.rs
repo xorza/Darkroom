@@ -11,12 +11,14 @@ use crate::memory::footprint::Footprint;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 /// What a frame is, read from its header: its shape, its sensor's pattern — [`CfaType::Mono`] for
-/// a frame of no filter, or of one already demosaiced — and what its decoder holds.
+/// a frame of no filter, or of one already demosaiced — what its decoder holds, and the bytes of
+/// the flat gain its file stores, none for a file with none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameInfo {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) cfa_type: CfaType,
     pub(crate) decoder: DecoderBytes,
+    pub(crate) gain_bytes: usize,
 }
 
 /// What a decoder holds while it makes a frame, beside the frame's own bytes.
@@ -50,6 +52,7 @@ impl FrameInfo {
             dimensions: image.dimensions(),
             cfa_type: image.cfa_type().unwrap_or(CfaType::Mono),
             decoder: DecoderBytes::default(),
+            gain_bytes: image.flat_gain().map_or(0, |gain| gain.ram_bytes()),
         }
     }
 

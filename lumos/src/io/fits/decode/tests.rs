@@ -14,12 +14,18 @@ use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
 use crate::io::error::OverBudget;
 use crate::io::fits::cfa;
+use crate::io::fits::decode;
 use crate::io::fits::decode::plan::internals::HduSpec;
 use crate::io::fits::decode::*;
 use crate::io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 use crate::math::size2us::Size2us;
+
+/// [`decode::load_linear`] of a run of its own, which shares its gain with no other frame.
+fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
+    decode::load_linear(path, ctx, &SharedGains::default())
+}
 
 fn load_ctx() -> LoadCtx {
     LoadCtx::new(CancelToken::never(), u64::MAX)

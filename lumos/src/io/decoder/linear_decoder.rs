@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::path::Path;
 
 use crate::decode::decoder_kind::DecoderKind;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::io::decoder::{Decoder, Peek};
 use crate::io::error::ImageError;
@@ -20,8 +21,8 @@ impl Decoder for LinearDecoder {
     type Read = Infallible;
     const KIND: DecoderKind = DecoderKind::Linear;
 
-    fn load(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
-        ctx.linear(path)
+    fn load(path: &Path, ctx: &LoadCtx, gains: &SharedGains) -> Result<LinearImage, ImageError> {
+        ctx.linear_sharing(path, gains)
     }
 
     fn read_len(read: &Infallible) -> usize {

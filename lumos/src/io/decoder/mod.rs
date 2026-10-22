@@ -7,6 +7,7 @@ use std::fmt::Debug;
 use std::path::Path;
 
 use crate::decode::decoder_kind::DecoderKind;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::stackable_image::StackableImage;
 use crate::io::error::ImageError;
 use crate::io::frame_info::FrameInfo;
@@ -25,7 +26,8 @@ pub(crate) trait Decoder {
     /// The decoder [`Self::load`] runs, which a kept cache records beside the planes it wrote.
     const KIND: DecoderKind;
 
-    fn load(path: &Path, ctx: &LoadCtx) -> Result<Self::Image, ImageError>;
+    /// The frame of `path` under `ctx`, the flat gain its file stores shared through `gains`.
+    fn load(path: &Path, ctx: &LoadCtx, gains: &SharedGains) -> Result<Self::Image, ImageError>;
 
     /// The bytes `read` holds.
     fn read_len(read: &Self::Read) -> usize;

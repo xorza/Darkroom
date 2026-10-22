@@ -131,6 +131,7 @@ fn quantize(samples: &[f32]) -> Vec<u16> {
 mod tests {
     use super::*;
     use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::flat_gain::shared_gains::SharedGains;
     use crate::io::fits::decode;
     use crate::io::load_ctx::LoadCtx;
     use crate::math::size2us::Size2us;
@@ -153,26 +154,28 @@ mod tests {
         let mono = field.light(size, CfaType::Mono);
         let path = dir.join("mono.fits");
         write_mosaic_u16(&path, &mono);
-        let loaded = decode::load_linear(&path, &LoadCtx::default()).unwrap();
+        let loaded =
+            decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         within_half_step(loaded.channel(0).pixels(), mono.data().pixels());
 
         let render = field.render(size).image;
         let path = dir.join("render.fits");
         write_mono_f32(&path, &render);
-        let loaded = decode::load_linear(&path, &LoadCtx::default()).unwrap();
+        let loaded =
+            decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.channel(0).pixels(), render.channel(0).pixels());
 
         let mosaic = field.light(size, CfaType::Bayer(CfaPattern::Rggb));
         let path = dir.join("mosaic.fits");
         write_mosaic_u16(&path, &mosaic);
-        let loaded = decode::load_cfa(&path, &LoadCtx::default()).unwrap();
+        let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.cfa_type(), mosaic.cfa_type());
         within_half_step(loaded.data().pixels(), mosaic.data().pixels());
 
         let calibrated = field.mosaic_exposure(size, CfaType::Bayer(CfaPattern::Rggb), 1);
         let path = dir.join("calibrated.fits");
         writer::cfa_fits(&calibrated, &path).unwrap();
-        let loaded = decode::load_cfa(&path, &LoadCtx::default()).unwrap();
+        let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.cfa_type(), calibrated.cfa_type());
         assert_eq!(loaded.data().pixels(), calibrated.data().pixels());
     }

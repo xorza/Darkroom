@@ -1,7 +1,5 @@
 //! [`MosaicNoiseMeasure`]: a mosaic's noise, measured before its demosaic.
 
-use std::sync::Arc;
-
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_image::CfaImage;
@@ -34,7 +32,7 @@ impl<'a> MosaicNoiseMeasure<'a> {
             plane: mosaic.data(),
             cfa_type: mosaic.cfa_type(),
             flags: mosaic.flags(),
-            flat_gain: mosaic.flat_gain().map(Arc::as_ref),
+            flat_gain: mosaic.flat_gain().map(|gain| &**gain),
             quantization_sigma: mosaic.metadata.derived.quantization_sigma(),
         })
     }

@@ -20,8 +20,9 @@ use crate::memory::stage::{Stage, Units};
 /// them when the run reads the machine's memory.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FrameOrigin {
-    /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache.
-    Files { uncached: usize },
+    /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache, beside
+    /// the `gains` bytes of the source gains they share, which the run holds from their decode on.
+    Files { uncached: usize, gains: usize },
     /// Handed over decoded, every one resident from the start and freed once drizzled.
     Memory,
 }
@@ -58,17 +59,19 @@ impl DrizzleShape {
             budget,
         );
         let uncached = match self.origin {
-            FrameOrigin::Files { uncached } => uncached,
+            FrameOrigin::Files { uncached, .. } => uncached,
             FrameOrigin::Memory => 0,
         };
         let writes = RunWrites {
-            kept: (self.input.decoded_bytes() as u64).saturating_mul(uncached as u64),
+            kept: (self.input.decoded_bytes() as u64)
+                .saturating_mul(uncached as u64)
+                .saturating_add(self.gain_bytes() as u64),
             spilled: (self.drizzled().heap_bytes(self.output) as u64)
                 .saturating_mul(self.frame_count as u64),
         };
         Ok(storage
             .tier(&plan, writes)?
-            .holding_beside(self.depth_bytes()))
+            .holding_beside(self.held_bytes()))
     }
 
     /// How a drizzled frame is stored: its channels, a drop weight and Kish size per weight plane,
@@ -84,17 +87,31 @@ impl DrizzleShape {
     }
 
     /// The depth of every weight plane, summed as the frames arrive and read by the gate after the
-    /// combine: what the run holds beside every stage.
+    /// combine.
     const fn depth_bytes(&self) -> usize {
         (self.deposit.weight_planes() * size_of::<f32>()).saturating_mul(self.output.pixel_count())
     }
 
-    /// The least a run of this shape holds: one drizzled frame and the depth beside it, refused
-    /// past the run's memory before any price is summed over the frames.
+    /// The source gains frames decoded from files share, which the caller holds of frames it
+    /// handed over.
+    const fn gain_bytes(&self) -> usize {
+        match self.origin {
+            FrameOrigin::Files { gains, .. } => gains,
+            FrameOrigin::Memory => 0,
+        }
+    }
+
+    /// What the run holds beside every stage: the depth and the source gains.
+    const fn held_bytes(&self) -> usize {
+        self.depth_bytes().saturating_add(self.gain_bytes())
+    }
+
+    /// The least a run of this shape holds: one drizzled frame and what the run holds beside every
+    /// stage, refused past the run's memory before any price is summed over the frames.
     const fn frame_bytes(&self) -> usize {
         self.drizzled()
             .heap_bytes(self.output)
-            .saturating_add(self.depth_bytes())
+            .saturating_add(self.held_bytes())
     }
 
     /// The stages of a run of this shape combined under `stack` on `workers`: the drizzle, a frame
@@ -127,7 +144,7 @@ impl DrizzleShape {
             FrameOrigin::Files { .. } => drizzled_bytes,
             FrameOrigin::Memory => drizzled_bytes - input_bytes.min(drizzled_bytes),
         };
-        let depth = self.depth_bytes();
+        let held = self.held_bytes();
         // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each channel by
         // its color's own.
         let [normalize, combine] = PlannedCombine {
@@ -146,13 +163,13 @@ impl DrizzleShape {
             kept,
         )
         .map(|stage| Stage {
-            held: stage.held + depth,
+            held: stage.held + held,
             ..stage
         });
         [
             Stage {
                 kept,
-                held: depth,
+                held,
                 in_flight: way.transient(),
                 units: Units::Serial,
             },
@@ -184,43 +201,47 @@ mod tests {
     /// past the frame it keeps. The depth of the one weight plane, 64 B, is held through every
     /// stage. The combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth,
     /// and a row copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies,
-    /// 312 B; the gain is read where it lies.
+    /// 312 B; the gain is read where it lies. The source gain the frames share, 2 × 2 nodes of
+    /// 4 B, 16 B, is held beside the depth.
     #[test]
-    fn the_depth_is_held_through_every_stage() {
-        let shape = DrizzleShape {
-            input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
-            output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
-            deposit: Deposit::Channels(ChannelLayout::Mono),
-            frame_count: 3,
-            origin: FrameOrigin::Files { uncached: 0 },
-        };
+    fn the_depth_and_the_shared_gains_are_held_through_every_stage() {
         let stack = StackConfig {
             normalization: Normalization::None,
             quality: QualityPlanes::IMAGE_ONLY,
             ..StackConfig::light()
         };
-        assert_eq!(
-            shape.stages(&stack, 1),
-            [
-                Stage {
-                    kept: 224,
-                    held: 64,
-                    in_flight: 184,
-                    units: Units::Serial,
-                },
-                Stage {
-                    kept: 224,
-                    held: 64,
-                    in_flight: 0,
-                    units: Units::Whole,
-                },
-                Stage {
-                    kept: 224,
-                    held: 144,
-                    in_flight: 312,
-                    units: Units::Rows(4),
-                },
-            ]
-        );
+        for gains in [0, 16] {
+            let shape = DrizzleShape {
+                input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
+                output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+                deposit: Deposit::Channels(ChannelLayout::Mono),
+                frame_count: 3,
+                origin: FrameOrigin::Files { uncached: 0, gains },
+            };
+            assert_eq!(
+                shape.stages(&stack, 1),
+                [
+                    Stage {
+                        kept: 224,
+                        held: 64 + gains,
+                        in_flight: 184,
+                        units: Units::Serial,
+                    },
+                    Stage {
+                        kept: 224,
+                        held: 64 + gains,
+                        in_flight: 0,
+                        units: Units::Whole,
+                    },
+                    Stage {
+                        kept: 224,
+                        held: 144 + gains,
+                        in_flight: 312,
+                        units: Units::Rows(4),
+                    },
+                ],
+                "{gains}"
+            );
+        }
     }
 }

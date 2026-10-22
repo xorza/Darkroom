@@ -1,7 +1,5 @@
 //! Per-frame robust statistics, with the white noise measured before any interpolation.
 
-use std::sync::Arc;
-
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -94,7 +92,7 @@ impl FrameStats {
                     plane: image.channel(0),
                     cfa_type,
                     flags,
-                    flat_gain: image.flat_gain().map(Arc::as_ref),
+                    flat_gain: image.flat_gain().map(|gain| &**gain),
                     quantization_sigma: metadata.derived.quantization_sigma(),
                 }
                 .measure(),

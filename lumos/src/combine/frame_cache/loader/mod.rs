@@ -43,9 +43,10 @@ const DECODE: usize = 0;
 
 /// The stages of a run that decodes `frame_count` frames such as `peek` reads straight into
 /// `combine`, on `workers`: each frame decoded and measured, beside what the peek holds for its
-/// frame's decode; the normalization; the combine, whose rows read every frame as it decoded. A
-/// frame may carry a mask its decode alone reveals, so the normalization is charged as over a set
-/// that shares only some pixels, which holds more than one every frame covers.
+/// frame's decode; the normalization; the combine, whose rows read every frame as it decoded; each
+/// beside the source gains the frames share. A frame may carry a mask its decode alone reveals, so
+/// the normalization is charged as over a set that shares only some pixels, which holds more than
+/// one every frame covers.
 fn stages(
     combine: PlannedCombine,
     peek: SetPeek,
@@ -76,6 +77,10 @@ fn stages(
         normalize,
         combine,
     ]
+    .map(|stage| Stage {
+        held: stage.held + peek.gains,
+        ..stage
+    })
 }
 
 /// Load every frame into the tier its set fits, each through its step.
@@ -124,16 +129,18 @@ where
         "Image cache storage decision"
     );
 
+    // A kept frame writes its gain too, a spilled one only its planes: its gain is the run's.
     let frame_bytes = dimensions.decoded_bytes() as u64;
     let writes = RunWrites {
-        kept: (files.uncached() as u64).saturating_mul(frame_bytes),
+        kept: (files.uncached() as u64)
+            .saturating_mul(frame_bytes.saturating_add(peek.info.gain_bytes as u64)),
         spilled: if kept.is_some() {
             0
         } else {
             frame_bytes.saturating_mul(paths.len() as u64)
         },
     };
-    let tier = stack(files.storage().tier(&plan, writes))?;
+    let tier = stack(files.storage().tier(&plan, writes))?.holding_beside(peek.gains);
     let intake = FrameIntake::new(
         IntakePlan {
             dimensions,

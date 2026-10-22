@@ -90,6 +90,16 @@ root causes.
 - **Reusing the reference's KdTree and triangles across registrations.** This saves CPU, not
   memory, and is out of scope.
 
+- **An `Arc`'s identity or count as the owner of a flat gain.** A short-lived clone, or two
+  equal grids decoded apart, fools either. The producer states it (batch 11).
+- **A warped gain computed when the combine reads it.** No pipeline found does: LSST, JWST,
+  SWarp and DrizzlePac store each frame's noise plane and warp it with the image
+  (`lumos/research/2026-10-23-flat-gain-practice.md`).
+- **Every frame owning its source gain, as JWST's `VAR_FLAT`.** A calibrated mosaic would pay a
+  copy of the master's grid for each light.
+- **A header read of every file before the plan, to count the distinct gains.** It reads each
+  file twice. The plan charges one gain for each frame the cache does not hold instead.
+
 ## Plan
 
 Each batch leaves `cargo drive check` and `cargo drive test` green. A batch that changes a
@@ -99,8 +109,9 @@ check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
 Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
-set, 4, the warp working set, 5, each input read once, and 6, one stored-frame writer, landed, and
-with batch 6 the warp's slot from batch 7. The other batches are independent.
+set, 4, the warp working set, 5, each input read once, 6, one stored-frame writer, and 11, shared
+source gains, landed, and with batch 6 the warp's slot from batch 7. The other batches are
+independent.
 
 ### 7. Reuse across frames and jobs
 
@@ -207,8 +218,8 @@ Small items, each local. Files as named.
   — two builders of the `NO_DATA`-where-unmeasured plane. Target: one builder.
 - [ ] `StoredImage::write`, `KeptFrame::reuse_image`, `FrameSpill::commit`, the loader's
   `FrameStore::frame`, `kept_frame` and `reused`, and `drizzle/drizzle_run.rs:208` —
-  `ImageMetadata` is cloned where the owner can move it or the commit can serialize a borrow. In the drizzle it is built for each frame and kept only for
-  frame 0.
+  `ImageMetadata` is cloned where the owner can move it or the commit can serialize a borrow.
+  In the drizzle it is built for each frame and kept only for frame 0.
 - [ ] `AlignStackRun::stack_in_one_pass` — the one-pass route maps `others: Vec<usize>`
   through `map_owned`, with a `Mutex` cell for each index, then inserts the reference. Target:
   `map` over an index range.

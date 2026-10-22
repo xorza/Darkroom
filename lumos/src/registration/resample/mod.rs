@@ -1,7 +1,6 @@
 //! Image resampling orchestration for registered frames.
 
 use std::slice;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
@@ -10,6 +9,7 @@ use rayon::prelude::*;
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
@@ -279,11 +279,9 @@ impl WarpResult {
             if method.interpolates() {
                 warped.metadata.derived.after_resample();
             }
-            warped.set_flat_gain(
-                image
-                    .flat_gain
-                    .map(|gain| Arc::new(gain.warped(|p| warp_transform.apply(p), size))),
-            );
+            warped.set_flat_gain(image.flat_gain.map(|gain| {
+                FrameGain::Own(Box::new(gain.warped(|p| warp_transform.apply(p), size)))
+            }));
         }
         warped.set_flags(flag_plane.and_then(|plane| flag_scratch.finish(plane)));
     }

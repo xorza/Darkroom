@@ -8,6 +8,7 @@ use imaginarium::Buffer2;
 use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
 use crate::image::channel_layout::ChannelLayout;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
@@ -267,7 +268,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         raster::write_image(path, &integer_image).unwrap();
         for error in [
             LoadCtx::default().linear(path).unwrap_err(),
-            LinearDecoder::load(path, &LoadCtx::default()).unwrap_err(),
+            LinearDecoder::load(path, &LoadCtx::default(), &SharedGains::default()).unwrap_err(),
         ] {
             assert!(
                 matches!(&error, ImageError::ScientificInputRejected { reason, .. } if *reason == refusal),

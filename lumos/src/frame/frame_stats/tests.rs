@@ -8,6 +8,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
@@ -109,18 +110,20 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
         let (pixels, divisor) = frame(size, read, sky);
         let mut mono =
             LinearImage::from_interleaved(ImageDimensions::new(size, ChannelLayout::Mono), pixels);
-        mono.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(
+        mono.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
             &divisor,
             &CfaType::Mono,
             |_| false,
-        ))));
+        )))));
         check(FrameStats::measure(&mono), 0.06, 0.06);
         let size = Size2us::new(512, 512);
         let (pixels, divisor) = frame(size, read, sky);
         let mut mosaic = make_cfa(size, pixels, cfa);
-        mosaic.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(&divisor, &cfa, |_| {
-            false
-        }))));
+        mosaic.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
+            &divisor,
+            &cfa,
+            |_| false,
+        )))));
         check(FrameStats::measure(&mosaic), 0.1, 0.2);
     }
 }

@@ -97,10 +97,24 @@
   `into_inner` on the resident tier.
 - **A light the decode cache keeps parks where it lies.** On the spilled tier, a linear light's
   decode returns the cache's maps beside its image, and parking takes them, the reference's
-  too, rather than write the same bytes to the scratch. A light written for its parking writes
-  its flat gain with its planes, as no plan prices a gain held in RAM. A mosaic changes in its
-  preparation, and still spills.
+  too, rather than write the same bytes to the scratch. A mosaic changes in its preparation, and
+  still spills.
 - **A flag plane travels with its counts.** A stored image keeps the `FlagCounts` its writer
   had, and a commit records them, so a reference's mask, a kept frame's quality and whether its
   flags stay are decided without a read of the plane. Refused: the `Carries` tag, one
   consequence of the counts; a copy of the plane to count it.
+- **A frame's flat gain says who holds it.** `FrameGain::Shared` is a source gain, the masters'
+  flat's or one a file stored, which a run holds once for every frame equal to it;
+  `FrameGain::Own` is a grid a warp or a drizzle made for one frame. A writer writes an own gain
+  alone, and a plan charges each shared gain once, beside every stage. Refused: an `Arc`'s
+  identity or count as the owner, which a short-lived clone or two equal grids decoded apart
+  fool; every frame owning its source gain, as JWST's `VAR_FLAT`, which charges a calibrated
+  mosaic a copy of the master's grid for each light (`research/2026-10-23-flat-gain-practice.md`).
+- **A warped gain is stored with its frame.** As LSST, JWST and SWarp store each frame's noise
+  plane and warp it with the image; a spilled one keeps its sensor's bins beside its nodes.
+  Refused: computing it when the combine reads it, which no pipeline found does.
+- **A gain is known by its key before its nodes are read.** A `LUMGAIN` header states the gain's
+  `GainKey` in `LUMGSUM`, so a decode whose key the run holds reads no node; the decode cache
+  keeps one file for each key, written once a run. The plan charges a gain for each frame the
+  cache does not hold, the most there can be before they decode. Refused: a header read of every
+  file before the plan, which reads each file twice.

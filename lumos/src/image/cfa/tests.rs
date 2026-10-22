@@ -18,6 +18,8 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, DemosaicProvenance};
@@ -147,10 +149,12 @@ fn a_masters_flags_survive_the_fits_round_trip() {
 }
 
 /// A flat gain survives the trip in its `LUMGAIN` extension, node for node, so a light saved after
-/// calibration reloads with the gain its noise model reads. A 12×6 RGGB mosaic has 4×3 nodes per
-/// color. An extension Lumos did not write is refused, each behind a valid checksum: a node that
-/// is no gain, another step, another version, another grid, grids for another count of colors, and
-/// one that names no image of the file.
+/// calibration reloads with the gain its noise model reads, a source gain its run shares, under
+/// the key its header states. A 12×6 RGGB mosaic has 4×3 nodes per color. An extension Lumos did
+/// not write is refused, each behind a valid checksum: a node that is no gain, another step,
+/// another version, another grid, a key that is no hex digest, another gain's key, grids for
+/// another count of colors, and one that names no image of the file. One that states no key loads
+/// whole.
 #[test]
 fn a_flat_gain_survives_the_fits_round_trip() {
     type Edit = fn(&mut Header, &mut Vec<u8>);
@@ -169,19 +173,21 @@ fn a_flat_gain_survives_the_fits_round_trip() {
             bayer,
             ImageMetadata::default(),
         );
-        image.set_flat_gain(Some(Arc::clone(&gain)));
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
         writer::cfa_fits(&image, &path).unwrap();
     };
 
     write();
     let loaded = LoadCtx::default().cfa(&path).unwrap();
-    let reloaded = loaded.flat_gain().unwrap();
+    let Some(FrameGain::Shared(reloaded)) = loaded.flat_gain() else {
+        panic!("a decoded gain is a source gain");
+    };
     assert_eq!(reloaded.size(), size);
     assert!(reloaded.planes().eq(gain.planes()));
-    assert!(loaded.flat_gain().is_some());
+    assert_eq!(reloaded.key(), gain.key());
 
     let extension = LumosExtension::Gain;
-    let cases: [(&str, Edit, FitsRefusal); 5] = [
+    let cases: [(&str, Edit, FitsRefusal); 7] = [
         (
             "no gain",
             |_, data| data[..4].copy_from_slice(&(-1.0f32).to_be_bytes()),
@@ -221,6 +227,22 @@ fn a_flat_gain_survives_the_fits_round_trip() {
             },
         ),
         (
+            "a key of no hex",
+            |header, _| {
+                header.set("LUMGSUM", "x").unwrap();
+            },
+            FitsRefusal::GainKeyText {
+                text: "x".to_owned(),
+            },
+        ),
+        (
+            "another gain's key",
+            |header, _| {
+                header.set("LUMGSUM", "0f".repeat(32)).unwrap();
+            },
+            FitsRefusal::GainKeyMismatch,
+        ),
+        (
             "no image named",
             |header, _| {
                 header.set("LUMFOR", "SCI").unwrap();
@@ -243,6 +265,15 @@ fn a_flat_gain_survives_the_fits_round_trip() {
         let error = LoadCtx::default().cfa(&path).unwrap_err();
         assert_eq!(fits_refusal(error), expected, "{name}");
     }
+    write();
+    rewrite_fits(&path, |idx, header, _| {
+        if idx == 1 {
+            header.remove("LUMGSUM");
+        }
+        true
+    });
+    let unkeyed = LoadCtx::default().cfa(&path).unwrap();
+    assert!(unkeyed.flat_gain().unwrap().planes().eq(gain.planes()));
     assert_eq!(
         FitsRefusal::ExtensionShape {
             extension,
@@ -295,6 +326,57 @@ fn a_flat_gain_survives_the_fits_round_trip() {
             }
         );
     }
+}
+
+/// Frames of one flat share its gain: a run holds it once, and a file whose `LUMGAIN` states the
+/// key of a gain the run holds is taken without its nodes being read. Two 12×6 RGGB mosaics of one
+/// gain, the second's nodes broken to −1 behind a valid checksum: through one run's gains both
+/// load with the first's gain, one allocation; through a run of its own the second is refused.
+#[test]
+fn a_gain_the_run_holds_is_not_read_again() {
+    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let gain = Arc::new(FlatGain::of_divisor(
+        &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
+        &bayer,
+        |_| false,
+    ));
+    let dir = TempDir::new("lumos-cfa-shared-gain");
+    let paths = ["first.fits", "second.fits"].map(|name| {
+        let path = dir.join(name);
+        let mut image = CfaImage::from_plane(
+            Buffer2::new(12, 6, vec![0.25; 72]),
+            bayer,
+            ImageMetadata::default(),
+        );
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
+        writer::cfa_fits(&image, &path).unwrap();
+        path
+    });
+    rewrite_fits(&paths[1], |idx, _, data| {
+        if idx == 1 {
+            data[..4].copy_from_slice(&(-1.0f32).to_be_bytes());
+        }
+        true
+    });
+    let ctx = LoadCtx::default();
+    let gains = SharedGains::default();
+    let [first, second] = paths
+        .each_ref()
+        .map(|path| ctx.cfa_sharing(path, &gains).unwrap());
+    let (Some(FrameGain::Shared(first)), Some(FrameGain::Shared(second))) =
+        (first.flat_gain(), second.flat_gain())
+    else {
+        panic!("a decoded gain is a source gain");
+    };
+    assert!(Arc::ptr_eq(first, second));
+    assert!(first.planes().eq(gain.planes()));
+    assert_eq!(
+        fits_refusal(ctx.cfa(&paths[1]).unwrap_err()),
+        FitsRefusal::NotAGain {
+            node: 0,
+            value: -1.0
+        }
+    );
 }
 
 /// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
@@ -451,10 +533,13 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
         |_| false,
     ));
     let mut flattened = cfa.clone();
-    flattened.set_flat_gain(Some(Arc::clone(&gain)));
+    flattened.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
     let flattened_mosaic = FrameStats::measure(&flattened);
     let flattened = flattened.demosaic_measured(MarkesteijnPasses::One);
-    assert!(Arc::ptr_eq(flattened.flat_gain().unwrap(), &gain));
+    let Some(FrameGain::Shared(carried)) = flattened.flat_gain() else {
+        panic!("the demosaic carries the shared gain");
+    };
+    assert!(Arc::ptr_eq(carried, &gain));
     let flattened_frame = FrameStats::measure(&flattened);
     assert_eq!(flattened_frame.bg, flattened_mosaic.bg);
 

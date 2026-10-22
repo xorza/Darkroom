@@ -10,7 +10,7 @@ use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::decode_cache::frame_spill::{
-    Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN,
+    Commit, Decoded, FrameSpill, KeptGain, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
 use crate::image::bg_split::BgSplit;
@@ -24,6 +24,7 @@ use crate::image::derived_facts::DerivedFacts;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::flag_counts::FlagCounts;
+use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
@@ -91,7 +92,6 @@ fn digests() -> PlaneDigests {
         channels: vec![[1; 32]],
         flags: None,
         samples: vec![[2; 32]],
-        gain: Vec::new(),
     }
 }
 
@@ -193,7 +193,7 @@ fn decoded(flags: Option<FlagCounts>) -> Decoded {
     Decoded {
         dimensions: ImageDimensions::new((4, 3), ChannelLayout::Mono),
         flags,
-        gain_channels: 0,
+        gain: None,
         metadata: metadata(),
     }
 }
@@ -231,12 +231,14 @@ fn sidecar_layout_is_pinned() {
         height: 4022,
         channels: 1,
         flags: Some(FlagCounts::from_per_bit([1, 2, 3, 4, 5, 6, 7, 8])),
-        gain_channels: 3,
+        gain: Some(KeptGain {
+            key: GainKey::from_hex(&"5a".repeat(32)).unwrap(),
+            channels: 3,
+        }),
         digests: PlaneDigests {
             channels: vec![[3; 32], [5; 32]],
             flags: Some([7; 32]),
             samples: vec![[9; 32]],
-            gain: vec![[11; 32], [13; 32], [15; 32]],
         },
         metadata: metadata(),
         stats: admitted.stats,

@@ -3,7 +3,6 @@
 use std::fs::File;
 use std::ops::Range;
 use std::path::Path;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use common::fs;
@@ -16,6 +15,8 @@ use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
+use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::pixels::HduDecode;
@@ -24,7 +25,7 @@ use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::fits::flags_extension;
-use crate::io::fits::gain_extension;
+use crate::io::fits::gain_extension::{self, LocatedGain};
 use crate::io::fits::lumos_extension::DescribedImage;
 use crate::io::fits::{cfa, linear, metadata};
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
@@ -49,8 +50,10 @@ pub(crate) struct SelectedFits<'r> {
     lumos_written: bool,
     /// The HDU of the image's flags extension, when it has one.
     flags_hdu: Option<usize>,
-    /// The HDU of the image's flat gain extension, when a flat divided it.
-    gain_hdu: Option<usize>,
+    /// The image's flat gain extension, when a flat divided it.
+    gain: Option<LocatedGain>,
+    /// The bytes of the gain its extension stores, as the decode holds it; none without one.
+    pub(super) gain_bytes: usize,
     /// The bytes of each extension the decode reads after the image, in the order it reads them:
     /// the flags, a byte a pixel, then the gain grid.
     extension_bytes: ArrayVec<u64, 2>,
@@ -150,16 +153,19 @@ impl<'r> SelectedFits<'r> {
         if flags_hdu.is_some() {
             plan.admit_flags_extension(limit)?;
         }
-        let gain_hdu = gain_extension::locate(reader.hdus(), selected.idx, &described)?;
+        let gain = gain_extension::locate(reader.hdus(), selected.idx, &described)?;
         let mut extension_bytes = ArrayVec::new();
         if flags_hdu.is_some() {
             extension_bytes.push(plan.dimensions.pixel_count() as u64);
         }
-        if let Some(gain_hdu) = gain_hdu {
-            let image = reader.hdus()[gain_hdu].image()?;
-            extension_bytes
-                .push((image.shape.iter().product::<usize>() * image.bitpix.elem_size()) as u64);
-        }
+        let gain_bytes = if let Some(gain) = gain {
+            let image = reader.hdus()[gain.hdu].image()?;
+            let nodes = image.shape.iter().product::<usize>();
+            extension_bytes.push((nodes * image.bitpix.elem_size()) as u64);
+            nodes * size_of::<f32>()
+        } else {
+            0
+        };
         Ok(Self {
             reader,
             selected,
@@ -167,7 +173,8 @@ impl<'r> SelectedFits<'r> {
             cfa_type,
             lumos_written: lumos_cfa || lumos_linear,
             flags_hdu,
-            gain_hdu,
+            gain,
+            gain_bytes,
             extension_bytes,
         })
     }
@@ -208,6 +215,7 @@ impl<'r> SelectedFits<'r> {
                 beside: usize::try_from(self.beside_frame_bytes())
                     .expect("a decode the plan admitted fits the address space"),
             },
+            gain_bytes: self.gain_bytes,
         })
     }
 
@@ -222,11 +230,13 @@ impl<'r> SelectedFits<'r> {
     }
 
     /// Decode the selected image, its checksum settled as `checksum` says, then its flags and gain
-    /// extensions, whose checksums are always required.
+    /// extensions, whose checksums are always required. The gain is the one `gains` holds of the
+    /// key its extension states, read from no node, or the one it reads, shared through `gains`.
     pub(crate) fn read(
         self,
         ctx: &LoadCtx,
         checksum: Checksum,
+        gains: &SharedGains,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let size = self.plan.dimensions.size();
         let idx = self.selected.idx;
@@ -259,10 +269,15 @@ impl<'r> SelectedFits<'r> {
             decoded.flags =
                 flags_extension::join(flags_extension::plane(bytes, size), decoded.flags.as_ref())?;
         }
-        if let Some(gain_hdu) = self.gain_hdu {
-            Cancelled::check(&ctx.cancel)?;
-            let nodes = read_extension::<f32>(self.reader, gain_hdu)?;
-            decoded.flat_gain = Some(Arc::new(gain_extension::decode(nodes, size)?));
+        if let Some(LocatedGain { hdu, key }) = self.gain {
+            let shared = if let Some(shared) = key.and_then(|key| gains.get(key)) {
+                shared
+            } else {
+                Cancelled::check(&ctx.cancel)?;
+                let nodes = read_extension::<f32>(self.reader, hdu)?;
+                gains.share(gain_extension::decode(nodes, size, key)?)
+            };
+            decoded.flat_gain = Some(FrameGain::Shared(shared));
         }
         Ok(decoded)
     }

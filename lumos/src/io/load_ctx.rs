@@ -7,6 +7,7 @@ use common::CancelToken;
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::preview_image::PreviewImage;
 use crate::io::decoder::Peek;
@@ -70,10 +71,18 @@ impl LoadCtx {
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are refused: load those
     /// with [`Self::cfa`] or [`Self::preview`].
     pub fn linear(&self, path: impl AsRef<Path>) -> Result<LinearImage, ImageError> {
-        let path = path.as_ref();
+        self.linear_sharing(path.as_ref(), &SharedGains::default())
+    }
+
+    /// [`Self::linear`], the flat gain a FITS file stores shared through `gains`.
+    pub(crate) fn linear_sharing(
+        &self,
+        path: &Path,
+        gains: &SharedGains,
+    ) -> Result<LinearImage, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_linear(path, self),
+            InputFormat::Fits => fits_decode::load_linear(path, self, gains),
             InputFormat::CameraRaw => Err(ImageError::scientific_rejection(
                 path,
                 ScientificRefusal::CameraRaw,
@@ -84,10 +93,18 @@ impl LoadCtx {
 
     /// Load an undemosaiced sensor image from camera RAW or mosaic FITS.
     pub fn cfa(&self, path: impl AsRef<Path>) -> Result<CfaImage, ImageError> {
-        let path = path.as_ref();
+        self.cfa_sharing(path.as_ref(), &SharedGains::default())
+    }
+
+    /// [`Self::cfa`], the flat gain a FITS file stores shared through `gains`.
+    pub(crate) fn cfa_sharing(
+        &self,
+        path: &Path,
+        gains: &SharedGains,
+    ) -> Result<CfaImage, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_cfa(path, self),
+            InputFormat::Fits => fits_decode::load_cfa(path, self, gains),
             InputFormat::CameraRaw => raw::load_cfa(path, self),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
