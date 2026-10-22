@@ -3,6 +3,7 @@
 //!
 //! [`StackConfig::combine_cached`]: crate::combine::stack_config::StackConfig::combine_cached
 
+pub(crate) mod combine_cost;
 pub(crate) mod mean_combine;
 pub(crate) mod planned_combine;
 mod quantization;

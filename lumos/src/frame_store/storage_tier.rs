@@ -18,8 +18,9 @@ use crate::memory::run_plan::RunPlan;
 /// frame or sizes a combine chunk reads, so no two of them can disagree.
 #[derive(Debug)]
 pub(crate) enum StorageTier {
-    /// Every plane in RAM: the combine walks whole planes and needs no budget.
-    Resident,
+    /// Every plane in RAM: the combine walks whole planes and needs no budget. `planned_peak_bytes`
+    /// is the peak the run's plan expects; `None` for frames handed over with no plan.
+    Resident { planned_peak_bytes: Option<u64> },
     /// Planes in `scratch`, memory-mapped back and read in row chunks `combine` budgets.
     Spilled {
         scratch: RunScratch,
@@ -29,26 +30,33 @@ pub(crate) enum StorageTier {
 
 /// What a spilled combine plans its rows against: the run's budget, the bytes the run holds beside
 /// the combine for its whole pass, and the most the stages before it held past the budget, which
-/// the run reports with the combine's own.
+/// the run reports with the combine's own, as it reports the peak its plan expects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CombineBudget {
     pub(crate) budget: Budget,
     pub(crate) beside_bytes: usize,
     pub(crate) prior_overcommit: u64,
+    pub(crate) planned_peak_bytes: Option<u64>,
 }
 
 impl CombineBudget {
-    /// `budget` alone, nothing beside the combine and nothing past the budget before it.
+    /// `budget` alone, nothing beside the combine, nothing past the budget before it, and no plan.
     pub(crate) const fn new(budget: Budget) -> Self {
         Self {
             budget,
             beside_bytes: 0,
             prior_overcommit: 0,
+            planned_peak_bytes: None,
         }
     }
 }
 
 impl StorageTier {
+    /// Every plane in RAM, for frames handed over with no plan.
+    pub(crate) const UNPLANNED: Self = Self::Resident {
+        planned_peak_bytes: None,
+    };
+
     /// Resident when `plan` keeps the run in memory; spilled to a scratch under `cache_dir`
     /// otherwise, its combine budgeted against the plan's budget. The disk is checked by
     /// [`RunStorage::tier`](crate::frame_store::run_storage::RunStorage::tier), which knows
@@ -59,7 +67,9 @@ impl StorageTier {
     /// The scratch cannot be made.
     pub(crate) fn for_plan(plan: &RunPlan, cache_dir: &Path) -> Result<Self, FrameStoreError> {
         if plan.resident {
-            return Ok(Self::Resident);
+            return Ok(Self::Resident {
+                planned_peak_bytes: Some(plan.peak_bytes),
+            });
         }
         let prior_overcommit = plan.prior_overcommit();
         if prior_overcommit > 0 {
@@ -72,15 +82,24 @@ impl StorageTier {
             scratch: RunScratch::create(cache_dir)?,
             combine: CombineBudget {
                 prior_overcommit,
+                planned_peak_bytes: Some(plan.peak_bytes),
                 ..CombineBudget::new(plan.budget)
             },
         })
     }
 
+    /// The peak the run's plan expects, when it had one.
+    pub(crate) const fn planned_peak_bytes(&self) -> Option<u64> {
+        match self {
+            Self::Resident { planned_peak_bytes } => *planned_peak_bytes,
+            Self::Spilled { combine, .. } => combine.planned_peak_bytes,
+        }
+    }
+
     /// The scratch a spilled tier writes to.
     pub(crate) const fn scratch(&self) -> Option<&RunScratch> {
         match self {
-            Self::Resident => None,
+            Self::Resident { .. } => None,
             Self::Spilled { scratch, .. } => Some(scratch),
         }
     }
@@ -101,7 +120,7 @@ impl StorageTier {
     /// frames where they lie.
     pub(crate) const fn combine_budget(&self) -> Option<CombineBudget> {
         match self {
-            Self::Resident => None,
+            Self::Resident { .. } => None,
             Self::Spilled { combine, .. } => Some(*combine),
         }
     }
@@ -115,7 +134,7 @@ impl StorageTier {
         admitted: Admitted,
     ) -> Result<StoredFrame, FrameStoreError> {
         match self {
-            Self::Resident => Ok(StoredFrame::from_memory(image, quality, admitted)),
+            Self::Resident { .. } => Ok(StoredFrame::from_memory(image, quality, admitted)),
             Self::Spilled { scratch, .. } => SpillFrame {
                 image: &image,
                 quality: &quality,

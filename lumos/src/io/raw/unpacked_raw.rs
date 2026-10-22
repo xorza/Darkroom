@@ -8,7 +8,9 @@ use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
@@ -26,6 +28,7 @@ use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::{null_policy, raw};
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -96,13 +99,18 @@ impl RawPath {
         })
     }
 
-    /// The bytes a visible pixel holds on this path beside the decoder's own: the mosaic's
-    /// normalized sample, or LibRaw's four 16-bit channels, the 16-bit RGB bitmap it processes
-    /// them into, and the three planes read out of that.
-    pub(super) const fn pixel_bytes(self) -> usize {
+    /// The bytes this path holds beside the decoder's own for a visible area of `active`: the
+    /// mosaic as it decodes, its normalized samples and its flags, which
+    /// [`FrameInfo::decoded`](crate::io::frame_info::FrameInfo::decoded) prices alike; or, a
+    /// pixel at a time, LibRaw's four 16-bit channels, the 16-bit RGB bitmap it processes them
+    /// into, and the three planes read out of that.
+    pub(super) fn frame_bytes(self, active: Size2us) -> usize {
         match self {
-            Self::Mosaic => size_of::<f32>(),
-            Self::Processed => 4 * size_of::<u16>() + 3 * size_of::<u16>() + 3 * size_of::<f32>(),
+            Self::Mosaic => ImageDimensions::new(active, ChannelLayout::Mono).decoded_bytes(),
+            Self::Processed => {
+                active.pixel_count()
+                    * (4 * size_of::<u16>() + 3 * size_of::<u16>() + 3 * size_of::<f32>())
+            }
         }
     }
 }

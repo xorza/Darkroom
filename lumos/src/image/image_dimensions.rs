@@ -111,6 +111,11 @@ impl ImageDimensions {
     pub(crate) const fn flag_plane_bytes(&self) -> usize {
         self.pixel_count()
     }
+
+    /// Bytes a frame holds as it decodes: its pixels and its flag plane.
+    pub(crate) const fn decoded_bytes(&self) -> usize {
+        self.frame_bytes() + self.flag_plane_bytes()
+    }
 }
 
 /// `width×height×channels` — the form error messages quote geometry in, where the derived `Debug`

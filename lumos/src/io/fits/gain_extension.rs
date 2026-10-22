@@ -3,7 +3,7 @@
 
 use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::{Data as FitsData, Image};
+use fits_well::image::Image;
 use fits_well::io::Hdu;
 use imaginarium::Buffer2;
 
@@ -75,27 +75,30 @@ impl GainExtension {
         Ok(found)
     }
 
-    /// The gain `stored` holds — the data of the HDU [`Self::locate`] found — over a `size` image.
-    /// Refused when a node is not a finite gain above zero: no flat multiplies by that.
-    pub(crate) fn decode(stored: FitsData, size: Size2us) -> Result<FlatGain, FitsLoadError> {
-        let FitsData::F32(nodes) = stored else {
-            unreachable!("`check` admitted only BITPIX = -32");
-        };
+    /// The gain `nodes` hold — each channel's plane of the HDU [`Self::locate`] found — over a
+    /// `size` image. Refused when a node is not a finite gain above zero: no flat multiplies by
+    /// that. A node is named by its index over the channels' planes in turn, as the HDU stores it.
+    pub(crate) fn decode(
+        nodes: ArrayVec<Vec<f32>, 3>,
+        size: Size2us,
+    ) -> Result<FlatGain, FitsLoadError> {
         let grid = GainGrid::of(size);
         let per_plane = grid.cols * grid.rows;
-        debug_assert_eq!(nodes.len() % per_plane, 0);
-        if let Some(idx) = nodes
+        debug_assert!(nodes.iter().all(|plane| plane.len() == per_plane));
+        if let Some((idx, &value)) = nodes
             .iter()
-            .position(|&gain| !gain.is_finite() || gain <= 0.0)
+            .flatten()
+            .enumerate()
+            .find(|&(_, &gain)| !gain.is_finite() || gain <= 0.0)
         {
             return Err(FitsLoadError::from(FitsRefusal::NotAGain {
                 node: idx,
-                value: nodes[idx],
+                value,
             }));
         }
-        let planes: ArrayVec<Buffer2<f32>, 3> = nodes
-            .chunks(per_plane)
-            .map(|plane| Buffer2::new(grid.cols, grid.rows, plane.to_vec()))
+        let planes = nodes
+            .into_iter()
+            .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
             .collect();
         Ok(FlatGain::from_nodes(size, planes))
     }

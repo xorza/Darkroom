@@ -7,11 +7,11 @@
 
 mod report_keywords;
 
-use std::array;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
+use arrayvec::ArrayVec;
 use common::fs;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
@@ -174,11 +174,11 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
             found.push(Found { extension, idx });
         }
     }
-    let plane_bytes = found.iter().try_fold(0, |bytes: u64, plane| {
-        let image = reader.hdus()[plane.idx].image()?;
-        let samples = image.shape.iter().product::<usize>() * image.bitpix.elem_size();
-        Ok::<_, FitsLoadError>(bytes + u64::try_from(samples).expect("a size fits u64"))
-    })?;
+    // Each plane is read straight into its own buffer, so what the planes hold is what they store.
+    let plane_bytes: u64 = found
+        .iter()
+        .map(|plane| reader.hdus()[plane.idx].data_bytes)
+        .sum();
     let image_bytes = u64::try_from(image.sample_count() * size_of::<f32>() + image.pixel_count())
         .expect("a size fits u64");
     OverBudget::check(image_bytes + plane_bytes, ctx.memory_limit_bytes).map_err(|budget| {
@@ -198,21 +198,25 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
     let mut mask = None;
     for Found { extension, idx } in found {
         Cancelled::check(&ctx.cancel)?;
-        let stored = read_plane(&mut reader, idx, extension, &described)?;
+        check_plane(&reader, idx, extension, &described)?;
+        if extension == LumosExtension::Mask {
+            mask = Some(selected_fits::read_extension::<u8>(&mut reader, idx)?);
+            continue;
+        }
+        let stored = Some(selected_fits::read_extension::<f32>(&mut reader, idx)?);
         match extension {
-            LumosExtension::Mask => mask = Some(stored),
-            LumosExtension::Uncertainty => planes.inverse_variance = Some(stored),
-            LumosExtension::Coverage => planes.coverage = Some(stored),
-            LumosExtension::Weight => planes.weight = Some(stored),
-            LumosExtension::Dispersion => planes.dispersion = Some(stored),
-            LumosExtension::Flags | LumosExtension::Gain => {
-                unreachable!("`PLANES` holds the quality planes alone")
+            LumosExtension::Uncertainty => planes.inverse_variance = stored,
+            LumosExtension::Coverage => planes.coverage = stored,
+            LumosExtension::Weight => planes.weight = stored,
+            LumosExtension::Dispersion => planes.dispersion = stored,
+            LumosExtension::Mask | LumosExtension::Flags | LumosExtension::Gain => {
+                unreachable!("`PLANES` holds the quality planes alone, the mask read above")
             }
         }
     }
     check_mask(mask, &image)?;
     let size = image.dimensions().size();
-    let map = |stored: Option<FitsData>| stored.map(|stored| quality_map(stored, size));
+    let map = |stored: Option<StoredPlanes<f32>>| stored.map(|stored| quality_map(stored, size));
     let coverage = match (uniform_coverage, map(planes.coverage)) {
         (Some(_), Some(_)) => return Err(FitsRefusal::CoverageTwice.into()),
         (Some(value), None) => Some(Coverage::Uniform { value, size }),
@@ -237,13 +241,17 @@ struct Found {
     idx: usize,
 }
 
+/// An extension's samples as [`selected_fits::read_extension`] reads them: a plane, or one per
+/// channel.
+type StoredPlanes<T> = ArrayVec<Vec<T>, 3>;
+
 /// The samples of each quality plane the file holds, as stored.
 #[derive(Debug, Default)]
 struct QualityPlanesRead {
-    coverage: Option<FitsData>,
-    weight: Option<FitsData>,
-    inverse_variance: Option<FitsData>,
-    dispersion: Option<FitsData>,
+    coverage: Option<StoredPlanes<f32>>,
+    weight: Option<StoredPlanes<f32>>,
+    inverse_variance: Option<StoredPlanes<f32>>,
+    dispersion: Option<StoredPlanes<f32>>,
 }
 
 /// One quality plane's HDU, as written.
@@ -359,14 +367,14 @@ where
     Ok(EncodedPlane { image, header })
 }
 
-/// The samples of the `extension` plane at HDU `idx`, refused unless it is its format's for
-/// `image` ([`LumosExtension::check`]), an uncertainty an inverse variance.
-fn read_plane(
-    reader: &mut StreamReader<File>,
+/// Refuse the `extension` plane at HDU `idx` unless it is its format's for `image`
+/// ([`LumosExtension::check`]), an uncertainty an inverse variance.
+fn check_plane(
+    reader: &StreamReader<File>,
     idx: usize,
     extension: LumosExtension,
     image: &DescribedImage,
-) -> Result<FitsData, FitsLoadError> {
+) -> Result<(), FitsLoadError> {
     let hdu = &reader.hdus()[idx];
     extension.check(hdu, image)?;
     if extension == LumosExtension::Uncertainty {
@@ -378,14 +386,12 @@ fn read_plane(
             .into());
         }
     }
-    let stored = hdu.image()?;
-    let section: Vec<_> = stored.shape.iter().map(|&extent| 0..extent).collect();
-    selected_fits::read_extension(reader, idx, &section)
+    Ok(())
 }
 
 /// Refuse a `mask` that is not the image's `NO_DATA` at each of its pixels, in every channel, or
 /// none where the image has such pixels.
-fn check_mask(mask: Option<FitsData>, image: &LinearImage) -> Result<(), FitsLoadError> {
+fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(), FitsLoadError> {
     let no_data = |pixel: usize| {
         image
             .flags()
@@ -398,11 +404,9 @@ fn check_mask(mask: Option<FitsData>, image: &LinearImage) -> Result<(), FitsLoa
             None => Ok(()),
         };
     };
-    let FitsData::U8(mask) = mask else {
-        unreachable!("`read_plane` admitted only BITPIX = 8");
-    };
     match mask
         .iter()
+        .flatten()
         .enumerate()
         .position(|(idx, &byte)| byte != u8::from(no_data(idx % pixel_count)))
     {
@@ -411,20 +415,16 @@ fn check_mask(mask: Option<FitsData>, image: &LinearImage) -> Result<(), FitsLoa
     }
 }
 
-/// The plane `stored` holds, one or three of `size`: [`read_plane`] admitted only those.
-fn quality_map(stored: FitsData, size: Size2us) -> QualityMap {
-    let FitsData::F32(samples) = stored else {
-        unreachable!("`read_plane` admitted only BITPIX = -32");
-    };
-    let pixel_count = size.pixel_count();
-    if samples.len() == pixel_count {
-        return QualityMap::Shared(Buffer2::new(size.width, size.height, samples));
+/// The planes `stored` holds, one or three of `size`: [`check_plane`] admitted only those.
+fn quality_map(stored: StoredPlanes<f32>, size: Size2us) -> QualityMap {
+    let mut planes = stored
+        .into_iter()
+        .map(|samples| Buffer2::new(size.width, size.height, samples));
+    match (planes.next(), planes.next(), planes.next()) {
+        (Some(shared), None, None) => QualityMap::Shared(shared),
+        (Some(red), Some(green), Some(blue)) => QualityMap::PerChannel([red, green, blue]),
+        _ => unreachable!("`check_plane` admitted one plane or three"),
     }
-    debug_assert_eq!(samples.len(), 3 * pixel_count);
-    QualityMap::PerChannel(array::from_fn(|channel| {
-        let plane = &samples[channel * pixel_count..(channel + 1) * pixel_count];
-        Buffer2::new(size.width, size.height, plane.to_vec())
-    }))
 }
 
 #[cfg(test)]

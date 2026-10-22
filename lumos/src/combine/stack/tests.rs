@@ -259,13 +259,13 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             // weight and inverse variance planes, the coverage plane the gather writes and the
             // flag byte a pixel no frame reached is flagged in, 24 × 150 × (12c + 5) B, beside two
             // chunks — the one reduced and the next one read — of 64 rows of every channel of the
-            // 12 frames, the six coverage-and-confidence pairs and the four flat gain grids at a
-            // byte a pixel, 2 × 24 × 64 × (48c + 52) B: 190 656c + 177 744 B in all. The stack is
-            // the same.
+            // 12 frames and the six coverage-and-confidence pairs, 2 × 24 × 64 × (48c + 48) B; the
+            // four flat gain grids are read where they are mapped, in no chunk: 190 656c +
+            // 165 456 B in all. The stack is the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.overcommit_bytes,
-                190_656 * channels as u64 + 177_744,
+                190_656 * channels as u64 + 165_456,
                 "{label}"
             );
             for channel in 0..channels {

@@ -49,9 +49,17 @@ pub(crate) struct Width {
     pub(crate) overcommit_bytes: u64,
 }
 
+/// What a stage holds kept as a [`Placement`] says: `beside` its work for its whole length, and
+/// `per_unit` for each unit of work in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Charge {
+    beside: u64,
+    per_unit: u64,
+}
+
 impl Stage {
-    /// The width under `budget` of this stage over `frames` frames, kept as `placement` says.
-    pub(crate) fn width(&self, budget: Budget, frames: usize, placement: Placement) -> Width {
+    /// What this stage holds kept as `placement` says.
+    const fn charge(&self, placement: Placement) -> Charge {
         let (kept_set, spilled) = match placement {
             Placement::Resident { kept_set } => (kept_set, false),
             Placement::Spilled => (0, true),
@@ -61,12 +69,26 @@ impl Stage {
             (Units::Frames | Units::Serial, true) => self.in_flight.saturating_add(self.kept),
             (Units::Frames | Units::Serial | Units::Rows(_), _) => self.in_flight,
         } as u64;
+        Charge {
+            beside: kept_set.saturating_add(self.held as u64),
+            per_unit,
+        }
+    }
+
+    /// The bytes this stage holds with `units` in flight, kept as `placement` says.
+    pub(crate) const fn peak_bytes(&self, units: usize, placement: Placement) -> u64 {
+        let Charge { beside, per_unit } = self.charge(placement);
+        beside.saturating_add(per_unit.saturating_mul(units as u64))
+    }
+
+    /// The width under `budget` of this stage over `frames` frames, kept as `placement` says.
+    pub(crate) fn width(&self, budget: Budget, frames: usize, placement: Placement) -> Width {
+        let Charge { beside, per_unit } = self.charge(placement);
         let (floor, most) = match self.units {
             Units::Frames => (1, budget.workers().min(frames).max(1)),
             Units::Serial | Units::Whole => (1, 1),
             Units::Rows(rows) => (MIN_CHUNK_ROWS.min(rows), rows),
         };
-        let beside = kept_set.saturating_add(self.held as u64);
         let free = budget.usable().saturating_sub(beside);
         let units = match free.checked_div(per_unit) {
             Some(fit) => usize::try_from(fit)

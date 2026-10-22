@@ -72,6 +72,11 @@ impl PreparedFlat {
         &self.divisor
     }
 
+    /// Resident RAM held by the flat: its divisor and the gain it applies.
+    pub(crate) fn ram_bytes(&self) -> usize {
+        self.divisor.ram_bytes() + self.gain.ram_bytes()
+    }
+
     pub(crate) const fn floored(&self) -> usize {
         self.floored
     }

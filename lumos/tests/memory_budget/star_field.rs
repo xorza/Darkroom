@@ -7,8 +7,9 @@ use common::{TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::Image as FitsImage;
+use imaginarium::Buffer2;
 use lumos::ChannelLayout;
-use lumos::{ImageDimensions, LinearImage};
+use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -75,6 +76,16 @@ impl StarField {
         LinearImage::from_planar_channels(
             ImageDimensions::new((self.side, self.side), ChannelLayout::Mono),
             [self.render(idx)],
+        )
+    }
+
+    /// Exposure `idx` as an RGGB mosaic in memory, as [`Self::expose`] writes it as
+    /// [`Layout::Mosaic`].
+    pub(crate) fn mosaic(&self, idx: usize) -> CfaImage {
+        CfaImage::from_plane(
+            Buffer2::new(self.side, self.side, self.render(idx)),
+            CfaType::Bayer(CfaPattern::Rggb),
+            ImageMetadata::default(),
         )
     }
 

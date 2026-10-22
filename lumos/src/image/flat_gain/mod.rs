@@ -161,36 +161,40 @@ impl FlatGain {
 
     /// This gain as an output frame of `size` sees it through `to_source`, its output-to-source
     /// map: each node the source's gain where the map samples it.
+    ///
+    /// A node row at a time, each node located among the source's nodes once for every channel,
+    /// so nothing beside the planes it fills grows with the frame.
     pub(crate) fn warped(&self, to_source: impl Fn(DVec2) -> DVec2 + Sync, size: Size2us) -> Self {
         let grid = GainGrid::of(size);
-        let to_source = &to_source;
         let source_grid = self.grid;
-        // Where each output node samples the source, located among its nodes once for every
-        // channel.
-        let points: Vec<GainPoint> = (0..grid.rows)
-            .into_par_iter()
-            .flat_map_iter(|j| {
-                (0..grid.cols).map(move |i| {
-                    let source = to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64));
-                    source_grid.point(source.x as f32, source.y as f32)
-                })
-            })
-            .collect();
-        let nodes = self
+        let mut nodes: ArrayVec<Buffer2<f32>, 3> = self
             .nodes
             .iter()
-            .map(|source| {
-                let mut plane = Buffer2::new_default(grid.cols, grid.rows);
-                plane
-                    .pixels_mut()
-                    .par_iter_mut()
-                    .zip(&points)
-                    .for_each(|(node, point)| {
-                        *node = point.read(source.pixels(), source_grid.cols, 0);
-                    });
-                plane
-            })
+            .map(|_| Buffer2::new_default(grid.cols, grid.rows))
             .collect();
+        let rows: Vec<ArrayVec<&mut [f32], 3>> = {
+            let mut planes: ArrayVec<_, 3> = nodes
+                .iter_mut()
+                .map(|plane| plane.pixels_mut().chunks_mut(grid.cols))
+                .collect();
+            (0..grid.rows)
+                .map(|_| {
+                    planes
+                        .iter_mut()
+                        .map(|plane| plane.next().expect("a row in each channel"))
+                        .collect()
+                })
+                .collect()
+        };
+        rows.into_par_iter().enumerate().for_each(|(j, mut row)| {
+            for i in 0..grid.cols {
+                let source = to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64));
+                let point = source_grid.point(source.x as f32, source.y as f32);
+                for (node, source) in row.iter_mut().zip(&self.nodes) {
+                    node[i] = point.read(source.pixels(), source_grid.cols, 0);
+                }
+            }
+        });
         Self {
             size,
             grid,
@@ -225,6 +229,11 @@ impl FlatGain {
     /// The colors or channels the gain covers.
     pub(crate) const fn channels(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// The bytes the node grids hold.
+    pub(crate) const fn ram_bytes(&self) -> usize {
+        self.channels() * self.grid.cols * self.grid.rows * size_of::<f32>()
     }
 
     /// Whether the gain covers an image of `size` and `channels` channels, or of `channels`

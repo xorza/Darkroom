@@ -12,7 +12,7 @@ use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 
-const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+pub(super) const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 /// Above this, a floating-point HDU's `DATAMAX` is read as declaring an ADU saturation level rather
 /// than a normalized one. Siril's threshold, and well clear of both the `[0, 1]` convention and the

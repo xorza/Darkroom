@@ -53,6 +53,10 @@ pub struct RunReport {
     /// smallest chunk of rows beside its output planes. The stages run one after another, so this
     /// is the largest of their excesses; zero when every step fit.
     pub overcommit_bytes: u64,
+    /// The heap the run's memory plan expected to hold at its peak: its largest stage at the width
+    /// the plan chose, the bytes past the budget of a stage whose smallest step did not fit
+    /// included. `None` for frames handed over with no plan.
+    pub planned_peak_bytes: Option<u64>,
     /// Input pixels, over every frame of a drizzle, whose position a warp's SIP correction could
     /// not invert — see [`InverseWarp::apply`](crate::InverseWarp::apply). Each deposited nothing,
     /// so the output pixels it would have reached record that frame's absence in their coverage.

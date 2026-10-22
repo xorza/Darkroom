@@ -47,7 +47,7 @@ impl FrameParking {
     /// Park a calibrated frame between detection and registration.
     pub(super) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
         match &self.tier {
-            StorageTier::Resident => Ok(PipelineFrame::Resident(image)),
+            StorageTier::Resident { .. } => Ok(PipelineFrame::Resident(image)),
             StorageTier::Spilled { scratch, .. } => {
                 let stored = StoredImage::spill(scratch, &image)?;
                 self.parked.fetch_add(1, Ordering::Relaxed);
@@ -73,7 +73,7 @@ impl FrameParking {
         admitted: Admitted,
     ) -> Result<StoredFrame, AlignStackError> {
         match &self.tier {
-            StorageTier::Resident => {
+            StorageTier::Resident { .. } => {
                 let WarpResult {
                     image,
                     coverage,
@@ -119,7 +119,7 @@ impl FrameParking {
             (StorageTier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
                 .into_reference_frame(scratch, admitted)
                 .map_err(AlignStackError::from),
-            (StorageTier::Resident, PipelineFrame::Spilled(_)) => {
+            (StorageTier::Resident { .. }, PipelineFrame::Spilled(_)) => {
                 unreachable!("the resident tier parks no frame on disk")
             }
         }
@@ -171,7 +171,7 @@ mod tests {
                 _ => QualityFlags::default(),
             }));
             for (label, tier, parked) in [
-                ("ram", FrameParking::new(StorageTier::Resident), false),
+                ("ram", FrameParking::new(StorageTier::UNPLANNED), false),
                 ("spill", spill(), false),
                 ("parked", spill(), true),
             ] {

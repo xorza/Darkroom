@@ -9,7 +9,7 @@ use arrayvec::ArrayVec;
 use common::fs;
 use fits_well::FitsReader;
 use fits_well::header::Header;
-use fits_well::image::Data as FitsData;
+use fits_well::image::View as FitsView;
 use fits_well::io::StreamReader;
 
 use crate::error::Cancelled;
@@ -18,7 +18,7 @@ use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::pixels::HduDecode;
-use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription};
+use crate::io::fits::decode::plan::{FITS_DECODE_CHUNK_BYTES, FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::{DecodedFitsImage, selection};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
@@ -249,37 +249,145 @@ impl<'r> SelectedFits<'r> {
         };
         if let Some(flags_hdu) = self.flags_hdu {
             Cancelled::check(&ctx.cancel)?;
-            let stored = read_extension(self.reader, flags_hdu, &[0..size.width, 0..size.height])?;
+            let bytes = read_extension::<u8>(self.reader, flags_hdu)?
+                .pop()
+                .expect("a flags extension is one plane");
             decoded.flags =
-                FlagsExtension::join(FlagsExtension::plane(stored, size), decoded.flags.as_ref())?;
+                FlagsExtension::join(FlagsExtension::plane(bytes, size), decoded.flags.as_ref())?;
         }
         if let Some(gain_hdu) = self.gain_hdu {
             Cancelled::check(&ctx.cancel)?;
-            let shape: Vec<Range<usize>> = self.reader.hdus()[gain_hdu]
-                .image()?
-                .shape
-                .iter()
-                .map(|&extent| 0..extent)
-                .collect();
-            let stored = read_extension(self.reader, gain_hdu, &shape)?;
-            decoded.flat_gain = Some(Arc::new(GainExtension::decode(stored, size)?));
+            let nodes = read_extension::<f32>(self.reader, gain_hdu)?;
+            decoded.flat_gain = Some(Arc::new(GainExtension::decode(nodes, size)?));
         }
         Ok(decoded)
     }
 }
 
-/// The samples of the extension at HDU `idx` of `reader` — flags or flat gain — over
-/// `section`, its whole shape, summed as they are read, and refused unless its checksum is valid.
-pub(crate) fn read_extension(
+/// A sample type an extension stores: the bytes of a flags plane or a mask, or the `f32`s of a
+/// flat gain or a quality plane.
+pub(crate) trait ExtensionSample: Copy {
+    /// The samples of `view`, of the `BITPIX` the extension's check admitted.
+    fn of(view: FitsView<'_>) -> &[Self];
+}
+
+impl ExtensionSample for u8 {
+    fn of(view: FitsView<'_>) -> &[Self] {
+        let FitsView::U8(samples) = view else {
+            unreachable!("the extension's check admitted only BITPIX = 8");
+        };
+        samples
+    }
+}
+
+impl ExtensionSample for f32 {
+    fn of(view: FitsView<'_>) -> &[Self] {
+        let FitsView::F32(samples) = view else {
+            unreachable!("the extension's check admitted only BITPIX = -32");
+        };
+        samples
+    }
+}
+
+/// The planes of the extension at HDU `idx` of `reader` — flags, a flat gain, a mask or a
+/// quality plane — one per slice of its third axis, or one for an image of two: each read a chunk
+/// of rows at a time straight into its own plane, summed as it is read, and refused unless the
+/// checksum is valid. No whole-unit buffer is read and copied out.
+pub(crate) fn read_extension<T: ExtensionSample>(
     reader: &mut StreamReader<File>,
     idx: usize,
-    section: &[Range<usize>],
-) -> Result<FitsData, FitsLoadError> {
-    let mut sum = reader.begin_data_checksum(idx)?;
-    let stored = reader
-        .read_image_section_summed(idx, section, &mut sum)?
-        .into_samples();
-    let report = reader.finish_data_checksum(sum)?;
+) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
+    read_extension_in_chunks(reader, idx, FITS_DECODE_CHUNK_BYTES)
+}
+
+/// [`read_extension`], a chunk of rows of at most `chunk_bytes` at a time, one row at least.
+fn read_extension_in_chunks<T: ExtensionSample>(
+    reader: &mut StreamReader<File>,
+    idx: usize,
+    chunk_bytes: usize,
+) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
+    let shape = ArrayVec::<usize, 3>::try_from(reader.hdus()[idx].image()?.shape)
+        .expect("the extension's check admitted at most three axes");
+    debug_assert!(shape.len() >= 2, "an extension is a plane at least");
+    let (width, height) = (shape[0], shape[1]);
+    let rows_per_chunk = (chunk_bytes / (width * size_of::<T>()).max(1)).max(1);
+    let mut sections = HduSections::summed(reader, idx)?;
+    let mut planes = ArrayVec::new();
+    for slice in 0..shape.get(2).copied().unwrap_or(1) {
+        let mut plane = Vec::with_capacity(width * height);
+        for start in (0..height).step_by(rows_per_chunk) {
+            let mut ranges: ArrayVec<Range<usize>, 3> =
+                [0..width, start..(start + rows_per_chunk).min(height)]
+                    .into_iter()
+                    .collect();
+            if shape.len() == 3 {
+                ranges.push(slice..slice + 1);
+            }
+            plane.extend_from_slice(T::of(sections.read_section(&ranges)?.samples()));
+        }
+        planes.push(plane);
+    }
+    let report = sections.finish_checksum()?;
     FitsChecksumPolicy::RequireValid.judge(report, idx)?;
-    Ok(stored)
+    Ok(planes)
+}
+
+#[cfg(test)]
+mod tests {
+    use common::{CancelToken, TempDir, fs};
+    use fits_well::FitsWriter;
+    use fits_well::image::Image;
+    use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus};
+
+    use crate::internals::fits::fits_refusal;
+    use crate::io::fits::decode::selected_fits::{self, read_extension_in_chunks};
+    use crate::io::fits::error::FitsRefusal;
+    use crate::io::load_ctx::LoadCtx;
+
+    /// An extension is read a chunk of rows at a time straight into a plane per slice, and its
+    /// checksum is summed across every chunk of every slice. A 3 × 5 × 3 cube of `f32`, 12 B a
+    /// row, read 24 B at a time: two rows, two rows, one, in each of the three slices, which come
+    /// back as written; a 3 × 5 byte plane read a row at a time is one plane. A flipped bit in the
+    /// last slice is refused, as every extension requires a valid checksum.
+    #[test]
+    fn an_extension_reads_in_chunks_into_a_plane_per_slice() {
+        let dir = TempDir::new("read_extension_chunks");
+        let ctx = LoadCtx::new(CancelToken::never(), u64::MAX);
+        let samples: Vec<f32> = (0..45).map(|idx| idx as f32).collect();
+        let bytes: Vec<u8> = (0..15).collect();
+        let path = dir.join("extension.fits");
+        let mut writer = FitsWriter::new(fs::create(&path).unwrap()).with_checksums();
+        writer
+            .write_image(&Image::new([3, 5, 3], samples.clone()).unwrap(), None)
+            .unwrap();
+        writer
+            .write_image(&Image::new([3, 5], bytes.clone()).unwrap(), None)
+            .unwrap();
+        drop(writer);
+
+        let mut reader = selected_fits::open(&path, &ctx).unwrap();
+        let planes = read_extension_in_chunks::<f32>(&mut reader, 0, 24).unwrap();
+        assert_eq!(planes.len(), 3);
+        for (slice, plane) in planes.iter().enumerate() {
+            assert_eq!(plane, &samples[slice * 15..(slice + 1) * 15]);
+        }
+        let planes = read_extension_in_chunks::<u8>(&mut reader, 1, 1).unwrap();
+        assert_eq!(planes.as_slice(), [bytes]);
+
+        let mut corrupt = fs::read(&path).unwrap();
+        // The last sample of the cube, 44.0, ends the first data block's 180 bytes.
+        corrupt[BLOCK_SIZE + 179] ^= 0x01;
+        fs::write(&path, corrupt).unwrap();
+        let mut reader = selected_fits::open(&path, &ctx).unwrap();
+        assert_eq!(
+            fits_refusal(read_extension_in_chunks::<f32>(&mut reader, 0, 24).unwrap_err()),
+            FitsRefusal::ChecksumRequired {
+                hdu: 0,
+                report: ChecksumReport {
+                    datasum: ChecksumStatus::Invalid,
+                    checksum: ChecksumStatus::Invalid,
+                },
+            }
+        );
+    }
 }

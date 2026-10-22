@@ -2,7 +2,7 @@
 //! it in a FITS file.
 
 use fits_well::header::Header;
-use fits_well::image::{Data as FitsData, Image};
+use fits_well::image::Image;
 use fits_well::io::Hdu;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -136,12 +136,9 @@ impl FlagsExtension {
         Ok(PixelFlags::from_bytes(bytes))
     }
 
-    /// The bytes of a flags HDU [`Self::locate`] found, `stored` as read, as the plane of the
-    /// `size` image they are for.
-    pub(crate) fn plane(stored: FitsData, size: Size2us) -> Buffer2<u8> {
-        let FitsData::U8(bytes) = stored else {
-            unreachable!("`check` admitted only BITPIX = 8");
-        };
+    /// The bytes of a flags HDU [`Self::locate`] found, as read, as the plane of the `size` image
+    /// they are for.
+    pub(crate) fn plane(bytes: Vec<u8>, size: Size2us) -> Buffer2<u8> {
         Buffer2::new(size.width, size.height, bytes)
     }
 }
@@ -153,8 +150,6 @@ fn bit_keyword(flag: QualityFlags) -> String {
 
 #[cfg(test)]
 mod tests {
-
-    use fits_well::image::Data as FitsData;
 
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
@@ -177,7 +172,7 @@ mod tests {
             3 => QualityFlags::SATURATED,
             _ => QualityFlags::default(),
         });
-        let plane = |bytes| FlagsExtension::plane(FitsData::U8(bytes), size);
+        let plane = |bytes| FlagsExtension::plane(bytes, size);
         let joined = FlagsExtension::join(plane(vec![0, 1, 6, 0, 24, 32]), decoded.as_ref())
             .unwrap()
             .unwrap();

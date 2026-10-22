@@ -1480,10 +1480,11 @@ fn ram_bytes_sums_present_frames_and_defects() {
         defect_map: Some(defects),
         imposed: None,
     };
-    // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 32 + 128.
+    // 320 (dark: 80·4) + 64 (flat: 16·4) + the flat's gain, a node at pixels 0 and 4 of each
+    // 4-pixel axis, 2 × 2 nodes of 4 B, 16 + the defects' 32 + 128.
     assert_eq!(
         masters.ram_bytes(),
-        10 * 8 * 4 + 4 * 4 * 4 + list_bytes + mask_bytes
+        10 * 8 * 4 + 4 * 4 * 4 + 2 * 2 * 4 + list_bytes + mask_bytes
     );
     // Three of the 80 pixels of a mono sensor: 3.75%.
     let summary = masters.defect_summary().unwrap();

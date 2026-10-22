@@ -5,8 +5,9 @@ use thiserror::Error;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::image::error::DimensionsError;
 use crate::ingest::error::AdmissionError;
-use crate::io::error::ImageError;
+use crate::io::error::{ImageError, OverBudget};
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
 ///
@@ -31,6 +32,14 @@ pub enum DrizzleError {
 
     #[error(transparent)]
     Stack(#[from] StackError),
+
+    /// The output grid the scale makes of the input frames is no image's.
+    #[error("drizzle output grid: {0}")]
+    OutputSize(#[from] DimensionsError),
+
+    /// One drizzled frame and the depth beside it do not fit the run's memory.
+    #[error("drizzle output frame: {0}")]
+    OutputOverBudget(OverBudget),
 }
 
 impl DrizzleError {

@@ -116,6 +116,7 @@ fn rgb_product() -> StackProduct {
             spilled_frames: 9,
             small_n_fallback_pixels: 10,
             overcommit_bytes: 11,
+            planned_peak_bytes: Some(14),
             parked_lights: 12,
             unconverged_points: 13,
         },

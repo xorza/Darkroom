@@ -27,6 +27,10 @@ const COUNTS: [Field<u64>; 12] = [
     ("LUMUNCP", |report| &mut report.unconverged_points),
 ];
 
+/// Each count the report holds for some runs alone, by its keyword, absent for the others.
+const OPTIONAL_COUNTS: [Field<Option<u64>>; 1] =
+    [("LUMPLNB", |report| &mut report.planned_peak_bytes)];
+
 /// Each yes or no the report holds, by its keyword.
 const DECISIONS: [Field<bool>; 1] = [("LUMVBKG", |report| &mut report.variance_bg_only)];
 
@@ -41,6 +45,11 @@ pub(super) fn write(header: &mut Header, report: &RunReport) -> fits_well::Resul
     let mut report = *report;
     for (keyword, field) in COUNTS {
         header.set(keyword, integer(*field(&mut report)))?;
+    }
+    for (keyword, field) in OPTIONAL_COUNTS {
+        if let Some(count) = *field(&mut report) {
+            header.set(keyword, integer(count))?;
+        }
     }
     for (keyword, field) in DECISIONS {
         header.set(keyword, *field(&mut report))?;
@@ -58,6 +67,12 @@ pub(super) fn read(header: &Header) -> Result<RunReport, FitsLoadError> {
     let mut report = RunReport::default();
     for (keyword, field) in COUNTS {
         *field(&mut report) = count(header, keyword)?;
+    }
+    for (keyword, field) in OPTIONAL_COUNTS {
+        *field(&mut report) = header
+            .get_integer(keyword)?
+            .map(|value| non_negative(keyword, value))
+            .transpose()?;
     }
     for (keyword, field) in DECISIONS {
         *field(&mut report) = header
@@ -85,6 +100,11 @@ fn count(header: &Header, keyword: &str) -> Result<u64, FitsLoadError> {
     let value = header
         .get_integer(keyword)?
         .ok_or_else(|| missing(keyword))?;
+    non_negative(keyword, value)
+}
+
+/// `value`, the integer `keyword` states, as a count: refused when negative.
+fn non_negative(keyword: &str, value: i64) -> Result<u64, FitsLoadError> {
     u64::try_from(value).map_err(|_| {
         FitsLoadError::from(FitsRefusal::KeywordOutOfRange {
             keyword: keyword.to_owned(),

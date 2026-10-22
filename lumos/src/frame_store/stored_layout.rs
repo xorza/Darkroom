@@ -2,7 +2,6 @@
 
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
-use crate::image::flat_gain;
 use crate::image::flat_gain::GainGrid;
 use crate::image::image_dimensions::ImageDimensions;
 
@@ -13,7 +12,7 @@ const FRAME_QUALITY_PLANES: usize = 2;
 
 /// What a stored frame's planes hold: its channels and its quality planes, a flag byte a pixel,
 /// and a flat gain grid of `gain_channels`. The plan prices a frame by it before the frame exists,
-/// and the combine prices the chunks it reads by it once it does.
+/// and the combine prices the chunks it copies by it once it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StoredLayout {
     pub(crate) channels: usize,
@@ -57,26 +56,22 @@ impl StoredLayout {
         }
     }
 
-    /// The bytes a whole frame of `dimensions` holds in this layout.
+    /// The bytes a whole frame of `dimensions` holds in this layout, saturated: a frame of
+    /// dimensions a scale made, not a file, can count past `usize`, and is then refused as never
+    /// fitting.
     pub(crate) const fn heap_bytes(self, dimensions: ImageDimensions) -> usize {
         let grid = GainGrid::of(dimensions.size());
         let pixels = dimensions.pixel_count();
-        (self.channels + self.quality_planes) * size_of::<f32>() * pixels
-            + self.flags as usize * pixels
-            + self.gain_channels * grid.cols * grid.rows * size_of::<f32>()
+        self.pixel_bytes().saturating_mul(pixels).saturating_add(
+            (self.gain_channels * size_of::<f32>()).saturating_mul(grid.cols * grid.rows),
+        )
     }
 
-    /// The bytes a chunk of this layout reads for each pixel of its rows.
-    ///
-    /// A flat gain grid holds a node per `STEP²` pixels of each channel, 3/4 of a byte a pixel at
-    /// most. Rounded up to a byte it also covers the two node rows a chunk of the fewest rows reads
-    /// past its own: 64 rows read at most 18 node rows of `W/4 + 1.75` nodes, `54W + 378` bytes in
-    /// color, under `64W` from 38 columns. A frame under 64 rows, read whole, is too small to
-    /// matter.
+    /// The bytes a spilled combine's chunk copy holds for each pixel of its rows: the channels,
+    /// the quality planes and the flags. The flat gain is read where its map lies, so no copy
+    /// holds it.
     pub(crate) const fn pixel_bytes(self) -> usize {
-        (self.channels + self.quality_planes) * size_of::<f32>()
-            + self.flags as usize
-            + (self.gain_channels * size_of::<f32>()).div_ceil(flat_gain::STEP * flat_gain::STEP)
+        (self.channels + self.quality_planes) * size_of::<f32>() + self.flags as usize
     }
 }
 
@@ -92,17 +87,17 @@ mod tests {
     ///
     /// A 9 × 9 color frame decodes to 3 planes of 81 pixels and a flag byte each, 1053 B, 13 B a
     /// pixel. Warped it adds coverage and confidence and its gain grid: 5 planes, 1620 B, the 81
-    /// flag bytes and 108 of gain, 1809 B; a row reads 5 · 4 + 1 B a pixel and the gain's 12 B
-    /// over 16 pixels, rounded up to 1: 22. A 13 × 5 mono frame warped is 3 planes of 65 pixels,
-    /// 780 B, 65 flag bytes and 32 of gain, 877 B, and 12 + 1 + 1 = 14 B a pixel.
+    /// flag bytes and 108 of gain, 1809 B; a chunk copies 5 · 4 + 1 = 21 B a pixel, no gain. A
+    /// 13 × 5 mono frame warped is 3 planes of 65 pixels, 780 B, 65 flag bytes and 32 of gain,
+    /// 877 B, and a chunk copies 3 · 4 + 1 = 13 B a pixel.
     #[test]
     fn a_layout_holds_its_planes_flags_and_gain() {
         let color = ImageDimensions::new((9, 9), ChannelLayout::Rgb);
         let mono = ImageDimensions::new((13, 5), ChannelLayout::Mono);
         for (layout, dimensions, frame, pixel) in [
             (StoredLayout::decoded(color), color, 1053, 13),
-            (StoredLayout::warped(color), color, 1809, 22),
-            (StoredLayout::warped(mono), mono, 877, 14),
+            (StoredLayout::warped(color), color, 1809, 21),
+            (StoredLayout::warped(mono), mono, 877, 13),
         ] {
             assert_eq!(layout.heap_bytes(dimensions), frame, "{layout:?}");
             assert_eq!(layout.pixel_bytes(), pixel, "{layout:?}");

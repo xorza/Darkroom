@@ -138,8 +138,7 @@ const fn decoder_bytes(libraw: &Libraw, layout: &SensorLayout) -> usize {
 /// `unpack`: what it holds at its peak, its decoder and the frame `route` makes.
 fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
     let layout = SensorLayout::of(&libraw.data().sizes)?;
-    let required =
-        decoder_bytes(libraw, &layout) + layout.active.pixel_count() * route.pixel_bytes();
+    let required = decoder_bytes(libraw, &layout) + route.frame_bytes(layout.active);
     OverBudget::check(
         u64::try_from(required).expect("a byte count fits u64"),
         limit,

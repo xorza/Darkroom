@@ -9,6 +9,7 @@ use lumos::{
 
 use crate::alone::alone;
 use crate::budget::Budget;
+use crate::flat;
 use crate::session::Session;
 use crate::star_field::{Layout, StarField};
 
@@ -18,8 +19,8 @@ const STARS: usize = 40;
 /// A budget the lights do not fit in that holds every stage's smallest step.
 const SPILLED: Budget = Budget::kib(4608);
 
-/// `AlignStackConfig::calibrate_align_stack_paths` of `lights` mosaics of `side` under `config` at
-/// `budget`, the case named `label`.
+/// `AlignStackConfig::calibrate_align_stack_paths` of `lights` mosaics of `side` calibrated by
+/// `masters` under `config` at `budget`, the case named `label`.
 #[derive(Debug)]
 struct Mosaics<'a> {
     label: &'a str,
@@ -27,6 +28,7 @@ struct Mosaics<'a> {
     lights: usize,
     budget: Budget,
     config: &'a AlignStackConfig,
+    masters: &'a CalibrationMasters,
 }
 
 impl Mosaics<'_> {
@@ -38,6 +40,7 @@ impl Mosaics<'_> {
             lights,
             budget,
             config,
+            masters,
         } = self;
         let session = Session::new("lumos_budget_registered");
         let paths =
@@ -48,7 +51,7 @@ impl Mosaics<'_> {
                 .calibrate_align_stack_paths(
                     CalibratedLights {
                         paths: &paths,
-                        masters: &CalibrationMasters::default(),
+                        masters,
                     },
                     &ingest,
                     ProgressMonitor::unattended(),
@@ -96,6 +99,7 @@ fn a_spilled_run_that_finds_its_reference_stays_within_its_budget() {
             lights: LIGHTS,
             budget: SPILLED,
             config: &AlignStackConfig::default(),
+            masters: &CalibrationMasters::default(),
         }
         .report();
         assert_eq!(
@@ -124,6 +128,7 @@ fn a_spilled_run_with_a_named_reference_stays_within_its_budget() {
             lights: LIGHTS,
             budget: SPILLED,
             config: &config,
+            masters: &CalibrationMasters::default(),
         }
         .report();
         assert_eq!(
@@ -152,6 +157,7 @@ fn a_spilled_run_cleaned_of_cosmic_rays_stays_within_its_budget() {
             lights: 2,
             budget: Budget::kib(2624),
             config: &config,
+            masters: &CalibrationMasters::default(),
         }
         .report();
         assert_eq!(
@@ -175,6 +181,7 @@ fn a_resident_run_stays_within_its_budget() {
             lights: LIGHTS,
             budget: Budget::mib(32),
             config: &AlignStackConfig::default(),
+            masters: &CalibrationMasters::default(),
         }
         .report();
         assert_eq!(
@@ -205,5 +212,32 @@ fn held_lights_add_no_more_than_the_budget() {
         });
         assert_eq!(run.value.registered(), LIGHTS);
         budget.assert_held("held", run.peak_bytes, &run.value.product.report);
+    });
+}
+
+/// Lights a flat divided carry its gain, warped onto each light's grid and stored beside it:
+/// resident, the run holds no more than its plan expected; spilled, no more than its budget.
+#[test]
+fn a_flat_divided_run_stays_within_its_budget() {
+    alone(|| {
+        // The first session builds the pool, before the masters' build is the first to use it.
+        let _pool = Session::new("lumos_budget_flat_masters");
+        let masters = flat::masters(SIDE);
+        for (label, budget, spilled) in [
+            ("flat, resident", Budget::mib(32), 0),
+            ("flat, spilled", SPILLED, LIGHTS as u64),
+        ] {
+            let report = Mosaics {
+                label,
+                side: SIDE,
+                lights: LIGHTS,
+                budget,
+                config: &AlignStackConfig::default(),
+                masters: &masters,
+            }
+            .report();
+            assert_eq!(report.spilled_frames, spilled, "{label}");
+            assert_eq!(report.overcommit_bytes, 0, "{label}");
+        }
     });
 }
