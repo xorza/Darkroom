@@ -5,7 +5,7 @@ use std::cell::OnceCell;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{CancelToken, TempDir};
+use common::{CancelToken, MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
@@ -23,7 +23,6 @@ use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
 use crate::pipeline::calibration_notes::CalibrationNotes;
 use crate::pipeline::mosaic_preparation::MosaicPreparation;
-use crate::platform::MappedFile;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::{SourceImage, SourcePlane};

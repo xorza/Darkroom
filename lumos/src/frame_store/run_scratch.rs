@@ -5,11 +5,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{io, process};
 
 use bytemuck::Pod;
+use common::{Eviction, ScratchFile};
 
 use crate::frame_store::disk_root::DiskRoot;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::platform::{Eviction, ScratchFile};
 
 /// The files one run parks frames in, private to it and gone when it ends, however it ends: each
 /// a [`ScratchFile`], deleted while it is open, so a frame's disk space returns the moment its
@@ -80,9 +80,10 @@ impl RunScratch {
 pub(crate) mod internals {
     use std::path::Path;
 
+    use common::Eviction;
+
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::run_scratch::RunScratch;
-    use crate::platform::Eviction;
 
     impl RunScratch {
         /// [`RunScratch::create`] whose planes a bench of cold reads can evict.

@@ -16,6 +16,7 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
+use crate::io::raster;
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform_model::TransformModel;
@@ -30,7 +31,7 @@ fn rho_opiuchi_path() -> PathBuf {
 
 /// The dataset's `rho-opiuchi.jpg` as one luminance plane.
 pub(crate) fn rho_opiuchi() -> LinearImage {
-    let image = imaginarium::Image::read_file(rho_opiuchi_path())
+    let image = raster::read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::L_F32);
     LinearImage::from_interleaved(
@@ -86,7 +87,7 @@ fn detect_rho_opiuchi() {
     }
 
     // Load original image for visualization (RGB_F32 for drawing functions)
-    let mut output_img = imaginarium::Image::read_file(rho_opiuchi_path())
+    let mut output_img = raster::read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::RGB_F32);
 
@@ -107,9 +108,7 @@ fn detect_rho_opiuchi() {
     let output_img = output_img.convert(ColorFormat::RGB_U8);
 
     if let Some(output_path) = internals::debug_output_path("rho-opiuchi-detection.jpg") {
-        output_img
-            .save_file(&output_path)
-            .expect("Failed to save output image");
+        raster::write_image(&output_path, &output_img).expect("Failed to save output image");
         println!("\nSaved detection result to: {}", output_path.display());
     }
 

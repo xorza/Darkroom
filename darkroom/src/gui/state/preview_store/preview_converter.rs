@@ -1,7 +1,8 @@
 //! [`PreviewConverter`]: the thread that turns published values into rasters.
 
 use std::sync::mpsc::{self, Receiver, Sender, TryIter};
-use std::thread;
+
+use common::thread;
 
 use glam::UVec2;
 use imaginarium::ColorFormat;
@@ -116,19 +117,16 @@ impl PreviewConverter {
     pub(super) fn new(wake: Wake) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, results) = mpsc::channel();
-        thread::Builder::new()
-            .name("darkroom-preview".to_owned())
-            .spawn(move || {
-                for job in inbox {
-                    // The store is gone, and with it everyone who would read
-                    // the result.
-                    if outbox.send(job.run()).is_err() {
-                        return;
-                    }
-                    wake();
+        thread::spawn("darkroom-preview", move || {
+            for job in inbox {
+                // The store is gone, and with it everyone who would read
+                // the result.
+                if outbox.send(job.run()).is_err() {
+                    return;
                 }
-            })
-            .expect("the OS starts the preview converter thread");
+                wake();
+            }
+        });
         Self {
             jobs: Jobs(jobs),
             results,

@@ -1,0 +1,18 @@
+# common is the one crate that reaches the file system, the environment, other processes and
+# thread creation directly, so it holds the workspace's settings without the bans that send every
+# other crate through it. Keep the rest of this file the same as the workspace's.
+allow-print-in-tests = true
+allowed-wildcard-imports = ["x86_64", "aarch64", "arch"]
+absolute-paths-allowed-crates = ["std", "core", "alloc"]
+disallowed-types = [
+    { path = "std::thread::LocalKey", reason = "state lives on an owner and travels by parameter" },
+]
+
+# A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
+# policy every case shares; `Scale::apply` alone calls these.
+disallowed-methods = [
+    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `Scale`" },
+]

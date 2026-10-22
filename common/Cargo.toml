@@ -8,21 +8,36 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 workspace = true
 
 [features]
-internals = []
+# `libc` drops a file's pages from the page cache, for the benches of cold reads on Linux.
+internals = ["dep:libc"]
 introspect-derive = ["dep:common-derive"]
 
 [dependencies]
 common-derive = { workspace = true, optional = true }
-glam = { workspace = true }
+glam = { workspace = true, features = ["serde", "std"] }
+memmap2 = { workspace = true }
+notify = { workspace = true, features = ["macos_fsevent"] }
+rayon = { workspace = true }
+sysinfo = { workspace = true, features = ["disk", "system"] }
 thiserror = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
 ron = { workspace = true }
-bitcode = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
-uuid = { workspace = true }
+bitcode = { workspace = true, features = ["serde", "std"] }
+tokio = { workspace = true, features = ["fs", "io-util", "rt", "rt-multi-thread"] }
+uuid = { workspace = true, features = ["serde", "std", "v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "std",
+] }
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals", "introspect-derive"] }

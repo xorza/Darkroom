@@ -1,10 +1,9 @@
-use std::fs;
 use std::panic::catch_unwind;
 use std::path::Path;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
-use common::{FileIdentity, TempDir};
+use common::{FileIdentity, ScratchFile, TempDir, fs};
 use imaginarium::Buffer2;
 
 use crate::combine::frame_read::frame_gate::FrameGate;
@@ -31,7 +30,6 @@ use crate::image::quality_flags::QualityFlags;
 use crate::internals::panic_message;
 use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
 use crate::io::load_ctx::LoadCtx;
-use crate::platform::ScratchFile;
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
 /// back with none. Its files have no name while it lives where a scratch file keeps none, and none
@@ -98,7 +96,10 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
     }
     drop((planes, first, second));
     assert_eq!(root.entry_count(), 1);
-    assert!(sentinel.is_file(), "a file lumos did not write was removed");
+    assert!(
+        fs::is_file(&sentinel),
+        "a file lumos did not write was removed"
+    );
 
     let kept = DecodeCache::open(root.path()).unwrap();
     assert_eq!(kept.path(), DecodeCache::open(root.path()).unwrap().path());

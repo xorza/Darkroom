@@ -4,8 +4,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use common::file_utils::{AtomicFile, PublicationMode};
-use tokio::fs;
+use common::fs::{self, AtomicFile, PublicationMode};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
@@ -55,7 +54,7 @@ impl BlobTarget {
     /// fails the same decode. A removal that fails is therefore reported:
     /// nothing here can force the unlink through.
     async fn delete(&self) {
-        if let Err(error) = fs::remove_file(&self.path).await
+        if let Err(error) = fs::remove_file_async(&self.path).await
             && error.kind() != io::ErrorKind::NotFound
         {
             tracing::error!(
@@ -75,7 +74,7 @@ impl BlobTarget {
         else {
             return Ok(());
         };
-        fs::create_dir_all(parent)
+        fs::create_dir_all_async(parent)
             .await
             .map_err(|source| StoreError::Dir {
                 path: self.path.clone(),
@@ -91,7 +90,7 @@ impl BlobTarget {
     /// "cannot serve" to every caller; only whether that is worth reporting
     /// differs, and that is the caller's to decide.
     async fn open(&self) -> io::Result<Option<OpenBlob>> {
-        let file = match File::open(&self.path).await {
+        let file = match fs::open_async(&self.path).await {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),

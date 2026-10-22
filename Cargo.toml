@@ -37,55 +37,48 @@ imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
 libraw-sys = { path = "libraw-sys" }
 
-serde = { version = "1.0", features = ["derive", "rc"] }
-uuid = { version = "1.28", features = ["v4", "serde"] }
-thiserror = { version = "2.0" }
-bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
-glam = { version = "0.34", features = ["serde"] }
-strum = { version = "0.28" }
-rand = { version = "0.10" }
-tokio = { version = "1.54" }
-tokio-util = { version = "0.7", features = ["rt"] }
-tracing = { version = "0.1" }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-rayon = { version = "1.12" }
-ron = { version = "0.12" }
-notify = { version = "8" }
-hashbrown = { version = "0.17", features = ["serde"] }
-quote = { version = "1.0" }
-proc-macro2 = { version = "1.0" }
-syn = { version = "3.0", default-features = false, features = [
-    "clone-impls",
-    "derive",
-    "extra-traits",
-    "parsing",
-    "printing",
-    "proc-macro",
-] }
-memmap2 = { version = "0.9" }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
-sysinfo = { version = "0.39" }
-bitcode = { version = "0.6", features = ["serde"] }
-blake3 = { version = "1.8" }
-windows = { version = "0.62" }
-libc = { version = "0.2" }
-objc2 = { version = "0.6" }
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
-rfd = { version = "0.17" }
-zip = { version = "9.0", default-features = false, features = ["deflate"] }
-async-trait = { version = "0.1" }
-arrayvec = { version = "0.7", features = ["serde"] }
-static_assertions = "1.1"
-rand_chacha = { version = "0.10" }
-nalgebra = { version = "0.35" }
-criterion = { version = "0.8" }
+serde = { version = "1.0", default-features = false }
+uuid = { version = "1.28", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+bytemuck = { version = "1.25", default-features = false }
+glam = { version = "0.34", default-features = false }
+strum = { version = "0.28", default-features = false }
+rand = { version = "0.10", default-features = false }
+tokio = { version = "1.54", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+rayon = { version = "1.12", default-features = false }
+ron = { version = "0.12", default-features = false }
+notify = { version = "8", default-features = false }
+hashbrown = { version = "0.17", default-features = false }
+quote = { version = "1.0", default-features = false }
+proc-macro2 = { version = "1.0", default-features = false }
+syn = { version = "3.0", default-features = false }
+memmap2 = { version = "0.9", default-features = false }
+image = { version = "0.25", default-features = false }
+sysinfo = { version = "0.39", default-features = false }
+bitcode = { version = "0.6", default-features = false }
+blake3 = { version = "1.8", default-features = false }
+windows = { version = "0.62", default-features = false }
+libc = { version = "0.2", default-features = false }
+objc2 = { version = "0.6", default-features = false }
+objc2-app-kit = { version = "0.3", default-features = false }
+objc2-foundation = { version = "0.3", default-features = false }
+rfd = { version = "0.17", default-features = false }
+zip = { version = "9.0", default-features = false }
+async-trait = { version = "0.1", default-features = false }
+arrayvec = { version = "0.7", default-features = false }
+static_assertions = { version = "1.1", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
+nalgebra = { version = "0.35", default-features = false }
+criterion = { version = "0.8", default-features = false }
 statrs = { version = "0.19", default-features = false }
-clap = { version = "4.6", features = ["derive"] }
-winresource = { version = "0.1" }
-ort = { version = "2.0.0-rc.15" }
-cc = { version = "1.9" }
-libz-sys = { version = "1.1", default-features = false, features = ["static"] }
+clap = { version = "4.6", default-features = false }
+winresource = { version = "0.1", default-features = false }
+ort = { version = "2.0.0-rc.15", default-features = false }
+cc = { version = "1.9", default-features = false }
+libz-sys = { version = "1.1", default-features = false }
 bindgen = { version = "0.73", default-features = false }
 
 [profile.dev]

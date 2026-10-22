@@ -1,10 +1,9 @@
 pub(crate) mod error;
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use common::{SerdeFormat, file_utils};
+use common::{SerdeFormat, fs};
 use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;
@@ -160,12 +159,12 @@ impl Preferences {
                 source,
             })?;
         }
-        file_utils::publish_bytes(path, &bytes, file_utils::PublicationMode::Durable).map_err(
-            |source| PreferencesSaveError::Write {
+        fs::publish_bytes(path, &bytes, fs::PublicationMode::Durable).map_err(|source| {
+            PreferencesSaveError::Write {
                 path: path.to_path_buf(),
                 source,
-            },
-        )
+            }
+        })
     }
 }
 

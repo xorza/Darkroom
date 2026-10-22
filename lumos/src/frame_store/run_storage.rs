@@ -108,7 +108,7 @@ impl RunStorage {
 
 #[cfg(test)]
 mod tests {
-    use common::TempDir;
+    use common::{FileSystem, TempDir};
 
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::run_storage::{RunStorage, RunWrites};
@@ -118,7 +118,6 @@ mod tests {
     use crate::memory::run_memory::RunMemory;
     use crate::memory::run_plan::RunPlan;
     use crate::memory::stage::{Stage, Units};
-    use crate::platform::FileSystem;
 
     /// What a run writes is checked against its disk as one: the decode cache's writes alone on a
     /// resident tier, which spills nothing, and both on a spilled one. With `free` bytes free,

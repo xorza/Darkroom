@@ -31,11 +31,11 @@ fn build_creates_dir_and_self_ignoring_gitignore() {
     let doc_path = dir.join("scene.darkroom");
 
     let root = root(&doc_path);
-    assert!(!root.exists(), "naming the root creates nothing");
+    assert!(!fs::exists(&root), "naming the root creates nothing");
     prepare(&root);
 
     assert_eq!(root, dir.join("scene.darkroom-cache"));
-    assert!(root.is_dir(), "cache dir created beside the document");
+    assert!(fs::is_dir(&root), "cache dir created beside the document");
     let gitignore = root.join(".gitignore");
     assert_eq!(
         fs::read_to_string(&gitignore).unwrap(),

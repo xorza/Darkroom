@@ -4,9 +4,11 @@
 //! FITS and RAW have their own decoders under `fits/` and `raw/`; a raster is read through
 //! imaginarium in one call, so what is left here is what each product makes of it.
 
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
+use common::fs;
 use imaginarium::{Buffer2, ChannelCount, FileFormat, Image};
 
 use crate::image::derived_facts::DerivedFacts;
@@ -24,12 +26,18 @@ use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullSamples;
 
-/// The image at `path`, read through imaginarium.
+/// The image at `path`, in the format its extension names, decoded by imaginarium.
 fn read(path: &Path) -> Result<Image, ImageError> {
-    Image::read_file(path).map_err(|source| ImageError::Image {
+    read_image(path).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// The image in the file at `path`, in the format its extension names.
+pub(crate) fn read_image(path: &Path) -> Result<Image, imaginarium::Error> {
+    let format = FileFormat::from_path(path)?;
+    Image::decode(BufReader::new(fs::open(path)?), format)
 }
 
 /// What a raster decode of a `format` file records: imaginarium decoded it, it stores its first
@@ -148,7 +156,18 @@ pub(crate) fn preview(
     Ok(PreviewImage::interleaved(decoded.convert(target), metadata))
 }
 
-/// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF.
+/// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF,
+/// published durably as the FITS writers publish, so a reader sees the old file or the new one.
 pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
-    Ok(Image::from(image).save_file(path)?)
+    write_image(path, &Image::from(image))
+}
+
+/// Write `image` to `path` as the raster format its extension names, published durably.
+pub(crate) fn write_image(path: &Path, image: &Image) -> Result<(), WriteError> {
+    let format = FileFormat::from_path(path)?;
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
+        let mut out = BufWriter::new(file);
+        image.encode(&mut out, format)?;
+        Ok::<_, WriteError>(out.flush()?)
+    })
 }

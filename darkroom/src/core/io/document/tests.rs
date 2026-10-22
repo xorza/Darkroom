@@ -2,7 +2,6 @@ use common::TempDir;
 
 use super::*;
 use crate::core::document::internals::DocFixture;
-use std::fs;
 
 #[test]
 fn document_round_trips_as_one_ron_entry() {
@@ -19,7 +18,7 @@ fn document_round_trips_as_one_ron_entry() {
     save(&document, &path).expect("save document");
     assert_eq!(load(&path).expect("load document"), document);
 
-    let mut archive = ZipArchive::new(File::open(path).unwrap()).unwrap();
+    let mut archive = ZipArchive::new(fs::open(path).unwrap()).unwrap();
     assert_eq!(archive.len(), 1, "archives contain only the document entry");
     let mut entry = archive.by_name(DOCUMENT_ENTRY).unwrap();
     assert_eq!(entry.compression(), CompressionMethod::Deflated);
@@ -107,7 +106,7 @@ fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
 }
 
 fn write_test_archive(path: &Path, name: &str, contents: &[u8]) {
-    let file = File::create(path).unwrap();
+    let file = fs::create(path).unwrap();
     let mut archive = ZipWriter::new(file);
     archive
         .start_file(name, SimpleFileOptions::default())

@@ -1,3 +1,5 @@
+use common::SystemMemory;
+
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
@@ -12,7 +14,6 @@ use crate::memory::budget::Budget;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{MIN_CHUNK_ROWS, Placement, Stage, Units, Width};
-use crate::platform::SystemMemory;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 const MIB: u64 = 1024 * 1024;

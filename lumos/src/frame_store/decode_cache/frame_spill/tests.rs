@@ -1,7 +1,6 @@
-use std::fs;
 use std::path::Path;
 
-use common::{FileId, FileIdentity, SerdeFormat, TempDir};
+use common::{FileId, FileIdentity, SerdeFormat, TempDir, fs};
 use fits_well::image::SampleType;
 
 use crate::decode::decoder_kind::DecoderKind;

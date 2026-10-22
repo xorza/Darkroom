@@ -7,10 +7,9 @@
 //! building mosaics from known colors and demosaicing them back.
 
 use std::convert::Infallible;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, fs, thread};
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
@@ -74,7 +73,7 @@ fn write_with_header(path: PathBuf, image: &Image, header: &Header) -> PathBuf {
 fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, ImageError> {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = dir.join(format!("{name}.fits"));
-    let mut writer = FitsWriter::new(File::create(&path).unwrap());
+    let mut writer = FitsWriter::new(fs::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
     decode::load_linear(&path, &LoadCtx::default())
@@ -439,10 +438,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     let bggr = mosaic("bggr", CfaPattern::Bggr);
     let never_decoded = dir.join("never_decoded.fits");
 
-    let single_thread = rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build()
-        .unwrap();
+    let single_thread = thread::pool("lumos-test", 1);
     for available_memory in [1 << 30, 1] {
         let ingest = IngestConfig::with_cache_dir(dir.join("cache"));
         let config = StackConfig {

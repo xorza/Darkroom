@@ -1,12 +1,11 @@
 //! Shared blocking-runtime adapters for astro node implementations.
 
-use common::CancelToken;
+use common::{CancelToken, task};
 use lumos::{LinearImage, OpError};
 use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
 use crate::image::Image;
 use std::error;
-use tokio::task;
 
 /// An in-place `lumos` op over the planes of a required image input, on the
 /// blocking pool, handing back the image it leaves.

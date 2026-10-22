@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
 use std::time::Duration;
 
+use common::thread;
 use rayon::prelude::*;
 
 use crate::progress::progress_callback::ProgressCallback;
@@ -33,13 +33,13 @@ fn parallel_completions_report_in_order() {
 #[test]
 fn a_callback_that_uses_rayon_completes() {
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
+    thread::spawn("lumos-test", move || {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let callback = ProgressCallback::new({
             let reports = Arc::clone(&reports);
             move |progress| {
                 (0..8).into_par_iter().for_each(|_| {
-                    thread::sleep(Duration::from_micros(20));
+                    std::thread::sleep(Duration::from_micros(20));
                 });
                 reports.lock().unwrap().push(progress.cur);
             }

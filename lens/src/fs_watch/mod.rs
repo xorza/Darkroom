@@ -3,23 +3,21 @@
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::fs;
 use std::future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::{fs, task};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::Notify;
-use tokio::task;
-use tokio::time::timeout;
-
 use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
 use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, Library};
+use tokio::sync::Notify;
+use tokio::time::timeout;
 
 const WATCH_DIR_FUNC_ID: FuncId = FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
 
@@ -78,17 +76,16 @@ impl WatchState {
         let signal = Arc::new(Notify::new());
         let callback_signal = Arc::clone(&signal);
         let callback_path = path.to_path_buf();
-        let mut watcher =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
-                Ok(event) if is_content_change(event.kind) => callback_signal.notify_one(),
-                Ok(_) => {}
-                Err(error) => tracing::warn!(
-                    path = %callback_path.display(),
-                    %error,
-                    "filesystem watcher backend error"
-                ),
-            })
-            .map_err(WatchError::Create)?;
+        let mut watcher = fs::watcher(move |res: notify::Result<notify::Event>| match res {
+            Ok(event) if is_content_change(event.kind) => callback_signal.notify_one(),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                path = %callback_path.display(),
+                %error,
+                "filesystem watcher backend error"
+            ),
+        })
+        .map_err(WatchError::Create)?;
         watcher
             .watch(path, mode)
             .map_err(|source| WatchError::Register {

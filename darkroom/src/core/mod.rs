@@ -7,7 +7,6 @@
 //! edited through [`palantir::DockOperation`], and the viewer's sampling preference
 //! is a [`palantir::ImageFilter`]. Nothing else from palantir is used here.
 
-mod bg_runtime;
 pub(crate) mod document;
 pub(crate) mod edit;
 pub(crate) mod io;

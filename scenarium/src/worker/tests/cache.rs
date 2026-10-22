@@ -1,7 +1,9 @@
 use super::*;
+
+use common::fs;
+
 use crate::exec::cache::disk_store::DiskStore;
 use crate::internals::test_graph::NodeSpec;
-use std::fs;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the
 /// acknowledgement, and reports nothing when it succeeds.

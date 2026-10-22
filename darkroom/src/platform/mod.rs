@@ -57,7 +57,7 @@ pub(crate) fn config_dir() -> Option<PathBuf> {
 /// mid-record, unlike the modal file dialogs. A missing opener logs and
 /// degrades; there is no user-facing error surface yet.
 pub(crate) fn open_url(url: &str) {
-    if let Err(e) = sys::url_opener().arg(url).spawn() {
+    if let Err(e) = sys::open_url(url) {
         tracing::warn!("failed to open url {url}: {e}");
     }
 }

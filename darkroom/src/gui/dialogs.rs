@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use common::fs;
+
 use crate::core::io::document;
 
 fn file_dialog(start: Option<&Path>) -> rfd::FileDialog {
@@ -48,7 +50,7 @@ fn project_save_dialog(start: Option<&Path>) -> rfd::FileDialog {
 /// about it: the extended name, when it differs from the picked one and exists.
 fn unconfirmed_target(picked: &Path) -> Option<PathBuf> {
     let target = document::with_extension(picked.to_path_buf());
-    (target != picked && target.exists()).then_some(target)
+    (target != picked && fs::exists(&target)).then_some(target)
 }
 
 fn filtered_file_dialog(extensions: &[&str]) -> rfd::FileDialog {
@@ -83,10 +85,9 @@ pub(crate) fn pick_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::PathBuf;
 
-    use common::TempDir;
+    use common::{TempDir, fs};
 
     use crate::gui::dialogs::{normalize_file_selection, unconfirmed_target};
 

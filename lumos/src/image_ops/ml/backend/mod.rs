@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use common::fs;
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
@@ -49,9 +50,15 @@ impl OnnxModel {
     /// The model at `path`, its weights read now: about 125 MB for the nets these filters run.
     ///
     /// # Errors
-    /// [`MlError::Model`] when ONNX Runtime cannot start or read the model.
+    /// [`MlError::Read`] when the file cannot be read; [`MlError::Model`] when ONNX Runtime cannot
+    /// start or parse the model.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, MlError> {
-        let session = Session::builder(&environment()?)?.commit_from_file(path.as_ref())?;
+        let path = path.as_ref();
+        let bytes = fs::read(path).map_err(|source| MlError::Read {
+            path: path.to_owned(),
+            source,
+        })?;
+        let session = Session::builder(&environment()?)?.commit_from_memory(&bytes)?;
         Ok(Self { session })
     }
 

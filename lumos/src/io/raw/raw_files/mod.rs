@@ -1,7 +1,8 @@
 //! The camera-RAW files of a directory.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use common::fs;
 
 use crate::io::input_format::InputFormat;
 use crate::io::raw::error::RawScanError;

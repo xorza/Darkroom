@@ -4,7 +4,7 @@
 
 use std::slice;
 
-use common::TempDir;
+use common::{MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 use imaginarium::Buffer2;
 
@@ -16,7 +16,6 @@ use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
 use crate::image::linear_image::LinearImage;
-use crate::platform::MappedFile;
 
 /// The rows of a chunk: what a 30-frame stack of warped mono lights gets on a 1 GiB combine
 /// budget, which holds two chunks of every frame's pixel, coverage and confidence, 12 bytes a

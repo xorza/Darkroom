@@ -8,6 +8,7 @@ use common::internals;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::internals::real_data::raw_frames;
 use crate::io::load_ctx::LoadCtx;
+use crate::io::raster;
 
 /// The first RAW light loads through the CFA entry point at the size its header declares, and
 /// demosaics to three channels of that size.
@@ -26,6 +27,6 @@ fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     assert_eq!(image.channels(), 3);
 
     if let Some(path) = internals::debug_output_path("light_from_raw.tiff") {
-        imaginarium::Image::from(image).save_file(path).unwrap();
+        raster::write_image(&path, &imaginarium::Image::from(image)).unwrap();
     }
 }

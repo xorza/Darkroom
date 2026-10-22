@@ -8,9 +8,10 @@
 pub(crate) mod comparison;
 pub(crate) mod report;
 
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use common::internals;
+use common::{fs, internals};
 use image::GrayImage;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
@@ -18,6 +19,7 @@ use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 use crate::bit_buffer2::BitBuffer2;
 #[cfg(feature = "real-data")]
 use crate::image::linear_image::LinearImage;
+use crate::io::raster;
 
 /// Extension every debug image is written with.
 const TEST_OUTPUT_IMAGE_EXT: &str = "png";
@@ -117,7 +119,7 @@ pub(crate) fn save_image(image: Image, name: &str) {
     } else {
         image
     };
-    image_u8.save_file(&out).expect("Failed to save image");
+    raster::write_image(&out, &image_u8).expect("Failed to save image");
 }
 
 /// Convert an f32 plane to an 8-bit grayscale image under `tone`.
@@ -202,17 +204,24 @@ pub(crate) fn save_linear(image: &LinearImage, name: &str) {
     let Some(path) = debug_file(name) else {
         return;
     };
-    Image::from(image)
-        .convert(ColorFormat::RGB_U8)
-        .save_file(&path)
-        .expect("save png");
+    raster::write_image(&path, &Image::from(image).convert(ColorFormat::RGB_U8)).expect("save png");
     eprintln!("wrote {}", path.display());
+}
+
+/// `image` encoded as PNG, the configured extension, and written to `path`.
+fn write_png<P>(image: &image::ImageBuffer<P, Vec<u8>>, path: &Path) -> image::ImageResult<()>
+where
+    P: image::PixelWithColorType<Subpixel = u8>,
+{
+    let mut png = Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png)?;
+    Ok(fs::write(path, png.into_inner())?)
 }
 
 /// Write an f32 plane as an 8-bit image under `tone`, with the configured extension.
 pub(crate) fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) {
     if let Some(path) = debug_file(name) {
-        to_gray(pixels, tone).save(path).expect("write debug image");
+        write_png(&to_gray(pixels, tone), &path).expect("write debug image");
     }
 }
 
@@ -220,7 +229,7 @@ pub(crate) fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) {
 #[cfg(feature = "real-data")]
 pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
     if let Some(out) = debug_file(name) {
-        image.save(&out).expect("Failed to save RGB image");
+        write_png(image, &out).expect("Failed to save RGB image");
     }
 }
 
@@ -228,9 +237,7 @@ pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
 #[cfg(feature = "real-data")]
 pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
     if let Some(out) = debug_file(name) {
-        mask_to_gray(mask)
-            .save(&out)
-            .expect("Failed to save mask image");
+        write_png(&mask_to_gray(mask), &out).expect("Failed to save mask image");
     }
 }
 

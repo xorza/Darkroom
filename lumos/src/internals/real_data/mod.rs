@@ -13,6 +13,8 @@
 
 use std::path::{Path, PathBuf};
 
+use common::fs;
+
 use crate::calibration::calibration_masters::internals::masters_from_files;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -30,7 +32,7 @@ mod milky_way;
 pub(crate) fn dataset_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data");
     assert!(
-        dir.is_dir(),
+        fs::is_dir(&dir),
         "real-data dataset missing at {} (fetch it with scripts/fetch-test-data.sh)",
         dir.display()
     );
@@ -40,7 +42,11 @@ pub(crate) fn dataset_dir() -> PathBuf {
 /// A file or directory of the dataset.
 pub(crate) fn dataset_path(name: &str) -> PathBuf {
     let path = dataset_dir().join(name);
-    assert!(path.exists(), "real-data dataset has no {}", path.display());
+    assert!(
+        fs::exists(&path),
+        "real-data dataset has no {}",
+        path.display()
+    );
     path
 }
 
@@ -133,8 +139,9 @@ pub(crate) fn first_and_last_lights() -> LightPair {
 /// Weight resolution for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`).
 #[cfg(feature = "ml")]
 pub(crate) mod ml_support {
-    use std::env;
     use std::path::PathBuf;
+
+    use common::{env, fs};
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else
     /// `test_data/<default_file>`. Returns `None` (after a skip message) when absent — lumos ships
@@ -152,7 +159,7 @@ pub(crate) mod ml_support {
             },
             PathBuf::from,
         );
-        if path.exists() {
+        if fs::exists(&path) {
             Some(path)
         } else {
             eprintln!(

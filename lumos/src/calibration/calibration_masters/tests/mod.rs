@@ -4,6 +4,17 @@ mod dark_scale;
 mod real_data;
 mod synthetic;
 
+use std::convert::Infallible;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use common::{CancelToken, TempDir, fs};
+use fits_well::FitsReader;
+use fits_well::header::Header;
+use fits_well::image::Bitpix;
+use fits_well::io::ChecksumStatus;
+use imaginarium::Buffer2;
+
 use crate::calibration::calibration_masters::MasterBuild;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
@@ -56,16 +67,6 @@ use crate::{
     ColorShares, DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata,
     MasterRole,
 };
-use common::{CancelToken, TempDir};
-use fits_well::FitsReader;
-use fits_well::header::Header;
-use fits_well::image::Bitpix;
-use fits_well::io::ChecksumStatus;
-use imaginarium::Buffer2;
-use std::convert::Infallible;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::Mutex;
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {

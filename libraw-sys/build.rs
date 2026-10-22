@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "a build script reads cargo's environment and the sources it compiles, at build time"
+)]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

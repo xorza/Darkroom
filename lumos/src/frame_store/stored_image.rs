@@ -141,9 +141,8 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use common::{MappedFile, TempDir};
     use imaginarium::Buffer2;
-
-    use common::TempDir;
 
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_image::StoredImage;
@@ -152,7 +151,6 @@ mod tests {
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use crate::math::size2us::Size2us;
-    use crate::platform::MappedFile;
 
     /// A parked image leaves the page cache whole where the system evicts, its flags with its
     /// channels, and loads back as it was spilled.

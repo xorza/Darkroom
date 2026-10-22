@@ -1,9 +1,8 @@
 use super::*;
 
-use std::fs;
 use std::sync::Mutex;
 
-use common::{TempDir, TempFile};
+use common::{TempDir, TempFile, fs};
 
 use crate::async_lambda;
 use crate::data::data_type::{FsPathConfig, FsPathMode};

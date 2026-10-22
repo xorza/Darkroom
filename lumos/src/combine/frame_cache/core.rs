@@ -6,7 +6,9 @@
 //! many as the budget dictates, each copied out of the planes' maps by reader threads while the
 //! chunk before it is reduced.
 
-use std::{mem, thread};
+use std::mem;
+
+use common::thread;
 
 use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
 use crate::frame_store::storage_tier::StorageTier;
@@ -171,8 +173,11 @@ impl CacheCore {
         cur.fill(frames, range(0));
         for chunk in 0..chunk_count {
             let completed = thread::scope(|scope| {
-                let reading = (chunk + 1 < chunk_count)
-                    .then(|| scope.spawn(|| next.fill(frames, range(chunk + 1))));
+                let reading = (chunk + 1 < chunk_count).then(|| {
+                    scope.spawn("lumos-chunk-prefetch", || {
+                        next.fill(frames, range(chunk + 1));
+                    })
+                });
                 let mut views: Vec<FrameChunk<'_>> = recycle::emptied(mem::take(&mut kept_views));
                 cur.views_into(frames, &mut views);
                 let completed = reduce(&views, chunk);

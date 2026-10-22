@@ -1,5 +1,3 @@
-use std::fs;
-
 use common::{CancelToken, TempDir};
 use imaginarium::Buffer2;
 

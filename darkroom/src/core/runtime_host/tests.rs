@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::core::status_log::StatusLog;
-use common::TempDir;
+use common::{TempDir, fs};
 use lens::MlModelPaths;
 use scenarium::{CacheMode, ConstValue, Graph, NodeId};
 
 use crate::core::io::cache;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
+use crate::core::status_log::StatusLog;
 
 /// The default value seeded into `func`'s model-path input (index 1),
 /// read back through the published library.
@@ -93,7 +93,10 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     assert_eq!(host.disk_root, None);
     host.set_document_cache(Some(&first_path));
     assert_eq!(host.disk_root.as_deref(), Some(first_root.as_path()));
-    assert!(!first_root.exists(), "opening a document writes nothing");
+    assert!(
+        !fs::exists(&first_root),
+        "opening a document writes nothing"
+    );
 
     let mut status = StatusLog::default();
     let mut memory_only = Graph::default();
@@ -104,22 +107,25 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         .expect("built-in present");
     let node = memory_only.add_func_node(func);
     host.run_once(&memory_only, &mut status);
-    assert!(!first_root.exists(), "a memory-only program writes nothing");
+    assert!(
+        !fs::exists(&first_root),
+        "a memory-only program writes nothing"
+    );
 
     let mut disk_backed = memory_only;
     disk_backed.find_mut(node).unwrap().cache = CacheMode::Disk;
     host.run_once(&disk_backed, &mut status);
     assert!(
-        first_root.join(".gitignore").is_file(),
+        fs::is_file(first_root.join(".gitignore")),
         "a disk-backed program prepares the root before it can write"
     );
 
     // A new root is prepared again, on its own next disk-backed compile.
     host.set_document_cache(Some(&second_path));
     assert_eq!(host.disk_root.as_deref(), Some(second_root.as_path()));
-    assert!(!second_root.exists());
+    assert!(!fs::exists(&second_root));
     host.run_once(&disk_backed, &mut status);
-    assert!(second_root.join(".gitignore").is_file());
+    assert!(fs::is_file(second_root.join(".gitignore")));
     host.set_document_cache(None);
     assert_eq!(host.disk_root, None);
 }

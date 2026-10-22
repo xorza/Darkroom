@@ -1,9 +1,10 @@
-//! Atomic same-directory publication, and the identity a cache keyed on a file compares.
+//! The file system: the one route to it outside `common`, as `clippy.toml` holds. The calls of
+//! `std::fs` and of `std::path::Path` that touch the disk, under their own names; atomic
+//! same-directory publication; and the identity a cache keyed on a file compares.
 
 pub(crate) mod file_identity;
-mod platform;
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, Metadata, OpenOptions, Permissions, ReadDir};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -14,6 +15,130 @@ use std::task::{Context, Poll};
 use tokio::fs as tokio_fs;
 use tokio::io::{AsyncSeek, AsyncWrite, AsyncWriteExt as _};
 use tokio::task;
+
+use crate::platform;
+
+pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    fs::read(path)
+}
+
+pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+    fs::read_to_string(path)
+}
+
+pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    fs::write(path, bytes)
+}
+
+pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
+    fs::copy(from, to)
+}
+
+pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+    fs::remove_file(path)
+}
+
+pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    fs::create_dir(path)
+}
+
+pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    fs::create_dir_all(path)
+}
+
+pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    fs::remove_dir(path)
+}
+
+pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    fs::remove_dir_all(path)
+}
+
+pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
+    fs::read_dir(path)
+}
+
+/// Following a link, as `std::fs::metadata`.
+pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
+    fs::metadata(path)
+}
+
+/// Of a link itself, as `std::fs::symlink_metadata`.
+pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
+    fs::symlink_metadata(path)
+}
+
+pub fn set_permissions(path: impl AsRef<Path>, permissions: Permissions) -> io::Result<()> {
+    fs::set_permissions(path, permissions)
+}
+
+pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    fs::canonicalize(path)
+}
+
+/// `false` when the metadata cannot be read, as `Path::exists`.
+pub fn exists(path: impl AsRef<Path>) -> bool {
+    path.as_ref().exists()
+}
+
+/// `false` when the metadata cannot be read, as `Path::is_file`.
+pub fn is_file(path: impl AsRef<Path>) -> bool {
+    path.as_ref().is_file()
+}
+
+/// `false` when the metadata cannot be read, as `Path::is_dir`.
+pub fn is_dir(path: impl AsRef<Path>) -> bool {
+    path.as_ref().is_dir()
+}
+
+/// A link at `link` to the file `original`. Windows makes one only in Developer Mode or for an
+/// elevated process, and fails otherwise.
+pub fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    platform::symlink(original.as_ref(), link.as_ref())
+}
+
+/// A watcher that hands `handler` each change under the paths it is told to watch, as
+/// `notify::recommended_watcher`.
+pub fn watcher(handler: impl notify::EventHandler) -> notify::Result<notify::RecommendedWatcher> {
+    notify::recommended_watcher(handler)
+}
+
+/// For reading, as `File::open`.
+pub fn open(path: impl AsRef<Path>) -> io::Result<File> {
+    File::open(path)
+}
+
+/// For writing an existing file in place, neither created nor truncated.
+pub fn open_write(path: impl AsRef<Path>) -> io::Result<File> {
+    OpenOptions::new().write(true).open(path)
+}
+
+/// For writing, created or truncated, as `File::create`.
+pub fn create(path: impl AsRef<Path>) -> io::Result<File> {
+    File::create(path)
+}
+
+/// For reading and writing, created exclusively: an existing name fails with
+/// [`io::ErrorKind::AlreadyExists`], as `File::create_new`.
+pub fn create_new(path: impl AsRef<Path>) -> io::Result<File> {
+    File::create_new(path)
+}
+
+pub async fn open_async(path: impl AsRef<Path>) -> io::Result<tokio_fs::File> {
+    tokio_fs::File::open(path).await
+}
+
+pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
+    tokio_fs::remove_file(path).await
+}
+
+pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
+    tokio_fs::create_dir_all(path).await
+}
 
 /// Whether publishing a file must survive an abrupt system shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,8 +257,8 @@ pub struct AtomicFile {
 
 impl AtomicFile {
     /// Create a writable same-directory temporary file for later atomic commit.
-    pub async fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
-        let destination = destination.to_path_buf();
+    pub async fn new(destination: impl AsRef<Path>, mode: PublicationMode) -> io::Result<Self> {
+        let destination = destination.as_ref().to_path_buf();
         let SyncAtomicFile { file, publication } =
             task::spawn_blocking(move || SyncAtomicFile::new(&destination, mode))
                 .await
@@ -196,7 +321,11 @@ fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
 }
 
 /// Publish bytes through a unique same-directory temporary file.
-pub fn publish_bytes(path: &Path, bytes: &[u8], mode: PublicationMode) -> io::Result<()> {
+pub fn publish_bytes(
+    path: impl AsRef<Path>,
+    bytes: &[u8],
+    mode: PublicationMode,
+) -> io::Result<()> {
     publish(path, mode, |file| file.write_all(bytes))
 }
 
@@ -209,11 +338,11 @@ pub fn publish_bytes(path: &Path, bytes: &[u8], mode: PublicationMode) -> io::Re
 /// error type, which carries this function's I/O failures too. Its handle reads
 /// as well, so it can map what it wrote before the file takes its name.
 pub fn publish<E: From<io::Error>>(
-    path: &Path,
+    path: impl AsRef<Path>,
     mode: PublicationMode,
     write: impl FnOnce(&mut File) -> Result<(), E>,
 ) -> Result<(), E> {
-    let mut file = SyncAtomicFile::new(path, mode)?;
+    let mut file = SyncAtomicFile::new(path.as_ref(), mode)?;
     write(&mut file.file)?;
     Ok(file.commit()?)
 }

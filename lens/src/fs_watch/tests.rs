@@ -1,7 +1,6 @@
-use std::fs;
 use std::sync::Arc;
 
-use common::TempDir;
+use common::{TempDir, fs};
 use notify::RecursiveMode;
 use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DynamicValue, Func, FuncBehavior, InvokeError, SharedAnyState};
@@ -84,11 +83,12 @@ fn registers_watch_dir_func() {
 
 #[test]
 fn classifies_filesystem_event_kinds() {
-    use crate::fs_watch::is_content_change;
     use notify::EventKind;
     use notify::event::{
         AccessKind, CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode,
     };
+
+    use crate::fs_watch::is_content_change;
 
     // Subscribed: writes, new files, removes, renames.
     assert!(is_content_change(EventKind::Create(CreateKind::File)));

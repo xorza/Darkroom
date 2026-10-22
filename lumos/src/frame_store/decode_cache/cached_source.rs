@@ -1,9 +1,8 @@
 //! [`CachedSource`]: a source file as the decode cache names and keys it.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::FileIdentity;
+use common::{FileIdentity, fs};
 
 use crate::decode::decoder_kind::DecoderKind;
 use crate::frame_store::decode_cache::cache_key::CacheKey;

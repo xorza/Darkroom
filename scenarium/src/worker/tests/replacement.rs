@@ -4,6 +4,10 @@ use crate::internals::test_graph::NodeSpec;
 /// An `Update` arriving mid-run is installed only after the running program
 /// reports — so the completion still describes the program that ran.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the source node blocks its thread on a condvar until this test, on another worker thread, releases it"
+)]
 async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
     use std::sync::{Condvar, Mutex};
 

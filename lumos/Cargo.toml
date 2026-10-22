@@ -11,51 +11,42 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-# `libc` drops a spilled frame's pages from the page cache, for the benches of cold reads on Linux.
-internals = ["common/internals", "dep:criterion", "dep:libc"]
+internals = ["common/internals", "dep:criterion"]
 
 [dependencies]
 common = { workspace = true, features = ["introspect-derive"] }
 imaginarium = { workspace = true }
 
-ort = { workspace = true, optional = true }
+ort = { workspace = true, optional = true, features = [
+    "api-31",
+    "download-binaries",
+    "std",
+    "tls-native",
+    "tracing",
+] }
 
 fits-well = { workspace = true }
 libraw-sys = { workspace = true }
 
 thiserror = { workspace = true }
-bytemuck = { workspace = true }
+bytemuck = { workspace = true, features = ["derive", "extern_crate_alloc"] }
 rayon = { workspace = true }
-tracing = { workspace = true }
-glam = { workspace = true }
-serde = { workspace = true }
-memmap2 = { workspace = true }
-sysinfo = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+glam = { workspace = true, features = ["serde", "std"] }
+serde = { workspace = true, features = ["derive", "std"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-nalgebra = { workspace = true }
+nalgebra = { workspace = true, features = ["std"] }
 statrs = { workspace = true }
-arrayvec = { workspace = true }
-blake3 = { workspace = true }
-criterion = { workspace = true, optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = { workspace = true, optional = true }
-
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_JobObjects",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Threading",
-] }
+arrayvec = { workspace = true, features = ["serde"] }
+blake3 = { workspace = true, features = ["std"] }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
-image = { workspace = true }
+image = { workspace = true, features = ["png"] }
 lumos = { workspace = true, features = ["internals"] }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "std"] }
 
 [lib]
 bench = false

@@ -68,6 +68,12 @@ pub enum MlError {
     Config(#[from] InvalidConfigField),
     #[error("ONNX model error: {0}")]
     Model(#[from] ort::Error),
+    #[error("cannot read the model {}: {source}", .path.display())]
+    Read {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     /// The model's output is not one NHWC `[1, WINDOW, WINDOW, 3]` tile.
     #[error(
         "model output has {len} values, expected {} (NHWC [1,{WINDOW},{WINDOW},3])",

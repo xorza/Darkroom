@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
+use common::fs;
 use lens::MlModelPaths;
 use palantir::FontWeight;
 use palantir::prelude::*;
@@ -283,10 +284,10 @@ fn path_problem(path: &str) -> Option<&'static str> {
         return None;
     }
     let p = Path::new(path);
-    if p.is_dir() {
+    if fs::is_dir(p) {
         return Some("Points at a folder \u{2014} pick the .onnx file inside");
     }
-    if !p.is_file() {
+    if !fs::is_file(p) {
         return Some("File not found");
     }
     let onnx = p
@@ -373,7 +374,6 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::iter;
 
     use common::{TempDir, TempFile};

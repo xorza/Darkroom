@@ -1,13 +1,14 @@
 //! The text report a visual detection test writes beside its images.
 
+use std::fmt;
+use std::io::Write;
+
+use common::{fs, internals};
+use glam::DVec2;
+
 use crate::internals::synthetic::metrics::{DetectionScore, match_catalogs};
 use crate::internals::synthetic::observe::ObservedSource;
 use crate::star_detection::star::Star;
-use common::internals;
-use glam::DVec2;
-use std::fmt;
-use std::fs::File;
-use std::io::Write;
 
 /// What a detection run recovered: the catalog match's [`DetectionScore`], and how far the
 /// matched stars' measurements are from the truth.
@@ -146,7 +147,7 @@ impl fmt::Display for DetectionMetrics {
 /// Write `metrics` as text to the debug file `name`, when debug output is on.
 pub(crate) fn save_metrics(metrics: &DetectionMetrics, name: &str) {
     if let Some(path) = internals::debug_output_path(name) {
-        let mut file = File::create(path).expect("Failed to create metrics file");
+        let mut file = fs::create(path).expect("Failed to create metrics file");
         write!(file, "{metrics}").expect("Failed to write metrics");
     }
 }

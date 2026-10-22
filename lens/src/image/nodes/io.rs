@@ -2,18 +2,19 @@
 
 use scenarium::FuncId;
 use scenarium::async_lambda;
+use std::io::{BufReader, BufWriter, Write};
 use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use imaginarium::SUPPORTED_EXTENSIONS;
+use common::{fs, task};
+use imaginarium::{FileFormat, SUPPORTED_EXTENSIONS};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
-use tokio::task;
 
 const LOAD_IMAGE_FUNC_ID: FuncId = FuncId::literal("a4d9bf87-9d98-44f1-a162-7483c298be3d");
 const SAVE_IMAGE_FUNC_ID: FuncId = FuncId::literal("0c17bcbe-d757-43be-b184-27b429e8b434");
@@ -21,6 +22,23 @@ const SAVE_IMAGE_FUNC_ID: FuncId = FuncId::literal("0c17bcbe-d757-43be-b184-27b4
 pub(super) fn register(library: &mut Library) {
     register_load(library);
     register_save(library);
+}
+
+/// The image in the file at `path`, in the format its extension names.
+fn read(path: &Path) -> Result<imaginarium::Image, imaginarium::Error> {
+    let format = FileFormat::from_path(path)?;
+    imaginarium::Image::decode(BufReader::new(fs::open(path)?), format)
+}
+
+/// `image` written to `path` in the format its extension names, published durably: a reader sees
+/// the old file or the new one.
+fn save(image: &imaginarium::Image, path: &Path) -> Result<(), imaginarium::Error> {
+    let format = FileFormat::from_path(path)?;
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
+        let mut out = BufWriter::new(file);
+        image.encode(&mut out, format)?;
+        Ok::<_, imaginarium::Error>(out.flush()?)
+    })
 }
 
 fn register_load(library: &mut Library) {
@@ -34,11 +52,10 @@ fn register_load(library: &mut Library) {
                 debug_assert_eq!(inputs.len(), 1);
                 debug_assert_eq!(outputs.len(), 1);
                 let path = PathBuf::from(inputs[0].required_fs_path());
-                let image = task::spawn_blocking(move || {
-                    imaginarium::Image::read_file(path).map_err(InvokeError::external)
-                })
-                .await
-                .map_err(InvokeError::external)??;
+                let image =
+                    task::spawn_blocking(move || read(&path).map_err(InvokeError::external))
+                        .await
+                        .map_err(InvokeError::external)??;
                 outputs[0] = DynamicValue::from_custom(Image::from(image));
                 Ok(())
             }),
@@ -70,8 +87,8 @@ fn register_save(library: &mut Library) {
                     let cpu_image = Image::take_interleaved(value);
                     task::spawn_blocking(move || {
                         match format.target(cpu_image.desc().color_format) {
-                            Some(target) => cpu_image.convert_to(target).save_file(path),
-                            None => cpu_image.save_file(path),
+                            Some(target) => save(&cpu_image.convert_to(target), &path),
+                            None => save(&cpu_image, &path),
                         }
                         .map_err(InvokeError::external)
                     })

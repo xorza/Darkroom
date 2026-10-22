@@ -1,8 +1,9 @@
 //! [`RunMemory`]: the memory figure one run sizes against, read once at its entry.
 
+use common::SystemMemory;
+
 use crate::memory;
 use crate::memory::budget::Budget;
-use crate::platform::SystemMemory;
 
 /// The memory one run sizes against: one system reading, taken at the run's entry and passed to
 /// every stage, so the tier decision, every chunk size and the decode ceiling cannot disagree.

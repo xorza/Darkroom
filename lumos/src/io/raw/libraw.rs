@@ -388,9 +388,8 @@ mod tests {
     use std::ffi::c_void;
     use std::ptr;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::thread;
 
-    use common::CancelToken;
+    use common::{CancelToken, thread};
 
     use crate::io::raw::libraw::{Hooks, record_data_error};
 
@@ -405,7 +404,7 @@ mod tests {
         let shared = &hooks;
         thread::scope(|scope| {
             for offset in 0..4 {
-                scope.spawn(move || {
+                scope.spawn("lumos-test", move || {
                     let user_data = (&raw const *shared).cast_mut().cast::<c_void>();
                     unsafe { record_data_error(user_data, ptr::null(), offset) };
                 });

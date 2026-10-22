@@ -8,6 +8,8 @@
 use std::array;
 use std::path::Path;
 
+use common::fs;
+
 use imaginarium::Buffer2;
 
 use crate::image::image_dimensions::ImageDimensions;
@@ -93,7 +95,7 @@ fn bayer_rcd_quality_vs_libraw() {
     let path = ["sample_canon.cr2", "raw-12bit-GBRG.dng", "sample.dng"]
         .iter()
         .map(|f| base.join(f))
-        .find(|p| p.exists())
+        .find(|p| fs::exists(p))
         .expect("No Bayer test file found in test_data/raw_samples/");
     println!("Bayer quality comparison on: {}\n", path.display());
 

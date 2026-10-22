@@ -1,8 +1,10 @@
 //! macOS. See [`crate::platform`] for the surface every OS module implements.
 
 use std::ffi::OsString;
+use std::io;
 use std::path::PathBuf;
-use std::process::Command;
+
+use common::{env, process};
 
 use palantir::HostHandle;
 
@@ -30,15 +32,15 @@ pub(super) fn route_opened_documents<A>(handle: HostHandle<A>, open: fn(&mut A, 
     });
 }
 
-pub(super) fn url_opener() -> Command {
-    Command::new("open")
+pub(super) fn open_url(url: &str) -> io::Result<()> {
+    process::spawn("open", [url])
 }
 
 /// `~/Library/Application Support/Darkroom`.
 pub(super) fn config_dir() -> Option<PathBuf> {
     // Not ~/Library/Preferences: NSUserDefaults owns those plists and rewrites
     // them behind a caching daemon, so a hand-edited file there won't survive.
-    resolve_config_dir(std::env::var_os("HOME"))
+    resolve_config_dir(env::var_os("HOME"))
 }
 
 /// Environment passed in, so resolution is testable without `set_var`.
