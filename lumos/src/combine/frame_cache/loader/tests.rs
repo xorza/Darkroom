@@ -11,10 +11,12 @@ use crate::combine::frame_cache::loader::*;
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
+use crate::frame_store::decode_cache::cached_source::CachedSource;
 use crate::frame_store::decode_cache::frame_spill::{Carries, FrameSpill};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -23,6 +25,7 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::fits::write_fits;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
+use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::writer;
 use crate::memory::run_memory::RunMemory;
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -66,21 +69,16 @@ impl SetFrame<'_> {
             combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
         };
         let paths = vec![source; idx + 1];
-        let storage = RunStorage::decoding(&run).unwrap();
-        let load = FrameLoad::<D, Option<Infallible>> {
-            paths: &paths,
-            storage: &storage,
-            kept: storage.kept(),
-            ctx: &run.ctx,
-            step: &None::<Infallible>,
-            decoder: PhantomData,
-        };
+        let files = FileSet::<_, D>::new(&paths, RunStorage::decoding(&run).unwrap(), &run.ctx);
         FrameStore {
-            load: &load,
+            files: &files,
+            kept: files.storage().kept(),
+            step: &None::<Infallible>,
+            ctx: &run.ctx,
             tier: &tier,
             intake: &intake,
         }
-        .frame(idx, None)
+        .frame(idx)
         .map(|loaded| loaded.frame)
     }
 }
@@ -450,15 +448,20 @@ fn cache_frame_dimension_mismatch() {
 /// Three 100 × 100 RGGB mosaics stacked to the image alone, with no normalization. A frame
 /// resides as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a
 /// row over 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and
-/// holds 49 000 more in work; the normalization holds nothing; the combine holds the image and its
-/// flag byte, 5 B a pixel, 50 000 B, and a row copies three frames of 5 B a pixel over 100
-/// pixels into each of its two chunk copies, 3000 B.
+/// holds 49 000 more in work, beside the 30 000 B file the peek read for its frame's decode; the
+/// normalization holds nothing; the combine holds the image and its flag byte, 5 B a pixel,
+/// 50 000 B, and a row copies three frames of 5 B a pixel over 100 pixels into each of its two
+/// chunk copies, 3000 B.
 #[test]
 fn stages_charge_the_decode_the_normalization_and_the_combine() {
-    let peek = FramePeek {
-        dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
-        decoder_bytes: 0,
-        mosaic: Some(CfaType::Bayer(CfaPattern::Rggb)),
+    let peek = SetPeek {
+        idx: 0,
+        info: FrameInfo {
+            dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
+            cfa_type: CfaType::Bayer(CfaPattern::Rggb),
+            decoder: DecoderBytes::default(),
+        },
+        held: 30_000,
     };
     let combine = PlannedCombine {
         normalization: Normalization::None,
@@ -470,7 +473,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
         [
             Stage {
                 kept,
-                held: 0,
+                held: 30_000,
                 in_flight: 49_000,
                 units: Units::Frames,
             },

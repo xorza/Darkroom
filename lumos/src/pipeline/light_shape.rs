@@ -18,13 +18,15 @@ use crate::star_detection::resources::DetectionResources;
 
 /// What a run of lights holds: how many there are, each one's demosaiced dimensions, its way from
 /// its file or the caller to detected, and what the caller held of it before the run read the
-/// machine; and the bytes their decodes add to the decode cache.
+/// machine; what the plan's read of a light left for that light's preparation, held from the
+/// plan until it is taken; and the bytes their decodes add to the decode cache.
 #[derive(Debug)]
 pub(super) struct LightShape {
     pub(super) count: usize,
     pub(super) dimensions: ImageDimensions,
     pub(super) prepared: Footprint,
     pub(super) held: usize,
+    pub(super) peeked: usize,
     pub(super) kept_writes: u64,
 }
 
@@ -54,6 +56,7 @@ impl LightShape {
             dimensions: peek.dimensions,
             prepared: peek.footprint(workers),
             held: 0,
+            peeked: 0,
             kept_writes: 0,
         }
     }
@@ -112,7 +115,7 @@ impl LightShape {
         [
             Stage {
                 kept: self.prepared.kept - self.held,
-                held: 0,
+                held: self.peeked,
                 in_flight: self.prepared.transient() + self.detector_bytes(workers),
                 units: Units::Frames,
             },
@@ -138,7 +141,7 @@ impl LightShape {
         [
             Stage {
                 kept: warped,
-                held: 0,
+                held: self.peeked,
                 in_flight: self.prepared.peak
                     + self.detector_bytes(workers)
                     + self.warp_bytes(workers),
@@ -178,6 +181,7 @@ mod tests {
     use crate::frame::frame_peek::FramePeek;
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
+    use crate::io::frame_info::DecoderBytes;
     use crate::memory::stage::{Stage, Units};
     use crate::pipeline::align_stack_config::AlignStackConfig;
     use crate::pipeline::light_shape::LightShape;
@@ -207,7 +211,7 @@ mod tests {
     fn a_light_is_kept_as_each_stage_leaves_it() {
         let peek = FramePeek {
             dimensions: ImageDimensions::new((4, 4), ChannelLayout::Mono),
-            decoder_bytes: 0,
+            decoder: DecoderBytes::default(),
             mosaic: None,
         };
         let config = AlignStackConfig {
@@ -244,6 +248,20 @@ mod tests {
         assert_eq!(
             decoded.named_reference(&config, 1),
             [stage(224, 0, 3376, Units::Frames), normalize, combine]
+        );
+        // A file the plan's read left for a light's preparation stays beside the preparing,
+        // until the light is taken: on each route's first stage.
+        let peeked = LightShape {
+            peeked: 30,
+            ..LightShape::decoded(peek, 3, 1)
+        };
+        assert_eq!(
+            peeked.found_reference(&config, 1)[0],
+            stage(80, 30, 3232, Units::Frames)
+        );
+        assert_eq!(
+            peeked.named_reference(&config, 1)[0],
+            stage(224, 30, 3376, Units::Frames)
         );
         let [normalize, combine] = tail(144);
         assert_eq!(

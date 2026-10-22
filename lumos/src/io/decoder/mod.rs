@@ -3,6 +3,7 @@
 pub(crate) mod cfa_decoder;
 pub(crate) mod linear_decoder;
 
+use std::fmt::Debug;
 use std::path::Path;
 
 use crate::decode::decoder_kind::DecoderKind;
@@ -16,13 +17,31 @@ use crate::io::load_ctx::LoadCtx;
 pub(crate) trait Decoder {
     type Image: StackableImage;
 
+    /// What a header read leaves in hand that the load then takes rather than read again: a
+    /// camera RAW's file, read whole for LibRaw to parse its header. Uninhabited for a decoder
+    /// whose header read leaves nothing.
+    type Read: Send + Debug;
+
     /// The decoder [`Self::load`] runs, which a kept cache records beside the planes it wrote.
     const KIND: DecoderKind;
 
     fn load(path: &Path, ctx: &LoadCtx) -> Result<Self::Image, ImageError>;
 
+    /// The bytes `read` holds.
+    fn read_len(read: &Self::Read) -> usize;
+
+    /// [`Self::load`] of what a [`Self::peek`] of `path` read.
+    fn load_read(read: Self::Read, path: &Path, ctx: &LoadCtx) -> Result<Self::Image, ImageError>;
+
     /// What a header alone settles about a frame, for a format that can answer without decoding.
-    /// `None` when it cannot, which leaves the caller to decode the frame and read the answer off
-    /// it.
-    fn peek(path: &Path, ctx: &LoadCtx) -> Option<FrameInfo>;
+    /// `None` when it cannot, or the header does not read, which leaves the caller to decode the
+    /// frame and read the answer off it; the decode then reports what the header read did.
+    fn peek(path: &Path, ctx: &LoadCtx) -> Option<Peek<Self::Read>>;
+}
+
+/// What a header read settles about a frame, and what it read that the frame's load takes.
+#[derive(Debug)]
+pub(crate) struct Peek<R> {
+    pub(crate) info: FrameInfo,
+    pub(crate) read: Option<R>,
 }

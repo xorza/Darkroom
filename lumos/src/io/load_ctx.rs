@@ -9,13 +9,14 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::linear_image::LinearImage;
 use crate::image::preview_image::PreviewImage;
+use crate::io::decoder::Peek;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::calibration_bundle::error::BundleError;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::fits::{calibration_bundle, decode as fits_decode, product as fits_product};
-use crate::io::frame_info::FrameInfo;
 use crate::io::input_format::InputFormat;
 use crate::io::null_policy::NullPolicy;
+use crate::io::raw::raw_file::RawFile;
 use crate::io::{raster, raw};
 use crate::memory::run_memory::RunMemory;
 use crate::stack_product::StackProduct;
@@ -130,16 +131,27 @@ impl LoadCtx {
         calibration_bundle::load(path.as_ref(), self)
     }
 
-    /// What the CFA frame at `path` is, read from its header without decoding it.
-    pub(crate) fn cfa_info(&self, path: &Path) -> Result<FrameInfo, ImageError> {
+    /// What the CFA frame at `path` is, read from its header without decoding it, with the file
+    /// a camera RAW's header read leaves for [`Self::cfa_read`].
+    pub(crate) fn cfa_peek(&self, path: &Path) -> Result<Peek<RawFile>, ImageError> {
+        self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::cfa_frame_info(path, self),
-            InputFormat::CameraRaw => raw::cfa_frame_info(path, self),
+            InputFormat::Fits => Ok(Peek {
+                info: fits_decode::cfa_frame_info(path, self)?,
+                read: None,
+            }),
+            InputFormat::CameraRaw => raw::cfa_peek(path, self),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 ScientificRefusal::RasterCfa,
             )),
         }
+    }
+
+    /// [`Self::cfa`] of the camera RAW `file`, read from `path` by [`Self::cfa_peek`].
+    pub(crate) fn cfa_read(&self, file: RawFile, path: &Path) -> Result<CfaImage, ImageError> {
+        self.check_cancelled(path)?;
+        raw::load_cfa_read(file, path, self)
     }
 
     pub(super) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {

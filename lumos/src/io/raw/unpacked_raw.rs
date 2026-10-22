@@ -314,15 +314,16 @@ impl UnpackedRaw {
 
     /// The visible area as a CFA frame: every sample `(v − black) / span`, unclamped — a dark's or
     /// a bias's noise below its pedestal is data the stack averages — with the flags the raw values
-    /// settle. Consumes `self`, so LibRaw's state, tens of MB, is freed before a demosaic allocates
-    /// its own.
+    /// settle. The file is freed before the frame is allocated ([`Libraw::release_file`]), and
+    /// consuming `self` frees LibRaw's state, tens of MB, before a demosaic allocates its own.
     ///
     /// # Errors
     ///
     /// [`RawError::NotACfaFrame`] for a sensor LibRaw delivers already processed, and
     /// [`RawError::NoRawImage`] when LibRaw unpacked no buffer.
-    pub(super) fn into_cfa_image(self) -> Result<CfaImage, RawError> {
+    pub(super) fn into_cfa_image(mut self) -> Result<CfaImage, RawError> {
         let cfa_type = self.cfa_type.ok_or(RawError::NotACfaFrame)?;
+        self.libraw.release_file();
         let raw = self.libraw.raw_image().ok_or(RawError::NoRawImage)?;
         let DecodedRaw { mut pixels, flags } = self.decode(raw);
         // A photosite read as no measurement holds the frame's median, as a FITS null does.

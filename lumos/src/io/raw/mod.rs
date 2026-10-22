@@ -3,6 +3,7 @@ pub(crate) mod error;
 mod libraw;
 pub(crate) mod libraw_filters;
 mod raw_decoder;
+pub(crate) mod raw_file;
 pub(crate) mod raw_files;
 mod sensor_layout;
 mod unpacked_raw;
@@ -19,13 +20,15 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
+use crate::io::decoder::Peek;
 use crate::io::error::{ImageError, OverBudget};
-use crate::io::frame_info::FrameInfo;
+use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::error::RawError;
 use crate::io::raw::libraw::Libraw;
 use crate::io::raw::libraw_filters::LibrawFilters;
 use crate::io::raw::raw_decoder::RawDecoder;
+use crate::io::raw::raw_file::RawFile;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::raw::unpacked_raw::{RawPath, UnpackedRaw};
 
@@ -94,11 +97,10 @@ fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawErro
     .cfa_type()?)
 }
 
-/// Read `path` whole and open it in LibRaw, which then parses the bytes in place, polling the
-/// cancel token of `ctx`. One input path on every system: LibRaw's memory datastream is its
-/// simplest, and a path never meets a narrow or wide file API.
+/// Read `path` whole, for LibRaw to parse in place. One input path on every system: LibRaw's
+/// memory datastream is its simplest, and a path never meets a narrow or wide file API.
 /// A file longer than the context's memory limit is refused before it is read.
-fn open(path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
+fn read(path: &Path, ctx: &LoadCtx) -> Result<RawFile, ImageError> {
     ctx.check_cancelled(path)?;
     let io_error = |source| ImageError::Io {
         path: path.to_path_buf(),
@@ -111,34 +113,50 @@ fn open(path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
     let mut bytes = Vec::with_capacity(usize::try_from(len).expect("a file within the limit"));
     // The length admitted, not what the file grew to since.
     file.take(len).read_to_end(&mut bytes).map_err(io_error)?;
-    Libraw::open(bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source))
+    Ok(RawFile { bytes })
 }
 
-/// Open and unpack `path`, once the decode along the path `route` names is admitted under the
-/// context's memory limit.
+/// `file`, read from `path`, opened in LibRaw, polling the cancel token of `ctx`.
+fn open(file: RawFile, path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
+    Libraw::open(file.bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source))
+}
+
+/// Open and unpack `file`, read from `path`, once the decode along the path `route` names is
+/// admitted under the context's memory limit.
 fn open_raw(
+    file: RawFile,
     path: &Path,
     ctx: &LoadCtx,
     route: impl FnOnce(&Libraw) -> Result<RawPath, RawError>,
 ) -> Result<UnpackedRaw, ImageError> {
-    let libraw = open(path, ctx)?;
+    let libraw = open(file, path, ctx)?;
     route(&libraw)
         .and_then(|route| admit(&libraw, route, ctx.memory_limit_bytes))
         .and_then(|()| UnpackedRaw::unpack(libraw, ctx.decode_threads))
         .map_err(|source| ImageError::raw(path, source))
 }
 
-/// What the decoder of the open `libraw` holds beside the frame it makes: the file LibRaw parses in
-/// place, and the raw buffer it unpacks into.
-const fn decoder_bytes(libraw: &Libraw, layout: &SensorLayout) -> usize {
-    libraw.file_len() + layout.raw.pixel_count() * size_of::<u16>()
+/// What the decoder of the open `libraw` holds while it makes a mosaic: the file LibRaw parses in
+/// place, until the sensor data is unpacked ([`UnpackedRaw::into_cfa_image`]), and the raw buffer
+/// it unpacks into, beside the frame.
+const fn decoder_bytes(libraw: &Libraw, layout: &SensorLayout) -> DecoderBytes {
+    DecoderBytes {
+        source: libraw.file_len(),
+        beside: layout.raw.pixel_count() * size_of::<u16>(),
+    }
 }
 
 /// Refuse a decode of the open `libraw` along `route` past `limit` bytes, from its header before
-/// `unpack`: what it holds at its peak, its decoder and the frame `route` makes.
+/// `unpack`: what it holds at its peak, its decoder and the frame `route` makes. LibRaw's own
+/// processing reads the file again, so it holds the file beside the frame.
 fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
     let layout = SensorLayout::of(&libraw.data().sizes)?;
-    let required = decoder_bytes(libraw, &layout) + route.frame_bytes(layout.active);
+    let decoder = decoder_bytes(libraw, &layout);
+    let frame = route.frame_bytes(layout.active);
+    let required = match route {
+        RawPath::Mosaic => decoder.peak(frame),
+        RawPath::Processed => decoder.source + decoder.beside + frame,
+    };
     OverBudget::check(
         u64::try_from(required).expect("a byte count fits u64"),
         limit,
@@ -153,7 +171,9 @@ fn admit(libraw: &Libraw, route: RawPath, limit: u64) -> Result<(), RawError> {
 /// anywhere, the masked margins included. Anything else — a linear DNG or sRAW, or an exotic
 /// three-color CFA — is LibRaw's own processing.
 pub(super) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
-    let raw = open_raw(path, ctx, |libraw| preview_route(libraw, ctx))?;
+    let raw = open_raw(read(path, ctx)?, path, ctx, |libraw| {
+        preview_route(libraw, ctx)
+    })?;
     ctx.check_cancelled(path)?;
     raw.into_linear_image(ctx)
         .map_err(|source| ImageError::raw(path, source))
@@ -169,10 +189,18 @@ fn preview_route(libraw: &Libraw, ctx: &LoadCtx) -> Result<RawPath, RawError> {
     Ok(route)
 }
 
-/// Read output dimensions and sensor layout without the expensive `libraw_unpack`: the file is
-/// read whole, as every load reads it, but its sensor data is not decoded.
-pub(crate) fn cfa_frame_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, ImageError> {
-    frame_info(&open(path, ctx)?).map_err(|source| ImageError::raw(path, source))
+/// What the CFA frame of `path` is, without the expensive `libraw_unpack`: the file is read whole,
+/// as every load reads it, and kept for the load ([`load_cfa_read`]), but its sensor data is not
+/// decoded.
+pub(crate) fn cfa_peek(path: &Path, ctx: &LoadCtx) -> Result<Peek<RawFile>, ImageError> {
+    let libraw = open(read(path, ctx)?, path, ctx)?;
+    let info = frame_info(&libraw).map_err(|source| ImageError::raw(path, source))?;
+    Ok(Peek {
+        info,
+        read: Some(RawFile {
+            bytes: libraw.into_file(),
+        }),
+    })
 }
 
 /// The refusals LibRaw's identify stage settles, before any decode, which the header read and the
@@ -205,7 +233,7 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     Ok(FrameInfo {
         dimensions: ImageDimensions::new(layout.active, ChannelLayout::Mono),
         cfa_type,
-        decoder_bytes: decoder_bytes(libraw, &layout),
+        decoder: decoder_bytes(libraw, &layout),
     })
 }
 
@@ -213,7 +241,17 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
 /// path, where defects are repaired before any demosaic and a master's noise below its pedestal
 /// stays in.
 pub(crate) fn load_cfa(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
-    let raw = open_raw(path, ctx, |_| Ok(RawPath::Mosaic))?;
+    load_cfa_read(read(path, ctx)?, path, ctx)
+}
+
+/// [`load_cfa`] of `file`, read from `path` already: by the header read that settled the run's
+/// shape ([`cfa_peek`]).
+pub(crate) fn load_cfa_read(
+    file: RawFile,
+    path: &Path,
+    ctx: &LoadCtx,
+) -> Result<CfaImage, ImageError> {
+    let raw = open_raw(file, path, ctx, |_| Ok(RawPath::Mosaic))?;
     ctx.check_cancelled(path)?;
     raw.into_cfa_image()
         .map_err(|source| ImageError::raw(path, source))
@@ -226,8 +264,8 @@ pub(crate) mod internals {
     use crate::image::linear_image::LinearImage;
     use crate::io::error::ImageError;
     use crate::io::load_ctx::LoadCtx;
-    use crate::io::raw::open_raw;
     use crate::io::raw::unpacked_raw::RawPath;
+    use crate::io::raw::{open_raw, read};
 
     /// Load a raw file through libraw's own demosaic at quality `user_qual`, the reference ours is
     /// compared with.
@@ -235,7 +273,8 @@ pub(crate) mod internals {
         path: &Path,
         user_qual: i32,
     ) -> Result<LinearImage, ImageError> {
-        let mut raw = open_raw(path, &LoadCtx::default(), |_| Ok(RawPath::Processed))?;
+        let ctx = LoadCtx::default();
+        let mut raw = open_raw(read(path, &ctx)?, path, &ctx, |_| Ok(RawPath::Processed))?;
         raw.libraw.params_mut().user_qual = user_qual;
         raw.processed_by_libraw()
             .map_err(|source| ImageError::raw(path, source))

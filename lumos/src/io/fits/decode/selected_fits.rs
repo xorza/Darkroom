@@ -27,7 +27,7 @@ use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension;
 use crate::io::fits::lumos_extension::DescribedImage;
 use crate::io::fits::{cfa, linear, metadata};
-use crate::io::frame_info::FrameInfo;
+use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 
 /// One image HDU of an open FITS file: the reader, the HDU, its decode plan, the mosaic its header
@@ -203,8 +203,11 @@ impl<'r> SelectedFits<'r> {
         Ok(FrameInfo {
             dimensions: self.plan.dimensions,
             cfa_type: self.require_cfa()?,
-            decoder_bytes: usize::try_from(self.beside_frame_bytes())
-                .expect("a decode the plan admitted fits the address space"),
+            decoder: DecoderBytes {
+                source: 0,
+                beside: usize::try_from(self.beside_frame_bytes())
+                    .expect("a decode the plan admitted fits the address space"),
+            },
         })
     }
 

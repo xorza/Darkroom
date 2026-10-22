@@ -1,13 +1,11 @@
 //! [`RunStorage`]: where one run reads its frames from and writes them to.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::frame_store::decode_cache::DecodeCache;
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::storage_tier::StorageTier;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::decoder::Decoder;
-use crate::io::load_ctx::LoadCtx;
 use crate::memory::run_plan::RunPlan;
 
 /// Where one run reads its frames from and writes them to: the decode cache, when the run keeps
@@ -55,31 +53,6 @@ impl RunStorage {
     /// The decode cache, when the run keeps one.
     pub(crate) const fn kept(&self) -> Option<&DecodeCache> {
         self.kept.as_ref()
-    }
-
-    /// `path` decoded by `D` under `ctx`, whole in RAM: through the decode cache when the run
-    /// keeps one ([`DecodeCache::decode`]).
-    ///
-    /// # Errors
-    ///
-    /// The decode, or the cache.
-    pub(crate) fn decode<D: Decoder>(
-        &self,
-        path: &Path,
-        ctx: &LoadCtx,
-    ) -> Result<D::Image, LoadError> {
-        match &self.kept {
-            Some(kept) => kept.decode::<D>(path, ctx),
-            None => Ok(D::load(path, ctx)?),
-        }
-    }
-
-    /// How many of `paths` the decode cache does not hold decoded by `D` under `ctx`: the
-    /// frames the run writes to it. None without a cache.
-    pub(crate) fn uncached<D: Decoder>(&self, paths: &[impl AsRef<Path>], ctx: &LoadCtx) -> usize {
-        self.kept
-            .as_ref()
-            .map_or(0, |kept| kept.missing::<D>(paths, ctx))
     }
 
     /// The tier `plan` keeps the run's frames in, once the disk is known to hold what the run

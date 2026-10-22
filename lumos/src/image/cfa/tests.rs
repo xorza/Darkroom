@@ -561,7 +561,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     let dir = TempDir::new("lumos-cfa-roundtrip");
     let path = dir.join("master.fits");
     writer::cfa_fits(&cfa, &path).unwrap();
-    let info = LoadCtx::default().cfa_info(&path).unwrap();
+    let info = LoadCtx::default().cfa_peek(&path).unwrap().info;
     assert_eq!(
         info.dimensions,
         ImageDimensions::new((2, 2), ChannelLayout::Mono)

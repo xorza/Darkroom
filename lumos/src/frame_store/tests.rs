@@ -27,9 +27,20 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
+use crate::image::stackable_image::StackableImage;
 use crate::internals::panic_message;
 use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
 use crate::io::load_ctx::LoadCtx;
+
+/// The frame `spill` commits, mapped, as a reuse reads it.
+fn reuse(spill: &FrameSpill<'_>) -> Option<KeptFrame> {
+    KeptFrame::reuse(spill, spill.committed()?)
+}
+
+/// The frame `spill` commits, as the image it was decoded to.
+fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
+    KeptFrame::reuse_image(spill, spill.committed()?)
+}
 
 /// A parked image reads back with its pixels, metadata and null mask; one with no nulls reads
 /// back with none. Its files have no name while it lives where a scratch file keeps none, and none
@@ -199,7 +210,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let (spill, written) = cache("masked", &image);
     assert!(written.samples.is_none());
     drop(written);
-    let reused = KeptFrame::reuse(&spill).unwrap();
+    let reused = reuse(&spill).unwrap();
     assert_eq!(reused.dimensions(), dimensions);
     let frame = reused.into_frame();
     assert_eq!(frame.channels[0].chunk(0..4), &[1.0, 2.0, 3.0, 4.0]);
@@ -211,7 +222,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     );
     drop(frame);
     // Read back whole, the frame is the image it was decoded to, flags and metadata with it.
-    let restored: LinearImage = KeptFrame::reuse(&spill).unwrap().into_image();
+    let restored: LinearImage = reuse_image(&spill).unwrap();
     assert_eq!(restored.channel(0).pixels(), image.channel(0).pixels());
     assert_eq!(
         restored.flags().unwrap().bytes(),
@@ -248,27 +259,28 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         .chain(other_options)
     {
         let other = FrameSpill::named(dir.path(), "masked", other);
-        assert!(KeptFrame::reuse(&other).is_none());
+        assert!(reuse(&other).is_none());
     }
 
     fs::remove_file(spill.flags_path()).unwrap();
-    assert!(
-        KeptFrame::reuse(&spill).is_none(),
-        "a mask without its flags"
-    );
+    assert!(reuse(&spill).is_none(), "a mask without its flags");
+    assert!(reuse_image::<LinearImage>(&spill).is_none());
 
     // A frame of no mask keeps one slot of samples, on the first run as on a reuse.
     let plain = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let (spill, written) = cache("plain", &plain);
     assert_eq!(written.samples.as_ref().map(ArrayVec::len), Some(1));
     drop(written);
-    let frame = KeptFrame::reuse(&spill).unwrap().into_frame();
+    let frame = reuse(&spill).unwrap().into_frame();
     assert!(frame.quality.is_none());
     assert!(frame.flat_gain.is_none());
     assert_eq!(frame.samples.as_ref().map(ArrayVec::len), Some(1));
     drop(frame);
     fs::remove_file(spill.samples_path(0)).unwrap();
-    assert!(KeptFrame::reuse(&spill).is_none(), "samples gone");
+    assert!(reuse(&spill).is_none(), "samples gone");
+    // An image carries no samples, so it is read back whole without them.
+    let restored: LinearImage = reuse_image(&spill).unwrap();
+    assert_eq!(restored.channel(0).pixels(), plain.channel(0).pixels());
 
     // A frame a flat divided keeps its gain's nodes as a plane, mapped on reuse — the stored gain
     // the combine reads, one channel of it — and back in RAM, the same grid, when read whole.
@@ -281,35 +293,40 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     flattened.set_flat_gain(Some(Arc::clone(&gain)));
     let (spill, written) = cache("flattened", &flattened);
     drop(written);
-    let frame = KeptFrame::reuse(&spill).unwrap().into_frame();
+    let frame = reuse(&spill).unwrap().into_frame();
     let stored = frame.flat_gain.as_ref().unwrap();
     assert!(matches!(stored, StoredGain::Mapped { .. }));
     assert_eq!(stored.channels(), 1);
     drop(frame);
-    let restored: LinearImage = KeptFrame::reuse(&spill).unwrap().into_image();
+    let restored: LinearImage = reuse_image(&spill).unwrap();
     assert!(restored.flat_gain().unwrap().planes().eq(gain.planes()));
     let nodes = fs::read(spill.gain_path(0)).unwrap();
     fs::write(spill.gain_path(0), &nodes[..4]).unwrap();
-    assert!(KeptFrame::reuse(&spill).is_none(), "a gain plane cut short");
+    assert!(reuse(&spill).is_none(), "a gain plane cut short");
+    assert!(reuse_image::<LinearImage>(&spill).is_none());
     fs::write(spill.gain_path(0), &nodes).unwrap();
 
     let channel = fs::read(spill.channel_path(0)).unwrap();
     fs::write(spill.channel_path(0), &channel[..12]).unwrap();
     assert!(
-        KeptFrame::reuse(&spill).is_none(),
+        reuse(&spill).is_none(),
         "a plane shorter than the shape it was committed with"
     );
+    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    let mut flipped = channel.clone();
+    flipped[0] ^= 1;
+    fs::write(spill.channel_path(0), &flipped).unwrap();
+    assert!(reuse(&spill).is_none(), "a plane changed");
+    assert!(reuse_image::<LinearImage>(&spill).is_none());
     fs::write(spill.channel_path(0), &channel).unwrap();
-    assert!(
-        KeptFrame::reuse(&spill).is_some(),
-        "the planes as committed"
-    );
+    assert!(reuse(&spill).is_some(), "the planes as committed");
     fs::remove_file(spill.channel_path(0)).unwrap();
-    assert!(KeptFrame::reuse(&spill).is_none());
+    assert!(reuse(&spill).is_none());
 }
 
 /// A published plane maps back as written, from the handle that wrote it: a plane published under
 /// the same name after it replaces the name, and leaves the first map reading its own samples.
+/// Each carries the digest of what it wrote, the bytes its map holds.
 #[test]
 fn a_published_plane_maps_back_what_its_writer_wrote() {
     let dir = TempDir::new("frame_store_plane");
@@ -317,6 +334,14 @@ fn a_published_plane_maps_back_what_its_writer_wrote() {
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
     let first = StoredPlane::publish(&path, &pixels).unwrap();
     let second = StoredPlane::publish(&path, &[7.0f32; 12]).unwrap();
+    for published in [&first, &second] {
+        assert_eq!(
+            published.digest,
+            <[u8; 32]>::from(blake3::hash(published.plane.bytes()))
+        );
+    }
+    assert_ne!(first.digest, second.digest);
+    let (first, second) = (first.plane, second.plane);
     assert_eq!(first.chunk(0..12), pixels);
     assert_eq!(second.chunk(0..12), &[7.0; 12]);
     let named = StoredPlane::<f32>::map(&path).unwrap();

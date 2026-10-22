@@ -65,10 +65,10 @@ impl StoredFrame {
     }
 
     /// Each slot's [`StratifiedSamples`] of `image`, each stored by `store(slot, samples)`.
-    pub(super) fn store_samples(
+    pub(super) fn store_samples<P>(
         image: &impl StackableImage,
-        mut store: impl FnMut(usize, &[f32]) -> Result<StoredPlane, FrameStoreError>,
-    ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
+        mut store: impl FnMut(usize, &[f32]) -> Result<P, FrameStoreError>,
+    ) -> Result<ArrayVec<P, 3>, FrameStoreError> {
         let size = image.dimensions().size();
         let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
         let slots = mosaic.map_or_else(|| image.dimensions().channels(), |cfa| cfa.color_count());

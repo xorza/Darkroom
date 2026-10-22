@@ -9,13 +9,11 @@ use std::path::Path;
 
 use crate::frame::admitted::Admitted;
 use crate::frame_store::decode_cache::cached_source::CachedSource;
-use crate::frame_store::decode_cache::frame_spill::FrameSpill;
+use crate::frame_store::decode_cache::frame_spill::{Committed, FrameSpill};
 use crate::frame_store::decode_cache::kept_frame::KeptFrame;
 use crate::frame_store::disk_root::DiskRoot;
-use crate::frame_store::error::{FrameStoreError, LoadError};
+use crate::frame_store::error::FrameStoreError;
 use crate::image::stackable_image::StackableImage;
-use crate::io::decoder::Decoder;
-use crate::io::load_ctx::LoadCtx;
 
 /// The directory under the cache root a kept frame lives in.
 const DIR: &str = "decode-cache";
@@ -48,14 +46,13 @@ impl DecodeCache {
     }
 
     /// The files the frame of `source` is kept in.
-    fn spill<'a>(&'a self, source: &'a CachedSource) -> FrameSpill<'a> {
+    pub(super) fn spill<'a>(&'a self, source: &'a CachedSource) -> FrameSpill<'a> {
         FrameSpill::cached(self.path(), &source.canonical, source.key)
     }
 
-    /// The frame committed for `source` as it is now; `None` when none whole is
-    /// ([`KeptFrame::reuse`]).
-    pub(crate) fn reuse(&self, source: &CachedSource) -> Option<KeptFrame> {
-        KeptFrame::reuse(&self.spill(source))
+    /// What the cache committed for `source` as it is now; `None` when it holds no frame of it.
+    pub(super) fn committed(&self, source: &CachedSource) -> Option<Committed> {
+        self.spill(source).committed()
     }
 
     /// Keep `image`, decoded from `source` after it was read, as its admission found it. The source
@@ -74,40 +71,6 @@ impl DecodeCache {
         source.ensure_unchanged()?;
         KeptFrame::keep(&self.spill(source), image, admitted)
     }
-
-    /// `path` decoded by `D` under `ctx`, whole in RAM: read back from the cache when a frame
-    /// is committed there for the source as it is now, decoded and kept otherwise. For an entry
-    /// that changes a frame in place — calibration, a cosmic-ray pass — and measures it after.
-    ///
-    /// # Errors
-    ///
-    /// The decode, or the cache.
-    pub(crate) fn decode<D: Decoder>(
-        &self,
-        path: &Path,
-        ctx: &LoadCtx,
-    ) -> Result<D::Image, LoadError> {
-        let source = CachedSource::of(path, D::KIND, ctx)?;
-        if let Some(reused) = self.reuse(&source) {
-            return Ok(reused.into_image());
-        }
-        let image = D::load(path, ctx)?;
-        self.keep(&source, &image, Admitted::measure(&image))?;
-        Ok(image)
-    }
-
-    /// How many of `paths` hold no frame committed for their source as it is now, decoded by `D`
-    /// under `ctx`: the frames a run that reads them through the cache writes. A path that
-    /// cannot be read counts as one, as its run fails on it anyway.
-    pub(crate) fn missing<D: Decoder>(&self, paths: &[impl AsRef<Path>], ctx: &LoadCtx) -> usize {
-        paths
-            .iter()
-            .filter(|path| match CachedSource::of(path.as_ref(), D::KIND, ctx) {
-                Ok(source) => self.spill(&source).committed().is_none(),
-                Err(_) => true,
-            })
-            .count()
-    }
 }
 
 #[cfg(test)]
@@ -118,10 +81,22 @@ pub(crate) mod internals {
 
     use crate::frame_store::decode_cache::DecodeCache;
     use crate::frame_store::decode_cache::cached_source::CachedSource;
+    use crate::frame_store::decode_cache::kept_frame::KeptFrame;
     use crate::io::decoder::Decoder;
     use crate::io::load_ctx::LoadCtx;
 
     impl DecodeCache {
+        /// The frame kept for `path` decoded by `D` under `ctx`, as the image it was decoded to;
+        /// `None` when none is.
+        pub(crate) fn kept_image<D: Decoder>(
+            &self,
+            path: &Path,
+            ctx: &LoadCtx,
+        ) -> Option<D::Image> {
+            let source = CachedSource::of(path, D::KIND, ctx).ok()?;
+            KeptFrame::reuse_image(&self.spill(&source), self.committed(&source)?)
+        }
+
         /// Edit channel 0 of the frame kept for `path` decoded by `D` under `ctx`, as anything
         /// outside lumos could, and commit it again as it now is: a test that edits a kept frame on
         /// purpose sees a later run read it back rather than decode the source.

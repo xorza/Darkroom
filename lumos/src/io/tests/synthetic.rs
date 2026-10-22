@@ -44,7 +44,7 @@ use crate::io::error::{ImageError, OverBudget, ScientificRefusal};
 use crate::io::fits::decode;
 use crate::io::fits::error::{FitsAllocation, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale, FitsLoadConfig};
-use crate::io::frame_info::FrameInfo;
+use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::writer;
@@ -825,13 +825,18 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(cache_loaded.data(), loaded.data());
     assert_eq!(cache_loaded.cfa_type(), loaded.cfa_type());
     // The reader holds the whole frame as one chunk beside it: 1024 samples of 4 bytes as
-    // stored, and as many swapped into words.
+    // stored, and as many swapped into words. The header is streamed, so the peek keeps nothing.
+    let peek = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap();
+    assert!(peek.read.is_none());
     assert_eq!(
-        CfaDecoder::peek(&path, &LoadCtx::default()),
+        Some(peek.info),
         Some(FrameInfo {
             dimensions: ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
             cfa_type: pattern,
-            decoder_bytes: 8192,
+            decoder: DecoderBytes {
+                source: 0,
+                beside: 8192,
+            },
         })
     );
 
@@ -853,7 +858,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     );
     // The preview is admitted with its demosaic, from the header: refused one byte short of the
     // way's peak, past what the decode alone holds.
-    let info = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap();
+    let info = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap().info;
     let way = u64::try_from(
         info.demosaiced(
             info.decoded(),

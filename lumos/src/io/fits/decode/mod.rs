@@ -31,7 +31,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
-use crate::io::frame_info::FrameInfo;
+use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
@@ -172,8 +172,11 @@ pub(crate) fn linear_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, Image
     Ok(FrameInfo {
         dimensions: selected.plan.dimensions,
         cfa_type: CfaType::Mono,
-        decoder_bytes: usize::try_from(selected.beside_frame_bytes())
-            .expect("a decode the plan admitted fits the address space"),
+        decoder: DecoderBytes {
+            source: 0,
+            beside: usize::try_from(selected.beside_frame_bytes())
+                .expect("a decode the plan admitted fits the address space"),
+        },
     })
 }
 

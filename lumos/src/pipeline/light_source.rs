@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::frame::frame_peek::FramePeek;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
+use crate::io::frame_info::FrameInfo;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::light_files::LightFiles;
 use crate::pipeline::light_shape::LightShape;
@@ -34,7 +35,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         match self {
             // They were in memory before the run read the machine: the plan charges them as held.
             Self::Held(frames) => Ok(LightShape::held(
-                FramePeek::of_decoded(&frames[0]),
+                FramePeek::from(FrameInfo::of_decoded(&frames[0])),
                 frames.len(),
                 run.budget.workers(),
             )),
