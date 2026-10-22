@@ -37,7 +37,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
         .size((Sizing::FILL, Sizing::HUG))
         .child_align(Align::new(HAlign::Right, VAlign::Center))
         .padding(Spacing::xy(PAD_X, PAD_Y))
-        .bg(Bg::fill(colors.chrome_fill))
+        .chrome(Chrome::fill(colors.chrome_fill))
         .show(ui, |ui| {
             if let Some(message) = ctx.status_message() {
                 let status = &ctx.theme().status;

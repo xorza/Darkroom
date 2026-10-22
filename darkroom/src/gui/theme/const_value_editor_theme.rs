@@ -43,11 +43,11 @@ impl ConstValueEditorTheme {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = Self::from_palette(p);
         let reveal = Brush::Solid(p.element_mid.with_alpha(REVEAL_ALPHA));
-        for bg in [
-            &mut out.drag_value.chip.looks.normal.bg,
-            &mut out.drag_value.editor.looks.normal.bg,
+        for chrome in [
+            &mut out.drag_value.chip.looks.normal.chrome,
+            &mut out.drag_value.editor.looks.normal.chrome,
         ] {
-            bg.fill = reveal.clone();
+            chrome.fill = reveal.clone();
         }
         out
     }

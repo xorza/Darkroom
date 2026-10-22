@@ -1,5 +1,11 @@
 # Open issues
 
+- **darkroom uses "chrome" in two senses.** `palantir::Chrome` is a node's
+  fill, border, corner radii and shadow, and darkroom passes it to every
+  panel. darkroom also names its frame surfaces chrome: `ChromeColors`,
+  `Palette::chrome_fill`, the `chrome_fill` key of
+  `darkroom/assets/ayu-graphite.ron`, and the "chrome bands" of
+  `gui/main_window/mod.rs`.
 - **Two lumos doc comments name items that no longer exist.**
   `lumos/src/image_ops/color_calibration/mod.rs:9` links
   `neutralize_background::NeutralizeBackground`, and

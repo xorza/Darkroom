@@ -36,7 +36,7 @@ pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>) {
         .gap(5.0)
         // Round only the bottom corners so the strip seats into the node's
         // rounded bottom — the header rounds the top the same way.
-        .bg(support::footer_bg(theme, r))
+        .chrome(support::footer_chrome(theme, r))
         .show(ui, |ui| {
             Panel::hstack()
                 .id_salt("node_mem_meters")
@@ -103,7 +103,7 @@ impl Pool {
         Panel::zstack()
             .id_salt(("node_mem_seg", self.label))
             .size((Sizing::fill(self.bytes as f32), Sizing::FILL))
-            .bg(Bg::rounded(self.hue, Corners::all(BAR_H * 0.5)))
+            .chrome(Chrome::rounded(self.hue, Corners::all(BAR_H * 0.5)))
             .show(ui, |_ui| {});
     }
 }
@@ -115,7 +115,7 @@ fn dot_cell(ui: &mut Ui, hue: RgbaF32) {
     Panel::zstack()
         .id_salt("node_mem_dot")
         .size((Sizing::fixed(DOT), Sizing::fixed(DOT)))
-        .bg(Bg::rounded(hue, Corners::all(DOT * 0.5)))
+        .chrome(Chrome::rounded(hue, Corners::all(DOT * 0.5)))
         .show(ui, |_ui| {});
 }
 

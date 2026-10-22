@@ -129,7 +129,7 @@ impl MainWindow {
         let app = cx.app();
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
-        let chrome = app.theme().colors.chrome_fill;
+        let fill = app.theme().colors.chrome_fill;
         let Self {
             graph_ui,
             image_viewers,
@@ -152,7 +152,7 @@ impl MainWindow {
                     .id_salt("chrome_row")
                     .size((Sizing::FILL, Sizing::HUG))
                     .child_align(Align::v(VAlign::Bottom))
-                    .bg(Bg::fill(chrome))
+                    .chrome(Chrome::fill(fill))
                     .show(ui, |ui| {
                         menu_bar::show(ui, app.theme(), out);
                     });
