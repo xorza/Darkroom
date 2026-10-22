@@ -1,2 +1,9 @@
 # Open issues
 
+- **A merged worker batch can fail a run-to-node for a superseded request.**
+  `WorkerTask::next_intent` merges every pending message into one
+  `BatchIntent`, where the last `Update` wins but the `RunNodes` seeds of every
+  message accumulate. A run-to-node followed, before the worker wakes, by an
+  install of a graph without that node fails the run with `NodeSeedNotFound`
+  (`scenarium/src/execution/schedule/mod.rs:410`), and the editor reports it as
+  a run error.
