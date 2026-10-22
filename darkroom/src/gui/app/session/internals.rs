@@ -21,7 +21,7 @@ use palantir::Ui;
 use palantir::internals::ui_harness::UiHarness;
 use scenarium::Library;
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
@@ -65,7 +65,7 @@ pub(crate) struct SessionHarness {
 impl SessionHarness {
     /// Real text shaping — the dock strip and node headers size to their
     /// labels, so mono metrics would put every chip in the wrong place.
-    pub(crate) fn new(fixture: DocFixture) -> Self {
+    pub(crate) fn new(fixture: DocumentFixture) -> Self {
         let theme = Theme::default();
         let mut ui = UiHarness::with_text(SURFACE);
         // What `App::new` does before frame 1, and what every palantir
@@ -75,7 +75,7 @@ impl SessionHarness {
         ui.ui().set_theme(theme.palantir.clone());
         Self {
             ui,
-            session: Session::new(OpenDocument::over(fixture.doc)),
+            session: Session::new(OpenDocument::over(fixture.document)),
             library: Arc::new(fixture.library),
             theme,
             run_state: RunState::new(wake::internals::noop()),

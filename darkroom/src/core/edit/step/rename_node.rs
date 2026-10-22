@@ -15,8 +15,9 @@ pub(crate) struct RenameNode {
 }
 
 impl Reversible for RenameNode {
-    fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.graph
+    fn write(&self, document: &mut Document, dir: Direction) {
+        document
+            .graph
             .find_mut(self.node_id)
             .unwrap()
             .name

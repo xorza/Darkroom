@@ -47,8 +47,8 @@ fn show_selected_wid() -> WidgetId {
 /// queues its [`AppCommand`]; a view-framing click queues a
 /// `GraphIntent::SetViewport`. It hit-tests above the canvas (drawn after it),
 /// so a click on a button never starts a pan.
-pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-    let (theme, graph_ctx) = (cx.theme(), cx.graph_ctx());
+pub(super) fn show(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+    let (theme, graph_ctx) = (ctx.theme(), ctx.graph_ctx());
     let run_state = graph_ctx.run_state();
     Panel::vstack()
         .id_salt("graph_toolbar")
@@ -110,17 +110,17 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill::dress(framing, theme).show(ui, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
-                    out.extend_graph(Framing::Reset.intent(ui, cx));
+                    out.extend_graph(Framing::Reset.intent(ui, ctx));
                 }
                 if Chip::new(show_all_wid(), "Show all").show(ui, theme, draw_show_all) {
-                    out.extend_graph(Framing::ShowAll.intent(ui, cx));
+                    out.extend_graph(Framing::ShowAll.intent(ui, ctx));
                 }
                 if Chip::new(show_selected_wid(), "Show selected").show(
                     ui,
                     theme,
                     draw_show_selected,
                 ) {
-                    out.extend_graph(Framing::ShowSelected.intent(ui, cx));
+                    out.extend_graph(Framing::ShowSelected.intent(ui, ctx));
                 }
             });
         });
@@ -165,8 +165,8 @@ fn draw_show_all(ui: &mut Ui, s: f32, color: RgbaF32) {
     let near = s * 0.5 - s * 0.11;
     let far = s * 0.5 + s * 0.11;
     for &cy in &[near, far] {
-        for &cx in &[near, far] {
-            ui.add_shape(support::dot(Vec2::new(cx, cy), r).fill(color));
+        for &ctx in &[near, far] {
+            ui.add_shape(support::dot(Vec2::new(ctx, cy), r).fill(color));
         }
     }
 }

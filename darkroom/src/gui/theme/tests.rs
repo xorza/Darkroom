@@ -9,7 +9,7 @@ assert_not_impl_any!(CardTheme: Copy);
 assert_not_impl_any!(PortTheme: Copy);
 assert_not_impl_any!(StatusColors: Copy);
 assert_not_impl_any!(TypeColors: Copy);
-assert_not_impl_any!(ConstValueEditorTheme: Copy);
+assert_not_impl_any!(ConstEditorTheme: Copy);
 assert_not_impl_any!(InlineRenameTheme: Copy);
 
 /// Pin which palette role reaches which field, plus the non-trivial

@@ -219,7 +219,7 @@ impl ImageViewer {
         &mut self,
         ui: &mut Ui,
         pane_view: ViewerPane<'_>,
-        prefs: &mut ViewerPreferences,
+        preferences: &mut ViewerPreferences,
     ) -> bool {
         let ViewerPane {
             theme,
@@ -239,8 +239,8 @@ impl ImageViewer {
         self.apply_gestures(ui, source.image().map(FullView::image), pane);
 
         // The checker draws over the theme's backdrop.
-        let fill = glyph::flat_fill(theme, prefs.bg).unwrap_or(theme.canvas.bg);
-        let mut prefs_changed = false;
+        let fill = glyph::flat_fill(theme, preferences.bg).unwrap_or(theme.canvas.bg);
+        let mut preferences_changed = false;
         Panel::zstack()
             .id(pane_wid(self.node_id))
             .size((Sizing::FILL, Sizing::FILL))
@@ -248,7 +248,7 @@ impl ImageViewer {
             .clip_rect()
             .chrome(Chrome::fill(fill))
             .show(ui, |ui| {
-                if prefs.bg == ViewerBg::Checker
+                if preferences.bg == ViewerBg::Checker
                     && let Some(pane) = pane
                 {
                     self.draw_checker(ui, pane);
@@ -257,7 +257,7 @@ impl ImageViewer {
                     let shown = view.image();
                     let image = Shape::image(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
-                        .mag_filter(prefs.mag_filter)
+                        .mag_filter(preferences.mag_filter)
                         // Area averaging preserves source brightness when minifying.
                         .downsample(ImageDownsample::Mean);
                     ui.add_shape(match self.effective_view(ui, shown, pane) {
@@ -274,7 +274,7 @@ impl ImageViewer {
                         view,
                     };
                     self.header(ui, shown);
-                    prefs_changed = self.controls(ui, shown, prefs);
+                    preferences_changed = self.controls(ui, shown, preferences);
                 }
                 // Complementary to the image above, so this is the same
                 // either/or the enum states — never a second thing drawn over
@@ -288,7 +288,7 @@ impl ImageViewer {
                     .show(ui, theme);
                 }
             });
-        prefs_changed
+        preferences_changed
     }
 
     /// The screen-fixed checkerboard backdrop across the whole pane. One
@@ -338,11 +338,16 @@ impl ImageViewer {
     /// frosted pills, opaque chip buttons raised off each pill. The top
     /// pill frames the view (fit, 100%); the column below edits the
     /// shared appearance preferences — the backdrop radio stack and,
-    /// past a rule, the sampling toggle. Returns `true` when `prefs`
+    /// past a rule, the sampling toggle. Returns `true` when `preferences`
     /// changed. Drawn after the image so the buttons hit-test above the
     /// pane's gesture surface. Framing clicks land next frame (responses
     /// lag the record by one frame) — imperceptible.
-    fn controls(&mut self, ui: &mut Ui, shown: Shown<'_>, prefs: &mut ViewerPreferences) -> bool {
+    fn controls(
+        &mut self,
+        ui: &mut Ui,
+        shown: Shown<'_>,
+        preferences: &mut ViewerPreferences,
+    ) -> bool {
         let (theme, pane) = (shown.pane.theme, shown.pane.size);
         let controls = Controls {
             node_id: self.node_id,
@@ -378,18 +383,18 @@ impl ImageViewer {
                 });
                 let appearance = Panel::vstack().id(controls.wid("pill_appearance"));
                 pill::dress(appearance, theme).show(ui, |ui| {
-                    for (mode, key, tip) in BACKDROPS {
-                        let state = Toggle::from(prefs.bg == mode);
-                        if Chip::new(controls.wid(key), tip).show(ui, theme, |ui, s, _| {
+                    for (mode, key, tooltip) in BACKDROPS {
+                        let state = Toggle::from(preferences.bg == mode);
+                        if Chip::new(controls.wid(key), tooltip).show(ui, theme, |ui, s, _| {
                             Swatch { mode, state }.draw(ui, s, theme);
                         }) && state == Toggle::Off
                         {
-                            prefs.bg = mode;
+                            preferences.bg = mode;
                             changed = true;
                         }
                     }
                     pill::rule(ui, theme);
-                    changed |= controls.filter_toggle(ui, &mut prefs.mag_filter);
+                    changed |= controls.filter_toggle(ui, &mut preferences.mag_filter);
                 });
             });
         changed
@@ -482,8 +487,8 @@ impl Display for HeaderReadout<'_> {
 /// resolves its own — the strip labels the tabs it is drawing, the pane header
 /// labels the one tab it is — because one hash probe per label is cheaper than
 /// a table keyed by every tab.
-pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
-    let name = &doc
+pub(crate) fn node_label(document: &Document, node_id: NodeId) -> &str {
+    let name = &document
         .graph
         .find(node_id)
         .expect("a viewer tab's node is in the graph")

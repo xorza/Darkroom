@@ -17,13 +17,13 @@ const BAR_H: f32 = 3.0;
 
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram()`
 /// is mirrored from the run cache; each pool shows only when non-zero.
-pub(super) fn show(ui: &mut Ui, ncx: NodeCtx<'_>) {
-    let node = ncx;
+pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
+    let node = node_ctx;
     let ram = node.ram();
     if ram.total() == 0 {
         return;
     }
-    let theme = ncx.theme();
+    let theme = node_ctx.theme();
     // Same inner radius the header rounds to (`CardTheme::inner_radius`),
     // not the card's raw outer `corner_radius` — else this strip's
     // corner leaves a wedge of body fill showing past the border stroke.

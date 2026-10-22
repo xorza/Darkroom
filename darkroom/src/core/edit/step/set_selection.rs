@@ -18,8 +18,11 @@ pub(crate) struct SetSelection {
 }
 
 impl Reversible for SetSelection {
-    fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.main_view.selected.clone_from(self.selection.half(dir));
+    fn write(&self, document: &mut Document, dir: Direction) {
+        document
+            .main_view
+            .selected
+            .clone_from(self.selection.half(dir));
     }
 
     fn is_noop(&self) -> bool {

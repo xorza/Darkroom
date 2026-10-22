@@ -4,7 +4,7 @@ use glam::UVec2;
 use scenarium::{FuncId, Graph, Library, internals};
 
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// A much bigger search field and a much roomier popup than the defaults.
@@ -62,7 +62,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // Real shaping: the search field sizes to its text, which is the
         // measurement the cap has to divide around.
         let mut h = CanvasHarness::shaping_text(
-            DocFixture::with_library(Graph::default(), library),
+            DocumentFixture::with_library(Graph::default(), library),
             SURFACE,
         );
         restyle(h.ui.ui().theme_mut());
@@ -161,7 +161,10 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
     /// below and that frame has nothing else to do.
     const IDLE: Duration = Duration::from_millis(600);
 
-    let mut h = CanvasHarness::new(DocFixture::with_library(Graph::default(), bulk_library(12)));
+    let mut h = CanvasHarness::new(DocumentFixture::with_library(
+        Graph::default(),
+        bulk_library(12),
+    ));
     h.frame();
     let anchor = Vec2::new(500.0, 400.0);
     h.ui.right_click_at(anchor);

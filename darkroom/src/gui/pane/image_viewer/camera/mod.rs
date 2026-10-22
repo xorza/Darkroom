@@ -21,20 +21,20 @@ pub(super) const VIEWER_ZOOM: ZoomRange = ZoomRange {
 };
 
 /// The pane-local rect a viewport paints the texture into.
-pub(super) fn draw_rect(img: Vec2, v: Viewport) -> Rect {
+pub(super) fn draw_rect(image: Vec2, v: Viewport) -> Rect {
     Rect {
         min: v.pan,
-        size: Size::new(img.x * v.zoom, img.y * v.zoom),
+        size: Size::new(image.x * v.zoom, image.y * v.zoom),
     }
 }
 
-/// Aspect-preserving fit of `img` (its 1:1 logical footprint) in `pane`
+/// Aspect-preserving fit of `image` (its 1:1 logical footprint) in `pane`
 /// (`ImageFit::Contain` semantics, upscaling small images too), as an
 /// explicit viewport so the drawn fit and the gesture math can't drift.
-pub(super) fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
-    let zoom = (pane.x / img.x).min(pane.y / img.y);
+pub(super) fn fit_viewport(image: Vec2, pane: Vec2) -> Viewport {
+    let zoom = (pane.x / image.x).min(pane.y / image.y);
     Viewport {
-        pan: (pane - img * zoom) * 0.5,
+        pan: (pane - image * zoom) * 0.5,
         zoom,
     }
 }

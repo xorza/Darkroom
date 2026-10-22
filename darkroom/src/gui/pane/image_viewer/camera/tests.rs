@@ -27,11 +27,11 @@ fn fit_viewport_centers_and_scales_like_contain() {
     // image's logical footprint (`logical_size` divides by the scale), so a
     // 400×200-texel image on a 2x display arrives as 200×100. Fitting that in
     // the 800×800 pane zooms 4x and draws 800×400 logical.
-    let img = Vec2::new(200.0, 100.0);
-    let v = fit_viewport(img, Vec2::new(800.0, 800.0));
+    let image = Vec2::new(200.0, 100.0);
+    let v = fit_viewport(image, Vec2::new(800.0, 800.0));
     assert_eq!(v.zoom, 4.0);
     assert_eq!(v.pan, Vec2::new(0.0, 200.0));
-    assert_eq!(draw_rect(img, v).size, Size::new(800.0, 400.0));
+    assert_eq!(draw_rect(image, v).size, Size::new(800.0, 400.0));
 }
 
 #[test]

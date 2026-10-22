@@ -3,8 +3,8 @@
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
+use crate::gui::pane::graph_ui::draw::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::Scribble;
-use crate::gui::pane::graph_ui::paint::wire::Wire;
 
 /// The active gesture, threaded through node and wire rendering so
 /// intersection tests run inline with the draw that knows the geometry.

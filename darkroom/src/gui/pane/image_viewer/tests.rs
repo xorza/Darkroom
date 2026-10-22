@@ -5,7 +5,7 @@ use std::sync::Arc;
 use imaginarium::ColorFormat;
 use palantir::internals::ui_harness::UiHarness;
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::core::wake;
 use crate::gui::state::preview_store;
@@ -145,7 +145,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
 #[test]
 fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     let mut h = UiHarness::arena();
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut store = PreviewStore::new(wake::internals::noop());
     // 512×256: a 256×128 thumbnail, and a deviceless harness caps the full
@@ -157,7 +157,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     store.settle(h.ui());
 
     let theme = Theme::default();
-    let mut prefs = ViewerPreferences::default();
+    let mut preferences = ViewerPreferences::default();
     let mut viewer = ImageViewer::new(node);
     let pane = Some(Vec2::new(800.0, 600.0));
     // The record closure runs once per pass, so counting it is what
@@ -173,7 +173,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
                 previews: store,
                 size: pane,
             };
-            viewer.show(ui, view, &mut prefs);
+            viewer.show(ui, view, &mut preferences);
         })
     };
     let first = frame(&mut h, &mut viewer, &store);

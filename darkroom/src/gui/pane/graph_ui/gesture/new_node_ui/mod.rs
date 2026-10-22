@@ -12,10 +12,10 @@ use palantir::{Ui, WidgetId};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::anchored_menu::{AnchoredMenu, PopupShape};
 use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph_ui::gesture::new_node_ui::node_palette::{NodePalette, Opening};
 use crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows;
-use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape};
 use crate::gui::port_ref::PortRef;
 
 /// Right-click or double-click on empty canvas → popup that lists every
@@ -95,15 +95,15 @@ impl NewNodeUi {
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
-        cx: CanvasCtx<'_>,
+        ctx: CanvasCtx<'_>,
         pending_source: Option<PortRef>,
     ) -> Option<GraphIntent> {
-        let graph_ctx = cx.graph_ctx();
+        let graph_ctx = ctx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a wire dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
-        let opening = if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
+        let opening = if (pending_source.is_some() || ctx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.world_pos = graph_ctx.viewport().to_world(local);

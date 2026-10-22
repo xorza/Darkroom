@@ -1,7 +1,7 @@
 use common::TempDir;
 
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 
 #[test]
 fn document_round_trips_as_one_ron_entry() {
@@ -9,7 +9,7 @@ fn document_round_trips_as_one_ron_entry() {
     let path = dir.join("roundtrip.darkroom");
     // Populated, not `Document::default()`: an empty document has an empty
     // placement map, which would never exercise a `NodeId` as a key.
-    let document = DocFixture::sample().doc;
+    let document = DocumentFixture::sample().document;
     assert!(
         !document.main_view.item_placements.is_empty(),
         "the fixture must place nodes for this to prove anything"

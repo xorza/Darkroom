@@ -21,9 +21,9 @@ fn the_preferences_file_is_named_for_the_app() {
     );
 }
 
-fn roundtrip(cfg: &Preferences) -> Preferences {
+fn roundtrip(preferences: &Preferences) -> Preferences {
     let bytes = SerdeFormat::Ron
-        .serialize(cfg)
+        .serialize(preferences)
         .expect("preferences RON serializes");
     SerdeFormat::Ron
         .deserialize(&bytes)
@@ -58,8 +58,8 @@ fn preferences_roundtrip() {
     let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
 
-    for cfg in [populated, Preferences::default()] {
-        assert_eq!(roundtrip(&cfg), cfg);
+    for preferences in [populated, Preferences::default()] {
+        assert_eq!(roundtrip(&preferences), preferences);
     }
 }
 
@@ -72,11 +72,11 @@ fn partial_preferences_fill_defaults() {
     assert_eq!(empty, Preferences::default());
 
     let partial = b"(confirm_unsaved_changes: false)";
-    let cfg: Preferences = SerdeFormat::Ron
+    let preferences: Preferences = SerdeFormat::Ron
         .deserialize(partial)
         .expect("partial preferences deserializes");
     assert_eq!(
-        cfg,
+        preferences,
         Preferences {
             confirm_unsaved_changes: false,
             ..Preferences::default()
@@ -104,11 +104,11 @@ fn partial_window_entry_fills_missing_fields_and_omits_position() {
     // `maximized` defaults to `false` and, with no `pos` key, the
     // physical position stays `None` (the Wayland case).
     let partial = b"(window: Some((size: (800, 600))))";
-    let cfg: Preferences = SerdeFormat::Ron
+    let preferences: Preferences = SerdeFormat::Ron
         .deserialize(partial)
         .expect("partial window entry deserializes");
     assert_eq!(
-        cfg.window,
+        preferences.window,
         Some(WindowState {
             size: UVec2::new(800, 600),
             maximized: false,

@@ -1,10 +1,10 @@
-//! [`NodeCtxMenu`]: the popup a right-click on a node body opens.
+//! [`NodeContextMenu`]: the popup a right-click on a node body opens.
 
 use palantir::CloseHandle;
 use palantir::prelude::*;
 use scenarium::NodeId;
 
-use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape};
+use crate::gui::pane::graph_ui::draw::anchored_menu::{AnchoredMenu, PopupShape};
 
 /// A context popup latched by a right-click on a node's body — the whole shape
 /// a canvas node menu takes, from the trigger scan to the pick. Wraps
@@ -16,7 +16,7 @@ use crate::gui::pane::graph_ui::paint::anchored_menu::{AnchoredMenu, PopupShape}
 /// right-clicked is settled by the node draw, which reports it as
 /// [`NodeDrawOutcome::menu_opened`](crate::gui::pane::graph_ui::node_ui::NodeDrawOutcome).
 #[derive(Default, Debug)]
-pub(crate) struct NodeCtxMenu {
+pub(crate) struct NodeContextMenu {
     menu: AnchoredMenu,
     /// The node whose widget opened the menu. Set with the anchor and read
     /// back by [`Self::show`]; left set after a close, which is unreachable
@@ -24,7 +24,7 @@ pub(crate) struct NodeCtxMenu {
     node_id: Option<NodeId>,
 }
 
-impl NodeCtxMenu {
+impl NodeContextMenu {
     /// Close the menu. `node_id` is left as it was — every read of it is
     /// gated by the wrapped [`AnchoredMenu`] being open.
     pub(crate) fn reset(&mut self) {
@@ -75,7 +75,7 @@ impl NodeCtxMenu {
     }
 }
 
-/// A pick from a [`NodeCtxMenu`], carrying the node the menu was opened
+/// A pick from a [`NodeContextMenu`], carrying the node the menu was opened
 /// on. The two travel together because a pick means nothing without the node
 /// it applies to, and that node was latched frames earlier — not read back off
 /// whatever the pointer or the selection happens to be at click time.

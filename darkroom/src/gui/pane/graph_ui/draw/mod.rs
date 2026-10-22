@@ -1,9 +1,9 @@
 //! The record pass's drawing helpers: the wires between node bodies, the
 //! inspection panels over them, and the anchoring a popup opens against.
 //! Everything here takes a [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx)
-//! and paints; none of it owns gesture state.
+//! and draws; none of it owns gesture state.
 
 pub(crate) mod anchored_menu;
 pub(crate) mod inspectors;
-pub(crate) mod node_ctx_menu;
+pub(crate) mod node_context_menu;
 pub(crate) mod wire;

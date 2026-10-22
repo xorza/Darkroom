@@ -5,7 +5,7 @@ use std::sync::Arc;
 use imaginarium::Image as RawImage;
 use scenarium::{ConstValue, Node, SpecialNode};
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::core::wake;
 
@@ -17,11 +17,11 @@ use crate::core::wake;
 /// full-resolution upload itself, so the store does not read whether one is
 /// open or visible.
 fn document_with_preview(node: NodeId) -> Document {
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let func = preview_sink::func(Arc::default());
     fixture.library.add(func.clone());
-    fixture.doc.graph.insert(node, Node::from(&func));
-    fixture.doc
+    fixture.document.graph.insert(node, Node::from(&func));
+    fixture.document
 }
 
 /// The two ways a target is chosen: against a ceiling, and against none.

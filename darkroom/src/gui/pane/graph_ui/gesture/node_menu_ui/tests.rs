@@ -4,7 +4,7 @@ use glam::{UVec2, Vec2};
 use palantir::WidgetId;
 use scenarium::{Binding, InputPort, NodeId};
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
@@ -92,10 +92,10 @@ fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
 /// removes it.
 #[test]
 fn a_stubs_menu_offers_only_remove() {
-    let mut fixture = DocFixture::probes(1);
-    let stub = fixture.add_stub(DocFixture::stub_node());
+    let mut fixture = DocumentFixture::probes(1);
+    let stub = fixture.add_stub(DocumentFixture::stub_node());
     let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
-    h.doc_mut().main_view.selected = [stub].into_iter().collect();
+    h.document_mut().main_view.selected = [stub].into_iter().collect();
 
     let rows = open_menu(&mut h, stub);
     assert_eq!(rows.len(), 1, "Remove is the one row");
@@ -117,7 +117,7 @@ fn a_stubs_menu_offers_only_remove() {
 fn a_node_body_right_click_selects_the_node_it_landed_on() {
     // Two nodes, so the assertion that exactly one ends up selected has
     // something to exclude, on a surface wide enough for the opened menu.
-    let mut h = CanvasHarness::sized(DocFixture::probes(2), SURFACE);
+    let mut h = CanvasHarness::sized(DocumentFixture::probes(2), SURFACE);
     let func = h.node(0);
     // Two frames so every node body has recorded and carries a hit-testable
     // rect for the click below.
@@ -141,9 +141,9 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
 /// alone, so both members survive to the pick.
 #[test]
 fn remove_pick_removes_every_selected_node() {
-    let mut h = CanvasHarness::shaping_text(DocFixture::probes(3), SURFACE);
+    let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(3), SURFACE);
     let (a, b) = (h.node(0), h.node(1));
-    h.doc_mut().main_view.selected = [a, b].into_iter().collect();
+    h.document_mut().main_view.selected = [a, b].into_iter().collect();
 
     let intents = pick(&mut h, a, REMOVE);
     let removed: BTreeSet<NodeId> = intents
@@ -176,14 +176,14 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
         c: NodeId,
     }
     let duplicate_via = |row: usize| {
-        let mut h = CanvasHarness::shaping_text(DocFixture::probes(3), SURFACE);
+        let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(3), SURFACE);
         let (a, b, c) = (h.node(0), h.node(1), h.node(2));
         // The one wire crossing the selection boundary: b reads c, and only
         // {a, b} are selected.
-        h.doc_mut()
+        h.document_mut()
             .graph
             .set_input_binding(InputPort::new(b, 0), Binding::wire(c, 0));
-        h.doc_mut().main_view.selected = [a, b].into_iter().collect();
+        h.document_mut().main_view.selected = [a, b].into_iter().collect();
 
         // Duplicating expands into ordinary intents: one add per clone, the
         // surviving wiring seeded onto the clone that consumes it, then the
@@ -234,11 +234,11 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
 /// asks `App` to run that node and edits nothing.
 #[test]
 fn run_pick_names_the_opened_node_and_edits_nothing() {
-    let mut h = CanvasHarness::shaping_text(DocFixture::probes(2), SURFACE);
+    let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(2), SURFACE);
     let (a, b) = (h.node(0), h.node(1));
     // A different node selected, so "the node the menu opened on" and "the
     // selection" name different things and the assertion can tell them apart.
-    h.doc_mut().main_view.selected = [b].into_iter().collect();
+    h.document_mut().main_view.selected = [b].into_iter().collect();
 
     let intents = pick(&mut h, a, RUN);
     assert!(

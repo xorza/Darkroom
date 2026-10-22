@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::gui::app::session::internals::SessionHarness;
 
 /// The rendered line, or `None` where there is no readout at all.
@@ -55,7 +55,7 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
 /// reading is available, rather than reappearing as the figure lands.
 #[test]
 fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
-    let mut h = SessionHarness::new(DocFixture::default());
+    let mut h = SessionHarness::new(DocumentFixture::default());
     h.prime(2);
     let without =
         h.ui.rect(id())

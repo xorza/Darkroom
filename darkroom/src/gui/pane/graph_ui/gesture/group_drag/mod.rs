@@ -91,8 +91,8 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn advance(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) -> bool {
-        let graph_ctx = cx.graph_ctx();
+    pub(crate) fn advance(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) -> bool {
+        let graph_ctx = ctx.graph_ctx();
         // A node deleted mid-drag (breaker swipe, undo) takes its drag with
         // it: left in place the anchor would emit against a missing node, and
         // could fire again if a fresh node reused the id.
@@ -115,7 +115,7 @@ impl GroupDrag {
             self.anchor = None;
             return false;
         }
-        if cx.cancelled() {
+        if ctx.cancelled() {
             out.push_graph(anchor.frame(Vec2::ZERO));
             self.anchor = None;
             return true;
@@ -147,10 +147,11 @@ impl Anchor {
 
 /// The selection's members at their current positions — [`GroupDrag::latch`]'s
 /// `members` for a drag that grabbed an already-selected member.
-pub(crate) fn selected_group(dcx: DrawCtx<'_>) -> Arc<[DragStart]> {
-    dcx.graph_ctx()
+pub(crate) fn selected_group(draw_ctx: DrawCtx<'_>) -> Arc<[DragStart]> {
+    draw_ctx
+        .graph_ctx()
         .nodes()
-        .filter(|n| dcx.is_selected(n.id))
+        .filter(|n| draw_ctx.is_selected(n.id))
         .map(|n| DragStart {
             node: n.id,
             pos: n.pos,

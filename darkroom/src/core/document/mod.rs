@@ -424,7 +424,7 @@ mod tests {
     use palantir::DockOperation;
 
     use super::*;
-    use crate::core::document::internals::DocFixture;
+    use crate::core::document::internals::DocumentFixture;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two
     /// narrowings of it are strict subsets — so a node that is gone is gone by
@@ -434,64 +434,69 @@ mod tests {
     /// Re-diverging the predicates is what this catches.
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
-        let mut fixture = DocFixture::default();
+        let mut fixture = DocumentFixture::default();
         let preview_func = preview_sink::func(Arc::default());
         fixture.library.add(preview_func.clone());
-        let preview = fixture.doc.graph.add(Node::from(&preview_func));
+        let preview = fixture.document.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);
-        let mut doc = fixture.doc;
+        let mut document = fixture.document;
 
         // The shared rule answers for a graph node and a stub alike.
         for node in [preview, plain] {
-            assert!(doc.holds_node(node), "the document holds {node:?}");
+            assert!(document.holds_node(node), "the document holds {node:?}");
         }
-        assert!(doc.holds_preview_node(preview));
+        assert!(document.holds_preview_node(preview));
         assert!(
-            !doc.holds_preview_node(plain),
+            !document.holds_preview_node(plain),
             "a stub retains no published value"
         );
         assert!(
-            !doc.holds_tab(TabRef::ImageViewer(plain)),
+            !document.holds_tab(TabRef::ImageViewer(plain)),
             "a stub has no viewer"
         );
 
         // The tab lift is the same rule asked of a tab: a viewer dies exactly
         // with its node, and the two non-node tabs never do.
-        assert!(doc.holds_tab(TabRef::ImageViewer(preview)));
-        assert!(doc.holds_tab(TabRef::Graph));
-        assert!(doc.holds_tab(TabRef::Preferences));
+        assert!(document.holds_tab(TabRef::ImageViewer(preview)));
+        assert!(document.holds_tab(TabRef::Graph));
+        assert!(document.holds_tab(TabRef::Preferences));
 
-        doc.graph.detach_node(preview);
-        assert!(!doc.holds_node(preview), "the rule says gone");
+        document.graph.detach_node(preview);
+        assert!(!document.holds_node(preview), "the rule says gone");
         assert!(
-            !doc.holds_preview_node(preview),
+            !document.holds_preview_node(preview),
             "and so does the narrowing"
         );
         assert!(
-            !doc.holds_tab(TabRef::ImageViewer(preview)),
+            !document.holds_tab(TabRef::ImageViewer(preview)),
             "and so does the tab lift"
         );
-        assert!(doc.holds_node(plain), "the surviving node is untouched");
+        assert!(
+            document.holds_node(plain),
+            "the surviving node is untouched"
+        );
     }
 
     /// A removal closes the node's viewer tab: every removal, by an edit, an
     /// undo or a redo, goes through `remove_node`, so no tab outlives its node.
     #[test]
     fn removing_a_node_closes_its_viewer() {
-        let mut fixture = DocFixture::sample();
+        let mut fixture = DocumentFixture::sample();
         let node_id = fixture.add(&preview_sink::func(Arc::default()));
-        let mut doc = fixture.doc;
-        let primary = doc.layout.primary().id;
-        doc.layout
+        let mut document = fixture.document;
+        let primary = document.layout.primary().id;
+        document
+            .layout
             .find_or_insert(TabRef::ImageViewer(node_id), primary);
 
-        doc.remove_node(node_id);
+        document.remove_node(node_id);
         assert!(
-            !doc.layout
+            !document
+                .layout
                 .all_tabs()
                 .any(|tab| tab == TabRef::ImageViewer(node_id))
         );
-        doc.validate().expect("no tab names the removed node");
+        document.validate().expect("no tab names the removed node");
     }
 
     /// The load repairs the view and the layout around the graph, in order,
@@ -501,25 +506,30 @@ mod tests {
     /// no preview node closes. A layout that pins another tab resets whole.
     #[test]
     fn reconcile_repairs_the_view_and_the_layout() {
-        let mut fixture = DocFixture::default();
+        let mut fixture = DocumentFixture::default();
         let shown = fixture.node_at(Vec2::new(f32::NAN, 0.0));
         let unplaced = fixture.node_at(Vec2::ZERO);
-        let DocFixture { mut doc, library } = fixture;
+        let DocumentFixture {
+            mut document,
+            library,
+        } = fixture;
         let ghost = NodeId::unique();
-        doc.main_view.viewport = Viewport {
+        document.main_view.viewport = Viewport {
             pan: Vec2::ZERO,
             zoom: 0.0,
         };
-        doc.main_view.item_placements.remove(&unplaced);
-        doc.main_view
+        document.main_view.item_placements.remove(&unplaced);
+        document
+            .main_view
             .item_placements
             .insert(ghost, ItemPlacement::default());
-        doc.main_view.selected = [unplaced].into_iter().collect();
-        let primary = doc.layout.primary().id;
-        doc.layout
+        document.main_view.selected = [unplaced].into_iter().collect();
+        let primary = document.layout.primary().id;
+        document
+            .layout
             .find_or_insert(TabRef::ImageViewer(shown), primary);
 
-        let report = doc.reconcile(&library);
+        let report = document.reconcile(&library);
         assert_eq!(
             report.repairs,
             [
@@ -530,40 +540,44 @@ mod tests {
                 DocumentRepair::ViewerClosed { node_id: shown },
             ]
         );
-        assert_eq!(doc.main_view.item_placements[&shown].pos, Vec2::ZERO);
-        assert_eq!(doc.main_view.item_placements[&unplaced].pos, Vec2::ZERO);
+        assert_eq!(document.main_view.item_placements[&shown].pos, Vec2::ZERO);
+        assert_eq!(
+            document.main_view.item_placements[&unplaced].pos,
+            Vec2::ZERO
+        );
         assert!(
-            doc.main_view.selected.contains(&unplaced),
+            document.main_view.selected.contains(&unplaced),
             "placed before the selection is checked, so it stays selected"
         );
-        doc.validate().expect("a reconciled document is valid");
+        document.validate().expect("a reconciled document is valid");
         assert!(
-            doc.reconcile(&library).is_empty(),
+            document.reconcile(&library).is_empty(),
             "nothing is left to repair"
         );
 
-        doc.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
+        document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
         assert_eq!(
-            doc.reconcile(&library).repairs,
+            document.reconcile(&library).repairs,
             [DocumentRepair::LayoutReset]
         );
-        assert_eq!(doc.layout, new_layout());
+        assert_eq!(document.layout, new_layout());
     }
 
     #[test]
     fn dock_layout_round_trips_as_ron() {
         use palantir::{DockDrop, SplitSide};
 
-        let mut fixture = DocFixture::sample();
+        let mut fixture = DocumentFixture::sample();
         let node_id = fixture.add(&preview_sink::func(Arc::default()));
-        let mut doc = fixture.doc;
-        let primary = doc.layout.primary().id;
-        doc.layout.find_or_insert(TabRef::Preferences, primary);
-        doc.layout
+        let mut document = fixture.document;
+        let primary = document.layout.primary().id;
+        document.layout.find_or_insert(TabRef::Preferences, primary);
+        document
+            .layout
             .find_or_insert(TabRef::ImageViewer(node_id), primary);
         // A split pane too, so the whole tree shape round-trips — not
         // just a flat strip.
-        doc.layout.apply(DockOperation::MoveTab {
+        document.layout.apply(DockOperation::MoveTab {
             tab: TabRef::ImageViewer(node_id),
             to: DockDrop::Split {
                 group: primary,
@@ -571,12 +585,12 @@ mod tests {
             },
         });
         let bytes = SerdeFormat::Ron
-            .serialize(&doc)
+            .serialize(&document)
             .expect("serialize with dock layout");
         let back: Document = SerdeFormat::Ron.deserialize(&bytes).expect("deserialize");
         back.validate().expect("round-tripped document is valid");
         assert_eq!(
-            back.layout, doc.layout,
+            back.layout, document.layout,
             "the split tree (groups, focus, ratio) round-trips through RON"
         );
     }
@@ -586,20 +600,20 @@ mod tests {
     /// own load check.
     #[test]
     fn validation_holds_the_layout_to_the_editors_dock() {
-        let mut doc = DocFixture::sample().doc;
-        doc.validate().unwrap();
+        let mut document = DocumentFixture::sample().document;
+        document.validate().unwrap();
 
-        doc.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
+        document.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
         assert!(matches!(
-            doc.validate(),
+            document.validate(),
             Err(DocumentValidationError::PinnedTab {
                 tab: TabRef::Preferences
             })
         ));
 
-        doc.layout = DockState::new("another.dock", TabRef::Graph);
+        document.layout = DockState::new("another.dock", TabRef::Graph);
         assert!(matches!(
-            doc.validate(),
+            document.validate(),
             Err(DocumentValidationError::ForeignDock)
         ));
     }

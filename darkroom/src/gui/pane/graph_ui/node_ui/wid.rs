@@ -67,7 +67,7 @@ pub(super) fn rename(node_id: NodeId) -> WidgetId {
 /// `DRAG`, so it can't fire mid-edit.)
 ///
 /// Deliberately *curated*, not "everything under the node". Port circles,
-/// header chips, and the inline value editors are all inside the body panel and
+/// header chips, and the inline const editors are all inside the body panel and
 /// all latch a drag of their own once the pointer travels — palantir's drag
 /// latch ignores `Sense`, so even a `Sense::CLICK` port circle reports one.
 /// Each of those owns its own gesture (a wire, a chip click, a text drag), so a
@@ -78,7 +78,7 @@ pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
     [body(node_id), rename(node_id)].into_iter()
 }
 
-/// Pointer-over-node for hover-reveal affordances (the value-editor chips).
+/// Pointer-over-node for hover-reveal affordances (the const-editor chips).
 /// The body response's own `hovered` flag misses most of the node's area —
 /// ports, chips, and editors capture the hit — so this asks whether the hover
 /// *target* sits anywhere in the node's subtree. Target-derived (not a raw

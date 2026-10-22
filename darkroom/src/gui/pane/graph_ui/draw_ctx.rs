@@ -7,9 +7,9 @@ use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::inspectors::Inspectors;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
-use crate::gui::pane::graph_ui::paint::inspectors::Inspectors;
 use crate::gui::theme::Theme;
 
 /// Read-only context threaded top to bottom through everything the graph
@@ -24,7 +24,7 @@ use crate::gui::theme::Theme;
 /// knows: which nodes read as selected this frame, which panels are open, and
 /// what the viewport keeps. The canvas-level draws that sit in the same pass
 /// and want the same refs — the inspection panels
-/// ([`crate::gui::pane::graph_ui::paint::inspectors`]) — take it too, rather than
+/// ([`crate::gui::pane::graph_ui::draw::inspectors`]) — take it too, rather than
 /// each growing its own near-identical bundle.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DrawCtx<'a> {

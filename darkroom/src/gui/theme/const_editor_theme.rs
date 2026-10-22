@@ -1,22 +1,22 @@
-//! [`ConstValueEditorTheme`]: how an inline value editor is styled.
+//! [`ConstEditorTheme`]: how an inline const editor is styled.
 
 use palantir::{Brush, ButtonTheme, DragValueTheme, TextEditTheme};
 
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out. Read by [`ConstValueEditorTheme::from_palette`],
+/// stretching the node out. Read by [`ConstEditorTheme::from_palette`],
 /// which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
-/// Per-widget theme bundle for the inline static-value editor on a
+/// Per-widget theme bundle for the inline const editor on a
 /// `Binding::Const` input port. Owns the `DragValue` look (scrub chip —
 /// transparent at rest, hover-only fill, no border — plus the inline
 /// editor derived from it) which the numeric fields use directly and the
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
 #[derive(Clone, Debug)]
-pub(crate) struct ConstValueEditorTheme {
+pub(crate) struct ConstEditorTheme {
     pub(crate) drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to
     /// at least this.
@@ -26,7 +26,7 @@ pub(crate) struct ConstValueEditorTheme {
     pub(crate) max_width: f32,
 }
 
-impl ConstValueEditorTheme {
+impl ConstEditorTheme {
     /// The pointer-over-node variant of [`Self::from_palette`]: the
     /// chip's hover fill (`element_mid`), at reduced alpha, becomes the
     /// *resting* fill — const editors surface as soon as the

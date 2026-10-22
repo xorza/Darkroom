@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// The breaker cuts a node where the *document* says it is, not where it last
@@ -23,7 +23,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     const SCRIBBLE_FROM: Vec2 = Vec2::new(600.0, 600.0);
     const SCRIBBLE_TO: Vec2 = Vec2::new(600.0, 420.0);
 
-    let mut h = CanvasHarness::new(DocFixture::probes(1));
+    let mut h = CanvasHarness::new(DocumentFixture::probes(1));
     let node = h.node(0);
     h.prime(2);
 
@@ -46,7 +46,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // Now move the node onto the scribble, centred on its far end. This frame
     // the document says the node is here while its arranged rect still says it
     // is back there — the divergence the probe has to resolve the new way.
-    h.doc_mut()
+    h.document_mut()
         .main_view
         .item_placements
         .get_mut(&node)

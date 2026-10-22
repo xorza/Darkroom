@@ -10,7 +10,7 @@ use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
-use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
+use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::hover::Hover;
 use scenarium::EventPort;
 
@@ -72,7 +72,7 @@ pub(crate) struct NodeCtx<'a> {
     ///
     /// Two things hang off it, the const editors' hover-revealed chips
     /// ([`Self::sve`]) and whether the port rows build tooltips at all
-    /// ([`Self::tips`]). One field rather than a `&ConstValueEditorTheme` and a
+    /// ([`Self::tooltips`]). One field rather than a `&ConstEditorTheme` and a
     /// flag threaded down beside each other, where no signature would say the
     /// two are the same fact.
     ///
@@ -128,7 +128,7 @@ impl<'a> NodeCtx<'a> {
     /// Whether the port rows build their hover tooltips: their text is
     /// composed per port per frame, and no port can be showing one while the
     /// pointer is elsewhere, so only the node under it pays.
-    pub(crate) const fn tips(self) -> bool {
+    pub(crate) const fn tooltips(self) -> bool {
         matches!(self.hover, Hover::Over)
     }
 
@@ -136,11 +136,11 @@ impl<'a> NodeCtx<'a> {
     /// over the node surfaces the (otherwise invisible) chips at half
     /// strength — the edit affordance appears exactly when the pointer is in
     /// the neighborhood, and geometry never changes.
-    pub(crate) const fn sve(self) -> &'a ConstValueEditorTheme {
+    pub(crate) const fn const_editor_theme(self) -> &'a ConstEditorTheme {
         let theme = self.graph_ctx.theme();
         match self.hover {
-            Hover::Over => &theme.const_value_editor_revealed,
-            Hover::Rest => &theme.const_value_editor,
+            Hover::Over => &theme.const_editor_revealed,
+            Hover::Rest => &theme.const_editor,
         }
     }
 

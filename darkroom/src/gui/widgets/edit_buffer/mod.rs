@@ -1,4 +1,4 @@
-//! [`EditBuffer`]: the cross-frame state behind the node value editors' buffered text fields.
+//! [`EditBuffer`]: the cross-frame state behind the node const editors' buffered text fields.
 
 use palantir::prelude::*;
 

@@ -16,8 +16,9 @@ pub(crate) struct SetInput {
 }
 
 impl Reversible for SetInput {
-    fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.graph
+    fn write(&self, document: &mut Document, dir: Direction) {
+        document
+            .graph
             .set_input_binding(self.input, self.binding.half(dir).clone());
     }
 
@@ -29,7 +30,7 @@ impl Reversible for SetInput {
         true
     }
 
-    /// The inline const-value editor exists only while the binding is
+    /// The inline const editor exists only while the binding is
     /// `Const(_)`. Flipping that presence (None ⇄ Const, Bind ⇄ Const) adds or
     /// removes a widget, so the node remeasures and every port below it
     /// shifts — wire curves have to re-sample their endpoints. Typing

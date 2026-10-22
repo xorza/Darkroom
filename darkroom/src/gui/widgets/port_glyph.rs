@@ -75,7 +75,7 @@ pub(crate) struct PortGlyph<'a> {
     wid: WidgetId,
     glyph: Painted,
     placement: Placement,
-    tip: Option<TextInput<'a>>,
+    tooltip: Option<TextInput<'a>>,
 }
 
 /// What a [`PortGlyph`] saw this frame.
@@ -124,7 +124,7 @@ impl<'a> PortGlyph<'a> {
             wid,
             glyph,
             placement: Placement::Margin(Spacing::ZERO),
-            tip: None,
+            tooltip: None,
         }
     }
 
@@ -163,12 +163,12 @@ impl<'a> PortGlyph<'a> {
     }
 
     /// Hover tooltip. `None` (the default) records none — which is what a
-    /// port off the hovered node passes, since only that node builds tips.
+    /// port off the hovered node passes, since only that node builds tooltips.
     /// A `&'static str` stays borrowed until the bubble records; an
     /// [`InternedStr`](palantir::InternedStr) from [`fmt!`](palantir::fmt) is
     /// already in the record pass's text arena.
-    pub(crate) fn tip(mut self, tip: Option<impl Into<TextInput<'a>>>) -> Self {
-        self.tip = tip.map(Into::into);
+    pub(crate) fn tooltip(mut self, tooltip: Option<impl Into<TextInput<'a>>>) -> Self {
+        self.tooltip = tooltip.map(Into::into);
         self
     }
 
@@ -177,7 +177,7 @@ impl<'a> PortGlyph<'a> {
             wid,
             glyph,
             placement,
-            tip,
+            tooltip,
         } = self;
         let (hit, inset) = (glyph.hit(), glyph.inset());
         let panel = Panel::zstack()
@@ -199,7 +199,7 @@ impl<'a> PortGlyph<'a> {
             double_clicked: shown.response.left.double_clicked(),
             secondary_clicked: shown.response.right.clicked(),
         };
-        support::tooltip_after(ui, &snapshot, tip);
+        support::tooltip_after(ui, &snapshot, tooltip);
         response
     }
 }

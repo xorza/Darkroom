@@ -131,7 +131,8 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   wires. Refused: edge, connection and link for it — "edge" is the graph's
   general word for a wire or a subscription, and "link" a text hyperlink.
 - **Fixed short forms.** `idx`, `pos`, `ctx`/`Ctx`, `dir`, `bg`, `col`,
-  `exec`, `desc`, `cur`, `prev`, and their plurals with `s` (`idxs`, `poss`),
+  `exec`, `desc`, `cur`, `prev`, `wid` (a palantir `WidgetId`), and their
+  plurals with `s` (`idxs`, `poss`),
   in every name; prose and test names keep whole words. A name a foreign API
   sets keeps its own form, as `Iterator::position` and `std::task::Context`;
   a term of another meaning keeps its own, as a sensor's dark current and

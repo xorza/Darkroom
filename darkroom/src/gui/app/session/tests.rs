@@ -4,7 +4,7 @@ use scenarium::NodeId;
 use std::sync::Arc;
 
 use crate::alloc_audit;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
@@ -45,7 +45,7 @@ const AUDITED_FRAMES: usize = 64;
 /// fails on the frame that performed it.
 #[test]
 fn a_settled_frame_records_without_allocating() {
-    let mut fixture = DocFixture::probes(6);
+    let mut fixture = DocumentFixture::probes(6);
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state
@@ -76,7 +76,7 @@ fn a_settled_frame_records_without_allocating() {
 /// lands.
 #[test]
 fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state
@@ -128,11 +128,11 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
 #[test]
 #[should_panic(expected = "a widget built a malformed intent")]
 fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
-    let mut test = SessionHarness::new(DocFixture::default());
+    let mut test = SessionHarness::new(DocumentFixture::default());
     test.apply(GraphIntent::add_node(
         Vec2::ZERO,
         NodeId::nil(),
-        DocFixture::stub_node(),
+        DocumentFixture::stub_node(),
     ));
 }
 
@@ -140,7 +140,7 @@ fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
 /// doesn't.
 #[test]
 fn dirty_flag_tracks_content_edits_not_navigation() {
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let node = fixture.plain_node();
     let mut test = SessionHarness::new(fixture);
     let node_id = NodeId::unique();
@@ -161,7 +161,7 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
 /// rearrangement doesn't prompt.
 #[test]
 fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let preview = preview_sink::func(Arc::default());
     fixture.library.add(preview.clone());
     let mut test = SessionHarness::new(fixture);
@@ -215,7 +215,7 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
 /// Ctrl+S that landed on the frame a run chip was clicked.
 #[test]
 fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
-    let mut test = SessionHarness::new(DocFixture::probes(1));
+    let mut test = SessionHarness::new(DocumentFixture::probes(1));
     // Two frames so the toolbar chip has a rect to aim at, and so the
     // Ctrl+S chord is subscribed for palantir's keyboard wake-gate.
     test.prime(2);
@@ -248,7 +248,7 @@ fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
     // whose value it shows, and the drain below prunes a tab whose node is
     // gone — as it must, since that is what closes a viewer when its node
     // is deleted.
-    let fixture = DocFixture::probes(1);
+    let fixture = DocumentFixture::probes(1);
     let node_id = fixture.node(0);
     let mut test = SessionHarness::new(fixture);
     let tab = TabRef::ImageViewer(node_id);

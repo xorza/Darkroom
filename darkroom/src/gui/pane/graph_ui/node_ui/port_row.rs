@@ -30,9 +30,9 @@ use crate::gui::frame::app_command::{EditCommand, PathPick};
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
+use crate::gui::pane::graph_ui::node_ui::const_editor::{ConstEditor, Field};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::node_ui::value_editor::{ConstEdit, Field};
 use crate::gui::pane::graph_ui::node_ui::wid;
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::theme::Theme;
@@ -60,7 +60,7 @@ const COL_VALUE: u16 = 1;
 const COL_SPACER: u16 = 2;
 const COL_OUTPUT: u16 = COL_SPACER + 1;
 
-/// Port row height as a multiple of the body font size. The value editors
+/// Port row height as a multiple of the body font size. The const editors
 /// fill this height (so a chip, dropdown, and text field are all the same
 /// size); it must clear the tallest editor's min-content — the inline text
 /// field, `line_height + chip padding ≈ 1.9em` — so nothing overflows.
@@ -68,8 +68,8 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 
 /// `row_tracks` is [`NodeUi`](crate::gui::pane::graph_ui::node_ui::NodeUi)'s retained staging
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
-pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
-    let (theme, node) = (rec.node.theme(), rec.node);
+pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, row_tracks: &mut Vec<Track>) {
+    let (theme, node) = (record.node.theme(), record.node);
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
     let n_rows = node
@@ -93,7 +93,7 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut V
         .size((Sizing::FILL, Sizing::HUG))
         .cols([
             Track::HUG,
-            Track::HUG.with_max(theme.const_value_editor.max_width),
+            Track::HUG.with_max(theme.const_editor.max_width),
             Track::FILL,
             Track::HUG,
         ])
@@ -107,8 +107,8 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut V
             theme.ports.gap,
         ))
         .show(ui, |ui| {
-            input_cells(ui, rec);
-            output_cells(ui, rec);
+            input_cells(ui, record);
+            output_cells(ui, record);
         });
 }
 
@@ -116,27 +116,30 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut V
 /// empty otherwise — the resolved [`InputCtx::description`] text) above a
 /// dimmer type line, else just the type.
 #[derive(Debug, Clone, Copy)]
-struct PortTip<'a> {
+struct PortTooltip<'a> {
     description: &'a str,
-    ty: &'a DataType,
+    data_type: &'a DataType,
 }
 
-impl PortTip<'_> {
-    /// The tip for a port of `ncx`, interned straight into this pass's text
-    /// arena, so a hovered node's ports author their tips with no `String`
+impl PortTooltip<'_> {
+    /// The tooltip for a port of `node_ctx`, interned straight into this pass's text
+    /// arena, so a hovered node's ports author their tooltips with no `String`
     /// between them and the widget.
     ///
     /// Built only for the node under the pointer — see [`show`]. `None` off
     /// that node, which [`support::tooltip_after`] and [`PortLabel`] both take
     /// as "no tooltip".
-    fn intern(self, ui: &mut Ui, ncx: NodeCtx<'_>) -> Option<InternedStr> {
-        let Self { description, ty } = self;
-        if !ncx.tips() {
+    fn intern(self, ui: &mut Ui, node_ctx: NodeCtx<'_>) -> Option<InternedStr> {
+        let Self {
+            description,
+            data_type,
+        } = self;
+        if !node_ctx.tooltips() {
             return None;
         }
         let type_label = TypeLabel {
-            library: ncx.graph_ctx.library(),
-            ty,
+            library: node_ctx.graph_ctx.library(),
+            data_type,
         };
         Some(if description.is_empty() {
             fmt!(ui, "{type_label}")
@@ -146,13 +149,13 @@ impl PortTip<'_> {
     }
 }
 
-/// A port's label, `name`, with `tip` (the port's data type) as its hover
-/// tooltip; `None` means no tooltip, as [`PortTip::intern`] answers off the
+/// A port's label, `name`, with `tooltip` (the port's data type) as its hover
+/// tooltip; `None` means no tooltip, as [`PortTooltip::intern`] answers off the
 /// hovered node.
 #[derive(Debug, Clone, Copy)]
 struct PortLabel<'a> {
     name: &'a str,
-    tip: Option<InternedStr>,
+    tooltip: Option<InternedStr>,
 }
 
 impl PortLabel<'_> {
@@ -166,22 +169,22 @@ impl PortLabel<'_> {
             .sense(Sense::HOVER)
             .show(ui)
             .snapshot();
-        support::tooltip_after(ui, &snapshot, self.tip);
+        support::tooltip_after(ui, &snapshot, self.tooltip);
     }
 }
 
-fn input_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-    for input in rec.node.inputs() {
-        input_label_cell(ui, rec, input);
-        value_cell(ui, rec, input);
+fn input_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+    for input in record.node.inputs() {
+        input_label_cell(ui, record, input);
+        value_cell(ui, record, input);
     }
 }
 
-fn output_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-    let node = rec.node;
+fn output_cells(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+    let node = record.node;
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
-        output_cell(ui, rec, output);
+        output_cell(ui, record, output);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
@@ -191,7 +194,7 @@ fn output_cells(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
             row: output_count + idx,
             event,
         }
-        .show(ui, rec);
+        .show(ui, record);
     }
 }
 
@@ -225,7 +228,7 @@ fn input_cell_wid(port: PortRef) -> WidgetId {
 /// *or* the port glyph's — the glyph senses its own `Sense::CLICK` and
 /// consumes hits over its rect, so the cell alone misses a right-click landed
 /// on the circle (no bubbling).
-fn open_port_ctx_menu(ui: &mut Ui, menu_id: WidgetId) {
+fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId) {
     if let Some(p) = ui.pointer_pos() {
         ContextMenu::open(ui, menu_id, p);
     }
@@ -243,18 +246,18 @@ fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
-    let (ncx, dcx) = (rec.node, rec.draw);
-    let theme = ncx.theme();
+fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
+    let (node_ctx, draw_ctx) = (record.node, record.draw);
+    let theme = node_ctx.theme();
     let port = input.port_ref();
-    let tip = PortTip {
+    let tooltip = PortTooltip {
         description: input.description(),
-        ty: input.ty(),
+        data_type: input.data_type(),
     }
-    .intern(ui, ncx);
+    .intern(ui, node_ctx);
     let label = PortLabel {
         name: input.name(),
-        tip,
+        tooltip,
     };
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
@@ -263,7 +266,8 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
     let fill = if input.missing() {
         theme.status.warning
     } else {
-        Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(theme, input.ty()))
+        Hover::from(draw_ctx.geometry().ports.is_hovered(port))
+            .lift(port_color::data(theme, input.data_type()))
     };
     // A required input's port reads as bigger — its total footprint matches
     // a bound output's circle-plus-ring, so "important port" carries the
@@ -301,7 +305,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
             } else {
                 let mut circle = PortGlyph::circle(wid, diameter, fill)
                     .margin(margin)
-                    .tip(tip);
+                    .tooltip(tooltip);
                 if let Some(color) = outline {
                     circle = circle.outline(color);
                 }
@@ -319,7 +323,7 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
         cell.response.left.double_clicked(),
     );
     if cell_secondary || glyph.secondary_clicked {
-        open_port_ctx_menu(ui, menu_id);
+        open_port_context_menu(ui, menu_id);
     }
     // Double-click on the circle or the label toggles the binding: clear it,
     // or seed the default const when unbound.
@@ -335,13 +339,13 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    rec.out.push_graph(GraphIntent::set_input(
+                    record.out.push_graph(GraphIntent::set_input(
                         input.port(),
                         Binding::Const(default),
                     ));
                 }
             }
-            Some(_) => rec
+            Some(_) => record
                 .out
                 .push_graph(GraphIntent::set_input(input.port(), None)),
         }
@@ -360,7 +364,8 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
                 .clicked()
                 && let Some(value) = default
             {
-                rec.out
+                record
+                    .out
                     .push_graph(GraphIntent::set_input(input.port(), Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
@@ -369,7 +374,8 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
                 .left
                 .clicked()
             {
-                rec.out
+                record
+                    .out
                     .push_graph(GraphIntent::set_input(input.port(), None));
             }
         });
@@ -377,15 +383,15 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
-    let ncx = rec.node;
+fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
+    let node_ctx = record.node;
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
     let Some(Binding::Const(value)) = input.binding() else {
         return;
     };
     let port = input.port();
-    let data_type = input.ty();
+    let data_type = input.data_type();
     let value_variants = input.value_variants();
     let editor_id = const_editor_wid(port);
     // An `FsPath` editor draws a pick button; clicking it raises a blocking
@@ -400,7 +406,8 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
         && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
         && let DataType::FsPath(config) = data_type
     {
-        rec.out
+        record
+            .out
             .push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
                 port,
                 config: Arc::clone(config),
@@ -415,12 +422,12 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
         .size((Sizing::FILL, Sizing::FILL))
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            ConstEdit {
+            ConstEditor {
                 field: Field {
-                    theme: ncx.sve(),
+                    theme: node_ctx.const_editor_theme(),
                     id: editor_id,
                 },
-                library: ncx.graph_ctx.library(),
+                library: node_ctx.graph_ctx.library(),
                 value,
                 data_type,
                 value_variants,
@@ -428,7 +435,8 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
             .show(ui)
         });
     if let Some(new_value) = edited.inner {
-        rec.out
+        record
+            .out
             .push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
     }
 }
@@ -437,17 +445,18 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>) {
-    let (ncx, dcx) = (rec.node, rec.draw);
-    let theme = ncx.theme();
+fn output_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>) {
+    let (node_ctx, draw_ctx) = (record.node, record.draw);
+    let theme = node_ctx.theme();
     let port = output.port_ref();
-    let ty = output.ty();
-    let fill = Hover::from(dcx.geometry().ports.is_hovered(port)).lift(port_color::data(theme, ty));
-    let tip = PortTip {
+    let data_type = output.data_type();
+    let fill = Hover::from(draw_ctx.geometry().ports.is_hovered(port))
+        .lift(port_color::data(theme, data_type));
+    let tooltip = PortTooltip {
         description: output.description(),
-        ty,
+        data_type,
     }
-    .intern(ui, ncx);
+    .intern(ui, node_ctx);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -461,12 +470,12 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
         .show(ui, |ui| {
             PortLabel {
                 name: output.name(),
-                tip,
+                tooltip,
             }
             .show(ui, theme);
             PortGlyph::circle(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
-                .tip(tip)
+                .tooltip(tooltip)
                 .show(ui)
         });
     // Right-click anywhere on the cell (circle or label) opens the port menu —
@@ -479,15 +488,16 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
     if glyph.double_clicked {
-        rec.out.extend_graph(
-            ncx.graph_ctx
+        record.out.extend_graph(
+            node_ctx
+                .graph_ctx
                 .wires()
                 .filter(|(_, producer)| *producer == output.port())
                 .map(|(consumer, _)| GraphIntent::set_input(consumer, None)),
         );
     }
     if cell_secondary || glyph.secondary_clicked {
-        open_port_ctx_menu(ui, menu_id);
+        open_port_context_menu(ui, menu_id);
     }
     // "Add preview" — spawn a preview node already wired to this output. What it
     // creates is an ordinary node the user can move, delete, and undo like any
@@ -495,18 +505,18 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            if let Some(func) = preview_sink::registered(ncx.graph_ctx.library())
+            if let Some(func) = preview_sink::registered(node_ctx.graph_ctx.library())
                 && MenuItem::new("Add preview").show(ui, popup).left.clicked()
             {
                 // Positioned off the port when its center is known (it is,
                 // after the first frame); otherwise the node lands at the
                 // origin and the user drags it.
-                let pos = dcx
+                let pos = draw_ctx
                     .geometry()
                     .ports
                     .center(port)
                     .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-                rec.out.extend_graph(
+                record.out.extend_graph(
                     PreviewSpawn {
                         port: output.port(),
                         pos,
@@ -564,16 +574,19 @@ struct EventRow<'a> {
 }
 
 impl EventRow<'_> {
-    fn show(self, ui: &mut Ui, rec: &NodeRecord<'_, '_>) {
+    fn show(self, ui: &mut Ui, record: &NodeRecord<'_, '_>) {
         let Self { idx, row, event } = self;
-        let (ncx, dcx) = (rec.node, rec.draw);
-        let theme = ncx.theme();
-        let node_id = ncx.id;
+        let (node_ctx, draw_ctx) = (record.node, record.draw);
+        let theme = node_ctx.theme();
+        let node_id = node_ctx.id;
         let overhang = theme.port_overhang();
         let ev = EventPort::new(node_id, idx);
         let wid = event_glyph_wid(ev);
-        let fill = Hover::from(dcx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
-        let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
+        let fill =
+            Hover::from(draw_ctx.geometry().events.is_hovered(ev)).lift(port_color::event(theme));
+        let tooltip = node_ctx
+            .tooltips()
+            .then(|| fmt!(ui, "event: {}", event.name));
         Panel::hstack()
             .id_salt(("event", idx))
             .grid_cell((grid_row(row), COL_OUTPUT))
@@ -588,7 +601,7 @@ impl EventRow<'_> {
                     .show(ui);
                 PortGlyph::arrow(wid, theme.ports.size, fill)
                     .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
-                    .tip(tip)
+                    .tooltip(tooltip)
                     .show(ui);
             });
     }
@@ -607,21 +620,21 @@ pub(crate) fn event_glyph_wid(event: EventPort) -> WidgetId {
 /// under it.
 ///
 /// Renders on demand rather than into a `String`: a hovered node builds one
-/// of these per port per frame, and [`PortTip::intern`] feeds it straight to `fmt!`.
+/// of these per port per frame, and [`PortTooltip::intern`] feeds it straight to `fmt!`.
 #[derive(Debug)]
 struct TypeLabel<'a> {
     library: &'a Library,
-    ty: &'a DataType,
+    data_type: &'a DataType,
 }
 
 impl Display for TypeLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let DataType::FsPath(cfg) = self.ty else {
+        let DataType::FsPath(config) = self.data_type else {
             // Borrowed for every type the library knows; only an id with no
             // entry behind it builds a string, and that one is scenarium's.
-            return f.write_str(&self.library.type_name(self.ty));
+            return f.write_str(&self.library.type_name(self.data_type));
         };
-        let mode = match cfg.mode {
+        let mode = match config.mode {
             FsPathMode::Dir => "directory",
             FsPathMode::ExistingFile => "file",
             FsPathMode::ExistingFiles => "files",
@@ -630,7 +643,7 @@ impl Display for TypeLabel<'_> {
         write!(f, "path · {mode}")?;
         // Written through one at a time rather than `join`ed — a joined list
         // is exactly the intermediate string this type exists to avoid.
-        if let Some((first, rest)) = cfg.extensions.split_first() {
+        if let Some((first, rest)) = config.extensions.split_first() {
             write!(f, " ({first}")?;
             for ext in rest {
                 write!(f, ", {ext}")?;
@@ -652,10 +665,10 @@ mod tests {
     #[test]
     fn type_label_spells_out_a_paths_mode_and_extension_list() {
         let library = Library::default();
-        let label = |ty: &DataType| {
+        let label = |data_type: &DataType| {
             TypeLabel {
                 library: &library,
-                ty,
+                data_type,
             }
             .to_string()
         };

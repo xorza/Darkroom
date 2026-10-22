@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::Modifiers;
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
@@ -21,7 +21,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     // Placed by id rather than left on the fixture's row: this case cares
     // *which* node the second band reaches, and wants its two nodes far
     // enough apart that a band can hold one without the other.
-    let fixture = DocFixture::probes(2);
+    let fixture = DocumentFixture::probes(2);
     let (a, b) = (fixture.node(0), fixture.node(1));
     let mut h = CanvasHarness::new(
         fixture
@@ -80,7 +80,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
 /// its debug assertion fires on every frame of this drag.
 #[test]
 fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
-    let fixture = DocFixture::probes(2);
+    let fixture = DocumentFixture::probes(2);
     let (a, b) = (fixture.node(0), fixture.node(1));
     let mut h = CanvasHarness::new(
         fixture
@@ -90,7 +90,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
     // `a` is already selected, and the band below sweeps *both* — so `a`
     // reaches the swept buffer twice, once from the base and once from the
     // sweep.
-    h.doc_mut().main_view.selected.insert(a);
+    h.document_mut().main_view.selected.insert(a);
     h.prime(2);
 
     h.ui.set_modifiers(Modifiers {

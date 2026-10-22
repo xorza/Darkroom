@@ -4,7 +4,7 @@ use scenarium::internals::test_graph::TestGraph;
 use scenarium::{DataType, InputPort, NodeId};
 
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::node_ui::port_row;
@@ -154,7 +154,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
 
     // Two unwired nodes, so the drag has a producer to leave and a consumer
     // to land on and nothing to trip the cycle check.
-    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let (producer, consumer) = (h.node(0), h.node(1));
     // Two frames to record both nodes, so their port circles have widget ids
     // and `CanvasGeometry` measured centers to hit-test against.
@@ -191,7 +191,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // The filter answers that off `Document::graph_for` — a prepass handed the
     // wrong graph would go on snapping cycles with every other assertion here
     // still green.
-    h.doc_mut()
+    h.document_mut()
         .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::wire(producer, 0));
     let back_source = port_row::port_circle_wid(PortRef::output(consumer, 0));

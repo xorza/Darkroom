@@ -90,7 +90,7 @@ pub(crate) struct CanvasGeometry {
 ///   frame — centers still resolve from `node.pos + cached_offset` and
 ///   wires draw on that first frame instead of popping in one frame
 ///   late. Keyed by the globally-unique domain key, so it spans every open
-///   graph; on doc reload the whole `GraphUi` (and this cache) is dropped.
+///   graph; on document reload the whole `GraphUi` (and this cache) is dropped.
 #[derive(Debug)]
 pub(crate) struct PortLayer<K> {
     live: HashMap<K, PortInfo>,

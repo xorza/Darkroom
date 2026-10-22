@@ -178,7 +178,7 @@ impl From<RgbaF32> for WirePaint {
 #[derive(Debug)]
 pub(crate) struct WirePass<'a, 'p> {
     /// Shared with the node-body draws — `Copy`, so it rides along by value.
-    pub(crate) dcx: DrawCtx<'a>,
+    pub(crate) draw_ctx: DrawCtx<'a>,
     pub(crate) probe: &'a mut BreakerProbe<'p>,
     pub(crate) emphasis: &'a WireEmphasis,
 }
@@ -206,7 +206,7 @@ impl WirePass<'_, '_> {
             hover: endpoint,
             tint,
         } = ends;
-        if !self.dcx.cull().keeps_wire(wire) {
+        if !self.draw_ctx.cull().keeps_wire(wire) {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);
@@ -215,11 +215,13 @@ impl WirePass<'_, '_> {
             (false, Hover::Over) => WireMark::EndpointHovered,
             (false, Hover::Rest) => WireMark::Plain,
         };
-        let stroke = self.emphasis.stroke(self.dcx.theme().stroke_width, mark);
+        let stroke = self
+            .emphasis
+            .stroke(self.draw_ctx.theme().stroke_width, mark);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let paint = if broken {
-            WirePaint::from(self.dcx.theme().colors.wire_broken)
+            WirePaint::from(self.draw_ctx.theme().colors.wire_broken)
         } else {
             self.emphasis.paint(tint(), stroke.tier)
         };

@@ -23,7 +23,7 @@ use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
 use crate::gui::dialogs;
 use crate::gui::frame::app_command::{
-    AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PrefsCommand, RunCommand,
+    AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PreferencesCommand, RunCommand,
 };
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
@@ -221,8 +221,10 @@ impl App {
             AppCommand::Run(RunCommand::Cancel) => self.runtime.cancel_run(),
             AppCommand::Run(RunCommand::StartEvents) => self.start_events(),
             AppCommand::Run(RunCommand::StopEvents) => self.stop_events(),
-            AppCommand::Prefs(PrefsCommand::Changed) => self.apply_preferences(),
-            AppCommand::Prefs(PrefsCommand::PickMlModel(kind)) => self.pick_ml_model(kind),
+            AppCommand::Preferences(PreferencesCommand::Changed) => self.apply_preferences(),
+            AppCommand::Preferences(PreferencesCommand::PickMlModel(kind)) => {
+                self.pick_ml_model(kind);
+            }
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
                 return self.pick_input_path(&pick);
             }
@@ -421,7 +423,7 @@ impl App {
     /// document it replaces.
     ///
     /// A fresh [`Session`] covers what it owns in one move: empty undo history
-    /// (restoring the old doc via Cmd-Z would replay intents that no longer
+    /// (restoring the old document via Cmd-Z would replay intents that no longer
     /// match the live tree), dropped gesture state, forced scene rebuild.
     ///
     /// The run projections are `App`'s, so they are cleared here rather than

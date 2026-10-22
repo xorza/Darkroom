@@ -16,11 +16,11 @@
 pub(crate) mod canvas;
 pub(crate) mod canvas_bg;
 pub(crate) mod canvas_ctx;
+pub(crate) mod draw;
 pub(crate) mod draw_ctx;
 pub(crate) mod frame;
 pub(crate) mod gesture;
 pub(crate) mod node_ui;
-pub(crate) mod paint;
 pub(crate) mod prepass_ctx;
 pub(crate) mod toolbar;
 
@@ -34,6 +34,8 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::inspectors::Inspectors;
+use crate::gui::pane::graph_ui::draw::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts, Selection};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::frame::cull_region::CullRegion;
@@ -48,8 +50,6 @@ use crate::gui::pane::graph_ui::gesture::subscription_ui::SubscriptionUi;
 use crate::gui::pane::graph_ui::gesture::wire_ui::WireUi;
 use crate::gui::pane::graph_ui::gesture::{shortcuts, subscription_ui, wire_ui};
 use crate::gui::pane::graph_ui::node_ui::{NodeDrawOutcome, NodePass, NodeUi};
-use crate::gui::pane::graph_ui::paint::inspectors::Inspectors;
-use crate::gui::pane::graph_ui::paint::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::prepass_ctx::{CanvasInput, Escape, PrepassCtx};
 
 /// The graph pane's UI state: the cross-frame geometry, the `NodeUi` that
@@ -308,27 +308,27 @@ impl GraphUi {
         self.geometry.rebuild(ui, graph_ctx);
         // Everything below reads the settled geometry, so from here the canvas
         // has a context of its own.
-        let cx = CanvasCtx::new(prepass, &self.geometry);
+        let ctx = CanvasCtx::new(prepass, &self.geometry);
         // Both port-drag claimants sit *after* the rebuild so they read this
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        self.preview_drag.apply(ui, cx, out);
+        self.preview_drag.apply(ui, ctx, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         if let Some(start) = self.new_node_ui.take_resume_floating() {
             self.wire_ui.resume(start, graph_ctx);
         }
-        self.wire_ui.apply(ui, cx, out);
+        self.wire_ui.apply(ui, ctx, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the wire gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
-        self.subscription_ui.apply(ui, cx, out);
+        self.subscription_ui.apply(ui, ctx, out);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
-        // `cx` — nothing below may read one.
+        // `ctx` — nothing below may read one.
         self.wire_ui.bake_snap_hover(&mut self.geometry);
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
@@ -372,8 +372,8 @@ impl GraphUi {
                 // mutably, while a context borrows the geometry shared. The
                 // toolbar only reads, so it takes one built once
                 // `record_canvas` has given the fields back.
-                let cx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
-                toolbar::show(ui, cx, out);
+                let ctx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
+                toolbar::show(ui, ctx, out);
             });
     }
 
@@ -382,24 +382,25 @@ impl GraphUi {
     /// [`AppCommand`](crate::gui::frame::app_command::AppCommand). Everything
     /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let cx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
+        let ctx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
         // the undo stack with no-op `SetSelection` entries every time
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
-        if cx.gesture() == Some(CanvasGesture::Deselect) && !cx.graph_ctx().selected().is_empty() {
+        if ctx.gesture() == Some(CanvasGesture::Deselect) && !ctx.graph_ctx().selected().is_empty()
+        {
             out.push_graph(GraphIntent::clear_selection());
         }
         // `CanvasGeometry` was already rebuilt in `prepass` against every
         // visible graph's scene — `App` rebuilds the scene *before* prepass
         // on the frame a tab becomes active, so prepass never sees a stale
         // graph, and the offset cache fills in port centers for nodes that
-        // hadn't recorded yet. `cx` carries that same table; no second
+        // hadn't recorded yet. `ctx` carries that same table; no second
         // rebuild needed.
-        self.selection_ui.apply(ui, cx, out);
-        self.breaker_ui.apply(ui, cx, out);
+        self.selection_ui.apply(ui, ctx, out);
+        self.breaker_ui.apply(ui, ctx, out);
         // A wire released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
         // the wire controller holds the dropped wire's source.
@@ -408,16 +409,16 @@ impl GraphUi {
         // the palette — suppress the `NewNode` gesture for this frame, by
         // handing the popup a context whose gesture slot is empty.
         let popup_cx = if self.wire_ui.ended_on_secondary() {
-            cx.without_gesture()
+            ctx.without_gesture()
         } else {
-            cx
+            ctx
         };
         out.extend_graph(self.new_node_ui.apply(ui, popup_cx, pending_connection));
         // The menu records every frame whatever comes of it — its popup owns a
         // lifecycle that depends on it — and everything a pick means goes onto
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
-        self.node_menu.apply(ui, cx, out);
+        self.node_menu.apply(ui, ctx, out);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -425,8 +426,8 @@ impl GraphUi {
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let cx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
-        let theme = cx.theme();
+        let ctx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
+        let theme = ctx.theme();
         let viewport = graph_ctx.viewport();
         // Effective selection to paint: the live rubber-band preview while
         // a band is in flight, else the committed set.
@@ -499,8 +500,8 @@ impl GraphUi {
                         // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
                         // the probe scope so both passes read the same refs.
-                        let dcx = DrawCtx::new(
-                            cx,
+                        let draw_ctx = DrawCtx::new(
+                            ctx,
                             PaintFacts {
                                 selected,
                                 inspectors: &self.inspectors,
@@ -529,7 +530,7 @@ impl GraphUi {
                             // cuttable — one passing behind an unrelated node
                             // goes under it rather than drawing on top.
                             let mut wires = WirePass {
-                                dcx,
+                                draw_ctx,
                                 probe: &mut probe,
                                 emphasis: &emphasis,
                             };
@@ -541,7 +542,7 @@ impl GraphUi {
                             outcome = self.node_ui.draw_all(
                                 ui,
                                 &mut NodePass {
-                                    dcx,
+                                    draw_ctx,
                                     probe: &mut probe,
                                     out,
                                 },
@@ -551,10 +552,10 @@ impl GraphUi {
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        self.inspectors.draw_panels(ui, dcx);
+                        self.inspectors.draw_panels(ui, draw_ctx);
                         self.breaker_ui.draw(ui, theme);
-                        self.wire_ui.draw_in_flight(ui, cx, canvas_origin);
-                        self.subscription_ui.draw_in_flight(ui, cx, canvas_origin);
+                        self.wire_ui.draw_in_flight(ui, ctx, canvas_origin);
+                        self.subscription_ui.draw_in_flight(ui, ctx, canvas_origin);
                     });
             });
         // The draw is over, so the panels are free to take `&mut`: cycle the
@@ -578,7 +579,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::core::document::internals::DocFixture;
+    use crate::core::document::internals::DocumentFixture;
     use crate::core::document::tab_ref::TabRef;
     use crate::core::preview_sink;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -590,7 +591,7 @@ mod tests {
     /// tab — the canvas's one view-tier request.
     #[test]
     fn clicking_a_preview_card_asks_for_its_viewer_tab() {
-        let mut fixture = DocFixture::default();
+        let mut fixture = DocumentFixture::default();
         let node = fixture.add(&preview_sink::func(Arc::default()));
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
@@ -633,10 +634,10 @@ mod tests {
     /// back rather than swallowing them.
     #[test]
     fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
-        let mut h = CanvasHarness::new(DocFixture::probes(2));
+        let mut h = CanvasHarness::new(DocumentFixture::probes(2));
         let (producer, consumer) = (h.node(0), h.node(1));
         let input = InputPort::new(consumer, 0);
-        h.doc_mut()
+        h.document_mut()
             .graph
             .set_input_binding(input, Binding::wire(producer, 0));
         // Two frames so the circle has a widget id and a measured rect to aim at.

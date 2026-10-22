@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, Subscription};
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
@@ -46,7 +46,7 @@ fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> Un
     })
 }
 
-fn cst(v: f64) -> Binding {
+fn constant(v: f64) -> Binding {
     Binding::Const(ConstValue::Float(v))
 }
 
@@ -74,9 +74,9 @@ fn node_property(node_id: NodeId, from: CacheMode, to: CacheMode) -> UndoStep {
 /// A removal of a real node — the one kind that can only be built by reading a
 /// document, since it carries everything the graph held about the node.
 fn node_removal() -> UndoStep {
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
-    let entry = NodeEntry::capture(&fixture.doc, node_id).expect("the fixture placed it");
+    let entry = NodeEntry::capture(&fixture.document, node_id).expect("the fixture placed it");
     UndoStep::SetNode(Box::new(SetNode::removal(entry)))
 }
 
@@ -120,7 +120,7 @@ fn dirties_document_splits_edits_from_navigation() {
             },
         }),
         move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-        set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
+        set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         subscribed(node_id, NodeId::unique()),
     ];
@@ -137,7 +137,7 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
     let every_kind = [
         (node_removal(), true),
         (
-            set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
+            set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
             false,
         ),
         (move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)), false),
@@ -220,7 +220,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
             z: Change { from: 0, to: 7 },
         }),
         // Value-only: the editor stays present at its `Fixed` size.
-        set_input(port, Some(cst(1.0)), Some(cst(2.0))),
+        set_input(port, Some(constant(1.0)), Some(constant(2.0))),
         // A dimmed body and a filled badge keep the same rect...
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         // ...and an event wire paints between glyphs that are already there.
@@ -248,10 +248,10 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
                 to: "a-much-longer-title".into(),
             },
         }),
-        set_input(port, None, Some(cst(1.0))),
+        set_input(port, None, Some(constant(1.0))),
         // ...and removing it is the wire commit, the case Pass B has
         // always existed for.
-        set_input(port, Some(cst(1.0)), None),
+        set_input(port, Some(constant(1.0)), None),
         // A node arriving — or coming back on an undo — has no cached port
         // offsets for its wires to anchor to.
         node_removal(),

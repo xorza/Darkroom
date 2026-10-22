@@ -170,7 +170,7 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
         .show(ui, |_| {});
 }
 
-/// Shows `tip` as a hover tooltip anchored to `snapshot`; `None` records
+/// Shows `tooltip` as a hover tooltip anchored to `snapshot`; `None` records
 /// none. Takes an already-snapshotted response (rather than `&Response<'_>`)
 /// so a caller that just finished building the widget can end its own `ui`
 /// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
@@ -180,14 +180,14 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
 /// `Option` rather than an empty-string sentinel: "this widget has no
 /// tooltip" is a different fact from "its tooltip is blank", and the port
 /// glyphs — the one family that decides per frame — now say which they mean.
-/// Any text form is accepted: a `&'static str` tip stays borrowed until the
+/// Any text form is accepted: a `&'static str` tooltip stays borrowed until the
 /// bubble actually records, and a [`fmt!`] one is already in the pass's arena.
 pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
     snapshot: &'a ResponseSnapshot,
-    tip: Option<impl Into<TextInput<'a>>>,
+    tooltip: Option<impl Into<TextInput<'a>>>,
 ) {
-    if let Some(tip) = tip {
-        Tooltip::on(snapshot, tip).show(ui);
+    if let Some(tooltip) = tooltip {
+        Tooltip::on(snapshot, tooltip).show(ui);
     }
 }

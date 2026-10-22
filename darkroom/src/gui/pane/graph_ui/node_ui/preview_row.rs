@@ -51,11 +51,11 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
-pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-    let ncx = rec.node;
-    let theme = ncx.theme();
-    let node = ncx;
-    let stored = ncx.graph_ctx.run_state().previews.get(node.id);
+pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+    let node_ctx = record.node;
+    let theme = node_ctx.theme();
+    let node = node_ctx;
+    let stored = node_ctx.graph_ctx.run_state().previews.get(node.id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
         .id(preview_image_wid(node.id))
@@ -96,12 +96,12 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
     // open just activates it.
     if content.left.clicked() {
-        rec.out.push_view(DockOperation::OpenTab {
+        record.out.push_view(DockOperation::OpenTab {
             tab: TabRef::ImageViewer(node.id),
         });
     }
     if let Some(image) = stored.and_then(StoredContent::image) {
-        info_row(ui, ncx.theme(), image);
+        info_row(ui, node_ctx.theme(), image);
     }
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 
 #[test]
@@ -11,7 +11,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   a: (0,0) 150×80      — on-screen, size cached
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
-    let mut fixture = DocFixture::default();
+    let mut fixture = DocumentFixture::default();
     let a = fixture.stub_at(Vec2::new(0.0, 0.0));
     let b = fixture.stub_at(Vec2::new(1000.0, 500.0));
     fixture.stub_at(Vec2::new(-50.0, 300.0));
@@ -35,7 +35,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let empty = GraphCtxFixture::over(DocFixture::default());
+    let empty = GraphCtxFixture::over(DocumentFixture::default());
     assert!(node_bounds(&geometry, empty.graph_ctx(), Bounded::All).is_none());
 }
 

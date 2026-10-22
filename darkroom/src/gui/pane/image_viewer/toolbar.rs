@@ -46,12 +46,12 @@ impl Controls<'_> {
     /// is active. Flips `filter` on click; returns whether it changed.
     pub(super) fn filter_toggle(self, ui: &mut Ui, filter: &mut ImageFilter) -> bool {
         let nearest = *filter == ImageFilter::Nearest;
-        let tip = if nearest {
+        let tooltip = if nearest {
             "Zoom-in sampling: nearest — click for bilinear"
         } else {
             "Zoom-in sampling: bilinear — click for nearest"
         };
-        if Chip::new(self.wid("filter"), tip)
+        if Chip::new(self.wid("filter"), tooltip)
             .toggled(Toggle::from(nearest))
             .show(ui, self.theme, glyph::draw_pixels)
         {

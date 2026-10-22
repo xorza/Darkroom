@@ -39,14 +39,14 @@ pub(crate) enum Framing {
 }
 
 impl Framing {
-    /// The `SetViewport` intent this framing implies on the canvas `cx`, or
+    /// The `SetViewport` intent this framing implies on the canvas `ctx`, or
     /// `None` when there's nothing to frame — `ShowSelected` with an empty
     /// selection, no nodes to fit, or the viewport not yet measured. The pane
     /// size comes from the outer canvas's `layout_rect`; node extents come
     /// from the geometry's cross-frame size cache, position from
     /// `NodeCtx::pos`.
-    pub(crate) fn intent(self, ui: &Ui, cx: CanvasCtx<'_>) -> Option<GraphIntent> {
-        let (geometry, graph_ctx) = (cx.geometry(), cx.graph_ctx());
+    pub(crate) fn intent(self, ui: &Ui, ctx: CanvasCtx<'_>) -> Option<GraphIntent> {
+        let (geometry, graph_ctx) = (ctx.geometry(), ctx.graph_ctx());
         let vp = ui.response_for(canvas::outer_wid()).layout_rect?.size;
         let pane = Vec2::new(vp.w, vp.h);
         let to = match self {

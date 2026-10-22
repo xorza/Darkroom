@@ -145,8 +145,9 @@ impl Inspectors {
     /// hit-tests over the nodes beneath. Walks `modes` in node-id order, so
     /// two overlapping panels keep a stable front-to-back relationship
     /// instead of trading places between frames.
-    pub(crate) fn draw_panels(&self, ui: &mut Ui, dcx: DrawCtx<'_>) {
-        let (theme, graph_ctx, geometry) = (dcx.theme(), dcx.graph_ctx(), dcx.geometry());
+    pub(crate) fn draw_panels(&self, ui: &mut Ui, draw_ctx: DrawCtx<'_>) {
+        let (theme, graph_ctx, geometry) =
+            (draw_ctx.theme(), draw_ctx.graph_ctx(), draw_ctx.geometry());
         for (&id, &mode) in &self.modes {
             let Some(node) = graph_ctx.node(id) else {
                 continue;
@@ -160,9 +161,9 @@ impl Inspectors {
                 .node_world_rect(node)
                 .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            let ncx = node.with_hover(wid::hover(ui, node.id));
+            let node_ctx = node.with_hover(wid::hover(ui, node.id));
             InspectPanel {
-                node: ncx,
+                node: node_ctx,
                 mode,
                 pos,
             }
@@ -183,12 +184,12 @@ struct InspectPanel<'a> {
 impl InspectPanel<'_> {
     fn show(self, ui: &mut Ui) {
         let Self {
-            node: ncx,
+            node: node_ctx,
             mode,
             pos,
         } = self;
-        let (theme, node) = (ncx.theme(), ncx);
-        let logs = ncx.graph_ctx.run_state().logs(node.id);
+        let (theme, node) = (node_ctx.theme(), node_ctx);
+        let logs = node_ctx.graph_ctx.run_state().logs(node.id);
         let error = match node.exec_status() {
             ExecStatus::Errored(message) => message.as_deref(),
             _ => None,
@@ -261,13 +262,13 @@ impl InspectPanel<'_> {
                     line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let library = ncx.graph_ctx.library();
+                let library = node_ctx.graph_ctx.library();
                 if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
                     for input in node.inputs() {
                         let val = value_str(ui, input.binding());
                         InspectedPort {
-                            label: PortLabel::resolve(library, input.name(), input.ty()),
+                            label: PortLabel::resolve(library, input.name(), input.data_type()),
                             value: Some(val),
                         }
                         .show(ui, theme);
@@ -278,7 +279,7 @@ impl InspectPanel<'_> {
                     section(ui, theme, "Outputs");
                     for output in node.outputs() {
                         InspectedPort {
-                            label: PortLabel::resolve(library, output.name(), output.ty()),
+                            label: PortLabel::resolve(library, output.name(), output.data_type()),
                             value: None,
                         }
                         .show(ui, theme);
@@ -385,22 +386,22 @@ struct PortLabel<'a> {
     name: &'a str,
     /// The declared type's display name, or `None` when it merely repeats
     /// `name` and the row would read as a stutter.
-    ty_name: Option<Cow<'a, str>>,
+    type_name: Option<Cow<'a, str>>,
 }
 
 impl<'a> PortLabel<'a> {
-    fn resolve(library: &'a Library, name: &'a str, ty: &DataType) -> Self {
-        let ty_name = library.type_name(ty);
-        let ty_name = (!ty_name.eq_ignore_ascii_case(name)).then_some(ty_name);
-        Self { name, ty_name }
+    fn resolve(library: &'a Library, name: &'a str, data_type: &DataType) -> Self {
+        let type_name = library.type_name(data_type);
+        let type_name = (!type_name.eq_ignore_ascii_case(name)).then_some(type_name);
+        Self { name, type_name }
     }
 }
 
 impl Display for PortLabel<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)?;
-        match &self.ty_name {
-            Some(ty_name) => write!(f, " · {ty_name}"),
+        match &self.type_name {
+            Some(type_name) => write!(f, " · {type_name}"),
             None => Ok(()),
         }
     }
@@ -474,7 +475,7 @@ mod tests {
         use std::sync::Arc;
 
         let lib = Library::default();
-        let path_ty = DataType::FsPath(Arc::new(FsPathConfig::default()));
+        let path_type = DataType::FsPath(Arc::new(FsPathConfig::default()));
 
         // Type repeats the name (case-insensitively) → the name alone, no
         // "Image · Image" stutter; distinct type → "name · type". A path
@@ -483,11 +484,11 @@ mod tests {
         let cases: [(&str, &DataType, &str); 4] = [
             ("Float", &DataType::Float, "Float"),
             ("Brightness", &DataType::Float, "Brightness · float"),
-            ("Path", &path_ty, "Path"),
-            ("Output", &path_ty, "Output · path"),
+            ("Path", &path_type, "Path"),
+            ("Output", &path_type, "Output · path"),
         ];
-        for (name, ty, expected) in cases {
-            let label = PortLabel::resolve(&lib, name, ty);
+        for (name, data_type, expected) in cases {
+            let label = PortLabel::resolve(&lib, name, data_type);
             assert_eq!(label.to_string(), expected, "label for {name}");
             // The deduped case is the dominant one, and it must resolve to the
             // declaration's own `&str` with nothing appended: that is the whole
@@ -495,7 +496,7 @@ mod tests {
             // own handles. Only the differing case carries a second piece.
             let deduped = expected == name;
             assert_eq!(
-                label.ty_name.is_none(),
+                label.type_name.is_none(),
                 deduped,
                 "{name}: a deduped label is the declared name alone, a \
                  combined one carries the type beside it",

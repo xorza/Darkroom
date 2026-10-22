@@ -5,7 +5,7 @@ use glam::Vec2;
 use scenarium::{Library, NodeId};
 
 use super::*;
-use crate::core::document::internals::{self, DocFixture};
+use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -15,7 +15,7 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 /// threaded through the helpers by hand.
 #[derive(Debug)]
 struct History {
-    doc: Document,
+    document: Document,
     library: Library,
     stack: ActionStack,
     /// The last gesture id minted.
@@ -38,9 +38,9 @@ impl History {
 
     /// [`Self::sample`] on a stated byte budget — for the trimming case.
     fn bounded(max_bytes: usize) -> Self {
-        let DocFixture { doc, library } = DocFixture::sample();
+        let DocumentFixture { document, library } = DocumentFixture::sample();
         Self {
-            doc,
+            document,
             library,
             stack: ActionStack::new(max_bytes),
             gestures: GestureId::default(),
@@ -49,11 +49,11 @@ impl History {
 
     /// The `i`th node of the sample, in its paint order.
     fn node(&self, i: usize) -> NodeId {
-        internals::nth_in_paint_order(&self.doc.main_view, i)
+        internals::nth_in_paint_order(&self.document.main_view, i)
     }
 
     fn pos(&self, node_id: NodeId) -> Vec2 {
-        self.doc.main_view.item_placements[&node_id].pos
+        self.document.main_view.item_placements[&node_id].pos
     }
 
     /// Push one graph edit, as a widget's single intent does.
@@ -87,7 +87,7 @@ impl History {
     fn apply(&mut self, intent: GraphIntent, steps: &mut Vec<UndoStep>) {
         let committed = steps.len();
         intent
-            .commit(&mut self.doc, &self.library, steps)
+            .commit(&mut self.document, &self.library, steps)
             .expect("the intent is well formed");
         assert!(steps.len() > committed, "a test commits every intent");
     }
@@ -130,11 +130,11 @@ impl History {
     /// Take back one entry. The per-step callback is the editor's business —
     /// nothing here watches it.
     fn undo(&mut self) -> bool {
-        self.stack.undo(&mut self.doc, &mut |_| {})
+        self.stack.undo(&mut self.document, &mut |_| {})
     }
 
     fn redo(&mut self) -> bool {
-        self.stack.redo(&mut self.doc, &mut |_| {})
+        self.stack.redo(&mut self.document, &mut |_| {})
     }
 }
 
@@ -198,7 +198,7 @@ fn a_drag_back_to_its_start_records_nothing() {
     assert_eq!(h.pos(a), a0);
 
     assert!(h.undo(), "the selection is the one entry left");
-    assert!(h.doc.main_view.selected.is_empty());
+    assert!(h.document.main_view.selected.is_empty());
     assert!(!h.undo(), "the cancelled drag recorded nothing");
 }
 
@@ -221,9 +221,9 @@ fn another_edit_seals_the_open_gesture() {
         a0 + Vec2::new(4.0, 0.0),
         "the frames after the edit"
     );
-    assert_eq!(h.doc.main_view.selected, BTreeSet::from([b]));
+    assert_eq!(h.document.main_view.selected, BTreeSet::from([b]));
     assert!(h.undo());
-    assert!(h.doc.main_view.selected.is_empty(), "the edit");
+    assert!(h.document.main_view.selected.is_empty(), "the edit");
     assert!(h.undo());
     assert_eq!(h.pos(a), a0, "the frames before it");
     assert!(!h.undo());
@@ -234,7 +234,7 @@ fn another_edit_seals_the_open_gesture() {
 #[test]
 fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
     let mut h = History::sample();
-    let start = h.doc.main_view.viewport;
+    let start = h.document.main_view.viewport;
     let at = |x: f32, zoom| Viewport {
         pan: Vec2::new(x, 0.0),
         zoom,
@@ -253,9 +253,13 @@ fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
     });
 
     assert!(h.undo());
-    assert_eq!(h.doc.main_view.viewport, at(20.0, start.zoom), "the jump");
+    assert_eq!(
+        h.document.main_view.viewport,
+        at(20.0, start.zoom),
+        "the jump"
+    );
     assert!(h.undo());
-    assert_eq!(h.doc.main_view.viewport, start, "the whole pan");
+    assert_eq!(h.document.main_view.viewport, start, "the whole pan");
     assert!(!h.undo());
 }
 
@@ -265,7 +269,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 
     let mut h = History::sample();
     let named = |h: &History, name: &str| {
-        h.doc
+        h.document
             .graph
             .iter()
             .find(|node| node.name == name)
@@ -274,21 +278,21 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     };
     let (a, b) = (named(&h, "get_b"), named(&h, "sum"));
     // Edge a -> b, then select both for deletion.
-    h.doc
+    h.document
         .graph
         .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
-    h.doc.main_view.selected = [a, b].into_iter().collect();
+    h.document.main_view.selected = [a, b].into_iter().collect();
 
     // The a->b edge is captured by a's step (before a is removed), so a
     // single undo can restore it once both nodes are back.
     h.batch([a, b].map(|node_id| GraphIntent::RemoveNode { node_id }));
-    assert!(h.doc.graph.find(a).is_none());
-    assert!(h.doc.graph.find(b).is_none());
+    assert!(h.document.graph.find(a).is_none());
+    assert!(h.document.graph.find(b).is_none());
 
     assert!(h.undo());
-    assert!(h.doc.graph.find(a).is_some());
-    assert!(h.doc.graph.find(b).is_some());
-    match h.doc.graph.bindings.get(&InputPort::new(b, 0)) {
+    assert!(h.document.graph.find(a).is_some());
+    assert!(h.document.graph.find(b).is_some());
+    match h.document.graph.bindings.get(&InputPort::new(b, 0)) {
         Some(Binding::Wire(src)) => assert_eq!((src.node_id, src.port_idx), (a, 0)),
         other => panic!("expected restored a->b edge, got {other:?}"),
     }
