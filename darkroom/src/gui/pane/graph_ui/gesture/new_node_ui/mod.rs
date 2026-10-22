@@ -226,7 +226,7 @@ pub(crate) fn results_wid() -> WidgetId {
 /// results area with it instead of silently mis-sizing the scroll.
 ///
 /// Palantir folds a chrome's border into its padding on every side, unless the
-/// width paints nothing. That fold (`Background::border_inset`) is not public,
+/// width paints nothing. That fold (`Bg::border_inset`) is not public,
 /// so its gate is repeated here over the same public `domain` predicate.
 ///
 /// The span between the rows is measured rather than re-summed from the

@@ -53,7 +53,7 @@ impl PreferencesForm<'_> {
             .size((Sizing::FILL, Sizing::FILL))
             .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
             .child_align(Align::new(HAlign::Center, VAlign::Top))
-            .background(Background::fill(theme.canvas.bg))
+            .bg(Bg::fill(theme.canvas.bg))
             .show(ui, |ui| {
                 Panel::vstack()
                     .id_salt("preferences_column")

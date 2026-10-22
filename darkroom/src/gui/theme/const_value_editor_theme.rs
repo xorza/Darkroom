@@ -44,8 +44,8 @@ impl ConstValueEditorTheme {
         let mut out = Self::from_palette(p);
         let reveal = Brush::Solid(p.element_mid.with_alpha(REVEAL_ALPHA));
         for bg in [
-            &mut out.drag_value.chip.looks.normal.background,
-            &mut out.drag_value.editor.looks.normal.background,
+            &mut out.drag_value.chip.looks.normal.bg,
+            &mut out.drag_value.editor.looks.normal.bg,
         ] {
             bg.fill = reveal.clone();
         }
