@@ -29,7 +29,11 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 /// `theme::tests::badges_are_told_apart_from_each_other` pins them
 /// pairwise. State the rule, not the hex: which color a role holds is
 /// the asset's to change.
+///
+/// A role the file holds and this struct does not fails the load, as a
+/// missing one does: the generator and the struct name the same roles.
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Palette {
     /// Ground fill behind the whole graph.
     pub(crate) canvas_bg: RgbaF32,
@@ -104,5 +108,32 @@ impl Palette {
     /// returning a `Result` no caller could act on.
     pub(super) fn load() -> Self {
         ron::from_str(AYU_GRAPHITE).expect("assets/ayu-graphite.ron matches Palette")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The file and the struct must name the same roles: one the generator
+    /// still emits but darkroom stopped reading fails the load, like one it
+    /// dropped. Both edits start from the real asset, which loads.
+    #[test]
+    fn a_role_the_struct_does_not_read_fails_the_load() {
+        ron::from_str::<Palette>(AYU_GRAPHITE).expect("the asset loads");
+
+        let extra = AYU_GRAPHITE.replacen("\n(\n", "\n(\n    output_port: \"#fa993b\",\n", 1);
+        assert_ne!(extra, AYU_GRAPHITE, "the role went in");
+        let error = ron::from_str::<Palette>(&extra).expect_err("an extra role fails");
+        assert!(error.to_string().contains("output_port"), "{error}");
+
+        let missing = AYU_GRAPHITE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("wire_broken:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(missing, AYU_GRAPHITE, "the role came out");
+        let error = ron::from_str::<Palette>(&missing).expect_err("a missing role fails");
+        assert!(error.to_string().contains("wire_broken"), "{error}");
     }
 }
