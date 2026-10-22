@@ -99,9 +99,8 @@ impl Labeler {
             strip_idx * rows_per_strip..end
         };
 
-        // The foreground pixel count bounds the provisional labels exactly: each run is at least
-        // one foreground pixel and takes one label.
-        union_find.reset(mask.count_ones());
+        // Each run of a row takes one provisional label, and a strip holds whole rows.
+        union_find.reset(mask.count_runs());
         if strips.len() < strip_count {
             strips.resize_with(strip_count, Strip::default);
         }

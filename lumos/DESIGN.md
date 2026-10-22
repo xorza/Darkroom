@@ -48,3 +48,16 @@
   `write_image` writes, byte for byte. Refused: an owned `Image` staged for each HDU before the file
   opened, which held a copy of every HDU and fits-well's encoding of one, about 1.85 GB above a
   24 MP RGB product.
+- **A detector holds two planes; σ and sky are surfaces.** The sky and its σ are a `MeshSurface`, the
+  mesh's values and y pass, read a row or a pixel at a time by the spline's own kernel, bit for bit
+  the plane it replaces; a detection plane's filters run a band of rows at a time from the
+  measurement plane or the plane less its sky (`DetectionFilter`), each band computing its halo
+  again into a ring of `2r + 1` rows. A detector slot drops from 5 planes to 3 at 24 MP, and
+  detection runs 4–13 % faster end to end; the matched filter alone takes 3 % more, an ellipse off
+  the axes 9 %, for the halo. Refused: the filters in place over column strips, which keep an
+  elliptical PSF's work plane; and σ and sky planes, which a detector slot paid twice over for
+  values read by row or at a peak. SEP filters a ring of rows the same way.
+- **A deblend set keeps room for a star.** A set that grew past `DeblendBuffers::KEPT_PIXELS` for
+  a galaxy or a nebula gives the room back after it, and a pixel is 12 bytes. Refused: keeping the
+  largest component's room for the run, which a nebula of millions of pixels pinned per slot.
+

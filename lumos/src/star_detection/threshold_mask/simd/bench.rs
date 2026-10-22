@@ -19,14 +19,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();
     let row = || {
         let stages: &Stages = stages.get_or_init(|| Stages::of(Field::Typical));
-        let span = FRAME.height / 2 * FRAME.width..(FRAME.height / 2 + 1) * FRAME.width;
+        let y = FRAME.height / 2;
         let threshold = ThresholdParams {
             sigma: stages.config.extraction.sigma_threshold,
             min_noise: stages.plane.noise.floor,
         };
         Row {
-            pixels: &stages.plane.values.pixels()[span.clone()],
-            noise: &stages.plane.noise.noise.pixels()[span],
+            pixels: stages.plane.values.row(y),
+            noise: stages.plane.noise.noise.reader().row(y).to_vec(),
             threshold,
         }
     };
@@ -43,7 +43,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         b.iter(|| {
             ProcessWords {
                 pixels: black_box(pixels),
-                noise,
+                noise: &noise,
                 threshold,
                 words: &mut words,
             }
@@ -62,7 +62,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 b.iter(|| {
                     tier.run(ProcessWords {
                         pixels: black_box(pixels),
-                        noise,
+                        noise: &noise,
                         threshold,
                         words: &mut words,
                     });
@@ -79,7 +79,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         b.iter(|| {
             ProcessWords {
                 pixels: black_box(pixels),
-                noise,
+                noise: &noise,
                 threshold,
                 words: &mut words,
             }
@@ -88,10 +88,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
     });
 }
 
-/// One row of the plane, its noise, and the threshold the detector puts on it.
+/// One row of the plane, its noise read off the plane's surface, and the threshold the detector
+/// puts on it.
 #[derive(Debug)]
 struct Row<'a> {
     pixels: &'a [f32],
-    noise: &'a [f32],
+    noise: Vec<f32>,
     threshold: ThresholdParams,
 }

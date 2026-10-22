@@ -36,7 +36,7 @@ fn nearest_peak_idx(pos: Vec2us, peaks: &[Pixel]) -> usize {
     let mut min_dist_sq = usize::MAX;
     let mut nearest = 0;
     for (i, peak) in peaks.iter().enumerate() {
-        let d = dist_sq(pos, peak.pos);
+        let d = dist_sq(pos, peak.pos());
         if d < min_dist_sq {
             min_dist_sq = d;
             nearest = i;

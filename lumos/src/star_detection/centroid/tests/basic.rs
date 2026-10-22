@@ -86,6 +86,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         // each metric.
         let sky_error = bg
             .bg
+            .plane()
             .iter()
             .map(|&level| (level - SKY).abs())
             .fold(0.0, f32::max);

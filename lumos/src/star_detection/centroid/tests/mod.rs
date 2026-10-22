@@ -52,7 +52,12 @@ fn global_bg(sky: &SkyNoise, pos: DVec2) -> StarBg {
     StarBg {
         offset: 0.0,
         noise: StarNoise {
-            bg_sigma: f64::from(sky.noise[pixel].max(sky.floor)),
+            bg_sigma: f64::from(
+                sky.noise
+                    .reader()
+                    .at(Vec2us::new(pixel.0, pixel.1))
+                    .max(sky.floor),
+            ),
             electrons_per_unit: None,
         },
         sky_samples: None,

@@ -12,6 +12,7 @@
 pub(crate) mod color_mesh;
 pub(crate) mod mesh_axis;
 pub(crate) mod mesh_spline;
+pub(crate) mod mesh_surface;
 pub(crate) mod mesh_workspace;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
@@ -92,14 +93,6 @@ impl BgMesh {
             .map(|tile| tile.sigma)
             .fold(f32::NEG_INFINITY, f32::max);
         low..=high
-    }
-
-    /// The last tile row whose centre is at or before `pos`, or the first when none is.
-    #[inline]
-    pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
-        self.centers_y
-            .partition_point(|&centre| centre <= pos)
-            .saturating_sub(1)
     }
 
     /// Every tile's statistics, a bad tile's taken from its good neighbours (see

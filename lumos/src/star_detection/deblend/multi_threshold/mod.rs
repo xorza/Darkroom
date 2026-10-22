@@ -103,7 +103,7 @@ impl MultiThresholdParams {
                 let candidate = objects[star as usize].peak;
                 if !peaks
                     .iter()
-                    .any(|kept: &Pixel| deblend::dist_sq(candidate.pos, kept.pos) < min_sep_sq)
+                    .any(|kept: &Pixel| deblend::dist_sq(candidate.pos(), kept.pos()) < min_sep_sq)
                 {
                     peaks.push(candidate);
                 }
@@ -184,6 +184,20 @@ impl ThresholdLadder {
 }
 
 impl TreeBuffers {
+    /// Give back what the vectors of each pixel hold past `pixels` of them.
+    pub(crate) fn shrink_to(&mut self, pixels: usize) {
+        for per_pixel in [
+            &mut self.object_of,
+            &mut self.visited,
+            &mut self.active,
+            &mut self.members,
+            &mut self.queue,
+        ] {
+            per_pixel.clear();
+            per_pixel.shrink_to(pixels);
+        }
+    }
+
     /// Build the tree of `pixels`, whose brightest is `cut.root`: the root is the whole
     /// component, and levels `1..threshold_count` cut every object of the level below into its
     /// regions above the level holding at least `min_area` pixels. Exponential spacing puts the
@@ -356,6 +370,41 @@ impl TreeBuffers {
         }
         // A split marks every ancestor split, the root among them, so an unsplit root found none.
         debug_assert!(!unsplit[0] || stars.is_empty());
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod buffer_room {
+    use crate::star_detection::deblend::multi_threshold::TreeBuffers;
+
+    impl TreeBuffers {
+        /// Room for `pixels` in each vector of each pixel.
+        pub(crate) fn reserve_per_pixel(&mut self, pixels: usize) {
+            for per_pixel in [
+                &mut self.object_of,
+                &mut self.visited,
+                &mut self.active,
+                &mut self.members,
+                &mut self.queue,
+            ] {
+                per_pixel.reserve(pixels);
+            }
+        }
+
+        /// The most room any vector of each pixel holds.
+        pub(crate) fn per_pixel_capacity(&self) -> usize {
+            [
+                &self.object_of,
+                &self.visited,
+                &self.active,
+                &self.members,
+                &self.queue,
+            ]
+            .iter()
+            .map(|per_pixel| per_pixel.capacity())
+            .max()
+            .unwrap_or(0)
+        }
     }
 }
 

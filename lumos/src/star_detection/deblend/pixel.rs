@@ -4,14 +4,25 @@ use std::cmp::Ordering;
 
 use crate::math::vec2us::Vec2us;
 
-/// A pixel with its coordinates and value.
+/// A pixel with its coordinates and value: 12 bytes, which a deblend holds one of for each pixel
+/// of the component it splits. A frame's sides fit a `u32`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Pixel {
-    pub(crate) pos: Vec2us,
+    x: u32,
+    y: u32,
     pub(crate) value: f32,
 }
 
 impl Pixel {
+    /// The pixel at column `x` of row `y`, as a labeling run states them.
+    pub(crate) const fn at(x: u32, y: u32, value: f32) -> Self {
+        Self { x, y, value }
+    }
+
+    pub(crate) const fn pos(&self) -> Vec2us {
+        Vec2us::new(self.x as usize, self.y as usize)
+    }
+
     /// The brightest of `pixels`, the first in iteration order among equals; `None` when there
     /// are none.
     pub(super) fn brightest(pixels: impl IntoIterator<Item = Self>) -> Option<Self> {
@@ -26,7 +37,24 @@ impl Pixel {
         other
             .value
             .total_cmp(&self.value)
-            .then(self.pos.y.cmp(&other.pos.y))
-            .then(self.pos.x.cmp(&other.pos.x))
+            .then(self.y.cmp(&other.y))
+            .then(self.x.cmp(&other.x))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::math::vec2us::Vec2us;
+    use crate::star_detection::deblend::pixel::Pixel;
+
+    impl Pixel {
+        /// The pixel at `pos`.
+        pub(crate) fn new(pos: Vec2us, value: f32) -> Self {
+            Self::at(
+                u32::try_from(pos.x).unwrap(),
+                u32::try_from(pos.y).unwrap(),
+                value,
+            )
+        }
     }
 }

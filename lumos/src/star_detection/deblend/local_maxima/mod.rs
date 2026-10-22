@@ -102,7 +102,7 @@ impl LocalMaximaParams {
         let reach = min_separation.saturating_sub(1);
         let min_sep_sq = min_separation * min_separation;
         for &candidate in maxima.iter() {
-            let pos = candidate.pos;
+            let pos = candidate.pos();
             let crowded = (pos.y.saturating_sub(reach)..=pos.y + reach).any(|y| {
                 (pos.x.saturating_sub(reach)..=pos.x + reach).any(|x| {
                     let near = Vec2us::new(x, y);
@@ -136,8 +136,8 @@ struct Kept<'a> {
 /// outside the image does not count against it.
 #[inline]
 fn is_local_maximum(pixel: Pixel, residual: &Buffer2<f32>) -> bool {
-    let x = pixel.pos.x;
-    let y = pixel.pos.y;
+    let x = pixel.pos().x;
+    let y = pixel.pos().y;
     let v = pixel.value;
     let width = residual.width();
     let height = residual.height();

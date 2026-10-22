@@ -22,7 +22,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 BgEstimate::estimate(
                     MaskedPlane::from(&pixels),
                     &config,
-                    &resources.floats,
+                    &resources.surfaces,
                     &mut resources.bg,
                 )
             });

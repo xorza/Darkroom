@@ -9,7 +9,7 @@ use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 /// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.
 fn threshold_mask(filtered: &Buffer2<f32>, noise: &Buffer2<f32>, sigma: f32) -> BitBuffer2 {
     let mut mask = BitBuffer2::new_filled(Size2us::from(filtered), false);
-    ThresholdParams::test(sigma).fill_mask(filtered, noise, &mut mask);
+    ThresholdParams::test(sigma).fill_mask_plane(filtered, noise, &mut mask);
     mask
 }
 

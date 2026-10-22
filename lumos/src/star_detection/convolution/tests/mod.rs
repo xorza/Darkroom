@@ -8,15 +8,13 @@
 mod matched_filter;
 
 use glam::Vec2;
+use imaginarium::Buffer2;
 
 use crate::internals::synthetic::patterns;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::fwhm;
-use crate::star_detection::convolution::filter_kernels::{
-    EllipticalGaussian, FilterKernels, KernelShape,
-};
+use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, KernelShape};
 use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
@@ -497,7 +495,7 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
     ] {
         let mut separable = pixels.clone();
         let mut temp = Buffer2::new_default(side, side);
-        let separable_norm = FilterKernels::default().separable(&mut separable, sigmas, &mut temp);
+        let separable_norm = separable_convolve(&mut separable, sigmas, &mut temp);
         let mut full = Buffer2::new_default(side, side);
         let full_norm = elliptical_gaussian_convolve(
             &pixels,
@@ -520,11 +518,7 @@ fn an_axis_aligned_ellipse_filters_separably_as_its_2d_kernel() {
         }
         if angle == FRAC_PI_2 {
             let mut swapped = pixels.clone();
-            FilterKernels::default().separable(
-                &mut swapped,
-                [sigma, sigma * axis_ratio],
-                &mut temp,
-            );
+            separable_convolve(&mut swapped, [sigma, sigma * axis_ratio], &mut temp);
             let largest = swapped
                 .iter()
                 .zip(full.iter())

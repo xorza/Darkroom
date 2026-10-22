@@ -118,13 +118,13 @@ fn rendered_skies_are_recovered() {
             size.height,
             pixels
                 .iter()
-                .zip(bg.bg.iter())
+                .zip(bg.bg.plane().iter())
                 .map(|(&p, &sky)| (p - sky).max(0.0))
                 .collect(),
         );
         for (suffix, image) in [
             ("input", &pixels),
-            ("background", &bg.bg),
+            ("background", &bg.bg.plane()),
             ("subtracted", &residual),
         ] {
             save(
@@ -135,7 +135,14 @@ fn rendered_skies_are_recovered() {
         }
 
         let largest = |values: &mut dyn Iterator<Item = f32>| values.fold(0.0f32, f32::max);
-        let model = largest(&mut bare.bg.iter().zip(&truth).map(|(a, b)| (a - b).abs()));
+        let model = largest(
+            &mut bare
+                .bg
+                .plane()
+                .iter()
+                .zip(&truth)
+                .map(|(a, b)| (a - b).abs()),
+        );
         let model_bound = case
             .model_error
             .unwrap_or_else(|| 8.0 * f32::EPSILON * largest(&mut truth.iter().copied()));
@@ -145,14 +152,15 @@ fn rendered_skies_are_recovered() {
             case.name
         );
 
-        let mut spread = noisy.sky.noise.pixels().to_vec();
+        let mut spread = noisy.sky.noise.plane().into_vec();
         let sigma = statistics::median_mut(&mut spread);
         let scatter_bound = 5.0 * 2.14 * sigma / 32.0;
         let scatter = largest(
             &mut noisy
                 .bg
+                .plane()
                 .iter()
-                .zip(bare.bg.iter())
+                .zip(bare.bg.plane().iter())
                 .map(|(a, b)| (a - b).abs()),
         );
         assert!(
@@ -164,8 +172,9 @@ fn rendered_skies_are_recovered() {
         let star_move = largest(
             &mut bg
                 .bg
+                .plane()
                 .iter()
-                .zip(noisy.bg.iter())
+                .zip(noisy.bg.plane().iter())
                 .map(|(a, b)| (a - b).abs()),
         );
         assert!(

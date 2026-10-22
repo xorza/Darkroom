@@ -54,7 +54,7 @@ impl Assignment {
         self.cell_starts.clear();
         self.cell_starts.resize(cell_count + 1, 0);
         for peak in peaks {
-            let cell = self.cell_of(peak.pos);
+            let cell = self.cell_of(peak.pos());
             self.cell_starts[cell + 1] += 1;
         }
         for cell in 0..cell_count {
@@ -67,7 +67,7 @@ impl Assignment {
             .extend_from_slice(&self.cell_starts[..cell_count]);
         // In index order, so each cell's run keeps its peaks in index order too.
         for (idx, peak) in peaks.iter().enumerate() {
-            let cell = self.cell_of(peak.pos);
+            let cell = self.cell_of(peak.pos());
             self.by_cell[self.cursor[cell] as usize] = idx as u32;
             self.cursor[cell] += 1;
         }
@@ -96,7 +96,10 @@ impl Assignment {
             let cell = cell_y * self.cells.x + cell_x;
             let run = self.cell_starts[cell] as usize..self.cell_starts[cell + 1] as usize;
             for &idx in &self.by_cell[run] {
-                let candidate = (deblend::dist_sq(pos, peaks[idx as usize].pos), idx as usize);
+                let candidate = (
+                    deblend::dist_sq(pos, peaks[idx as usize].pos()),
+                    idx as usize,
+                );
                 *best = (*best).min(candidate);
             }
         };

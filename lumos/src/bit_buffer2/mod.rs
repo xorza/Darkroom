@@ -237,6 +237,25 @@ impl BitBuffer2 {
             .sum()
     }
 
+    /// The runs of set pixels along the rows: each set pixel whose left neighbour in its row is
+    /// clear or past the row's start begins one.
+    pub(crate) fn count_runs(&self) -> usize {
+        let words_per_row = self.words_per_row().max(1);
+        self.words
+            .chunks_exact(words_per_row)
+            .map(|row| {
+                let mut left = 0;
+                row.iter()
+                    .map(|&word| {
+                        let starts = word & !((word << 1) | left);
+                        left = word >> (BITS_PER_WORD - 1);
+                        starts.count_ones() as usize
+                    })
+                    .sum::<usize>()
+            })
+            .sum()
+    }
+
     /// Fill the mask by testing every pixel, row by row in parallel, accumulating a whole word
     /// before storing it.
     ///

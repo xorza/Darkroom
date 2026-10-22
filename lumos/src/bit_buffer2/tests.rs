@@ -94,16 +94,30 @@ fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
     }
 }
 
+/// Counts of pixels and of runs along the rows: a full 7 × 2 mask is 14 pixels in 2 runs, a row
+/// per run, and a pixel cleared mid-row splits its run. A run across the 64-pixel word boundary of
+/// a 130-wide row, pixels 63 and 64, is one; pixel 127 alone and 129, the row's last, are two
+/// more; a run at the start of row 1 begins a run of its own after row 0 ended set.
 #[test]
 fn fill_count_clone_and_swap() {
     let mut first = BitBuffer2::new_default(Size2us::new(7, 2));
     assert_eq!(first.count_ones(), 0);
+    assert_eq!(first.count_runs(), 0);
     assert!(iter_bits(&first).iter().all(|&value| !value));
 
     first.fill(true);
     assert_eq!(first.count_ones(), 14);
+    assert_eq!(first.count_runs(), 2);
     first.set_at(Vec2us::new(3, 1), false);
     assert_eq!(first.count_ones(), 13);
+    assert_eq!(first.count_runs(), 3);
+
+    let mut wide = BitBuffer2::new_default(Size2us::new(130, 2));
+    for x in [63, 64, 127, 129] {
+        wide.set_at(Vec2us::new(x, 0), true);
+    }
+    wide.set_at(Vec2us::new(0, 1), true);
+    assert_eq!(wide.count_runs(), 4);
 
     let mut copy = first.clone();
     assert_eq!(iter_bits(&copy), iter_bits(&first));

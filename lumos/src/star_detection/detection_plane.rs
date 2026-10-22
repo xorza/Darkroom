@@ -1,14 +1,12 @@
 //! [`DetectionPlane`]: the plane detection thresholds and deblends, with the noise measured on it.
 
-use std::mem;
-
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::sky_noise::SkyNoise;
-use crate::star_detection::median_filter;
+use crate::star_detection::detection_filter::{DetectionFilter, FilterSource};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
@@ -50,40 +48,29 @@ pub(crate) struct PlaneSpec<'a> {
 }
 
 impl DetectionPlane {
-    /// Filter `residual`, a plane from `resources` that the plane takes over, and measure its
-    /// noise.
-    pub(super) fn from_residual(
-        mut residual: Pooled<Buffer2<f32>>,
+    /// `source` through the filters `spec` names into a plane from `resources`, and its noise
+    /// measured.
+    pub(super) fn filtered(
+        source: FilterSource<'_>,
         spec: PlaneSpec<'_>,
         resources: &mut DetectionResources,
     ) -> Self {
-        match spec.prefilter {
-            Prefilter::None => {}
-            Prefilter::Median3x3 => {
-                let mut filtered = resources.acquire_f32();
-                median_filter::apply_3x3(&residual, &mut filtered);
-                mem::swap(&mut residual, &mut filtered);
-            }
+        let mut values = resources.acquire_f32();
+        DetectionFilter {
+            prefilter: spec.prefilter,
+            matched: spec.matched.map(|filter| resources.kernels.matched(filter)),
         }
-        if let Some(filter) = spec.matched {
-            let mut temp = resources.acquire_f32();
-            resources
-                .kernels
-                .matched_filter(&mut residual, filter, &mut temp);
-        }
+        .run(source, &mut values, &resources.bands);
         let noise = SkyNoise::measure(
             MaskedPlane {
-                pixels: &residual,
+                pixels: &values,
                 mask: spec.mask,
             },
             spec.bg,
-            &resources.floats,
+            &resources.surfaces,
             &mut resources.bg,
         );
-        Self {
-            values: residual,
-            noise,
-        }
+        Self { values, noise }
     }
 
     /// The threshold `sigma` of the plane's own noise, held to its floor.

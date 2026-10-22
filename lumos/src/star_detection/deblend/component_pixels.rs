@@ -41,7 +41,7 @@ impl ComponentPixels {
         let mut cursor = 0;
         for y in bbox.min.y..bbox.max.y {
             self.row_starts.push(cursor as u32);
-            while cursor < self.pixels.len() && self.pixels[cursor].pos.y == y {
+            while cursor < self.pixels.len() && self.pixels[cursor].pos().y == y {
                 cursor += 1;
             }
         }
@@ -81,11 +81,11 @@ impl ComponentPixels {
             };
             let (mut j, mut k) = (up.start, down.start);
             for i in cur {
-                let low = pixels[i].pos.x.saturating_sub(1);
-                while j < up.end && pixels[j].pos.x < low {
+                let low = pixels[i].pos().x.saturating_sub(1);
+                while j < up.end && pixels[j].pos().x < low {
                     j += 1;
                 }
-                while k < down.end && pixels[k].pos.x < low {
+                while k < down.end && pixels[k].pos().x < low {
                     k += 1;
                 }
                 above[i] = j as u32;
@@ -113,11 +113,21 @@ impl ComponentPixels {
         }
     }
 
+    /// Give back what the vectors of each pixel hold past `pixels` of them.
+    pub(crate) fn shrink_to(&mut self, pixels: usize) {
+        for per_pixel in [&mut self.above, &mut self.below] {
+            per_pixel.clear();
+            per_pixel.shrink_to(pixels);
+        }
+        self.pixels.clear();
+        self.pixels.shrink_to(pixels);
+    }
+
     /// The index of the pixel at `pos`, when the component holds it.
     pub(crate) fn idx_of(&self, pos: Vec2us) -> Option<usize> {
         let row = self.row(pos.y);
         row.pixels
-            .binary_search_by_key(&pos.x, |pixel| pixel.pos.x)
+            .binary_search_by_key(&pos.x, |pixel| pixel.pos().x)
             .ok()
             .map(|offset| row.start + offset)
     }
@@ -131,11 +141,12 @@ impl ComponentPixels {
         mut visit: impl FnMut(usize),
     ) {
         debug_assert_eq!(self.above.len(), self.pixels.len(), "the rows are linked");
-        let pos = self.pixels[idx].pos;
-        if idx > 0 && self.pixels[idx - 1].pos == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
+        let pos = self.pixels[idx].pos();
+        if idx > 0 && self.pixels[idx - 1].pos() == Vec2us::new(pos.x.wrapping_sub(1), pos.y) {
             visit(idx - 1);
         }
-        if idx + 1 < self.pixels.len() && self.pixels[idx + 1].pos == Vec2us::new(pos.x + 1, pos.y)
+        if idx + 1 < self.pixels.len()
+            && self.pixels[idx + 1].pos() == Vec2us::new(pos.x + 1, pos.y)
         {
             visit(idx + 1);
         }
@@ -146,10 +157,10 @@ impl ComponentPixels {
         let row = pos.y - self.top;
         let rows = self.row_starts.len() - 1;
         let mut scan = |mut at: usize, end: usize| {
-            while at < end && self.pixels[at].pos.x < low {
+            while at < end && self.pixels[at].pos().x < low {
                 at += 1;
             }
-            while at < end && self.pixels[at].pos.x <= high {
+            while at < end && self.pixels[at].pos().x <= high {
                 visit(at);
                 at += 1;
             }
@@ -168,6 +179,28 @@ impl ComponentPixels {
 struct Row<'a> {
     start: usize,
     pixels: &'a [Pixel],
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::star_detection::deblend::component_pixels::ComponentPixels;
+
+    impl ComponentPixels {
+        /// Room for `pixels` in each vector of each pixel.
+        pub(crate) fn reserve_per_pixel(&mut self, pixels: usize) {
+            self.pixels.reserve(pixels);
+            self.above.reserve(pixels);
+            self.below.reserve(pixels);
+        }
+
+        /// The most room any vector of each pixel holds.
+        pub(crate) fn per_pixel_capacity(&self) -> usize {
+            self.pixels
+                .capacity()
+                .max(self.above.capacity())
+                .max(self.below.capacity())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -214,7 +247,7 @@ mod tests {
         let reached = |connectivity| {
             let mut poss = Vec::new();
             component.for_each_neighbour(arm, connectivity, |idx| {
-                let pos = component.pixels[idx].pos;
+                let pos = component.pixels[idx].pos();
                 poss.push((pos.x, pos.y));
             });
             poss.sort_unstable();

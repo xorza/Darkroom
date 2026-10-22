@@ -140,6 +140,7 @@ fn the_threshold_decides_per_star() {
     let bg = bg_estimate(&pixels);
     let residual = bg.residual_of(&pixels);
     let sky = bg.sky_noise();
+    let (bg_plane, noise) = (bg.bg.plane(), sky.noise.plane());
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
     let lone = isolated(&stars, &[], size);
 
@@ -153,8 +154,8 @@ fn the_threshold_decides_per_star() {
         let (mut detected, mut missed) = (0, 0);
         for star in &lone {
             let pixel = (star.x.round() as usize, star.y.round() as usize);
-            let peak = frame.truth.clean[pixel] - bg.bg[pixel];
-            let sigma = sky.noise[pixel].max(sky.floor);
+            let peak = frame.truth.clean[pixel] - bg_plane[pixel];
+            let sigma = noise[pixel].max(sky.floor);
             if peak >= 2.0 * (k + 5.0) * sigma {
                 assert_eq!(near(*star, &found, PEAK_RADIUS), 1, "{k}σ: star at {star}");
                 detected += 1;

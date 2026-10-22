@@ -13,6 +13,7 @@ use crate::star_detection::bg::sky_noise::SkyNoise;
 use crate::star_detection::centroid::MeasurePlanes;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::deblend::region::Region;
+use crate::star_detection::detection_filter::FilterSource;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec, Prefilter};
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
@@ -163,9 +164,7 @@ impl PreparedFrame {
 
     /// The measurement plane under `spec`.
     fn plane(&self, spec: PlaneSpec<'_>, resources: &mut DetectionResources) -> DetectionPlane {
-        let mut residual = resources.acquire_f32();
-        residual.pixels_mut().copy_from_slice(self.measure.pixels());
-        DetectionPlane::from_residual(residual, spec, resources)
+        DetectionPlane::filtered(FilterSource::Plane(&self.measure), spec, resources)
     }
 
     /// Measure the stars of `request.regions` on the measurement plane, in parallel, into `out`:

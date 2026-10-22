@@ -293,30 +293,6 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
     }
 }
 
-/// `find_lower_tile_y` is the last tile whose centre is at or before the position, and tile 0
-/// before the first centre: 32-px tiles over 128 rows centre at 15.5, 47.5, 79.5, 111.5.
-#[test]
-fn find_lower_tile_y_is_the_last_centre_at_or_before() {
-    let grid = make_grid(&Buffer2::new_filled(64, 128, 0.5), 32);
-    for (pos, tile) in [
-        (-10.0, 0),
-        (0.0, 0),
-        (15.5, 0),
-        (47.4, 0),
-        (47.5, 1),
-        (79.5, 2),
-        (111.4, 2),
-        (111.5, 3),
-        (1000.0, 3),
-    ] {
-        assert_eq!(grid.find_lower_tile_y(pos), tile, "y = {pos}");
-    }
-    let single = make_grid(&Buffer2::new_filled(32, 32, 0.5), 32);
-    for pos in [0.0, 15.5, 100.0] {
-        assert_eq!(single.find_lower_tile_y(pos), 0, "one tile, y = {pos}");
-    }
-}
-
 /// A tile masked whole takes its neighbour's sky: on the ramp `x/64`, tile (1, 0) reads the ramp at
 /// its centre column, 47.5/64 (dyadic, exact), and the masked tile (0, 0) takes it. A mask over
 /// every tile leaves no sky to take, and each tile reads all its pixels: 15.5/64 and 47.5/64.

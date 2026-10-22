@@ -4,6 +4,7 @@
 
 use imaginarium::Buffer2;
 
+use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::bg_estimate::BgEstimate;
@@ -16,9 +17,9 @@ use crate::star_detection::star_detection_config::bg_config::BgConfig;
 /// Create a uniform `BgEstimate` with constant background and noise values.
 pub(crate) fn uniform(size: Size2us, bg: f32, noise: f32) -> BgEstimate {
     BgEstimate {
-        bg: Pooled::loose(Buffer2::new_filled(size.width, size.height, bg), size),
+        bg: Pooled::loose(MeshSurface::uniform(bg, size), ()),
         sky: SkyNoise {
-            noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, noise), size),
+            noise: Pooled::loose(MeshSurface::uniform(noise, size), ()),
             // The map is uniform, so the frame's typical σ is `noise` itself and the estimator's
             // median-tile-σ derivation reduces to exactly this.
             floor: noise_floor_for(noise),
@@ -58,12 +59,18 @@ pub(crate) fn estimate_in(
 mod tests {
     use crate::internals::synthetic::bg_map::*;
 
+    /// Every pixel of a uniform estimate reads its two values exactly.
     #[test]
     fn uniform_fills_both_the_background_and_noise_planes() {
-        let bg = uniform(Size2us::new(100, 100), 0.1, 0.01);
-        assert_eq!(bg.bg.width(), 100);
-        assert_eq!(bg.bg.height(), 100);
-        assert!((bg.bg[(50, 50)] - 0.1).abs() < 1e-6);
-        assert!((bg.sky.noise[(50, 50)] - 0.01).abs() < 1e-6);
+        let bg = uniform(Size2us::new(100, 70), 0.1, 0.01);
+        assert!(bg.bg.plane().pixels().iter().all(|&sky| sky == 0.1));
+        assert!(
+            bg.sky
+                .noise
+                .plane()
+                .pixels()
+                .iter()
+                .all(|&sigma| sigma == 0.01)
+        );
     }
 }

@@ -57,6 +57,7 @@ pub(crate) mod bg;
 mod centroid;
 mod convolution;
 mod deblend;
+pub(crate) mod detection_filter;
 pub(crate) mod detection_plane;
 pub(crate) mod duplicates;
 mod labeling;

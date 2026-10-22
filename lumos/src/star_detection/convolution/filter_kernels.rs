@@ -1,15 +1,13 @@
 //! [`FilterKernels`]: the matched filter, over kernel weights it keeps from frame to frame.
 
-use std::mem;
-
-use imaginarium::Buffer2;
-use rayon::prelude::*;
-
-use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::math::fwhm;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
+use crate::math::size2us::Size2us;
+use crate::simd::Kernel;
 use crate::star_detection::convolution;
-use crate::star_detection::convolution::simd::Kernel2d;
+use crate::star_detection::convolution::simd::{
+    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
+};
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable
@@ -89,107 +87,129 @@ impl KernelShape {
     }
 }
 
+/// A matched filter's kernel over the weights a [`FilterKernels`] holds, run a row at a time: its
+/// shape, and the factor that puts the filtered image back on its input's noise scale.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MatchedKernel<'a> {
+    shape: MatchedShape<'a>,
+    inv_norm: f32,
+}
+
+/// The weights of a [`MatchedKernel`]: a row pass and a column pass, or one 2D kernel.
+#[derive(Debug, Clone, Copy)]
+enum MatchedShape<'a> {
+    Separable { rows: &'a [f32], cols: &'a [f32] },
+    Elliptical(Kernel2d<'a>),
+}
+
 impl FilterKernels {
-    /// Apply matched filter convolution optimized for star detection, in place, with `temp` — of
-    /// any contents and `values`' size — for the intermediate pass.
+    /// The matched filter's kernel for `filter`, its weights filled into this set.
     ///
-    /// Convolves the residual — the image less its sky, so the convolution carries no pedestal —
-    /// with a Gaussian kernel matching the expected PSF as the pixels record it: each weight is the
-    /// PSF's mean over its pixel. The output is normalized by `sqrt(sum(K^2))`, which keeps white
-    /// noise at its σ; the detection plane measures the σ its output has anyway, which holds for
-    /// noise of any correlation.
+    /// It convolves the residual — the image less its sky, so the convolution carries no pedestal
+    /// — with a Gaussian kernel matching the expected PSF as the pixels record it: each weight is
+    /// the PSF's mean over its pixel. The output is normalized by `sqrt(sum(K^2))`, which keeps
+    /// white noise at its σ; the detection plane measures the σ its output has anyway, which holds
+    /// for noise of any correlation.
     ///
     /// SEP's matched filter (Barbary 2016) where the noise is uniform:
     /// `SNR = conv(D, K) / (sigma * sqrt(sum(K^2)))`. Where σ varies, SEP weighs each pixel by
     /// `1/σ²` inside the sums; this does not, and the threshold reads the local σ of the output
     /// instead.
     ///
-    /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
-    /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`. An
-    /// ellipse whose axes lie along the pixel axes is a product of two 1D profiles, and so is its
-    /// pixel mean, so it filters in a row pass and a column pass. At any other angle the kernel is
-    /// 2D: Geusebroek, van den Boomgaard and Smeulders (2003) split a rotated Gaussian into an axis
-    /// pass and a skewed one, but the skewed pass interpolates between pixels, and the kernel is
-    /// then no longer the PSF's pixel mean.
-    pub(crate) fn matched_filter(
-        &mut self,
-        values: &mut Buffer2<f32>,
-        filter: MatchedFilter,
-        temp: &mut Buffer2<f32>,
-    ) {
-        debug_assert_eq!(values.width(), temp.width());
-        debug_assert_eq!(values.height(), temp.height());
+    /// Supports elliptical PSF shapes for stars elongated due to tracking errors, field rotation,
+    /// or optical aberrations. An ellipse whose axes lie along the pixel axes is a product of two
+    /// 1D profiles, and so is its pixel mean, so it filters in a row pass and a column pass, out to
+    /// `3σ` of the wider both ways. At any other angle the kernel is 2D: Geusebroek, van den
+    /// Boomgaard and Smeulders (2003) split a rotated Gaussian into an axis pass and a skewed one,
+    /// but the skewed pass interpolates between pixels, and the kernel is then no longer the PSF's
+    /// pixel mean.
+    pub(crate) fn matched(&mut self, filter: MatchedFilter) -> MatchedKernel<'_> {
         debug_assert!(
             filter.axis_ratio > 0.0 && filter.axis_ratio <= 1.0,
             "Axis ratio must be in (0, 1]"
         );
-
-        // sqrt(sum(K²)) of the kernel the convolution used.
-        let noise_norm = match KernelShape::of(filter) {
-            KernelShape::Separable(sigmas) => self.separable(values, sigmas, temp),
+        let squares = |kernel: &[f32]| kernel.iter().map(|&weight| weight * weight).sum::<f32>();
+        // sqrt(sum(K²)) of the kernel: for a separable one, of the equivalent 2D kernel,
+        // `sqrt(Σkx²·Σky²)`, which for a circular kernel is `Σk²` exactly.
+        let (shape, noise_norm) = match KernelShape::of(filter) {
+            KernelShape::Separable([sigma_x, sigma_y]) => {
+                debug_assert!(sigma_x > 0.0 && sigma_y > 0.0, "Sigma must be positive");
+                let radius = convolution::kernel_radius(sigma_x.max(sigma_y));
+                convolution::fill_gaussian_kernel_1d(sigma_x, radius, &mut self.rows);
+                convolution::fill_gaussian_kernel_1d(sigma_y, radius, &mut self.cols);
+                let norm = (squares(&self.rows) * squares(&self.cols)).sqrt();
+                (
+                    MatchedShape::Separable {
+                        rows: &self.rows,
+                        cols: &self.cols,
+                    },
+                    norm,
+                )
+            }
             KernelShape::Elliptical(ellipse) => {
-                let norm = self.elliptical(values, ellipse, temp);
-                mem::swap(values, temp);
-                norm
+                let size = ellipse.fill_kernel(&mut self.rows);
+                let norm = squares(&self.rows).sqrt();
+                (
+                    MatchedShape::Elliptical(Kernel2d::new(&self.rows, size)),
+                    norm,
+                )
             }
         };
+        MatchedKernel {
+            shape,
+            inv_norm: 1.0 / noise_norm,
+        }
+    }
+}
 
-        // After convolution the noise is the map's times sqrt(sum(K²)); dividing it out puts the
-        // filtered image back on the map's scale.
-        let inv_norm = 1.0 / noise_norm;
-        values
-            .pixels_mut()
-            .par_chunks_mut(SAMPLES_PER_BLOCK)
-            .for_each(|block| block.iter_mut().for_each(|px| *px *= inv_norm));
+impl MatchedKernel<'_> {
+    /// The rows above and below an output row that its taps read.
+    pub(crate) const fn radius(self) -> usize {
+        match self.shape {
+            MatchedShape::Separable { cols, .. } => cols.len() / 2,
+            MatchedShape::Elliptical(kernel) => kernel.radius(),
+        }
     }
 
-    /// Convolve `values` in place with the Gaussian of `[σx, σy]` along the axes, out to `3σ` of
-    /// the wider both ways, using `temp` for the row pass.
-    ///
-    /// Separable: the rows, then the columns, O(n×k) instead of O(n×k²). Both passes mirror at the
-    /// edges per axis, so they hold for a kernel wider than the image too. Returns `sqrt(sum(K²))`
-    /// of the equivalent normalized 2D kernel, `sqrt(Σkx²·Σky²)`: for a circular kernel, `Σk²`
-    /// exactly.
-    pub(super) fn separable(
-        &mut self,
-        values: &mut Buffer2<f32>,
-        [sigma_x, sigma_y]: [f32; 2],
-        temp: &mut Buffer2<f32>,
-    ) -> f32 {
-        debug_assert!(sigma_x > 0.0 && sigma_y > 0.0, "Sigma must be positive");
-        debug_assert_eq!(values.width(), temp.width());
-        debug_assert_eq!(values.height(), temp.height());
-
-        let radius = convolution::kernel_radius(sigma_x.max(sigma_y));
-        convolution::fill_gaussian_kernel_1d(sigma_x, radius, &mut self.rows);
-        convolution::fill_gaussian_kernel_1d(sigma_y, radius, &mut self.cols);
-        // The column pass reads the row pass's output alone, so it writes back over the input.
-        convolution::convolve_rows_parallel(values, temp, &self.rows);
-        convolution::convolve_cols(temp, values, &self.cols);
-        let squares = |kernel: &[f32]| kernel.iter().map(|&weight| weight * weight).sum::<f32>();
-        (squares(&self.rows) * squares(&self.cols)).sqrt()
+    /// Into `ring_row`, what the column taps read of an input row: its row pass for a separable
+    /// kernel, the row itself for a 2D one.
+    pub(crate) fn ring_row(self, input: &[f32], ring_row: &mut [f32]) {
+        match self.shape {
+            MatchedShape::Separable { rows, .. } => ConvolveRow {
+                input,
+                output: ring_row,
+                kernel: rows,
+            }
+            .dispatch(),
+            MatchedShape::Elliptical(_) => ring_row.copy_from_slice(input),
+        }
     }
 
-    /// Convolve `pixels` with the elliptical Gaussian `ellipse` into `output`.
-    ///
-    /// Full 2D convolution, O(n×k²), for an ellipse at an angle to the pixel axes. Returns
-    /// `sqrt(sum(K²))` for the normalized 2D kernel.
-    pub(super) fn elliptical(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        ellipse: EllipticalGaussian,
-        output: &mut Buffer2<f32>,
-    ) -> f32 {
-        debug_assert_eq!(pixels.width(), output.width());
-        debug_assert_eq!(pixels.height(), output.height());
-
-        let size = ellipse.fill_kernel(&mut self.rows);
-        convolution::convolve_2d(pixels, Kernel2d::new(&self.rows, size), output);
-        self.rows
-            .iter()
-            .map(|&weight| weight * weight)
-            .sum::<f32>()
-            .sqrt()
+    /// Output row `y` of an image of `size` into `output`, from `ring`, whole rows of
+    /// [`Self::ring_row`]s, image row `n` in slot `n` modulo its slots, holding every row the taps
+    /// read: mirrored at the image's edges, and scaled back to the input's noise.
+    pub(crate) fn output_row(self, ring: &[f32], size: Size2us, y: usize, output: &mut [f32]) {
+        debug_assert_eq!(output.len(), size.width, "one output row");
+        let input = RowRing::new(ring, size);
+        match self.shape {
+            MatchedShape::Separable { cols, .. } => ConvolveColsRow {
+                input,
+                out_row: output,
+                y,
+                kernel: cols,
+            }
+            .dispatch(),
+            MatchedShape::Elliptical(kernel) => Convolve2dRow {
+                input,
+                output_row: output,
+                y,
+                kernel,
+            }
+            .dispatch(),
+        }
+        for sample in output {
+            *sample *= self.inv_norm;
+        }
     }
 }
 

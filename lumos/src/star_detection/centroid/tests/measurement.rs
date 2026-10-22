@@ -6,7 +6,6 @@
 use glam::Vec2;
 
 use super::*;
-use crate::scratch_pool::Pooled;
 use std::f32::consts::PI;
 
 /// The windowed centroid against what it must return. A star centred on the start stays put: its
@@ -395,16 +394,15 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
             sky_plane[(x, y)] = sky(x);
         }
     }
-    let measured = Measured::of(
-        &pixels,
-        &BgEstimate {
-            bg: Pooled::loose(sky_plane, size),
-            sky: SkyNoise {
-                noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, 0.01), size),
-                floor: 1e-6,
-            },
-        },
-    );
+    let mut residual = pixels.clone();
+    for (value, &sky) in residual.pixels_mut().iter_mut().zip(sky_plane.pixels()) {
+        *value -= sky;
+    }
+    let measured = Measured {
+        residual,
+        sky: bg_map::uniform(size, 0.0, 0.01).sky_noise(),
+        saturation: unsaturated(&pixels),
+    };
     let config = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
         local_bg: LocalBgMethod::LocalAnnulus,
