@@ -12,6 +12,38 @@
 //! declaration and only wiring [`Graph::admit`] accepts: [`Graph::reconcile`]
 //! makes a decoded graph so, and the host's edit gate keeps it so. A node's
 //! own id is the only name it has.
+//!
+//! # Decisions
+//!
+//! - **Reconcile at load, assert after.** A host's library keeps its funcs and
+//!   their ports for the life of a process — darkroom's recompose changes only
+//!   an input default, which no binding depends on — so only a load can bring
+//!   in a mismatch with it; the load repairs it, and every later reader
+//!   asserts. Refused: tolerance at each reader, as
+//!   two readers that tolerate in their own way disagree. Source: "parse,
+//!   don't validate".
+//! - **One admission rule.** [`Graph::admit`] and [`Graph::admit_subscription`]
+//!   are the rule for the load, the edit gate and the compile's assert.
+//! - **A matching signature is not enough.** The signature covers port names,
+//!   types and order, and event names — not the `required` flag,
+//!   `const_only`, picker variants, overrides, an enum's variants or a
+//!   default. A library change to any of these keeps a node resolved but can
+//!   break a binding, so the load admits each binding of a resolved node too.
+//! - **The invariant is the host's contract, not a type.** `bindings` is a
+//!   public field and a graph holds no library, so no type can enforce
+//!   admission; the host's edit gate is the only way an edit lands.
+//! - **Broken structure is repaired, not refused.** A node under the nil id
+//!   goes, as no lookup can address it; wiring that names a missing node goes;
+//!   a nil func id is a node that does not resolve. Refused: refusing the
+//!   file, which then does not open.
+//! - **A data cycle is broken in node-id order.** A depth-first walk from each
+//!   node in id order removes each wire that returns to the current path, so
+//!   every load makes the same choice. Only a hand-edited file holds one.
+//! - **An output's type is its declaration.** No output is a wildcard or
+//!   `Any`, so no edit retypes a distant wire and every wire is checkable.
+//!   Refused: wildcard outputs, whose retype either removes wires you did not
+//!   touch or refuses the edit until you remove them by hand. Reroute nodes
+//!   need a new design.
 
 use std::collections::{BTreeMap, BTreeSet};
 
