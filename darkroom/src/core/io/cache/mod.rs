@@ -15,13 +15,13 @@ use crate::core::io::document::EXTENSION;
 /// Per-document-named so two projects in one folder keep separate stores.
 /// Save-As / moving the project does *not* carry the cache along — each
 /// location keeps its own store, which refills lazily as nodes recompute.
-pub(crate) fn root(doc_path: &Path) -> PathBuf {
-    let stem = doc_path.file_stem().unwrap_or_default();
+pub(crate) fn root(document_path: &Path) -> PathBuf {
+    let stem = document_path.file_stem().unwrap_or_default();
     let mut name = stem.to_os_string();
     name.push(".");
     name.push(EXTENSION);
     name.push("-cache");
-    doc_path.with_file_name(name)
+    document_path.with_file_name(name)
 }
 
 /// Best-effort: create `root` and drop a `*`-pattern `.gitignore`, so the whole

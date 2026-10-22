@@ -4,7 +4,7 @@ use glam::Vec2;
 use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
-use crate::gui::pane::graph_ui::paint::wire::Wire;
+use crate::gui::pane::graph_ui::draw::wire::Wire;
 
 /// Polyline samples closer than this (in inner-canvas world units)
 /// are dropped — keeps the breaker from accumulating sub-pixel

@@ -75,10 +75,10 @@ impl MainWindow {
     /// handed to the frame's queue, which is where every other darkroom
     /// surface puts one: dock ops travel beside graph edits, stay out of
     /// undo, and are validated before a save.
-    pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
+    pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
         let ops = &mut self.dock_ops;
         ops.clear();
-        DockView::scan(ui, &cx.document().layout, ops);
+        DockView::scan(ui, &ctx.document().layout, ops);
         for op in ops.drain(..) {
             out.push_view(op);
         }
@@ -97,17 +97,17 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        cx: WindowCtx<'_>,
+        ctx: WindowCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
         let Self { graph_ui, .. } = self;
         let mut request_relayout = Relayout::NotNeeded;
-        for tab in cx.document().layout.active_tabs() {
+        for tab in ctx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUi::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx), out);
+                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(ctx), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -118,15 +118,15 @@ impl MainWindow {
         request_relayout
     }
 
-    pub(crate) fn frame(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, writes: FrameWrites<'_>) {
+    pub(crate) fn frame(&mut self, ui: &mut Ui, ctx: WindowCtx<'_>, writes: FrameWrites<'_>) {
         let FrameWrites {
-            preferences: prefs,
+            preferences,
             requests: out,
         } = writes;
         // The frame's world without the document, for the surfaces below that
         // read one and not the other: the surround bands take the app context,
         // the panes take the whole thing.
-        let app = cx.app();
+        let app = ctx.app();
         // The menu bar rides its own surround band; the dock fills the
         // space between it and the status bar.
         let fill = app.theme().colors.surround_fill;
@@ -157,14 +157,14 @@ impl MainWindow {
                         menu_bar::show(ui, app.theme(), out);
                     });
                 let mut panes = DockPanes {
-                    cx,
+                    ctx,
                     graph_ui,
                     image_viewers,
-                    prefs,
+                    preferences,
                     out,
                 };
                 dock_ops.clear();
-                DockView::new(&cx.document().layout, dock_ops)
+                DockView::new(&ctx.document().layout, dock_ops)
                     .min_pane(MIN_PANE)
                     .overflow(TabOverflow::Menu)
                     .show(ui, &mut panes);
@@ -211,7 +211,7 @@ mod tests {
 
     use scenarium::NodeId;
 
-    use crate::core::document::internals::DocFixture;
+    use crate::core::document::internals::DocumentFixture;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::gui::main_window::MainWindow;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -223,7 +223,7 @@ mod tests {
     /// every node gone by then.
     #[test]
     fn the_node_caches_are_swept_only_after_the_revision_moves() {
-        let fixture = DocFixture::probes(2);
+        let fixture = DocumentFixture::probes(2);
         let (stays, leaves) = (fixture.node(0), fixture.node(1));
         let mut h = CanvasHarness::new(fixture);
         h.prime(2);

@@ -31,40 +31,41 @@ pub(crate) struct NodeEntry {
 }
 
 impl NodeEntry {
-    /// Read `node_id`'s whole entry out of `doc`, a graph node or a stub, or
+    /// Read `node_id`'s whole entry out of `document`, a graph node or a stub, or
     /// `None` when the document no longer holds it — the ordinary outcome of
     /// an intent that spans frames.
     ///
     /// One lookup answers both halves of the question: the snapshot *is* the
     /// existence check.
-    pub(crate) fn capture(doc: &Document, node_id: NodeId) -> Option<Self> {
-        let (detached, home) = match doc.graph.snapshot_node(node_id) {
+    pub(crate) fn capture(document: &Document, node_id: NodeId) -> Option<Self> {
+        let (detached, home) = match document.graph.snapshot_node(node_id) {
             Some(detached) => (detached, Home::Graph),
-            None => (doc.stubs.get(node_id)?.clone(), Home::Stubs),
+            None => (document.stubs.get(node_id)?.clone(), Home::Stubs),
         };
         Some(Self {
-            placement: *doc
+            placement: *document
                 .main_view
                 .item_placements
                 .get(&node_id)
                 .expect("the view places every node and stub"),
-            selected: doc.main_view.selected.contains(&node_id),
+            selected: document.main_view.selected.contains(&node_id),
             detached,
             home,
         })
     }
 
-    fn restore(&self, doc: &mut Document) {
+    fn restore(&self, document: &mut Document) {
         let node_id = self.detached.node_id();
         match self.home {
-            Home::Graph => doc.graph.attach_node(self.detached.clone()),
-            Home::Stubs => doc.stubs.insert(self.detached.clone()),
+            Home::Graph => document.graph.attach_node(self.detached.clone()),
+            Home::Stubs => document.stubs.insert(self.detached.clone()),
         }
-        doc.main_view
+        document
+            .main_view
             .item_placements
             .insert(node_id, self.placement);
         if self.selected {
-            doc.main_view.selected.insert(node_id);
+            document.main_view.selected.insert(node_id);
         }
     }
 }
@@ -126,15 +127,15 @@ impl SetNode {
     /// would silently discard. The check holds because a step is always
     /// reverted against exactly the document its own apply produced: entries
     /// replay in reverse, and so do the steps inside one.
-    fn take_out(&self, doc: &mut Document, dir: Direction) {
+    fn take_out(&self, document: &mut Document, dir: Direction) {
         let recorded = self
             .node
             .half(dir.reversed())
             .as_ref()
             .expect("a node step is an insertion or a removal, never two absences");
         let removed = match recorded.home {
-            Home::Graph => doc.remove_node(self.node_id),
-            Home::Stubs => doc.remove_stub(self.node_id),
+            Home::Graph => document.remove_node(self.node_id),
+            Home::Stubs => document.remove_stub(self.node_id),
         };
         assert_eq!(
             removed, recorded.detached,
@@ -144,10 +145,10 @@ impl SetNode {
 }
 
 impl Reversible for SetNode {
-    fn write(&self, doc: &mut Document, dir: Direction) {
+    fn write(&self, document: &mut Document, dir: Direction) {
         match self.node.half(dir) {
-            Some(entry) => entry.restore(doc),
-            None => self.take_out(doc, dir),
+            Some(entry) => entry.restore(document),
+            None => self.take_out(document, dir),
         }
     }
 

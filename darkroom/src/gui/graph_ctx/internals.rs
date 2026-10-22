@@ -1,7 +1,7 @@
 //! The fixture a test reads a graph back through: everything a [`GraphCtx`]
 //! composes, owned together so one can be handed out from a `&mut` borrow.
 //!
-//! One level up from [`DocFixture`], which owns the document and the library
+//! One level up from [`DocumentFixture`], which owns the document and the library
 //! this resolves them against — a test that needs no context at all stops
 //! there. Everything that records a canvas builds on this.
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use scenarium::{Library, NodeId};
 
-use crate::core::document::internals::{self, DocFixture};
+use crate::core::document::internals::{self, DocumentFixture};
 use crate::core::open_document::OpenDocument;
 use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
@@ -46,12 +46,12 @@ impl Default for GraphCtxFixture {
 }
 
 impl GraphCtxFixture {
-    /// Takes a [`DocFixture`] or anything that converts into one — a
+    /// Takes a [`DocumentFixture`] or anything that converts into one — a
     /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
-    pub(crate) fn over(fixture: impl Into<DocFixture>) -> Self {
-        let DocFixture { doc, library } = fixture.into();
+    pub(crate) fn over(fixture: impl Into<DocumentFixture>) -> Self {
+        let DocumentFixture { document, library } = fixture.into();
         Self {
-            open: OpenDocument::over(doc),
+            open: OpenDocument::over(document),
             library: Arc::new(library),
             ..Self::default()
         }
@@ -63,7 +63,7 @@ impl GraphCtxFixture {
         self
     }
 
-    /// The `i`th node in placement order — [`DocFixture::node`] over the
+    /// The `i`th node in placement order — [`DocumentFixture::node`] over the
     /// document this fixture took ownership of.
     pub(crate) fn node(&self, i: usize) -> NodeId {
         internals::nth_in_paint_order(&self.open.document.main_view, i)

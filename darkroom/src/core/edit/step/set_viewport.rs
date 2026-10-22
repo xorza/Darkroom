@@ -26,8 +26,8 @@ impl SetViewport {
 }
 
 impl Reversible for SetViewport {
-    fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.main_view.viewport = *self.viewport.half(dir);
+    fn write(&self, document: &mut Document, dir: Direction) {
+        document.main_view.viewport = *self.viewport.half(dir);
     }
 
     /// Compared with a tolerance rather than for equality: a pan that moved a

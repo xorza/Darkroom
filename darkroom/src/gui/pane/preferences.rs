@@ -4,10 +4,10 @@
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
 //! It edits the borrowed [`Preferences`] **in place** and reports a single
-//! [`PrefsCommand::Changed`] whenever any field moved. `App` synchronizes and
+//! [`PreferencesCommand::Changed`] whenever any field moved. `App` synchronizes and
 //! persists derived state after authoring, so adding a preference is just
 //! another widget here; no new command or handler. The "Browse…" buttons
-//! return [`PrefsCommand::PickMlModel`] so `App` can open the blocking dialog
+//! return [`PreferencesCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use palantir::prelude::*;
 
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::{MlModelKind, PrefsCommand};
+use crate::gui::frame::app_command::{MlModelKind, PreferencesCommand};
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
@@ -45,9 +45,9 @@ pub(crate) struct PreferencesForm<'a> {
 }
 
 impl PreferencesForm<'_> {
-    /// Draw the form, editing `prefs` in place, and queue whatever the edit
+    /// Draw the form, editing `preferences` in place, and queue whatever the edit
     /// needs `App` to run: persist + re-sync, or a Browse dialog.
-    pub(crate) fn show(mut self, ui: &mut Ui, prefs: &mut Preferences) {
+    pub(crate) fn show(mut self, ui: &mut Ui, preferences: &mut Preferences) {
         let theme = self.theme;
         Panel::vstack()
             .id_salt("preferences_view")
@@ -64,19 +64,21 @@ impl PreferencesForm<'_> {
                     .show(ui, |ui| {
                         // Behavior — the startup + exit toggles.
                         Section { title: "Behavior" }.show(ui, theme, |ui| {
-                            if Checkbox::new(&mut prefs.load_last_document)
+                            if Checkbox::new(&mut preferences.load_last_document)
                                 .label("Load last document on startup")
                                 .show(ui)
                                 .changed
                             {
-                                self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                                self.out
+                                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
                             }
-                            if Checkbox::new(&mut prefs.confirm_unsaved_changes)
+                            if Checkbox::new(&mut preferences.confirm_unsaved_changes)
                                 .label("Ask to save unsaved changes")
                                 .show(ui)
                                 .changed
                             {
-                                self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                                self.out
+                                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
                             }
                         });
 
@@ -91,7 +93,7 @@ impl PreferencesForm<'_> {
                                     download_label: "Download DeepSNR CLI \u{2197}",
                                     download_url: "https://starnetastro.com/cli-tools/deepsnr/",
                                 },
-                                &mut prefs.ml_models,
+                                &mut preferences.ml_models,
                             );
                             self.model_row(
                                 ui,
@@ -101,7 +103,7 @@ impl PreferencesForm<'_> {
                                     download_label: "Download StarNet CLI \u{2197}",
                                     download_url: "https://starnetastro.com/cli-tools/starnet/",
                                 },
-                                &mut prefs.ml_models,
+                                &mut preferences.ml_models,
                             );
                         });
                     });
@@ -114,8 +116,8 @@ impl PreferencesForm<'_> {
     /// when the committed path is broken, then a download hint (a browser link to
     /// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
     /// Writes the path `kind` names in `paths` in place and queues
-    /// [`PrefsCommand::Changed`] on an edited path, or
-    /// [`PrefsCommand::PickMlModel`] when Browse is clicked.
+    /// [`PreferencesCommand::Changed`] on an edited path, or
+    /// [`PreferencesCommand::PickMlModel`] when Browse is clicked.
     fn model_row(&mut self, ui: &mut Ui, row: ModelRow, paths: &mut MlModelPaths) {
         let ModelRow { label, kind, .. } = row;
         let theme = self.theme;
@@ -188,7 +190,9 @@ impl PreferencesForm<'_> {
                                 // there keeps `path` unborrowed for the write.
                                 if field.text != field.seen {
                                     *path = PathBuf::from(field.text.clone());
-                                    self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                                    self.out.push_app(AppCommand::Preferences(
+                                        PreferencesCommand::Changed,
+                                    ));
                                 }
                                 // Re-stat on every commit — even an unchanged
                                 // path: the file may have appeared (or vanished)
@@ -206,8 +210,9 @@ impl PreferencesForm<'_> {
                                 .left
                                 .clicked()
                             {
-                                self.out
-                                    .push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
+                                self.out.push_app(AppCommand::Preferences(
+                                    PreferencesCommand::PickMlModel(kind),
+                                ));
                             }
                         });
 
@@ -428,7 +433,12 @@ mod tests {
                 .model_row(ui, row, paths);
             });
             iter::from_fn(|| out.pop_app())
-                .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
+                .filter(|command| {
+                    matches!(
+                        command,
+                        AppCommand::Preferences(PreferencesCommand::Changed)
+                    )
+                })
                 .count()
         };
         let type_x = |h: &mut UiHarness,

@@ -15,9 +15,9 @@ use crate::gui::theme::Theme;
 #[test]
 fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
     let theme = Theme::default();
-    let id = WidgetId::from_hash("value_editor::mirror");
+    let id = WidgetId::from_hash("const_editor::mirror");
     let field = Field {
-        theme: &theme.const_value_editor,
+        theme: &theme.const_editor,
         id,
     };
     let value = ConstValue::Int(42);
@@ -43,12 +43,12 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
     // The unset field borrows the same buffer and refills it
     // unconditionally, so it carries the same hazard — and its overwrite
     // is what makes the field read-only in the first place.
-    let unset = WidgetId::from_hash("value_editor::unset");
+    let unset = WidgetId::from_hash("const_editor::unset");
     for frame in 0..3 {
         h.frame(|ui| {
             assert!(
                 Field {
-                    theme: &theme.const_value_editor,
+                    theme: &theme.const_editor,
                     id: unset,
                 }
                 .unset(ui, &ConstValue::Null)
@@ -115,8 +115,8 @@ fn escape_drops_the_draft_and_enter_or_blur_commits() {
     let theme = Theme::default();
     let field = Probe {
         field: Field {
-            theme: &theme.const_value_editor,
-            id: WidgetId::from_hash("value_editor::commit_rules"),
+            theme: &theme.const_editor,
+            id: WidgetId::from_hash("const_editor::commit_rules"),
         },
         value: ConstValue::Int(42),
     };

@@ -17,7 +17,7 @@ use crate::core::edit::step::change::Direction;
 /// [`UndoStep`](crate::core::edit::step::undo_step::UndoStep)'s variants; the
 /// enum forwards each call to the one it holds.
 pub(super) trait Reversible {
-    /// Write one half of this step into `doc`: the "to" half going forward,
+    /// Write one half of this step into `document`: the "to" half going forward,
     /// the "from" half going back.
     ///
     /// A single direction-parameterised write rather than an `apply`/`revert`
@@ -25,12 +25,12 @@ pub(super) trait Reversible {
     /// [`Change`](crate::core::edit::step::change::Change) — spelling them
     /// separately is how they drift.
     ///
-    /// Applying and then reverting must leave `doc` exactly as it was found:
+    /// Applying and then reverting must leave `document` exactly as it was found:
     /// the action stack replays entries in reverse and the steps inside an
     /// entry in reverse, so each step is reverted against precisely the
     /// document its own apply produced. Steps that check themselves against
     /// what they overwrite rely on it.
-    fn write(&self, doc: &mut Document, dir: Direction);
+    fn write(&self, document: &mut Document, dir: Direction);
 
     /// Whether writing either half would leave the document unchanged.
     /// Filtered out at commit time so phantom entries — re-selecting the

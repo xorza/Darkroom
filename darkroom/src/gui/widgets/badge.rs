@@ -54,16 +54,16 @@ enum BadgeKind {
 pub(crate) struct BadgeFace {
     glyph: BadgeGlyph,
     color: RgbaF32,
-    tip: &'static str,
+    tooltip: &'static str,
 }
 
 impl BadgeFace {
     /// A bold font character in `color`.
-    pub(crate) const fn text(glyph: &'static str, color: RgbaF32, tip: &'static str) -> Self {
+    pub(crate) const fn text(glyph: &'static str, color: RgbaF32, tooltip: &'static str) -> Self {
         Self {
             glyph: BadgeGlyph::Char(glyph),
             color,
-            tip,
+            tooltip,
         }
     }
 
@@ -74,12 +74,12 @@ impl BadgeFace {
     pub(crate) const fn drawn(
         draw: fn(&mut Ui, RgbaF32),
         rest: RgbaF32,
-        tip: &'static str,
+        tooltip: &'static str,
     ) -> Self {
         Self {
             glyph: BadgeGlyph::Drawn(draw),
             color: rest,
-            tip,
+            tooltip,
         }
     }
 }
@@ -141,7 +141,7 @@ impl Badge {
                 BadgeFace {
                     glyph,
                     mut color,
-                    tip,
+                    tooltip,
                 },
             hover_color,
             kind,
@@ -214,7 +214,7 @@ impl Badge {
         // ends before the tooltip records into `ui`.
         let snapshot = chip.response.snapshot();
         let clicked = chip.response.left.clicked();
-        support::tooltip_after(ui, &snapshot, Some(tip));
+        support::tooltip_after(ui, &snapshot, Some(tooltip));
         clicked
     }
 }

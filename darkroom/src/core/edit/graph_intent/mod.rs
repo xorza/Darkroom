@@ -198,7 +198,7 @@ impl GraphIntent {
         }
     }
 
-    /// Clone `doc`'s current selection: each node gets a fresh id and an
+    /// Clone `document`'s current selection: each node gets a fresh id and an
     /// offset position, const-value bindings copy verbatim, the data and
     /// event wires *among* the selected nodes are recreated against the
     /// clones, and the copies end up selected. A `Wire` whose source is
@@ -221,18 +221,18 @@ impl GraphIntent {
     /// because a right-click selects the node it landed on first. A selected
     /// stub is skipped: a copy of a node that cannot run has little use.
     pub(crate) fn duplicate(
-        doc: &Document,
+        document: &Document,
         library: &Library,
         incoming: IncomingWires,
     ) -> Vec<Self> {
-        let (graph, view) = (&doc.graph, &doc.main_view);
+        let (graph, view) = (&document.graph, &document.main_view);
         // Resolve the whole set first, in selection order: an edge is only
         // recognisable as internal once both of its endpoints have a fresh id,
         // so nothing can be authored until every member has one.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
         let mut sources = Vec::with_capacity(view.selected.len());
         for old_id in &view.selected {
-            if doc.stubs.contains(*old_id) {
+            if document.stubs.contains(*old_id) {
                 continue;
             }
             let node = graph
@@ -307,7 +307,7 @@ impl GraphIntent {
         intents
     }
 
-    /// Read the state this intent overwrites out of `doc` and fold the two
+    /// Read the state this intent overwrites out of `document` and fold the two
     /// into a complete [`UndoStep`]. Pure — does not write to the graph.
     ///
     /// This is the only gate between a caller and the document, so each arm
@@ -327,10 +327,10 @@ impl GraphIntent {
     /// rather than refusing the whole intent.)
     pub(crate) fn into_step(
         self,
-        doc: &Document,
+        document: &Document,
         library: &Library,
     ) -> Result<Option<UndoStep>, MalformedIntent> {
-        let (graph, view) = (&doc.graph, &doc.main_view);
+        let (graph, view) = (&document.graph, &document.main_view);
         let step = match self {
             Self::AddNode {
                 pos,
@@ -338,7 +338,7 @@ impl GraphIntent {
                 node,
                 bindings,
             } => {
-                validate::fresh_node_id(doc, node_id)?;
+                validate::fresh_node_id(document, node_id)?;
                 validate::finite_pos(pos, Role::AddNode)?;
                 let func = validate::resolving_node(library, &node)?;
                 validate::seed_bindings(
@@ -367,7 +367,7 @@ impl GraphIntent {
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, Role::RemoveNode)?;
-                let Some(entry) = NodeEntry::capture(doc, node_id) else {
+                let Some(entry) = NodeEntry::capture(document, node_id) else {
                     return Ok(None);
                 };
                 UndoStep::SetNode(Box::new(SetNode::removal(entry)))
@@ -548,7 +548,7 @@ impl GraphIntent {
         }
     }
 
-    /// Build, no-op-filter, and apply one intent against `doc` in a single
+    /// Build, no-op-filter, and apply one intent against `document` in a single
     /// call — the entry every frontend drives its per-intent loop through.
     ///
     /// Pushes each committed [`UndoStep`] onto `steps`, in the order it
@@ -565,12 +565,12 @@ impl GraphIntent {
     /// (a redo replays already-valid history).
     pub(crate) fn commit(
         self,
-        doc: &mut Document,
+        document: &mut Document,
         library: &Library,
         steps: &mut Vec<UndoStep>,
     ) -> Result<(), MalformedIntent> {
         let fed: Vec<InputPort> = match &self {
-            Self::RemoveNode { node_id } => doc
+            Self::RemoveNode { node_id } => document
                 .graph
                 .wires()
                 .filter(|(_, producer)| producer.node_id == *node_id)
@@ -578,21 +578,21 @@ impl GraphIntent {
                 .collect(),
             _ => Vec::new(),
         };
-        let Some(step) = self.into_step(doc, library)? else {
+        let Some(step) = self.into_step(document, library)? else {
             return Ok(());
         };
         if step.is_noop() {
             return Ok(());
         }
-        step.apply(doc);
+        step.apply(document);
         steps.push(step);
         for input in fed {
-            if let Some(to) = unwired::binding(&doc.graph, library, input) {
+            if let Some(to) = unwired::binding(&document.graph, library, input) {
                 Self::SetInput {
                     input,
                     to: Some(to),
                 }
-                .commit(doc, library, steps)?;
+                .commit(document, library, steps)?;
             }
         }
         Ok(())
@@ -613,11 +613,11 @@ pub(crate) mod internals {
         /// [`Self::commit`] of an intent that commits at most one step.
         pub(crate) fn commit_one(
             self,
-            doc: &mut Document,
+            document: &mut Document,
             library: &Library,
         ) -> Result<Option<UndoStep>, MalformedIntent> {
             let mut steps = Vec::new();
-            self.commit(doc, library, &mut steps)?;
+            self.commit(document, library, &mut steps)?;
             assert!(steps.len() <= 1, "the intent committed {steps:?}");
             Ok(steps.pop())
         }

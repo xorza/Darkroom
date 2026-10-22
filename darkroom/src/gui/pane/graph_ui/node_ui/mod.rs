@@ -1,3 +1,4 @@
+mod const_editor;
 pub(super) mod header;
 mod memory_row;
 pub(super) mod node_record;
@@ -5,7 +6,6 @@ pub(super) mod node_widget;
 pub(super) mod port_color;
 pub(crate) mod port_row;
 pub(crate) mod preview_row;
-mod value_editor;
 pub(crate) mod wid;
 
 use crate::core::document::graph_view::StackedItem;
@@ -61,7 +61,7 @@ pub(super) struct NodeUi {
 /// into.
 #[derive(Debug)]
 pub(super) struct NodePass<'a, 'p> {
-    pub(super) dcx: DrawCtx<'a>,
+    pub(super) draw_ctx: DrawCtx<'a>,
     pub(super) probe: &'a mut BreakerProbe<'p>,
     pub(super) out: &'a mut Requests,
 }
@@ -106,7 +106,7 @@ impl NodeUi {
     /// grabs); `prepass` converts the anchor into `GraphIntent::MoveSelection`
     /// on later frames.
     pub(super) fn draw_all(&mut self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> NodeDrawOutcome {
-        let dcx = pass.dcx;
+        let draw_ctx = pass.draw_ctx;
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
         // across save/load and tab switches; `GraphIntent::Raise` lifts a
@@ -130,7 +130,7 @@ impl NodeUi {
         // to its widget; it goes back below with its capacity, so only a graph
         // larger than every earlier one ever allocates here.
         let mut order = mem::take(&mut self.paint_order);
-        let graph_ctx = dcx.graph_ctx();
+        let graph_ctx = draw_ctx.graph_ctx();
         graph_ctx.paint_order(&mut order);
         for item in &order {
             let n = graph_ctx
@@ -140,14 +140,16 @@ impl NodeUi {
             if keeps_focus {
                 focus_kept = Some(n.id);
             }
-            if !dcx.cull().keeps_node(dcx.geometry().node_world_rect(n))
+            if !draw_ctx
+                .cull()
+                .keeps_node(draw_ctx.geometry().node_world_rect(n))
                 && !keeps_focus
                 && self.focus_kept_last != Some(n.id)
             {
                 continue;
             }
-            let ncx = n.with_hover(wid::hover(ui, n.id));
-            let node = node_widget::NodeWidget::new(self, ncx).show(ui, pass);
+            let node_ctx = n.with_hover(wid::hover(ui, n.id));
+            let node = node_widget::NodeWidget::new(self, node_ctx).show(ui, pass);
             if node.inspect_toggled {
                 outcome.inspect_toggled.get_or_insert(n.id);
             }
@@ -167,7 +169,7 @@ impl NodeUi {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) {
-        self.drag.advance(ui, cx, out);
+    pub(super) fn prepass(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) {
+        self.drag.advance(ui, ctx, out);
     }
 }

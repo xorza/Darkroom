@@ -76,13 +76,13 @@ impl CameraGesture {
     ///   `-y` (wheel up) → zoom in.
     /// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
     ///   `Response::pointer_local` pivot.
-    pub(crate) fn emit(&mut self, ui: &Ui, cx: PrepassCtx<'_>, out: &mut Requests) {
-        let viewport = cx.graph_ctx().viewport();
+    pub(crate) fn emit(&mut self, ui: &Ui, ctx: PrepassCtx<'_>, out: &mut Requests) {
+        let viewport = ctx.graph_ctx().viewport();
         let resp = ui.response_for(canvas::outer_wid());
         let mut v = viewport;
         // Pan latch comes from the central classification; continuation and
         // wheel/pinch zoom below read the response directly (not arbitration).
-        if cx.input().gesture == Some(CanvasGesture::Pan) {
+        if ctx.input().gesture == Some(CanvasGesture::Pan) {
             self.latch_pan(viewport.pan, out);
         }
         let held = self.fold_pan(resp.middle.drag.delta(), &mut v.pan);

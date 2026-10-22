@@ -27,7 +27,7 @@ pub(crate) enum AppCommand {
     /// Graph execution + worker event loop.
     Run(RunCommand),
     /// Preferences edits.
-    Prefs(PrefsCommand),
+    Preferences(PreferencesCommand),
     /// Node edits raised via a dialog.
     Edit(EditCommand),
     /// Quit the app, through the unsaved-changes prompt.
@@ -70,7 +70,7 @@ pub(crate) enum RunCommand {
 
 /// Preferences UI actions.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum PrefsCommand {
+pub(crate) enum PreferencesCommand {
     /// A field of [`crate::core::io::preferences::Preferences`] was edited
     /// in place — by the Preferences tab (any checkbox / radio / path field)
     /// or the image viewer's toolbar (backdrop / sampling). `App` synchronizes

@@ -18,7 +18,7 @@ use scenarium::NodeId;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::app_command::AppCommand;
-use crate::gui::frame::app_command::PrefsCommand;
+use crate::gui::frame::app_command::PreferencesCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
@@ -33,10 +33,10 @@ use crate::gui::pane::preferences::PreferencesForm;
 /// borrows one capture at a time.
 #[derive(Debug)]
 pub(crate) struct DockPanes<'a> {
-    pub(crate) cx: WindowCtx<'a>,
+    pub(crate) ctx: WindowCtx<'a>,
     pub(crate) graph_ui: &'a mut GraphUi,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
-    pub(crate) prefs: &'a mut Preferences,
+    pub(crate) preferences: &'a mut Preferences,
     pub(crate) out: &'a mut Requests,
 }
 
@@ -44,38 +44,38 @@ impl DockTabs for DockPanes<'_> {
     type Tab = TabRef;
 
     fn title(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
-        let doc = self.cx.document();
+        let document = self.ctx.document();
         ui.intern(match tab {
             TabRef::Graph => "main",
             TabRef::Preferences => "preferences",
-            TabRef::ImageViewer(node_id) => image_viewer::node_label(doc, node_id),
+            TabRef::ImageViewer(node_id) => image_viewer::node_label(document, node_id),
         })
     }
 
     fn content(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {
-        let cx = self.cx;
-        let app = cx.app();
+        let ctx = self.ctx;
+        let app = ctx.app();
         match tab {
             TabRef::Graph => {
                 // The context carries everything the canvas reads — theme
-                // and run included, through the `cx` it is composed from.
-                self.graph_ui.draw(ui, GraphCtx::new(cx), self.out);
+                // and run included, through the `ctx` it is composed from.
+                self.graph_ui.draw(ui, GraphCtx::new(ctx), self.out);
             }
             TabRef::Preferences => {
                 PreferencesForm {
                     theme: app.theme(),
                     out: self.out,
                 }
-                .show(ui, self.prefs);
+                .show(ui, self.preferences);
             }
             TabRef::ImageViewer(node_id) => {
-                let title = image_viewer::node_label(cx.document(), node_id);
+                let title = image_viewer::node_label(ctx.document(), node_id);
                 let previews = &app.run_state().previews;
                 let viewer = self
                     .image_viewers
                     .entry(node_id)
                     .or_insert_with(|| ImageViewer::new(node_id));
-                // Viewer-toolbar edits ride the same in-place prefs path
+                // Viewer-toolbar edits ride the same in-place preferences path
                 // as the Preferences tab.
                 let pane = ViewerPane {
                     theme: app.theme(),
@@ -83,8 +83,9 @@ impl DockTabs for DockPanes<'_> {
                     previews,
                     size: size.map(Vec2::from),
                 };
-                if viewer.show(ui, pane, &mut self.prefs.viewer) {
-                    self.out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                if viewer.show(ui, pane, &mut self.preferences.viewer) {
+                    self.out
+                        .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
                 }
             }
         }
@@ -107,7 +108,7 @@ impl DockTabs for DockPanes<'_> {
         if tab != TabRef::Graph {
             return TabBadge::None;
         }
-        if self.cx.open().dirty {
+        if self.ctx.open().dirty {
             TabBadge::On
         } else {
             TabBadge::Idle
@@ -146,7 +147,7 @@ impl DockTabs for DockPanes<'_> {
 mod tests {
     use palantir::{DockView, TabStrip};
 
-    use crate::core::document::internals::DocFixture;
+    use crate::core::document::internals::DocumentFixture;
     use crate::core::document::tab_ref::TabRef;
     use crate::gui::app::session::internals::SessionHarness;
 
@@ -159,7 +160,7 @@ mod tests {
     fn the_badge_box_is_reserved_by_the_graph_tab_alone_and_never_resizes_it() {
         // Preferences beside the graph, so the test also covers a chip
         // that reserves nothing: it must not grow a slot of its own.
-        let mut h = SessionHarness::new(DocFixture::sample().with_tab(TabRef::Preferences));
+        let mut h = SessionHarness::new(DocumentFixture::sample().with_tab(TabRef::Preferences));
         let strip = {
             let layout = &h.session.open.document.layout;
             DockView::strip_id(layout, layout.primary().id)

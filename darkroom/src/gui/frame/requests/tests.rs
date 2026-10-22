@@ -11,7 +11,7 @@ fn remove_node() -> GraphIntent {
     }
 }
 
-fn close_prefs() -> DockOperation<TabRef> {
+fn close_preferences() -> DockOperation<TabRef> {
     DockOperation::CloseTab {
         tab: TabRef::Preferences,
     }
@@ -28,7 +28,7 @@ fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
     let mut out = Requests::default();
     out.push_graph(remove_node());
     out.push_app(AppCommand::Run(RunCommand::Once));
-    out.push_view(close_prefs());
+    out.push_view(close_preferences());
     out.push_app(AppCommand::Quit);
     out.extend_graph([remove_node(), remove_node()]);
 

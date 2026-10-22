@@ -23,7 +23,7 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
-    /// Document to reopen on launch. `None` starts with an empty doc.
+    /// Document to reopen on launch. `None` starts with an empty document.
     pub(crate) document_path: Option<PathBuf>,
     /// Reopen `document_path` on launch. When `false`, launch starts with
     /// an empty document (the path is still remembered, just not opened).

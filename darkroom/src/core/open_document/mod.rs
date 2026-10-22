@@ -239,7 +239,7 @@ impl OpenDocument {
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
     const fn land(&mut self, signals: &StepSignals) -> Relayout {
-        // A content edit (or an undone/redone one) leaves the doc differing
+        // A content edit (or an undone/redone one) leaves the document differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.

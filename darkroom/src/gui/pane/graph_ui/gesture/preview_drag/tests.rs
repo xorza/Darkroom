@@ -1,7 +1,7 @@
 use glam::Vec2;
 use scenarium::Binding;
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 use crate::gui::pane::graph_ui::node_ui::port_row;
@@ -24,7 +24,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
 
     // The preview func is declared but not placed — the gesture is what
     // spawns a node from it.
-    let mut fixture = DocFixture::probes(1);
+    let mut fixture = DocumentFixture::probes(1);
     fixture
         .library
         .add(preview_sink::func(Arc::<PreviewSink>::default()));

@@ -44,17 +44,17 @@ pub(crate) enum UndoStep {
 }
 
 impl UndoStep {
-    /// Forward apply: write the "to" half to `doc`. Used by the initial
+    /// Forward apply: write the "to" half to `document`. Used by the initial
     /// commit and by undo-stack redo, which replays a stored step without
     /// rebuilding it.
-    pub(crate) fn apply(&self, doc: &mut Document) {
-        self.kind().write(doc, Direction::Forward);
+    pub(crate) fn apply(&self, document: &mut Document) {
+        self.kind().write(document, Direction::Forward);
     }
 
-    /// Backward apply: write the "from" half to `doc`. Calling this after
+    /// Backward apply: write the "from" half to `document`. Calling this after
     /// [`Self::apply`] restores the document to its pre-commit state.
-    pub(crate) fn revert(&self, doc: &mut Document) {
-        self.kind().write(doc, Direction::Backward);
+    pub(crate) fn revert(&self, document: &mut Document) {
+        self.kind().write(document, Direction::Backward);
     }
 
     pub(crate) fn is_noop(&self) -> bool {

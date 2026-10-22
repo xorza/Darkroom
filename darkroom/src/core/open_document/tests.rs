@@ -6,7 +6,7 @@ use common::TempDir;
 use glam::Vec2;
 
 use crate::core::document::Document;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::document::load_report::DocumentRepair;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -217,10 +217,10 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         }]
     );
     assert!(loaded.open.dirty, "a save accepts the change");
-    let doc = &loaded.open.document;
-    assert!(doc.graph.find(mid_id).is_none());
+    let document = &loaded.open.document;
+    assert!(document.graph.find(mid_id).is_none());
     assert_eq!(
-        doc.stubs.get(mid_id).unwrap().bindings(),
+        document.stubs.get(mid_id).unwrap().bindings(),
         [
             BindingEntry {
                 port: into_mid,
@@ -233,7 +233,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         ],
         "the stub keeps every edge that touched it"
     );
-    let compiled = Compiler::default().compile(&doc.graph, &changed);
+    let compiled = Compiler::default().compile(&document.graph, &changed);
     assert!(compiled.contains(src_id) && compiled.contains(dst_id));
 
     // While `mid` is a stub, `dst` is wired to `src` instead.
@@ -258,14 +258,14 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
             },
         ]
     );
-    let doc = &reattached.open.document;
-    assert!(doc.stubs.get(mid_id).is_none());
+    let document = &reattached.open.document;
+    assert!(document.stubs.get(mid_id).is_none());
     assert_eq!(
-        doc.graph.bindings.get(&into_mid),
+        document.graph.bindings.get(&into_mid),
         Some(&Binding::wire(src_id, 0))
     );
     assert_eq!(
-        doc.graph.bindings.get(&into_dst),
+        document.graph.bindings.get(&into_dst),
         Some(&Binding::wire(src_id, 0)),
         "the input bound while `mid` was a stub keeps its binding"
     );
@@ -276,10 +276,10 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
 /// recorded with it as a plain entry, which seals the gesture before it.
 #[test]
 fn only_a_one_step_batch_is_a_gesture_frame() {
-    let fixture = DocFixture::sample();
+    let fixture = DocumentFixture::sample();
     let (node, other) = (fixture.node(0), fixture.node(1));
-    let DocFixture { doc, library } = fixture;
-    let mut open = OpenDocument::over(doc);
+    let DocumentFixture { document, library } = fixture;
+    let mut open = OpenDocument::over(document);
     let start = open.document.main_view.item_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();

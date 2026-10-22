@@ -10,7 +10,7 @@ pub(crate) mod app_colors;
 pub(crate) mod canvas_theme;
 pub(crate) mod card_theme;
 pub(crate) mod color;
-pub(crate) mod const_value_editor_theme;
+pub(crate) mod const_editor_theme;
 pub(crate) mod inline_rename_theme;
 pub(crate) mod palantir_bridge;
 pub(crate) mod palette;
@@ -24,7 +24,7 @@ use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyl
 use crate::gui::theme::app_colors::AppColors;
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
-use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
+use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::BridgeRoles;
 use crate::gui::theme::palette::Palette;
@@ -37,7 +37,7 @@ use crate::gui::theme::type_scale::TypeScale;
 /// handed to every UI subtree through [`crate::gui::frame::app_ctx::AppCtx`] and the
 /// contexts derived from it, so call sites read off a single source
 /// instead of hard-coded constants. Layout fields live here too —
-/// node ports, value editors, etc. — so a theme swap can restyle
+/// node ports, const editors, etc. — so a theme swap can restyle
 /// geometry as well as color.
 ///
 /// Also owns the palantir [`palantir::Theme`] this app wants on its
@@ -87,15 +87,15 @@ pub(crate) struct Theme {
     /// Data-type → wire/port hue roster (see [`TypeColors`]).
     pub(crate) type_colors: TypeColors,
 
-    /// Look + dimensions for the inline static-value editor that hugs a
+    /// Look + dimensions for the inline const editor that hugs a
     /// `Binding::Const` input port (number/string field, file-pick chip).
-    pub(crate) const_value_editor: ConstValueEditorTheme,
+    pub(crate) const_editor: ConstEditorTheme,
 
-    /// The pointer-over-node variant of `const_value_editor` (chip fill
+    /// The pointer-over-node variant of `const_editor` (chip fill
     /// pre-lit at half the hover strength). Precomputed at construction —
     /// deriving it per frame would clone the whole nested theme in the
     /// record path — and kept next to its base so the pair can't drift.
-    pub(crate) const_value_editor_revealed: ConstValueEditorTheme,
+    pub(crate) const_editor_revealed: ConstEditorTheme,
 
     /// Look for the inline-rename widget. Text is left unset, so a rename
     /// inherits ambient `palantir::Theme::text` like any other label.
@@ -110,7 +110,7 @@ pub(crate) struct Theme {
 
     /// The preferences path field's look while its committed path is broken:
     /// palantir's text edit with every state's border in the error color.
-    /// Precomputed at construction like `const_value_editor_revealed`, so a
+    /// Precomputed at construction like `const_editor_revealed`, so a
     /// broken path costs no theme clone per frame.
     pub(crate) path_field_error: TextEditTheme,
 
@@ -176,7 +176,7 @@ impl Theme {
     /// Assemble the full theme from `p` — the darkroom peer of
     /// `palantir::Theme::from_palette`. Dimensions are palette-independent;
     /// every color and every sub-recipe (the palantir widget theme, the
-    /// static-value editor, inline rename) cascades from `p` rather than
+    /// const editor, inline rename) cascades from `p` rather than
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
         let colors = AppColors::from_palette(p);
@@ -217,8 +217,8 @@ impl Theme {
             status,
             colors,
             type_colors: p.type_colors.clone(),
-            const_value_editor: ConstValueEditorTheme::from_palette(&pal),
-            const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(&pal),
+            const_editor: ConstEditorTheme::from_palette(&pal),
+            const_editor_revealed: ConstEditorTheme::revealed_from_palette(&pal),
             inline_rename,
             inline_rename_title,
             menu_button,

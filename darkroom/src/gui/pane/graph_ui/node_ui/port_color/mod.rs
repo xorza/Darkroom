@@ -20,14 +20,14 @@ use scenarium::DataType;
 use crate::gui::theme::Theme;
 use crate::gui::theme::type_colors::TypeColors;
 
-/// `RgbaF32` for a port of type `ty`, at rest — see
+/// `RgbaF32` for a port of type `data_type`, at rest — see
 /// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). An untyped (`Any`)
 /// input takes the theme's untyped input color.
-pub(crate) fn data(theme: &Theme, ty: &DataType) -> RgbaF32 {
-    if matches!(ty, DataType::Any) {
+pub(crate) fn data(theme: &Theme, data_type: &DataType) -> RgbaF32 {
+    if matches!(data_type, DataType::Any) {
         theme.ports.input
     } else {
-        type_hue(&theme.type_colors, ty)
+        type_hue(&theme.type_colors, data_type)
     }
 }
 
@@ -39,8 +39,8 @@ pub(crate) const fn event(theme: &Theme) -> RgbaF32 {
 }
 
 /// The base hue for a non-`Any` type under the theme's roster.
-fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
-    match ty {
+fn type_hue(t: &TypeColors, data_type: &DataType) -> RgbaF32 {
+    match data_type {
         DataType::Bool => t.boolean,
         DataType::Int => t.int,
         DataType::Float => t.float,

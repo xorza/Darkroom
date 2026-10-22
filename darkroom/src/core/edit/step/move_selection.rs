@@ -58,9 +58,10 @@ impl MoveSelection {
 }
 
 impl Reversible for MoveSelection {
-    fn write(&self, doc: &mut Document, dir: Direction) {
+    fn write(&self, document: &mut Document, dir: Direction) {
         for moved in &self.moves {
-            doc.main_view
+            document
+                .main_view
                 .item_placements
                 .get_mut(&moved.key)
                 .expect("history replays a move against the items it recorded")

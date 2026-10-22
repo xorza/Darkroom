@@ -21,17 +21,17 @@ pub(super) const BUTTON_RADIUS: f32 = 6.0;
 #[derive(Debug)]
 pub(crate) struct Chip {
     wid: WidgetId,
-    tip: &'static str,
+    tooltip: &'static str,
     toggled: Toggle,
     idle_glyph: Option<RgbaF32>,
     toggled_fill: Option<RgbaF32>,
 }
 
 impl Chip {
-    pub(crate) const fn new(wid: WidgetId, tip: &'static str) -> Self {
+    pub(crate) const fn new(wid: WidgetId, tooltip: &'static str) -> Self {
         Self {
             wid,
-            tip,
+            tooltip,
             toggled: Toggle::Off,
             idle_glyph: None,
             toggled_fill: None,
@@ -94,7 +94,7 @@ impl Chip {
         // borrow ends before the tooltip records into `ui`.
         let snapshot = button.response.snapshot();
         let clicked = button.response.left.clicked();
-        support::tooltip_after(ui, &snapshot, Some(self.tip));
+        support::tooltip_after(ui, &snapshot, Some(self.tooltip));
         clicked
     }
 }

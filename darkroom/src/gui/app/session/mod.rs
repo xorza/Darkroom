@@ -125,7 +125,7 @@ impl Session {
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
         //    projection, then emit the input-derived graph mutations (drag,
         //    pan/zoom, wire commit). Drained before the record so Pass A
-        //    sees the settled doc. Driven by the panes on screen, like the
+        //    sees the settled document. Driven by the panes on screen, like the
         //    record below — a pane kind that grows input handling gets an arm
         //    there rather than another question here. A canvas that just
         //    became visible needs a relayout: it may never have recorded, and
@@ -199,7 +199,7 @@ impl Session {
 /// Ctrl+Shift+S / Ctrl+R / Ctrl+Q fired.
 ///
 /// Document file ops are **global** — they fire regardless of
-/// focus, so Ctrl+S still saves while a node's value editor is
+/// focus, so Ctrl+S still saves while a node's const editor is
 /// focused (`TextEdit` doesn't bind S/O/N, so nothing is stolen).
 /// Every chord is sampled with `key_pressed` each frame so all
 /// stay subscribed for palantir's wake-gate (sampling them all up

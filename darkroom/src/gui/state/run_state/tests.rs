@@ -9,7 +9,7 @@ use scenarium::RunError;
 use crate::core::wake;
 use crate::gui::state::preview_store::StoredContent;
 
-fn nid(n: u128) -> NodeId {
+fn node_id(n: u128) -> NodeId {
     NodeId::from_u128(n)
 }
 
@@ -49,8 +49,8 @@ fn run_state(nodes: impl IntoIterator<Item = NodeId>) -> RunState {
 /// it keeps its RAM figure and its preview, because its value is still cached.
 #[test]
 fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else() {
-    let evicted_node = nid(1);
-    let remaining_node = nid(2);
+    let evicted_node = node_id(1);
+    let remaining_node = node_id(2);
     let mut state = run_state([evicted_node, remaining_node]);
     state.nodes.entry(evicted_node).or_default().status = ExecStatus::Cached;
     state.nodes.entry(evicted_node).or_default().ram = RamUsage { cpu: 11, gpu: 0 };
@@ -109,7 +109,7 @@ fn clearing_cache_projections_drops_the_evicted_cone_and_keeps_everything_else()
 /// resolves through `compiled`, and clearing it turns that report into a panic.
 #[test]
 fn clear_drops_the_document_half_and_keeps_the_worker_half() {
-    let node = nid(1);
+    let node = node_id(1);
     let mut state = run_state([node]);
     let compiled = state.compiled.clone().expect("the fixture installs one");
     state.nodes.entry(node).or_default().status = ExecStatus::Executed(1.5);
@@ -164,7 +164,7 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
 /// closed document's cache until some later run measured it again.
 #[test]
 fn install_and_clear_reports_carry_the_cache_reading() {
-    let node = nid(1);
+    let node = node_id(1);
     let mut state = run_state([node]);
     let mut log = StatusLog::default();
     state.cache_ram = RamUsage { cpu: 24, gpu: 8 };
@@ -175,7 +175,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
 
     // An install that dropped every cached node reports an empty cache, and
     // the readout follows it down.
-    let replacement = Arc::new(CompiledGraph::bare([nid(2)]));
+    let replacement = Arc::new(CompiledGraph::bare([node_id(2)]));
     state.apply_report(
         WorkerReport::Installed {
             compiled: Arc::clone(&replacement),
@@ -220,7 +220,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
 /// worker's activity follows its own reports.
 #[test]
 fn progress_marks_the_attributed_node_running_then_finished() {
-    let (succeeds, fails) = (nid(1), nid(2));
+    let (succeeds, fails) = (node_id(1), node_id(2));
     let mut rs = run_state([succeeds, fails]);
     let mut log = StatusLog::default();
     let mut progress = |rs: &mut RunState, node_id, phase| {
@@ -247,7 +247,7 @@ fn progress_marks_the_attributed_node_running_then_finished() {
     );
 
     // A node no event mentioned stays None.
-    assert_eq!(rs.status(nid(99)), ExecStatus::None);
+    assert_eq!(rs.status(node_id(99)), ExecStatus::None);
 }
 
 /// The completed snapshot is the authority: it clears the previous run
@@ -257,20 +257,20 @@ fn progress_marks_the_attributed_node_running_then_finished() {
 /// progress that replaces the status replaces the detail with it.
 #[test]
 fn completed_snapshot_replaces_the_previous_run() {
-    let executed = nid(1);
-    let errored = nid(2);
+    let executed = node_id(1);
+    let errored = node_id(2);
     let mut rs = run_state([executed, errored]);
 
     let mut log = StatusLog::default();
     rs.apply_report(
-        completed_status(&[(nid(1), 1.0), (nid(2), 0.25)], &[]),
+        completed_status(&[(node_id(1), 1.0), (node_id(2), 0.25)], &[]),
         &mut log,
     );
     assert_eq!(rs.status(executed), ExecStatus::Executed(1.0));
     assert_eq!(rs.status(errored), ExecStatus::Executed(0.25));
 
     // Second run: only `errored` is reported, and it failed.
-    rs.apply_report(completed_status(&[], &[nid(2)]), &mut log);
+    rs.apply_report(completed_status(&[], &[node_id(2)]), &mut log);
     // The failure message rides along with the status — the inspector
     // shows it instead of a bare "errored".
     assert_eq!(
@@ -315,7 +315,7 @@ fn completed_snapshot_replaces_the_previous_run() {
 /// run, so the statuses the last completed run left stand.
 #[test]
 fn only_a_failed_run_clears_the_last_run_statuses() {
-    let node = nid(1);
+    let node = node_id(1);
     let mut rs = run_state([node]);
     let mut log = StatusLog::default();
     rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);

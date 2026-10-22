@@ -19,8 +19,9 @@ pub(crate) struct Raise {
 }
 
 impl Reversible for Raise {
-    fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.main_view
+    fn write(&self, document: &mut Document, dir: Direction) {
+        document
+            .main_view
             .item_placements
             .get_mut(&self.key)
             .expect("history replays a raise against the item it recorded")

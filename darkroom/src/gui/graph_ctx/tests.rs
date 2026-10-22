@@ -2,7 +2,7 @@ use scenarium::internals::test_graph::NodeSpec;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{CacheMode, DataType, EventPort, FuncId, Graph, Node, internals};
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -18,12 +18,12 @@ use crate::gui::port_ref::PortKind;
 /// graph still reads back with every pane showing something else.
 #[test]
 fn visibility_tracks_the_active_tab_not_the_graph_contents() {
-    let empty_but_shown = GraphCtxFixture::over(DocFixture::default());
+    let empty_but_shown = GraphCtxFixture::over(DocumentFixture::default());
     assert!(empty_but_shown.graph_ctx().is_visible());
     assert_eq!(empty_but_shown.graph_ctx().nodes().count(), 0);
 
     let populated_but_hidden =
-        GraphCtxFixture::over(DocFixture::probes(2).with_tab(TabRef::Preferences));
+        GraphCtxFixture::over(DocumentFixture::probes(2).with_tab(TabRef::Preferences));
     assert!(!populated_but_hidden.graph_ctx().is_visible());
     assert_eq!(
         populated_but_hidden.graph_ctx().nodes().count(),
@@ -42,7 +42,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
-    let mut fixture = DocFixture::from(g);
+    let mut fixture = DocumentFixture::from(g);
     let ghost = fixture.add_stub(internals::unresolved_node(FuncId::unique()));
     let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
@@ -77,7 +77,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     // And one authored against other ports of a func the library does hold.
     let add_id = library.by_name("Add").unwrap().id();
     let known_id = graph.add(known);
-    let mut fixture = DocFixture::with_library(graph, library);
+    let mut fixture = DocumentFixture::with_library(graph, library);
     let ghost_id = fixture.add_stub(ghost);
     let changed_id = fixture.add_stub(internals::unresolved_node(add_id));
 
@@ -137,7 +137,7 @@ fn func_events_read_in_order_alongside_outputs() {
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
 
-    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let n = fixture.graph_ctx().node(node_id).unwrap();
 
     let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
@@ -166,7 +166,7 @@ fn subscriptions_read_from_the_graph() {
     let subscriber_id = graph.add(subscriber);
     graph.subscribe(EventPort::new(emitter_id, 1), subscriber_id);
 
-    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
@@ -195,7 +195,7 @@ fn cache_mode_reads_verbatim_per_node() {
         ids.push((node_id, mode));
     }
 
-    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(DocumentFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     for (id, mode) in ids {

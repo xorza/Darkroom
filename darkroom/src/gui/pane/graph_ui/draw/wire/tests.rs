@@ -148,7 +148,7 @@ fn a_node_key_names_the_node_its_glyph_hangs_off() {
     use scenarium::NodeId;
 
     use crate::gui::node_key::NodeKey;
-    use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
+    use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
     use crate::gui::port_ref::{PortKind, PortRef};
     use scenarium::EventPort;
 

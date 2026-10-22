@@ -40,13 +40,13 @@ use palantir::TextWrap;
 use palantir::prelude::*;
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
-use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
+use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
 
 /// One const editor: the field it records as, and the literal it edits on
 /// a port of `data_type`.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ConstEdit<'a> {
+pub(super) struct ConstEditor<'a> {
     pub(super) field: Field<'a>,
     pub(super) library: &'a Library,
     pub(super) value: &'a ConstValue,
@@ -60,7 +60,7 @@ pub(super) struct ConstEdit<'a> {
 /// (button look, field width) comes off.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Field<'a> {
-    pub(super) theme: &'a ConstValueEditorTheme,
+    pub(super) theme: &'a ConstEditorTheme,
     /// Stable across frames, so the `TextEdit` / buffer state survives.
     pub(super) id: WidgetId,
 }
@@ -83,12 +83,12 @@ impl<S> Clone for Pick<'_, S> {
 
 impl<S> Copy for Pick<'_, S> {}
 
-impl ConstEdit<'_> {
+impl ConstEditor<'_> {
     /// Render the editor for the value. Returns the new value when the user
     /// committed an edit this frame (scrub released, Enter, blur, or a
     /// discrete pick), otherwise `None`.
     pub(super) fn show(self, ui: &mut Ui) -> Option<ConstValue> {
-        let ConstEdit {
+        let ConstEditor {
             field,
             library,
             value,

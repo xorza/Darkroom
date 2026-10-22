@@ -57,9 +57,9 @@ pub(super) fn live_node(
 /// One insertion carries one node, and intents commit one at a time — so a
 /// batch that repeats an id fails here on its second intent, against a
 /// document the first has already been applied to.
-pub(super) fn fresh_node_id(doc: &Document, node_id: NodeId) -> Result<(), MalformedIntent> {
+pub(super) fn fresh_node_id(document: &Document, node_id: NodeId) -> Result<(), MalformedIntent> {
     non_nil_node(node_id, Role::New)?;
-    if doc.holds_node(node_id) {
+    if document.holds_node(node_id) {
         return Err(MalformedIntent::NodeAlreadyExists { node_id });
     }
     Ok(())

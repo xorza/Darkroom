@@ -7,10 +7,10 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
+use crate::gui::pane::graph_ui::draw::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
-use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
 use scenarium::EventPort;
@@ -77,8 +77,8 @@ impl SubscriptionUi {
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+        let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
@@ -96,7 +96,7 @@ impl SubscriptionUi {
                 self.state.latch(latched);
             }
         }
-        if cx.cancelled() {
+        if ctx.cancelled() {
             self.state.clear();
         }
         let Some(mut state) = self.state.take() else {
@@ -112,11 +112,11 @@ impl SubscriptionUi {
         // release edge.
         let released = match &mut state {
             InFlight::FromEmitter(drag) => {
-                drag.snap = scan_sub_target(ui, cx, drag.from);
+                drag.snap = scan_subscription_target(ui, ctx, drag.from);
                 !drag.held(&geometry.events)
             }
             InFlight::FromSubscriber(drag) => {
-                drag.snap = scan_emitter_target(ui, cx, drag.from);
+                drag.snap = scan_emitter_target(ui, ctx, drag.from);
                 !drag.held(&geometry.subs)
             }
         };
@@ -170,8 +170,8 @@ impl SubscriptionUi {
     /// from is fixed to its glyph; the free end follows the snapped opposite
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
-        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: CanvasCtx<'_>, canvas_origin: Vec2) {
+        let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         let Some(state) = self.state.get().copied() else {
             return;
         };
@@ -209,8 +209,11 @@ impl SubscriptionUi {
 /// [`crate::gui::pane::graph_ui::gesture::wire_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUi`].
 pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph_ctx, geometry) =
-        (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
+    let (theme, graph_ctx, geometry) = (
+        pass.draw_ctx.theme(),
+        pass.draw_ctx.graph_ctx(),
+        pass.draw_ctx.geometry(),
+    );
     for s in graph_ctx.subscriptions() {
         let (Some(p0), Some(p3)) = (
             geometry.events.center(s.event),
@@ -238,26 +241,26 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// sink node (the only kind that renders a pin) other than the emitter's
 /// own node. The pin-only target enforces "events connect only to
 /// subscribers"; the self-node skip rejects a node subscribing to itself.
-fn scan_sub_target(ui: &mut Ui, cx: CanvasCtx<'_>, emitter: EventPort) -> Option<NodeId> {
+fn scan_subscription_target(ui: &mut Ui, ctx: CanvasCtx<'_>, emitter: EventPort) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    let candidates = cx
+    let candidates = ctx
         .graph_ctx()
         .nodes()
         .filter(|n| n.id != emitter.node_id && n.sink())
         .map(|n| n.id);
-    cx.geometry().subs.first_containing(pointer, candidates)
+    ctx.geometry().subs.first_containing(pointer, candidates)
 }
 
 /// Emitter event glyph under the pointer that's a valid drop for a wire
 /// dragged from `subscriber`'s pin: any node's event other than the
 /// subscriber's own (a node can't subscribe to itself). Mirror of
-/// [`scan_sub_target`] for the reverse drag.
-fn scan_emitter_target(ui: &mut Ui, cx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventPort> {
+/// [`scan_subscription_target`] for the reverse drag.
+fn scan_emitter_target(ui: &mut Ui, ctx: CanvasCtx<'_>, subscriber: NodeId) -> Option<EventPort> {
     let pointer = ui.pointer_pos()?;
-    let candidates = cx
+    let candidates = ctx
         .graph_ctx()
         .nodes()
         .filter(|n| n.id != subscriber)
         .flat_map(NodeCtx::event_ports);
-    cx.geometry().events.first_containing(pointer, candidates)
+    ctx.geometry().events.first_containing(pointer, candidates)
 }

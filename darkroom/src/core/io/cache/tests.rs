@@ -28,9 +28,9 @@ fn cache_root_is_named_after_stem_beside_the_file() {
 #[test]
 fn build_creates_dir_and_self_ignoring_gitignore() {
     let dir = TempDir::new("darkroom-cache");
-    let doc_path = dir.join("scene.darkroom");
+    let document_path = dir.join("scene.darkroom");
 
-    let root = root(&doc_path);
+    let root = root(&document_path);
     assert!(!fs::exists(&root), "naming the root creates nothing");
     prepare(&root);
 

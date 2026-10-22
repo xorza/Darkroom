@@ -20,12 +20,12 @@ use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph_ui::draw::inspectors;
+use crate::gui::pane::graph_ui::draw::inspectors::InspectMode;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::node_ui::node_widget;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::pane::graph_ui::node_ui::wid;
-use crate::gui::pane::graph_ui::paint::inspectors;
-use crate::gui::pane::graph_ui::paint::inspectors::InspectMode;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_SIZE, Badge, BadgeFace};
@@ -96,7 +96,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     )
     .turn(PI + FRAC_PI_4)
     .centered_on(node.pos)
-    .tip(Some(
+    .tooltip(Some(
         "Event subscription — drag to an emitter, or drop an event wire here",
     ))
     .show(ui);
@@ -119,9 +119,9 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// Reports whether the inspect chip was clicked — cycling a panel needs
 /// `&mut Inspectors`, which the draw holds only shared, so the caller applies
 /// it once the draw is over.
-pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
-    let (ncx, dcx) = (rec.node, rec.draw);
-    let (theme, node) = (ncx.theme(), ncx);
+pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
+    let (node_ctx, draw_ctx) = (record.node, record.draw);
+    let (theme, node) = (node_ctx.theme(), node_ctx);
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
     // stroke's *inner* radius, not the card's outer `corner_radius` —
@@ -142,9 +142,11 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
             if node.runnable() && play_chip(ui, theme, node) {
                 // Run this node's cone — the same command the context menu's
                 // "Run to this node" resolves to.
-                rec.out.push_app(AppCommand::Run(RunCommand::Node(node.id)));
+                record
+                    .out
+                    .push_app(AppCommand::Run(RunCommand::Node(node.id)));
             }
-            title(ui, rec);
+            title(ui, record);
             // Splits the title (left) from the descriptive cluster
             // (right): the markers, then inspect.
             support::hspacer(ui, "header_spacer");
@@ -175,7 +177,7 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
             }
             // Inspect toggle: filled (checked) when pinned, accent outline
             // when open, muted-grey outline (`text_muted`) when closed.
-            let mode = dcx.inspectors().mode(node.id);
+            let mode = draw_ctx.inspectors().mode(node.id);
             let color = if mode.is_some() {
                 theme.colors.badge_graph
             } else {
@@ -196,9 +198,9 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-    let ncx = rec.node;
-    let (theme, node) = (ncx.theme(), ncx);
+pub(super) fn status_row(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+    let node_ctx = record.node;
+    let (theme, node) = (node_ctx.theme(), node_ctx);
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::HUG))
@@ -255,11 +257,11 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                     on_color: theme.colors.text_muted,
                     state: Toggle::from(node.disabled()),
                     tag: "disable_badge",
-                    tip: "Disable — exclude this sink from graph runs",
+                    tooltip: "Disable — exclude this sink from graph runs",
                     to: NodeProperty::Disabled(!node.disabled()),
                     then: None,
                 }
-                .show(ui, rec);
+                .show(ui, record);
             }
             if node.cacheable()
                 && Badge::control(
@@ -273,7 +275,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                 )
                 .show(ui)
             {
-                rec.out
+                record.out
                     .push_app(AppCommand::Run(RunCommand::EvictCache(node.id)));
             }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
@@ -300,7 +302,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                         on_color: theme.colors.badge_cache,
                         state: Toggle::from(ram),
                         tag: "ram_badge",
-                        tip: "RuntimeCache in RAM — keep the output resident, reused across runs this session",
+                        tooltip: "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
                         then: None,
                     },
@@ -309,7 +311,7 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                         on_color: theme.colors.badge_cache,
                         state: Toggle::from(disk),
                         tag: "disk_badge",
-                        tip: "RuntimeCache to disk — persist the output across runs and reopens",
+                        tooltip: "RuntimeCache to disk — persist the output across runs and reopens",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, !disk)),
                         // Turning the bit *on* publishes whatever is already in
                         // RAM, right now. Without it the value would reach disk
@@ -320,14 +322,14 @@ pub(super) fn status_row(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
                             .then_some(AppCommand::Run(RunCommand::FlushCache(node.id))),
                     },
                 ] {
-                    chip.show(ui, rec);
+                    chip.show(ui, record);
                 }
             }
         });
 }
 
 /// One control chip that writes a node property when clicked — the disable
-/// toggle and the two cache bits, which differ only in glyph, tag, tip, and
+/// toggle and the two cache bits, which differ only in glyph, tag, tooltip, and
 /// which property the click sets.
 ///
 /// Quiet at rest: the chip inks muted grey until its state is *on*, when it
@@ -340,7 +342,7 @@ struct PropertyChip {
     on_color: RgbaF32,
     state: Toggle,
     tag: &'static str,
-    tip: &'static str,
+    tooltip: &'static str,
     /// What a click sets — already carries the flipped value.
     to: NodeProperty,
     /// A side effect the click raises alongside the property, for a bit whose
@@ -352,20 +354,20 @@ struct PropertyChip {
 }
 
 impl PropertyChip {
-    fn show(self, ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-        let node = rec.node;
+    fn show(self, ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+        let node = record.node;
         let color = match self.state {
             Toggle::On => self.on_color,
             Toggle::Off => node.theme().colors.text_muted,
         };
         if Badge::control(
-            BadgeFace::text(self.glyph, color, self.tip),
+            BadgeFace::text(self.glyph, color, self.tooltip),
             wid::node(self.tag, node.id),
             self.state,
         )
         .show(ui)
         {
-            rec.out.push_graph(GraphIntent::SetNodeProperty {
+            record.out.push_graph(GraphIntent::SetNodeProperty {
                 node_id: node.id,
                 to: self.to,
             });
@@ -373,7 +375,7 @@ impl PropertyChip {
             // app tier runs, so the command compiles a graph that already carries
             // the property this click just set.
             if let Some(command) = self.then {
-                rec.out.push_app(command);
+                record.out.push_app(command);
             }
         }
     }
@@ -418,8 +420,8 @@ fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click). A stub's
 /// title is read-only: its record is a frozen snapshot no edit changes.
-fn title(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
-    let node = rec.node;
+fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
+    let node = record.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
     let id = wid::rename(node.id);
     // Borrowed straight off the node: an interned handle is only valid
@@ -435,11 +437,12 @@ fn title(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) {
     };
     let ev = rename.show(ui);
     if ev.clicked {
-        rec.out
+        record
+            .out
             .extend_graph(GraphIntent::click(mode, node.graph_ctx.selected(), node.id));
     }
     if let Some(to) = ev.committed {
-        rec.out.push_graph(GraphIntent::RenameNode {
+        record.out.push_graph(GraphIntent::RenameNode {
             node_id: node.id,
             to,
         });
@@ -451,7 +454,7 @@ mod tests {
     use scenarium::{CacheMode, NodeId};
     use std::mem;
 
-    use crate::core::document::internals::DocFixture;
+    use crate::core::document::internals::DocumentFixture;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::edit::step::set_node_property::NodeProperty;
     use crate::gui::frame::app_command::AppCommand;
@@ -508,9 +511,9 @@ mod tests {
     /// Click the `↓` chip on the fixture's only node, over a document whose
     /// node already sits at `from`.
     fn click_disk_chip(from: CacheMode) -> ChipClick {
-        let mut h = CanvasHarness::new(DocFixture::probes(1));
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
         let node_id = h.node(0);
-        h.doc_mut().graph.find_mut(node_id).unwrap().cache = from;
+        h.document_mut().graph.find_mut(node_id).unwrap().cache = from;
         // Two frames so the node body — and with it the chip — has recorded
         // and carries a rect to aim at.
         h.prime(2);

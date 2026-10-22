@@ -42,7 +42,7 @@ impl<'a> InputCtx<'a> {
         self.declared.description.as_deref().unwrap_or_default()
     }
 
-    pub(crate) const fn ty(self) -> &'a DataType {
+    pub(crate) const fn data_type(self) -> &'a DataType {
         &self.declared.data_type
     }
 
@@ -102,9 +102,9 @@ fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValu
                 .map(|first| ConstValue::Enum(first.clone())),
             // An untyped (`Any`) port has no concrete kind to seed; start it as
             // an empty string so the smart editor opens blank and infers the
-            // kind from whatever the user types (see `value_editor::parse_any`).
+            // kind from whatever the user types (see `const_editor::parse_any`).
             DataType::Any => Some(ConstValue::String(String::new())),
-            ty => ty.default_value(),
+            data_type => data_type.default_value(),
         }
     })
 }

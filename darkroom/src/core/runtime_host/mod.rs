@@ -149,15 +149,15 @@ impl RuntimeHost {
         }
     }
 
-    /// Point the disk cache at `doc_path`'s project-local store (`<stem>.darkroom-cache/` beside
+    /// Point the disk cache at `document_path`'s project-local store (`<stem>.darkroom-cache/` beside
     /// the file), so disk-backed (`Disk`/`Both`) nodes reload across sessions. `None` (an unsaved
     /// document) is memory-only. Explicit-path cache nodes are unaffected — they always use their
     /// own path.
     ///
     /// What the worker is told is [`CacheRootChange`]'s to decide — see there
     /// for why only one of the transitions owes a flush.
-    pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
-        let prev = mem::replace(&mut self.disk_root, doc_path.map(cache::root));
+    pub(crate) fn set_document_cache(&mut self, document_path: Option<&Path>) {
+        let prev = mem::replace(&mut self.disk_root, document_path.map(cache::root));
         let change = CacheRootChange::of(prev.as_deref(), self.disk_root.as_deref());
         if change != CacheRootChange::Unchanged {
             self.root_prepared = false;

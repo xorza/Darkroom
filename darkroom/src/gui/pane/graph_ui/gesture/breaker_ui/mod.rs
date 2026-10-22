@@ -54,19 +54,19 @@ impl BreakerUi {
     /// undo step already detaches every incoming edge and pin, so emitting
     /// both would log a redundant history entry. The context's Esc — resolved
     /// once by the canvas — drops the scribble without emitting.
-    pub(crate) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = cx.graph_ctx();
+    pub(crate) fn apply(&mut self, ui: &Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+        let graph_ctx = ctx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
-        if let Some(CanvasGesture::Breaker(button)) = cx.gesture()
+        if let Some(CanvasGesture::Breaker(button)) = ctx.gesture()
             && self.latched.is_idle()
             && let Some(p) = resp.pointer_local
         {
             self.latched.latch(button);
             self.scribble.restart(graph_ctx.viewport().to_world(p));
         }
-        if cx.cancelled() {
+        if ctx.cancelled() {
             self.latched.clear();
             return;
         }

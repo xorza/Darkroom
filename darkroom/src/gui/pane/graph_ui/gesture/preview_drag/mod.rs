@@ -44,11 +44,11 @@ impl PreviewDrag {
     /// Advance the drag in flight, or latch a new one off a Ctrl+drag on an
     /// output port. Swept once per frame over the whole scene: only one
     /// pointer drag can be in flight.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+        let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, cx.prepass(), out) || !canvas_gesture::preview_drag_modifier(ui) {
+        if self.drag.advance(ui, ctx.prepass(), out) || !canvas_gesture::preview_drag_modifier(ui) {
             return;
         }
         let Some(port) = geometry.ports.started_drag() else {

@@ -13,7 +13,7 @@ use palantir::prelude::*;
 use scenarium::NodeId;
 
 use crate::core::document::Document;
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -40,7 +40,7 @@ impl GraphUi {
 }
 
 /// Surface every canvas test records at unless it is about size. Wide enough
-/// that [`DocFixture`]'s row of nodes lands on screen uncropped.
+/// that [`DocumentFixture`]'s row of nodes lands on screen uncropped.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
 #[derive(Debug)]
@@ -67,25 +67,25 @@ impl CanvasHarness {
     /// [`SURFACE`] with mono metrics — what a canvas test wants unless it is
     /// about measured text or about the surface itself.
     ///
-    /// Takes a [`DocFixture`] or anything that converts into one — a
+    /// Takes a [`DocumentFixture`] or anything that converts into one — a
     /// [`TestGraph`](scenarium::internals::test_graph::TestGraph) goes straight in.
-    pub(crate) fn new(fixture: impl Into<DocFixture>) -> Self {
+    pub(crate) fn new(fixture: impl Into<DocumentFixture>) -> Self {
         Self::over(UiHarness::new(SURFACE), fixture)
     }
 
     /// A different surface, still mono: for the tests whose subject is what
     /// fits on one.
-    pub(crate) fn sized(fixture: impl Into<DocFixture>, surface: UVec2) -> Self {
+    pub(crate) fn sized(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
         Self::over(UiHarness::new(surface), fixture)
     }
 
     /// Real text shaping: node headers and menu rows size to their labels, so
     /// mono metrics would put every one of them in the wrong place.
-    pub(crate) fn shaping_text(fixture: impl Into<DocFixture>, surface: UVec2) -> Self {
+    pub(crate) fn shaping_text(fixture: impl Into<DocumentFixture>, surface: UVec2) -> Self {
         Self::over(UiHarness::with_text(surface), fixture)
     }
 
-    fn over(ui: UiHarness, fixture: impl Into<DocFixture>) -> Self {
+    fn over(ui: UiHarness, fixture: impl Into<DocumentFixture>) -> Self {
         Self {
             ui,
             graph_ui: GraphUi::default(),
@@ -155,13 +155,13 @@ impl CanvasHarness {
         .is_some()
     }
 
-    pub(crate) fn doc(&self) -> &Document {
+    pub(crate) fn document(&self) -> &Document {
         &self.ctx.open.document
     }
 
     /// The document, to edit between frames — an undo moving a node out from
     /// under a live gesture is the case this exists for.
-    pub(crate) fn doc_mut(&mut self) -> &mut Document {
+    pub(crate) fn document_mut(&mut self) -> &mut Document {
         &mut self.ctx.open.document
     }
 

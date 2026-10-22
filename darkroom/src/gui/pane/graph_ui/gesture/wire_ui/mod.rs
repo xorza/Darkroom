@@ -8,11 +8,11 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
+use crate::gui::pane::graph_ui::draw::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
 use crate::gui::pane::graph_ui::gesture::canvas_gesture;
 use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::paint::wire::glyph_drag::GlyphDrag;
-use crate::gui::pane::graph_ui::paint::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::port_ref::{PortKind, PortRef};
 use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
@@ -101,8 +101,8 @@ impl WireUi {
     /// [`Self::resume`] re-enters [`DragMode::Floating`] once a node is
     /// picked. The context's Esc — resolved once by the canvas — drops either
     /// mode without emitting anything.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+        let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         self.ended_on_secondary = false;
         // Latch a fresh port drag only when idle.
         // The output column drops out while the preview-spawn chord is
@@ -120,7 +120,7 @@ impl WireUi {
                 mode: DragMode::Held,
             });
         }
-        if cx.cancelled() {
+        if ctx.cancelled() {
             self.state.clear();
         }
         let Some(mut state) = self.state.take() else {
@@ -134,11 +134,11 @@ impl WireUi {
         }
 
         // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(ui, cx, state.drag.from);
+        state.drag.snap = scan_snap_target(ui, ctx, state.drag.from);
         self.state.latch(state);
 
         let resolved = match state.mode {
-            DragMode::Held => self.resolve_held(ui, cx, state.drag),
+            DragMode::Held => self.resolve_held(ui, ctx, state.drag),
             DragMode::Floating => self.resolve_floating(ui, state.drag),
         };
         out.extend_graph(resolved);
@@ -170,18 +170,18 @@ impl WireUi {
     fn resolve_held(
         &mut self,
         ui: &mut Ui,
-        cx: CanvasCtx<'_>,
+        ctx: CanvasCtx<'_>,
         drag: GlyphDrag<PortRef, PortRef>,
     ) -> Option<GraphIntent> {
-        if drag.held(&cx.geometry().ports) {
+        if drag.held(&ctx.geometry().ports) {
             return None;
         }
         self.state.clear();
         if let Some(end) = drag.snap {
             return Some(wire(drag.from, end));
         }
-        let set_const = const_drop(ui, cx, drag.from);
-        if set_const.is_none() && dropped_on_empty_canvas(ui, cx.geometry()) {
+        let set_const = const_drop(ui, ctx, drag.from);
+        if set_const.is_none() && dropped_on_empty_canvas(ui, ctx.geometry()) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
             self.pending_open.latch(drag.from);
@@ -242,8 +242,8 @@ impl WireUi {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent wires.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
-        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: CanvasCtx<'_>, canvas_origin: Vec2) {
+        let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         let Some(state) = self.state.get().copied() else {
             return;
         };
@@ -265,8 +265,8 @@ impl WireUi {
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
         let theme = graph_ctx.theme();
-        let drag_ty = graph_ctx.port_type(start_port);
-        let color = port_color::data(theme, drag_ty);
+        let drag_data_type = graph_ctx.data_type(start_port);
+        let color = port_color::data(theme, drag_data_type);
         Wire::data(p0, p3).add(ui, theme.stroke_width, color);
     }
 }
@@ -279,7 +279,7 @@ impl WireUi {
 /// module rather than [`WireUi`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (graph_ctx, geometry) = (pass.dcx.graph_ctx(), pass.dcx.geometry());
+    let (graph_ctx, geometry) = (pass.draw_ctx.graph_ctx(), pass.draw_ctx.geometry());
     for (consumer, producer) in graph_ctx.wires() {
         let (src, tgt) = (PortRef::from(producer), PortRef::from(consumer));
         let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt)) else {
@@ -303,8 +303,8 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
     let theme = graph_ctx.theme();
     WireTint::new(
-        port_color::data(theme, graph_ctx.port_type(src)),
-        port_color::data(theme, graph_ctx.port_type(tgt)),
+        port_color::data(theme, graph_ctx.data_type(src)),
+        port_color::data(theme, graph_ctx.data_type(tgt)),
     )
 }
 
@@ -322,8 +322,8 @@ fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
 /// `response.hovered`: palantir suppresses `hovered` on every widget except the
 /// LMB-capture owner during a drag, so while the start port owns the capture no
 /// other port can ever read `hovered = true`.
-fn scan_snap_target(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<PortRef> {
-    let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+fn scan_snap_target(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<PortRef> {
+    let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
     let pointer = ui.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
     // snaps anywhere, so its release falls through to the set-const gesture.
@@ -371,8 +371,8 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
 /// intent, or `None` when the gesture doesn't apply — drag started
 /// on an output, released off the start node, the port is unknown,
 /// or the input is already a const (don't clobber the value).
-fn const_drop(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIntent> {
-    let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
+fn const_drop(ui: &mut Ui, ctx: CanvasCtx<'_>, start: PortRef) -> Option<GraphIntent> {
+    let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
     let port = start.input_port()?;
     let pointer = ui.pointer_pos()?;
     if !geometry.node_screen_rect(port.node_id)?.contains(pointer) {

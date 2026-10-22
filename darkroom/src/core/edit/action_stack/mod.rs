@@ -111,7 +111,11 @@ impl ActionStack {
         steps.clear();
     }
 
-    pub(crate) fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub(crate) fn undo(
+        &mut self,
+        document: &mut Document,
+        on_step: &mut dyn FnMut(&UndoStep),
+    ) -> bool {
         self.seal();
         if self.cursor == 0 {
             return false;
@@ -122,13 +126,17 @@ impl ActionStack {
         let range = &self.entries[self.cursor];
         let steps = deserialize_steps(slice_bytes(&self.actions, range));
         for step in steps.iter().rev() {
-            step.revert(doc);
+            step.revert(document);
             on_step(step);
         }
         true
     }
 
-    pub(crate) fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+    pub(crate) fn redo(
+        &mut self,
+        document: &mut Document,
+        on_step: &mut dyn FnMut(&UndoStep),
+    ) -> bool {
         self.seal();
         if self.cursor == self.entries.len() {
             return false;
@@ -136,7 +144,7 @@ impl ActionStack {
         let range = &self.entries[self.cursor];
         let steps = deserialize_steps(slice_bytes(&self.actions, range));
         for step in &steps {
-            step.apply(doc);
+            step.apply(document);
             on_step(step);
         }
         self.cursor += 1;

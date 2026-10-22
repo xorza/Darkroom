@@ -70,9 +70,9 @@ impl<'a> GraphCtx<'a> {
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
     pub(crate) fn new(window: WindowCtx<'a>) -> Self {
-        let doc = window.document();
+        let document = window.document();
         Self {
-            is_visible: doc.shows_graph(),
+            is_visible: document.shows_graph(),
             window,
         }
     }
@@ -138,7 +138,7 @@ impl<'a> GraphCtx<'a> {
     ///
     /// If the graph does not hold `port`: a committed wire joins two declared
     /// ports, and an in-flight wire drops once its start is gone.
-    pub(crate) fn port_type(self, port: PortRef) -> &'a DataType {
+    pub(crate) fn data_type(self, port: PortRef) -> &'a DataType {
         let func = self
             .body()
             .find(port.node_id)

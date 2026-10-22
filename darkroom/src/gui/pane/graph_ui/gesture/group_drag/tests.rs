@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{Key, PointerButton};
 
-use crate::core::document::internals::DocFixture;
+use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -16,9 +16,9 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 /// every node unmovable with the whole rest of the canvas green.
 #[test]
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
-    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let (dragged, bystander) = (h.node(0), h.node(1));
-    let start = h.doc().main_view.item_placements[&dragged].pos;
+    let start = h.document().main_view.item_placements[&dragged].pos;
     h.prime(2);
 
     // Press the body, then travel past the drag threshold. The sweep sees
@@ -76,9 +76,9 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
 /// selection, and a second, with nothing left in flight, clears it.
 #[test]
 fn esc_cancels_a_drag_before_it_deselects() {
-    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let dragged = h.node(0);
-    h.doc_mut().main_view.selected = [dragged].into_iter().collect();
+    h.document_mut().main_view.selected = [dragged].into_iter().collect();
     h.prime(2);
 
     let grab = h.node_center(dragged);

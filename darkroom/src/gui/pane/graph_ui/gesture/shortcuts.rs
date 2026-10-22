@@ -20,7 +20,7 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 
 /// Turn this frame's canvas chords into intents.
 ///
-/// Routed through the intent stack (not a direct doc write) so they land in
+/// Routed through the intent stack (not a direct document write) so they land in
 /// the undo history; the `is_noop` filter in `drain_requests` drops them when
 /// they'd change nothing. Every chord is sampled up front rather than
 /// short-circuited, so one firing doesn't drop the others' subscription for
@@ -28,20 +28,20 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// text field holds focus, and Ctrl+0 / Ctrl+D are `Accel` so they keep firing
 /// mid-edit.
 ///
-/// Esc deselects only when the canvas `cx` says nothing was in flight: only
+/// Esc deselects only when the canvas `ctx` says nothing was in flight: only
 /// the canvas knows whether the Esc cancelled a gesture instead.
-pub(crate) fn emit(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-    let graph_ctx = cx.graph_ctx();
+pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+    let graph_ctx = ctx.graph_ctx();
     let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
     let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
     let delete =
         ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
     let view = graph_ctx.view();
-    if cx.deselects() && !view.selected.is_empty() {
+    if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
     // Ctrl+0 is the toolbar's reset view: 1:1, centred on the content.
-    if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, cx) {
+    if reset_zoom && let Some(reset) = Framing::Reset.intent(ui, ctx) {
         out.push_graph(reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them

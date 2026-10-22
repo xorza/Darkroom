@@ -44,19 +44,23 @@ pub(super) struct NodeResponse {
 #[derive(Debug)]
 pub(super) struct NodeWidget<'a> {
     state: &'a mut NodeUi,
-    ncx: NodeCtx<'a>,
+    node_ctx: NodeCtx<'a>,
 }
 
 impl<'a> NodeWidget<'a> {
-    pub(super) const fn new(state: &'a mut NodeUi, ncx: NodeCtx<'a>) -> Self {
-        Self { state, ncx }
+    pub(super) const fn new(state: &'a mut NodeUi, node_ctx: NodeCtx<'a>) -> Self {
+        Self { state, node_ctx }
     }
 
     pub(super) fn show(self, ui: &mut Ui, pass: &mut NodePass<'_, '_>) -> NodeResponse {
-        let Self { state, ncx } = self;
-        let NodePass { dcx, probe, out } = pass;
-        let dcx = *dcx;
-        let (theme, node) = (ncx.theme(), ncx);
+        let Self { state, node_ctx } = self;
+        let NodePass {
+            draw_ctx,
+            probe,
+            out,
+        } = pass;
+        let draw_ctx = *draw_ctx;
+        let (theme, node) = (node_ctx.theme(), node_ctx);
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
@@ -66,14 +70,14 @@ impl<'a> NodeWidget<'a> {
         // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
         // frame: acceptable, since the user can't aim at something unpainted.
-        let broken = dcx
+        let broken = draw_ctx
             .geometry()
             .node_world_rect(node)
             .is_some_and(|r| probe.crosses_rect(r));
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = dcx.is_selected(ncx.id);
+        let selected = draw_ctx.is_selected(node_ctx.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes: the breaker alarm wins,
@@ -108,7 +112,7 @@ impl<'a> NodeWidget<'a> {
             header::subscription_pin(
                 ui,
                 node,
-                Hover::from(dcx.geometry().subs.is_hovered(node.id)),
+                Hover::from(draw_ctx.geometry().subs.is_hovered(node.id)),
             );
         }
 
@@ -133,20 +137,20 @@ impl<'a> NodeWidget<'a> {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                let mut rec = NodeRecord {
-                    node: ncx,
-                    draw: dcx,
+                let mut record = NodeRecord {
+                    node: node_ctx,
+                    draw: draw_ctx,
                     out,
                 };
-                let inspect_toggled = header::show(ui, &mut rec);
-                header::status_row(ui, &mut rec);
-                port_row::show(ui, &mut rec, row_tracks);
+                let inspect_toggled = header::show(ui, &mut record);
+                header::status_row(ui, &mut record);
+                port_row::show(ui, &mut record, row_tracks);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
-                    preview_row::show(ui, &mut rec);
+                    preview_row::show(ui, &mut record);
                 } else {
-                    memory_row::show(ui, ncx);
+                    memory_row::show(ui, node_ctx);
                 }
                 inspect_toggled
             });
@@ -173,7 +177,7 @@ impl<'a> NodeWidget<'a> {
         if body_clicked {
             out.extend_graph(GraphIntent::click(
                 click_mode,
-                ncx.graph_ctx.selected(),
+                node_ctx.graph_ctx.selected(),
                 node.id,
             ));
         }
@@ -192,11 +196,11 @@ impl<'a> NodeWidget<'a> {
             // grabbing an unselected node selects only it and drags it
             // alone.
             let members = if selected {
-                group_drag::selected_group(dcx)
+                group_drag::selected_group(draw_ctx)
             } else {
                 out.extend_graph(GraphIntent::click(
                     ClickMode::Replace,
-                    ncx.graph_ctx.selected(),
+                    node_ctx.graph_ctx.selected(),
                     node.id,
                 ));
                 Arc::from([DragStart {

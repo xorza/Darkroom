@@ -188,7 +188,7 @@ mod tests {
     fn checker_image_is_one_2x2_period() {
         const L: u8 = CHECKER_LIGHT_U8;
         const D: u8 = CHECKER_DARK_U8;
-        let img = checker_image();
+        let image = checker_image();
         // Row-major light/dark, dark/light — one full checker period.
         #[rustfmt::skip]
         let expected = [
@@ -196,7 +196,7 @@ mod tests {
             D, D, D, 255,  L, L, L, 255,
         ];
         assert_eq!(
-            img,
+            image,
             palantir::Image::from_srgba8(UVec2::splat(2), expected.to_vec())
                 .expect("2×2 RGBA8 is 16 bytes")
         );

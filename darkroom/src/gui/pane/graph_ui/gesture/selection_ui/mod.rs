@@ -99,11 +99,11 @@ impl SelectionUi {
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
     /// committing `SetSelection` emitted on release. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = cx.graph_ctx();
+    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+        let graph_ctx = ctx.graph_ctx();
         let resp = ui.response_for(canvas::outer_wid());
         if self.band.is_idle()
-            && cx.gesture() == Some(CanvasGesture::Select)
+            && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
             let w = graph_ctx.viewport().to_world(p);
@@ -122,7 +122,7 @@ impl SelectionUi {
             };
             self.band.latch(band);
         }
-        if cx.cancelled() {
+        if ctx.cancelled() {
             self.band.clear();
         }
         let Some(mut band) = self.band.take() else {
@@ -145,7 +145,7 @@ impl SelectionUi {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
             // (first frame) can't be hit yet — skip.
-            let Some(body) = cx.geometry().node_world_rect(n) else {
+            let Some(body) = ctx.geometry().node_world_rect(n) else {
                 continue;
             };
             if rect.intersects(body) {

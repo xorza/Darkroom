@@ -32,7 +32,7 @@ fn spread(view: &mut GraphView) {
 }
 
 /// Place `node_id` at `pos`, frontmost — so a fixture's paint order is the
-/// order its constructors added in, which is what [`DocFixture::node`] indexes.
+/// order its constructors added in, which is what [`DocumentFixture::node`] indexes.
 fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
     let z = view.front_z();
     view.item_placements
@@ -42,16 +42,16 @@ fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
 /// The `i`th node in placement order — the order [`place`] adds in, and the
 /// canvas's paint stack.
 ///
-/// A free fn rather than a [`DocFixture`] method because the context fixture
+/// A free fn rather than a [`DocumentFixture`] method because the context fixture
 /// one level up indexes the same order over an `OpenDocument` it owns
-/// outright, with no `DocFixture` left to ask.
+/// outright, with no `DocumentFixture` left to ask.
 pub(crate) fn nth_in_paint_order(view: &GraphView, i: usize) -> NodeId {
     let mut order = Vec::new();
     view.paint_order(&mut order);
     order.get(i).expect("the fixture placed that many nodes").id
 }
 
-/// The func of [`DocFixture::plain_node`].
+/// The func of [`DocumentFixture::plain_node`].
 fn plain_func() -> Func {
     internals::stub_func(
         FuncId::literal("1ed07f16-02ed-4fb2-9677-5aa67801c7ae"),
@@ -74,19 +74,19 @@ fn row_pos(i: usize) -> Vec2 {
 /// origin, so a document built without one stacks its whole graph in one spot
 /// and a recording test culls all but the topmost node.
 #[derive(Debug, Default)]
-pub(crate) struct DocFixture {
-    pub(crate) doc: Document,
+pub(crate) struct DocumentFixture {
+    pub(crate) document: Document,
     pub(crate) library: Library,
 }
 
-impl DocFixture {
+impl DocumentFixture {
     /// A document over a hand-built `graph` and the library it resolves
     /// against — the [`TestGraph`] conversion for the cases that fixture can't
     /// express, like a node naming a func the library was never given.
     pub(crate) fn with_library(graph: Graph, library: Library) -> Self {
-        let mut doc = Document::from(graph);
-        spread(&mut doc.main_view);
-        Self { doc, library }
+        let mut document = Document::from(graph);
+        spread(&mut document.main_view);
+        Self { document, library }
     }
 
     /// [`TestGraph::sample`]'s stock multi-node graph — what a test wants when
@@ -119,9 +119,9 @@ impl DocFixture {
         if self.library.by_id(func.id()).is_none() {
             self.library.add(func.clone());
         }
-        let node_id = self.doc.graph.add_func_node(func);
-        let slot = self.doc.main_view.item_placements.len();
-        place(&mut self.doc.main_view, node_id, row_pos(slot));
+        let node_id = self.document.graph.add_func_node(func);
+        let slot = self.document.main_view.item_placements.len();
+        place(&mut self.document.main_view, node_id, row_pos(slot));
         node_id
     }
 
@@ -140,8 +140,8 @@ impl DocFixture {
     /// only a node's identity and where it sits.
     pub(crate) fn node_at(&mut self, pos: Vec2) -> NodeId {
         let node = self.plain_node();
-        let node_id = self.doc.graph.add(node);
-        place(&mut self.doc.main_view, node_id, pos);
+        let node_id = self.document.graph.add(node);
+        place(&mut self.document.main_view, node_id, pos);
         node_id
     }
 
@@ -155,7 +155,7 @@ impl DocFixture {
     /// Keep `node`, which the library must not resolve, as a stub with no
     /// wiring at the next slot in the row.
     pub(crate) fn add_stub(&mut self, node: Node) -> NodeId {
-        let slot = self.doc.main_view.item_placements.len();
+        let slot = self.document.main_view.item_placements.len();
         self.insert_stub(node, row_pos(slot))
     }
 
@@ -172,8 +172,8 @@ impl DocFixture {
             subscriptions: Vec::new(),
         })
         .expect("a stub with no wiring is a well-formed record");
-        self.doc.stubs.insert(record);
-        place(&mut self.doc.main_view, node_id, pos);
+        self.document.stubs.insert(record);
+        place(&mut self.document.main_view, node_id, pos);
         node_id
     }
 
@@ -186,19 +186,19 @@ impl DocFixture {
     /// The `i`th node in placement order — the order the constructors add in,
     /// and the canvas's paint stack.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        nth_in_paint_order(&self.doc.main_view, i)
+        nth_in_paint_order(&self.document.main_view, i)
     }
 
     /// Move `id` to exactly `at`, overriding the row — for the tests that care
     /// *which* node a gesture reaches rather than merely that all of them are
     /// on screen.
     pub(crate) fn placed(mut self, id: NodeId, at: Vec2) -> Self {
-        match self.doc.main_view.item_placements.get_mut(&id) {
+        match self.document.main_view.item_placements.get_mut(&id) {
             // Repositioning a node the fixture already placed must not
             // restack it — `node(i)` indexes paint order, and several tests
             // move one node after adding others.
             Some(placement) => placement.pos = at,
-            None => place(&mut self.doc.main_view, id, at),
+            None => place(&mut self.document.main_view, id, at),
         }
         self
     }
@@ -206,17 +206,19 @@ impl DocFixture {
     /// Open `tab` in the primary group and make it that group's active one —
     /// only a visible tab draws, so a test about drawing needs both halves.
     pub(crate) fn with_tab(mut self, tab: TabRef) -> Self {
-        let primary = self.doc.layout.primary().id;
-        self.doc.layout.find_or_insert(tab, primary);
-        self.doc.layout.apply(DockOperation::ActivateTab { tab });
+        let primary = self.document.layout.primary().id;
+        self.document.layout.find_or_insert(tab, primary);
+        self.document
+            .layout
+            .apply(DockOperation::ActivateTab { tab });
         self
     }
 }
 
-impl From<TestGraph> for DocFixture {
+impl From<TestGraph> for DocumentFixture {
     /// A document over `g`'s graph, resolving against the library `g` declared
     /// its funcs in. Every fixture above this one takes an `impl
-    /// Into<DocFixture>`, so a test can hand its [`TestGraph`] straight to a
+    /// Into<DocumentFixture>`, so a test can hand its [`TestGraph`] straight to a
     /// context or a canvas.
     fn from(g: TestGraph) -> Self {
         Self::with_library(g.graph, g.library)

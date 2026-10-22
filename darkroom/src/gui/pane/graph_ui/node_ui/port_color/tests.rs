@@ -31,12 +31,12 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
         }
     }
 
-    for ty in &types {
-        let rest = data(&theme, ty);
+    for data_type in &types {
+        let rest = data(&theme, data_type);
         assert_ne!(
             rest,
-            Hover::Over.lift(data(&theme, ty)),
-            "{ty:?} must visibly lift on hover",
+            Hover::Over.lift(data(&theme, data_type)),
+            "{data_type:?} must visibly lift on hover",
         );
     }
 }
@@ -62,8 +62,8 @@ fn custom_types_keyed_by_type_id() {
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
-    let image_ty = DataType::Custom(lens::IMAGE_TYPE_ID);
-    assert_eq!(data(&t, &image_ty), t.type_colors.image);
+    let image_type = DataType::Custom(lens::IMAGE_TYPE_ID);
+    assert_eq!(data(&t, &image_type), t.type_colors.image);
     assert!(!t.type_colors.ramp.contains(&t.type_colors.image));
 }
 
