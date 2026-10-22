@@ -62,6 +62,10 @@ each.
   not touch. Also refused: an edit that is refused, because you must remove the
   downstream wires by hand first. If reroute nodes come later, wildcards need a
   new design.
+- **No output is `Any`.** `FuncBuilder` refuses one (`AnyOutput`), and
+  `DataType::compatible_with` passes `Any` on the input side only. An `Any`
+  output was the unresolved wildcard: it fed any input, so no gate could
+  check its wires. No shipped func declares one.
 - **The signature encoding goes to v2.** Without the output-kind tag, every
   signature changes, and documents saved before the change load with their func
   nodes as stubs. There is no compat code. A one-off script outside the repo can
@@ -219,7 +223,7 @@ becomes an assert or goes.
 | In-flight wire `port_type(..).unwrap_or(&Any)` | `connection_ui` drag paint | Each frame of a drag | `expect` |
 | `Graph::validate_with` (structure, stubs, `ConstOnlyBinding`) | `Compiler::compile` | Each compile | One `assert!` of the whole contract |
 | Type gate for each input | `Compiler::typed_binding` | Each compile | Lower directly; covered by the up-front `assert!` |
-| Out-of-range output | `Compiler::resolve` | Each compile | `debug_assert!`; `PendingNode.outputs` goes if nothing else reads it |
+| Out-of-range output | `Compiler::typed_binding` | Each compile | `debug_assert!` |
 | Subscription to a dropped event skipped | compile walk, events | Each compile | `debug_assert!` |
 | Cycle detection | `planner.rs` (`Error::CycleDetected`) | Each run | `debug_assert!`; the variant goes |
 | `EventSeedNotFound` | `RunSchedule::collect_roots` (`schedule/mod.rs:420-425`) | Each event run | `debug_assert!`; the variant goes: fired events arrive in a batch of their own (`next_intent`'s `select!` takes one source per wake), and each install rebuilds the loop (`EventLoopTransition::for_intent`), so an event always names the installed program |
@@ -277,35 +281,39 @@ of the document's validity.
 - **New edits.** `Graph::produces_cycle`, `accepts_wire` and the edit gate check
   an edit, not the document.
 
-## Working tree at the stop
+## Progress
 
-- The previous step, not committed: `Library::binding_satisfies`,
-  `Graph::overridden(port, library, output_types)`, and the mistyped cases in
-  `engine/tests/overrides.rs` and `gui/graph_ctx/tests.rs`. Item 9 replaces it.
-- Item 1 is partly done, and **the build is broken**: `FuncOutput::data_type`
-  is in, `OutputType` and `wildcard_output` are out, `InvalidWildcardInput` is
-  out, `DataType::or_const_type` is out, and `TestGraph::returns` calls
-  `literal_type`, which is not written yet.
+- Batch 1 is done. It also took the darkroom half of the wildcard removal, so
+  the workspace builds: `OutputTypeCache` and the `GraphCtx` / `MainWindow` /
+  `DockPanes` plumbing are gone, `OutputCtx::ty` and `GraphCtx::port_type`
+  read the declaration, and `retypes_outputs` is `changes_node_set` (true only
+  for `NodePresence`). The rest of items 16 and 17 is open.
+- `FuncBuilder` refuses an `Any` output. The compile's range check moved
+  into the type check, which reads the producer's declared output, so
+  `PendingNode.outputs` is gone.
+- The cache digest domain is `scenarium-cache-v8`: the output-type fold is
+  gone, and a hand-built program's `FuncRef` carries the signature of its
+  outputs.
 - `AGENTS.md` has the new convention.
 
 ## Implementation plan
 
 ### Batch 1 — scenarium: remove wildcards
 
-1. [ ] `FuncOutput.data_type`; remove `OutputType` and its export,
+1. [x] `FuncOutput.data_type`; remove `OutputType` and its export,
    `wildcard_output`, `InvalidWildcardInput`, `or_const_type`. Write
    `literal_type` in `internals/test_graph`. Update every reader, including
    `lens/src/astro/nodes/tests.rs`.
-2. [ ] Remove `graph/output_types/`, its export, `Graph::output_source` and the
+2. [x] Remove `graph/output_types/`, its export, `Graph::output_source` and the
    `input_type` / `input_spec` / `output_spec` helpers nothing else reads.
    Remove `Compiler.output_types`.
-3. [ ] `CompiledGraph.outputs` keeps the spans without a `DataType` per output.
+3. [x] `CompiledGraph.outputs` keeps the spans without a `DataType` per output.
    Remove the output-type fold from `RuntimeCache::node_digest` and
    `DigestHasher::write_data_type`. Reduce `NodeBuilder::output_types`.
-4. [ ] `FuncSignature::of`: name and `write_type` per output, no tag byte;
+4. [x] `FuncSignature::of`: name and `write_type` per output, no tag byte;
    `DOMAIN` v2; update `a_small_func_has_the_pinned_signature` and remove the
    wildcard case of `a_signature_covers_the_ports_and_nothing_else`.
-5. [ ] `declared_enum_types` reads `data_type`. Remove the wildcard tests and
+5. [x] `declared_enum_types` reads `data_type`. Remove the wildcard tests and
    the `TestGraph` helpers listed above. Rewrite the docs listed above.
 
 ### Batch 2 — scenarium: resolved-only graph, admission, reconcile, asserts
@@ -334,8 +342,8 @@ of the document's validity.
 10. [ ] Compile: `compile` returns `CompiledGraph`; remove `CompileError`. One
     `assert!` at its start checks the contract: structure (`Graph::validate`),
     each node resolves, each binding and subscription admitted, no cycle.
-    `typed_binding`, `resolve` and the event walk lower directly, the last two
-    behind `debug_assert!`. Remove `PendingNode.outputs` if unused.
+    `typed_binding` and the event walk lower directly, both behind
+    `debug_assert!`.
 11. [ ] Planner and worker: `CycleDetected` and `EventSeedNotFound` become
     `debug_assert!` and the variants go. `NodeSeedNotFound` and the evict and
     flush skips stay (see "Checks that stay").
@@ -375,11 +383,11 @@ of the document's validity.
     `Document::reconcile_with_graph` goes.
 17. [ ] Editor: `NodeCtx` holds a body that is a graph node with its `&Func` or
     a stub with its reason; the port accessors lose their `Option` fallbacks;
-    the stub card reads the stub body. Remove `OutputTypeCache`,
-    `GraphCtx.output_types` and its plumbing; `OutputCtx::ty` and
-    `GraphCtx::port_type` read declarations; remove the `data_tint` mismatch
-    branch; turn the `value_editor`, `node_label` and drag-paint fallbacks into
-    `expect` or `debug_assert!`.
+    the stub card reads the stub body. Remove the `data_tint` mismatch branch;
+    turn the `value_editor`, `node_label`, `data_tint` and drag-paint
+    fallbacks into `expect` or `debug_assert!`. No output then reads `Any`,
+    so `port_color::data` loses its `PortKind` parameter and
+    `theme.ports.output` goes.
 18. [ ] `RuntimeHost::compile` becomes infallible; its `compile failed` status
     and the `false means the compile failed` returns go.
 19. [ ] Other darkroom checks become asserts: `Document::validate` in

@@ -16,7 +16,7 @@ use crate::graph::node::{CacheMode, FuncResolution, Node, NodeKind};
 use crate::graph::subscription::Subscription;
 use crate::graph::{Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
-use crate::internals::test_graph::{NodeSpec, TestGraph};
+use crate::internals::test_graph::TestGraph;
 use common::SerdeFormat;
 use std::panic;
 use std::panic::AssertUnwindSafe;
@@ -221,103 +221,6 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
 }
 
 #[test]
-fn resolve_output_type_follows_passthrough_chain() {
-    // Int-out producer → pass1 → pass2. Both passthroughs declare an `Any`
-    // (wildcard) output, but the resolved type must be the producer's `Int`.
-    let mut g = TestGraph::new();
-    g.add("src", |n| n.pure().output(DataType::Int));
-    g.add("pass1", NodeSpec::passthrough);
-    g.instance("pass2", "pass1");
-    g.wire("src", "pass1");
-    g.wire("pass1", "pass2");
-
-    // The producer reports its own declared type.
-    assert_eq!(g.output_type("src", 0), DataType::Int);
-    // Each passthrough mirrors what flows through, transitively.
-    assert_eq!(g.output_type("pass1", 0), DataType::Int);
-    assert_eq!(g.output_type("pass2", 0), DataType::Int);
-
-    // An unbound value input leaves the passthrough polymorphic (`Any`),
-    // so its output accepts any consumer again.
-    g.unbind("pass1", 0);
-    assert_eq!(g.output_type("pass1", 0), DataType::Any);
-    // The taint flows downstream: pass2 now reads pass1's `Any`.
-    assert_eq!(g.output_type("pass2", 0), DataType::Any);
-
-    // A scalar const carries its type, so the output resolves to it (and
-    // propagates downstream) — a const isn't "no type".
-    g.constant("pass1", 0, ConstValue::Bool(true));
-    assert_eq!(g.output_type("pass1", 0), DataType::Bool);
-    assert_eq!(
-        g.output_type("pass2", 0),
-        DataType::Bool,
-        "the const's type propagates through the second passthrough too"
-    );
-
-    // A const whose type can't be reconstructed from the value alone — an
-    // enum literal on an `Any` (wildcard) input — stays polymorphic rather
-    // than panicking. (The passthrough's value input is `Any`-declared.)
-    g.constant("pass1", 0, ConstValue::Enum("X".into()));
-    assert_eq!(g.output_type("pass1", 0), DataType::Any);
-}
-
-#[test]
-fn resolve_output_type_uses_declared_type_for_typed_const_input() {
-    use crate::data::data_type::{FsPathConfig, FsPathMode, TypeId};
-    use std::sync::Arc;
-
-    // A reroute node with *typed* inputs, each mirrored by a wildcard output.
-    let fs_ty = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
-    let enum_ty = DataType::Enum(TypeId::from_u128(0x5e));
-    let mut g = TestGraph::new();
-    let (path_ty, mode_ty) = (fs_ty.clone(), enum_ty.clone());
-    g.add("reroute", move |n| {
-        n.input(path_ty).input(mode_ty).wildcard(0).wildcard(1)
-    });
-
-    // A const FsPath / Enum on a typed input resolves to that input's
-    // *declared* type — which carries the full `FsPathConfig` / `Enum` id the
-    // bare `ConstValue` lacks.
-    g.constant("reroute", 0, ConstValue::FsPath("/tmp/x".into()));
-    g.constant("reroute", 1, ConstValue::Enum("A".into()));
-    assert_eq!(g.output_type("reroute", 0), fs_ty);
-    assert_eq!(g.output_type("reroute", 1), enum_ty);
-}
-
-#[test]
-fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
-    let mut g = TestGraph::new();
-    g.add("float_src", |n| n.pure().output(DataType::Float));
-    g.add("str_src", |n| n.pure().output(DataType::String));
-    g.add("pass1", NodeSpec::passthrough);
-    g.instance("pass2", "pass1");
-    g.add("sink", |n| n.sink().input(DataType::Float));
-    g.wire("float_src", "pass1");
-    g.wire("pass1", "pass2");
-    g.wire("pass2", "sink");
-
-    // The valid Float chain binds the sink to its passthrough producer
-    // (passthroughs are real func nodes — only boundaries short-circuit).
-    assert_eq!(
-        g.compile().producer("sink", 0),
-        Some("pass2"),
-        "a well-typed chain lowers as bound"
-    );
-
-    // Rewire pass1's value input to the String producer: pass1.out and
-    // pass2.out both retype to String, so the *two-hops-down* sink edge is
-    // the one now incompatible — it lowers as unbound while the authored
-    // wire survives in the document.
-    g.wire("str_src", "pass1");
-    assert_eq!(g.compile().producer("sink", 0), None);
-    assert_eq!(
-        g.graph.bindings.get(&InputPort::new(g.id("sink"), 0)),
-        Some(&Binding::bind(g.id("pass2"), 0)),
-        "the mismatched wire stays authored"
-    );
-}
-
-#[test]
 fn removing_a_node_drops_it_and_every_edge_touching_it() {
     let mut g = TestGraph::sample();
     let sum = g.id("sum");
@@ -340,10 +243,10 @@ fn removing_a_node_drops_it_and_every_edge_touching_it() {
 /// apart.
 #[test]
 fn produces_cycle_detects_direct_and_transitive_loops() {
-    // A passthrough is both consumer and producer, so it can chain:
-    // a → b → c, with d left unconnected.
+    // A node with one input and one output can chain: a → b → c, with d left
+    // unconnected.
     let mut g = TestGraph::new();
-    g.add("a", NodeSpec::passthrough);
+    g.add("a", |n| n.input(DataType::Any).output(DataType::Int));
     g.instance("b", "a");
     g.instance("c", "a");
     g.instance("d", "a");
@@ -369,13 +272,13 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
 #[test]
 fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
     let mut g = TestGraph::new();
-    g.add("a", NodeSpec::passthrough);
+    g.add("a", |n| n.input(DataType::Any).output(DataType::Int));
     g.instance("b", "a");
     g.add("wide", |n| {
         n.input(DataType::Any)
             .input(DataType::Any)
             .input(DataType::Any)
-            .wildcard(0)
+            .output(DataType::Int)
     });
     g.wire("a", "b");
     // The only wire into `wide` sits on port 2, behind a literal on port 0 and
@@ -765,21 +668,6 @@ fn a_node_resolves_its_declaration_or_reads_unknown() {
     assert!(missing_func.func(&g.library).is_none());
 }
 
-#[test]
-fn input_type_resolves_declared_types_and_rejects_out_of_range() {
-    let mut g = TestGraph::new();
-    g.add("dst", |n| {
-        n.pure().input(DataType::Float).output(DataType::Float)
-    });
-    let dst = g.id("dst");
-
-    assert_eq!(
-        g.graph.input_type(&g.library, InputPort::new(dst, 0)),
-        Some(DataType::Float)
-    );
-    assert_eq!(g.graph.input_type(&g.library, InputPort::new(dst, 9)), None);
-}
-
 /// A named edit of a func's declaration.
 type FuncEdit = (&'static str, fn(&mut FuncBuilder));
 
@@ -807,7 +695,6 @@ fn signed_func() -> FuncBuilder {
 #[test]
 fn a_signature_covers_the_ports_and_nothing_else() {
     use crate::data::data_type::{FsPathConfig, FsPathMode};
-    use crate::graph::func::func_output::OutputType;
     use std::sync::Arc;
 
     let signature = signed_func().build().func_ref();
@@ -823,8 +710,8 @@ fn a_signature_covers_the_ports_and_nothing_else() {
         }),
         ("the inputs reordered", |f| f.inputs.swap(0, 1)),
         ("an output dropped", |f| f.outputs.clear()),
-        ("an output made a wildcard", |f| {
-            f.outputs[0].ty = OutputType::Wildcard { mirrors: 0 };
+        ("an output retyped", |f| {
+            f.outputs[0].data_type = DataType::Int;
         }),
         ("an event renamed", |f| f.events[0].name = "tock".into()),
         ("a custom type swapped", |f| {

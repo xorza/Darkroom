@@ -37,7 +37,7 @@ impl Reversible for RenameNode {
         true
     }
 
-    fn retypes_outputs(&self) -> bool {
+    fn changes_node_set(&self) -> bool {
         false
     }
 }

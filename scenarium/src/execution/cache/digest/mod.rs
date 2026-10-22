@@ -48,11 +48,10 @@ use blake3::Hasher;
 use common::FileIdentity;
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::DataType;
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
-pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v7";
+pub(super) const DOMAIN: &[u8] = b"scenarium-cache-v8";
 
 /// 256-bit content digest. Cross-machine stable for a given binary: equal
 /// digests mean the same function identity, params, upstream outputs, and file inputs.
@@ -222,27 +221,6 @@ impl DigestHasher {
             ConstValue::Enum(name) => {
                 self.write_bytes(&[7]).write_str(name);
             }
-        }
-    }
-
-    /// Fold a declared port type: a discriminant tag, plus the nominal type id
-    /// for `Custom`/`Enum` (so two distinct custom types don't collide). The
-    /// `FsPath` config is identity-irrelevant to the cached bytes, so only the
-    /// tag is hashed.
-    pub(super) fn write_data_type(&mut self, ty: &DataType) {
-        let tag: u8 = match ty {
-            DataType::Any => 0,
-            DataType::Float => 1,
-            DataType::Int => 2,
-            DataType::Bool => 3,
-            DataType::String => 4,
-            DataType::FsPath(_) => 5,
-            DataType::Custom(_) => 6,
-            DataType::Enum(_) => 7,
-        };
-        self.write_bytes(&[tag]);
-        if let DataType::Custom(type_id) | DataType::Enum(type_id) = ty {
-            self.write_pod(type_id.as_u128());
         }
     }
 }

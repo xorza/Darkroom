@@ -17,18 +17,15 @@ use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 
 use crate::data::const_value::ConstValue;
-use crate::data::data_type::DataType;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::DetachedNode;
 use crate::graph::error::{GraphValidationError, ValidationResult};
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::{FuncOutput, OutputType};
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
 use crate::graph::node::{FuncResolution, Node, NodeKind};
 use crate::graph::node_ref::NodeRef;
-use crate::graph::output_types::OutputTypeSource;
 use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
@@ -40,7 +37,6 @@ pub(crate) mod func;
 pub(crate) mod identity;
 pub(crate) mod node;
 pub(crate) mod node_ref;
-pub(crate) mod output_types;
 mod serde;
 pub(crate) mod subscription;
 
@@ -133,52 +129,12 @@ impl Graph {
                 .is_some_and(|producer| !producer.disabled),
         }
     }
-    /// The declared type of input `port`, or `None` when it can't be resolved
-    /// — a missing node or an unresolved func. The caller treats `None` as the
-    /// polymorphic `Any`.
-    fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
-        self.input_spec(library, port).map(|i| i.data_type.clone())
-    }
     /// The declared [`FuncInput`] of input `port` — its full spec (type +
-    /// `value_variants` + flags), or `None` for an unresolved node. Resolution
-    /// mirrors [`Self::input_type`].
+    /// `value_variants` + flags), or `None` for an unresolved node or a port
+    /// the func does not declare.
     fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.find(port.node_id)?;
         node.func(library)?.inputs().get(port.port_idx)
-    }
-    /// What settles one output port's type, one hop at a time: its own
-    /// declaration, or — for a *wildcard* (a reroute or passthrough) — the
-    /// input it mirrors, which is a hop to whatever feeds that.
-    ///
-    /// The reading of a declaration, and no more. Following the hops is
-    /// [`OutputTypes`](crate::OutputTypes)'s, which is the only thing that
-    /// walks them: it memoizes every port on a chain as it goes, so covering
-    /// a graph costs one walk per chain rather than one per port, and a
-    /// caller wanting a single port reads the table rather than re-walking.
-    fn output_source(&self, library: &Library, port: OutputPort) -> OutputTypeSource {
-        let Some(out) = self.output_spec(library, port) else {
-            return OutputTypeSource::Unresolved;
-        };
-        let OutputType::Wildcard { mirrors } = &out.ty else {
-            return OutputTypeSource::Fixed(out.ty.declared());
-        };
-        let mirror = InputPort::new(port.node_id, *mirrors);
-        match self.bindings.get(&mirror) {
-            Some(Binding::Bind(source)) => OutputTypeSource::Bind(*source),
-            Some(Binding::Const(value)) => OutputTypeSource::Fixed(
-                self.input_type(library, mirror)
-                    .unwrap_or_default()
-                    .or_const_type(value),
-            ),
-            None => OutputTypeSource::Unresolved,
-        }
-    }
-    /// The declared [`FuncOutput`] of output `port` — its name +
-    /// [`OutputType`], or `None` for an unresolved node. The output-side mirror
-    /// of [`Self::input_spec`].
-    fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
-        let node = self.find(port.node_id)?;
-        node.func(library)?.outputs().get(port.port_idx)
     }
     /// Every data edge as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
@@ -392,7 +348,7 @@ impl Graph {
         // and degrades to unbound at lowering time (a required input
         // surfaces as a missing-input verdict; see lowering's `typed_binding`).
         // Deleting or rejecting it would destroy authored wiring that
-        // revives when the library or the upstream types come back.
+        // revives when the library comes back.
         for (destination, binding) in &self.bindings {
             if !self.nodes.contains_key(&destination.node_id) {
                 return Err(GraphValidationError::BindingMissingNode {

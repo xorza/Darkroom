@@ -41,14 +41,14 @@ const UNDO_HISTORY_BYTES: usize = 1 << 20;
 struct StepSignals {
     geometry_stale: bool,
     dirtied: bool,
-    retyped: bool,
+    node_set_changed: bool,
 }
 
 impl StepSignals {
     fn fold(&mut self, step: &UndoStep) {
         self.geometry_stale |= step.invalidates_cached_geometry();
         self.dirtied |= step.dirties_document();
-        self.retyped |= step.retypes_outputs();
+        self.node_set_changed |= step.changes_node_set();
     }
 }
 
@@ -65,8 +65,8 @@ pub(crate) struct OpenDocument {
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
     pub(crate) dirty: bool,
-    /// The state of the graph its output types are resolved from; moved by
-    /// every edit, undo or redo that can retype an output.
+    /// The state of the graph's node set; moved by every edit, undo or redo
+    /// that adds or removes a node.
     revision: GraphRevision,
     /// This document's undo history. Beside the document rather than on a
     /// frontend because it *is* document state — opening another file
@@ -243,13 +243,13 @@ impl OpenDocument {
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.
         self.dirty |= signals.dirtied;
-        if signals.retyped {
+        if signals.node_set_changed {
             self.revision = self.revision.next();
         }
         Relayout::needed_if(signals.geometry_stale)
     }
 
-    /// The state of the graph that output types are resolved from.
+    /// The state of the graph's node set.
     pub(crate) const fn graph_revision(&self) -> GraphRevision {
         self.revision
     }

@@ -59,9 +59,8 @@ pub(super) trait Reversible {
     /// for the length of the drag.
     fn invalidates_cached_geometry(&self) -> bool;
 
-    /// Whether replaying this can change the type a wildcard output resolves
-    /// to: a node coming or going, or an input binding changing. The output
-    /// type table is resolved again only after such a step, so a false
-    /// answer here leaves a wire drawn with a stale type.
-    fn retypes_outputs(&self) -> bool;
+    /// Whether replaying this adds or removes a node. The canvas's node caches
+    /// are swept only after such a step, so a false answer here leaves a
+    /// removed node's entries behind.
+    fn changes_node_set(&self) -> bool;
 }

@@ -1,6 +1,7 @@
 use super::*;
 use common::TempFile;
 
+use crate::data::data_type::DataType;
 use crate::execution::cache::runtime_cache::RuntimeCache;
 use crate::execution::cache::runtime_slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
@@ -14,8 +15,8 @@ use std::fs;
 
 /// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
 ///
-/// `Int` rather than the builder's polymorphic default because the output
-/// signature folds into the digest, and one case below pins the resulting bytes.
+/// `Int` rather than the builder's `Any` default because the output signature
+/// folds into the digest.
 fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> {
     typed(prog, func, &vec![DataType::Int; count])
 }
@@ -95,16 +96,16 @@ fn deterministic_and_per_function_distinct() {
     assert_eq!(
         first.at(b),
         Some(Digest([
-            14, 231, 179, 95, 208, 67, 137, 135, 195, 156, 40, 110, 177, 99, 75, 122, 199, 157, 35,
-            39, 157, 170, 168, 233, 24, 189, 53, 37, 221, 178, 146, 237
+            123, 78, 77, 104, 159, 189, 36, 153, 41, 7, 41, 77, 78, 80, 200, 168, 64, 63, 224, 130,
+            97, 249, 166, 162, 217, 66, 63, 36, 249, 190, 114, 168
         ])),
         "bound-input node digest"
     );
     assert_eq!(
         first.at(c),
         Some(Digest([
-            228, 196, 146, 59, 254, 102, 67, 253, 83, 70, 75, 102, 84, 29, 170, 119, 85, 108, 150,
-            234, 171, 54, 158, 95, 173, 82, 137, 77, 25, 70, 171, 167
+            27, 183, 113, 194, 233, 161, 86, 5, 173, 3, 92, 106, 151, 25, 83, 236, 123, 26, 121,
+            12, 221, 23, 246, 22, 92, 107, 250, 128, 79, 250, 71, 37
         ])),
         "const-input node digest"
     );
@@ -312,8 +313,8 @@ fn fs_path_folds_file_identity_and_path() {
     assert_eq!(
         d_here,
         Some(Digest([
-            70, 236, 254, 227, 27, 119, 168, 214, 105, 23, 173, 142, 179, 50, 233, 237, 252, 150,
-            166, 22, 47, 236, 117, 204, 21, 10, 145, 31, 77, 205, 101, 37,
+            71, 48, 178, 227, 188, 59, 70, 56, 185, 205, 116, 38, 197, 173, 181, 204, 79, 119, 249,
+            4, 219, 174, 123, 236, 170, 116, 111, 86, 95, 181, 142, 23,
         ])),
         "the single-path digest encoding must remain stable"
     );

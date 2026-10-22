@@ -1,13 +1,16 @@
 //! [`NodeBuilder`]: one node of a hand-built program, under construction.
 
+use crate::containers::column::Span;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::graph::func::FuncBehavior;
+use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::{FuncId, NodeId};
+use crate::graph::func::signature::FuncSignature;
+use crate::graph::identity::{FuncId, FuncRef, NodeId};
 use crate::graph::node::CacheMode;
 use crate::internals;
 use crate::internals::program::{Placed, ProgramBuilder};
@@ -20,8 +23,9 @@ pub(crate) struct NodeBuilder<'a> {
     owner: &'a mut ProgramBuilder,
     e_node: ExecutionNode,
     inputs: Vec<ExecutionInput>,
-    outputs: Vec<DataType>,
+    outputs: Vec<FuncOutput>,
     events: Vec<ExecutionEvent>,
+    func_id: Option<FuncId>,
     node_id: Option<NodeId>,
 }
 
@@ -33,6 +37,7 @@ impl<'a> NodeBuilder<'a> {
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
+            func_id: None,
             node_id: None,
         }
     }
@@ -56,7 +61,7 @@ impl<'a> NodeBuilder<'a> {
     /// gives each node a distinct one; a test names it only when reinstalling
     /// a node under the *same* implementation, which is what keeps its state.
     pub(crate) fn func(mut self, func_id: FuncId) -> Self {
-        self.e_node.func_ref = internals::portless_func_ref(func_id);
+        self.func_id = Some(func_id);
         self
     }
 
@@ -119,15 +124,18 @@ impl<'a> NodeBuilder<'a> {
         self
     }
 
-    /// `count` outputs, each polymorphic. [`output_types`](Self::output_types)
-    /// when a test reads the declared type back.
-    pub(crate) fn outputs(mut self, count: u32) -> Self {
-        self.outputs.extend((0..count).map(|_| DataType::default()));
-        self
+    /// `count` outputs, each `Int`.
+    pub(crate) fn outputs(self, count: u32) -> Self {
+        self.output_types((0..count).map(|_| DataType::Int))
     }
 
+    /// One output per type, declared in the node's signature as a func's are,
+    /// which is where an output type reaches the digest.
     pub(crate) fn output_types(mut self, types: impl IntoIterator<Item = DataType>) -> Self {
-        self.outputs.extend(types);
+        for data_type in types {
+            let name = format!("out{}", self.outputs.len());
+            self.outputs.push(FuncOutput::new(name, data_type));
+        }
         self
     }
 
@@ -153,6 +161,7 @@ impl<'a> NodeBuilder<'a> {
             inputs,
             outputs,
             events,
+            func_id,
             node_id,
         } = self;
         let position = owner.placed.len();
@@ -160,16 +169,17 @@ impl<'a> NodeBuilder<'a> {
         // ascend from 1 with the placement, so `node_ids` stays sorted (which
         // `CompiledGraph::node` binary-searches) and index 0 is not the nil id.
         let node_id = node_id.unwrap_or_else(|| NodeId::from_u128(position as u128 + 1));
-        if e_node.func_ref.id().is_nil() {
-            // Keyed to the *node's* id, not its position: one implementation per
-            // node (the authoring default), and stable across a reinstall that
-            // shifts the index space — where a func id that moved with the
-            // position would read as a changed implementation and drop the
-            // node's state.
-            e_node.func_ref = internals::portless_func_ref(FuncId::from_u128(node_id.as_u128()));
-        }
+        // Keyed by default to the *node's* id, not its position: one
+        // implementation per node (the authoring default), and stable across a
+        // reinstall that shifts the index space — where a func id that moved
+        // with the position would read as a changed implementation and drop the
+        // node's state.
+        let func_id = func_id.unwrap_or_else(|| FuncId::from_u128(node_id.as_u128()));
+        e_node.func_ref = FuncRef::new(func_id, FuncSignature::of(&[], &outputs, &[]));
         e_node.inputs = owner.program.inputs.append(inputs);
-        e_node.outputs = owner.program.outputs.append(outputs);
+        let output_count = u32::try_from(outputs.len()).expect("a fixture's outputs fit in u32");
+        e_node.outputs = Span::new(owner.program.output_count, output_count);
+        owner.program.output_count += output_count;
         e_node.events = owner.program.events.append(events);
         let node_idx = owner.program.push(node_id, e_node);
         let placed = Placed { node_id, node_idx };

@@ -203,7 +203,7 @@ impl CanvasHarness {
 }
 
 /// The record body both frame drivers run.
-fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
+fn record(graph_ui: &mut GraphUI, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
     let mut out = Requests::default();
     let graph_ctx = ctx.graph_ctx();
     graph_ui.prepass(recorder, graph_ctx, &mut out);

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::data_type::DataType;
 use crate::graph::func::FuncEvent;
 use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::{FuncOutput, OutputType};
+use crate::graph::func::func_output::FuncOutput;
 
 /// A digest of a func's ports: its inputs' names and types, its outputs' names and types, and
 /// its events' names, in order.
@@ -21,7 +21,7 @@ pub(crate) struct FuncSignature([u8; 32]);
 
 impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
-    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v1";
+    const DOMAIN: &'static [u8] = b"scenarium-func-signature-v2";
 
     /// The signature of `inputs`, `outputs` and `events`, in order — what
     /// [`FuncBuilder::build`](crate::graph::func::func_builder::FuncBuilder::build)
@@ -44,16 +44,7 @@ impl FuncSignature {
         count(&mut hasher, outputs.len());
         for output in outputs {
             name(&mut hasher, &output.name);
-            match &output.ty {
-                OutputType::Fixed(data_type) => {
-                    hasher.update(&[0]);
-                    write_type(&mut hasher, data_type);
-                }
-                OutputType::Wildcard { mirrors } => {
-                    hasher.update(&[1]);
-                    hasher.update(&(*mirrors as u64).to_le_bytes());
-                }
-            }
+            write_type(&mut hasher, &output.data_type);
         }
         count(&mut hasher, events.len());
         for event in events {
@@ -112,7 +103,7 @@ mod tests {
 
     /// One small func's signature, from its bytes written out by hand rather than by the
     /// encoder: the domain, then each length-prefixed list — one input `value` of kind 2 (Int),
-    /// one fixed output `out` of kind 1 (Float), one event `tick`. The digest is pinned too, so
+    /// one output `out` of kind 1 (Float), one event `tick`. The digest is pinned too, so
     /// an encoding that changes on purpose has to bump the domain and this pin together; any
     /// other failure here is drift that would refuse every saved node.
     #[test]
@@ -125,13 +116,13 @@ mod tests {
         let count = |n: u64| n.to_le_bytes().to_vec();
         let name = |text: &str| [count(text.len() as u64), text.as_bytes().to_vec()].concat();
         let layout = [
-            b"scenarium-func-signature-v1".to_vec(),
+            b"scenarium-func-signature-v2".to_vec(),
             count(1),
             name("value"),
             vec![2],
             count(1),
             name("out"),
-            vec![0, 1],
+            vec![1],
             count(1),
             name("tick"),
         ]
@@ -144,7 +135,7 @@ mod tests {
         });
         assert_eq!(
             hex,
-            "308a00dec0dd99b316897f7b18a471352cc0d9e03f4e607f70526b681700c4bc"
+            "5397de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c"
         );
     }
 }

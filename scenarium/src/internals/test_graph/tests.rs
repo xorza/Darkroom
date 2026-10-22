@@ -24,7 +24,9 @@ fn a_named_graph_compiles_to_one_node_per_name() {
         Binding::bind(g.id("src"), 0)
     );
     // `returns` declared the output its literal implies.
-    assert_eq!(g.compile().output_types("src"), [DataType::Int]);
+    let src = g.graph.find(g.id("src")).unwrap();
+    let func = src.func(&g.library).unwrap();
+    assert_eq!(func.outputs()[0].data_type, DataType::Int);
 }
 
 /// One func per node by default: editing one node's declaration leaves

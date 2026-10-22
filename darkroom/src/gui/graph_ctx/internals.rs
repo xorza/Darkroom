@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use scenarium::{Library, NodeId, OutputTypes};
+use scenarium::{Library, NodeId};
 
 use crate::core::document::internals::{self, DocFixture};
 use crate::core::open_document::OpenDocument;
@@ -26,17 +26,12 @@ use crate::gui::theme::Theme;
 /// [`Document`](crate::core::document::Document) could not compose one. It
 /// starts saved; a test about the unsaved-changes dot sets
 /// [`OpenDocument::dirty`] on it.
-///
-/// The output-type table starts empty: [`Self::graph_ctx`] resolves it, the
-/// same way composing one does anywhere else — which is why that method takes
-/// `&mut self`.
 #[derive(Debug)]
 pub(crate) struct GraphCtxFixture {
     pub(crate) open: OpenDocument,
     pub(crate) library: Arc<Library>,
     pub(crate) run_state: RunState,
     pub(crate) theme: Theme,
-    output_types: OutputTypes,
 }
 
 impl Default for GraphCtxFixture {
@@ -46,7 +41,6 @@ impl Default for GraphCtxFixture {
             library: Arc::default(),
             run_state: RunState::new(wake::internals::noop()),
             theme: Theme::default(),
-            output_types: OutputTypes::default(),
         }
     }
 }
@@ -78,16 +72,14 @@ impl GraphCtxFixture {
     /// The context over this fixture, derived from an [`AppCtx`] whose
     /// status-bar inputs sit at their empty defaults — no canvas reader
     /// sees them.
-    pub(crate) fn graph_ctx(&mut self) -> GraphCtx<'_> {
+    pub(crate) fn graph_ctx(&self) -> GraphCtx<'_> {
         let Self {
             open,
             library,
             run_state,
             theme,
-            output_types,
         } = self;
-        output_types.update(&open.document.graph, library);
         let app = AppCtx::new(theme, library, run_state);
-        GraphCtx::new(WindowCtx::new(app, open), output_types)
+        GraphCtx::new(WindowCtx::new(app, open))
     }
 }

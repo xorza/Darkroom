@@ -5,13 +5,12 @@
 //! doesn't compile is never sent, so the worker's install is infallible and a
 //! running event loop is never disturbed by a bad edit.
 //!
-//! The walk is a copy with four jobs it is the only place to do: resolving each
-//! binding to the producer it names, gating it against the declared types,
-//! stamping each output with the effective type the same pass resolved, and
-//! interning every id-named reference into the dense index space.
-//! The *type gate* is drift tolerance — a wire whose resolved source type no
-//! longer fits the consumer, or a const that no longer satisfies it, lowers as
-//! unbound rather than severing authored wiring.
+//! The walk is a copy with three jobs it is the only place to do: resolving
+//! each binding to the producer it names, gating it against the declared types,
+//! and interning every id-named reference into the dense index space.
+//! The *type gate* is drift tolerance — a wire whose producer's declared type
+//! no longer fits the consumer, or a const that no longer satisfies it, lowers
+//! as unbound rather than severing authored wiring.
 //!
 //! **The sort comes first.** [`Graph::iter`] is a `HashMap` walk, so the order
 //! nodes are reached in is not an order an artifact may depend on. Sorting the
@@ -36,7 +35,7 @@ mod validate;
 use std::iter;
 use std::sync::Arc;
 
-use crate::containers::column::{Column, Idx};
+use crate::containers::column::{Column, Idx, Span};
 use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
@@ -47,21 +46,17 @@ use crate::graph::Graph;
 use crate::graph::binding::Binding;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
-use crate::graph::output_types::OutputTypes;
 use crate::library::Library;
 
 /// One node awaiting placement: its id, which the sort keys on, and the one
-/// fact about it a *consumer* may need before the walk reaches the node itself.
+/// fact about it a *subscription* may need before the walk reaches the node
+/// itself.
 ///
 /// Not to be confused with the fixture builder's `Placed`, which is where a
 /// node *landed* — this is what the walk knows before it gets there.
 #[derive(Debug)]
 struct PendingNode {
     node_id: NodeId,
-    /// The node's declared output count. A binding is range-checked against it,
-    /// and the producer's own `outputs` run does not exist until the walk emits
-    /// that node — which the id order may put after the consumer naming it.
-    outputs: u32,
     /// The node is disabled: it fires no events and receives none, which a
     /// subscription is checked against before its subscriber is emitted.
     disabled: bool,
@@ -103,15 +98,11 @@ pub struct Compiler {
     /// ([`idx`](Self::idx)). The artifact's own id column is a projection of
     /// this, not a second copy anything looks things up in.
     placed: Vec<PendingNode>,
-    /// Every output type of the graph, filled before the walk. Held here
-    /// because the type gate runs once per bound input, and resolving one port
-    /// at a time would cost a walk per edge.
-    output_types: OutputTypes,
 }
 
 impl Compiler {
     /// Compile `graph` against `library`: validate, then walk into a func-only
-    /// program with its output-type pool resolved. Pure CPU on the caller's
+    /// program. Pure CPU on the caller's
     /// thread; the result is installed into an engine
     /// (`ExecutionEngine::install`), typically across the worker channel.
     ///
@@ -147,7 +138,6 @@ impl Compiler {
     /// so a copy is a refcount bump), which is what leaves the artifact
     /// self-contained.
     fn walk(&mut self, graph: &Graph, library: &Library) -> CompiledGraph {
-        self.output_types.update(graph, library);
         let totals = self.place_nodes(graph, library);
 
         // Sized from the placement, so each column allocates once and every
@@ -156,7 +146,7 @@ impl Compiler {
             node_ids: Column::with_capacity(self.placed.len()),
             e_nodes: Column::with_capacity(self.placed.len()),
             inputs: Column::with_capacity(totals.inputs),
-            outputs: Column::with_capacity(totals.outputs),
+            output_count: 0,
             events: Column::with_capacity(totals.events),
             subscribers: Column::with_capacity(graph.subscriptions().len()),
             codecs: Arc::clone(library.codecs()),
@@ -195,6 +185,7 @@ impl Compiler {
                         required: func_input.required,
                         stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                         binding: self.typed_binding(
+                            graph,
                             library,
                             func_input,
                             graph.bindings.get(&InputPort::new(node_id, port_idx)),
@@ -206,19 +197,10 @@ impl Compiler {
                 },
             ));
 
-            // The effective type of each output, straight off the table filled
-            // above — the same answer the editor paints, so the program and the
-            // canvas agree about a wildcard by construction rather than by two
-            // walks happening to match. A port the table missed is library
-            // drift, and `Any` is the right answer for one.
-            let node_outputs = compiled
-                .outputs
-                .append((0..func.outputs().len()).map(|port_idx| {
-                    self.output_types
-                        .get(OutputPort::new(node_id, port_idx))
-                        .cloned()
-                        .unwrap_or_default()
-                }));
+            let output_count =
+                u32::try_from(func.outputs().len()).expect("a func's output count fits in u32");
+            let node_outputs = Span::new(compiled.output_count, output_count);
+            compiled.output_count += output_count;
 
             // Each event lands with its subscribers, resolved through the
             // placement, which already covers nodes the walk has not reached.
@@ -261,22 +243,18 @@ impl Compiler {
         // so a mismatch is the two disagreeing about the library — and every
         // column above would have silently regrown to cover it.
         debug_assert_eq!(compiled.inputs.len(), totals.inputs);
-        debug_assert_eq!(compiled.outputs.len(), totals.outputs);
+        debug_assert_eq!(compiled.output_count as usize, totals.outputs);
         debug_assert_eq!(compiled.events.len(), totals.events);
 
         compiled
     }
 
     /// Settle the dense index space: the artifact's id column and the reverse
-    /// map, plus the output count the walk range-checks bindings against.
+    /// map.
     ///
     /// Id order rather than `Graph::iter`'s, so the artifact is deterministic
     /// however the walk happens to reach the nodes. Ids come from a map keyed by
     /// them, so the sort cannot produce a duplicate.
-    ///
-    /// The per-node output count is taken here rather than during the walk
-    /// because a wire is range-checked against its *producer*, which the id
-    /// order may put after the consumer that names it.
     ///
     /// The returned pool totals ride along for free: this pass already holds
     /// every declaration the walk is about to read, so counting the ports here
@@ -293,14 +271,16 @@ impl Compiler {
             totals.events += func.events().len();
             placed.push(PendingNode {
                 node_id: node.id,
-                outputs: u32::try_from(func.outputs().len())
-                    .expect("a func's output count must fit in u32"),
                 disabled: node.disabled,
             });
         }
         assert!(
             u32::try_from(placed.len()).is_ok(),
             "program node count must fit in u32"
+        );
+        assert!(
+            u32::try_from(totals.outputs).is_ok(),
+            "program output count must fit in u32"
         );
         placed.sort_unstable_by_key(|placed| placed.node_id);
         totals
@@ -324,13 +304,15 @@ impl Compiler {
         &self.placed[self.idx(node_id).idx()]
     }
 
-    /// [`Self::resolve`] behind the type gate: a wire whose resolved source type
-    /// is incompatible with the declared input, or a const that doesn't satisfy
-    /// it, lowers as unbound — drift tolerance. The editor paints such a wire as
+    /// [`Self::resolve`] behind the type gate: a wire to an output its producer
+    /// does not declare or whose declared type the input does not accept, or a
+    /// const that doesn't satisfy the input, lowers as unbound — drift
+    /// tolerance. The editor paints such a wire as
     /// mismatched; a required input surfaces as a missing-input verdict. Nothing
     /// is severed, so the wiring revives when the types line up again.
     fn typed_binding(
         &self,
+        graph: &Graph,
         library: &Library,
         input: &FuncInput,
         binding: Option<&Binding>,
@@ -341,42 +323,28 @@ impl Compiler {
             }
             None | Some(Binding::Const(_)) => ExecutionBinding::None,
             Some(Binding::Bind(src)) => {
-                // A port the table missed is one no chain reached *and* no
-                // declaration names, and `Any` is what that resolved to before
-                // the table existed: the gate passes and `resolve` unbinds it on
-                // the range check. A port the table *did* stamp still has to
-                // pass that check — a wildcard chain records every port it walks
-                // through, out-of-range ones included, as `Any`.
-                let resolved = self.output_types.get(*src).cloned().unwrap_or_default();
-                if input.data_type.compatible_with(&resolved) {
-                    self.resolve(*src)
-                } else {
-                    ExecutionBinding::None
+                let producer = graph
+                    .find(src.node_id)
+                    .and_then(|producer| producer.func(library))
+                    .expect("validate_with resolved every producer");
+                match producer.outputs().get(src.port_idx) {
+                    Some(output) if input.data_type.compatible_with(&output.data_type) => {
+                        self.resolve(*src)
+                    }
+                    _ => ExecutionBinding::None,
                 }
             }
         }
     }
 
-    /// Intern an output reference into the dense [`OutputAddr`] the producer
-    /// landed at — the one place a producer id is ever hashed, once per compile
-    /// instead of once per run.
-    ///
-    /// Library drift can leave a binding to an output the func no longer
-    /// declares — degrade to unbound rather than addressing a vanished slot
-    /// (the planner reports the consumer's missing input). The count comes off
-    /// the placement rather than the producer's emitted node, which the id order
-    /// may not have reached yet. The *node* is never missing:
-    /// `Graph::validate_with` rejects a binding naming a producer the graph
-    /// does not hold, and the placement covers every node it does.
+    /// Intern an output reference, which [`Self::typed_binding`] found among
+    /// its producer's declared outputs, into the dense [`OutputAddr`] the
+    /// producer landed at — the one place a producer id is ever hashed, once
+    /// per compile instead of once per run.
     fn resolve(&self, port: OutputPort) -> ExecutionBinding {
-        let OutputPort { node_id, port_idx } = port;
-        let node_idx = self.idx(node_id);
-        if port_idx >= self.placed[node_idx.idx()].outputs as usize {
-            return ExecutionBinding::None;
-        }
         ExecutionBinding::Bind(OutputAddr {
-            node_idx,
-            port_idx: port_idx as u32,
+            node_idx: self.idx(port.node_id),
+            port_idx: port.port_idx as u32,
         })
     }
 }

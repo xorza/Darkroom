@@ -50,9 +50,8 @@ impl FsPathConfig {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DataType {
-    #[default]
     Any,
     Float,
     Int,
@@ -64,40 +63,6 @@ pub enum DataType {
 }
 
 impl DataType {
-    /// This type when it is definite, or the type `value` itself carries when it
-    /// is `Any`.
-    ///
-    /// The rule a wildcard output resolves a *constant* through: a declared type
-    /// wins, because it carries what a literal cannot — an `FsPathConfig`, an
-    /// enum's id. Only a polymorphic declaration falls back to the literal.
-    ///
-    /// **`Any` here means "the literal cannot say", not "unhandled".** Reaching
-    /// it takes nothing but an authored const on an `Any`-declared input, so it
-    /// is ordinary data rather than a broken contract, and the arms below spell
-    /// out which literals describe no type of their own and why. The match is
-    /// deliberately exhaustive: a new [`ConstValue`] variant must fail to
-    /// compile here rather than fall into `Any` unexamined.
-    pub(crate) fn or_const_type(self, value: &ConstValue) -> Self {
-        if !matches!(self, Self::Any) {
-            return self;
-        }
-        match value {
-            ConstValue::Float(_) => Self::Float,
-            ConstValue::Int(_) => Self::Int,
-            ConstValue::Bool(_) => Self::Bool,
-            ConstValue::String(_) => Self::String,
-            // Null is typeless by nature — there is no type it could report.
-            ConstValue::Null => Self::Any,
-            // A path literal is a bare string; [`DataType::FsPath`] needs the
-            // mode and extension list, which only a declaration carries.
-            ConstValue::FsPath(_) | ConstValue::FsPaths(_) => Self::Any,
-            // An enum literal is a variant *name*; [`DataType::Enum`] needs the
-            // enum's `TypeId`, which a name cannot supply. The same asymmetry
-            // [`Self::default_value`] hits in the other direction.
-            ConstValue::Enum(_) => Self::Any,
-        }
-    }
-
     pub fn default_value(&self) -> Option<ConstValue> {
         Some(match self {
             Self::Any => ConstValue::Null,
@@ -118,14 +83,14 @@ impl DataType {
     /// Whether a value of type `source` may feed a port of type `self` — the
     /// **wire** half of the compile-boundary gate.
     ///
-    /// Deliberately looser than type equality: `Any` accepts everything, and
-    /// the three scalar kinds form one coercion class
+    /// Deliberately looser than type equality: an `Any` input accepts
+    /// everything, and the three scalar kinds form one coercion class
     /// (`is_numeric_scalar`). The **literal** half
     /// is `accepts_const`, which reads the same class
     /// off the value side — so wiring and constants are exactly as permissive
     /// as what executes.
     pub fn compatible_with(&self, source: &Self) -> bool {
-        if matches!(self, Self::Any) || matches!(source, Self::Any) {
+        if matches!(self, Self::Any) {
             return true;
         }
         if self.is_numeric_scalar() && source.is_numeric_scalar() {

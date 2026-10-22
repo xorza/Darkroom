@@ -52,13 +52,43 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     connection(PortRef::input(consumer, 0), PortRef::input(producer, 0));
 }
 
+/// The snap filter reads the input's type against the output's, whichever end
+/// the drag started from: an `Any` input takes an `Int` output, and a `String`
+/// input does not.
+#[test]
+fn the_snap_type_check_reads_the_input_against_the_output_from_either_end() {
+    let mut g = TestGraph::new();
+    let producer = g.add("producer", |n| n.output(DataType::Int));
+    let any = g.add("any", |n| n.input(DataType::Any));
+    let text = g.add("text", |n| n.input(DataType::String));
+    let f = GraphCtxFixture::over(g);
+    let graph_ctx = f.graph_ctx();
+    let output = PortRef::output(producer, 0);
+
+    for (input, accepted) in [
+        (PortRef::input(any, 0), true),
+        (PortRef::input(text, 0), false),
+    ] {
+        assert_eq!(
+            accepts_wire(graph_ctx, output, input),
+            accepted,
+            "{input:?} from the output"
+        );
+        assert_eq!(
+            accepts_wire(graph_ctx, input, output),
+            accepted,
+            "{input:?} from the input"
+        );
+    }
+}
+
 /// Run one canvas prepass with a wire latched from `start` and report whether
 /// it is still in flight afterwards. Deliberately `Floating`: it is the mode
 /// the fixture can express (a `Held` wire needs a real button release edge off
 /// the port geometry, which a bare fixture has none of) — and the more exposed
 /// one, since no button is held, so it can sit across an arbitrary number of
 /// undos.
-fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Option<InFlight> {
+fn prepass_with_wire_from(fixture: &GraphCtxFixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
     let mut connections = ConnectionUI::default();
     connections.state.latch(InFlight {
@@ -93,19 +123,19 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
     let Wired {
-        fixture: mut f,
+        fixture: f,
         producer,
         ..
     } = fixture();
     let live = PortRef::output(producer, 0);
     assert!(
-        prepass_with_wire_from(&mut f, live).is_some(),
+        prepass_with_wire_from(&f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
     let gone = PortRef::output(NodeId::unique(), 0);
     assert!(
-        prepass_with_wire_from(&mut f, gone).is_none(),
+        prepass_with_wire_from(&f, gone).is_none(),
         "a wire from a vanished node drops"
     );
 }

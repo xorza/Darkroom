@@ -1,7 +1,5 @@
 //! The root of the UI's context chain.
 
-use std::sync::Arc;
-
 use scenarium::Library;
 
 use crate::gui::state::run_state::RunState;
@@ -16,8 +14,7 @@ use crate::gui::theme::Theme;
 /// context from the one above rather than restating its refs:
 /// [`WindowCtx`](crate::gui::frame::window_ctx::WindowCtx) pairs this with the
 /// document being edited, [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) adds
-/// the resolved output types a canvas reads, and everything under the canvas
-/// reads the theme, the library and the run back off *that* — which is why
+/// whether a pane shows the graph, and everything under the canvas reads the theme, the library and the run back off *that* — which is why
 /// nothing below [`MainWindow`](crate::gui::main_window::MainWindow) names this
 /// type.
 ///
@@ -32,7 +29,7 @@ use crate::gui::theme::Theme;
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppCtx<'a> {
     theme: &'a Theme,
-    library: &'a Arc<Library>,
+    library: &'a Library,
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
     run_state: &'a RunState,
@@ -44,7 +41,7 @@ impl<'a> AppCtx<'a> {
     /// figure — see [`Self::with_status`].
     pub(crate) const fn new(
         theme: &'a Theme,
-        library: &'a Arc<Library>,
+        library: &'a Library,
         run_state: &'a RunState,
     ) -> Self {
         Self {
@@ -68,13 +65,7 @@ impl<'a> AppCtx<'a> {
     }
 
     /// The library every node's declaration is resolved through.
-    pub(crate) fn library(self) -> &'a Library {
-        self.library
-    }
-
-    /// The library as the frame holds it, for a cache that has to know
-    /// whether it is the one it was filled against.
-    pub(crate) const fn shared_library(self) -> &'a Arc<Library> {
+    pub(crate) const fn library(self) -> &'a Library {
         self.library
     }
 

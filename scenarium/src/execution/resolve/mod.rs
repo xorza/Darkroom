@@ -41,7 +41,7 @@ pub(crate) async fn sweep(
     cache.stamp_digests(program, schedule);
     // The sweep *accumulates* demand and readers, so it starts from zero of
     // its own accord rather than trusting whoever opened the schedule.
-    schedule.outputs.reset(program.outputs.len());
+    schedule.outputs.reset(program.output_count as usize);
     schedule.promote_roots();
 
     // Reverse process order, so every consumer of a node has contributed

@@ -7,6 +7,11 @@ fn compatibility_and_defaults_follow_runtime_coercions() {
     assert!(DataType::Float.compatible_with(&DataType::Int));
     assert!(DataType::Bool.compatible_with(&DataType::Float));
     assert!(DataType::Any.compatible_with(&DataType::String));
+    assert!(DataType::Any.compatible_with(&custom(1)));
+    assert!(
+        !DataType::String.compatible_with(&DataType::Any),
+        "an `Any` source is no wildcard: only an `Any` input takes it"
+    );
     assert!(!DataType::String.compatible_with(&DataType::Bool));
     assert!(custom(1).compatible_with(&custom(1)));
     assert!(!custom(1).compatible_with(&custom(2)));

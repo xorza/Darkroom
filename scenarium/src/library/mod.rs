@@ -10,7 +10,6 @@ use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, Strictness, TypeId};
 use crate::graph::func::Func;
 use crate::graph::func::func_input::FuncInput;
-use crate::graph::func::func_output::OutputType;
 use crate::graph::identity::FuncId;
 use crate::library::type_entry::TypeEntry;
 
@@ -210,8 +209,7 @@ impl Library {
 }
 
 /// Every type a `func` port declares as [`DataType::Enum`], inputs and
-/// outputs alike. A wildcard output declares no nominal type of its
-/// own, so it contributes nothing here.
+/// outputs alike.
 fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
     let enum_id = |ty: &DataType| match ty {
         DataType::Enum(type_id) => Some(*type_id),
@@ -221,10 +219,10 @@ fn declared_enum_types(func: &Func) -> impl Iterator<Item = TypeId> + '_ {
         .inputs()
         .iter()
         .filter_map(move |i| enum_id(&i.data_type));
-    let outputs = func.outputs().iter().filter_map(move |o| match &o.ty {
-        OutputType::Fixed(ty) => enum_id(ty),
-        OutputType::Wildcard { .. } => None,
-    });
+    let outputs = func
+        .outputs()
+        .iter()
+        .filter_map(move |o| enum_id(&o.data_type));
     inputs.chain(outputs)
 }
 

@@ -527,11 +527,7 @@ impl GraphIntent {
     }
 
     /// Build, no-op-filter, and apply one intent against `doc` in a single
-    /// call — the entry every frontend drives its per-intent loop through. A
-    /// `SetInput` that retypes wildcard outputs severs nothing: type
-    /// mismatches are tolerated (the wire draws as mismatched and lowers as
-    /// unbound — see scenarium's `typed_binding`), so the edit stays a single
-    /// step.
+    /// call — the entry every frontend drives its per-intent loop through.
     ///
     /// Returns the committed [`UndoStep`] (the caller records it and reads its
     /// signals), or `Ok(None)` when nothing came of the intent and nothing was

@@ -84,7 +84,7 @@ impl Reversible for MoveSelection {
         false
     }
 
-    fn retypes_outputs(&self) -> bool {
+    fn changes_node_set(&self) -> bool {
         false
     }
 }

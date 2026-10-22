@@ -359,7 +359,7 @@ impl RunSchedule {
             .reset(program.e_nodes.len(), NodeState::default());
         self.root_flags
             .reset(program.e_nodes.len(), RootFlags::default());
-        self.outputs.reset(program.outputs.len());
+        self.outputs.reset(program.output_count as usize);
     }
 
     /// The nodes the backward walk starts from, ascending.
@@ -485,12 +485,12 @@ impl RunSchedule {
             (
                 ScheduleColumn::OutputDemand,
                 self.outputs.demand.len(),
-                program.outputs.len(),
+                program.output_count as usize,
             ),
             (
                 ScheduleColumn::OutputReaders,
                 self.outputs.readers.len(),
-                program.outputs.len(),
+                program.output_count as usize,
             ),
         ] {
             if len != expected {

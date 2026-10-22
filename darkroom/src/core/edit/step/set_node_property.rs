@@ -56,7 +56,7 @@ impl Reversible for SetNodeProperty {
         false
     }
 
-    fn retypes_outputs(&self) -> bool {
+    fn changes_node_set(&self) -> bool {
         false
     }
 }

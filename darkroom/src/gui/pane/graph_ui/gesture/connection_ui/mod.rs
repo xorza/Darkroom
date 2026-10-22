@@ -302,10 +302,10 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 
 /// The endpoint colors of a committed data wire: the two ports' type colors,
 /// so each end matches the port it touches and the wire reads as its data type
-/// (both ends share it unless one side is the untyped `Any` wildcard).
+/// (both ends share it unless the input is the untyped `Any`).
 ///
-/// A wire an upstream wildcard retype left type-mismatched paints entirely in
-/// the missing-input warning color instead. Nothing severs it — it lowers as
+/// A wire a library change left type-mismatched paints entirely in the
+/// missing-input warning color instead. Nothing severs it — it lowers as
 /// unbound (drift tolerance) — so it wears the same warning the run will report
 /// on the port.
 fn data_tint(graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
@@ -361,8 +361,14 @@ fn scan_snap_target(ui: &mut Ui, cx: CanvasCtx<'_>, start: PortRef) -> Option<Po
 /// Whether a wire dragged from `start` may land on `port` — the two
 /// rejections that outlive the geometric hit test in [`scan_snap_target`].
 fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool {
-    let compatible = match (graph_ctx.port_type(start), graph_ctx.port_type(port)) {
-        (Some(a), Some(b)) => a.compatible_with(b),
+    // `start.kind` fixes which side is the producer (output) and which the
+    // consumer (input).
+    let (producer, consumer) = match start.kind {
+        PortKind::Output => (start, port),
+        PortKind::Input => (port, start),
+    };
+    let compatible = match (graph_ctx.port_type(consumer), graph_ctx.port_type(producer)) {
+        (Some(input), Some(output)) => input.compatible_with(output),
         // Missing type info (port not in the scene this frame) — don't
         // block; let the intent layer decide.
         _ => true,
@@ -371,13 +377,11 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
     // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
     // refuses to commit one, so the wire must never latch. Asked of the
     // authoring graph rather than the scene's edge mirror, so the snap filter
-    // and `GraphIntent::into_step` can't answer differently. `start.kind` fixes which side
-    // is the producer (output) and which the consumer (input).
-    let (producer, consumer) = match start.kind {
-        PortKind::Output => (start.node_id, port.node_id),
-        PortKind::Input => (port.node_id, start.node_id),
-    };
-    compatible && !graph_ctx.body().produces_cycle(producer, consumer)
+    // and `GraphIntent::into_step` can't answer differently.
+    compatible
+        && !graph_ctx
+            .body()
+            .produces_cycle(producer.node_id, consumer.node_id)
 }
 
 /// "Set const" gesture: an input-port drag released over its own
@@ -423,9 +427,7 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
 /// [`scan_snap_target`]) commits. A cycle-forming pair never reaches here —
 /// [`scan_snap_target`] refuses to snap one, and `GraphIntent::into_step`
 /// rejects any cycle-forming bind that slips through (the planner is the final
-/// backstop, `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
-/// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
-/// the warning color, and lowers as unbound.
+/// backstop, `Error::CycleDetected`).
 fn connection(start: PortRef, end: PortRef) -> GraphIntent {
     let pair = start
         .input_port()
