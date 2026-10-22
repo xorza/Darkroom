@@ -23,6 +23,7 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
             source: 0,
             beside: 100,
         },
+        gain_bytes: 0,
     };
     let rggb = CfaType::Bayer(CfaPattern::Rggb);
     assert_eq!(

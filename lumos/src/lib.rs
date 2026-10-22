@@ -85,6 +85,7 @@ pub use image::error::{DimensionsError, FrameDimensionMismatch, XTransPatternErr
 pub use image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 pub use image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 pub use image::flat_gain::FlatGain;
+pub use image::flat_gain::frame_gain::FrameGain;
 pub use image::image_dimensions::ImageDimensions;
 pub use image::image_metadata::ImageMetadata;
 pub use image::image_provenance::{

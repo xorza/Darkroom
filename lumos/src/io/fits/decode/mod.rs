@@ -18,11 +18,12 @@
 //! is not.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
@@ -50,7 +51,7 @@ pub(crate) struct DecodedFitsImage {
     /// instead of reaching here.
     flags: Option<PixelFlags>,
     /// The gain the file's `LUMGAIN` extension stores, when it has one.
-    flat_gain: Option<Arc<FlatGain>>,
+    flat_gain: Option<FrameGain>,
 }
 
 impl DecodedFitsImage {
@@ -108,14 +109,19 @@ fn refuse_mosaic(path: &Path, selected: &SelectedFits<'_>) -> Result<(), ImageEr
     Ok(())
 }
 
-/// Load an already-linear astronomical image from a FITS file.
-pub(crate) fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
+/// Load an already-linear astronomical image from a FITS file, its flat gain shared through
+/// `gains`.
+pub(crate) fn load_linear(
+    path: &Path,
+    ctx: &LoadCtx,
+    gains: &SharedGains,
+) -> Result<LinearImage, ImageError> {
     let fits = |error| ImageError::fits_load(path, error);
     let mut reader = selected_fits::open(path, ctx).map_err(fits)?;
     let selected = SelectedFits::select(&mut reader, ctx).map_err(fits)?;
     refuse_mosaic(path, &selected)?;
     selected
-        .read(ctx, Checksum::Judged)
+        .read(ctx, Checksum::Judged, gains)
         .and_then(DecodedFitsImage::into_linear)
         .map_err(fits)
 }
@@ -125,7 +131,9 @@ pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
         let mut reader = selected_fits::open(path, ctx)?;
         let selected = SelectedFits::select(&mut reader, ctx)?;
         if selected.cfa_type.is_none() {
-            return selected.read(ctx, Checksum::Judged)?.into_linear();
+            return selected
+                .read(ctx, Checksum::Judged, &SharedGains::default())?
+                .into_linear();
         }
         let info = selected.cfa_frame_info()?;
         info.admit_demosaic(ctx)
@@ -134,7 +142,7 @@ pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
                 budget,
             })?;
         let cfa = selected
-            .read(ctx, Checksum::Judged)?
+            .read(ctx, Checksum::Judged, &SharedGains::default())?
             .into_cfa(info.cfa_type)?;
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
         Ok(cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?)
@@ -142,12 +150,19 @@ pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
     preview().map_err(|error| ImageError::fits_load(path, error))
 }
 
-pub(crate) fn load_cfa(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
+/// Load a sensor frame from a FITS file, its flat gain shared through `gains`.
+pub(crate) fn load_cfa(
+    path: &Path,
+    ctx: &LoadCtx,
+    gains: &SharedGains,
+) -> Result<CfaImage, ImageError> {
     let cfa = || {
         let mut reader = selected_fits::open(path, ctx)?;
         let selected = SelectedFits::select(&mut reader, ctx)?;
         let cfa_type = selected.require_cfa()?;
-        selected.read(ctx, Checksum::Judged)?.into_cfa(cfa_type)
+        selected
+            .read(ctx, Checksum::Judged, gains)?
+            .into_cfa(cfa_type)
     };
     cfa().map_err(|error| ImageError::fits_load(path, error))
 }
@@ -177,6 +192,7 @@ pub(crate) fn linear_info(path: &Path, ctx: &LoadCtx) -> Result<FrameInfo, Image
             beside: usize::try_from(selected.beside_frame_bytes())
                 .expect("a decode the plan admitted fits the address space"),
         },
+        gain_bytes: selected.gain_bytes,
     })
 }
 

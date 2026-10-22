@@ -11,8 +11,9 @@ use crate::image::image_dimensions::ImageDimensions;
 const FRAME_QUALITY_PLANES: usize = 2;
 
 /// What a stored frame's planes hold: its channels and its quality planes, a flag byte a pixel,
-/// and a flat gain grid of `gain_channels`. The plan prices a frame by it before the frame exists,
-/// and the combine prices the chunks it copies by it once it does.
+/// and a flat gain grid of `gain_channels` it holds as its own — a source gain the frames share is
+/// the run's, priced once. The plan prices a frame by it before the frame exists, and the combine
+/// prices the chunks it copies by it once it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StoredLayout {
     pub(crate) channels: usize,
@@ -28,13 +29,13 @@ impl StoredLayout {
             channels: frame.channels.len(),
             quality_planes: frame.quality.count(),
             flags: frame.flags.is_some(),
-            gain_channels: frame.flat_gain.as_ref().map_or(0, StoredGain::channels),
+            gain_channels: frame.flat_gain.as_ref().map_or(0, StoredGain::own_channels),
         }
     }
 
     /// A frame of `dimensions` as it decodes: its channels and the flag plane charged to every
     /// frame, since a decoder that flags saturation, and a calibration that flags its repairs, give
-    /// one to most.
+    /// one to most. Its gain is a source gain, which the run holds once for every frame.
     pub(crate) const fn decoded(dimensions: ImageDimensions) -> Self {
         Self {
             channels: dimensions.channels(),
@@ -62,9 +63,9 @@ impl StoredLayout {
     pub(crate) const fn heap_bytes(self, dimensions: ImageDimensions) -> usize {
         let grid = GainGrid::of(dimensions.size());
         let pixels = dimensions.pixel_count();
-        self.pixel_bytes().saturating_mul(pixels).saturating_add(
-            (self.gain_channels * size_of::<f32>()).saturating_mul(grid.cols * grid.rows),
-        )
+        self.pixel_bytes()
+            .saturating_mul(pixels)
+            .saturating_add(grid.bytes(self.gain_channels))
     }
 
     /// The bytes a spilled combine's chunk copy holds for each pixel of its rows: the channels,

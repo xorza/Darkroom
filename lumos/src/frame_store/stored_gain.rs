@@ -9,41 +9,60 @@ use imaginarium::Buffer2;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
 use crate::math::size2us::Size2us;
 
-/// Each channel's node grid of a frame's [`FlatGain`], wherever the memory tier put it: the image's
-/// own gain on the resident tier, node planes mapped from files on the spilled one.
+/// Each channel's node grid of a frame's [`FrameGain`], wherever it lies: a source gain where the
+/// run holds it for every frame that shares it, and a frame's own in RAM on the resident tier or
+/// its node planes mapped from files on the spilled one.
 #[derive(Debug)]
 pub(crate) enum StoredGain {
-    Resident(Arc<FlatGain>),
-    Mapped {
-        size: Size2us,
-        planes: ArrayVec<StoredPlane, 3>,
-    },
+    Shared(Arc<FlatGain>),
+    Own(Box<FlatGain>),
+    Mapped(Box<MappedGain>),
+}
+
+/// A frame's own gain on the spilled tier: the image size it covers, each channel's node plane,
+/// and the bins it carries over from the sensor, which its nodes do not give back.
+#[derive(Debug)]
+pub(crate) struct MappedGain {
+    size: Size2us,
+    planes: ArrayVec<StoredPlane, 3>,
+    bins: ArrayVec<GainBins, 3>,
 }
 
 impl StoredGain {
-    /// Each channel's nodes of `gain` written to `sink` and mapped back.
+    /// `gain` as a frame keeps it through `sink`: a shared gain as the handle the run holds, a
+    /// frame's own each channel's nodes written and mapped back.
     pub(crate) fn write(
-        gain: &FlatGain,
+        gain: &FrameGain,
         mut sink: impl PlaneSink,
     ) -> Result<Self, FrameStoreError> {
-        Ok(Self::Mapped {
-            size: gain.size(),
-            planes: gain
+        let own = match gain {
+            FrameGain::Shared(gain) => return Ok(Self::Shared(Arc::clone(gain))),
+            FrameGain::Own(gain) => gain,
+        };
+        Ok(Self::Mapped(Box::new(MappedGain {
+            size: own.size(),
+            planes: own
                 .planes()
                 .enumerate()
                 .map(|(channel, nodes)| sink.write(PlaneRole::Gain(channel), nodes))
                 .collect::<Result<_, _>>()?,
-        })
+            bins: (0..own.channels())
+                .map(|channel| own.bins(channel).clone())
+                .collect(),
+        })))
     }
 
     /// The image size the grid covers.
     fn size(&self) -> Size2us {
         match self {
-            Self::Resident(gain) => gain.size(),
-            Self::Mapped { size, .. } => *size,
+            Self::Shared(gain) => gain.size(),
+            Self::Own(gain) => gain.size(),
+            Self::Mapped(mapped) => mapped.size,
         }
     }
 
@@ -53,16 +72,28 @@ impl StoredGain {
 
     pub(crate) fn channels(&self) -> usize {
         match self {
-            Self::Resident(gain) => gain.channels(),
-            Self::Mapped { planes, .. } => planes.len(),
+            Self::Shared(gain) => gain.channels(),
+            Self::Own(gain) => gain.channels(),
+            Self::Mapped(mapped) => mapped.planes.len(),
+        }
+    }
+
+    /// The channels of a grid the frame holds as its own; none for a shared one, which the run
+    /// holds once for every frame.
+    pub(crate) fn own_channels(&self) -> usize {
+        match self {
+            Self::Shared(_) => 0,
+            Self::Own(_) | Self::Mapped(_) => self.channels(),
         }
     }
 
     /// Each channel's nodes from `range` of its grid, row-major.
     fn nodes(&self, range: Range<usize>) -> ArrayVec<&[f32], 3> {
         match self {
-            Self::Resident(gain) => gain.planes().map(|nodes| &nodes[range.clone()]).collect(),
-            Self::Mapped { planes, .. } => planes
+            Self::Shared(gain) => gain.planes().map(|nodes| &nodes[range.clone()]).collect(),
+            Self::Own(gain) => gain.planes().map(|nodes| &nodes[range.clone()]).collect(),
+            Self::Mapped(mapped) => mapped
+                .planes
                 .iter()
                 .map(|plane| plane.chunk(range.clone()))
                 .collect(),
@@ -80,33 +111,55 @@ impl StoredGain {
         )
     }
 
-    /// The gain's mapped node planes, one per channel; none for a resident gain.
-    pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
-        let planes = match self {
-            Self::Resident(_) => None,
-            Self::Mapped { planes, .. } => Some(planes),
-        };
-        planes.into_iter().flatten()
-    }
-
-    /// The gain as a [`FlatGain`] in RAM: shared when it is one already, copied out of its maps
-    /// otherwise.
-    pub(super) fn to_flat_gain(&self) -> Arc<FlatGain> {
+    /// The gain as an image carries it: the handle the run holds, or the frame's own, copied out
+    /// of its maps.
+    pub(super) fn into_frame_gain(self) -> FrameGain {
         match self {
-            Self::Resident(gain) => Arc::clone(gain),
-            Self::Mapped { size, planes } => {
-                let grid = GainGrid::of(*size);
-                let count = grid.cols * grid.rows;
-                Arc::new(FlatGain::from_nodes(
-                    *size,
+            Self::Shared(gain) => FrameGain::Shared(gain),
+            Self::Own(gain) => FrameGain::Own(gain),
+            Self::Mapped(mapped) => {
+                let MappedGain { size, planes, bins } = *mapped;
+                let grid = GainGrid::of(size);
+                let count = grid.nodes();
+                FrameGain::Own(Box::new(FlatGain::with_bins(
+                    size,
                     planes
                         .iter()
                         .map(|plane| {
                             Buffer2::new(grid.cols, grid.rows, plane.chunk(0..count).to_vec())
                         })
                         .collect(),
-                ))
+                    bins,
+                )))
             }
+        }
+    }
+}
+
+/// A gain in RAM, as the resident tier stores it: the handle the run holds, or the frame's own,
+/// moved in.
+impl From<FrameGain> for StoredGain {
+    fn from(gain: FrameGain) -> Self {
+        match gain {
+            FrameGain::Shared(gain) => Self::Shared(gain),
+            FrameGain::Own(gain) => Self::Own(gain),
+        }
+    }
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::frame_store::stored_gain::StoredGain;
+    use crate::frame_store::stored_plane::StoredPlane;
+
+    impl StoredGain {
+        /// The gain's mapped node planes, one per channel; none for a gain in RAM.
+        pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
+            let planes = match self {
+                Self::Shared(_) | Self::Own(_) => None,
+                Self::Mapped(mapped) => Some(&mapped.planes),
+            };
+            planes.into_iter().flatten()
         }
     }
 }

@@ -30,6 +30,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RasterFormat, RasterTransfer, RowOrder,
@@ -196,11 +197,11 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     } else {
                         CfaType::Bayer(CfaPattern::Rggb)
                     };
-                    image.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(
+                    image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
                         &divisor,
                         &cfa,
                         |_| false,
-                    ))));
+                    )))));
                 }
                 // Every other frame gets a partial coverage map (warped-border emulation).
                 let quality = if f.is_multiple_of(2) {
@@ -2338,7 +2339,7 @@ fn each_samples_noise_reads_the_gain_its_flat_applied() {
     let frame = |value: f32, read_share: f32, flat: bool, electrons: Option<f32>| {
         let mut image = LinearImage::from_interleaved(dims, vec![value; 2]);
         if flat {
-            image.set_flat_gain(Some(Arc::clone(&gain)));
+            image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
         }
         let mut frame = with_noise(image.into(), 1.0);
         frame.admitted.stats.bg[0].read_share = read_share;

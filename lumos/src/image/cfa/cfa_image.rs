@@ -2,7 +2,6 @@
 //! file says about it.
 
 use std::f64::consts::FRAC_1_SQRT_2;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
@@ -16,7 +15,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::channel_layout::ChannelLayout;
-use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
@@ -41,10 +40,10 @@ pub struct CfaImage {
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
     /// [`QualityFlags::NO_DATA`] are a finite fill, not data.
     flags: Option<PixelFlags>,
-    /// The gain a flat applied to each pixel's value and noise, by color — see [`FlatGain`]:
+    /// The gain a flat applied to each pixel's value and noise, by color — see [`FrameGain`]:
     /// set when calibration divides by a flat, and kept through a demosaic and through a FITS file
     /// of the mosaic. `None` for a frame no flat divided, and for a master, which the combine made.
-    flat_gain: Option<Arc<FlatGain>>,
+    flat_gain: Option<FrameGain>,
 }
 
 impl StackableImage for CfaImage {
@@ -97,7 +96,7 @@ impl StackableImage for CfaImage {
         image
     }
 
-    fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+    fn flat_gain(&self) -> Option<&FrameGain> {
         Self::flat_gain(self)
     }
 }
@@ -206,12 +205,12 @@ impl CfaImage {
     }
 
     /// The gain a flat applied to the pixels, by color, for a mosaic a flat divided.
-    pub const fn flat_gain(&self) -> Option<&Arc<FlatGain>> {
+    pub const fn flat_gain(&self) -> Option<&FrameGain> {
         self.flat_gain.as_ref()
     }
 
     /// Replace the flat gain with `gain`, which covers these pixels and the pattern's colors.
-    pub(crate) fn set_flat_gain(&mut self, gain: Option<Arc<FlatGain>>) {
+    pub(crate) fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
         debug_assert!(
             gain.as_ref()
                 .is_none_or(|gain| gain.covers(self.size(), self.cfa_type.color_count())),

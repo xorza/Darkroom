@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use common::fs;
 use fits_well::FitsWriter;
@@ -67,7 +66,7 @@ pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
         },
     )?;
     let flags = flags_extension::encode(image.flags(), None, 1)?;
-    let gain = gain_extension::encode(image.flat_gain().map(Arc::as_ref), None)?;
+    let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         primary.write(&mut writer)?;

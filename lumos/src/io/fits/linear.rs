@@ -2,7 +2,6 @@
 //! its flags and flat gain beside it.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use common::fs;
@@ -65,7 +64,7 @@ pub(crate) fn hdu(
 pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
     let primary = hdu(image, None)?;
     let flags = flags_extension::encode(image.flags(), None, 1)?;
-    let gain = gain_extension::encode(image.flat_gain().map(Arc::as_ref), None)?;
+    let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         primary.write(&mut writer)?;

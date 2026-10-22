@@ -40,7 +40,8 @@ pub(crate) struct StoredFlags {
 }
 
 impl StoredImage {
-    /// `image`'s channels, `flags` and flat gain written to `sink` and mapped back: `flags` are
+    /// `image`'s channels, `flags` and own flat gain written to `sink` and mapped back, a shared
+    /// gain kept as the handle the run holds: `flags` are
     /// the image's own, or none when the frame does not keep them.
     pub(crate) fn write<I: StackableImage>(
         image: &I,
@@ -99,7 +100,7 @@ impl StoredImage {
         let parts = ImageParts {
             planes,
             flags,
-            flat_gain: self.flat_gain.as_ref().map(StoredGain::to_flat_gain),
+            flat_gain: self.flat_gain.map(StoredGain::into_frame_gain),
         };
         I::from_parts(parts, cfa_type, self.metadata)
     }
@@ -142,9 +143,17 @@ mod tests {
     use common::{MappedFile, TempDir};
     use imaginarium::Buffer2;
 
+    use std::sync::Arc;
+
+    use glam::DVec2;
+
     use crate::frame_store::run_scratch::RunScratch;
+    use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_image::StoredImage;
+    use crate::image::cfa::cfa_type::CfaType;
     use crate::image::channel_layout::ChannelLayout;
+    use crate::image::flat_gain::FlatGain;
+    use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
@@ -177,5 +186,59 @@ mod tests {
             );
         }
         assert_eq!(loaded.flags().unwrap().bytes(), bytes);
+    }
+
+    /// A light parks its source gain as the handle its run holds, writing none of it, and reads
+    /// back with that handle: one gain for every frame of a flat. A frame's own gain, a warp's, is
+    /// written with its planes, not counted as the run's, and reads back with its nodes and the
+    /// bins it carried over from its sensor, which its nodes alone would not give. A 9 × 9 mono
+    /// frame's gain is 3 × 3 nodes.
+    #[test]
+    fn a_shared_gain_parks_as_its_handle_and_an_own_one_is_written() {
+        let dir = TempDir::new("stored_image_gain");
+        let scratch = RunScratch::create(dir.path()).unwrap();
+        let size = Size2us::new(9, 9);
+        let divisor = Buffer2::from_fn(9, 9, |x, y| 0.5 + 0.05 * (x + y) as f32);
+        let gain = Arc::new(FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false));
+        let mut image = LinearImage::from_planar_channels(
+            ImageDimensions::new(size, ChannelLayout::Mono),
+            [vec![0.5f32; size.pixel_count()]],
+        );
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
+        let parked = StoredImage::write(&image, None, &scratch).unwrap();
+        let Some(StoredGain::Shared(held)) = &parked.flat_gain else {
+            panic!("a source gain parks as its handle");
+        };
+        assert!(Arc::ptr_eq(held, &gain));
+        assert_eq!(parked.flat_gain.as_ref().unwrap().own_channels(), 0);
+        let loaded: LinearImage = parked.into_image(None);
+        let Some(FrameGain::Shared(read)) = loaded.flat_gain() else {
+            panic!("a parked source gain reads back shared");
+        };
+        assert!(Arc::ptr_eq(read, &gain));
+
+        let warped = gain.warped(|pos| pos + DVec2::new(1.5, 0.5), size);
+        image.set_flat_gain(Some(FrameGain::Own(Box::new(warped.clone()))));
+        let parked = StoredImage::write(&image, None, &scratch).unwrap();
+        let stored = parked.flat_gain.as_ref().unwrap();
+        assert!(matches!(stored, StoredGain::Mapped(_)));
+        assert_eq!(stored.own_channels(), 1);
+        let loaded: LinearImage = parked.into_image(None);
+        let Some(FrameGain::Own(read)) = loaded.flat_gain() else {
+            panic!("a frame's own gain reads back its own");
+        };
+        assert!(read.planes().eq(warped.planes()));
+        assert_eq!(read.bins(0), gain.bins(0));
+        assert_ne!(
+            FlatGain::from_nodes(
+                size,
+                [Buffer2::new(3, 3, read.planes().next().unwrap().to_vec())]
+                    .into_iter()
+                    .collect()
+            )
+            .bins(0),
+            gain.bins(0),
+            "the nodes alone give other bins"
+        );
     }
 }

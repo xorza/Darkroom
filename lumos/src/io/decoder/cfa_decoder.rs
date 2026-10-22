@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::decode::decoder_kind::DecoderKind;
 use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::decoder::{Decoder, Peek};
 use crate::io::error::ImageError;
 use crate::io::load_ctx::LoadCtx;
@@ -18,8 +19,8 @@ impl Decoder for CfaDecoder {
     type Read = RawFile;
     const KIND: DecoderKind = DecoderKind::Cfa;
 
-    fn load(path: &Path, ctx: &LoadCtx) -> Result<CfaImage, ImageError> {
-        ctx.cfa(path)
+    fn load(path: &Path, ctx: &LoadCtx, gains: &SharedGains) -> Result<CfaImage, ImageError> {
+        ctx.cfa_sharing(path, gains)
     }
 
     fn read_len(read: &RawFile) -> usize {

@@ -1,8 +1,12 @@
 //! [`FlatGain`]: the factor a flat multiplied each pixel's value and noise by, per channel.
 
+pub(crate) mod frame_gain;
 pub(crate) mod gain_bins;
+pub(crate) mod gain_key;
+pub(crate) mod shared_gains;
 
 use std::ops::Range;
+use std::sync::OnceLock;
 
 use arrayvec::ArrayVec;
 use glam::DVec2;
@@ -14,6 +18,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::InvalidFlatGain;
 use crate::image::flat_gain::gain_bins::GainBins;
+use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -41,6 +46,8 @@ pub struct FlatGain {
     /// Each channel's bins of equal count over the sensor's gain, which a frame's noise is
     /// measured over before any warp moves it.
     bins: ArrayVec<GainBins, 3>,
+    /// The gain's [`GainKey`], taken once the first time it is asked for.
+    key: OnceLock<GainKey>,
 }
 
 /// A [`FlatGain`] as a kept frame's record holds it: the image it covers, each channel's node grid
@@ -82,22 +89,21 @@ impl TryFrom<FlatGainRecord> for FlatGain {
         let shaped = (1..=3).contains(&record.nodes.len())
             && record.bins.len() == record.nodes.len()
             && record.nodes.iter().all(|plane| {
-                plane.len() == grid.cols * grid.rows
+                plane.len() == grid.nodes()
                     && plane.iter().all(|gain| gain.is_finite() && *gain > 0.0)
             });
         if !shaped {
             return Err(invalid);
         }
-        Ok(Self {
+        Ok(Self::with_bins(
             size,
-            grid,
-            nodes: record
+            record
                 .nodes
                 .into_iter()
                 .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
                 .collect(),
-            bins: record.bins.into_iter().collect(),
-        })
+            record.bins.into_iter().collect(),
+        ))
     }
 }
 
@@ -141,22 +147,39 @@ impl FlatGain {
     /// The gain of an image of `size` whose node grids, one per channel, are `nodes`: a grid a
     /// file stored. Each must be [`GainGrid::of`] `size`.
     pub(crate) fn from_nodes(size: Size2us, nodes: ArrayVec<Buffer2<f32>, 3>) -> Self {
+        let bins = nodes
+            .iter()
+            .map(|plane| GainBins::of(&mut plane.pixels().to_vec()))
+            .collect();
+        Self::with_bins(size, nodes, bins)
+    }
+
+    /// The gain of an image of `size` whose node grids are `nodes`, each channel's bins `bins`: a
+    /// warped gain, whose bins are its sensor's, read back.
+    pub(crate) fn with_bins(
+        size: Size2us,
+        nodes: ArrayVec<Buffer2<f32>, 3>,
+        bins: ArrayVec<GainBins, 3>,
+    ) -> Self {
         let grid = GainGrid::of(size);
         debug_assert!(
             nodes
                 .iter()
                 .all(|plane| plane.width() == grid.cols && plane.height() == grid.rows)
         );
-        let bins = nodes
-            .iter()
-            .map(|plane| GainBins::of(&mut plane.pixels().to_vec()))
-            .collect();
+        debug_assert_eq!(nodes.len(), bins.len());
         Self {
             size,
             grid,
             nodes,
             bins,
+            key: OnceLock::new(),
         }
+    }
+
+    /// What the gain is known by: see [`GainKey`].
+    pub(crate) fn key(&self) -> GainKey {
+        *self.key.get_or_init(|| GainKey::of(self))
     }
 
     /// This gain as an output frame of `size` sees it through `to_source`, its output-to-source
@@ -195,12 +218,7 @@ impl FlatGain {
                 }
             }
         });
-        Self {
-            size,
-            grid,
-            nodes,
-            bins: self.bins.clone(),
-        }
+        Self::with_bins(size, nodes, self.bins.clone())
     }
 
     /// The image the grid covers.
@@ -233,7 +251,7 @@ impl FlatGain {
 
     /// The bytes the node grids hold.
     pub(crate) const fn ram_bytes(&self) -> usize {
-        self.channels() * self.grid.cols * self.grid.rows * size_of::<f32>()
+        self.grid.bytes(self.channels())
     }
 
     /// Whether the gain covers an image of `size` and `channels` channels, or of `channels`
@@ -257,6 +275,18 @@ impl GainGrid {
             cols: nodes_along(size.width),
             rows: nodes_along(size.height),
         }
+    }
+
+    /// How many nodes the grid holds.
+    pub(crate) const fn nodes(self) -> usize {
+        self.cols * self.rows
+    }
+
+    /// The bytes `channels` grids of `f32` nodes hold, saturated.
+    pub(crate) const fn bytes(self, channels: usize) -> usize {
+        channels
+            .saturating_mul(self.nodes())
+            .saturating_mul(size_of::<f32>())
     }
 
     /// The node rows the pixel rows `rows` read: from the low node of the first to the high node of

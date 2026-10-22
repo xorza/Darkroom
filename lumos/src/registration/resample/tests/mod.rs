@@ -7,6 +7,7 @@ use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::mosaic_noise::MosaicNoise;
@@ -556,11 +557,11 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
     let size = Size2us::new(9, 9);
     let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
     let divisor = Buffer2::from_fn(9, 9, |x, _| 1.0 / (1.0 + x as f32 / 8.0));
-    image.set_flat_gain(Some(Arc::new(FlatGain::of_divisor(
+    image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
         &divisor,
         &CfaType::Mono,
         |_| false,
-    ))));
+    )))));
     let warped = WarpConfig::default().warp(
         &image,
         &WarpTransform::new(Transform::translation(DVec2::new(4.0, 0.0))),

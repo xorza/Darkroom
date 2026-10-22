@@ -6,6 +6,8 @@
 //! no name at all: it goes to [`RunScratch`](crate::frame_store::run_scratch::RunScratch).
 
 use std::fmt::Display;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
@@ -20,11 +22,12 @@ use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flag_counts::FlagCounts;
+use crate::image::flat_gain::gain_key::GainKey;
+use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::math::size2us::Size2us;
@@ -33,14 +36,15 @@ use crate::math::size2us::Size2us;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every commit carries.
-const SIDECAR_PIN: &str = "138b840bca3cefa1";
+const SIDECAR_PIN: &str = "b8d7806539a4b732";
 
 /// The tag every commit carries.
 const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN]);
 
-/// The files one kept frame occupies in the decode cache: one plane per channel, its flags, its
-/// stratified samples and its flat gain's node planes when it has them, and its [`Commit`] —
-/// under a name of the whole decode it holds.
+/// The files one kept frame occupies in the decode cache: one plane per channel, its flags and its
+/// stratified samples when it has them, and its [`Commit`] — under a name of the whole decode it
+/// holds — and the file of its flat gain, under the gain's key, which every frame of that gain
+/// shares.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameSpill<'a> {
     dir: &'a Path,
@@ -87,9 +91,19 @@ impl<'a> FrameSpill<'a> {
         self.file(format_args!("_s{slot}.bin"))
     }
 
-    /// Path of one channel's flat gain nodes.
-    pub(crate) fn gain_path(&self, channel: usize) -> PathBuf {
-        self.file(format_args!("_g{channel}.bin"))
+    /// Path of the flat gain of `key`: each channel's nodes in turn.
+    pub(crate) fn gain_path(&self, key: GainKey) -> PathBuf {
+        self.dir.join(format!("gain-{key}.bin"))
+    }
+
+    /// Write `gain`'s nodes to [`Self::gain_path`], published whole.
+    pub(crate) fn publish_gain(&self, gain: &FlatGain) -> Result<(), FrameStoreError> {
+        let path = self.gain_path(gain.key());
+        fs::publish(&path, fs::PublicationMode::Cache, |file: &mut File| {
+            gain.planes()
+                .try_for_each(|nodes| file.write_all(bytemuck::cast_slice(nodes)))
+        })
+        .map_err(|source| FrameStoreError::WriteFile { path, source })
     }
 
     /// Path of the [`Commit`].
@@ -125,7 +139,7 @@ impl<'a> FrameSpill<'a> {
                 height: decoded.dimensions.height(),
                 channels: decoded.dimensions.channels(),
                 flags: decoded.flags,
-                gain_channels: decoded.gain_channels,
+                gain: decoded.gain,
                 digests,
                 metadata: decoded.metadata.clone(),
                 stats: admitted.stats.clone(),
@@ -161,7 +175,7 @@ impl<'a> FrameSpill<'a> {
             decoded: Decoded {
                 dimensions,
                 flags: commit.flags,
-                gain_channels: commit.gain_channels,
+                gain: commit.gain,
                 metadata: commit.metadata,
             },
             digests: commit.digests,
@@ -179,7 +193,8 @@ impl<'a> FrameSpill<'a> {
 /// a saturated value, into the stack as data. They also give a reuse the frame's quality, by the
 /// rule its keep wrote it by, without a read of the plane. The digests are what make a plane
 /// changed under its name, or one a power loss left zeroed behind its commit, a cache to rebuild
-/// too. The metadata holds no flat gain: its nodes are planes of their own, mapped on reuse.
+/// too. The metadata holds no flat gain: the commit names its file by its key, which a reuse checks
+/// the file against.
 #[derive(Debug, Serialize, Deserialize)]
 struct Commit {
     key: CacheKey,
@@ -189,7 +204,7 @@ struct Commit {
     height: usize,
     channels: usize,
     flags: Option<FlagCounts>,
-    gain_channels: usize,
+    gain: Option<KeptGain>,
     digests: PlaneDigests,
     metadata: ImageMetadata,
     stats: FrameStats,
@@ -197,24 +212,45 @@ struct Commit {
 }
 
 /// What a decode left beside its planes, which a commit records: the frame's shape, the counts of
-/// the flags it wrote, none for a frame with no flag set, the channels of its flat gain, none for a
-/// frame no flat divided, and its metadata with no flat gain.
+/// the flags it wrote, none for a frame with no flag set, its flat gain, none for a frame no flat
+/// divided, and its metadata with no flat gain.
 #[derive(Debug, Clone)]
 pub(crate) struct Decoded {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) flags: Option<FlagCounts>,
-    pub(crate) gain_channels: usize,
+    pub(crate) gain: Option<KeptGain>,
     pub(crate) metadata: ImageMetadata,
 }
 
+/// A kept frame's flat gain: the key its file is named by and checked against, and its channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct KeptGain {
+    pub(crate) key: GainKey,
+    pub(crate) channels: usize,
+}
+
+impl KeptGain {
+    /// The kept gain of `gain`.
+    pub(crate) fn of(gain: &FlatGain) -> Self {
+        Self {
+            key: gain.key(),
+            channels: gain.channels(),
+        }
+    }
+
+    /// The bytes the gain holds in RAM over an image of `size`.
+    pub(crate) const fn bytes(self, size: Size2us) -> usize {
+        GainGrid::of(size).bytes(self.channels)
+    }
+}
+
 /// The blake3 digest of each plane a reuse reads: every channel, the flags plane when the frame
-/// carries one, each slot's samples, and each channel's gain nodes.
+/// carries one, and each slot's samples. The flat gain is checked against its key.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PlaneDigests {
     pub(crate) channels: Vec<[u8; 32]>,
     pub(crate) flags: Option<[u8; 32]>,
     pub(crate) samples: Vec<[u8; 32]>,
-    pub(crate) gain: Vec<[u8; 32]>,
 }
 
 impl PlaneDigests {
@@ -229,12 +265,6 @@ impl PlaneDigests {
                 .as_ref()
                 .map(|flags| digest(flags.plane.bytes())),
             samples: samples.into_iter().flatten().map(plane).collect(),
-            gain: image
-                .flat_gain
-                .iter()
-                .flat_map(StoredGain::planes)
-                .map(plane)
-                .collect(),
         }
     }
 }

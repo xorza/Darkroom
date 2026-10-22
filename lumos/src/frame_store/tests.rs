@@ -23,6 +23,9 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
+use crate::image::flat_gain::gain_key::GainKey;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
@@ -32,14 +35,15 @@ use crate::internals::panic_message;
 use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
 use crate::io::load_ctx::LoadCtx;
 
-/// The frame `spill` commits, mapped, as a reuse reads it.
+/// The frame `spill` commits, mapped, as a reuse of a run of its own reads it.
 fn reuse(spill: &FrameSpill<'_>) -> Option<KeptFrame> {
-    KeptFrame::reuse(spill, spill.committed()?)
+    KeptFrame::reuse(spill, spill.committed()?, &SharedGains::default())
 }
 
-/// The frame `spill` commits, as the image it was decoded to.
+/// The frame `spill` commits, as the image it was decoded to in a run of its own.
 fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
-    KeptFrame::reuse_image(spill, spill.committed()?).map(|kept| kept.image)
+    KeptFrame::reuse_image(spill, spill.committed()?, &SharedGains::default())
+        .map(|kept| kept.image)
 }
 
 /// A parked image reads back with its pixels, metadata and null mask, its flags counted as they
@@ -208,6 +212,9 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     ));
     let cache = |name, image: &LinearImage| {
         let spill = FrameSpill::named(dir.path(), name, key);
+        if let Some(gain) = image.flat_gain() {
+            spill.publish_gain(gain).unwrap();
+        }
         let kept = KeptFrame::keep(&spill, image, Admitted::measure(image)).unwrap();
         (spill, kept.into_frame())
     };
@@ -287,29 +294,49 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let restored: LinearImage = reuse_image(&spill).unwrap();
     assert_eq!(restored.channel(0).pixels(), plain.channel(0).pixels());
 
-    // A frame a flat divided keeps its gain's nodes as a plane, mapped on reuse — the stored gain
-    // the combine reads, one channel of it — and back in RAM, the same grid, when read whole.
+    // A frame a flat divided keeps its gain once, in a file named by the gain's key, which every
+    // frame of that gain shares. A run reads it into RAM once: two frames of one gain reused in
+    // one run hold one gain, the one image and frame alike, and the same grid as kept.
     let gain = Arc::new(FlatGain::of_divisor(
         &Buffer2::new(2, 2, vec![0.5, 0.25, 1.0, 0.5]),
         &CfaType::Mono,
         |_| false,
     ));
     let mut flattened = plain.clone();
-    flattened.set_flat_gain(Some(Arc::clone(&gain)));
+    flattened.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
     let (spill, written) = cache("flattened", &flattened);
     drop(written);
-    let frame = reuse(&spill).unwrap().into_frame();
-    let stored = frame.flat_gain.as_ref().unwrap();
-    assert!(matches!(stored, StoredGain::Mapped { .. }));
-    assert_eq!(stored.channels(), 1);
-    drop(frame);
-    let restored: LinearImage = reuse_image(&spill).unwrap();
-    assert!(restored.flat_gain().unwrap().planes().eq(gain.planes()));
-    let nodes = fs::read(spill.gain_path(0)).unwrap();
-    fs::write(spill.gain_path(0), &nodes[..4]).unwrap();
-    assert!(reuse(&spill).is_none(), "a gain plane cut short");
+    let (twin, written) = cache("twin", &flattened);
+    drop(written);
+    let gains = SharedGains::default();
+    let committed = |spill: &FrameSpill<'_>| spill.committed().unwrap();
+    let frame = KeptFrame::reuse(&spill, committed(&spill), &gains)
+        .unwrap()
+        .into_frame();
+    let Some(StoredGain::Shared(first)) = &frame.flat_gain else {
+        panic!("a kept frame's gain is shared");
+    };
+    assert_eq!(frame.flat_gain.as_ref().unwrap().channels(), 1);
+    assert!(first.planes().eq(gain.planes()));
+    let restored: LinearImage = KeptFrame::reuse_image(&twin, committed(&twin), &gains)
+        .unwrap()
+        .image;
+    let Some(FrameGain::Shared(second)) = restored.flat_gain() else {
+        panic!("a kept image's gain is shared");
+    };
+    assert!(Arc::ptr_eq(first, second), "one gain for the run");
+    drop((frame, restored));
+    assert_eq!(spill.gain_path(gain.key()), twin.gain_path(gain.key()));
+    let nodes = fs::read(spill.gain_path(gain.key())).unwrap();
+    fs::write(spill.gain_path(gain.key()), &nodes[..4]).unwrap();
+    assert!(reuse(&spill).is_none(), "a gain file cut short");
     assert!(reuse_image::<LinearImage>(&spill).is_none());
-    fs::write(spill.gain_path(0), &nodes).unwrap();
+    let mut other = nodes.clone();
+    other[0] ^= 1;
+    fs::write(spill.gain_path(gain.key()), &other).unwrap();
+    assert!(reuse(&spill).is_none(), "another gain under the key");
+    assert!(reuse_image::<LinearImage>(&spill).is_none());
+    fs::write(spill.gain_path(gain.key()), &nodes).unwrap();
 
     let channel = fs::read(spill.channel_path(0)).unwrap();
     fs::write(spill.channel_path(0), &channel[..12]).unwrap();
@@ -422,9 +449,10 @@ fn spill_names_are_stable_per_source_and_key_and_share_one_stem() {
         hashed.samples_path(1),
         cache_dir.join(format!("{stem}_s1.bin"))
     );
+    let key = GainKey::from_hex(&"0f".repeat(32)).unwrap();
     assert_eq!(
-        hashed.gain_path(2),
-        cache_dir.join(format!("{stem}_g2.bin"))
+        hashed.gain_path(key),
+        cache_dir.join(format!("gain-{}.bin", "0f".repeat(32)))
     );
 
     let plain = FrameSpill::named(cache_dir, "frame", linear);
@@ -448,7 +476,7 @@ fn a_flat_gain_of_another_image_is_refused() {
                 ImageDimensions::new((8, 8), ChannelLayout::try_from(channels).unwrap()),
                 vec![0.5; 64 * channels],
             );
-            image.set_flat_gain(Some(gain));
+            image.set_flat_gain(Some(FrameGain::Shared(gain)));
             let stats = Admitted::measure(&image);
             StoredFrame::from_memory(image, FrameQuality::None, stats);
         })

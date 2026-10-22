@@ -1,14 +1,13 @@
 //! [`StackableImage`]: an image as the frame layer reads it, whatever its type.
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flag_counts::FlagCounts;
-use crate::image::flat_gain::FlatGain;
+use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::pixel_flags::PixelFlags;
@@ -41,7 +40,7 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
 
     /// The gain a flat applied to the image's pixels, for an image a flat divided: of its
     /// channels, or of a mosaic's colors.
-    fn flat_gain(&self) -> Option<&Arc<FlatGain>>;
+    fn flat_gain(&self) -> Option<&FrameGain>;
 }
 
 /// What [`StackableImage::into_parts`] moves out of an image.
@@ -49,5 +48,5 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
 pub(crate) struct ImageParts {
     pub(crate) planes: ArrayVec<Buffer2<f32>, 3>,
     pub(crate) flags: Option<PixelFlags>,
-    pub(crate) flat_gain: Option<Arc<FlatGain>>,
+    pub(crate) flat_gain: Option<FrameGain>,
 }

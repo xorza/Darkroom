@@ -4,6 +4,7 @@ use imaginarium::Buffer2;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::gain_bins::GainBins;
+use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, FlatGainRecord};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
@@ -131,4 +132,27 @@ fn a_record_of_no_image_size_is_refused() {
     assert!(FlatGain::try_from(record(5, 5, 3)).is_err());
     let gain = FlatGain::try_from(record(5, 5, 4)).unwrap();
     assert_eq!(gain.nodes[0].pixels(), &[1.5; 4]);
+}
+
+/// A gain's key is the blake3 digest of its size, its channel count and its nodes, each value
+/// little-endian, whatever the machine: a 9×9 mono gain of 3×3 nodes hashes the three sizes as
+/// `u64` and the 9 nodes as `f32`. An equal gain has the key, one node apart another, and the key
+/// reads back from its 64 hex digits.
+#[test]
+fn a_gain_is_known_by_its_little_endian_digest() {
+    let divisor = Buffer2::from_fn(9, 9, |x, y| 0.5 + 0.02 * (x * 9 + y) as f32);
+    let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
+    let mut bytes: Vec<u8> = [9u64, 9, 1].iter().flat_map(|v| v.to_le_bytes()).collect();
+    bytes.extend(gain.planes().flatten().flat_map(|node| node.to_le_bytes()));
+    let expected = blake3::hash(&bytes).to_hex().to_string();
+    assert_eq!(gain.key().to_string(), expected);
+    assert_eq!(GainKey::from_hex(&expected), Some(gain.key()));
+    assert_eq!(GainKey::from_hex("x"), None);
+
+    let equal = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
+    assert_eq!(equal.key(), gain.key());
+    let mut other = divisor;
+    other.pixels_mut()[0] = 0.25;
+    let other = FlatGain::of_divisor(&other, &CfaType::Mono, |_| false);
+    assert_ne!(other.key(), gain.key());
 }

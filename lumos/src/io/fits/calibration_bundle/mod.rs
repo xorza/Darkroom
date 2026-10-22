@@ -26,6 +26,7 @@ use crate::calibration::master_role::MasterRole;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::error::{ImageError, WriteError};
 use crate::io::fits::calibration_bundle::error::{BundleError, DefectTableError};
 use crate::io::fits::cfa::{self, CfaFitsHduMetadata};
@@ -234,7 +235,7 @@ impl BundleReader<'_> {
             let selected = SelectedFits::lumos_cfa(&mut self.reader, idx, ctx)?;
             let cfa_type = selected.require_cfa()?;
             selected
-                .read(ctx, Checksum::Verified(checksum))?
+                .read(ctx, Checksum::Verified(checksum), &SharedGains::default())?
                 .into_cfa(cfa_type)
         };
         master().map(Some).map_err(|source| match source {
