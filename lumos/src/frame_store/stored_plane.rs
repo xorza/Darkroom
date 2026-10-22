@@ -26,11 +26,19 @@ pub(crate) enum StoredPlane<T = f32> {
     },
 }
 
+/// A plane [`StoredPlane::publish`] wrote, and the blake3 digest of its bytes, taken from the
+/// slice it wrote rather than read back from the file.
+#[derive(Debug)]
+pub(crate) struct PublishedPlane<T = f32> {
+    pub(crate) plane: StoredPlane<T>,
+    pub(crate) digest: [u8; 32],
+}
+
 impl<T: Pod> StoredPlane<T> {
     /// Write `pixels` to `path` as the plane file [`Self::map`] reads back, published whole — a
     /// reader finds the old file or the new one, never a part — and mapped from the handle that
     /// wrote it: another run that publishes the same name after it is never read in its place.
-    pub(crate) fn publish(path: &Path, pixels: &[T]) -> Result<Self, FrameStoreError> {
+    pub(crate) fn publish(path: &Path, pixels: &[T]) -> Result<PublishedPlane<T>, FrameStoreError> {
         let mut mapped = None;
         fs::publish(
             path,
@@ -46,9 +54,10 @@ impl<T: Pod> StoredPlane<T> {
             path: path.to_path_buf(),
             source,
         })?;
-        Ok(Self::mapped(
-            mapped.expect("a published plane was mapped as it was written"),
-        ))
+        Ok(PublishedPlane {
+            plane: Self::mapped(mapped.expect("a published plane was mapped as it was written")),
+            digest: blake3::hash(bytemuck::cast_slice(pixels)).into(),
+        })
     }
 
     /// Memory-map a plane file [`Self::publish`] wrote.

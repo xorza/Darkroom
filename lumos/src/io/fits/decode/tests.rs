@@ -383,7 +383,13 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         loaded.dimensions(),
         "the header gives what the decode makes"
     );
-    assert_eq!(peek.decoder_bytes, 32);
+    assert_eq!(
+        peek.decoder,
+        DecoderBytes {
+            source: 0,
+            beside: 32
+        }
+    );
 
     let mosaic_path = dir.join("mosaic.fits");
     cfa::save(

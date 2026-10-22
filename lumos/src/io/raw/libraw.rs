@@ -5,7 +5,7 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{fmt, slice};
+use std::{fmt, mem, slice};
 
 use common::CancelToken;
 use libraw_sys as sys;
@@ -95,9 +95,24 @@ impl Libraw {
         })
     }
 
+    /// The file's bytes, the handle closed: a header read hands them to the load, which opens
+    /// them again rather than read the file again.
+    pub(super) fn into_file(mut self) -> Vec<u8> {
+        mem::take(&mut self.file)
+    }
+
     /// The size of the file LibRaw holds in memory.
     pub(super) const fn file_len(&self) -> usize {
         self.file.len()
+    }
+
+    /// Free the file once `unpack` read the sensor data out of it: LibRaw drops its stream over
+    /// the bytes, and what a mosaic is read from after — its state and the raw buffer — lives in
+    /// LibRaw's own memory. Its own processing reads the file again, so it refuses a handle
+    /// whose file is gone.
+    pub(super) fn release_file(&mut self) {
+        unsafe { sys::libraw_recycle_datastream(self.handle.as_ptr()) };
+        self.file = Vec::new();
     }
 
     /// LibRaw's state.
@@ -196,6 +211,10 @@ impl Libraw {
     ///
     /// [`RawError::Process`] when either step fails.
     pub(super) fn process(&mut self) -> Result<ProcessedImage<'_>, RawError> {
+        assert!(
+            !self.file.is_empty(),
+            "LibRaw's processing reads the file, which was released"
+        );
         let code = unsafe { sys::libraw_dcraw_process(self.handle.as_ptr()) };
         if let Some(code) = LibrawCode::of(code) {
             return Err(RawError::Process(code));

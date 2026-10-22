@@ -4,6 +4,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::stackable_image::StackableImage;
 use crate::io::error::OverBudget;
 use crate::io::load_ctx::LoadCtx;
 use crate::memory::footprint::Footprint;
@@ -15,20 +16,50 @@ use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 pub(crate) struct FrameInfo {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) cfa_type: CfaType,
-    /// What the decoder holds beside the frame while it makes it: a camera RAW's whole file, which
-    /// LibRaw parses in place, and the raw buffer it unpacks into; nothing for a FITS file, which
-    /// is streamed.
-    pub(crate) decoder_bytes: usize,
+    pub(crate) decoder: DecoderBytes,
+}
+
+/// What a decoder holds while it makes a frame, beside the frame's own bytes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct DecoderBytes {
+    /// Held until the frame's samples are allocated, then freed: a camera RAW's whole file, which
+    /// LibRaw parses in place until it unpacked the sensor data.
+    pub(crate) source: usize,
+    /// Held beside the frame while it is made: the raw buffer LibRaw unpacks into, a FITS file's
+    /// chunk buffers.
+    pub(crate) beside: usize,
+}
+
+impl DecoderBytes {
+    /// The peak of a decode that makes a frame of `frame` bytes: what stays beside, with the source
+    /// before the frame and the frame after it.
+    pub(crate) const fn peak(self, frame: usize) -> usize {
+        self.beside
+            + if self.source > frame {
+                self.source
+            } else {
+                frame
+            }
+    }
 }
 
 impl FrameInfo {
+    /// What `image`, decoded already, settles: its decoder is done, so what it held is not known.
+    pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
+        Self {
+            dimensions: image.dimensions(),
+            cfa_type: image.cfa_type().unwrap_or(CfaType::Mono),
+            decoder: DecoderBytes::default(),
+        }
+    }
+
     /// The frame's decode: its samples and its flag plane kept, which a decoder that flags
-    /// saturation gives most frames, and the decoder's bytes beside them on the way.
+    /// saturation gives most frames, and the decoder's bytes on the way.
     pub(crate) const fn decoded(self) -> Footprint {
         let frame = self.dimensions.decoded_bytes();
         Footprint {
             kept: frame,
-            peak: frame + self.decoder_bytes,
+            peak: self.decoder.peak(frame),
         }
     }
 

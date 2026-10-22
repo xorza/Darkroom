@@ -1,6 +1,10 @@
 //! [`KeptFrame`]: a frame of the decode cache, as a keep wrote it or a reuse mapped it back.
 
+use std::path::Path;
+
 use arrayvec::ArrayVec;
+use bytemuck::Pod;
+use imaginarium::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
@@ -11,10 +15,11 @@ use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::StoredImage;
-use crate::frame_store::stored_plane::StoredPlane;
+use crate::frame_store::stored_plane::{PublishedPlane, StoredPlane};
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::image::stackable_image::StackableImage;
+use crate::image::stackable_image::{ImageParts, StackableImage};
 
 /// A kept frame, its planes mapped: the same whether this run wrote it or a run before did, so a
 /// first run and a reuse give the combine frames of one shape.
@@ -81,7 +86,7 @@ impl KeptFrame {
         admitted: Admitted,
     ) -> Result<Self, FrameStoreError> {
         let quality = FrameQuality::for_unwarped(image);
-        let channels = (0..image.dimensions().channels())
+        let channels: ArrayVec<PublishedPlane, 3> = (0..image.dimensions().channels())
             .map(|channel| {
                 StoredPlane::publish(&spill.channel_path(channel), image.channel(channel))
             })
@@ -99,7 +104,7 @@ impl KeptFrame {
                 })
             })
             .transpose()?;
-        let gain: ArrayVec<StoredPlane, 3> = image
+        let gain: ArrayVec<PublishedPlane, 3> = image
             .flat_gain()
             .into_iter()
             .flat_map(|gain| gain.planes().enumerate())
@@ -117,26 +122,34 @@ impl KeptFrame {
             gain_channels: gain.len(),
             metadata,
         };
-        let planes = KeptPlanes {
-            channels,
-            flags,
-            samples,
-            gain,
+        let digest = |published: &PublishedPlane| published.digest;
+        let digests = PlaneDigests {
+            channels: channels.iter().map(digest).collect(),
+            flags: flags.as_ref().map(|published| published.digest),
+            samples: samples.iter().flatten().map(digest).collect(),
+            gain: gain.iter().map(digest).collect(),
         };
-        spill.commit(&decoded, PlaneDigests::of(&planes), &admitted)?;
+        let plane = |published: PublishedPlane| published.plane;
+        let planes = KeptPlanes {
+            channels: channels.into_iter().map(plane).collect(),
+            flags: flags.map(|published| published.plane),
+            samples: samples.map(|samples| samples.into_iter().map(plane).collect()),
+            gain: gain.into_iter().map(plane).collect(),
+        };
+        spill.commit(&decoded, digests, &admitted)?;
         Ok(Self::new(planes, decoded, admitted))
     }
 
-    /// The frame [`Self::keep`] committed to `spill`'s files, mapped; `None` when there is none
-    /// whole to reuse — no commit for this source under the spill's key, or a plane that does not
-    /// map or holds other bytes than it was committed with. The digests read every page of the
-    /// planes, which the checks a reused frame passes read next anyway.
-    pub(crate) fn reuse(spill: &FrameSpill<'_>) -> Option<Self> {
+    /// The frame [`Self::keep`] committed to `spill`'s files as `committed` records it, mapped;
+    /// `None` when there is none whole to reuse — a plane that does not map or holds other bytes
+    /// than it was committed with. The digests read every page of the planes, which the checks a
+    /// reused frame passes read next anyway.
+    pub(crate) fn reuse(spill: &FrameSpill<'_>, committed: Committed) -> Option<Self> {
         let Committed {
             admitted,
             decoded,
             digests,
-        } = spill.committed()?;
+        } = committed;
         let channels = (0..decoded.dimensions.channels())
             .map(|channel| FrameSpill::map(&spill.channel_path(channel)))
             .collect::<Option<_>>()?;
@@ -195,16 +208,71 @@ impl KeptFrame {
         }
     }
 
-    /// The frame as the image it was decoded to, copied out of its maps into RAM, its flat gain
-    /// with it: for an entry that changes the frame in place, as calibration does.
-    pub(crate) fn into_image<I: StackableImage>(self) -> I {
-        let Self {
-            mut image,
-            flat_gain,
+    /// The frame [`Self::keep`] committed to `spill`'s files as `committed` records it, as the
+    /// image it was decoded to, in RAM, its flat gain with it: for an entry that changes the frame
+    /// in place, as calibration does. `None` as [`Self::reuse`] finds none whole. Each channel and
+    /// the flags are copied out of their maps, then hashed in RAM, so a page of their files is read
+    /// once; the samples, which an image does not carry, are not read.
+    pub(crate) fn reuse_image<I: StackableImage>(
+        spill: &FrameSpill<'_>,
+        committed: Committed,
+    ) -> Option<I> {
+        let Committed {
             admitted,
-            ..
-        } = self;
-        image.flat_gain = flat_gain.as_ref().map(StoredGain::to_flat_gain);
-        image.into_image(admitted.facts.cfa_type)
+            decoded,
+            digests,
+        } = committed;
+        let size = decoded.dimensions.size();
+        if digests.channels.len() != decoded.dimensions.channels()
+            || digests.gain.len() != decoded.gain_channels
+        {
+            return None;
+        }
+        let pixels = size.pixel_count();
+        let planes = digests
+            .channels
+            .iter()
+            .enumerate()
+            .map(|(channel, digest)| {
+                copied(&spill.channel_path(channel), digest, pixels)
+                    .map(|samples| Buffer2::new(size.width, size.height, samples))
+            })
+            .collect::<Option<_>>()?;
+        let flags = match (decoded.carries.flags(), digests.flags) {
+            (true, Some(digest)) => PixelFlags::from_bytes(Buffer2::new(
+                size.width,
+                size.height,
+                copied(&spill.flags_path(), &digest, pixels)?,
+            )),
+            (false, None) => None,
+            (true, None) | (false, Some(_)) => return None,
+        };
+        let gain = (0..decoded.gain_channels)
+            .map(|channel| FrameSpill::map(&spill.gain_path(channel)))
+            .collect::<Option<ArrayVec<StoredPlane, 3>>>()?;
+        let digest = |plane: &StoredPlane| -> [u8; 32] { blake3::hash(plane.bytes()).into() };
+        if !gain.iter().map(digest).eq(digests.gain.iter().copied()) {
+            return None;
+        }
+        let flat_gain =
+            (!gain.is_empty()).then(|| StoredGain::Mapped { size, planes: gain }.to_flat_gain());
+        Some(I::from_parts(
+            ImageParts {
+                planes,
+                flags,
+                flat_gain,
+            },
+            admitted.facts.cfa_type,
+            decoded.metadata,
+        ))
     }
+}
+
+/// The `len` samples of the plane at `path`, copied into RAM; `None` when it does not map, holds
+/// another count, or its bytes are not `digest`'s.
+fn copied<T: Pod>(path: &Path, digest: &[u8; 32], len: usize) -> Option<Vec<T>> {
+    let plane = FrameSpill::map::<T>(path)?;
+    let samples = plane.chunk(0..plane.samples()).to_vec();
+    (samples.len() == len && blake3::hash(bytemuck::cast_slice(&samples)).as_bytes() == digest)
+        .then_some(samples)
 }

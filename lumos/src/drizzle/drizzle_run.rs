@@ -18,7 +18,7 @@
 //! dropped before the next is read.
 
 use std::iter;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
@@ -36,6 +36,7 @@ use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
 use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::frame::frame_quality::FrameQuality;
+use crate::frame_store::file_set::FileSet;
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
@@ -58,19 +59,20 @@ pub(super) struct DrizzleRun<'a> {
     pub(super) ingest: IngestRun,
 }
 
-/// `frame`'s source decoded by `D` under `ctx`, through `storage`.
+/// `frame`, frame `idx` of `files`, its source decoded under `ctx`.
 fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
-    storage: &RunStorage,
+    idx: usize,
+    files: &FileSet<'_, PathBuf, D>,
     ctx: &LoadCtx,
 ) -> Result<DrizzleFrame<D::Image>, DrizzleError> {
     let DrizzleFrame {
-        source,
         warp,
         pixel_weight_map,
+        ..
     } = frame;
     Ok(DrizzleFrame {
-        source: storage.decode::<D>(source.as_ref(), ctx)?,
+        source: files.decode(idx, ctx)?,
         warp,
         pixel_weight_map,
     })
@@ -85,16 +87,20 @@ impl DrizzleRun<'_> {
     ) -> Result<StackProduct, DrizzleError> {
         let run = &self.ingest;
         let ctx = run.ctx.clone();
-        let storage = RunStorage::decoding(run)?;
-        let sources: Vec<&Path> = frames.iter().map(|frame| frame.source.as_ref()).collect();
+        let sources: Vec<PathBuf> = frames
+            .iter()
+            .map(|frame| frame.source.as_ref().to_path_buf())
+            .collect();
+        let files = FileSet::<_, D>::new(&sources, RunStorage::decoding(run)?, &ctx);
         let origin = FrameOrigin::Files {
-            uncached: storage.uncached::<D>(&sources, &ctx),
+            uncached: files.uncached(),
         };
         // Lazy, so only the frame currently being drizzled is resident.
         let loaded = frames
             .into_iter()
-            .map(|frame| load_drizzle_frame::<D, P>(frame, &storage, &ctx));
-        self.accumulate(loaded, origin, &storage)
+            .enumerate()
+            .map(|(idx, frame)| load_drizzle_frame(frame, idx, &files, &ctx));
+        self.accumulate(loaded, origin, files.storage())
     }
 
     /// The body of the in-memory entries of [`DrizzleConfig`].

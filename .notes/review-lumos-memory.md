@@ -99,54 +99,13 @@ check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
 Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
-set, and 4, the warp working set, landed. Dependencies: batch 6 needs the digest that batch 5 computes at the write, and batch 7
-needs the `Stored` return of batch 6. The other batches are independent.
-
-### 5. Read each input once
-
-Files: `pipeline/{light_files.rs, align_stack_run.rs, light_shape.rs}`, `io/raw/{mod.rs,
-libraw.rs, unpacked_raw.rs}`, `io/load_ctx.rs`, `io/frame_info/mod.rs`, `frame/frame_peek.rs`,
-`combine/frame_cache/loader/mod.rs`, `frame_store/{stored_plane.rs, run_storage.rs}`,
-`frame_store/decode_cache/`.
-
-- [ ] `pipeline/light_files.rs:74-77` — for a format with no header peek (RAW as linear,
-  raster, a FITS whose `linear_info` fails), light 0 is decoded for its shape, dropped, and
-  decoded again by `prepare(0)`. Target: the peek keeps the decoded light and hands it to the
-  intake, as the combine loader's `Early` (`loader/mod.rs:117-122,168-170`) and the drizzle's
-  `first` do. Price the held light in the shape.
-- [ ] `frame_store/decode_cache/mod.rs:102-110` — `missing` resolves each path and reads,
-  hashes and decodes each commit sidecar. Then each frame's `decode` or `reuse` does it all
-  again. Target: one pass makes `Vec<Option<Committed>>` with the `CachedSource`s, and hands
-  each entry to its decode.
-- [ ] `io/raw/mod.rs:175-177` — `cfa_frame_info` reads the whole first file of each set (lights,
-  and each master role through `D::peek` in `loader/mod.rs:117`) for its header, and the load
-  reads it again. When the decode cache holds the file, the load never reads it, so the peek
-  read it for nothing. Target: the commit records the `FrameInfo`, and the shape comes from file
-  0's commit when the cache holds it. Otherwise the peek keeps the opened `Libraw`, and the
-  load of file 0 takes it. Price the held file in the shape.
-- [ ] `io/raw/libraw.rs:28` — `Libraw` holds the file bytes (25–60 MB) until it closes, while the
-  f32 mosaic and the flags are allocated. Target: on `RawPath::Mosaic`, a `Libraw` method calls
-  `libraw_recycle_datastream` after `unpack` and frees the bytes. After `unpack` the mosaic
-  route reads only parsed state (`raw_image`, `data`, and the shim's `camera_clock`, which reads
-  `other.timestamp`). `recycle_datastream` deletes only the stream object that
-  `libraw_open_buffer` made (`LibRaw/src/utils/utils_libraw.cpp:282`), and `libraw_close` then
-  finds no stream. The processed route keeps the bytes, because `dcraw_process` can read the
-  file. The decode price (`RawPath::frame_bytes` beside `decoder_bytes`, and
-  `FrameInfo::decoded`) becomes two steps: unpack holds the file and the raw u16 buffer, and the
-  decode holds the raw buffer, the f32 mosaic and the flags.
-- [ ] `frame_store/decode_cache/kept_frame.rs:126` with `frame_spill/mod.rs:219` — the digest
-  of a kept plane is taken from the map that `StoredPlane::publish` (`stored_plane.rs:33-52`)
-  just wrote. Under memory pressure this reads the pages back from disk. Target: `publish`
-  hashes the slice it writes and returns the digest with the plane. `PlaneDigests::of` remains
-  only for `reuse`.
-- [ ] `frame_store/decode_cache/kept_frame.rs:165` and `mod.rs:91-92` — a reuse that goes
-  into RAM hashes every map, then copies every map. Target: copy first, hash the copy, and
-  compare.
+set, 4, the warp working set, and 5, each input read once, landed. Dependencies: batch 7 needs the
+`Stored` return of batch 6. The other batches are independent.
 
 ### 6. One stored-frame writer; kept frames parked in place
 
-Needs batch 5. Files: `frame_store/{stored_frame.rs, stored_image.rs, storage_tier.rs,
-stored_gain.rs}`, `frame_store/decode_cache/kept_frame.rs`, `pipeline/{frame_parking.rs,
+Files: `frame_store/{stored_frame.rs, stored_image.rs, storage_tier.rs, stored_gain.rs,
+file_set.rs}`, `frame_store/decode_cache/kept_frame.rs`, `pipeline/{frame_parking.rs,
 light_files.rs, align_stack_run.rs, pipeline_frame/}`, `image/flag_counts.rs`.
 
 - [ ] `frame_store/stored_frame.rs:41-65,101-133`, `decode_cache/kept_frame.rs:78-128`,
@@ -161,10 +120,10 @@ light_files.rs, align_stack_run.rs, pipeline_frame/}`, `image/flag_counts.rs`.
   `FrameParking::store` goes.
 - [ ] `frame_store/stored_image.rs:35` with `decode_cache/kept_frame.rs:28,64,68-71,207` — the
   gain has two representations: `Option<Arc<FlatGain>>` on `StoredImage`, and its own
-  `Option<StoredGain>` on `KeptFrame`, which `into_image` copies out of the maps
+  `Option<StoredGain>` on `KeptFrame`, which `reuse_image` copies out of the maps
   (`stored_gain.rs:81-97`). Target: `StoredImage.flat_gain: Option<StoredGain>`, with no
   `KeptFrame` field.
-- [ ] `pipeline/light_files.rs:123-124` with `pipeline/frame_parking.rs:52` — a linear light
+- [ ] `frame_store/file_set.rs` `FileSet::decode` with `pipeline/frame_parking.rs:52` — a linear light
   with `keep_cache` on the spill tier is read from the cache into RAM for detection, and then
   `StoredImage::spill` writes the same bytes again. That is 312 MB written for each RGB light.
   Target: `prepare` also returns the kept `StoredImage`, and parking takes it as

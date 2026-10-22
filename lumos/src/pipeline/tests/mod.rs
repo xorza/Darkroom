@@ -856,7 +856,9 @@ fn kept_lights_are_read_back_by_the_next_run() {
     let first = run();
     let decode_cache = DecodeCache::open(&ingest.cache_dir).unwrap();
     for path in &paths {
-        let kept_light = decode_cache.decode::<LinearDecoder>(path, &ctx).unwrap();
+        let kept_light = decode_cache
+            .kept_image::<LinearDecoder>(path, &ctx)
+            .expect("the run kept every light");
         let decoded = ctx.linear(path).unwrap();
         for channel in 0..3 {
             assert_eq!(

@@ -72,3 +72,17 @@
   whole planes of block ORs, 48 MB at 24 MP; bands of rows, whose scratch grows with the window,
   and a warp's window grows with its stretch, which no plan knows. A strip writes its own columns
   of each row through a raw pointer, as the warp writes its rows.
+- **A run reads each file once.** `FileSet` reads each source's identity and its cache commit
+  once, before any decode. The plan peeks the first file the cache lacks, and that file's decode
+  takes what the peek read: a camera RAW's whole file, or the frame itself for a format with no
+  header that answers. When the cache holds every file, the shape comes from frame 0's commit,
+  with no decoder, as none runs. The first stage prices the read until its frame takes it.
+  Refused: a `FrameInfo` in each commit, as a keep does not know what its decoder held, and the
+  plan needs it only for the files it will decode.
+- **A RAW file goes once its sensor data is unpacked.** The mosaic route frees the file
+  (`libraw_recycle_datastream`) before it allocates the frame, so a decode peaks at the raw buffer
+  and the larger of the file and the frame (`DecoderBytes::peak`). LibRaw's own processing reads
+  the file again, and keeps it.
+- **A digest is taken of bytes in RAM, never of a map read back.** A keep hashes the slice it
+  writes; a reuse into RAM copies each plane first and hashes the copy, and skips the samples an
+  image does not carry. Only a mapped reuse hashes its maps, whose pages the combine reads next.

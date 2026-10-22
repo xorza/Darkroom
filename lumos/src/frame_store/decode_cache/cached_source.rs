@@ -50,6 +50,14 @@ impl CachedSource {
             })
         }
     }
+
+    /// Whether the source reads as it did when [`Self::of`] read it; `false` when it no longer
+    /// reads at all.
+    pub(crate) fn is_current(&self) -> bool {
+        canonicalize(&self.path)
+            .and_then(|canonical| identity(&self.path, &canonical))
+            .is_ok_and(|now| now == self.key.source)
+    }
 }
 
 /// `path` canonicalized, a failure named by `path`.

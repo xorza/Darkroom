@@ -43,7 +43,7 @@ fn load_invalid_path() {
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
-        cfa_frame_info(path, &cancelled),
+        cfa_peek(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
 }
@@ -217,7 +217,9 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
     use crate::internals::real_data::raw_frames;
 
     for path in raw_frames("raw_samples") {
-        let mut raw = open_raw(&path, &LoadCtx::default(), |_| Ok(RawPath::Processed)).unwrap();
+        let ctx = LoadCtx::default();
+        let file = read(&path, &ctx).unwrap();
+        let mut raw = open_raw(file, &path, &ctx, |_| Ok(RawPath::Processed)).unwrap();
         let visible = raw.layout.active;
         assert_ne!(
             visible.width, visible.height,
@@ -378,8 +380,9 @@ fn the_raw_values_settle_no_data_and_saturation() {
 /// A decode is admitted from the header, before `unpack`, against the context's memory limit.
 /// The 24 × 24 dump is 1152 file bytes and unpacks into a 1152-byte raw buffer (576 photosites
 /// of 2 bytes). Its 22 × 22 = 484 visible pixels then hold 4 bytes of sample and a flag byte each
-/// on the mosaic path, 2420 bytes for a sum of 4724, and 8 + 6 + 12 = 26 each through LibRaw's
-/// processing, 12584 bytes for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
+/// on the mosaic path, 2420 bytes, made once the file is gone: 1152 + 2420 = 3572 at the peak.
+/// LibRaw's processing reads the file to the end and holds 8 + 6 + 12 = 26 bytes a pixel, 12584
+/// bytes, for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
 #[test]
 fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
     let samples = Buffer2::new_filled(24, 24, 2000u16);
@@ -390,13 +393,13 @@ fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
         Err(error) => panic!("{error:?}"),
     };
     let over = |required, limit| Some(OverBudget { required, limit });
-    assert_eq!(refused(RawPath::Mosaic, 4724), None);
-    assert_eq!(refused(RawPath::Mosaic, 4723), over(4724, 4723));
+    assert_eq!(refused(RawPath::Mosaic, 3572), None);
+    assert_eq!(refused(RawPath::Mosaic, 3571), over(3572, 3571));
     assert_eq!(refused(RawPath::Processed, 14888), None);
     assert_eq!(refused(RawPath::Processed, 14887), over(14888, 14887));
     assert_eq!(RawPath::preview(&libraw).unwrap(), RawPath::Mosaic);
     // The preview demosaics the mosaic too, which holds four of its planes at once — past the
-    // 4724 bytes its decode alone is admitted under — and is refused one byte short of its way.
+    // 3572 bytes its decode alone is admitted under — and is refused one byte short of its way.
     let info = frame_info(&libraw).unwrap();
     let way = u64::try_from(
         info.demosaiced(
@@ -521,8 +524,9 @@ fn a_cancelled_token_stops_libraw() {
     ));
 }
 
-/// The peek counts what LibRaw holds beside the frame: the 24 × 24 × 2 = 1152-byte file it parses
-/// in place, and the raw buffer of as many samples it unpacks into.
+/// The peek counts what LibRaw holds: the 24 × 24 × 2 = 1152-byte file it parses in place until
+/// the sensor data is unpacked, and the raw buffer of as many samples it unpacks into, beside the
+/// frame.
 #[test]
 fn the_peek_counts_the_file_and_the_raw_buffer() {
     let samples = Buffer2::new_filled(24, 24, 2000u16);
@@ -532,7 +536,27 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
         info.dimensions,
         ImageDimensions::new((22, 22), ChannelLayout::Mono)
     );
-    assert_eq!(info.decoder_bytes, 1152 + 1152);
+    assert_eq!(
+        info.decoder,
+        DecoderBytes {
+            source: 1152,
+            beside: 1152
+        }
+    );
+}
+
+/// Once the sensor data is unpacked, the file goes and the raw buffer stays as it was unpacked:
+/// the mosaic reads LibRaw's own memory alone.
+#[test]
+fn the_file_goes_once_the_sensor_data_is_unpacked() {
+    let samples = Buffer2::from_fn(24, 24, |x, y| 1000 + (x * 24 + y) as u16);
+    let mut libraw =
+        Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
+    libraw.unpack(1).unwrap();
+    let raw = libraw.raw_image().unwrap().to_vec();
+    libraw.release_file();
+    assert_eq!(libraw.file_len(), 0);
+    assert_eq!(libraw.raw_image().unwrap(), raw);
 }
 
 /// LibRaw's own processing, the path of a sensor lumos does not demosaic, run on a uniform field:

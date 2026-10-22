@@ -27,13 +27,18 @@ use crate::{CalibrationSet, CfaImage, MasterRole, StackConfig};
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
-    // `from_files` sizes its in-memory-vs-disk decision from `raw::cfa_frame_info` (a header peek,
+    // `from_files` sizes its in-memory-vs-disk decision from `raw::cfa_peek` (a header peek,
     // no decode). That peek must report exactly the dims a full decode produces, or the memory
-    // budget would be wrong.
+    // budget would be wrong; and the file it read decodes to the frame a read of its own makes.
     let paths = real_data::calibration_frames();
     let path = &paths.darks[0];
-    let peeked = raw::cfa_frame_info(path, &LoadCtx::default()).expect("peek frame info");
-    let loaded = raw::load_cfa(path, &LoadCtx::default()).expect("full decode");
+    let ctx = LoadCtx::default();
+    let peek = raw::cfa_peek(path, &ctx).expect("peek frame info");
+    let loaded = raw::load_cfa(path, &ctx).expect("full decode");
+    let file = peek.read.expect("a RAW peek keeps the file it read");
+    let from_peek = raw::load_cfa_read(file, path, &ctx).expect("decode of the peek's file");
+    assert_eq!(from_peek.data().pixels(), loaded.data().pixels());
+    let peeked = peek.info;
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
         (loaded.data().width(), loaded.data().height()),
