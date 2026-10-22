@@ -1,3 +1,4 @@
+use std::io::Cursor;
 use std::path::Path;
 
 use crate::common::buffer2::Buffer2;
@@ -5,6 +6,7 @@ use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 use crate::common::error::Error;
 use crate::common::internals::{create_test_image, lena};
 use crate::image::Image;
+use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 
 #[test]
@@ -16,7 +18,8 @@ fn lena_reads_as_packed_rgba() {
 }
 
 /// The extension picks the codec, case-insensitively; a missing or unknown one is refused
-/// before any I/O.
+/// before any I/O, and a known one reads the file first, so a missing file is an I/O error
+/// whatever its format.
 #[test]
 fn read_file_dispatches_on_the_extension() {
     assert!(matches!(
@@ -29,7 +32,7 @@ fn read_file_dispatches_on_the_extension() {
     ));
     assert!(matches!(
         Image::read_file("/nonexistent/does_not_exist.PNG"),
-        Err(Error::ImageCodec(_))
+        Err(Error::Io(_))
     ));
     assert!(matches!(
         Image::read_file("/nonexistent/does_not_exist.TIF"),
@@ -48,7 +51,20 @@ fn every_format_round_trips_through_tiff() {
         let reloaded = Image::read_file(&path).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
+        assert_bytes_match_the_file(&image, FileFormat::Tiff, &path);
     }
+}
+
+/// `encode` writes what `save_file` puts in the file, and `decode` reads it back as `read_file`
+/// does: the file calls are the bytes calls plus the file.
+fn assert_bytes_match_the_file(image: &Image, format: FileFormat, path: &Path) {
+    let mut encoded = Cursor::new(Vec::new());
+    image.encode(&mut encoded, format).unwrap();
+    let on_disk = std::fs::read(path).unwrap();
+    assert_eq!(encoded.get_ref(), &on_disk, "{format:?} {}", image.desc());
+    let decoded = Image::decode(Cursor::new(&on_disk), format).unwrap();
+    assert_eq!(decoded.desc(), image.desc(), "{format:?}");
+    assert_eq!(decoded.bytes(), image.bytes(), "{format:?}");
 }
 
 /// PNG stores the integer formats and reads them back byte for byte; it has no float.
@@ -69,6 +85,7 @@ fn integer_formats_round_trip_through_png() {
         let reloaded = Image::read_file(&path).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
+        assert_bytes_match_the_file(&image, FileFormat::Png, &path);
     }
 }
 

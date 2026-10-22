@@ -4,6 +4,7 @@ pub(crate) mod image_desc;
 pub(crate) mod image_pixels;
 mod io;
 
+use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
 use std::path::Path;
 
 use crate::common::buffer2::Buffer2;
@@ -87,21 +88,32 @@ impl Image {
         Ok(Self { pixels })
     }
 
+    /// The image in the file at `filename`, in the format its extension names.
     pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Self> {
         let filename = filename.as_ref();
-        match FileFormat::from_path(filename)? {
-            FileFormat::Png | FileFormat::Jpeg => io::load_png_jpeg(filename),
-            FileFormat::Tiff => io::load_tiff(filename),
-        }
+        let format = FileFormat::from_path(filename)?;
+        Self::decode(BufReader::new(std::fs::File::open(filename)?), format)
     }
 
+    /// The image `input` holds, in `format`, decoded as it is read: a file whoever owns the
+    /// reading opened, or bytes in a [`Cursor`](std::io::Cursor).
+    pub fn decode(mut input: impl BufRead + Seek, format: FileFormat) -> Result<Self> {
+        io::load(&mut input, format)
+    }
+
+    /// This image written to `filename`, in the format its extension names.
     pub fn save_file<P: AsRef<Path>>(&self, filename: P) -> Result<()> {
         let filename = filename.as_ref();
-        match FileFormat::from_path(filename)? {
-            FileFormat::Png => io::save_png(self, filename),
-            FileFormat::Jpeg => io::save_jpg(self, filename),
-            FileFormat::Tiff => io::save_tiff(self, filename),
-        }
+        let format = FileFormat::from_path(filename)?;
+        let mut file = BufWriter::new(std::fs::File::create(filename)?);
+        self.encode(&mut file, format)?;
+        file.flush()?;
+        Ok(())
+    }
+
+    /// This image in `format`, written into `out`, which the encoder may seek back over.
+    pub fn encode(&self, mut out: impl Write + Seek, format: FileFormat) -> Result<()> {
+        io::save(self, format, &mut out)
     }
 
     /// This image in `color_format`: itself when the format already matches.

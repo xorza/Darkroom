@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::path::Path;
+use std::io::{BufRead, Seek, Write};
 
 use bytemuck::Pod;
 use image as image_lib;
@@ -12,12 +11,39 @@ use tiff::encoder::{TiffEncoder, TiffValue};
 use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::common::error::{Error, Result};
 use crate::image::Image;
+use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 
-pub(super) fn load_png_jpeg(filename: &Path) -> Result<Image> {
+/// A sink an encoder writes into and seeks back over, as the TIFF and PNG encoders do.
+pub(super) trait WriteSeek: Write + Seek {}
+
+impl<T: Write + Seek> WriteSeek for T {}
+
+/// A source a decoder reads in buffered steps and seeks back over, as the TIFF decoder does.
+pub(super) trait BufReadSeek: BufRead + Seek {}
+
+impl<T: BufRead + Seek> BufReadSeek for T {}
+
+pub(super) fn load(input: &mut dyn BufReadSeek, format: FileFormat) -> Result<Image> {
+    match format {
+        FileFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png),
+        FileFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg),
+        FileFormat::Tiff => load_tiff(input),
+    }
+}
+
+pub(super) fn save(image: &Image, format: FileFormat, out: &mut dyn WriteSeek) -> Result<()> {
+    match format {
+        FileFormat::Png => save_png(image, out),
+        FileFormat::Jpeg => save_jpg(image, out),
+        FileFormat::Tiff => save_tiff(image, out),
+    }
+}
+
+fn load_png_jpeg(input: &mut dyn BufReadSeek, format: image_lib::ImageFormat) -> Result<Image> {
     use image_lib::DynamicImage;
 
-    let img = image_lib::open(filename)?;
+    let img = image_lib::ImageReader::with_format(input, format).decode()?;
     let (width, height) = (img.width() as usize, img.height() as usize);
     let desc = |format| ImageDesc::new(width, height, format);
     // Each decoded buffer is handed over whole. Grey with alpha has no format of its own here;
@@ -57,10 +83,10 @@ pub(super) fn load_png_jpeg(filename: &Path) -> Result<Image> {
     }
 }
 
-pub(super) fn load_tiff(filename: &Path) -> Result<Image> {
+fn load_tiff(input: &mut dyn BufReadSeek) -> Result<Image> {
     // Use unlimited to support large astrophotography images
     let limits = Limits::unlimited();
-    let mut decoder = Decoder::new(File::open(filename)?)?.with_limits(limits);
+    let mut decoder = Decoder::new(input)?.with_limits(limits);
 
     let channel_count = match decoder.colortype()? {
         tiff::ColorType::Gray(_) => ChannelCount::L,
@@ -117,7 +143,7 @@ fn encoder_dimensions(image: &Image) -> Result<[u32; 2]> {
     Ok([fit(desc.width)?, fit(desc.height)?])
 }
 
-pub(super) fn save_jpg(image: &Image, filename: &Path) -> Result<()> {
+fn save_jpg(image: &Image, mut out: &mut dyn WriteSeek) -> Result<()> {
     let format = image.desc().color_format;
     let color_type = match format {
         ColorFormat::L_U8 => image_lib::ColorType::L8,
@@ -129,8 +155,8 @@ pub(super) fn save_jpg(image: &Image, filename: &Path) -> Result<()> {
         }
     };
     let [width, height] = encoder_dimensions(image)?;
-    image_lib::save_buffer_with_format(
-        filename,
+    image_lib::write_buffer_with_format(
+        &mut out,
         image.bytes(),
         width,
         height,
@@ -140,7 +166,7 @@ pub(super) fn save_jpg(image: &Image, filename: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn save_png(image: &Image, filename: &Path) -> Result<()> {
+fn save_png(image: &Image, mut out: &mut dyn WriteSeek) -> Result<()> {
     let format = image.desc().color_format;
     let color_type = match (format.channel_count, format.sample_type) {
         (ChannelCount::L, SampleType::U8) => image_lib::ColorType::L8,
@@ -156,8 +182,8 @@ pub(super) fn save_png(image: &Image, filename: &Path) -> Result<()> {
         }
     };
     let [width, height] = encoder_dimensions(image)?;
-    image_lib::save_buffer_with_format(
-        filename,
+    image_lib::write_buffer_with_format(
+        &mut out,
         image.bytes(),
         width,
         height,
@@ -167,24 +193,24 @@ pub(super) fn save_png(image: &Image, filename: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn save_tiff(image: &Image, filename: &Path) -> Result<()> {
+fn save_tiff(image: &Image, out: &mut dyn WriteSeek) -> Result<()> {
     let format = image.desc().color_format;
     match (format.channel_count, format.sample_type) {
-        (ChannelCount::L, SampleType::U8) => write_tiff::<Gray8>(image, filename),
-        (ChannelCount::L, SampleType::U16) => write_tiff::<Gray16>(image, filename),
-        (ChannelCount::L, SampleType::F32) => write_tiff::<Gray32Float>(image, filename),
-        (ChannelCount::Rgb, SampleType::U8) => write_tiff::<RGB8>(image, filename),
-        (ChannelCount::Rgb, SampleType::U16) => write_tiff::<RGB16>(image, filename),
-        (ChannelCount::Rgb, SampleType::F32) => write_tiff::<RGB32Float>(image, filename),
-        (ChannelCount::Rgba, SampleType::U8) => write_tiff::<RGBA8>(image, filename),
-        (ChannelCount::Rgba, SampleType::U16) => write_tiff::<RGBA16>(image, filename),
-        (ChannelCount::Rgba, SampleType::F32) => write_tiff::<RGBA32Float>(image, filename),
+        (ChannelCount::L, SampleType::U8) => write_tiff::<Gray8>(image, out),
+        (ChannelCount::L, SampleType::U16) => write_tiff::<Gray16>(image, out),
+        (ChannelCount::L, SampleType::F32) => write_tiff::<Gray32Float>(image, out),
+        (ChannelCount::Rgb, SampleType::U8) => write_tiff::<RGB8>(image, out),
+        (ChannelCount::Rgb, SampleType::U16) => write_tiff::<RGB16>(image, out),
+        (ChannelCount::Rgb, SampleType::F32) => write_tiff::<RGB32Float>(image, out),
+        (ChannelCount::Rgba, SampleType::U8) => write_tiff::<RGBA8>(image, out),
+        (ChannelCount::Rgba, SampleType::U16) => write_tiff::<RGBA16>(image, out),
+        (ChannelCount::Rgba, SampleType::F32) => write_tiff::<RGBA32Float>(image, out),
     }
 }
 
 /// Writes `image` as the TIFF color type `C`, whose sample type the caller matched to the
 /// image's format — so the cast of the image's own aligned storage cannot fail.
-fn write_tiff<C>(image: &Image, filename: &Path) -> Result<()>
+fn write_tiff<C>(image: &Image, out: &mut dyn WriteSeek) -> Result<()>
 where
     C: ColorType,
     C::Inner: Pod,
@@ -192,8 +218,7 @@ where
 {
     let samples: &[C::Inner] = bytemuck::cast_slice(image.bytes());
     let [width, height] = encoder_dimensions(image)?;
-    let mut file = File::create(filename)?;
-    let mut tiff = TiffEncoder::new(&mut file)?;
+    let mut tiff = TiffEncoder::new(out)?;
     tiff.new_image::<C>(width, height)?.write_data(samples)?;
     Ok(())
 }
