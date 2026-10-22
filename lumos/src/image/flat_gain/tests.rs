@@ -84,6 +84,26 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     for (x, expected) in [(0.0, 1.5), (4.0, 1.875), (8.0, 1.875)] {
         close(shifted.at(0, x, 0.0), expected, &format!("warped x = {x}"));
     }
+
+    // Three channels of 3 × 3 nodes, each its own ramp down the rows, warped by 4 pixels down:
+    // every output node of every channel reads its own channel one node row lower, exactly, and
+    // the last row, past the source, holds the source's last.
+    let ramps = (1..=3)
+        .map(|channel| Buffer2::from_fn(3, 3, |i, j| (10 * channel + 3 * j + i) as f32))
+        .collect();
+    let gain = FlatGain::from_nodes(size, ramps);
+    let down = WarpTransform::new(Transform::translation(DVec2::new(0.0, 4.0)));
+    let warped = gain.warped(|p| down.apply(p), size);
+    for channel in 0..3 {
+        for (i, j) in [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)] {
+            let (x, y) = ((4 * i) as f32, (4 * j) as f32);
+            assert_eq!(
+                warped.at(channel, x, y).to_bits(),
+                gain.at(channel, x, (y + 4.0).min(8.0)).to_bits(),
+                "channel {channel}, node ({i}, {j})"
+            );
+        }
+    }
 }
 
 /// A record reads back as a gain only when its size is an image's: a zero side has no grid and an

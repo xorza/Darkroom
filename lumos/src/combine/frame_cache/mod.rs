@@ -31,6 +31,7 @@ use crate::combine::normalization::{FrameNorm, Normalization};
 use crate::combine::reducer::combined_sample::CombinedSample;
 use crate::combine::reducer::pixel_samples::{NoiseCols, PixelSamples};
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::combine::stack::combine_cost::CombineCost;
 use crate::combine::stack::planned_combine::PlannedCombine;
 use crate::combine::stack_frame::StackFrame;
 use crate::error::Cancelled;
@@ -59,7 +60,7 @@ use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::memory::stage::{Stage, Units};
+use crate::memory::stage::Stage;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::recycle;
 use crate::scratch_pool::ScratchPool;
@@ -204,7 +205,7 @@ impl FrameCache {
         Self::measured(
             stored,
             CacheCore {
-                tier: StorageTier::Resident,
+                tier: StorageTier::UNPLANNED,
                 dimensions,
                 metadata,
                 monitor,
@@ -621,6 +622,7 @@ impl FrameCache {
                 variance_bg_only: planes.inverse_variance
                     && noise.is_some_and(|noise| noise.first_without_gain().is_some()),
                 overcommit_bytes: chunking.overcommit_bytes,
+                planned_peak_bytes: self.core.tier.planned_peak_bytes(),
                 spilled_frames: if self.core.tier.spills() {
                     self.frames.len() as u64
                 } else {
@@ -653,26 +655,21 @@ impl FrameCache {
             .any(|frame| frame.flags.is_some() || !frame.quality.is_none())
     }
 
-    /// The combine as a stage of rows: each row reads every frame's planes as their layouts say,
-    /// beside the output planes held throughout — the coverage planes when any are gathered, and
-    /// the flag plane when the combine writes one.
+    /// The combine as a stage of rows: the [`CombineCost`] of the frames' layouts, the coverage
+    /// planes when any are gathered, and the flag plane when the combine writes one.
     fn combine_stage(&self, planes: QualityPlanes) -> Stage {
-        let dimensions = self.core.dimensions;
-        let frame_bytes: usize = self
-            .frames
-            .iter()
-            .map(|frame| StoredLayout::of(frame).pixel_bytes())
-            .sum();
-        Stage {
-            kept: 0,
-            held: planes.pixel_bytes(
-                dimensions.channels(),
-                self.coverage_layout(planes).map_or(0, ChannelLayout::count),
-                usize::from(self.flag_plane()),
-            ) * dimensions.pixel_count(),
-            in_flight: frame_bytes * dimensions.width(),
-            units: Units::Rows(dimensions.height()),
+        CombineCost {
+            dimensions: self.core.dimensions,
+            quality: planes,
+            coverage_planes: self.coverage_layout(planes).map_or(0, ChannelLayout::count),
+            flag_planes: usize::from(self.flag_plane()),
+            frame_pixel_bytes: self
+                .frames
+                .iter()
+                .map(|frame| StoredLayout::of(frame).pixel_bytes())
+                .sum(),
         }
+        .stage(0)
     }
 
     /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.
@@ -752,7 +749,7 @@ pub(crate) mod internals {
             images: Vec<I>,
             normalization: Normalization,
         ) -> Self {
-            let mut core = CacheCore::plain(StorageTier::Resident, images[0].dimensions());
+            let mut core = CacheCore::plain(StorageTier::UNPLANNED, images[0].dimensions());
             core.metadata = images[0].metadata().clone();
             let frames = images
                 .into_iter()

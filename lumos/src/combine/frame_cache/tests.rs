@@ -24,6 +24,7 @@ use crate::internals::cfa::make_cfa;
 use crate::math::statistics;
 use crate::memory::budget::Budget;
 use crate::memory::run_plan::RunPlan;
+use crate::memory::stage::Units;
 
 /// A request with the default survivor minimum, no weights and no noise.
 fn request(planes: QualityPlanes) -> CombineRequest<'static> {
@@ -189,7 +190,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
     let frame = |pixels: usize| {
         let image = LinearImage::from_interleaved(
             ImageDimensions::new((pixels, 1), ChannelLayout::Mono),
@@ -256,7 +257,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
     );
     let stats = Admitted::measure(&image);
     let core = CacheCore::plain(
-        StorageTier::Resident,
+        StorageTier::UNPLANNED,
         ImageDimensions::new((4, 2), ChannelLayout::Mono),
     );
     let _cache = FrameCache::from_stored_frames(
@@ -272,7 +273,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
         let stats = Admitted::measure(&image);
@@ -331,7 +332,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::Resident, dimensions);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
             coverage: Buffer2::new(4, 1, support),
@@ -482,12 +483,12 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
             .expect("frames are valid")
     };
     let cache = frames(false);
-    // A row of the 2 × 1 output reads `input` bytes a pixel of every frame, and the output holds
-    // `output` bytes a pixel throughout.
+    // A row of the 2 × 1 output copies `input` bytes a pixel of every frame, into each of the two
+    // chunk copies, and the output holds `output` bytes a pixel throughout.
     let stage = |input: usize, output: usize| Stage {
         kept: 0,
         held: output * 2,
-        in_flight: input * 2,
+        in_flight: 2 * input * 2,
         units: Units::Rows(1),
     };
 
@@ -774,9 +775,13 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
         Normalization::None,
     )
     .unwrap();
+    // The plan expects the one 48-byte frame in work, spilled, at its peak.
     assert_eq!(
         spilled.core.tier.combine_budget(),
-        Some(CombineBudget::new(budget))
+        Some(CombineBudget {
+            planned_peak_bytes: Some(48),
+            ..CombineBudget::new(budget)
+        })
     );
     for cache in [&resident, &spilled] {
         let plane = &cache.frames[0].channels[0];

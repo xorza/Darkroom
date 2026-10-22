@@ -36,15 +36,32 @@ impl Budget {
         self.memory_override * BUDGET_PERCENT / 100
     }
 
-    /// Assert a run of `label` held at most `peak_bytes`: the budget, what its `report` says it
+    /// Assert a run of `label` held at most `peak_bytes`: the budget, the `overcommit_bytes` it
     /// held past it when not even a stage's smallest step fit, and [`UNPLANNED_BYTES`].
-    pub(crate) fn assert_held(self, label: &str, peak_bytes: usize, report: &RunReport) {
+    pub(crate) fn assert_within(self, label: &str, peak_bytes: usize, overcommit_bytes: u64) {
         let budget = self.bytes();
-        let overcommit = report.overcommit_bytes;
         assert!(
-            peak_bytes as u64 <= budget + overcommit + UNPLANNED_BYTES,
+            peak_bytes as u64 <= budget + overcommit_bytes + UNPLANNED_BYTES,
             "{label}: the run held {peak_bytes} B at its peak, over its budget of {budget} B, \
-             {overcommit} B of overcommit and {UNPLANNED_BYTES} B unplanned"
+             {overcommit_bytes} B of overcommit and {UNPLANNED_BYTES} B unplanned"
         );
+    }
+
+    /// [`Self::assert_within`] the overcommit `report` states. A resident run, which holds well
+    /// below its budget, holds no more than the peak its plan expected either, past which a price
+    /// undercounts what it prices; a spilled combine plans its chunks again from the frames it
+    /// reads, against the budget alone.
+    pub(crate) fn assert_held(self, label: &str, peak_bytes: usize, report: &RunReport) {
+        self.assert_within(label, peak_bytes, report.overcommit_bytes);
+        if report.spilled_frames == 0 {
+            let planned = report
+                .planned_peak_bytes
+                .expect("every entry the budget test runs plans its memory");
+            assert!(
+                peak_bytes as u64 <= planned + UNPLANNED_BYTES,
+                "{label}: the resident run held {peak_bytes} B at its peak, over the {planned} B \
+                 its plan expected and {UNPLANNED_BYTES} B unplanned"
+            );
+        }
     }
 }

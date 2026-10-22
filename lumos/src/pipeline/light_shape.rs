@@ -186,8 +186,8 @@ mod tests {
     /// pixel, a row of 16 B and 136 of bookkeeping, 1128 B. Its detector holds 5 planes, 320 B, and
     /// 4 bitmasks of 4 rows padded to 128 bits, 256 B: 576 B.
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
-    /// row reads 12 + 1 B a pixel and 4 B of gain over 16 pixels, rounded up to 1: 14 B a pixel,
-    /// 168 B for three over 4 pixels. The combine holds the image and its flag byte, 80 B. A warp's
+    /// row copies 12 + 1 B a pixel of three over 4 pixels into each of two chunk copies, 312 B;
+    /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B. A warp's
     /// flag planes are a validity plane of 4 B a pixel, and the grown flags, the growth's two
     /// planes and the warped flags', a byte a pixel each: 128 B.
     ///
@@ -219,7 +219,7 @@ mod tests {
         let tail = |kept| {
             [
                 stage(kept, 0, 0, Units::Whole),
-                stage(kept, 80, 168, Units::Rows(4)),
+                stage(kept, 80, 312, Units::Rows(4)),
             ]
         };
         let decoded = LightShape::decoded(peek, 3, 1);

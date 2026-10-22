@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use lumos::{
-    CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor, RunReport,
+    CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor,
     SigmaThreshold, StackConfig,
 };
 
@@ -79,6 +79,6 @@ fn a_master_stays_within_its_budget() {
             )
             .unwrap()
         });
-        budget.assert_held("master dark", run.peak_bytes, &RunReport::default());
+        budget.assert_within("master dark", run.peak_bytes, 0);
     });
 }

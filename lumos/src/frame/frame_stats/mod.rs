@@ -65,19 +65,19 @@ impl FrameStats {
 
     /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
     /// workers: its noise first — a mosaic's by [`MosaicNoiseMeasure`], any other frame's by
-    /// [`NoisePlane`] one channel at a time — then the samples its levels sort, every slot's at
-    /// once.
+    /// [`NoisePlane`] one channel at a time — then the samples its levels sort, a plane's worth at
+    /// most: a mosaic's colors at once, which share its one plane, or a channel at a time.
     pub(crate) fn heap_bytes(
         dimensions: ImageDimensions,
         mosaic: Option<&CfaType>,
         threads: usize,
     ) -> usize {
         let size = dimensions.size();
-        match mosaic {
-            Some(cfa_type) => MosaicNoiseMeasure::heap_bytes(size, cfa_type)
-                .max(dimensions.pixel_count() * size_of::<f32>()),
-            None => mrs_noise::heap_bytes(size, threads).max(dimensions.frame_bytes()),
-        }
+        let noise = match mosaic {
+            Some(cfa_type) => MosaicNoiseMeasure::heap_bytes(size, cfa_type),
+            None => mrs_noise::heap_bytes(size, threads),
+        };
+        noise.max(dimensions.pixel_count() * size_of::<f32>())
     }
 
     /// [`Self::measure`], and with [`Spreads::Measured`] each slot's [`spread`](Self::spread) from

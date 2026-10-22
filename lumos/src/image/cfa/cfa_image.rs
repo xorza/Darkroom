@@ -176,10 +176,12 @@ impl CfaImage {
         self.cfa_type
     }
 
-    /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
-    /// Metadata is negligible against a full-sensor plane.
-    pub const fn ram_bytes(&self) -> usize {
+    /// Resident RAM held by this frame: its f32 CFA plane and its flag plane. A flat gain is
+    /// shared with every frame the flat divided, so its owner counts it. Metadata is negligible
+    /// against a full-sensor plane.
+    pub fn ram_bytes(&self) -> usize {
         self.data.width() * self.data.height() * size_of::<f32>()
+            + self.flags.as_ref().map_or(0, |flags| flags.bytes().len())
     }
 
     /// The data-quality flags of the pixels; `None` when no pixel carries one.

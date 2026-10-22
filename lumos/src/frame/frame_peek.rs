@@ -37,7 +37,7 @@ impl FramePeek {
     /// every frame, since a decoder that flags saturation gives one to most, and which also holds
     /// the mask of a frame with pixels it has no measurement for.
     pub(crate) const fn resident_bytes(self) -> usize {
-        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes()
+        self.dimensions.decoded_bytes()
     }
 
     /// What one such frame's way into a stack holds on `workers`: its decode, the decoder's own

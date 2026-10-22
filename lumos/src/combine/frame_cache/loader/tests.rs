@@ -451,8 +451,8 @@ fn cache_frame_dimension_mismatch() {
 /// resides as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a
 /// row over 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and
 /// holds 49 000 more in work; the normalization holds nothing; the combine holds the image and its
-/// flag byte, 5 B a pixel, 50 000 B, and a row reads three frames of 5 B a pixel over 100 pixels,
-/// 1500 B.
+/// flag byte, 5 B a pixel, 50 000 B, and a row copies three frames of 5 B a pixel over 100
+/// pixels into each of its two chunk copies, 3000 B.
 #[test]
 fn stages_charge_the_decode_the_normalization_and_the_combine() {
     let peek = FramePeek {
@@ -483,7 +483,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
             Stage {
                 kept,
                 held: 50_000,
-                in_flight: 1500,
+                in_flight: 3000,
                 units: Units::Rows(100),
             },
         ]

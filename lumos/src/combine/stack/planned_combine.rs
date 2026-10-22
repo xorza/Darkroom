@@ -3,6 +3,7 @@
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::Normalization;
 use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
+use crate::combine::stack::combine_cost::CombineCost;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::stage::{Stage, Units};
@@ -31,11 +32,10 @@ pub(crate) struct PlannedFrames {
 impl PlannedCombine {
     /// The normalization and the combine of `frames`, each kept at `kept`.
     ///
-    /// The normalization holds what measuring the frames holds. The combine holds its output
-    /// planes throughout — a coverage plane, one per channel when each channel is covered by its
-    /// own rule, and the flag plane — and each of its rows reads every frame in its layout. An
-    /// upper bound for frames that turn out to carry no quality planes or no flags, which leave
-    /// those planes out.
+    /// The normalization holds what measuring the frames holds. The combine is the
+    /// [`CombineCost`] of a coverage plane, one per channel when each channel is covered by its
+    /// own rule, the flag plane, and every frame in its layout. An upper bound for frames that turn
+    /// out to carry no quality planes or no flags, which leave those planes out.
     pub(crate) fn stages(self, frames: PlannedFrames, kept: usize) -> [Stage; 2] {
         let PlannedFrames {
             count,
@@ -65,15 +65,14 @@ impl PlannedCombine {
                 in_flight: 0,
                 units: Units::Whole,
             },
-            Stage {
-                kept,
-                held: self
-                    .quality
-                    .pixel_bytes(dimensions.channels(), coverage_planes, 1)
-                    * dimensions.pixel_count(),
-                in_flight: count * layout.pixel_bytes() * dimensions.width(),
-                units: Units::Rows(dimensions.height()),
-            },
+            CombineCost {
+                dimensions,
+                quality: self.quality,
+                coverage_planes,
+                flag_planes: 1,
+                frame_pixel_bytes: count * layout.pixel_bytes(),
+            }
+            .stage(kept),
         ]
     }
 }

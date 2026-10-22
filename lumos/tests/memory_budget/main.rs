@@ -14,6 +14,7 @@ mod alone;
 mod budget;
 mod detection;
 mod drizzle;
+mod flat;
 mod image_ops;
 mod live_heap;
 mod registered;

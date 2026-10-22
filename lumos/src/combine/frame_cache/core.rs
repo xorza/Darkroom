@@ -57,8 +57,9 @@ pub(super) struct ChunkCtx<'a> {
 impl CacheCore {
     /// The rows the combine `stage` reads at once, and what the run holds past the budget: the
     /// whole image for a resident stack, which reads its frames where they lie; on the disk tier
-    /// the rows the budget leaves room for beside what the run holds beside the combine, two chunks
-    /// held at once — the one reduced and the next one read. The overcommit is the larger of the
+    /// the rows the budget leaves room for beside what the run holds beside the combine, each row
+    /// priced by its [`CombineCost`](crate::combine::stack::combine_cost::CombineCost). The
+    /// overcommit is the larger of the
     /// combine's own and the earlier stages'. A pass the floor puts past the budget says so in the
     /// log.
     pub(super) fn chunk_rows(&self, stage: Stage) -> Width {
@@ -68,12 +69,11 @@ impl CacheCore {
                 overcommit_bytes: 0,
             };
         };
-        let double_buffered = Stage {
+        let beside = Stage {
             held: stage.held + combine.beside_bytes,
-            in_flight: 2 * stage.in_flight,
             ..stage
         };
-        let width = double_buffered.width(combine.budget, 1, Placement::Spilled);
+        let width = beside.width(combine.budget, 1, Placement::Spilled);
         if width.overcommit_bytes > 0 {
             tracing::warn!(
                 rows = width.units,

@@ -377,9 +377,9 @@ fn the_raw_values_settle_no_data_and_saturation() {
 
 /// A decode is admitted from the header, before `unpack`, against the context's memory limit.
 /// The 24 × 24 dump is 1152 file bytes and unpacks into a 1152-byte raw buffer (576 photosites
-/// of 2 bytes). Its 22 × 22 = 484 visible pixels then hold 4 bytes each on the mosaic path, 1936
-/// bytes for a sum of 4240, and 8 + 6 + 12 = 26 each through LibRaw's processing, 12584 bytes
-/// for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
+/// of 2 bytes). Its 22 × 22 = 484 visible pixels then hold 4 bytes of sample and a flag byte each
+/// on the mosaic path, 2420 bytes for a sum of 4724, and 8 + 6 + 12 = 26 each through LibRaw's
+/// processing, 12584 bytes for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
 #[test]
 fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
     let samples = Buffer2::new_filled(24, 24, 2000u16);
@@ -390,13 +390,13 @@ fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
         Err(error) => panic!("{error:?}"),
     };
     let over = |required, limit| Some(OverBudget { required, limit });
-    assert_eq!(refused(RawPath::Mosaic, 4240), None);
-    assert_eq!(refused(RawPath::Mosaic, 4239), over(4240, 4239));
+    assert_eq!(refused(RawPath::Mosaic, 4724), None);
+    assert_eq!(refused(RawPath::Mosaic, 4723), over(4724, 4723));
     assert_eq!(refused(RawPath::Processed, 14888), None);
     assert_eq!(refused(RawPath::Processed, 14887), over(14888, 14887));
     assert_eq!(RawPath::preview(&libraw).unwrap(), RawPath::Mosaic);
     // The preview demosaics the mosaic too, which holds four of its planes at once — past the
-    // 4240 bytes its decode alone is admitted under — and is refused one byte short of its way.
+    // 4724 bytes its decode alone is admitted under — and is refused one byte short of its way.
     let info = frame_info(&libraw).unwrap();
     let way = u64::try_from(
         info.demosaiced(

@@ -61,7 +61,7 @@ fn set(c: &mut Criterion) {
         let lights = lights();
         b.iter_batched(
             || lights.resident(),
-            |frames| lights.combine(frames, StorageTier::Resident, &StackConfig::light()),
+            |frames| lights.combine(frames, StorageTier::UNPLANNED, &StackConfig::light()),
             BatchSize::PerIteration,
         );
     });
@@ -102,7 +102,7 @@ fn set(c: &mut Criterion) {
             let lights = lights();
             b.iter_batched(
                 || lights.resident(),
-                |frames| lights.combine(frames, StorageTier::Resident, &config),
+                |frames| lights.combine(frames, StorageTier::UNPLANNED, &config),
                 BatchSize::PerIteration,
             );
         });

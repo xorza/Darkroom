@@ -151,7 +151,7 @@ impl DrizzleRun<'_> {
             "Starting drizzle stacking"
         );
         let grid = OutputGrid::new(drizzle.scale, input_dims.size());
-        let output = ImageDimensions::new(grid.size(), deposit.output_layout());
+        let output = ImageDimensions::checked(grid.size(), deposit.output_layout())?;
         let mut drizzler = Drizzler::new(
             &first.source,
             KernelPlan::new(drizzle.kernel, drizzle.pixfrac, drizzle.scale),

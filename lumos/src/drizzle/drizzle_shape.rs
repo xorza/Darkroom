@@ -11,6 +11,7 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::ingest_run::IngestRun;
+use crate::io::error::OverBudget;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
@@ -45,6 +46,11 @@ impl DrizzleShape {
         run: &IngestRun,
         storage: &RunStorage,
     ) -> Result<StorageTier, DrizzleError> {
+        OverBudget::check(
+            u64::try_from(self.frame_bytes()).expect("a byte count fits u64"),
+            run.ctx.memory_limit_bytes,
+        )
+        .map_err(DrizzleError::OutputOverBudget)?;
         let budget = run.budget;
         let plan = RunPlan::of(
             self.frame_count,
@@ -56,8 +62,7 @@ impl DrizzleShape {
             FrameOrigin::Memory => 0,
         };
         let writes = RunWrites {
-            kept: (StoredLayout::decoded(self.input).heap_bytes(self.input) as u64)
-                .saturating_mul(uncached as u64),
+            kept: (self.input.decoded_bytes() as u64).saturating_mul(uncached as u64),
             spilled: (self.drizzled().heap_bytes(self.output) as u64)
                 .saturating_mul(self.frame_count as u64),
         };
@@ -67,20 +72,29 @@ impl DrizzleShape {
     }
 
     /// How a drizzled frame is stored: its channels, a drop weight and Kish size per weight plane,
-    /// and a flag byte.
+    /// a flag byte, and its flat gain warped onto the output grid, a channel each — charged to
+    /// every drizzled frame, as lights are divided by a flat as a rule.
     const fn drizzled(&self) -> StoredLayout {
         StoredLayout {
             channels: self.output.channels(),
             quality_planes: 2 * self.deposit.weight_planes(),
             flags: true,
-            gain_channels: 0,
+            gain_channels: self.output.channels(),
         }
     }
 
     /// The depth of every weight plane, summed as the frames arrive and read by the gate after the
     /// combine: what the run holds beside every stage.
     const fn depth_bytes(&self) -> usize {
-        self.deposit.weight_planes() * self.output.pixel_count() * size_of::<f32>()
+        (self.deposit.weight_planes() * size_of::<f32>()).saturating_mul(self.output.pixel_count())
+    }
+
+    /// The least a run of this shape holds: one drizzled frame and the depth beside it, refused
+    /// past the run's memory before any price is summed over the frames.
+    const fn frame_bytes(&self) -> usize {
+        self.drizzled()
+            .heap_bytes(self.output)
+            .saturating_add(self.depth_bytes())
     }
 
     /// The stages of a run of this shape combined under `stack` on `workers`: the drizzle, a frame
@@ -99,7 +113,7 @@ impl DrizzleShape {
         } = *self;
         let drizzled = self.drizzled();
         let drizzled_bytes = drizzled.heap_bytes(output);
-        let input_bytes = StoredLayout::decoded(input).heap_bytes(input);
+        let input_bytes = input.decoded_bytes();
         let mosaic = deposit.mosaic();
         let way = Footprint::kept(input_bytes)
             .beside(FrameStats::heap_bytes(input, mosaic.as_ref(), workers))
@@ -162,13 +176,15 @@ mod tests {
     /// Three mono frames of 2 × 2 drizzled from files onto 4 × 4, with no normalization and the
     /// image alone, on one worker.
     ///
-    /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, and
-    /// 16 flag bytes: 208 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B, measured by
-    /// MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of transform a
-    /// pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 200 past the
-    /// frame it keeps. The depth of the one weight plane, 64 B, is held through every stage. The
-    /// combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row
-    /// reads three frames of 13 B a pixel over 4 pixels, 156 B.
+    /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, 16
+    /// flag bytes, and its flat gain warped onto the output, a node at pixels 0 and 4 of each axis,
+    /// 2 × 2 nodes of 4 B: 224 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B,
+    /// measured by MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of
+    /// transform a pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 184
+    /// past the frame it keeps. The depth of the one weight plane, 64 B, is held through every
+    /// stage. The combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth,
+    /// and a row copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies,
+    /// 312 B; the gain is read where it lies.
     #[test]
     fn the_depth_is_held_through_every_stage() {
         let shape = DrizzleShape {
@@ -187,21 +203,21 @@ mod tests {
             shape.stages(&stack, 1),
             [
                 Stage {
-                    kept: 208,
+                    kept: 224,
                     held: 64,
-                    in_flight: 200,
+                    in_flight: 184,
                     units: Units::Serial,
                 },
                 Stage {
-                    kept: 208,
+                    kept: 224,
                     held: 64,
                     in_flight: 0,
                     units: Units::Whole,
                 },
                 Stage {
-                    kept: 208,
+                    kept: 224,
                     held: 144,
-                    in_flight: 156,
+                    in_flight: 312,
                     units: Units::Rows(4),
                 },
             ]

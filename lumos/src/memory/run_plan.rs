@@ -16,6 +16,9 @@ pub(crate) struct RunPlan {
     /// The budget the run is planned under, which its combine is budgeted against too.
     pub(crate) budget: Budget,
     widths: ArrayVec<Width, MAX_STAGES>,
+    /// The bytes the run holds at its largest stage, each at its width: what it expects to hold
+    /// at its peak.
+    pub(crate) peak_bytes: u64,
 }
 
 impl RunPlan {
@@ -42,22 +45,30 @@ impl RunPlan {
                 .overcommit_bytes
                 == 0
         });
-        let widths = stages
+        let placement = |kept_set| {
+            if resident {
+                Placement::Resident { kept_set }
+            } else {
+                Placement::Spilled
+            }
+        };
+        let widths: ArrayVec<Width, MAX_STAGES> = stages
             .iter()
             .zip(&kept_sets)
-            .map(|(stage, &kept_set)| {
-                let placement = if resident {
-                    Placement::Resident { kept_set }
-                } else {
-                    Placement::Spilled
-                };
-                stage.width(budget, frame_count, placement)
-            })
+            .map(|(stage, &kept_set)| stage.width(budget, frame_count, placement(kept_set)))
             .collect();
+        let peak_bytes = stages
+            .iter()
+            .zip(&kept_sets)
+            .zip(&widths)
+            .map(|((stage, &kept_set), width)| stage.peak_bytes(width.units, placement(kept_set)))
+            .max()
+            .unwrap_or(0);
         Self {
             resident,
             budget,
             widths,
+            peak_bytes,
         }
     }
 

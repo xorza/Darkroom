@@ -25,7 +25,7 @@ impl FrameInfo {
     /// The frame's decode: its samples and its flag plane kept, which a decoder that flags
     /// saturation gives most frames, and the decoder's bytes beside them on the way.
     pub(crate) const fn decoded(self) -> Footprint {
-        let frame = self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes();
+        let frame = self.dimensions.decoded_bytes();
         Footprint {
             kept: frame,
             peak: frame + self.decoder_bytes,

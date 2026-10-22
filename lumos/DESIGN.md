@@ -29,3 +29,16 @@
   through demosaic and star detection, so a fixed budget runs fewer lights at once; caching
   allocators and buffer reuse pay where the allocation is a large share of the work. Source:
   `research/2026-10-16-cosmic-ray-page-faults.md`.
+- **A price sits beside what it prices, and one price serves the plan and the run.** The combine
+  is priced by `CombineCost` for the plan and the frame cache alike, two chunk copies included, and
+  a chunk is priced by what `ChunkCopy` copies, not the flat gain it reads where it is mapped.
+  Refused: a formula per caller, which drifted (the drizzle's frames left out their flat gain).
+- **A run reports the peak its plan expects, and the budget test holds a resident run to it.**
+  `RunReport::planned_peak_bytes`, written as `LUMPLNB`, is what `tests/memory_budget` measures a
+  resident run against, where the budget alone binds nothing. Refused: a lower bound on the same
+  figure, since prices are upper bounds by design (flags and flat gain are charged to every frame),
+  so a run held well below its plan is no fault.
+- **A drizzle grid is refused before it is allocated.** A scale whose grid is no image's size, or
+  whose one drizzled frame and depth pass the run's memory, fails the run with
+  `DrizzleError::OutputSize` or `OutputOverBudget`; prices saturate rather than wrap. Refused: a
+  cap on the scale, which bounds no input's size.

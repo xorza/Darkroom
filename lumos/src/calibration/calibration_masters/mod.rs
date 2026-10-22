@@ -222,14 +222,12 @@ impl CalibrationMasters {
         self.flat.as_ref().map_or(0, PreparedFlat::floored)
     }
 
-    /// Resident RAM held by this bundle: the present master frames' pixel bytes, the defect map's
-    /// index lists, and the flags the masters impose on a light.
+    /// Resident RAM held by this bundle: the present masters' planes and flags, the flat's gain,
+    /// the defect map's index lists, and the flags the masters impose on a light.
     pub fn ram_bytes(&self) -> usize {
-        let frame_bytes = self
-            .masters()
-            .map(|(_, master)| master.ram_bytes())
-            .sum::<usize>();
-        frame_bytes
+        self.dark.as_ref().map_or(0, CfaImage::ram_bytes)
+            + self.flat.as_ref().map_or(0, PreparedFlat::ram_bytes)
+            + self.bias.as_ref().map_or(0, CfaImage::ram_bytes)
             + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
             + self.imposed.as_ref().map_or(0, |flags| flags.bytes().len())
     }
