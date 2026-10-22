@@ -6,6 +6,7 @@
 //! on every CPU.
 
 use crate::math::size2us::Size2us;
+use crate::registration::resample::flagged_sources::Validity;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::warp_kernel::TapAxis;
@@ -234,22 +235,18 @@ impl<'a> TapWindow<'a> {
         AxisSums::of(self.wx).window(AxisSums::of(self.wy))
     }
 
-    /// The weight sums over the taps `validity` marks with 1, the others 0: a source with nulls,
-    /// where the window is no longer a product of its axes.
+    /// The weight sums over the taps that `validity` holds: a source with nulls, where the window
+    /// is no longer a product of its axes.
     #[inline(always)]
-    pub(super) fn masked_weights<S: Isa>(
-        &self,
-        isa: S,
-        validity: SourcePlane<'_>,
-    ) -> WindowWeights {
+    pub(super) fn masked_weights<S: Isa>(&self, isa: S, validity: Validity<'_>) -> WindowWeights {
         let mut lobes = Lobes::zero(isa);
         let mut square = isa.splat_f32(0.0);
         let head = self.head(isa);
         let first = head.weights;
         let first_square = first.all * first.all;
         for (j, &wy) in self.wy.iter().enumerate() {
-            let row = self.row(validity, j);
-            let valid = head.load(isa, validity.pixels, row);
+            let row = self.row(validity.width, j);
+            let valid = head.valid(isa, validity, row);
             let mut on_row = Lobes {
                 positive: valid * first.positive,
                 negative: valid * first.negative,
@@ -258,7 +255,7 @@ impl<'a> TapWindow<'a> {
             for start in (F32_LANES..self.wx.len()).step_by(F32_LANES) {
                 let end = (start + F32_LANES).min(self.wx.len());
                 let lanes = SignedLanes::load(isa, &self.wx[start..end]);
-                let valid = isa.load_f32_partial(&validity.pixels[row + start..row + end]);
+                let valid = validity.lanes(isa, row + start, end - start);
                 on_row.positive = valid.mul_add(lanes.positive, on_row.positive);
                 on_row.negative = valid.mul_add(lanes.negative, on_row.negative);
                 on_square = (valid * lanes.all).mul_add(lanes.all, on_square);
@@ -279,21 +276,20 @@ impl<'a> TapWindow<'a> {
         &self,
         isa: S,
         plane: SourcePlane<'_>,
-        validity: Option<SourcePlane<'_>>,
+        validity: Option<Validity<'_>>,
     ) -> f32 {
         let head = self.head(isa);
         let first = head.weights.all;
         let mut sum = isa.splat_f32(0.0);
         for (j, &wy) in self.wy.iter().enumerate() {
-            let row = self.row(plane, j);
+            let row = self.row(plane.width, j);
             let values = head.load(isa, plane.pixels, row);
             let mut on_row =
-                valid_only(isa, values, validity.map(|v| head.load(isa, v.pixels, row))) * first;
+                valid_only(isa, values, validity.map(|v| head.valid(isa, v, row))) * first;
             for start in (F32_LANES..self.wx.len()).step_by(F32_LANES) {
                 let end = (start + F32_LANES).min(self.wx.len());
                 let values = isa.load_f32_partial(&plane.pixels[row + start..row + end]);
-                let valid =
-                    validity.map(|v| isa.load_f32_partial(&v.pixels[row + start..row + end]));
+                let valid = validity.map(|v| v.lanes(isa, row + start, end - start));
                 on_row = valid_only(isa, values, valid)
                     .mul_add(isa.load_f32_partial(&self.wx[start..end]), on_row);
             }
@@ -309,7 +305,7 @@ impl<'a> TapWindow<'a> {
         &self,
         isa: S,
         plane: SourcePlane<'_>,
-        validity: Option<SourcePlane<'_>>,
+        validity: Option<Validity<'_>>,
     ) -> LobeSums {
         let zero = isa.splat_f32(0.0);
         let mut lobes = Lobes::zero(isa);
@@ -317,11 +313,11 @@ impl<'a> TapWindow<'a> {
         let head = self.head(isa);
         let first = head.weights;
         for (j, &wy) in self.wy.iter().enumerate() {
-            let row = self.row(plane, j);
+            let row = self.row(plane.width, j);
             let values = valid_only(
                 isa,
                 head.load(isa, plane.pixels, row),
-                validity.map(|v| head.load(isa, v.pixels, row)),
+                validity.map(|v| head.valid(isa, v, row)),
             );
             let light = values.max(zero);
             let mut on_row = Lobes {
@@ -335,7 +331,7 @@ impl<'a> TapWindow<'a> {
                 let values = valid_only(
                     isa,
                     isa.load_f32_partial(&plane.pixels[row + start..row + end]),
-                    validity.map(|v| isa.load_f32_partial(&v.pixels[row + start..row + end])),
+                    validity.map(|v| v.lanes(isa, row + start, end - start)),
                 );
                 let light = values.max(zero);
                 on_row.positive = light.mul_add(lanes.positive, on_row.positive);
@@ -374,15 +370,15 @@ impl<'a> TapWindow<'a> {
         }
     }
 
-    /// Where row `j` of the window starts in a plane of the source's width.
+    /// Where row `j` of the window starts in a plane `width` wide, the source's.
     #[inline(always)]
-    const fn row(&self, plane: SourcePlane<'_>, j: usize) -> usize {
-        (self.y + j) * plane.width + self.x
+    const fn row(&self, width: usize, j: usize) -> usize {
+        (self.y + j) * width + self.x
     }
 }
 
 /// `values` where `valid` holds data, zero elsewhere — selected, not multiplied, so a NaN under an
-/// excluded tap never reaches a sum — or `values` whole without a validity plane.
+/// excluded tap never reaches a sum — or `values` whole for a source that excludes none.
 #[inline(always)]
 fn valid_only<S: Isa>(isa: S, values: S::F32, valid: Option<S::F32>) -> S::F32 {
     match valid {
@@ -403,6 +399,12 @@ impl<V: F32x8> Head<V> {
     #[inline(always)]
     fn load<S: Isa<F32 = V>>(self, isa: S, pixels: &[f32], row: usize) -> V {
         self.lanes.load(isa, pixels, row)
+    }
+
+    /// The [`Validity::lanes`] of the row starting at `row`, past the window cleared.
+    #[inline(always)]
+    fn valid<S: Isa<F32 = V>>(self, isa: S, validity: Validity<'_>, row: usize) -> V {
+        validity.lanes(isa, row, self.lanes.count)
     }
 }
 

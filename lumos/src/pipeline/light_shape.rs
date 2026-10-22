@@ -97,9 +97,10 @@ impl LightShape {
         DetectionResources::heap_bytes(self.dimensions.size(), workers)
     }
 
-    /// What each light's warp holds beside its source and its result: a flagged light's planes.
-    const fn warp_bytes(&self) -> usize {
-        WarpScratch::heap_bytes(self.dimensions.size())
+    /// What each light's warp on `workers` holds beside its source and its result: a flagged
+    /// light's planes.
+    const fn warp_bytes(&self, workers: usize) -> usize {
+        WarpScratch::heap_bytes(self.dimensions.size(), workers)
     }
 
     /// The stages of the lights with the reference found, under `config` on `workers`: each light
@@ -118,7 +119,7 @@ impl LightShape {
             Stage {
                 kept: warped,
                 held: 0,
-                in_flight: self.prepared.kept + self.warp_bytes(),
+                in_flight: self.prepared.kept + self.warp_bytes(workers),
                 units: Units::Frames,
             },
             normalize,
@@ -138,7 +139,9 @@ impl LightShape {
             Stage {
                 kept: warped,
                 held: 0,
-                in_flight: self.prepared.peak + self.detector_bytes(workers) + self.warp_bytes(),
+                in_flight: self.prepared.peak
+                    + self.detector_bytes(workers)
+                    + self.warp_bytes(workers),
                 units: Units::Frames,
             },
             normalize,
@@ -192,12 +195,13 @@ mod tests {
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
     /// row copies 12 + 1 B a pixel of three over 4 pixels into each of two chunk copies, 312 B;
     /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B. A warp's
-    /// flag planes are a validity plane of 4 B a pixel, and the grown flags, the growth's two
-    /// planes and the warped flags', a byte a pixel each: 128 B.
+    /// flag planes are the grown flags and the warped flags', a byte a pixel each, 32 B, and its
+    /// worker's block ORs of the growth, two of a strip of the 4 columns down the 4 rows, 32 B:
+    /// 64 B.
     ///
     /// Found, a light in work holds its statistics and its detector, 3232 B, and a warp its 80 B
-    /// source and its planes, 208 B. Named, a worker holds the light at its peak, 1208 B, the
-    /// detector and the warp's planes, 3440 B. Held by the caller, a light keeps nothing until it
+    /// source and its planes, 144 B. Named, a worker holds the light at its peak, 1208 B, the
+    /// detector and the warp's planes, 3376 B. Held by the caller, a light keeps nothing until it
     /// is warped, then 224 − 80 = 144 B.
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
@@ -232,21 +236,21 @@ mod tests {
             decoded.found_reference(&config, 1),
             [
                 stage(80, 0, 3232, Units::Frames),
-                stage(224, 0, 208, Units::Frames),
+                stage(224, 0, 144, Units::Frames),
                 normalize,
                 combine,
             ]
         );
         assert_eq!(
             decoded.named_reference(&config, 1),
-            [stage(224, 0, 3440, Units::Frames), normalize, combine]
+            [stage(224, 0, 3376, Units::Frames), normalize, combine]
         );
         let [normalize, combine] = tail(144);
         assert_eq!(
             LightShape::held(peek, 3, 1).found_reference(&config, 1),
             [
                 stage(0, 0, 3232, Units::Frames),
-                stage(144, 0, 208, Units::Frames),
+                stage(144, 0, 144, Units::Frames),
                 normalize,
                 combine,
             ]

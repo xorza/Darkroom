@@ -1,7 +1,8 @@
 //! A light warped onto the reference, as the warp stage warps every light into the buffers it
 //! keeps from frame to frame, with the coverage and confidence the combine reads: a mono light
 //! under every interpolation method, and a demosaiced one under the default Lanczos-3, through the
-//! similarity registration fits and through the same with its SIP correction.
+//! similarity registration fits and through the same with its SIP correction; and a mono light
+//! whose calibration flagged its star cores and its defects, under Lanczos-3.
 
 use std::cell::OnceCell;
 
@@ -13,6 +14,8 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::linear_image::LinearImage;
+use crate::image::pixel_flags::PixelFlags;
+use crate::image::quality_flags::QualityFlags;
 use crate::registration::bench::Pair;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
@@ -57,6 +60,18 @@ pub(crate) fn integration(c: &mut Criterion) {
             },
         );
     });
+    group.bench_function(id("mono_flagged"), |b| {
+        let mut light = field.render(FRAME).image;
+        light.set_flags(calibration_flags(&light));
+        warp(
+            b,
+            WarpCase {
+                light: &light,
+                transform: &similarity(),
+                method,
+            },
+        );
+    });
     group.bench_function(id("rgb_sip"), |b| {
         warp(
             b,
@@ -68,6 +83,30 @@ pub(crate) fn integration(c: &mut Criterion) {
         );
     });
 }
+
+/// The flags a calibration gives `light`: its star cores saturated, and one pixel in
+/// [`DEFECT_SPACING`] a defect, scattered by a multiplicative hash of its index.
+fn calibration_flags(light: &LinearImage) -> Option<PixelFlags> {
+    let pixels = light.channel(0).pixels();
+    PixelFlags::from_fn(light.dimensions().size(), |idx| {
+        if (idx as u64)
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .is_multiple_of(DEFECT_SPACING)
+        {
+            QualityFlags::DEFECT
+        } else if pixels[idx] > SATURATION {
+            QualityFlags::SATURATED
+        } else {
+            QualityFlags::default()
+        }
+    })
+}
+
+/// A sensor's defect rate, about 0.1%, as a hot-pixel map flags it.
+const DEFECT_SPACING: u64 = 1000;
+
+/// Where the scene's brightest stars clip.
+const SATURATION: f32 = 0.8;
 
 /// The bench id's name for `method`.
 const fn name(method: InterpolationMethod) -> &'static str {

@@ -98,30 +98,9 @@ and a slowdown is a defect of the batch. A batch that changes a vector kernel ru
 check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
-Batches 1, prices that match the allocations, 2, streaming FITS output, and 3, the detection working
-set, landed. Dependencies: batch 6 needs the digest that batch 5 computes at the write, and batch 7
+Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
+set, and 4, the warp working set, landed. Dependencies: batch 6 needs the digest that batch 5 computes at the write, and batch 7
 needs the `Stored` return of batch 6. The other batches are independent.
-
-### 4. Warp working set
-
-Each warp in flight prices 8 B/px of `FlagScratch`. This batch takes it to 2 B/px (−144 MB for
-each warp slot). Files: `registration/resample/{flagged_sources.rs, tap_window.rs,
-frame_sampler/mod.rs}`, `image/pixel_flags.rs`, `simd/`, `image/cfa/cfa_image.rs`.
-
-- [ ] `registration/resample/flagged_sources.rs:37,49,74` and `image/pixel_flags.rs:201` — the
-  f32 validity plane is a 4 B/px copy of the flag bytes. It is read as a lane mask for values
-  (`tap_window.rs:252-338`, `frame_sampler/mod.rs:166`) and as a ×1/×0 factor for weights.
-  Target: build the lane mask from the flag bytes inside the windows that `near` marks. This
-  needs a u8-load-to-mask op on `simd::Isa` for each ISA. A select of the weights gives the same
-  sums with one exception: a Lanczos lobe is negative, so `0 × w` is `−0.0` where a select gives
-  `+0.0`, and a window with every lane masked can sum to the other zero. Such a pixel has no
-  coverage and is excluded. The cross-check test compares the outputs bit for bit where
-  coverage is above zero, and by value elsewhere.
-- [ ] `image/pixel_flags.rs:105-112,243` — the vertical van Herk pass holds two full u8 planes
-  (48 MB), and `dilate_window` makes a new `DilationScratch` on each call (once for each
-  demosaic, `cfa_image.rs:303`). Target: the vertical pass in bands of `reach.len()` rows, with
-  O(block × width) scratch, and `DilationScratch::heap_bytes` to match. The existing dilation
-  tests cover it, and a test compares it with the plane version over random flags.
 
 ### 5. Read each input once
 
@@ -201,7 +180,8 @@ Needs batch 6. Files: `drizzle/{accumulator/mod.rs, drizzle_run.rs, input_map.rs
 align_stack_run.rs}`, `registration/resample/mod.rs`, `noise/mrs_noise.rs`,
 `combine/normalization/{norm_fit.rs, photometric_gain.rs, slot_planes.rs}`,
 `frame_store/stratified_samples.rs`, `combine/frame_cache/{loader/mod.rs, sample/mod.rs}`,
-`combine/rejection/{scratch_buffers.rs, sorted_samples.rs}`.
+`combine/rejection/{scratch_buffers.rs, sorted_samples.rs}`, `image/{pixel_flags.rs,
+cfa/cfa_image.rs}`, `io/{raw/unpacked_raw.rs, fits/decode/mod.rs}`, `pipeline/mosaic_preparation.rs`.
 
 - [ ] `drizzle/accumulator/mod.rs:121-145` with `drizzle_run.rs:228-238` — `drizzle` builds a
   new `OutputSums` for each frame, and on the spill tier the store writes it and frees it. That
@@ -238,6 +218,12 @@ align_stack_run.rs}`, `registration/resample/mod.rs`, `noise/mrs_noise.rs`,
   carries, so capacities settle near 2 × `frame_count`. Target: clear first, then
   `reserve_exact(frame_count)`. Add the pooled `CombineScratch` (frames × 54 B plus
   `NormalScores` up to 1 MiB, for each worker) to the combine's `held`.
+- [ ] `image/pixel_flags.rs` `PixelFlags::dilate_window`, `image/cfa/cfa_image.rs:305` — each
+  demosaic makes a new `DilationScratch`: up to `workers × 2 × height × 64` B of block ORs (8 MB
+  at 24 MP on 16 workers), allocated for each frame and priced nowhere. Its callers
+  (`io/raw/unpacked_raw.rs`, `io/fits/decode/mod.rs`, `pipeline/mosaic_preparation.rs`) reach
+  the demosaic through `LoadCtx`. Target: the scratch on the owner that decodes frame after
+  frame, through `LoadCtx`, and its `heap_bytes` in the decode's price.
 
 ### 8. Raster decode bound
 
