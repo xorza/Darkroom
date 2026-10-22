@@ -91,9 +91,10 @@ impl LightShape {
         })
     }
 
-    /// What each worker's detector holds throughout: its pool of image-sized planes.
-    const fn detector_bytes(&self) -> usize {
-        DetectionResources::heap_bytes(self.dimensions.size())
+    /// What each worker's detector holds throughout, its filters' bands on `workers`: its pool of
+    /// image-sized planes.
+    fn detector_bytes(&self, workers: usize) -> usize {
+        DetectionResources::heap_bytes(self.dimensions.size(), workers)
     }
 
     /// What each light's warp holds beside its source and its result: a flagged light's planes.
@@ -111,7 +112,7 @@ impl LightShape {
             Stage {
                 kept: self.prepared.kept - self.held,
                 held: 0,
-                in_flight: self.prepared.transient() + self.detector_bytes(),
+                in_flight: self.prepared.transient() + self.detector_bytes(workers),
                 units: Units::Frames,
             },
             Stage {
@@ -137,7 +138,7 @@ impl LightShape {
             Stage {
                 kept: warped,
                 held: 0,
-                in_flight: self.prepared.peak + self.detector_bytes() + self.warp_bytes(),
+                in_flight: self.prepared.peak + self.detector_bytes(workers) + self.warp_bytes(),
                 units: Units::Frames,
             },
             normalize,
@@ -183,17 +184,20 @@ mod tests {
     ///
     /// A light decodes to 16 pixels of 4 bytes and 16 flag bytes, 80 B, and its statistics are
     /// MRS over one tile that is the frame: 16 coefficients of 33 bytes, 28 bytes of transform a
-    /// pixel, a row of 16 B and 136 of bookkeeping, 1128 B. Its detector holds 5 planes, 320 B, and
-    /// 4 bitmasks of 4 rows padded to 128 bits, 256 B: 576 B.
+    /// pixel, a row of 16 B and 136 of bookkeeping, 1128 B. Its detector holds 3 planes, 192 B,
+    /// 4 bitmasks of 4 rows padded to 128 bits, 256 B, 2 surfaces of one tile, its value and second
+    /// derivative, 2 centres and a reader's 3 + 4 samples, 44 B each, its worker's band of the
+    /// widest filter, 57 rows of 4 samples, 912 B, and its worker's deblend set, room for the
+    /// frame's 16 pixels at 41 B, 656 B: 2104 B.
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
     /// row copies 12 + 1 B a pixel of three over 4 pixels into each of two chunk copies, 312 B;
     /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B. A warp's
     /// flag planes are a validity plane of 4 B a pixel, and the grown flags, the growth's two
     /// planes and the warped flags', a byte a pixel each: 128 B.
     ///
-    /// Found, a light in work holds its statistics and its detector, 1704 B, and a warp its 80 B
+    /// Found, a light in work holds its statistics and its detector, 3232 B, and a warp its 80 B
     /// source and its planes, 208 B. Named, a worker holds the light at its peak, 1208 B, the
-    /// detector and the warp's planes, 1912 B. Held by the caller, a light keeps nothing until it
+    /// detector and the warp's planes, 3440 B. Held by the caller, a light keeps nothing until it
     /// is warped, then 224 − 80 = 144 B.
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
@@ -227,7 +231,7 @@ mod tests {
         assert_eq!(
             decoded.found_reference(&config, 1),
             [
-                stage(80, 0, 1704, Units::Frames),
+                stage(80, 0, 3232, Units::Frames),
                 stage(224, 0, 208, Units::Frames),
                 normalize,
                 combine,
@@ -235,13 +239,13 @@ mod tests {
         );
         assert_eq!(
             decoded.named_reference(&config, 1),
-            [stage(224, 0, 1912, Units::Frames), normalize, combine]
+            [stage(224, 0, 3440, Units::Frames), normalize, combine]
         );
         let [normalize, combine] = tail(144);
         assert_eq!(
             LightShape::held(peek, 3, 1).found_reference(&config, 1),
             [
-                stage(0, 0, 1704, Units::Frames),
+                stage(0, 0, 3232, Units::Frames),
                 stage(144, 0, 208, Units::Frames),
                 normalize,
                 combine,

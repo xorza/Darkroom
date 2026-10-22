@@ -161,7 +161,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     // 1. The measurement plane, the sky out, and the sky's noise.
     let mut frame = PreparedFrame::new(&linear_image, &config, &mut pool);
     save(&frame.measure, "01_measure");
-    save(&frame.sky.noise, "02_sky_noise");
+    save(&frame.sky.noise.plane(), "02_sky_noise");
 
     // 2. FWHM estimation.
     let fwhm_source = frame.estimate_fwhm(&config, &mut pool);
@@ -171,7 +171,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     // 3. The detection plane and the noise measured on it.
     let plane = frame.final_plane(fwhm, &config, &mut pool);
     save(&plane.values, "03_detection_plane");
-    save(&plane.noise.noise, "04_detection_noise");
+    save(&plane.noise.noise.plane(), "04_detection_noise");
 
     // 4. Threshold mask.
     let mut mask = pool.acquire_bit();

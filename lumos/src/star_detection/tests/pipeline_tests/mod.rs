@@ -115,8 +115,9 @@ impl PipelineCase<'_> {
         let bg = bg_map::estimate(pixels, &config.bg);
         let saturation = frame.image.metadata.header.saturation_level();
         let k = config.extraction.sigma_threshold;
-        let sigma_at = |x: usize, y: usize| bg.sky.noise[(x, y)].max(bg.sky.floor);
-        let residual_at = |x: usize, y: usize| frame.truth.clean[(x, y)] - bg.bg[(x, y)];
+        let (sky, noise) = (bg.bg.plane(), bg.sky.noise.plane());
+        let sigma_at = |x: usize, y: usize| noise[(x, y)].max(bg.sky.floor);
+        let residual_at = |x: usize, y: usize| frame.truth.clean[(x, y)] - sky[(x, y)];
         // What the threshold is applied to: the residual itself, or its matched-filtered image,
         // which lifts a smooth plateau by 2√π·s against noise, twice what it lifts a star's peak
         // by.

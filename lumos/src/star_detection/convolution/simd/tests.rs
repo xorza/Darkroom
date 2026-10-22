@@ -6,9 +6,9 @@ use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 use crate::math::size2us::Size2us;
 use crate::simd::Kernel;
-use crate::star_detection::convolution;
+use crate::star_detection::convolution::internals::convolve_cols;
 use crate::star_detection::convolution::simd::{
-    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, mirror_idx,
+    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing, mirror_idx,
 };
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
@@ -206,7 +206,7 @@ fn convolve_cols_uniform_input() {
     let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
 
     let mut output = Buffer2::new_default(width, height);
-    convolution::convolve_cols(&input, &mut output, &kernel);
+    convolve_cols(&input, &mut output, &kernel);
 
     for (i, &v) in output.pixels().iter().enumerate() {
         assert!(
@@ -228,7 +228,7 @@ fn convolve_cols_impulse_response() {
     let radius = kernel.len() / 2;
 
     let mut output = Buffer2::new_default(width, height);
-    convolution::convolve_cols(&input, &mut output, &kernel);
+    convolve_cols(&input, &mut output, &kernel);
 
     for y in 0..height {
         for x in 0..width {
@@ -258,14 +258,14 @@ fn convolve_cols_matches_scalar() {
             for y in 0..height {
                 let row = y * width..(y + 1) * width;
                 ConvolveColsRow {
-                    input: &input,
+                    input: RowRing::plane(&input),
                     out_row: &mut scalar[row.clone()],
                     y,
                     kernel: &kernel,
                 }
                 .run_scalar();
                 tier.run(ConvolveColsRow {
-                    input: &input,
+                    input: RowRing::plane(&input),
                     out_row: &mut simd[row],
                     y,
                     kernel: &kernel,
@@ -299,14 +299,14 @@ fn convolve_2d_row_matches_scalar() {
                 let mut scalar_row = vec![0.0f32; width];
                 let mut simd_row = vec![0.0f32; width];
                 Convolve2dRow {
-                    input: &input,
+                    input: RowRing::plane(&input),
                     output_row: &mut scalar_row,
                     y,
                     kernel,
                 }
                 .run_scalar();
                 tier.run(Convolve2dRow {
-                    input: &input,
+                    input: RowRing::plane(&input),
                     output_row: &mut simd_row,
                     y,
                     kernel,
@@ -331,7 +331,7 @@ fn convolve_2d_row_uniform() {
     for y in 0..height {
         let mut output = vec![0.0f32; width];
         Convolve2dRow {
-            input: &input,
+            input: RowRing::plane(&input),
             output_row: &mut output,
             y,
             kernel,
@@ -360,7 +360,7 @@ fn convolve_2d_row_impulse_response() {
     for y in 0..height {
         let mut output = vec![0.0f32; width];
         Convolve2dRow {
-            input: &input,
+            input: RowRing::plane(&input),
             output_row: &mut output,
             y,
             kernel,

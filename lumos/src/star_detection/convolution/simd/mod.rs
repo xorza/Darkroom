@@ -9,11 +9,37 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use imaginarium::Buffer2;
-
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+
+/// The rows a column or 2D convolution reads its taps from: whole rows of an image of `size`, image
+/// row `n` in slot `n` modulo the slots held. A ring of a filter's tap count holds every row a band
+/// of output reads; a whole image is the ring of all its rows.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RowRing<'a> {
+    rows: &'a [f32],
+    size: Size2us,
+}
+
+impl<'a> RowRing<'a> {
+    /// `rows`, whole rows of an image of `size`.
+    pub(super) fn new(rows: &'a [f32], size: Size2us) -> Self {
+        debug_assert!(
+            !rows.is_empty() && rows.len().is_multiple_of(size.width),
+            "a ring holds whole rows"
+        );
+        Self { rows, size }
+    }
+
+    /// Image row `n`.
+    #[inline]
+    fn row(self, n: usize) -> &'a [f32] {
+        let width = self.size.width;
+        let slot = n % (self.rows.len() / width);
+        &self.rows[slot * width..(slot + 1) * width]
+    }
+}
 
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///
@@ -56,15 +82,18 @@ impl<'a> Kernel2d<'a> {
 
     /// One output pixel of the 2D convolution of the image `input` at `pos`, mirrored on both axes.
     #[inline]
-    fn convolve_pixel(self, input: &Buffer2<f32>, pos: Vec2us) -> f32 {
-        let size = Size2us::from(input);
+    fn convolve_pixel(self, input: RowRing<'_>, pos: Vec2us) -> f32 {
+        let size = input.size;
         let radius = self.radius() as isize;
         let mut sum = 0.0f32;
         for ky in 0..self.size() {
-            let sy = mirror_idx(pos.y as isize + ky as isize - radius, size.height);
+            let row = input.row(mirror_idx(
+                pos.y as isize + ky as isize - radius,
+                size.height,
+            ));
             for kx in 0..self.size() {
                 let sx = mirror_idx(pos.x as isize + kx as isize - radius, size.width);
-                sum += input[sy * size.width + sx] * self.at(ky, kx);
+                sum += row[sx] * self.at(ky, kx);
             }
         }
         sum
@@ -176,7 +205,7 @@ impl Kernel for ConvolveRow<'_> {
 /// needs the scalar form.
 #[derive(Debug)]
 pub(super) struct ConvolveColsRow<'a> {
-    pub(super) input: &'a Buffer2<f32>,
+    pub(super) input: RowRing<'a>,
     pub(super) out_row: &'a mut [f32],
     pub(super) y: usize,
     pub(super) kernel: &'a [f32],
@@ -193,7 +222,7 @@ impl Kernel for ConvolveColsRow<'_> {
             y,
             kernel,
         } = self;
-        let size = Size2us::from(input);
+        let size = input.size;
         debug_assert_eq!(out_row.len(), size.width, "one output row");
         let radius = radius_of(kernel);
         out_row.fill(0.0);
@@ -214,7 +243,7 @@ impl Kernel for ConvolveColsRow<'_> {
 /// window crosses the row's ends.
 #[derive(Debug)]
 pub(super) struct Convolve2dRow<'a> {
-    pub(super) input: &'a Buffer2<f32>,
+    pub(super) input: RowRing<'a>,
     pub(super) output_row: &'a mut [f32],
     pub(super) y: usize,
     pub(super) kernel: Kernel2d<'a>,
@@ -231,7 +260,7 @@ impl Kernel for Convolve2dRow<'_> {
             y,
             kernel,
         } = self;
-        let size = Size2us::from(input);
+        let size = input.size;
         debug_assert_eq!(output_row.len(), size.width, "one output row");
         let radius = kernel.radius();
         let interior = radius..size.width.saturating_sub(radius).max(radius);
@@ -288,6 +317,21 @@ impl WeightedTap<'_> {
     }
 }
 
+#[cfg(test)]
+pub(super) mod plane_ring {
+    use imaginarium::Buffer2;
+
+    use crate::math::size2us::Size2us;
+    use crate::star_detection::convolution::simd::RowRing;
+
+    impl<'a> RowRing<'a> {
+        /// Every row of `image`, each in its own slot.
+        pub(crate) fn plane(image: &'a Buffer2<f32>) -> Self {
+            Self::new(image.pixels(), Size2us::from(image))
+        }
+    }
+}
+
 #[cfg(feature = "internals")]
 mod internals {
     #[cfg(test)]
@@ -315,7 +359,7 @@ mod internals {
                 for (k, &kval) in self.kernel.iter().enumerate() {
                     let sy = mirror_idx(
                         self.y as isize + k as isize - radius as isize,
-                        self.input.height(),
+                        self.input.size.height,
                     );
                     sum += self.input.row(sy)[x] * kval;
                 }

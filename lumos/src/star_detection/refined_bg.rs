@@ -6,6 +6,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::bg_estimate::BgEstimate;
+use crate::star_detection::detection_filter::FilterSource;
 use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgRefinement;
@@ -38,7 +39,7 @@ impl RefinedBg {
             BgEstimate::estimate(
                 MaskedPlane { pixels, mask },
                 spec.bg,
-                &resources.floats,
+                &resources.surfaces,
                 &mut resources.bg,
             )
         };
@@ -52,10 +53,17 @@ impl RefinedBg {
         let mut sources = resources.acquire_bit();
         let mut scratch = resources.acquire_bit();
         for _ in 0..refinement.iterations.get() {
-            let mut residual = resources.acquire_f32();
-            sky.residual_into(pixels, &mut residual);
-            drop(sky);
-            let detect = DetectionPlane::from_residual(residual, spec, resources);
+            // The residual reads the sky alone; its σ goes back before the plane measures its own.
+            drop(sky.sky);
+            let detect = DetectionPlane::filtered(
+                FilterSource::Residual {
+                    pixels,
+                    sky: &sky.bg,
+                },
+                spec,
+                resources,
+            );
+            drop(sky.bg);
             detect.threshold(refinement.mask_sigma, &mut sources);
             drop(detect);
             sources.dilate(refinement.mask_dilation, &mut scratch);

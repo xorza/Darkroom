@@ -1,6 +1,10 @@
 //! Tests for 3x3 median filter.
 
+use imaginarium::Buffer2;
+
 use crate::internals::test_rng::TestRng;
+use crate::math::vec2us::Vec2us;
+use crate::star_detection::median_filter::internals::apply_3x3;
 use crate::star_detection::median_filter::*;
 
 #[test]
@@ -280,12 +284,13 @@ fn median_at_side_edges() {
     ];
 
     let pixels = Buffer2::new(5, 5, pixels);
-    let left = median_at_left_edge(&pixels, 1);
+    let rows = [pixels.row(0), pixels.row(1), pixels.row(2)];
+    let left = median_at_side(rows, 0);
     assert!(
         (left - 0.65).abs() < 1e-6,
         "left edge median should be 0.65, got {left}"
     );
-    let right = median_at_right_edge(&pixels, 1);
+    let right = median_at_side(rows, 3);
     assert!(
         (right - 0.95).abs() < 1e-6,
         "right edge median should be 0.95, got {right}"
@@ -335,7 +340,8 @@ fn median_at_edge_truth_table() {
     ];
 
     for case in cases {
-        let actual = median_at_edge(&Buffer2::new(4, 4, pixels.clone()), case.pos);
+        let plane = Buffer2::new(4, 4, pixels.clone());
+        let actual = MedianRows::of(&plane, case.pos.y).median_at_edge(case.pos.x);
         assert!((actual - case.expected).abs() < 1e-6, "{case:?}");
     }
 }
@@ -353,7 +359,8 @@ fn interior_row_replaces_a_hot_pixel_with_its_neighbourhood_median() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_interior_row(&Buffer2::new(5, 5, pixels), 2, &mut output_row);
+    let plane = Buffer2::new(5, 5, pixels);
+    MedianRows::of(&plane, 2).filter_into(&mut output_row);
 
     // Center pixel (x=2) should be filtered
     // Neighborhood: [0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5]
@@ -378,7 +385,8 @@ fn filter_edge_row_top() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&Buffer2::new(5, 5, pixels), 0, &mut output_row);
+    let plane = Buffer2::new(5, 5, pixels);
+    MedianRows::of(&plane, 0).filter_into(&mut output_row);
 
     // Check first pixel (corner)
     // Neighbors: [0.1, 0.2, 0.6, 0.7] -> median = (0.2 + 0.6) / 2 = 0.4
@@ -402,7 +410,8 @@ fn filter_edge_row_bottom() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&Buffer2::new(5, 5, pixels), 4, &mut output_row);
+    let plane = Buffer2::new(5, 5, pixels);
+    MedianRows::of(&plane, 4).filter_into(&mut output_row);
 
     // Check last pixel (corner)
     // Neighbors: [1.9, 2.0, 2.4, 2.5] -> median = (2.0 + 2.4) / 2 = 2.2

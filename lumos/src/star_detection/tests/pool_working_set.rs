@@ -11,11 +11,17 @@
 
 use rayon::prelude::*;
 
+use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
+use crate::star_detection::convolution;
+use crate::star_detection::detection_filter::BandScratch;
 use crate::star_detection::resources::internals::BufferCounts;
-use crate::star_detection::resources::{DetectionResources, PEAK_BITMASKS, PEAK_FLOATS};
+use crate::star_detection::resources::{
+    DetectionResources, PEAK_BITMASKS, PEAK_FLOATS, PEAK_SURFACES,
+};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
+use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
 use crate::star_detection::star_detector::StarDetector;
 
 /// The detection working set at its high-water mark over every preset: the buffers the pool holds
@@ -24,8 +30,9 @@ use crate::star_detection::star_detector::StarDetector;
 /// any change to the pipeline's concurrent buffer demand surfaces here for review rather than
 /// silently growing peak heap.
 const WORKING_SET: BufferCounts = BufferCounts {
-    floats: 4,
+    floats: 2,
     bitmasks: 3,
+    surfaces: 2,
 };
 
 /// The bitmask a frame with pixels of no data adds to [`WORKING_SET`], which these synthetic fields
@@ -36,17 +43,29 @@ const NO_DATA_MASK: usize = 1;
 /// means anything while they match what the pool actually holds. Tying the two together here is
 /// what stops the planner's figure from being a number nobody can check: a stage that grows its
 /// scratch fails [`warmed_pool_holds_the_pinned_working_set`] first, and raising `WORKING_SET` to
-/// match then fails this until the peak counts are raised too. A 64 × 64 frame's pool holds five
-/// planes of 16 KiB — four f32 planes and the labeling's runs — and four bitmasks of 64 rows of
-/// 128 bits, 1 KiB each.
+/// match then fails this until the peak counts are raised too. A 64 × 64 frame's pool on one
+/// worker holds three planes of 16 KiB — two f32 planes and the labeling's runs — four bitmasks of
+/// 64 rows of 128 bits, 1 KiB each, two surfaces over 16-px tiles, 4 × 4 of them, each 2 · 16
+/// tile values, 4 + 4 centres and a reader's 3 · 4 + 64 samples, 116 f32s, the worker's band of the
+/// widest filter, radius 26: 53 ring rows, 3 residual rows and a median row of 64 samples, and the
+/// worker's deblend set, room for the frame's 4096 pixels at 41 B each.
 #[test]
 fn pinned_working_set_matches_what_the_memory_planner_charges() {
-    let BufferCounts { floats, bitmasks } = WORKING_SET;
+    let BufferCounts {
+        floats,
+        bitmasks,
+        surfaces,
+    } = WORKING_SET;
     assert_eq!(floats, PEAK_FLOATS);
     assert_eq!(bitmasks + NO_DATA_MASK, PEAK_BITMASKS);
+    assert_eq!(surfaces, PEAK_SURFACES);
+    let size = Size2us::new(64, 64);
+    assert_eq!(MeshSurface::heap_bytes(size, MIN_TILE_SIZE, 1), 116 * 4);
+    assert_eq!(convolution::max_kernel_radius(), 26);
+    assert_eq!(BandScratch::heap_bytes(64, 26), (53 + 3 + 1) * 64 * 4);
     assert_eq!(
-        DetectionResources::heap_bytes(Size2us::new(64, 64)),
-        5 * 16_384 + 4 * 1024
+        DetectionResources::heap_bytes(size, 1),
+        3 * 16_384 + 4 * 1024 + 2 * 116 * 4 + 57 * 64 * 4 + 4096 * 41
     );
 }
 
@@ -81,10 +100,12 @@ fn warmed_pool_holds_the_pinned_working_set() {
         BufferCounts {
             floats: 0,
             bitmasks: 0,
+            surfaces: 0,
         },
         |peak, counts| BufferCounts {
             floats: peak.floats.max(counts.floats),
             bitmasks: peak.bitmasks.max(counts.bitmasks),
+            surfaces: peak.surfaces.max(counts.surfaces),
         },
     );
     assert_eq!(

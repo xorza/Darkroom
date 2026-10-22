@@ -1,9 +1,8 @@
 //! [`SkyNoise`]: what detection keeps of the sky once it is subtracted.
 
-use imaginarium::Buffer2;
-
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::mesh_spline::MeshSpline;
+use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bg_mesh::tile_stats::TileComponent;
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics;
@@ -16,7 +15,8 @@ use crate::star_detection::star_detection_config::bg_config::BgConfig;
 /// from collapsing the threshold onto the sky.
 const NOISE_FLOOR_FRACTION: f32 = 1e-4;
 
-/// The sky's noise per pixel and its floor: all the stages after the sky's removal need of it.
+/// The sky's noise per pixel, read a row or a pixel at a time, and its floor: all the stages after
+/// the sky's removal need of it.
 ///
 /// The sky level itself went into the residual plane `pixels − bg` that those stages read,
 /// so none of them can see sky-included values — the threshold, the labeling, both deblenders and
@@ -24,7 +24,7 @@ const NOISE_FLOOR_FRACTION: f32 = 1e-4;
 #[derive(Debug)]
 pub(crate) struct SkyNoise {
     /// Per-pixel noise (σ).
-    pub(crate) noise: Pooled<Buffer2<f32>>,
+    pub(crate) noise: Pooled<MeshSurface>,
     /// The floor every threshold built from [`Self::noise`] applies to it — see
     /// [`noise_floor_from`].
     pub(crate) floor: f32,
@@ -37,7 +37,7 @@ impl SkyNoise {
     pub(crate) fn measure(
         plane: MaskedPlane<'_>,
         config: &BgConfig,
-        planes: &ScratchPool<Buffer2<f32>>,
+        surfaces: &ScratchPool<MeshSurface>,
         workspace: &mut BgWorkspace,
     ) -> Self {
         let MaskedPlane { pixels, mask } = plane;
@@ -46,7 +46,7 @@ impl SkyNoise {
             .measure(pixels, mask, None, config.mesh_params());
         Self::of_mesh(
             mesh,
-            planes,
+            surfaces,
             MeshReaders {
                 spline: &mut workspace.spline,
                 values: &mut workspace.values,
@@ -54,16 +54,16 @@ impl SkyNoise {
         )
     }
 
-    /// The σ plane of `mesh`, from `planes`, and its floor.
+    /// The σ surface of `mesh`, from `surfaces`, and its floor.
     pub(super) fn of_mesh(
         mesh: &BgMesh,
-        planes: &ScratchPool<Buffer2<f32>>,
+        surfaces: &ScratchPool<MeshSurface>,
         readers: MeshReaders<'_>,
     ) -> Self {
         let MeshReaders { spline, values } = readers;
         let floor = noise_floor_from(mesh, values);
-        let mut noise = planes.acquire();
-        spline.interpolate(mesh, TileComponent::Sigma, &mut noise);
+        let mut noise = surfaces.acquire();
+        spline.solve(mesh, TileComponent::Sigma, &mut noise);
         Self { noise, floor }
     }
 }

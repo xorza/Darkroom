@@ -120,10 +120,10 @@ impl MeasurePlanes<'_> {
             ),
         };
         let start_annulus = annulus_at(start);
-        let (local_offset, local_noise) = start_annulus
-            .map_or((0.0, sky.noise[(region.peak.x, region.peak.y)]), |local| {
-                (local.offset, local.noise)
-            });
+        let (local_offset, local_noise) = start_annulus.map_or_else(
+            || (0.0, sky.noise.reader().at(region.peak)),
+            |local| (local.offset, local.noise),
+        );
         let noise = StarNoise {
             bg_sigma: f64::from(local_noise.max(sky.floor)),
             electrons_per_unit: config.electrons_per_unit.map(f64::from),

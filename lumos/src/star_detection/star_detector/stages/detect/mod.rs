@@ -137,15 +137,15 @@ fn extract_candidates(
     // One deblend buffer set per fold split, leased from the detector's pool so a frame after the
     // first reuses the last one's, each split's regions gathered in its set: the reduce appends a
     // later set's to an earlier one's, which keeps the components' order.
-    let (deblended_components, mut gathered) = label_map
+    let (deblended_components, mut gathered, _) = label_map
         .components()
         .par_iter()
         // A component smaller than `min_area` holds no region that large. One larger than
         // `max_area` is still deblended: a crowded group splits into regions within it.
         .filter(|data| data.area >= config.min_area)
         .fold(
-            || (0, deblend_buffers.acquire()),
-            |(mut deblended, mut buffers), data| {
+            || (0, deblend_buffers.acquire(), plane.noise.noise.reader()),
+            |(mut deblended, mut buffers, mut noise), data| {
                 let component = Component::new(data, values, label_map);
                 let DeblendBuffers { regions: found, .. } = &mut *buffers;
                 let mut split = mem::take(found);
@@ -160,10 +160,10 @@ fn extract_candidates(
                         min_area: config.min_area,
                         connectivity: config.connectivity,
                         floor: {
-                            let peak = component.peak().pos;
+                            let peak = component.peak().pos();
                             plane
                                 .threshold_params(config.sigma_threshold)
-                                .level(plane.noise.noise[(peak.x, peak.y)])
+                                .level(noise.at(peak))
                         },
                     }
                     .deblend(&component, &mut buffers, &mut split),
@@ -176,15 +176,18 @@ fn extract_candidates(
                     .deblend(&component, &mut buffers, &mut split),
                 };
                 buffers.regions = split;
+                if data.area > DeblendBuffers::KEPT_PIXELS {
+                    buffers.release();
+                }
                 deblended += usize::from(pushed > 1);
-                (deblended, buffers)
+                (deblended, buffers, noise)
             },
         )
         .reduce(
-            || (0, deblend_buffers.acquire()),
-            |(a, mut first), (b, mut second)| {
+            || (0, deblend_buffers.acquire(), plane.noise.noise.reader()),
+            |(a, mut first, noise), (b, mut second, _)| {
                 first.regions.append(&mut second.regions);
-                (a + b, first)
+                (a + b, first, noise)
             },
         );
     regions.append(&mut gathered.regions);
@@ -240,7 +243,7 @@ pub(crate) mod internals {
         let plane = DetectionPlane {
             values: Pooled::loose(residual.clone(), size),
             noise: SkyNoise {
-                noise: Pooled::loose(Buffer2::clone(&sky.noise), size),
+                noise: Pooled::loose(sky.noise.duplicate(), ()),
                 floor: sky.floor,
             },
         };

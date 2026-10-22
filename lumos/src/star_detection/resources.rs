@@ -4,16 +4,20 @@
 
 use imaginarium::Buffer2;
 
+use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::bg::workspace::BgWorkspace;
+use crate::star_detection::convolution;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
+use crate::star_detection::detection_filter::BandScratch;
 use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star::Star;
+use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
 /// frame after the first allocates nothing but the stars it hands back.
@@ -23,10 +27,14 @@ use crate::star_detection::star::Star;
 /// of a leased plane are **unspecified**: overwrite before reading.
 #[derive(Debug, Default)]
 pub(crate) struct DetectionResources {
-    /// Grayscale, scratch, background, noise — anything one f32 plane wide.
+    /// The measurement plane and the detection planes made of it.
     pub(crate) floats: ScratchPool<Buffer2<f32>>,
     /// Threshold masks, dilation scratch.
     bitmasks: ScratchPool<BitBuffer2>,
+    /// The sky and σ surfaces of the estimates, read a row or a pixel at a time.
+    pub(crate) surfaces: ScratchPool<MeshSurface>,
+    /// The rows each worker holds while it filters a band of a detection plane.
+    pub(crate) bands: ScratchPool<BandScratch>,
     pub(crate) labeler: Labeler,
     pub(crate) bg: BgWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
@@ -45,26 +53,39 @@ pub(crate) struct DetectionResources {
     pub(crate) stars: Vec<Star>,
 }
 
-/// The f32 planes the pool holds at its high-water mark over every preset: the measurement plane,
-/// its sky noise, the detection plane and the filter's pass scratch, which the detection plane's
-/// noise takes over. `star_detection::tests::pool_working_set` pins it against the pool.
-pub(super) const PEAK_FLOATS: usize = 4;
+/// The f32 planes the pool holds at its high-water mark over every preset: the measurement plane
+/// and the detection plane, which the filters write a band of rows at a time; the sky and its σ
+/// are surfaces read a row at a time. `star_detection::tests::pool_working_set` pins it against
+/// the pool.
+pub(super) const PEAK_FLOATS: usize = 2;
+
+/// The surfaces the pool holds at its high-water mark: an estimate's sky and σ, or a refinement's
+/// sky and the σ of the detection plane it filters from it, or the measurement plane's σ and a
+/// detection plane's.
+pub(super) const PEAK_SURFACES: usize = 2;
 
 /// The bitmasks the pool holds at its high-water mark: saturation, threshold, the sources a
 /// refined sky was measured around, and the pixels with no data of a frame that has any.
 pub(super) const PEAK_BITMASKS: usize = 4;
 
-/// The f32 planes the labeling's runs are charged: a run is 16 bytes in its strip and 12 in the
-/// label map, so the runs hold under one f32 plane while fewer than one pixel in seven starts a
-/// run — a mask of sources a few σ above the sky starts far fewer.
+/// The f32 planes the labeling's runs are charged: a run is 16 bytes in its strip, 12 in the label
+/// map, and its provisional label 4 in the union-find and 4 in the mapping to components, so the
+/// runs hold under one f32 plane while fewer than one pixel in nine starts a run — a mask of
+/// sources a few σ above the sky starts far fewer.
 const LABEL_RUNS_PLANES: usize = 1;
 
 impl DetectionResources {
-    /// The bytes a detector's pool holds for frames of `size` at its high-water mark: its f32
-    /// planes and the labeling's runs, a plane each, and its bitmasks, a bit a pixel each.
-    pub(crate) const fn heap_bytes(size: Size2us) -> usize {
+    /// The bytes a detector's pool holds for frames of `size` between frames on `workers`: its f32
+    /// planes and the labeling's runs, a plane each, its bitmasks, a bit a pixel each, its surfaces
+    /// over the finest mesh, and each worker's band of the widest matched filter and deblend set.
+    /// A component past [`DeblendBuffers::KEPT_PIXELS`] holds its set past that while it splits,
+    /// in proportion to its pixels.
+    pub(crate) fn heap_bytes(size: Size2us, workers: usize) -> usize {
         (PEAK_FLOATS + LABEL_RUNS_PLANES) * size.pixel_count() * size_of::<f32>()
             + PEAK_BITMASKS * BitBuffer2::heap_bytes(size)
+            + PEAK_SURFACES * MeshSurface::heap_bytes(size, MIN_TILE_SIZE, workers)
+            + workers * BandScratch::heap_bytes(size.width, convolution::max_kernel_radius())
+            + workers * DeblendBuffers::kept_bytes(size.pixel_count())
     }
 
     /// The dimensions every plane is leased at.
@@ -81,9 +102,9 @@ impl DetectionResources {
     }
 
     /// Serve frames of `dimensions`. A change drops the planes, and the workspaces whose size
-    /// follows the frame's: the labeler, the background mesh and the deblenders. The per-tile and
-    /// per-star vectors, the duplicate scratch and the filter kernels follow the star and tile
-    /// counts, and stay.
+    /// follows the frame's: the labeler, the background mesh, the surfaces and their readers' rows,
+    /// the filters' bands and the deblenders. The per-tile and per-star vectors, the duplicate
+    /// scratch and the filter kernels follow the star and tile counts, and stay.
     pub(crate) fn reshape(&mut self, dimensions: Size2us) {
         if self.dimensions() == dimensions {
             return;
@@ -92,6 +113,8 @@ impl DetectionResources {
         self.bitmasks.reshape(dimensions);
         self.labeler = Labeler::default();
         self.bg.clear();
+        self.surfaces.clear();
+        self.bands.clear();
         self.deblend.clear();
     }
 }
@@ -107,6 +130,7 @@ pub(crate) mod internals {
     pub(crate) struct BufferCounts {
         pub(crate) floats: usize,
         pub(crate) bitmasks: usize,
+        pub(crate) surfaces: usize,
     }
 
     impl DetectionResources {
@@ -126,6 +150,7 @@ pub(crate) mod internals {
             BufferCounts {
                 floats: self.floats.pooled(),
                 bitmasks: self.bitmasks.pooled(),
+                surfaces: self.surfaces.pooled(),
             }
         }
     }
@@ -138,7 +163,11 @@ mod tests {
     use crate::star_detection::resources::internals::BufferCounts;
 
     const fn counts(floats: usize, bitmasks: usize) -> BufferCounts {
-        BufferCounts { floats, bitmasks }
+        BufferCounts {
+            floats,
+            bitmasks,
+            surfaces: 0,
+        }
     }
 
     /// Each kind of plane is leased at the resources' dimensions from a pool of its own: nothing
@@ -165,20 +194,33 @@ mod tests {
         assert_eq!(resources.acquire_bit().words_ptr(), address);
     }
 
-    /// The same dimensions keep every plane; new ones drop them, and a plane leased before the
-    /// change is not shelved when it drops after it.
+    /// The same dimensions keep every plane, surface and band; new ones drop them, and a plane
+    /// leased before the change is not shelved when it drops after it.
     #[test]
     fn reshape_drops_the_planes_on_a_change_of_dimensions() {
         let mut resources = DetectionResources::new(Size2us::new(64, 64));
-        drop((resources.acquire_f32(), resources.acquire_bit()));
+        drop((
+            resources.acquire_f32(),
+            resources.acquire_bit(),
+            resources.surfaces.acquire(),
+            resources.bands.acquire(),
+        ));
         let outstanding = resources.acquire_f32();
 
         resources.reshape(Size2us::new(64, 64));
-        assert_eq!(resources.buffer_counts(), counts(0, 1));
+        assert_eq!(
+            resources.buffer_counts(),
+            BufferCounts {
+                surfaces: 1,
+                ..counts(0, 1)
+            }
+        );
+        assert_eq!(resources.bands.pooled(), 1);
 
         resources.reshape(Size2us::new(128, 64));
         assert_eq!(resources.dimensions(), Size2us::new(128, 64));
         assert_eq!(resources.buffer_counts(), counts(0, 0));
+        assert_eq!(resources.bands.pooled(), 0);
         drop(outstanding);
         assert_eq!(resources.buffer_counts(), counts(0, 0));
         assert_eq!(resources.acquire_f32().width(), 128);

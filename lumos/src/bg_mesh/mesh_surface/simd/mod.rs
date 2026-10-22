@@ -97,7 +97,7 @@ impl<V: F32x8> Coefficients<V> {
 
 #[cfg(test)]
 mod internals {
-    use crate::bg_mesh::mesh_spline::simd::{InterpolateSegment, SegmentRamp};
+    use crate::bg_mesh::mesh_surface::simd::{InterpolateSegment, SegmentRamp};
 
     impl SegmentRamp {
         /// The spline parameter at output pixel `i`: outside [0, 1] past the segment's knots,

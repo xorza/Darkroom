@@ -298,10 +298,7 @@ fn stars_are_found_from_the_top_level_down() {
                 .iter()
                 .map(|&(parent, flux_above)| TreeObject {
                     parent,
-                    peak: Pixel {
-                        pos: Vec2us::new(0, 0),
-                        value: flux_above,
-                    },
+                    peak: Pixel::new(Vec2us::new(0, 0), flux_above),
                     flux_above,
                 })
                 .collect(),

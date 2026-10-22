@@ -103,7 +103,7 @@ fn deblended(
 
 /// `(x, y)` of each peak, in the order given.
 fn poss(peaks: &[Pixel]) -> Vec<(usize, usize)> {
-    peaks.iter().map(|p| (p.pos.x, p.pos.y)).collect()
+    peaks.iter().map(|p| (p.pos().x, p.pos().y)).collect()
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn two_separated_stars() {
     let blob_area = |left: bool| {
         component
             .pixels()
-            .filter(|p| (p.pos.x < 50) == left)
+            .filter(|p| (p.pos().x < 50) == left)
             .count()
     };
     let summary: Vec<(Vec2us, usize)> = regions.iter().map(|r| (r.peak, r.area)).collect();
@@ -248,7 +248,7 @@ fn peaks_sorted_by_brightness() {
     assert_eq!(poss(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
-    assert_eq!(component.peak().pos, Vec2us::new(50, 50));
+    assert_eq!(component.peak().pos(), Vec2us::new(50, 50));
     assert_eq!(component.peak().value, fixture.pixels[(50, 50)]);
 }
 
@@ -283,9 +283,9 @@ fn many_peaks_are_all_kept_brightest_first() {
         0.1,
     );
 
-    let xs: Vec<usize> = peaks.iter().map(|p| p.pos.x).collect();
+    let xs: Vec<usize> = peaks.iter().map(|p| p.pos().x).collect();
     assert_eq!(xs, [98, 90, 82, 74, 66, 58, 50, 42, 34, 26, 18, 10]);
-    assert!(peaks.iter().all(|p| p.pos.y == 50));
+    assert!(peaks.iter().all(|p| p.pos().y == 50));
 }
 
 #[test]
@@ -347,10 +347,7 @@ fn is_local_maximum_cases() {
         ((8, 2), true, "above every neighbour"),
     ];
     for ((x, y), expected, why) in cases {
-        let pixel = Pixel {
-            pos: Vec2us::new(x, y),
-            value: pixels[(x, y)],
-        };
+        let pixel = Pixel::new(Vec2us::new(x, y), pixels[(x, y)]);
         assert_eq!(is_local_maximum(pixel, &pixels), expected, "{why}");
     }
 }
@@ -431,10 +428,7 @@ fn voronoi_assignment_and_its_tie() {
         area: 61,
     };
     let component = Component::new(&data, &pixels, &labels);
-    let peak = |x: usize| Pixel {
-        pos: Vec2us::new(x, 50),
-        value: 1.0,
-    };
+    let peak = |x: usize| Pixel::new(Vec2us::new(x, 50), 1.0);
 
     let split = |peaks: &[Pixel]| {
         let mut regions = Vec::new();
@@ -508,8 +502,8 @@ fn fast_paths_match_the_definitions() {
         let mut expected: Vec<Pixel> = Vec::new();
         for candidate in candidates {
             if expected.iter().all(|kept| {
-                kept.pos.x.abs_diff(candidate.pos.x).pow(2)
-                    + kept.pos.y.abs_diff(candidate.pos.y).pow(2)
+                kept.pos().x.abs_diff(candidate.pos().x).pow(2)
+                    + kept.pos().y.abs_diff(candidate.pos().y).pow(2)
                     >= separation * separation
             }) {
                 expected.push(candidate);
@@ -530,20 +524,20 @@ fn fast_paths_match_the_definitions() {
             let nearest = (0..peaks.len())
                 .min_by_key(|&i| {
                     (
-                        pixel.pos.x.abs_diff(peaks[i].pos.x).pow(2)
-                            + pixel.pos.y.abs_diff(peaks[i].pos.y).pow(2),
+                        pixel.pos().x.abs_diff(peaks[i].pos().x).pow(2)
+                            + pixel.pos().y.abs_diff(peaks[i].pos().y).pow(2),
                         i,
                     )
                 })
                 .expect("peaks");
             areas[nearest] += 1;
-            boxes[nearest].include(pixel.pos);
+            boxes[nearest].include(pixel.pos());
         }
         let expected_regions: Vec<(Vec2us, usize, URect)> = peaks
             .iter()
             .zip(areas.iter().zip(&boxes))
             .filter(|(_, (area, _))| **area > 0)
-            .map(|(peak, (&area, &bbox))| (peak.pos, area, bbox))
+            .map(|(peak, (&area, &bbox))| (peak.pos(), area, bbox))
             .collect();
         let got: Vec<(Vec2us, usize, URect)> = regions
             .iter()

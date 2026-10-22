@@ -6,6 +6,9 @@ use crate::bg_mesh::mesh_workspace::{DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFi
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
 
+/// The smallest tile a mesh may take, in px: the finest mesh, and the most tiles it holds.
+pub(crate) const MIN_TILE_SIZE: usize = 16;
+
 /// Strategy for refining background estimation.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BgRefinement {
@@ -94,8 +97,10 @@ impl BgConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        ConfigField::count("tile_size", self.tile_size)
-            .must_be("between 16 and 256", (16..=256).contains(&self.tile_size))?;
+        ConfigField::count("tile_size", self.tile_size).must_be(
+            "between 16 and 256",
+            (MIN_TILE_SIZE..=256).contains(&self.tile_size),
+        )?;
         ConfigField::count("sigma_clip_max_iterations", self.sigma_clip_max_iterations)
             .must_be("at most 10", self.sigma_clip_max_iterations <= 10)?;
         self.refinement.validate()

@@ -98,61 +98,9 @@ and a slowdown is a defect of the batch. A batch that changes a vector kernel ru
 check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
-Batches 1, prices that match the allocations, and 2, streaming FITS output, landed. Dependencies:
-batch 6 needs the digest that batch 5 computes at the write, and batch 7 needs the `Stored` return
-of batch 6. The other batches are independent.
-
-### 3. Detection working set
-
-Each detector slot prices 4 f32 planes plus a plane for the labeling's runs, and 4 bit planes,
-and the plan charges every light in flight. This batch takes the f32 planes from 5 to 3, or 4 for
-a demosaiced light (−96 to −192 MB for each slot). Files:
-`star_detection/bg/{bg_estimate.rs, sky_noise.rs}`, `star_detection/refined_bg.rs`,
-`star_detection/star_detector/stages/{prepared_frame/, detect/mod.rs}`,
-`star_detection/convolution/`, `star_detection/threshold_mask/`, `star_detection/centroid/mod.rs`,
-`star_detection/star_detector/resources.rs`, `star_detection/deblend/`,
-`star_detection/labeling/labeler.rs`, `bg_mesh/mesh_spline/`, `math/wavelet/mod.rs`.
-
-- [ ] `star_detection/bg/bg_estimate.rs:40` and `refined_bg.rs:45-65` — each refinement
-  `estimate` interpolates a σ plane that `drop(sky)` frees unread. Target: `BgEstimate` holds
-  the background only, and the σ comes from the mesh on demand.
-- [ ] `star_detection/bg/sky_noise.rs:26` — `SkyNoise.noise` is a full plane. Its readers are
-  `centroid/mod.rs:124` and `star_detector/stages/detect/mod.rs:166` (one pixel for each
-  region) and `threshold_mask/threshold_params.rs:37-62` (row by row in `par_rows_mut`).
-  Target: `SkyNoise` owns a copy of the mesh's tile statistics and the y spline's `d2y` (about
-  100 KB), because later estimates overwrite the workspace mesh. `row_into(y, &mut [f32])` is
-  `ColSpline::interpolate_row` (`bg_mesh/mesh_spline/mod.rs:158`) with the σ clip, into the
-  row scratch of the threshold's workers. `at(pos)` runs the same row solve over the tile
-  columns and the same interval kernel for one pixel. A test compares both with the plane bit
-  for bit, the vector ISAs included. `BgEstimate::residual_into` and `subtract_from` read the
-  background through the same rows. The fixtures that build a uniform σ plane
-  (`internals/synthetic/bg_map.rs:20`, `detect/mod.rs:242`, `bg_estimate.rs:101-105`) build a
-  mesh of one tile, whose rows are its one value.
-- [ ] `star_detection/convolution/filter_kernels.rs:153-171` — the separable filter runs rows
-  into a full `temp` plane, then columns back. `prepared_frame/mod.rs:167` copies `measure`
-  into the plane first (96 MB, 2–3 times for each frame), and with no filter the copy is the
-  plane. Target: one banded separable engine from a source plane into a separate output plane.
-  Each band runs the row pass over rows `[start − r, end + r)`, with the column pass's edge rule
-  at the frame's top and bottom, into band scratch, then the column pass into its output rows.
-  The order of each sum stays, so the result stays bit-identical. It reads `measure` directly,
-  and with no filter the stage reads `measure` itself. A filter cannot run in place in bands,
-  because a band's row pass reads source rows that the band above writes.
-- [ ] `math/wavelet/mod.rs:33` — `atrous_smooth` is a second separable-filter design, with
-  `for_each_init(|| vec![0.0; width])` on each call (scales × channels for each op, and once
-  for each MRS tile). Target: it runs on the banded engine, which takes the kernel's dilation
-  step, with pooled row scratch.
-- [ ] `star_detection/star_detector/stages/detect/mod.rs:147,184` — each pooled
-  `DeblendBuffers` grows to the largest component it met (about 52 B for each component pixel,
-  125 MB for a 2.4 MP nebula) and keeps that size for the run. `DetectionResources::heap_bytes`
-  charges none of it. Target: `Pixel` with u32 coordinates (`deblend/pixel.rs:9-12`, 24 → 12 B),
-  and a set over a stated bound shrinks before it returns to the pool. Charge the bound.
-- [ ] `star_detection/labeling/labeler.rs:104` — the union-find is sized by foreground pixels
-  (`count_ones`), not runs, and `LABEL_RUNS_PLANES` (`resources.rs:57-60`) leaves out the
-  union-find and `mapping`. Target: size it by the run count, counted in the same pass, and
-  charge the runs, the union-find and the mapping by run.
-- [ ] `star_detection/star_detector/resources.rs:51-68` — set `PEAK_FLOATS` to the new peak,
-  and pin it in `tests/pool_working_set.rs` and the detection case of `tests/memory_budget`.
-  The bench at `threshold_mask/simd/bench.rs:29` reads a σ row instead of the plane.
+Batches 1, prices that match the allocations, 2, streaming FITS output, and 3, the detection working
+set, landed. Dependencies: batch 6 needs the digest that batch 5 computes at the write, and batch 7
+needs the `Stored` return of batch 6. The other batches are independent.
 
 ### 4. Warp working set
 
@@ -356,5 +304,10 @@ Small items, each local. Files as named.
 - [ ] `pipeline/align_stack_run.rs:344-357` — the one-pass route maps `others: Vec<usize>`
   through `map_owned`, with a `Mutex` cell for each index, then inserts the reference. Target:
   `map` over an index range.
+- [ ] `math/wavelet/mod.rs:33` — `atrous_smooth` is a third separable-filter design beside the
+  convolution kernels and the band filter, with `for_each_init(|| vec![0.0; width])` on each call
+  (scales × channels for each op, and once for each MRS tile). Target: one row scratch from a
+  pool its owner keeps, and the à trous pass on the convolution's row and column kernels with the
+  dilation step, if a bench shows no loss.
 - [ ] `drizzle/drizzle_shape.rs:104-105` — the input footprint is built by hand. Target:
   `FramePeek::footprint(workers)`, as every other entry uses.

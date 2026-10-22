@@ -4,7 +4,6 @@ use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
@@ -64,7 +63,7 @@ impl<'a> Component<'a> {
     pub(crate) const fn whole(&self) -> Region {
         Region {
             bbox: self.data.bbox,
-            peak: self.peak.pos,
+            peak: self.peak.pos(),
             area: self.data.area,
         }
     }
@@ -85,8 +84,8 @@ impl<'a> Component<'a> {
         }
         scratch.reset(peaks, self.data.bbox);
         for pixel in self.pixels() {
-            let nearest = scratch.nearest(pixel.pos, peaks);
-            scratch.bboxes[nearest].include(pixel.pos);
+            let nearest = scratch.nearest(pixel.pos(), peaks);
+            scratch.bboxes[nearest].include(pixel.pos());
             scratch.areas[nearest] += 1;
         }
         let Assignment { bboxes, areas, .. } = scratch;
@@ -95,12 +94,12 @@ impl<'a> Component<'a> {
         for ((peak, &bbox), &area) in peaks.iter().zip(bboxes.iter()).zip(areas.iter()) {
             if area > 0 {
                 debug_assert!(
-                    bbox.contains(peak.pos),
+                    bbox.contains(peak.pos()),
                     "assigned region must contain its peak"
                 );
                 out.push(Region {
                     bbox,
-                    peak: peak.pos,
+                    peak: peak.pos(),
                     area,
                 });
             }
@@ -114,10 +113,7 @@ impl<'a> Component<'a> {
 fn scan<'a>(residual: &'a Buffer2<f32>, runs: &'a [LabelRun]) -> impl Iterator<Item = Pixel> + 'a {
     let width = residual.width();
     runs.iter().flat_map(move |run| {
-        let y = run.y as usize;
-        (run.start as usize..run.end as usize).map(move |x| Pixel {
-            pos: Vec2us::new(x, y),
-            value: residual[y * width + x],
-        })
+        let row = run.y as usize * width;
+        (run.start..run.end).map(move |x| Pixel::at(x, run.y, residual[row + x as usize]))
     })
 }

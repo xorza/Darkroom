@@ -46,16 +46,17 @@ fn constant_skies_come_back_exactly() {
         (128, 128, 16, 0.5),
         (128, 128, 128, 0.5),
     ] {
-        let bg = estimate(&Buffer2::new_filled(width, height, value), tile_size);
+        let estimate = estimate(&Buffer2::new_filled(width, height, value), tile_size);
+        let (bg, noise) = (estimate.bg.plane(), estimate.sky.noise.plane());
         let case = format!("{width}×{height} at tile {tile_size}");
-        assert_eq!(bg.bg.width(), width, "{case}");
-        assert_eq!(bg.bg.height(), height, "{case}");
+        assert_eq!(bg.width(), width, "{case}");
+        assert_eq!(bg.height(), height, "{case}");
         assert!(
-            bg.bg.pixels().iter().all(|&v| v == value),
+            bg.pixels().iter().all(|&v| v == value),
             "{case}: background off {value}"
         );
         assert!(
-            bg.sky.noise.pixels().iter().all(|&v| v == 0.0),
+            noise.pixels().iter().all(|&v| v == 0.0),
             "{case}: noise off 0"
         );
     }
@@ -78,12 +79,12 @@ fn plane_skies_come_back_exactly() {
     ] {
         let plane = |x: usize, y: usize| 0.5 + gradient.x * x as f32 + gradient.y * y as f32;
         let pixels = Buffer2::from_fn(width, height, plane);
-        let bg = estimate(&pixels, tile_size);
+        let bg = estimate(&pixels, tile_size).bg.plane();
         let largest = pixels.pixels().iter().fold(0.0f32, |m, &v| m.max(v.abs()));
         let bound = 8.0 * f32::EPSILON * largest;
         for y in 0..height {
             for x in 0..width {
-                let error = (bg.bg[(x, y)] - plane(x, y)).abs();
+                let error = (bg[(x, y)] - plane(x, y)).abs();
                 assert!(
                     error <= bound,
                     "{width}×{height}, gradient {gradient}: ({x}, {y}) off by {error} > {bound}"
@@ -179,15 +180,15 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
             let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
             SKY[tile] + sign * SPREAD[tile]
         });
-        let bg = estimate(&pixels, 32);
+        let estimate = estimate(&pixels, 32);
+        let (bg, noise) = (estimate.bg.plane(), estimate.sky.noise.plane());
         for y in 0..height {
             for x in 0..width {
                 let at = if along_x { x } else { y } as f64;
                 let sky = sky_spline.at(at);
                 let sigma = sigma_spline.at(at).clamp(sigmas[0], sigmas[4]);
                 let axis = if along_x { "x" } else { "y" };
-                let (got_sky, got_sigma) =
-                    (f64::from(bg.bg[(x, y)]), f64::from(bg.sky.noise[(x, y)]));
+                let (got_sky, got_sigma) = (f64::from(bg[(x, y)]), f64::from(noise[(x, y)]));
                 assert!(
                     (got_sky - sky).abs() <= bound,
                     "along {axis}: sky at ({x}, {y}) {got_sky} vs {sky}"
@@ -210,7 +211,7 @@ fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
         pixels[i] = 0.95;
     }
     let bg = estimate(&pixels, 32);
-    assert!(bg.bg.pixels().iter().all(|&v| v == 0.2));
+    assert!(bg.bg.plane().pixels().iter().all(|&v| v == 0.2));
 }
 
 /// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest, and
@@ -270,7 +271,14 @@ fn refine_masks_the_stars_and_their_halos_out() {
     };
 
     let unrefined = estimate(&pixels, 32);
-    assert!(unrefined.bg.pixels().iter().all(|&v| v == SKY + SPREAD));
+    assert!(
+        unrefined
+            .bg
+            .plane()
+            .pixels()
+            .iter()
+            .all(|&v| v == SKY + SPREAD)
+    );
     // A configuration that refines nothing hands the estimate back as it came, with no sources.
     let mut resources = DetectionResources::new(size);
     let untouched = RefinedBg::measure(
@@ -284,24 +292,33 @@ fn refine_masks_the_stars_and_their_halos_out() {
         &mut resources,
     );
     assert!(untouched.sources.is_none());
-    assert_eq!(untouched.estimate.bg.pixels(), unrefined.bg.pixels());
+    assert_eq!(
+        untouched.estimate.bg.plane().pixels(),
+        unrefined.bg.plane().pixels()
+    );
     for mask_dilation in [0, 2] {
         let haloed = refined(1, mask_dilation);
         assert!(
-            haloed.bg.pixels().iter().all(|&v| v == SKY + SPREAD),
+            haloed
+                .bg
+                .plane()
+                .pixels()
+                .iter()
+                .all(|&v| v == SKY + SPREAD),
             "dilated by {mask_dilation}"
         );
     }
     for iterations in [1, 2] {
         let clean = refined(iterations, 3);
         assert!(
-            clean.bg.pixels().iter().all(|&v| v == SKY),
+            clean.bg.plane().pixels().iter().all(|&v| v == SKY),
             "{iterations} passes"
         );
         assert!(
             clean
                 .sky
                 .noise
+                .plane()
                 .pixels()
                 .iter()
                 .all(|&v| v == statistics::sigma_of_mad(SPREAD, 2 * 472)),
@@ -322,21 +339,21 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     let first = BgEstimate::estimate(
         MaskedPlane::from(&pixels),
         &config,
-        &resources.floats,
+        &resources.surfaces,
         &mut resources.bg,
     );
-    let expected_bg = first.bg.pixels().to_vec();
-    let expected_noise = first.sky.noise.pixels().to_vec();
+    let expected_bg = first.bg.plane().pixels().to_vec();
+    let expected_noise = first.sky.noise.plane().pixels().to_vec();
     drop(first);
 
     let second = BgEstimate::estimate(
         MaskedPlane::from(&pixels),
         &config,
-        &resources.floats,
+        &resources.surfaces,
         &mut resources.bg,
     );
-    assert_eq!(second.bg.pixels(), expected_bg);
-    assert_eq!(second.sky.noise.pixels(), expected_noise);
+    assert_eq!(second.bg.plane().pixels(), expected_bg);
+    assert_eq!(second.sky.noise.plane().pixels(), expected_noise);
     drop(second);
 
     resources.reshape(Size2us::new(48, 32));
@@ -344,13 +361,28 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     let resized = BgEstimate::estimate(
         MaskedPlane::from(&resized_pixels),
         &config,
-        &resources.floats,
+        &resources.surfaces,
         &mut resources.bg,
     );
-    assert_eq!(resized.bg.width(), 48);
-    assert_eq!(resized.bg.height(), 32);
-    assert!(resized.bg.pixels().iter().all(|&value| value == 0.25));
-    assert!(resized.sky.noise.pixels().iter().all(|&value| value == 0.0));
+    assert_eq!(resized.bg.plane().width(), 48);
+    assert_eq!(resized.bg.plane().height(), 32);
+    assert!(
+        resized
+            .bg
+            .plane()
+            .pixels()
+            .iter()
+            .all(|&value| value == 0.25)
+    );
+    assert!(
+        resized
+            .sky
+            .noise
+            .plane()
+            .pixels()
+            .iter()
+            .all(|&value| value == 0.0)
+    );
 }
 
 #[test]

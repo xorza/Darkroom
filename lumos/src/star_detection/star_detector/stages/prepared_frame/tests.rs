@@ -7,6 +7,7 @@ use crate::image::image_provenance::{
 use crate::internals::images::gray_image;
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
 
@@ -303,9 +304,9 @@ fn the_detection_threshold_passes_the_sky_it_states() {
             .count();
         count as f64 / size.pixel_count() as f64
     };
-    let two = above(2.0, &plane.noise.noise);
+    let two = above(2.0, &plane.noise.noise.plane());
     assert!((two / 0.02275 - 1.0).abs() <= 0.25, "{two}");
-    let white = above(2.0, &frame.sky.noise);
+    let white = above(2.0, &frame.sky.noise.plane());
     assert!(white > 3.0 * 0.02275, "{white}");
 }
 
@@ -340,7 +341,7 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
     let config = StarDetectionConfig::default();
     let mut pool = DetectionResources::new(size);
     let frame = PreparedFrame::new(&image, &config, &mut pool);
-    let sigma = frame.sky.noise[(32, 32)];
+    let sigma = frame.sky.noise.reader().at(Vec2us::new(32, 32));
     assert!((sigma / 0.01 - 1.0).abs() <= 0.1, "{sigma}");
     let plane = frame.detection_plane(Some(4.0), &config, &mut pool);
     let detected = Candidates::detect(
