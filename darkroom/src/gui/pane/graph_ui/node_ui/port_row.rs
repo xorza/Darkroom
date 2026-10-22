@@ -114,13 +114,11 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, row_tracks: &mut V
 
 /// A port's hover tooltip: its `description` (when the func declares one,
 /// empty otherwise — the resolved [`InputCtx::description`] text) above a
-/// dimmer type line, else just the type, and below them the input that sets
-/// this one aside, if one does.
+/// dimmer type line, else just the type.
 #[derive(Debug, Clone, Copy)]
 struct PortTip<'a> {
     description: &'a str,
     ty: &'a DataType,
-    set_aside_by: Option<&'a str>,
 }
 
 impl PortTip<'_> {
@@ -132,11 +130,7 @@ impl PortTip<'_> {
     /// that node, which [`support::tooltip_after`] and [`PortLabel`] both take
     /// as "no tooltip".
     fn intern(self, ui: &mut Ui, ncx: NodeCtx<'_>) -> Option<InternedStr> {
-        let Self {
-            description,
-            ty,
-            set_aside_by,
-        } = self;
+        let Self { description, ty } = self;
         if !ncx.tips() {
             return None;
         }
@@ -144,26 +138,12 @@ impl PortTip<'_> {
             library: ncx.graph_ctx.library(),
             ty,
         };
-        Some(match (description.is_empty(), set_aside_by) {
-            (true, None) => fmt!(ui, "{type_label}"),
-            (false, None) => fmt!(ui, "{description}\n{type_label}"),
-            (true, Some(by)) => fmt!(ui, "{type_label}\nSet aside: \"{by}\" overrides it."),
-            (false, Some(by)) => {
-                fmt!(
-                    ui,
-                    "{description}\n{type_label}\nSet aside: \"{by}\" overrides it."
-                )
-            }
+        Some(if description.is_empty() {
+            fmt!(ui, "{type_label}")
+        } else {
+            fmt!(ui, "{description}\n{type_label}")
         })
     }
-}
-
-/// How a port's label inks: the ports' muted label ink, or fainter still for
-/// an input another sets aside.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LabelInk {
-    Plain,
-    SetAside,
 }
 
 /// A port's label, `name`, with `tip` (the port's data type) as its hover
@@ -173,7 +153,6 @@ enum LabelInk {
 struct PortLabel<'a> {
     name: &'a str,
     tip: Option<InternedStr>,
-    ink: LabelInk,
 }
 
 impl PortLabel<'_> {
@@ -183,7 +162,7 @@ impl PortLabel<'_> {
     /// value column is each row's strong element, not the label.
     fn show(self, ui: &mut Ui, theme: &Theme) {
         let snapshot = Text::new(self.name)
-            .style(&label_style(ui, theme, self.ink))
+            .style(&label_style(ui, theme))
             .sense(Sense::HOVER)
             .show(ui)
             .snapshot();
@@ -252,15 +231,10 @@ fn open_port_ctx_menu(ui: &mut Ui, menu_id: WidgetId) {
     }
 }
 
-/// The ink a port or event label wears: the ports' muted label ink, fainter
-/// still for an input another sets aside.
-fn label_style(ui: &Ui, theme: &Theme, ink: LabelInk) -> TextStyle {
-    let color = match ink {
-        LabelInk::SetAside => theme.colors.text_muted,
-        LabelInk::Plain => theme.ports.label,
-    };
+/// The ink a port or event label wears: the ports' muted label ink.
+fn label_style(ui: &Ui, theme: &Theme) -> TextStyle {
     TextStyle {
-        color,
+        color: theme.ports.label,
         ..ui.theme().text
     }
 }
@@ -273,22 +247,14 @@ fn input_label_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'
     let (ncx, dcx) = (rec.node, rec.draw);
     let theme = ncx.theme();
     let port = input.port_ref();
-    let set_aside_by = input.overridden_by();
-    let ink = if set_aside_by.is_some() {
-        LabelInk::SetAside
-    } else {
-        LabelInk::Plain
-    };
     let tip = PortTip {
         description: input.description(),
         ty: input.ty(),
-        set_aside_by,
     }
     .intern(ui, ncx);
     let label = PortLabel {
         name: input.name(),
         tip,
-        ink,
     };
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
@@ -443,13 +409,10 @@ fn value_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
     // a sensible floor; the editor fills this cell, this cell fills the col.
-    // A knob another input sets aside is not what a run reads, so it does
-    // not take edits until the override is gone.
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((grid_row(port.port_idx), COL_VALUE))
         .size((Sizing::FILL, Sizing::FILL))
-        .disabled(input.overridden_by().is_some())
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             ConstEdit {
@@ -483,7 +446,6 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
     let tip = PortTip {
         description: output.description(),
         ty,
-        set_aside_by: None,
     }
     .intern(ui, ncx);
     let wid = port_circle_wid(port);
@@ -500,7 +462,6 @@ fn output_cell(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>, output: OutputCtx<'_>)
             PortLabel {
                 name: output.name(),
                 tip,
-                ink: LabelInk::Plain,
             }
             .show(ui, theme);
             PortGlyph::circle(wid, theme.ports.size, fill)
@@ -623,7 +584,7 @@ impl EventRow<'_> {
             .show(ui, |ui| {
                 // Muted like the data-port labels.
                 Text::new(event.name.as_str())
-                    .style(&label_style(ui, theme, LabelInk::Plain))
+                    .style(&label_style(ui, theme))
                     .show(ui);
                 PortGlyph::arrow(wid, theme.ports.size, fill)
                     .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))

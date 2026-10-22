@@ -260,9 +260,6 @@ impl RootFlags {
 pub(crate) enum Delivery<'a> {
     /// Nothing: no binding, or a bind to a producer disabled for this run.
     Unbound,
-    /// Nothing, because the input that overrides this one delivers. Never
-    /// missing, required or not: the node reads the overriding input instead.
-    SetAside,
     /// Nothing, because the producer cannot run for want of an input of its
     /// own — which makes this input missing, optional or not. Only a node the
     /// planner verdicted `MissingInputs` has one, so a node that runs never
@@ -273,40 +270,11 @@ pub(crate) enum Delivery<'a> {
     Wire(OutputAddr),
 }
 
-impl Delivery<'_> {
-    /// Whether the node is handed a value: a constant other than the explicit
-    /// `Null`, or a producer's output.
-    const fn delivers(self) -> bool {
-        match self {
-            Self::Const(value) => !matches!(value, ConstValue::Null),
-            Self::Wire(_) => true,
-            Self::Unbound | Self::SetAside | Self::Blocked => false,
-        }
-    }
-}
-
 impl RunSchedule {
     /// What `input` delivers this run. This schedule must already hold the
-    /// state of `input`'s producer and of its overrider's producer, which the
-    /// planner's post-order walk guarantees.
-    pub(crate) fn delivery<'a>(
-        &self,
-        program: &'a CompiledGraph,
-        input: &'a ExecInput,
-    ) -> Delivery<'a> {
-        // An overrider is never itself overridden (`FuncBuilder::validate`), so its
-        // own binding is the whole answer.
-        if input
-            .overridden_by
-            .is_some_and(|by| self.binding_delivery(&program.inputs[by]).delivers())
-        {
-            return Delivery::SetAside;
-        }
-        self.binding_delivery(input)
-    }
-
-    /// [`delivery`](Self::delivery) without the override.
-    fn binding_delivery<'a>(&self, input: &'a ExecInput) -> Delivery<'a> {
+    /// state of `input`'s producer, which the planner's post-order walk
+    /// guarantees.
+    pub(crate) fn delivery<'a>(&self, input: &'a ExecInput) -> Delivery<'a> {
         match &input.binding {
             ExecBinding::None => Delivery::Unbound,
             ExecBinding::Const(value) => Delivery::Const(value),
@@ -329,11 +297,11 @@ impl RunSchedule {
     /// through those — a cached or executing producer delivers a value, and a
     /// disabled one leaves the input unbound). Shared by the planner's verdict and
     /// the executor's outcome so the two can't drift.
-    pub(crate) fn input_missing(&self, program: &CompiledGraph, input: &ExecInput) -> bool {
-        match self.delivery(program, input) {
+    pub(crate) fn input_missing(&self, input: &ExecInput) -> bool {
+        match self.delivery(input) {
             Delivery::Unbound => input.required,
             Delivery::Blocked => true,
-            Delivery::SetAside | Delivery::Const(_) | Delivery::Wire(_) => false,
+            Delivery::Const(_) | Delivery::Wire(_) => false,
         }
     }
 

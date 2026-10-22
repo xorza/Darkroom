@@ -2,13 +2,13 @@
 //! [`Func`] by [`build`](FuncBuilder::build).
 
 use crate::data::data_type::{DataType, Strictness};
-use crate::graph::func::error::{FuncValidationError, OverrideRule};
+use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::signature::FuncSignature;
-use crate::graph::func::{Func, FuncBehavior, FuncEvent, overrider_of};
+use crate::graph::func::{Func, FuncBehavior, FuncEvent};
 use crate::graph::identity::{FuncId, FuncRef};
 use crate::graph::node::CacheMode;
 
@@ -153,18 +153,6 @@ impl FuncBuilder {
                 });
             }
         }
-        for (input_idx, input) in self.inputs.iter().enumerate() {
-            if let Some(target) = input.overrides
-                && let Err(rule) = self.check_override(input_idx, target)
-            {
-                return Err(FuncValidationError::InvalidOverride {
-                    func_id: self.id,
-                    input_idx,
-                    target,
-                    rule,
-                });
-            }
-        }
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.data_type {
                 DataType::Any => {
@@ -181,34 +169,6 @@ impl FuncBuilder {
                 }
                 _ => {}
             }
-        }
-        Ok(())
-    }
-
-    /// Whether input `input_idx` may override input `target`: an optional
-    /// input over another, `const_only` one that nothing else overrides, and
-    /// no chain — the override is one hop, resolved without a fixed point.
-    fn check_override(&self, input_idx: usize, target: usize) -> Result<(), OverrideRule> {
-        let Some(overridden) = self.inputs.get(target) else {
-            return Err(OverrideRule::TargetOutOfRange);
-        };
-        if target == input_idx {
-            return Err(OverrideRule::SelfTarget);
-        }
-        if self.inputs[input_idx].required {
-            return Err(OverrideRule::RequiredOverride);
-        }
-        if !overridden.const_only {
-            return Err(OverrideRule::WirableTarget);
-        }
-        if overridden.overrides.is_some() || overrider_of(&self.inputs, input_idx).is_some() {
-            return Err(OverrideRule::Chain);
-        }
-        if self.inputs[..input_idx]
-            .iter()
-            .any(|input| input.overrides == Some(target))
-        {
-            return Err(OverrideRule::SharedTarget);
         }
         Ok(())
     }

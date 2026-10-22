@@ -152,12 +152,6 @@ impl Func {
         matches!(self.behavior, FuncBehavior::Impure)
     }
 
-    /// The index of the input declared to override input `target`, if one is.
-    /// [`FuncBuilder::validate`] holds a target to one overrider.
-    pub fn overrider_of(&self, target: usize) -> Option<usize> {
-        overrider_of(&self.inputs, target)
-    }
-
     /// The const bindings a fresh instance starts with: one per input that
     /// declares a default, at that input's port index.
     pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
@@ -171,13 +165,6 @@ impl Func {
                 })
             })
     }
-}
-
-/// The index of the input among `inputs` declared to override input `target`.
-fn overrider_of(inputs: &[FuncInput], target: usize) -> Option<usize> {
-    inputs
-        .iter()
-        .position(|input| input.overrides == Some(target))
 }
 
 #[cfg(test)]

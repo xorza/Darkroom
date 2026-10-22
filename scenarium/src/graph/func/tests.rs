@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, FsPathConfig, FsPathMode, TypeId};
 use crate::graph::func::Func;
-use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::func_input::FuncInput;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
@@ -84,68 +83,9 @@ fn validate_rejects_invalid_identities_and_defaults() {
         .default(ConstValue::FsPath("a.fits".into())),
     );
 
-    // An override is one hop from an optional input onto a const-only one
-    // nothing else overrides.
-    let preset = || FuncInput::required("preset", DataType::Int).const_only();
-    let config = |target| FuncInput::optional("config", DataType::Int).overrides(target);
-    let override_rows = [
-        (
-            vec![preset(), config(2)],
-            1,
-            2,
-            OverrideRule::TargetOutOfRange,
-        ),
-        (vec![config(0)], 0, 0, OverrideRule::SelfTarget),
-        (
-            vec![
-                preset(),
-                FuncInput::required("config", DataType::Int).overrides(0),
-            ],
-            1,
-            0,
-            OverrideRule::RequiredOverride,
-        ),
-        (
-            vec![FuncInput::required("preset", DataType::Int), config(0)],
-            1,
-            0,
-            OverrideRule::WirableTarget,
-        ),
-        (
-            vec![
-                preset(),
-                FuncInput::optional("middle", DataType::Int)
-                    .const_only()
-                    .overrides(0),
-                config(1),
-            ],
-            1,
-            0,
-            OverrideRule::Chain,
-        ),
-        (
-            vec![preset(), config(0), config(0)],
-            2,
-            0,
-            OverrideRule::SharedTarget,
-        ),
-    ];
-    for (inputs, input_idx, target, rule) in override_rows {
-        let func = Func::builder(FuncId::unique(), "override", FuncLambda::stub()).inputs(inputs);
-        assert_eq!(
-            func.validate(),
-            Err(FuncValidationError::InvalidOverride {
-                func_id: func.id,
-                input_idx,
-                target,
-                rule,
-            }),
-            "{rule}"
-        );
-    }
-
     // Well-formed declarations: exact kinds, a variant member, Null on an
-    // optional input, `Any` accepting any literal, and a valid override.
+    // optional input, `Any` accepting any literal, and a picker whose variants
+    // are not of its type, as a preset beside a wired config is.
     let ok = Func::builder(FuncId::unique(), "ok", FuncLambda::stub())
         .input(FuncInput::optional("int", DataType::Int).default(2i64))
         .input(FuncInput::optional("any", DataType::Any).default("text"))
@@ -162,13 +102,16 @@ fn validate_rejects_invalid_identities_and_defaults() {
             )
             .default(ConstValue::FsPaths(vec!["a.fits".into()])),
         )
-        .input(preset())
-        .input(config(5))
-        .output(FuncOutput::new("value", DataType::Int))
-        .build();
-    // `config` (input 6) overrides `preset` (input 5); nothing overrides `config`.
-    assert_eq!(ok.overrider_of(5), Some(6));
-    assert_eq!(ok.overrider_of(6), None);
+        .input(
+            FuncInput::required("preset", DataType::Bool)
+                .variants(vec![ValueVariant::new(
+                    "fast",
+                    ConstValue::Enum("fast".to_owned()),
+                )])
+                .default(ConstValue::Enum("fast".to_owned())),
+        )
+        .output(FuncOutput::new("value", DataType::Int));
+    assert_eq!(ok.validate(), Ok(()));
 }
 
 #[test]

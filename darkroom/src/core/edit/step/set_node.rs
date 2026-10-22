@@ -1,4 +1,4 @@
-//! Whether a node is in the document at all.
+//! [`SetNode`]: a node added to the document or removed from it.
 
 use scenarium::{DetachedNode, NodeId};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ enum Home {
 /// forward it paints, and whether it was selected. What a removal takes out,
 /// and what an undo has to put back for the removal to have been reversible.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct PresenceState {
+pub(crate) struct NodeEntry {
     detached: DetachedNode,
     home: Home,
     /// Restored verbatim rather than recomputed, so an undone delete comes
@@ -30,8 +30,8 @@ pub(crate) struct PresenceState {
     selected: bool,
 }
 
-impl PresenceState {
-    /// Read `node_id`'s whole state out of `doc`, a graph node or a stub, or
+impl NodeEntry {
+    /// Read `node_id`'s whole entry out of `doc`, a graph node or a stub, or
     /// `None` when the document no longer holds it — the ordinary outcome of
     /// an intent that spans frames.
     ///
@@ -69,24 +69,25 @@ impl PresenceState {
     }
 }
 
-/// Whether one node is in the document, before and after.
+/// The document's entry for one node, before and after: the whole entry, or
+/// none.
 ///
 /// Adding a node and removing one are the same edit in opposite directions,
 /// so both intents lower to this one step rather than to a pair that would
 /// have to keep their insert and remove halves in agreement. An insertion
 /// carries `from: None`, a removal `to: None`, and a write either puts the
-/// recorded state back or takes the node out.
+/// recorded entry back or takes the node out.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct NodePresence {
-    /// The node both halves are about. Read off the half that holds a state,
+pub(crate) struct SetNode {
+    /// The node both halves are about. Read off the half that holds an entry,
     /// so the anchor cannot disagree with the payload.
     node_id: NodeId,
-    /// Exactly one half is `Some`: a presence step is an insertion or a
-    /// removal, never a replacement of one node by another.
-    state: Change<Option<PresenceState>>,
+    /// Exactly one half is `Some`: the step is an insertion or a removal,
+    /// never a replacement of one node by another.
+    node: Change<Option<NodeEntry>>,
 }
 
-impl NodePresence {
+impl SetNode {
     /// Put a freshly authored node into the document; undo takes it back out.
     ///
     /// Unselected: adding a node leaves the selection alone, and a caller that
@@ -94,9 +95,9 @@ impl NodePresence {
     pub(crate) const fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
         Self {
             node_id: detached.node_id(),
-            state: Change {
+            node: Change {
                 from: None,
-                to: Some(PresenceState {
+                to: Some(NodeEntry {
                     detached,
                     home: Home::Graph,
                     placement,
@@ -106,12 +107,12 @@ impl NodePresence {
         }
     }
 
-    /// Take `state`'s node out of the document; undo puts it back whole.
-    pub(crate) const fn removal(state: PresenceState) -> Self {
+    /// Take `entry`'s node out of the document; undo puts it back whole.
+    pub(crate) const fn removal(entry: NodeEntry) -> Self {
         Self {
-            node_id: state.detached.node_id(),
-            state: Change {
-                from: Some(state),
+            node_id: entry.detached.node_id(),
+            node: Change {
+                from: Some(entry),
                 to: None,
             },
         }
@@ -127,10 +128,10 @@ impl NodePresence {
     /// replay in reverse, and so do the steps inside one.
     fn take_out(&self, doc: &mut Document, dir: Direction) {
         let recorded = self
-            .state
+            .node
             .half(dir.reversed())
             .as_ref()
-            .expect("a presence step is an insertion or a removal, never two absences");
+            .expect("a node step is an insertion or a removal, never two absences");
         let removed = match recorded.home {
             Home::Graph => doc.remove_node(self.node_id),
             Home::Stubs => doc.remove_stub(self.node_id),
@@ -142,16 +143,16 @@ impl NodePresence {
     }
 }
 
-impl Reversible for NodePresence {
+impl Reversible for SetNode {
     fn write(&self, doc: &mut Document, dir: Direction) {
-        match self.state.half(dir) {
-            Some(state) => state.restore(doc),
+        match self.node.half(dir) {
+            Some(entry) => entry.restore(doc),
             None => self.take_out(doc, dir),
         }
     }
 
     fn is_noop(&self) -> bool {
-        self.state.unchanged()
+        self.node.unchanged()
     }
 
     fn dirties_document(&self) -> bool {

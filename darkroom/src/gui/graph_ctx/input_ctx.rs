@@ -76,23 +76,10 @@ impl<'a> InputCtx<'a> {
         self.node.missing_inputs().contains(&self.port_idx)
     }
 
-    /// The name of the input declared to override this one, while that
-    /// override is in effect — a wired config sets this quick knob aside, and
-    /// a run reads the config instead. `None` for an input nothing overrides,
-    /// or whose overrider holds nothing.
-    pub(crate) fn overridden_by(self) -> Option<&'a str> {
-        let func = self.node.func()?;
-        if !self.node.graph_ctx.body().overridden(self.port(), func) {
-            return None;
-        }
-        func.overrider_of(self.port_idx)
-            .map(|by| func.inputs()[by].name.as_str())
-    }
-
     /// The literal this port falls back to when given a const binding: its
     /// declared default, else the zero value for its data type. `None` for a
-    /// `Custom` type — there is no `ConstValue` for it, so the port can't be
-    /// given an inline const.
+    /// `Custom` type that declares none — there is no `ConstValue` of it, so
+    /// the port can't be given an inline const.
     ///
     /// Owned rather than borrowed: an enum's and an `Any`'s fallbacks are
     /// built here, not stored anywhere to point at.

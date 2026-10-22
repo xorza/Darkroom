@@ -386,8 +386,8 @@ impl RuntimeCache {
             // Keyed by what the executor hands the node: a producer the run skips
             // folds as unbound, since folding its stamp would key this node on the
             // last run the producer took part in.
-            match schedule.delivery(program, input) {
-                Delivery::Unbound | Delivery::SetAside => {
+            match schedule.delivery(input) {
+                Delivery::Unbound => {
                     hasher.write_input_tag(InputTag::Unbound);
                 }
                 Delivery::Blocked => {

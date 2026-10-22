@@ -114,7 +114,11 @@ impl NodeMenuUi {
         match pick.choice {
             MenuChoice::Run => out.push_app(AppCommand::Run(RunCommand::Node(pick.node_id))),
             MenuChoice::Duplicate { incoming } => {
-                out.extend_graph(GraphIntent::duplicate(graph_ctx.document(), incoming));
+                out.extend_graph(GraphIntent::duplicate(
+                    graph_ctx.document(),
+                    graph_ctx.library(),
+                    incoming,
+                ));
             }
             // One intent per member, batched into a single undo entry by the
             // drain — the Delete chord's path exactly.

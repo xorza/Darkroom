@@ -26,7 +26,7 @@
 //!   are the rule for the load, the edit gate and the compile's assert.
 //! - **A matching signature is not enough.** The signature covers port names,
 //!   types and order, and event names — not the `required` flag,
-//!   `const_only`, picker variants, overrides, an enum's variants or a
+//!   `const_only`, picker variants, an enum's variants or a
 //!   default. A library change to any of these keeps a node resolved but can
 //!   break a binding, so the load admits each binding of a resolved node too.
 //! - **The invariant is the host's contract, not a type.** `bindings` is a
@@ -51,7 +51,6 @@ use ::serde::{Deserialize, Serialize};
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 
-use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::DetachedNode;
@@ -146,26 +145,6 @@ impl Graph {
             .range(InputPort::new(node_id, 0)..)
             .take_while(move |(port, _)| port.node_id == node_id)
             .map(|(port, binding)| (*port, binding))
-    }
-    /// Whether input `port` of a node instantiating `func` is set aside by the
-    /// input `func` declares to override it — the editor's reading of the
-    /// rule a run applies, taken from the graph alone.
-    ///
-    /// The overriding input sets `port` aside when it holds a constant other
-    /// than `Null`, or is wired to an enabled node. A run also reads `port`
-    /// when that node cannot run for a missing input of its own, which only a
-    /// run knows.
-    pub fn overridden(&self, port: InputPort, func: &Func) -> bool {
-        let Some(by) = func.overrider_of(port.port_idx) else {
-            return false;
-        };
-        match self.bindings.get(&InputPort::new(port.node_id, by)) {
-            None | Some(Binding::Const(ConstValue::Null)) => false,
-            Some(Binding::Const(_)) => true,
-            Some(Binding::Wire(source)) => self
-                .find(source.node_id)
-                .is_some_and(|producer| !producer.disabled),
-        }
     }
     /// Whether this graph may hold `binding` on `port`: the input is one its
     /// node declares, a constant is one the input accepts, and a wire reads an

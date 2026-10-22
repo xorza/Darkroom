@@ -42,14 +42,13 @@ fn commit_all(
     library: &Library,
     intents: impl IntoIterator<Item = GraphIntent>,
 ) -> Vec<UndoStep> {
-    intents
-        .into_iter()
-        .filter_map(|intent| {
-            intent
-                .commit(doc, library)
-                .expect("the batch is well formed")
-        })
-        .collect()
+    let mut steps = Vec::new();
+    for intent in intents {
+        intent
+            .commit(doc, library, &mut steps)
+            .expect("the batch is well formed");
+    }
+    steps
 }
 
 #[track_caller]
@@ -124,7 +123,7 @@ fn a_removed_node_comes_back_whole() {
     let placement = doc.main_view.item_placements[&a];
 
     let step = GraphIntent::RemoveNode { node_id: a }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("removing a live node commits");
     assert!(doc.graph.find(a).is_none());
@@ -159,7 +158,7 @@ fn a_removed_node_comes_back_whole() {
     let record = doc.stubs.get(stub).cloned().unwrap();
     let stub_placement = doc.main_view.item_placements[&stub];
     let step = GraphIntent::RemoveNode { node_id: stub }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("removing a stub commits");
     assert!(!doc.stubs.contains(stub));
@@ -177,6 +176,100 @@ fn a_removed_node_comes_back_whole() {
         .expect("an undone stub removal leaves a valid document");
 }
 
+/// A wire that goes leaves its input on the input's declared default, so a
+/// preset input shows its pick again: cut on its own, dropped from a
+/// duplicate, or gone with the node that fed it. An input with no default is
+/// left unbound, and clearing a constant leaves it unbound too. Undo puts
+/// each wire back, and redo the default.
+#[test]
+fn a_wire_that_goes_leaves_its_input_on_its_default() {
+    let mut fixture = DocFixture::default();
+    let consumer = internals::stub_func(FuncId::unique(), "consumer")
+        .input(FuncInput::optional("knob", DataType::Int).default(7i64))
+        .input(FuncInput::optional("bare", DataType::Int))
+        .build();
+    let producer = fixture.node_at(Vec2::ZERO);
+    let node = fixture.add(&consumer);
+    let library = fixture.library;
+    let mut doc = fixture.doc;
+    let (knob, bare) = (InputPort::new(node, 0), InputPort::new(node, 1));
+    let wire = || Some(Binding::wire(producer, 0));
+    let seven = || Some(Binding::Const(ConstValue::Int(7)));
+    let wire_both = |doc: &mut Document| {
+        for port in [knob, bare] {
+            doc.graph.set_input_binding(port, wire());
+        }
+    };
+    let bindings = |doc: &Document| [knob, bare].map(|port| doc.graph.bindings.get(&port).cloned());
+
+    wire_both(&mut doc);
+    let cut = commit_all(
+        &mut doc,
+        &library,
+        [knob, bare].map(|input| GraphIntent::SetInput { input, to: None }),
+    );
+    assert_eq!(bindings(&doc), [seven(), None]);
+    undo_all(&mut doc, &cut);
+    assert_eq!(bindings(&doc), [wire(), wire()]);
+    for step in &cut {
+        step.apply(&mut doc);
+    }
+    assert_eq!(bindings(&doc), [seven(), None]);
+    commit_all(
+        &mut doc,
+        &library,
+        [GraphIntent::SetInput {
+            input: knob,
+            to: None,
+        }],
+    );
+    assert_eq!(
+        bindings(&doc),
+        [None, None],
+        "a cleared constant is unbound"
+    );
+
+    wire_both(&mut doc);
+    doc.main_view.selected = [node].into_iter().collect();
+    let intents = GraphIntent::duplicate(&doc, &library, IncomingWires::Drop);
+    let copy = commit_all(&mut doc, &library, intents);
+    let clone = doc.main_view.selected.first().copied().unwrap();
+    assert_ne!(clone, node);
+    assert_eq!(
+        [0, 1].map(|port_idx| doc
+            .graph
+            .bindings
+            .get(&InputPort::new(clone, port_idx))
+            .cloned()),
+        [seven(), None],
+        "a duplicate drops the wires from outside it as a cut does"
+    );
+    undo_all(&mut doc, &copy);
+
+    let removal = commit_all(
+        &mut doc,
+        &library,
+        [GraphIntent::RemoveNode { node_id: producer }],
+    );
+    assert!(
+        matches!(
+            removal.as_slice(),
+            [UndoStep::SetNode(_), UndoStep::SetInput(_)]
+        ),
+        "the removal, then the one input with a default taking it back: {removal:?}"
+    );
+    assert_eq!(bindings(&doc), [seven(), None]);
+    doc.validate().expect("a removal leaves a valid document");
+    undo_all(&mut doc, &removal);
+    assert_eq!(bindings(&doc), [wire(), wire()]);
+    doc.validate()
+        .expect("an undone removal leaves a valid document");
+    for step in &removal {
+        step.apply(&mut doc);
+    }
+    assert_eq!(bindings(&doc), [seven(), None]);
+}
+
 /// The gate holds every write to [`scenarium::Graph::admit`]: a constant the
 /// input does not accept, a wire whose output type it does not accept, and a
 /// node listening to its own event are refused, and nothing is written.
@@ -192,7 +285,7 @@ fn the_gate_refuses_a_mistyped_constant_or_wire_and_a_self_subscription() {
     let input = InputPort::new(dst, 0);
     let refused = |intent: GraphIntent, doc: &mut Document| {
         intent
-            .commit(doc, &library)
+            .commit_one(doc, &library)
             .expect_err("the gate refuses it")
     };
 
@@ -237,7 +330,7 @@ fn duplicate_skips_a_selected_stub() {
     let DocFixture { mut doc, library } = fixture;
     doc.main_view.selected = [node, stub].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&doc, IncomingWires::Drop);
+    let intents = GraphIntent::duplicate(&doc, &library, IncomingWires::Drop);
     commit_all(&mut doc, &library, intents);
     assert_eq!(doc.graph.len(), 2, "the graph node was copied");
     assert_eq!(doc.stubs.len(), 1, "the stub was not");
@@ -261,12 +354,12 @@ fn redo_restores_the_depth_an_add_had() {
     let x = NodeId::unique();
 
     let add = GraphIntent::add_node(Vec2::new(50.0, 0.0), x, node)
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("adding a fresh node commits");
     let x_z = doc.main_view.item_placements[&x].z;
     let raise = GraphIntent::Raise { key: y }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("y is behind x, so raising it is a real change");
     assert!(
@@ -311,7 +404,7 @@ fn raising_the_frontmost_item_records_no_step() {
     for _ in 0..3 {
         assert!(
             GraphIntent::Raise { key: high }
-                .commit(&mut doc, &fixture.library)
+                .commit_one(&mut doc, &fixture.library)
                 .unwrap()
                 .is_none(),
             "the higher id already paints last at a tied depth"
@@ -320,13 +413,13 @@ fn raising_the_frontmost_item_records_no_step() {
     assert_eq!(doc.main_view.item_placements[&high].z, 4);
 
     let step = GraphIntent::Raise { key: low }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("the lower id is behind at a tied depth");
     assert_eq!(doc.main_view.item_placements[&low].z, 5);
     assert!(
         GraphIntent::Raise { key: low }
-            .commit(&mut doc, &fixture.library)
+            .commit_one(&mut doc, &fixture.library)
             .unwrap()
             .is_none(),
         "once in front, raising again is a no-op"
@@ -400,7 +493,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&doc, IncomingWires::Drop);
+    let intents = GraphIntent::duplicate(&doc, &library, IncomingWires::Drop);
     let steps = commit_all(&mut doc, &library, intents);
     doc.validate().expect("a duplicate leaves a valid document");
 
@@ -479,7 +572,7 @@ fn duplicate_keeps_external_producers_on_request() {
     } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
-    let intents = GraphIntent::duplicate(&doc, IncomingWires::Keep);
+    let intents = GraphIntent::duplicate(&doc, &library, IncomingWires::Keep);
     commit_all(&mut doc, &library, intents);
     let b_clone = clone_of(&doc, Vec2::new(100.0, 0.0), &originals);
     assert_eq!(
@@ -494,7 +587,7 @@ fn duplicate_keeps_external_producers_on_request() {
 fn duplicate_of_nothing_asks_for_nothing() {
     let mut fixture = DocFixture::default();
     fixture.node_at(Vec2::ZERO);
-    assert!(GraphIntent::duplicate(&fixture.doc, IncomingWires::Drop).is_empty());
+    assert!(GraphIntent::duplicate(&fixture.doc, &fixture.library, IncomingWires::Drop).is_empty());
 }
 
 #[test]
@@ -535,7 +628,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
     for to in invalid {
         assert!(
             GraphIntent::SetViewport { to, gesture: None }
-                .commit(&mut doc, &fixture.library)
+                .commit_one(&mut doc, &fixture.library)
                 .is_err(),
             "invalid viewport {to:?} must be dropped"
         );
@@ -554,7 +647,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
             to: valid,
             gesture: None,
         }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .is_some(),
         "a finite positive viewport must commit"
@@ -572,7 +665,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
 
     // Subscribe commits and writes the edge.
     let step = subscribe(emitter, subscriber, true)
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("subscribe commits");
     assert!(
@@ -583,7 +676,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
     // A second identical subscribe is a no-op (from == to == true).
     assert!(
         subscribe(emitter, subscriber, true)
-            .commit(&mut doc, &fixture.library)
+            .commit_one(&mut doc, &fixture.library)
             .unwrap()
             .is_none(),
         "re-subscribing the same edge is a no-op"
@@ -603,7 +696,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
     let step = subscribe(emitter, subscriber, false)
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .expect("unsubscribe commits");
     assert!(
@@ -625,7 +718,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
     );
     assert!(
         subscribe(emitter, subscriber, false)
-            .commit(&mut doc, &fixture.library)
+            .commit_one(&mut doc, &fixture.library)
             .unwrap()
             .is_none(),
         "unsubscribing a missing edge is a no-op"
@@ -653,7 +746,7 @@ fn set_node_property_commits_and_reverts() {
     ];
     for to in cases {
         let step = GraphIntent::SetNodeProperty { node_id: id, to }
-            .commit(&mut doc, &fixture.library)
+            .commit_one(&mut doc, &fixture.library)
             .unwrap()
             .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
         let node = doc.graph.find(id).unwrap();
@@ -678,7 +771,7 @@ fn set_node_property_commits_and_reverts() {
     ] {
         assert!(
             GraphIntent::SetNodeProperty { node_id: id, to }
-                .commit(&mut doc, &fixture.library)
+                .commit_one(&mut doc, &fixture.library)
                 .unwrap()
                 .is_none(),
             "{to:?} equals the current value → writes nothing"
@@ -704,7 +797,7 @@ fn commit_rejects_cycle_forming_bind() {
             input: InputPort::new(a, 0),
             to: Some(Binding::wire(b, 0)),
         }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .is_none(),
         "a bind that closes a cycle is rejected"
@@ -727,7 +820,7 @@ fn commit_rejects_cycle_forming_bind() {
             input: InputPort::new(c, 0),
             to: Some(Binding::wire(b, 0)),
         }
-        .commit(&mut doc, &fixture.library)
+        .commit_one(&mut doc, &fixture.library)
         .unwrap()
         .is_some(),
         "an acyclic bind commits"
@@ -743,7 +836,7 @@ fn commit_rejects_cycle_forming_bind() {
 /// half — or `None` when the refusal held.
 fn refusal_leak(doc: &mut Document, library: &Library, intent: GraphIntent) -> Option<String> {
     let nodes = doc.graph.len();
-    if let Ok(outcome) = intent.commit(doc, library) {
+    if let Ok(outcome) = intent.commit_one(doc, library) {
         return Some(format!("expected a MalformedIntent, got {outcome:?}"));
     }
     if doc.graph.len() != nodes {
@@ -802,7 +895,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     let repeated = NodeId::unique();
     assert!(
         GraphIntent::add_node(Vec2::ZERO, repeated, node)
-            .commit(&mut doc, &fixture.library)
+            .commit_one(&mut doc, &fixture.library)
             .unwrap()
             .is_some()
     );
@@ -910,7 +1003,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     // The refusal names the field it held to, not just the check.
     let refused = |intent: GraphIntent, doc: &mut Document| {
         intent
-            .commit(doc, &fixture.library)
+            .commit_one(doc, &fixture.library)
             .expect_err("a malformed payload is refused")
     };
     assert!(matches!(
@@ -1003,7 +1096,7 @@ fn stale_references_still_refuse_quietly() {
     ];
     // The silent drop widgets rely on is an `Ok` outcome, not an error.
     for (what, intent) in cases {
-        match intent.commit(&mut doc, &fixture.library) {
+        match intent.commit_one(&mut doc, &fixture.library) {
             Ok(None) => {}
             other => panic!("{what}: expected no step, got {other:?}"),
         }
@@ -1027,7 +1120,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     let step = GraphIntent::SetSelection {
         to: [live, gone].into_iter().collect(),
     }
-    .commit(&mut doc, &fixture.library)
+    .commit_one(&mut doc, &fixture.library)
     .unwrap()
     .expect("a selection with one live member commits");
     let UndoStep::SetSelection(step) = &step else {
@@ -1046,7 +1139,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         &[member(live, Vec2::new(1.0, 2.0)), member(gone, Vec2::ZERO)],
         Vec2::new(4.0, 4.0),
     )
-    .commit(&mut doc, &fixture.library)
+    .commit_one(&mut doc, &fixture.library)
     .unwrap()
     .expect("a move with one live member commits");
     let UndoStep::MoveSelection(step) = &step else {
@@ -1083,7 +1176,7 @@ fn a_wire_onto_a_const_only_input_is_refused() {
         input,
         to: Some(Binding::wire(feed, 0)),
     }
-    .commit(&mut doc, &fixture.library);
+    .commit_one(&mut doc, &fixture.library);
     assert!(
         matches!(
             wired,
@@ -1104,7 +1197,7 @@ fn a_wire_onto_a_const_only_input_is_refused() {
             binding: Binding::wire(feed, 0),
         }],
     }
-    .commit(&mut doc, &fixture.library);
+    .commit_one(&mut doc, &fixture.library);
     assert!(
         matches!(
             seeded,
@@ -1122,7 +1215,7 @@ fn a_wire_onto_a_const_only_input_is_refused() {
         input,
         to: Some(Binding::Const(ConstValue::Float(0.5))),
     }
-    .commit(&mut doc, &fixture.library);
+    .commit_one(&mut doc, &fixture.library);
     assert!(matches!(constant, Ok(Some(_))), "{constant:?}");
 }
 
@@ -1184,7 +1277,7 @@ fn indices_past_the_declaration_are_refused() {
 
     let refused = |intent: GraphIntent, doc: &mut Document| {
         intent
-            .commit(doc, library)
+            .commit_one(doc, library)
             .expect_err("an undeclared index is refused")
     };
     assert!(matches!(
@@ -1206,7 +1299,7 @@ fn indices_past_the_declaration_are_refused() {
     ));
 
     assert!(
-        matches!(set(1, None).commit(&mut doc, library), Ok(None)),
+        matches!(set(1, None).commit_one(&mut doc, library), Ok(None)),
         "clearing an undeclared input writes nothing and refuses nothing"
     );
     for (what, intent) in [
@@ -1221,7 +1314,7 @@ fn indices_past_the_declaration_are_refused() {
             seeded(0, Binding::wire(producer, 0)),
         ),
     ] {
-        let committed = intent.commit(&mut doc, library);
+        let committed = intent.commit_one(&mut doc, library);
         assert!(matches!(committed, Ok(Some(_))), "{what}: {committed:?}");
     }
 }

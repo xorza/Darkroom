@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::core::document::Document;
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::move_selection::MoveSelection;
-use crate::core::edit::step::node_presence::NodePresence;
 use crate::core::edit::step::raise::Raise;
 use crate::core::edit::step::rename_node::RenameNode;
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_input::SetInput;
+use crate::core::edit::step::set_node::SetNode;
 use crate::core::edit::step::set_node_property::SetNodeProperty;
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
@@ -32,7 +32,7 @@ use crate::core::edit::step::set_viewport::SetViewport;
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
     /// Boxed: a whole detached node is several times the size of every other step.
-    NodePresence(Box<NodePresence>),
+    SetNode(Box<SetNode>),
     MoveSelection(MoveSelection),
     RenameNode(RenameNode),
     SetInput(SetInput),
@@ -96,7 +96,7 @@ impl UndoStep {
     /// matches. [`Self::absorb`] matches too, as it pairs two payloads.
     fn kind(&self) -> &dyn Reversible {
         match self {
-            Self::NodePresence(step) => step.as_ref(),
+            Self::SetNode(step) => step.as_ref(),
             Self::MoveSelection(step) => step,
             Self::RenameNode(step) => step,
             Self::SetInput(step) => step,

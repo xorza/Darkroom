@@ -72,109 +72,94 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.inputs()[5].default_value, Some(ConstValue::Bool(true)));
 }
 
-/// Every quick knob is one const-only input beside a detailed config declared
-/// to override it, and the matching builder emits that config: the D12 shape,
-/// on the six processing nodes and on the stacking node's three stages.
+/// Every preset input is one required, wireable input of its detailed config's
+/// wire type, the builder's output, holding a pick by default: on the three
+/// preset processing nodes and on the stacking node's three stages.
 #[test]
-fn every_quick_knob_has_a_config_that_overrides_it() {
+fn every_preset_input_takes_a_pick_or_its_builders_config() {
     let lib = astro_library(&MlModelPaths::default());
-    // (node, knob index, knob name, config index, config name, builder)
+    // (node, input index, input name, builder)
     let cases = [
-        (
-            "Auto Stretch",
-            1,
-            "Method",
-            2,
-            "Config",
-            "Build Stretch Config",
-        ),
-        (
-            "Extract Background",
-            1,
-            "Mode",
-            2,
-            "Config",
-            "Build Background Config",
-        ),
-        ("SCNR", 1, "Protection", 2, "Config", "Build SCNR Config"),
-        (
-            "Denoise",
-            1,
-            "Strength",
-            2,
-            "Config",
-            "Build Denoise Config",
-        ),
-        (
-            "HDR Compression",
-            1,
-            "Amount",
-            2,
-            "Config",
-            "Build HDR Config",
-        ),
-        (
-            "Local Contrast",
-            1,
-            "Strength",
-            2,
-            "Config",
-            "Build Local Contrast Config",
-        ),
+        ("Auto Stretch", 1, "Method", "Build Stretch Config"),
+        ("Extract Background", 1, "Mode", "Build Background Config"),
+        ("SCNR", 1, "Protection", "Build SCNR Config"),
+        ("Stack Lights", 2, "Detection", "Build Detection Config"),
         (
             "Stack Lights",
-            2,
-            "Detection",
             3,
-            "Detection Config",
-            "Build Detection Config",
-        ),
-        (
-            "Stack Lights",
-            4,
             "Registration",
-            5,
-            "Registration Config",
             "Build Registration Config",
         ),
-        (
-            "Stack Lights",
-            6,
-            "Combine",
-            7,
-            "Combine Config",
-            "Build Combine Config",
-        ),
+        ("Stack Lights", 4, "Combine", "Build Combine Config"),
     ];
-    for (node, knob_idx, knob_name, config_idx, config_name, builder) in cases {
-        let f = lib.by_name(node).unwrap();
-        let knob = &f.inputs()[knob_idx];
-        assert_eq!(knob.name, knob_name, "{node}");
-        assert!(knob.const_only && knob.required, "{node} {knob_name}");
+    for (node, idx, name, builder) in cases {
+        let input = &lib.by_name(node).unwrap().inputs()[idx];
+        assert_eq!(input.name, name, "{node}");
+        assert!(input.required && !input.const_only, "{node} {name}");
         assert!(
-            knob.default_value.is_some(),
-            "{node} {knob_name} starts set"
+            !input.value_variants.is_empty(),
+            "{node} {name} offers picks"
         );
-        let config = &f.inputs()[config_idx];
-        assert_eq!(config.name, config_name, "{node}");
-        assert!(!config.required, "{node} {config_name} is optional");
-        assert_eq!(config.overrides, Some(knob_idx), "{node} {config_name}");
+        assert_eq!(
+            input.default_value.as_ref(),
+            Some(&input.value_variants[0].value),
+            "{node} {name} starts on its first pick"
+        );
         let built = lib.by_name(builder).unwrap();
-        assert_eq!(built.outputs()[0].data_type, config.data_type, "{builder}");
+        assert_eq!(built.outputs()[0].data_type, input.data_type, "{builder}");
+    }
+}
+
+/// An op of a few plain knobs takes them as its own inputs after the image,
+/// one per field at the op's default, and has no config builder.
+#[test]
+fn a_few_knobs_are_the_nodes_own_inputs() {
+    let lib = astro_library(&MlModelPaths::default());
+    // The labels are the lumos field names title-cased.
+    for (node, labels, builder) in [
+        (
+            "Denoise",
+            &["Scales", "K", "Threshold", "Strength"][..],
+            "Build Denoise Config",
+        ),
+        ("HDR Compression", &["Scales", "Amount"], "Build HDR Config"),
+        (
+            "Local Contrast",
+            &["Tiles", "Clip Limit", "Strength"],
+            "Build Local Contrast Config",
+        ),
+    ] {
+        let inputs = &lib.by_name(node).unwrap().inputs()[1..];
+        let names: Vec<&str> = inputs.iter().map(|input| input.name.as_str()).collect();
+        assert_eq!(names, labels, "{node}");
+        assert!(
+            inputs.iter().all(|input| input.default_value.is_some()),
+            "{node}"
+        );
+        assert!(lib.by_name(builder).is_none(), "{builder}");
     }
 
-    // A strength knob starts where the op's own default does.
-    let strength = |node: &str| lib.by_name(node).unwrap().inputs()[1].default_value.clone();
+    // The strength each starts at is the op's own default.
+    let default = |node: &str, name: &str| {
+        lib.by_name(node)
+            .unwrap()
+            .inputs()
+            .iter()
+            .find(|input| input.name == name)
+            .unwrap()
+            .default_value
+            .clone()
+    };
     assert_eq!(
-        strength("Denoise"),
+        default("Denoise", "Strength"),
         Some(ConstValue::Float(f64::from(Denoise::default().strength)))
     );
     assert_eq!(
-        strength("HDR Compression"),
+        default("HDR Compression", "Amount"),
         Some(ConstValue::Float(f64::from(Hdr::default().amount)))
     );
     assert_eq!(
-        strength("Local Contrast"),
+        default("Local Contrast", "Strength"),
         Some(ConstValue::Float(f64::from(
             LocalContrast::default().strength
         )))
@@ -195,11 +180,8 @@ fn stack_lights_node_is_registered() {
             "Lights",
             "Masters",
             "Detection",
-            "Detection Config",
             "Registration",
-            "Registration Config",
             "Combine",
-            "Combine Config",
             "Reference"
         ]
     );
@@ -208,8 +190,8 @@ fn stack_lights_node_is_registered() {
     assert_eq!(f.inputs()[1].data_type, MASTERS_DATA_TYPE);
     assert!(!f.inputs()[1].required, "masters are genuinely optional");
     // Unset picks the sharpest frame with enough stars; no sentinel stands in for it.
-    assert!(!f.inputs()[8].required);
-    assert_eq!(f.inputs()[8].default_value, None);
+    assert!(!f.inputs()[5].required);
+    assert_eq!(f.inputs()[5].default_value, None);
 
     let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);

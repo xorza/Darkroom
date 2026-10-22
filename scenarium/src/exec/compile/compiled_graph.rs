@@ -45,10 +45,6 @@ pub(crate) struct ExecInput {
     /// Whether a bound value's filesystem referent contributes to this input's digest.
     pub(crate) stamps_fs_path: bool,
     pub(crate) binding: ExecBinding,
-    /// The input of the same node declared to override this one
-    /// ([`FuncInput::overrides`](crate::FuncInput::overrides)), resolved to its
-    /// place in the input column.
-    pub(crate) overridden_by: Option<InputIdx>,
 }
 
 #[derive(Debug)]
