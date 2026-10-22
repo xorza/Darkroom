@@ -13,7 +13,6 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::result;
 
 use hashbrown::HashMap;
 
@@ -23,7 +22,6 @@ use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime_cache::error::CacheNodeFailure;
-use crate::execution::compile::error::CompileError;
 use crate::execution::engine::{ExecuteRequest, ExecutionEngine};
 use crate::execution::error::{Result, RunError};
 use crate::execution::report::execution_outcome::ExecutionOutcome;
@@ -53,10 +51,7 @@ pub(crate) struct TestEngine {
 }
 
 impl TestEngine {
-    /// Compile `graph` and install it. Panics on a compile error — a fixture
-    /// that does not compile is a broken fixture;
-    /// [`try_reinstall`](Self::try_reinstall) is for the tests where the
-    /// refusal *is* the subject.
+    /// Compile `graph` and install it.
     pub(crate) fn over(graph: TestGraph) -> Self {
         let mut engine = Self {
             graph,
@@ -93,11 +88,7 @@ impl TestEngine {
     }
 
     pub(crate) fn reinstall(&mut self) {
-        self.try_reinstall().expect("the fixture graph compiles");
-    }
-
-    pub(crate) fn try_reinstall(&mut self) -> result::Result<(), CompileError> {
-        self.engine.update(&self.graph.graph, &self.graph.library)
+        self.engine.update(&self.graph.graph, &self.graph.library);
     }
 
     /// Point the cache's disk tier at `root`, using this graph's own codecs.

@@ -1,13 +1,7 @@
-//! What compiling rejects, including the compiler's debug-only checks of a
-//! freshly linked artifact.
+//! The compiler's debug-only checks of a freshly linked artifact.
 //!
-//! [`CompileError`] is the only one a caller sees: a graph that will not compile
-//! against the library it names — a dropped func, a shrunk port list, a
-//! type-mismatched binding — which a document can reach simply by being older
-//! than the library. It is recoverable, and never enters the worker.
-//!
-//! The crate-private errors are *self-consistency* verdicts from the validation
-//! stage that follows the walk. Nothing but a bug in this crate can raise one, so they
+//! These are *self-consistency* verdicts from the validation stage that
+//! follows the walk. Nothing but a bug in this crate can raise one, so they
 //! surface only through its `is_debug()`-gated wrapper — as values rather than
 //! panics, so a test can assert on exactly which invariant broke.
 
@@ -18,21 +12,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 use crate::execution::index::{NodeIdx, OutputAddr};
-use crate::graph::error::GraphValidationError;
 use crate::graph::identity::{FuncId, NodeId};
-
-/// The graph won't compile against the library: a document can be stale
-/// against an evolved library (a dropped func, a shrunk port list, a
-/// type-mismatched binding), so this is a recoverable error the caller
-/// surfaces, not a logic bug. The compile-phase counterpart of the run-phase
-/// [`Error`](crate::execution::error::Error) — the two can't be confused at the type
-/// level, and only `compile` produces it.
-#[derive(Debug, Error)]
-#[error("invalid graph: {source}")]
-pub struct CompileError {
-    #[from]
-    pub source: GraphValidationError,
-}
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an
 /// `is_debug()`-gated `validate_debug` wrapper, so production call sites pay nothing

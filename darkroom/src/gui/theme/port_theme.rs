@@ -15,10 +15,8 @@ use crate::gui::theme::palette::Palette;
 /// resting one; the pointer lift is applied at that call site.
 #[derive(Clone, Debug)]
 pub(crate) struct PortTheme {
-    /// Positional color for untyped input ports.
+    /// Color for an untyped (`Any`) input port. No output is untyped.
     pub(crate) input: RgbaF32,
-    /// Positional color for untyped output ports.
-    pub(crate) output: RgbaF32,
     /// Event emitter glyphs, subscription pins, and event wires — distinct
     /// from the type-colored data ports.
     pub(crate) event: RgbaF32,
@@ -47,7 +45,6 @@ impl PortTheme {
     pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             input: p.input_port,
-            output: p.output_port,
             event: p.event_port,
             label: p.port_label,
             size: 13.0,

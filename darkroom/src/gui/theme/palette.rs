@@ -66,10 +66,8 @@ pub(crate) struct Palette {
     pub(crate) connection_broken: RgbaF32,
     /// The scribble that cuts wires.
     pub(crate) breaker_stroke: RgbaF32,
-    /// Positional color for an untyped input port.
+    /// Color for an untyped (`Any`) input port.
     pub(crate) input_port: RgbaF32,
-    /// Positional color for an untyped output port.
-    pub(crate) output_port: RgbaF32,
     /// Event emitters, subscription pins and event wires — the sink
     /// marker's red, so the trigger machinery reads as one family.
     pub(crate) event_port: RgbaF32,

@@ -1,16 +1,15 @@
 //! Phase 1 of the pipeline, split off the engine so hosts compile on their own
-//! thread: validate the authoring [`Graph`] against the [`Library`], then walk
-//! it straight into a self-contained [`CompiledGraph`] the worker installs
-//! as-is. Compile errors surface synchronously at the call site — a graph that
-//! doesn't compile is never sent, so the worker's install is infallible and a
-//! running event loop is never disturbed by a bad edit.
+//! thread: walk the authoring [`Graph`] straight into a self-contained
+//! [`CompiledGraph`] the worker installs as-is.
 //!
-//! The walk is a copy with three jobs it is the only place to do: resolving
-//! each binding to the producer it names, gating it against the declared types,
-//! and interning every id-named reference into the dense index space.
-//! The *type gate* is drift tolerance — a wire whose producer's declared type
-//! no longer fits the consumer, or a const that no longer satisfies it, lowers
-//! as unbound rather than severing authored wiring.
+//! A compile has no expected failure. The host reconciles a document against
+//! the library at load and admits each edit after, so the graph a compile gets
+//! holds only nodes that resolve and wiring
+//! [`Graph::validate_with`] accepts — which the compile asserts up front.
+//!
+//! The walk is a copy with two jobs it is the only place to do: resolving each
+//! binding to the producer it names, and interning every id-named reference
+//! into the dense index space.
 //!
 //! **The sort comes first.** [`Graph::iter`] is a `HashMap` walk, so the order
 //! nodes are reached in is not an order an artifact may depend on. Sorting the
@@ -40,11 +39,9 @@ use crate::data::data_type::DataType;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
-use crate::execution::compile::error::CompileError;
 use crate::execution::index::{InputIdx, NodeIdx, OutputAddr};
 use crate::graph::Graph;
 use crate::graph::binding::Binding;
-use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
 use crate::library::Library;
 
@@ -101,29 +98,23 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    /// Compile `graph` against `library`: validate, then walk into a func-only
-    /// program. Pure CPU on the caller's
-    /// thread; the result is installed into an engine
+    /// Compile `graph` against `library` into a func-only program. Pure CPU on
+    /// the caller's thread; the result is installed into an engine
     /// (`ExecutionEngine::install`), typically across the worker channel.
     ///
-    /// A rejection is returned, not logged. It is an ordinary outcome of editing
-    /// against an evolving library, and the caller is the one that knows whether
-    /// this compile was a user action to surface or a speculative one to
-    /// swallow — darkroom, for instance, puts the same message on its status
-    /// bar.
-    pub fn compile(
-        &mut self,
-        graph: &Graph,
-        library: &Library,
-    ) -> Result<CompiledGraph, CompileError> {
-        // Validate before building anything: the graph+library pair is untrusted
-        // input, and a passing check lets the walk below resolve every reference
-        // infallibly.
-        graph.validate_with(library)?;
-
+    /// # Panics
+    ///
+    /// If `graph` breaks the load contract against `library`
+    /// ([`Graph::validate_with`]). Checked in every build, so a host's bug
+    /// stops here naming the bad node or binding, rather than in a lambda on
+    /// the worker that misreads an input.
+    pub fn compile(&mut self, graph: &Graph, library: &Library) -> CompiledGraph {
+        if let Err(breach) = graph.validate_with(library) {
+            panic!("a host compiled a graph that breaks the load contract: {breach}");
+        }
         let compiled = self.walk(graph, library);
         validate::validate_debug(&compiled, library);
-        Ok(compiled)
+        compiled
     }
 
     /// The walk itself, over a graph [`Self::compile`] has already validated.
@@ -168,13 +159,12 @@ impl Compiler {
 
             // A func and a special node both resolve to a `&Func` spec and emit
             // one node, so the body below is shared.
-            let func = node.func(library).expect("func resolved by validate_with");
+            let func = node.func(library);
             let special = node.special();
 
-            // Every port is read fresh from the func each build (never carried
-            // over from the last one): the library can evolve between updates —
-            // a changed `required` flag, a grown input list, a retyped output —
-            // and this is where that lands.
+            // Every port is read fresh from the func each build, never carried
+            // over from the last one, so the artifact is the library's as
+            // given.
             //
             // Each input is resolved as it is appended, so it is whole the moment
             // it enters the pool rather than being revisited by index afterwards.
@@ -184,12 +174,7 @@ impl Compiler {
                     ExecutionInput {
                         required: func_input.required,
                         stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
-                        binding: self.typed_binding(
-                            graph,
-                            library,
-                            func_input,
-                            graph.bindings.get(&InputPort::new(node_id, port_idx)),
-                        ),
+                        binding: self.lower(graph.bindings.get(&InputPort::new(node_id, port_idx))),
                         overridden_by: func
                             .overrider_of(port_idx)
                             .map(|by| InputIdx::from_idx(base + by)),
@@ -204,13 +189,16 @@ impl Compiler {
 
             // Each event lands with its subscribers, resolved through the
             // placement, which already covers nodes the walk has not reached.
-            // A subscription to an event the func has since dropped sorts
-            // before the next node's and is passed over — the same drift
-            // tolerance the type gate applies to data edges.
             let node_events = compiled.events.append(func.events().iter().enumerate().map(
                 |(event_idx, event)| {
                     let port = EventPort::new(node_id, event_idx);
-                    while subscriptions.next_if(|sub| sub.event < port).is_some() {}
+                    #[expect(clippy::debug_assert_with_mut_call, reason = "a peek moves nothing")]
+                    {
+                        debug_assert!(
+                            subscriptions.peek().is_none_or(|sub| sub.event >= port),
+                            "every subscription names an event its emitter declares"
+                        );
+                    }
                     let subscribers = compiled.subscribers.append(
                         iter::from_fn(|| subscriptions.next_if(|sub| sub.event == port))
                             .filter(|sub| {
@@ -239,6 +227,13 @@ impl Compiler {
             });
         }
 
+        #[expect(clippy::debug_assert_with_mut_call, reason = "a peek moves nothing")]
+        {
+            debug_assert!(
+                subscriptions.peek().is_none(),
+                "every subscription names an event its emitter declares"
+            );
+        }
         // The placement counted these from the same declarations the walk read,
         // so a mismatch is the two disagreeing about the library — and every
         // column above would have silently regrown to cover it.
@@ -265,7 +260,7 @@ impl Compiler {
         placed.reserve_exact(graph.len());
         let mut totals = PortTotals::default();
         for node in graph.iter() {
-            let func = node.func(library).expect("func resolved by validate_with");
+            let func = node.func(library);
             totals.inputs += func.inputs().len();
             totals.outputs += func.outputs().len();
             totals.events += func.events().len();
@@ -304,43 +299,19 @@ impl Compiler {
         &self.placed[self.idx(node_id).idx()]
     }
 
-    /// [`Self::resolve`] behind the type gate: a wire to an output its producer
-    /// does not declare or whose declared type the input does not accept, or a
-    /// const that doesn't satisfy the input, lowers as unbound — drift
-    /// tolerance. The editor paints such a wire as
-    /// mismatched; a required input surfaces as a missing-input verdict. Nothing
-    /// is severed, so the wiring revives when the types line up again.
-    fn typed_binding(
-        &self,
-        graph: &Graph,
-        library: &Library,
-        input: &FuncInput,
-        binding: Option<&Binding>,
-    ) -> ExecutionBinding {
+    /// What an input lowers to: its constant, the producer it is wired to, or
+    /// nothing.
+    fn lower(&self, binding: Option<&Binding>) -> ExecutionBinding {
         match binding {
-            Some(Binding::Const(value)) if library.const_satisfies(input, value) => {
-                ExecutionBinding::Const(value.clone())
-            }
-            None | Some(Binding::Const(_)) => ExecutionBinding::None,
-            Some(Binding::Bind(src)) => {
-                let producer = graph
-                    .find(src.node_id)
-                    .and_then(|producer| producer.func(library))
-                    .expect("validate_with resolved every producer");
-                match producer.outputs().get(src.port_idx) {
-                    Some(output) if input.data_type.compatible_with(&output.data_type) => {
-                        self.resolve(*src)
-                    }
-                    _ => ExecutionBinding::None,
-                }
-            }
+            None => ExecutionBinding::None,
+            Some(Binding::Const(value)) => ExecutionBinding::Const(value.clone()),
+            Some(Binding::Bind(source)) => self.resolve(*source),
         }
     }
 
-    /// Intern an output reference, which [`Self::typed_binding`] found among
-    /// its producer's declared outputs, into the dense [`OutputAddr`] the
-    /// producer landed at — the one place a producer id is ever hashed, once
-    /// per compile instead of once per run.
+    /// Intern an output reference into the dense [`OutputAddr`] the producer
+    /// landed at — the one place a producer id is ever hashed, once per compile
+    /// instead of once per run.
     fn resolve(&self, port: OutputPort) -> ExecutionBinding {
         ExecutionBinding::Bind(OutputAddr {
             node_idx: self.idx(port.node_id),

@@ -1,7 +1,7 @@
 //! One node of the graph, with its declaration resolved.
 
 use glam::Vec2;
-use scenarium::{CacheMode, Func, FuncEvent, FuncResolution, Node, NodeId, RamUsage};
+use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, RamUsage, Unresolved};
 
 use crate::core::preview_sink;
 use crate::gui::graph_ctx::GraphCtx;
@@ -15,15 +15,23 @@ use crate::gui::widgets::hover::Hover;
 use scenarium::EventPort;
 
 /// The `kind_label` a stub reports when the library holds no func under its
-/// id — see [`NodeCtx::missing`].
+/// id — see [`NodeCtx::stub`].
 const MISSING_FUNC_LABEL: &str = "missing func";
 
 /// The `kind_label` a stub reports when the library holds its func with other
 /// ports than the node was authored against.
 const CHANGED_FUNC_LABEL: &str = "changed func";
 
-/// One node of the graph: its authoring record, its position in the paint
-/// stack, and the declaration the library resolves for it.
+/// What a placed item declares: the func a graph node instantiates, or why a
+/// stub has none.
+#[derive(Clone, Copy, Debug)]
+enum Declaration<'a> {
+    Func(&'a Func),
+    Stub(Unresolved),
+}
+
+/// One placed item of the graph pane — a graph node or a stub: its authoring
+/// record, its position in the paint stack, and what it declares.
 ///
 /// The leaf of the context chain, and the one level where the *item* is the
 /// level — every function below a node body is about that node, so passing it
@@ -49,23 +57,13 @@ pub(crate) struct NodeCtx<'a> {
     /// than an accessor: the paint stack is walked by position, and every
     /// geometry reader wants it.
     pub(crate) pos: Vec2,
+    /// The graph node, or a stub's record of one.
     node: &'a Node,
-    /// The declaration scenarium resolves — a library func or a special
-    /// node's hardcoded spec.
-    ///
-    /// `None` is **library drift**, not a failure to look something up: a
-    /// document loads against whatever library is present, and
-    /// `Graph::validate` (the structural walk the load path runs) tolerates a
-    /// func id the current library lacks so the authored wiring survives the
-    /// library coming back. It reads as a portless
-    /// [`missing`](Self::missing) stub the user can still select and delete,
-    /// and a run refuses it loudly — `validate_with` rejects `MissingFunc` at
-    /// compile, which the status bar shows.
-    ///
-    /// Every accessor below degrades it to "declares nothing" rather than
-    /// guessing; that is the stub, and it is what a new accessor here must
-    /// keep doing.
-    func: Option<&'a Func>,
+    /// A graph node's func — a library func or a special node's hardcoded
+    /// spec — or the reason a stub has none. A stub keeps the user's work
+    /// while the library cannot run it: it declares no ports, and the user can
+    /// still select, move and delete it.
+    declaration: Declaration<'a>,
     /// What the last run said about this node, looked up once when the node
     /// resolves rather than at every status, memory or port read.
     run: Option<&'a NodeRunState>,
@@ -85,27 +83,33 @@ pub(crate) struct NodeCtx<'a> {
 }
 
 impl<'a> NodeCtx<'a> {
-    /// Resolve the placed `node_id` against the graph.
+    /// Resolve the placed `node_id` against the document.
     ///
     /// # Panics
     ///
-    /// If the graph holds no `node_id`: callers resolve placements, and the
-    /// document holds a placement exactly for every node.
+    /// If the document holds no `node_id`: callers resolve placements, and the
+    /// document holds a placement exactly for every graph node and stub.
     pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
-        let node = graph_ctx
-            .body()
-            .find(node_id)
-            .expect("every placement names a node the graph holds");
-        // `None` is a func node the library cannot resolve: its id is gone, or
-        // its func moved its ports. A special node's declaration is hardcoded,
-        // so `Node::func` resolves it unconditionally.
-        let func = node.func(graph_ctx.library());
+        let library = graph_ctx.library();
+        let (node, declaration) = if let Some(node) = graph_ctx.body().find(node_id) {
+            (node, Declaration::Func(node.func(library)))
+        } else {
+            let record = graph_ctx
+                .document()
+                .stubs
+                .get(node_id)
+                .expect("every placement names a graph node or a stub");
+            let reason = library
+                .func_of(record.node())
+                .expect_err("a stub does not resolve");
+            (record.node(), Declaration::Stub(reason))
+        };
         Self {
             graph_ctx,
             id: node_id,
             pos,
             node,
-            func,
+            declaration,
             run: graph_ctx.run_state().node(node_id),
             hover: Hover::Rest,
         }
@@ -153,26 +157,24 @@ impl<'a> NodeCtx<'a> {
     /// Human-readable type identity: the func's name, or for a stub whether its
     /// func is gone or changed its ports. Shown by the inspection panel.
     pub(crate) fn kind_label(self) -> &'a str {
-        match self.node.resolve(self.graph_ctx.library()) {
-            FuncResolution::Found(func) => func.name(),
-            FuncResolution::Changed(_) => CHANGED_FUNC_LABEL,
-            FuncResolution::Missing(_) => MISSING_FUNC_LABEL,
+        match self.declaration {
+            Declaration::Func(func) => func.name(),
+            Declaration::Stub(Unresolved::ChangedPorts) => CHANGED_FUNC_LABEL,
+            Declaration::Stub(Unresolved::MissingFunc) => MISSING_FUNC_LABEL,
         }
     }
 
     /// The func's description, empty for a stub or a func that declares none.
     /// Shown by the inspection panel and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
-        self.func.and_then(|f| f.description()).unwrap_or_default()
+        self.func().and_then(Func::description).unwrap_or_default()
     }
 
-    /// The node's func is absent from the library, or present with other ports
-    /// than the node was authored against (a document saved against another
-    /// library), so its interface can't be resolved.
-    /// Rendered as a portless error stub the user can still select and
+    /// A stub: a node the library cannot resolve, kept beside the graph.
+    /// Rendered as a portless error card the user can still select, move and
     /// delete — never silently dropped.
-    pub(crate) const fn missing(self) -> bool {
-        self.func.is_none()
+    pub(crate) const fn stub(self) -> bool {
+        matches!(self.declaration, Declaration::Stub(_))
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
@@ -196,31 +198,30 @@ impl<'a> NodeCtx<'a> {
     /// lets the affordances it gates — the disable toggle, the subscription
     /// pin — render before the first compile.
     pub(crate) fn sink(self) -> bool {
-        self.func.is_some_and(Func::sink)
+        self.func().is_some_and(Func::sink)
     }
 
     /// The node holds work that recomputes every run. An impure node has no
     /// content digest, so no cache mode is ever honored; the header paints
     /// the `~` marker off this. Declared, like [`Self::sink`].
     pub(crate) fn impure(self) -> bool {
-        self.func.is_some_and(Func::impure)
+        self.func().is_some_and(Func::impure)
     }
 
     /// A preview node: its body shows the value wired into it instead of the
-    /// usual output ports and memory readout. Resolved from the func id, so a
-    /// document whose library lost the func degrades to an ordinary missing
-    /// stub rather than an empty card.
+    /// usual output ports and memory readout. A stub is never one, so a
+    /// document whose library lost the func shows an ordinary stub card rather
+    /// than an empty preview.
     pub(crate) fn preview(self) -> bool {
-        self.func.is_some() && self.node.func_id().is_some_and(preview_sink::is_func)
+        !self.stub() && self.node.func_id().is_some_and(preview_sink::is_func)
     }
 
     /// Whether the node has an output a cache can key: the one rule behind
     /// the header's RAM/disk storage chips and its eviction chip. An impure
     /// func has no content digest to key a cache on, and a func with no
-    /// outputs has nothing to store — a `missing` stub for both reasons at
-    /// once.
+    /// outputs has nothing to store — a stub for both reasons at once.
     pub(crate) fn cacheable(self) -> bool {
-        self.func
+        self.func()
             .is_some_and(|f| !f.outputs().is_empty() && !f.impure())
     }
 
@@ -234,14 +235,14 @@ impl<'a> NodeCtx<'a> {
     /// Whether this node can seed a "run to this node" — drives the header
     /// play chip, the context-menu item, and the port menu's "Add preview".
     ///
-    /// Everything but a `missing` stub qualifies: the stub resolves to no
-    /// compiled work, while a *disabled* node still runs, because a targeted
+    /// Everything but a stub qualifies: the stub is not in the graph, so it
+    /// has no compiled work, while a *disabled* node still runs, because a targeted
     /// run overrides that flag for the run. Deliberately an authoring-side
     /// fact, not a lookup in a compiled program — the palette and the header
     /// record every frame, including before the first compile, so an
     /// affordance can't wait on one.
     pub(crate) const fn runnable(self) -> bool {
-        !self.missing()
+        !self.stub()
     }
 
     /// Outcome of the last graph run, with its detail. Drives the node's
@@ -259,29 +260,32 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which
-    /// declares nothing.
+    /// declares none.
     pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputCtx<'a>> {
-        let declared = self.func.map_or(&[][..], |f| f.inputs());
+        let declared = self.func().map_or(&[][..], Func::inputs);
         declared
             .iter()
             .enumerate()
             .map(move |(port_idx, input)| InputCtx::new(self, port_idx, input))
     }
 
-    /// The func this node instantiates, `None` for one the library lacks.
+    /// The func this node instantiates, `None` for a stub.
     pub(super) const fn func(self) -> Option<&'a Func> {
-        self.func
+        match self.declaration {
+            Declaration::Func(func) => Some(func),
+            Declaration::Stub(_) => None,
+        }
     }
 
     /// One input port by index.
     pub(crate) fn input(self, port_idx: usize) -> Option<InputCtx<'a>> {
-        let declared = self.func?.inputs().get(port_idx)?;
+        let declared = self.func()?.inputs().get(port_idx)?;
         Some(InputCtx::new(self, port_idx, declared))
     }
 
     /// This node's output ports, in declaration order.
     pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputCtx<'a>> {
-        let declared = self.func.map_or(&[][..], |f| f.outputs());
+        let declared = self.func().map_or(&[][..], Func::outputs);
         declared
             .iter()
             .enumerate()
@@ -292,14 +296,14 @@ impl<'a> NodeCtx<'a> {
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
     pub(crate) fn events(self) -> &'a [FuncEvent] {
-        self.func.map_or(&[][..], |f| f.events())
+        self.func().map_or(&[][..], Func::events)
     }
 
     /// How many ports this node declares on `kind`'s side.
     pub(crate) fn port_count(self, kind: PortKind) -> usize {
         match kind {
-            PortKind::Input => self.func.map_or(0, |f| f.inputs().len()),
-            PortKind::Output => self.func.map_or(0, |f| f.outputs().len()),
+            PortKind::Input => self.func().map_or(0, |f| f.inputs().len()),
+            PortKind::Output => self.func().map_or(0, |f| f.outputs().len()),
         }
     }
 

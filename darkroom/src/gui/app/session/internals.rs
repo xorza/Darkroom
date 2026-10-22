@@ -132,7 +132,7 @@ impl SessionHarness {
         // frame it appears, in this harness exactly as in production.
         run_state.previews.reconcile(&session.open.document);
         let ctx = AppCtx::new(theme, library, run_state).with_status(StatusInputs {
-            error: None,
+            message: None,
             process_memory: *process_memory,
         });
         // Drained *inside* every pass, as `App::record` does — it is the

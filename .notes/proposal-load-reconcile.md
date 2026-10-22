@@ -283,17 +283,40 @@ of the document's validity.
 
 ## Progress
 
-- Batch 1 is done. It also took the darkroom half of the wildcard removal, so
-  the workspace builds: `OutputTypeCache` and the `GraphCtx` / `MainWindow` /
-  `DockPanes` plumbing are gone, `OutputCtx::ty` and `GraphCtx::port_type`
-  read the declaration, and `retypes_outputs` is `changes_node_set` (true only
-  for `NodePresence`). The rest of items 16 and 17 is open.
-- `FuncBuilder` refuses an `Any` output. The compile's range check moved
-  into the type check, which reads the producer's declared output, so
-  `PendingNode.outputs` is gone.
-- The cache digest domain is `scenarium-cache-v8`: the output-type fold is
-  gone, and a hand-built program's `FuncRef` carries the signature of its
-  outputs.
+- Batches 1 to 3 are done; batch 4 is open. `cargo drive check` and `cargo
+  drive test` pass.
+- Batch 1 also took the darkroom half of the wildcard removal, so the
+  workspace builds: `OutputTypeCache` and its plumbing are gone, `OutputCtx::ty`
+  and `GraphCtx::port_type` read the declaration, and `retypes_outputs` is
+  `changes_node_set`. `FuncBuilder` refuses an `Any` output. The cache digest
+  domain is `scenarium-cache-v8`.
+- Batches 2 and 3 landed together, because batch 2 alone leaves darkroom
+  holding stub nodes in a graph that the compile asserts holds none.
+- `Library::func_of` returns `Result<&Func, Unresolved>`, not `Option`, so the
+  reconcile and the stub card read the reason from one call. A stub's reason is
+  asked of the library each frame rather than stored: the library is fixed per
+  process, so the answer cannot change.
+- `Graph::admit_onto` admits a binding onto a node an insertion has not added
+  yet; `Graph::admit` finds the consumer and calls it.
+- The load decodes only (`io::document::load`); `Document::reconcile` makes the
+  result consistent, and `OpenDocument::load` returns `Loaded { open, report }`.
+  `StatusLog::warn` parks the summary line in the sticky slot.
+- A viewer tab is held only by a preview node in the graph; a stub has none.
+- `port_color::data` lost its `PortKind` parameter, and the palette's
+  `output_port` color is gone: no output is `Any`.
+- `Graph::overridden(port, func)` already read only the binding kind and
+  `disabled`; item 9 needed no change.
+- The canvas snap filter asks `Graph::admit`, so the canvas and the edit
+  gate hold a wire to one rule; `GraphCtx::port_type` cannot fail;
+  `DataType::compatible_with` is crate-private.
+- `GraphValidationError::NilFuncId` is gone: a nil func id is a node that does
+  not resolve, which `func_of` answers.
+- The edit gate checks a new id against the graph and the stubs. A stub's
+  title is read-only (`InlineRename::read_only`), and its context menu offers
+  only Remove.
+- Both reconciles assert in debug builds that their result validates.
+- A status line carries a `Severity`, so the load summary paints in the
+  warning color, not the error color.
 - `AGENTS.md` has the new convention.
 
 ## Implementation plan
@@ -318,10 +341,10 @@ of the document's validity.
 
 ### Batch 2 — scenarium: resolved-only graph, admission, reconcile, asserts
 
-6. [ ] `Library::func_of(&Node) -> Option<&Func>` (id and signature).
+6. [x] `Library::func_of(&Node) -> Option<&Func>` (id and signature).
    `Node::func(library) -> &Func`. Remove `FuncResolution`, `Node::resolve`,
    `MissingFunc`, `FuncChanged` and the stub arms of `validate_references`.
-7. [ ] `BindingRejection` in `graph/error.rs`: `UndeclaredInput`,
+7. [x] `BindingRejection` in `graph/error.rs`: `UndeclaredInput`,
    `UndeclaredOutput`, `WiredConstOnly`, `ConstMismatch`, `WireMismatch`. A
    `SubscriptionRejection`: `UndeclaredEvent`, `SelfSubscription`.
    `Graph::admit(library, port, binding)` and
@@ -329,25 +352,25 @@ of the document's validity.
    only. The `Const` arm is `FuncInput::accepts_const` with the enum-variant
    lookup from `binding_satisfies`; the `Bind` arm reads the producer's
    declared output. Remove `Library::binding_satisfies`.
-8. [ ] `Graph::reconcile(&mut self, library) -> Reconciled`, in order: remove
+8. [x] `Graph::reconcile(&mut self, library) -> Reconciled`, in order: remove
    nil-id nodes and edges that name a missing node; detach each node that
    `func_of` does not resolve (the nil func id included) and return its
    `DetachedNode`; remove each binding and subscription that `admit` refuses;
    remove each wire that closes a cycle, walking in sorted id order.
    `Reconciled` lists each removal with its reason and holds the detached
    records.
-9. [ ] `Graph::overridden(port, func)`: binding kind and `disabled` only.
+9. [x] `Graph::overridden(port, func)`: binding kind and `disabled` only.
    Revert `InputCtx::overridden_by` and the override test closure; remove the
    mistyped cases from both override tests.
-10. [ ] Compile: `compile` returns `CompiledGraph`; remove `CompileError`. One
+10. [x] Compile: `compile` returns `CompiledGraph`; remove `CompileError`. One
     `assert!` at its start checks the contract: structure (`Graph::validate`),
     each node resolves, each binding and subscription admitted, no cycle.
     `typed_binding` and the event walk lower directly, both behind
     `debug_assert!`.
-11. [ ] Planner and worker: `CycleDetected` and `EventSeedNotFound` become
+11. [x] Planner and worker: `CycleDetected` and `EventSeedNotFound` become
     `debug_assert!` and the variants go. `NodeSeedNotFound` and the evict and
     flush skips stay (see "Checks that stay").
-12. [ ] Tests: `reconcile` removes exactly each rejection kind, removes a nil-id
+12. [x] Tests: `reconcile` removes exactly each rejection kind, removes a nil-id
     node, detaches a missing func, a changed func and a nil func id, keeps
     `Null` on an optional input, and removes one closing wire of a cycle; a
     reconciled graph compiles. Rewrite the drift and stub tests in
@@ -356,11 +379,11 @@ of the document's validity.
 
 ### Batch 3 — darkroom
 
-13. [ ] Stubs: a `Stubs` collection of `DetachedNode` records keyed by node id,
+13. [x] Stubs: a `Stubs` collection of `DetachedNode` records keyed by node id,
     with a reason (missing func, changed ports) computed at load and not
     serialized; `Document.stubs`. Placements cover graph nodes and stubs; ids
     are disjoint. `Document::validate` checks both.
-14. [ ] Load, in order: decode; repair the view and layout; attach each saved
+14. [x] Load, in order: decode; repair the view and layout; attach each saved
     stub that `func_of` now resolves, after removing its edges that conflict
     with a bound input; `graph.reconcile`; add the detached records to
     `Stubs`; place any node or stub with no placement; set `dirty` when
@@ -369,33 +392,33 @@ of the document's validity.
     `adopt_document`, and one `tracing` warning for each item. Remove
     `validate_declarations`, the refusals that became repairs, and
     `core/document/declaration.rs`.
-15. [ ] Edit gate: `SetInput` and `seed_bindings` call `graph.admit`;
+15. [x] Edit gate: `SetInput` and `seed_bindings` call `graph.admit`;
     `SetSubscription` calls `graph.admit_subscription`. A refusal is
     `MalformedIntent::Rejected { port, rejection }` or the subscription
     variant. Remove `declared_input`, `declared_output`, `declared_event`,
     `wirable` and the variants they raise. Keep the presence and cycle checks.
     Duplicate skips stubs; `insertable_kind` requires a resolving node.
-16. [ ] Undo steps: `NodePresence` records whether its node lives in the graph
+16. [x] Undo steps: `NodePresence` records whether its node lives in the graph
     or in `Stubs`, so a stub can be deleted and the delete undone.
     `retypes_outputs` becomes `changes_node_set` (true only for
     `NodePresence`); `StepSignals` and `GraphRevision` follow.
     `Document::remove_node` closes the node's viewer tabs;
     `Document::reconcile_with_graph` goes.
-17. [ ] Editor: `NodeCtx` holds a body that is a graph node with its `&Func` or
+17. [x] Editor: `NodeCtx` holds a body that is a graph node with its `&Func` or
     a stub with its reason; the port accessors lose their `Option` fallbacks;
     the stub card reads the stub body. Remove the `data_tint` mismatch branch;
     turn the `value_editor`, `node_label`, `data_tint` and drag-paint
     fallbacks into `expect` or `debug_assert!`. No output then reads `Any`,
     so `port_color::data` loses its `PortKind` parameter and
     `theme.ports.output` goes.
-18. [ ] `RuntimeHost::compile` becomes infallible; its `compile failed` status
+18. [x] `RuntimeHost::compile` becomes infallible; its `compile failed` status
     and the `false means the compile failed` returns go.
-19. [ ] Other darkroom checks become asserts: `Document::validate` in
+19. [x] Other darkroom checks become asserts: `Document::validate` in
     `io::document::save`; the placement skips in `MoveSelection::apply` and
     `Raise::apply`; the selected-node skip in `GraphIntent::Duplicate`; the
     node paint loop's skip. Update the messages of the asserts in "Run-time
     checks that already assert the contract" that name the compiler.
-20. [ ] Tests: a load of a document with each case in the catalogue removes,
+20. [x] Tests: a load of a document with each case in the catalogue removes,
     repairs, detaches or attaches it, reports it and marks the document dirty;
     a stub that resolves again drops an edge that conflicts; a graph with a
     stub runs the rest; the edit gate refuses a mistyped constant, a mistyped

@@ -24,42 +24,32 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
     for (i, a) in types.iter().enumerate() {
         for b in &types[i + 1..] {
             assert_ne!(
-                data(&theme, a, PortKind::Input),
-                data(&theme, b, PortKind::Input),
+                data(&theme, a),
+                data(&theme, b),
                 "{a:?} and {b:?} share a color",
             );
         }
     }
 
     for ty in &types {
-        let rest = data(&theme, ty, PortKind::Input);
-        assert_eq!(
-            rest,
-            data(&theme, ty, PortKind::Output),
-            "{ty:?} is the type's hue, not the column's",
-        );
+        let rest = data(&theme, ty);
         assert_ne!(
             rest,
-            Hover::Over.lift(data(&theme, ty, PortKind::Input)),
+            Hover::Over.lift(data(&theme, ty)),
             "{ty:?} must visibly lift on hover",
         );
     }
 }
 
-/// Every port lifts through one rule, so an untyped port rests on its
-/// positional color and hovers to the same emphasis a typed one would.
+/// Every port lifts through one rule, so an untyped input rests on its
+/// untyped color and hovers to the same emphasis a typed one would.
 #[test]
-fn null_falls_back_to_positional_port_color() {
+fn any_falls_back_to_the_untyped_input_color() {
     let t = Theme::default();
-    assert_eq!(data(&t, &DataType::Any, PortKind::Input), t.ports.input);
-    assert_eq!(data(&t, &DataType::Any, PortKind::Output), t.ports.output);
+    assert_eq!(data(&t, &DataType::Any), t.ports.input);
     assert_eq!(
-        Hover::Over.lift(data(&t, &DataType::Any, PortKind::Input)),
+        Hover::Over.lift(data(&t, &DataType::Any)),
         color::hover_lift(t.ports.input)
-    );
-    assert_eq!(
-        Hover::Over.lift(data(&t, &DataType::Any, PortKind::Output)),
-        color::hover_lift(t.ports.output)
     );
 }
 
@@ -68,15 +58,12 @@ fn custom_types_keyed_by_type_id() {
     let t = Theme::default();
     // Ids in adjacent ramp slots → different colors (ramp entries
     // are distinct, len > 1).
-    assert_ne!(
-        data(&t, &custom(0), PortKind::Input),
-        data(&t, &custom(1), PortKind::Input),
-    );
+    assert_ne!(data(&t, &custom(0)), data(&t, &custom(1)),);
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
     let image_ty = DataType::Custom(lens::IMAGE_TYPE_ID);
-    assert_eq!(data(&t, &image_ty, PortKind::Input), t.type_colors.image);
+    assert_eq!(data(&t, &image_ty), t.type_colors.image);
     assert!(!t.type_colors.ramp.contains(&t.type_colors.image));
 }
 

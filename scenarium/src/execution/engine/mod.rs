@@ -260,7 +260,6 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::result;
 
     use crate::data::dynamic_value::DynamicValue;
     use crate::execution::cache::disk_store::DiskStore;
@@ -297,13 +296,8 @@ pub(crate) mod internals {
         /// Compile + install in one step — the shape the in-tree tests are
         /// written against. Production compiles on the host (a long-lived
         /// [`compile::Compiler`]) and sends the artifact to the worker.
-        pub(crate) fn update(
-            &mut self,
-            graph: &Graph,
-            library: &Library,
-        ) -> result::Result<(), compile::error::CompileError> {
-            self.install(compile::Compiler::default().compile(graph, library)?.into());
-            Ok(())
+        pub(crate) fn update(&mut self, graph: &Graph, library: &Library) {
+            self.install(compile::Compiler::default().compile(graph, library).into());
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.

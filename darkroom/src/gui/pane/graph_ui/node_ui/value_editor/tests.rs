@@ -40,28 +40,32 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
         assert_eq!(buffered, "42", "frame {frame}");
     }
 
-    // The read-only fallback borrows the same buffer and refills it
+    // The unset field borrows the same buffer and refills it
     // unconditionally, so it carries the same hazard — and its overwrite
     // is what makes the field read-only in the first place.
-    let read_only = WidgetId::from_hash("value_editor::read_only");
+    let unset = WidgetId::from_hash("value_editor::unset");
     for frame in 0..3 {
         h.frame(|ui| {
             assert!(
                 Field {
                     theme: &theme.const_value_editor,
-                    id: read_only,
+                    id: unset,
                 }
-                .read_only(ui, &value)
+                .unset(ui, &ConstValue::Null)
                 .is_none(),
-                "frame {frame}: a read-only field never commits"
+                "frame {frame}: an unset field never commits"
             );
             buffered = ui
-                .state::<EditBuffer>(read_only)
+                .state::<EditBuffer>(unset)
                 .expect("the field keeps its buffer")
                 .text
                 .clone();
         });
-        assert_eq!(buffered, "42", "frame {frame}");
+        assert_eq!(
+            buffered,
+            ConstValue::Null.value_text().to_string(),
+            "frame {frame}"
+        );
     }
 }
 

@@ -89,7 +89,7 @@ impl DataType {
     /// is `accepts_const`, which reads the same class
     /// off the value side — so wiring and constants are exactly as permissive
     /// as what executes.
-    pub fn compatible_with(&self, source: &Self) -> bool {
+    pub(crate) fn compatible_with(&self, source: &Self) -> bool {
         if matches!(self, Self::Any) {
             return true;
         }

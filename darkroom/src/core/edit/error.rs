@@ -4,7 +4,10 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use glam::Vec2;
-use scenarium::{DetachedNodeError, InputPort, NodeId, OutputPort, Subscription};
+use scenarium::{
+    BindingRejection, DetachedNodeError, InputPort, NodeId, Subscription, SubscriptionRejection,
+    Unresolved,
+};
 use thiserror::Error;
 
 /// A payload no widget could legitimately have raised: a nil or colliding
@@ -32,23 +35,33 @@ pub(crate) enum MalformedIntent {
     /// outright on a collision.
     #[error("node {node_id:?} already exists in the document")]
     NodeAlreadyExists { node_id: NodeId },
-    /// An inserted node whose kind names nothing the library can resolve.
-    #[error("new node has a nil func id")]
-    NilFuncId,
+    /// An inserted node the library cannot resolve: the graph holds only nodes
+    /// it can run.
+    #[error("new node does not resolve: {reason}")]
+    UnresolvedNode { reason: Unresolved },
     /// An insertion's own wiring pointing at a node the graph doesn't hold.
     /// Unlike a stale reference this is malformed: an insertion's wiring is
     /// authored in the same breath as its node.
     #[error("{role} node {node_id:?} is not in the graph")]
     NodeAbsent { role: Role, node_id: NodeId },
-    /// A seed binding reading the very node it feeds. That is a cycle of one,
-    /// which the planner refuses outright (`Error::CycleDetected`) — so the
-    /// graph would author fine and then never run.
+    /// A seed binding reading the very node it feeds: a cycle of one, which
+    /// every compile refuses with a panic.
     #[error("seed binding on {port:?} reads the node it is being added to")]
     CyclicSeedBinding { port: InputPort },
-    /// A wire onto an input its func declares const-only. The canvas never
-    /// offers one, and a graph holding it fails every compile.
-    #[error("input {port:?} is const-only and cannot take a wire")]
-    WiredConstOnly { port: InputPort },
+    /// A binding the graph may not hold ([`scenarium::Graph::admit`]). The
+    /// canvas offers only bindings that fit, so one here is a widget's bug.
+    #[error("the binding on {port:?} is refused: {rejection}")]
+    Rejected {
+        port: InputPort,
+        rejection: BindingRejection,
+    },
+    /// A subscription the graph may not hold
+    /// ([`scenarium::Graph::admit_subscription`]).
+    #[error("subscription {subscription:?} is refused: {rejection}")]
+    RejectedSubscription {
+        subscription: Subscription,
+        rejection: SubscriptionRejection,
+    },
     /// A seed binding landing somewhere other than the node being inserted.
     /// An insertion restores exactly the wiring it recorded, so it may only
     /// author its own node's inputs — anything else would be an edit of a
@@ -59,24 +72,13 @@ pub(crate) enum MalformedIntent {
     /// twice, of which only one could survive.
     #[error("the inserted node's record is malformed: {0}")]
     InsertionRecord(#[from] DetachedNodeError),
-    /// Positions reach the view verbatim, and a non-finite one fails
-    /// `GraphView::validate` — which runs only on save and load, so an
-    /// unchecked NaN surfaces as a document that won't reopen.
+    /// Positions reach the view verbatim, and nothing after the load repairs a
+    /// non-finite one.
     #[error("{role} position {pos:?} is not finite")]
     NonFinitePosition { role: Role, pos: Vec2 },
     /// Same corruption path as [`Self::NonFinitePosition`], one level up.
     #[error("viewport needs finite pan and positive finite zoom")]
     InvalidViewport,
-    #[error("input {port:?} is not one its node declares")]
-    UndeclaredInput { port: InputPort },
-    #[error("output {port:?} is not one its node declares")]
-    UndeclaredOutput { port: OutputPort },
-    #[error(
-        "event {} is not one node {:?} declares",
-        .subscription.event.event_idx,
-        .subscription.event.node_id
-    )]
-    UndeclaredEvent { subscription: Subscription },
 }
 
 /// Which identity or position of an intent a check was holding to — what a

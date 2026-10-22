@@ -116,20 +116,3 @@ async fn repeated_structural_churn_stays_correct() {
         assert_eq!(run.logs(), ["2"], "round {round} shrink values");
     }
 }
-
-#[tokio::test]
-async fn planning_a_cycle_names_the_node_that_closes_it() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    // Close the loop: sum[0] ← mult, and mult already depends on sum.
-    e.edit(|g| g.wire("mult", "sum"));
-
-    let error = e
-        .try_plan(RunSeeds::sinks())
-        .await
-        .expect_err("a cyclic graph cannot be planned");
-
-    assert!(
-        matches!(error, Error::CycleDetected { node_id } if node_id == e.id("mult")),
-        "unexpected error: {error:?}"
-    );
-}

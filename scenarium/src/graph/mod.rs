@@ -5,10 +5,13 @@
 //!
 //! The modules beside it keep what those methods work *with*: [`identity`]
 //! how a node or port is named, [`detached`] the reversible-removal records,
-//! [`error`] what validation rejects.
+//! [`error`] what validation and admission reject, [`reconciled`] what a load
+//! repaired.
 //!
-//! Every node resolves to a [`Func`] declaration, and a node's own id is the
-//! only name it has.
+//! A graph a host keeps holds only nodes that resolve to a [`Func`]
+//! declaration and only wiring [`Graph::admit`] accepts: [`Graph::reconcile`]
+//! makes a decoded graph so, and the host's edit gate keeps it so. A node's
+//! own id is the only name it has.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,12 +23,14 @@ use crate::data::const_value::ConstValue;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::DetachedNode;
-use crate::graph::error::{GraphValidationError, ValidationResult};
+use crate::graph::error::{
+    BindingRejection, GraphValidationError, SubscriptionRejection, ValidationResult,
+};
 use crate::graph::func::Func;
-use crate::graph::func::func_input::FuncInput;
 use crate::graph::identity::{EventPort, InputPort, NodeId, OutputPort};
-use crate::graph::node::{FuncResolution, Node, NodeKind};
+use crate::graph::node::Node;
 use crate::graph::node_ref::NodeRef;
+use crate::graph::reconciled::{Detachment, Reconciled, Repair};
 use crate::graph::subscription::Subscription;
 use crate::library::Library;
 
@@ -37,6 +42,7 @@ pub(crate) mod func;
 pub(crate) mod identity;
 pub(crate) mod node;
 pub(crate) mod node_ref;
+pub(crate) mod reconciled;
 mod serde;
 pub(crate) mod subscription;
 
@@ -129,12 +135,98 @@ impl Graph {
                 .is_some_and(|producer| !producer.disabled),
         }
     }
-    /// The declared [`FuncInput`] of input `port` — its full spec (type +
-    /// `value_variants` + flags), or `None` for an unresolved node or a port
-    /// the func does not declare.
-    fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
-        let node = self.find(port.node_id)?;
-        node.func(library)?.inputs().get(port.port_idx)
+    /// Whether this graph may hold `binding` on `port`: the input is one its
+    /// node declares, a constant is one the input accepts, and a wire reads an
+    /// output its producer declares, of a type the input accepts, into an
+    /// input that is not const-only. The one rule a load, an edit and a
+    /// compile hold wiring to. A cycle is the graph's question, not the
+    /// binding's — see [`Self::produces_cycle`].
+    ///
+    /// # Panics
+    ///
+    /// If the graph does not hold the consumer, or the producer of a wire.
+    pub fn admit(
+        &self,
+        library: &Library,
+        port: InputPort,
+        binding: &Binding,
+    ) -> Result<(), BindingRejection> {
+        let consumer = self
+            .find(port.node_id)
+            .expect("an admitted binding's consumer is in the graph")
+            .func(library);
+        self.admit_onto(library, consumer, port, binding)
+    }
+    /// [`Self::admit`] onto a consumer that instantiates `consumer` — for a
+    /// node an edit is inserting together with its bindings, which the graph
+    /// does not hold yet.
+    ///
+    /// # Panics
+    ///
+    /// If the graph does not hold the producer of a wire.
+    pub fn admit_onto(
+        &self,
+        library: &Library,
+        consumer: &Func,
+        port: InputPort,
+        binding: &Binding,
+    ) -> Result<(), BindingRejection> {
+        let input = consumer
+            .inputs()
+            .get(port.port_idx)
+            .ok_or(BindingRejection::UndeclaredInput)?;
+        match binding {
+            Binding::Const(value) => {
+                if library.const_satisfies(input, value) {
+                    Ok(())
+                } else {
+                    Err(BindingRejection::ConstMismatch)
+                }
+            }
+            Binding::Bind(source) => {
+                if input.const_only {
+                    return Err(BindingRejection::WiredConstOnly);
+                }
+                let producer = self
+                    .find(source.node_id)
+                    .expect("an admitted wire's producer is in the graph")
+                    .func(library);
+                let output = producer
+                    .outputs()
+                    .get(source.port_idx)
+                    .ok_or(BindingRejection::UndeclaredOutput)?;
+                if input.data_type.compatible_with(&output.data_type) {
+                    Ok(())
+                } else {
+                    Err(BindingRejection::WireMismatch)
+                }
+            }
+        }
+    }
+    /// Whether this graph may hold `subscription`: the emitter declares the
+    /// event, and the subscriber is another node.
+    ///
+    /// # Panics
+    ///
+    /// If the graph does not hold the emitter.
+    pub fn admit_subscription(
+        &self,
+        library: &Library,
+        subscription: Subscription,
+    ) -> Result<(), SubscriptionRejection> {
+        let Subscription { event, subscriber } = subscription;
+        if event.node_id == subscriber {
+            return Err(SubscriptionRejection::SelfSubscription);
+        }
+        let emitter = self
+            .find(event.node_id)
+            .expect("an admitted subscription's emitter is in the graph")
+            .func(library);
+        if event.event_idx < emitter.events().len() {
+            Ok(())
+        } else {
+            Err(SubscriptionRejection::UndeclaredEvent)
+        }
     }
     /// Every data edge as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
@@ -149,9 +241,9 @@ impl Graph {
     /// Whether binding an output of `producer` into an input on `consumer`
     /// would close a directed data cycle. A node wired to itself counts.
     ///
-    /// The planner rejects a cyclic graph outright
-    /// ([`Error::CycleDetected`](crate::Error)), so this is what keeps one from
-    /// being authored at all: the editor asks before it commits a bind. Port
+    /// A compile asserts that no wire closes a cycle
+    /// ([`Self::validate_with`]), so this is what keeps one from being authored
+    /// at all: the editor asks before it commits a bind. Port
     /// indices don't enter into it — a cycle is a property of the node graph,
     /// and any output of `producer` reaching any input of `consumer` closes the
     /// same loop.
@@ -317,10 +409,9 @@ impl Graph {
     }
 
     /// Validate this graph structurally: everything a document must satisfy to
-    /// *be* a graph, answerable without a library. What a host runs on a
-    /// freshly decoded document, where no library exists yet — decoding checks
-    /// only what it alone can see (a repeated key, which no decoded value could
-    /// still show), never the wiring below.
+    /// *be* a graph, answerable without a library. Decoding checks only what it
+    /// alone can see (a repeated key, which no decoded value could still show),
+    /// never the wiring below.
     ///
     /// Id *uniqueness* is therefore not among the checks: `nodes` is keyed by
     /// id, so a duplicate cannot survive to be found here — the two ways one
@@ -328,27 +419,10 @@ impl Graph {
     /// which refuses. Re-deriving it from the map's own keys would only ever
     /// confirm that a map is a map.
     pub fn validate(&self) -> ValidationResult<()> {
-        for (node_id, node) in &self.nodes {
-            if node_id.is_nil() {
-                return Err(GraphValidationError::NilNodeId);
-            }
-            match &node.kind {
-                NodeKind::Func(func_ref) => {
-                    if func_ref.id().is_nil() {
-                        return Err(GraphValidationError::NilFuncId { node_id: *node_id });
-                    }
-                }
-                NodeKind::Special(_) => {}
-            }
+        if self.nodes.contains_key(&NodeId::nil()) {
+            return Err(GraphValidationError::NilNodeId);
         }
 
-        // Drift is tolerated everywhere below: a binding, subscription, or
-        // pin referencing a port the current library no longer declares —
-        // and a wire or const whose type no longer matches — stays valid
-        // and degrades to unbound at lowering time (a required input
-        // surfaces as a missing-input verdict; see lowering's `typed_binding`).
-        // Deleting or rejecting it would destroy authored wiring that
-        // revives when the library comes back.
         for (destination, binding) in &self.bindings {
             if !self.nodes.contains_key(&destination.node_id) {
                 return Err(GraphValidationError::BindingMissingNode {
@@ -382,55 +456,200 @@ impl Graph {
         Ok(())
     }
 
-    /// Validate this graph as an execution entry against `library`: structurally
-    /// first, then every reference it makes.
+    /// Validate this graph as one a host may compile against `library`: the
+    /// structure, then the load contract — every node resolves, every binding
+    /// and subscription is admitted, and no wire closes a data cycle.
     ///
-    /// Two passes rather than one interleaved walk, because they answer
-    /// different questions and only one of them can always be asked. Structure
-    /// is what the document must satisfy to be a graph at all; this adds what it
-    /// takes to compile one against a *particular* library, which the same
-    /// document may pass today and fail tomorrow. Running structure first also
-    /// lets the second pass assume it: every id it reads names a node that is
-    /// there.
+    /// What [`Self::reconcile`] establishes at load and the edit gate keeps,
+    /// so a failure here is the host's bug: a compile asserts it.
     pub fn validate_with(&self, library: &Library) -> ValidationResult<()> {
         self.validate()?;
-        self.validate_references(library)
+        for (node_id, node) in &self.nodes {
+            if let Err(reason) = library.func_of(node) {
+                return Err(GraphValidationError::Unresolved {
+                    node_id: *node_id,
+                    reason,
+                });
+            }
+        }
+        for (port, binding) in &self.bindings {
+            self.admit(library, *port, binding).map_err(|rejection| {
+                GraphValidationError::RejectedBinding {
+                    port: *port,
+                    rejection,
+                }
+            })?;
+        }
+        for subscription in self.subscriptions() {
+            self.admit_subscription(library, subscription)
+                .map_err(|rejection| GraphValidationError::RejectedSubscription {
+                    subscription,
+                    rejection,
+                })?;
+        }
+        if let Some(&port) = self.closing_wires().first() {
+            return Err(GraphValidationError::Cycle { port });
+        }
+        Ok(())
     }
 
-    /// Everything in this graph that names a declaration: every func resolves
-    /// with the ports its node was authored against, and a `Bind` does not sit
-    /// on a `const_only` input.
-    fn validate_references(&self, library: &Library) -> ValidationResult<()> {
-        for (node_id, node) in &self.nodes {
-            match node.resolve(library) {
-                FuncResolution::Found(_) => {}
-                FuncResolution::Changed(func) => {
-                    return Err(GraphValidationError::FuncChanged {
-                        node_id: *node_id,
-                        func_id: func.id(),
-                        func_name: func.name().to_owned(),
-                    });
-                }
-                FuncResolution::Missing(func_id) => {
-                    return Err(GraphValidationError::MissingFunc {
-                        node_id: *node_id,
-                        func_id,
-                    });
+    /// Make a decoded graph one `library` can run, and report each change:
+    /// remove a node under the nil id and the wiring that names a missing
+    /// node, detach each node the library does not resolve with the wiring
+    /// that touches it, remove each binding and subscription
+    /// [`admit`](Self::admit) refuses, and remove each wire that closes a data
+    /// cycle. Afterwards [`Self::validate_with`] holds.
+    pub fn reconcile(&mut self, library: &Library) -> Reconciled {
+        let mut repairs = Vec::new();
+
+        if self.nodes.remove(&NodeId::nil()).is_some() {
+            repairs.push(Repair::NilNode);
+        }
+        let nodes = &self.nodes;
+        self.bindings.retain(|port, binding| {
+            let held = nodes.contains_key(&port.node_id)
+                && match binding {
+                    Binding::Bind(source) => nodes.contains_key(&source.node_id),
+                    Binding::Const(_) => true,
+                };
+            if !held {
+                repairs.push(Repair::DanglingBinding {
+                    port: *port,
+                    binding: binding.clone(),
+                });
+            }
+            held
+        });
+        self.subscriptions.retain(|subscription| {
+            let held = nodes.contains_key(&subscription.event.node_id)
+                && nodes.contains_key(&subscription.subscriber);
+            if !held {
+                repairs.push(Repair::DanglingSubscription {
+                    subscription: *subscription,
+                });
+            }
+            held
+        });
+
+        let mut unresolved: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                library.func_of(node).err().map(|reason| (*node_id, reason))
+            })
+            .collect();
+        unresolved.sort_unstable_by_key(|(node_id, _)| *node_id);
+        let detached = unresolved
+            .into_iter()
+            .map(|(node_id, reason)| Detachment {
+                record: self.detach_node(node_id),
+                reason,
+            })
+            .collect();
+
+        let refused: Vec<_> = self
+            .bindings
+            .iter()
+            .filter_map(|(port, binding)| {
+                self.admit(library, *port, binding)
+                    .err()
+                    .map(|rejection| (*port, rejection))
+            })
+            .collect();
+        for (port, rejection) in refused {
+            let binding = self
+                .bindings
+                .remove(&port)
+                .expect("a refused binding is in the graph");
+            repairs.push(Repair::RejectedBinding {
+                port,
+                binding,
+                rejection,
+            });
+        }
+        let refused: Vec<_> = self
+            .subscriptions()
+            .filter_map(|subscription| {
+                self.admit_subscription(library, subscription)
+                    .err()
+                    .map(|rejection| (subscription, rejection))
+            })
+            .collect();
+        for (subscription, rejection) in refused {
+            self.subscriptions.remove(&subscription);
+            repairs.push(Repair::RejectedSubscription {
+                subscription,
+                rejection,
+            });
+        }
+
+        for port in self.closing_wires() {
+            let Some(Binding::Bind(producer)) = self.bindings.remove(&port) else {
+                unreachable!("a closing wire is a wire in the graph");
+            };
+            repairs.push(Repair::CycleWire { port, producer });
+        }
+        debug_assert!(
+            self.validate_with(library).is_ok(),
+            "a reconciled graph holds the load contract: {:?}",
+            self.validate_with(library)
+        );
+        Reconciled { repairs, detached }
+    }
+
+    /// Each wire that returns to a node on the current path of a depth-first
+    /// walk from every node in id order, following wires from consumer to
+    /// producer: removing them all leaves the graph acyclic, and the id order
+    /// makes the choice the same on every load.
+    fn closing_wires(&self) -> Vec<InputPort> {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum Mark {
+            OnPath,
+            Done,
+        }
+        #[derive(Debug)]
+        enum Visit {
+            Enter(NodeId),
+            Wire(InputPort, NodeId),
+            Exit(NodeId),
+        }
+
+        let mut roots: Vec<NodeId> = self.nodes.keys().copied().collect();
+        roots.sort_unstable();
+        let mut marks: HashMap<NodeId, Mark> = HashMap::with_capacity(roots.len());
+        let mut stack = Vec::new();
+        let mut closing = Vec::new();
+        for root in roots {
+            if marks.contains_key(&root) {
+                continue;
+            }
+            stack.push(Visit::Enter(root));
+            while let Some(visit) = stack.pop() {
+                match visit {
+                    Visit::Enter(node_id) => {
+                        marks.insert(node_id, Mark::OnPath);
+                        stack.push(Visit::Exit(node_id));
+                        let first = stack.len();
+                        stack.extend(self.input_bindings(node_id).filter_map(|(port, binding)| {
+                            match binding {
+                                Binding::Bind(source) => Some(Visit::Wire(port, source.node_id)),
+                                Binding::Const(_) => None,
+                            }
+                        }));
+                        stack[first..].reverse();
+                    }
+                    Visit::Wire(port, producer) => match marks.get(&producer) {
+                        Some(Mark::OnPath) => closing.push(port),
+                        Some(Mark::Done) => {}
+                        None => stack.push(Visit::Enter(producer)),
+                    },
+                    Visit::Exit(node_id) => {
+                        marks.insert(node_id, Mark::Done);
+                    }
                 }
             }
         }
-
-        for (destination, binding) in &self.bindings {
-            if matches!(binding, Binding::Bind(_))
-                && self
-                    .input_spec(library, *destination)
-                    .is_some_and(|input| input.const_only)
-            {
-                return Err(GraphValidationError::ConstOnlyBinding { port: *destination });
-            }
-        }
-
-        Ok(())
+        closing
     }
 }
 

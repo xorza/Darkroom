@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
 use crate::core::document::graph_revision::GraphRevision;
+use crate::core::document::load_report::LoadReport;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::document_request::DocumentRequest;
@@ -119,14 +120,6 @@ impl OpenDocument {
     /// Called three times a frame — after the navigation scan, the prepass,
     /// and the record — so a request raised in one phase lands before the next
     /// reads the document.
-    ///
-    /// The reconcile is *not* inside the empty-queue fast path, and not inside
-    /// [`Self::commit`] either. Not the fast path, because the mutation that
-    /// most often orphans a tab — an undo replaying a node removal — never
-    /// touches the queue, so a frame whose only edit was Ctrl+Z would skip it.
-    /// Not `commit`, because closing a tab is a frontend policy about what is
-    /// on screen, and an edit applied outside a frame (a dialog result) has no
-    /// business acting on it.
     #[must_use]
     pub(crate) fn drain_requests(
         &mut self,
@@ -134,16 +127,11 @@ impl OpenDocument {
         library: &Library,
     ) -> Relayout {
         // Usually nothing is queued, and the commit is what allocates.
-        let relayout = if requests.is_empty() {
-            Relayout::NotNeeded
-        } else {
-            self.commit(requests.drain(), library)
-                .expect("a widget built a malformed intent")
-        };
-        // A tab whose node is gone can't stay open. Cheap when nothing died —
-        // `reconcile_with_graph` scans the tab list and returns.
-        self.document.reconcile_with_graph();
-        relayout
+        if requests.is_empty() {
+            return Relayout::NotNeeded;
+        }
+        self.commit(requests.drain(), library)
+            .expect("a widget built a malformed intent")
     }
 
     /// Apply `queued`, each request according to its tier: a graph edit is
@@ -254,20 +242,19 @@ impl OpenDocument {
         self.revision
     }
 
-    /// Open the document at `path`. A func node resolves only against the ports
-    /// it was authored against in `library`, so a node whose func moved its
-    /// ports loads as a stub, its wiring kept but not landed on the wrong ports.
-    /// Wiring on a port or event a resolved func does not declare is refused.
-    pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
-        let document = document::load(&path)?;
-        if let Err(source) = document.validate_declarations(library) {
-            return Err(DocumentLoadError::InvalidDocument { path, source });
-        }
-        Ok(Self {
+    /// Open the document at `path`, made consistent with `library` by
+    /// [`Document::reconcile`]. A load that changed something leaves the
+    /// document dirty, so a save accepts the changes.
+    pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Loaded, DocumentLoadError> {
+        let mut document = document::load(&path)?;
+        let report = document.reconcile(library);
+        let open = Self {
             document,
             path: Some(path),
+            dirty: !report.is_empty(),
             ..Self::default()
-        })
+        };
+        Ok(Loaded { open, report })
     }
 
     /// The document a launching frontend opens `from`: its `argument` when the
@@ -299,10 +286,16 @@ impl OpenDocument {
         // working directory, which the file dialogs' anchor and the worker's
         // disk cache both outlive.
         let path = path::absolute(&path).unwrap_or(path);
-        Self::load(path, library).unwrap_or_else(|error| {
-            status.error(StatusFamily::Document, format!("load failed: {error:#}"));
-            Self::default()
-        })
+        match Self::load(path, library) {
+            Ok(Loaded { open, report }) => {
+                report.report(status);
+                open
+            }
+            Err(error) => {
+                status.error(StatusFamily::Document, format!("load failed: {error:#}"));
+                Self::default()
+            }
+        }
     }
 
     /// The document `preferences` remembers, or an empty one when there is
@@ -320,7 +313,10 @@ impl OpenDocument {
             return Self::default();
         };
         match Self::load(path, library) {
-            Ok(open) => open,
+            Ok(Loaded { open, report }) => {
+                report.report(status);
+                open
+            }
             Err(error) => {
                 status.error(StatusFamily::Document, format!("load failed: {error:#}"));
                 preferences.document_path = None;
@@ -338,6 +334,15 @@ impl OpenDocument {
         self.dirty = false;
         Ok(())
     }
+}
+
+/// A document a load opened, and what the load changed to open it. A caller
+/// reports the changes after any `succeeded(Document)` it raises, which would
+/// clear the status line.
+#[derive(Debug)]
+pub(crate) struct Loaded {
+    pub(crate) open: OpenDocument,
+    pub(crate) report: LoadReport,
 }
 
 #[cfg(feature = "internals")]

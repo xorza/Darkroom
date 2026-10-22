@@ -2,6 +2,8 @@
 
 use scenarium::Library;
 
+use crate::core::status_log::StatusMessage;
+
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -49,7 +51,7 @@ impl<'a> AppCtx<'a> {
             library,
             run_state,
             status: StatusInputs {
-                error: None,
+                message: None,
                 process_memory: 0,
             },
         }
@@ -74,11 +76,11 @@ impl<'a> AppCtx<'a> {
         self.run_state
     }
 
-    /// The last failed action's message (the engine's
+    /// The last failure or warning (the engine's
     /// [`StatusLog::current`](crate::core::status_log::StatusLog::current)),
     /// shown in the status bar until a success of its family clears it.
-    pub(crate) const fn status_error(self) -> Option<&'a str> {
-        self.status.error
+    pub(crate) const fn status_message(self) -> Option<StatusMessage<'a>> {
+        self.status.message
     }
 
     /// This process's resident bytes (see
@@ -93,6 +95,6 @@ impl<'a> AppCtx<'a> {
 /// together and nothing between here and the bar reads either.
 #[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct StatusInputs<'a> {
-    pub(crate) error: Option<&'a str>,
+    pub(crate) message: Option<StatusMessage<'a>>,
     pub(crate) process_memory: u64,
 }

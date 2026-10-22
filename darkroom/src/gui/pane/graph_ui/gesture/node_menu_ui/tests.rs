@@ -67,13 +67,7 @@ const ROW_COUNT: usize = 4;
 /// app sees them in, and what lets the pick read back the selection the open
 /// committed.
 fn pick(h: &mut CanvasHarness, on: NodeId, row: usize) -> Vec<GraphIntent> {
-    // Two frames so every node body has recorded and carries a hit-testable
-    // rect to aim the right-click at, then two more so the opened menu has.
-    h.prime(2);
-    let anchor = h.node_center(on);
-    h.ui.right_click_at(anchor);
-    h.prime(2);
-    let rows = menu_rows(h, anchor);
+    let rows = open_menu(h, on);
     assert_eq!(
         rows.len(),
         ROW_COUNT,
@@ -81,6 +75,36 @@ fn pick(h: &mut CanvasHarness, on: NodeId, row: usize) -> Vec<GraphIntent> {
     );
     h.ui.click_on(rows[row]);
     h.frame()
+}
+
+/// Open the menu on `on` and return its rows.
+fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
+    // Two frames so every node body has recorded and carries a hit-testable
+    // rect to aim the right-click at, then two more so the opened menu has.
+    h.prime(2);
+    let anchor = h.node_center(on);
+    h.ui.right_click_at(anchor);
+    h.prime(2);
+    menu_rows(h, anchor)
+}
+
+/// A stub neither runs nor copies, so its menu offers only Remove — which
+/// removes it.
+#[test]
+fn a_stubs_menu_offers_only_remove() {
+    let mut fixture = DocFixture::probes(1);
+    let stub = fixture.add_stub(DocFixture::stub_node());
+    let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
+    h.doc_mut().main_view.selected = [stub].into_iter().collect();
+
+    let rows = open_menu(&mut h, stub);
+    assert_eq!(rows.len(), 1, "Remove is the one row");
+    h.ui.click_on(rows[0]);
+    let intents = h.frame();
+    assert!(
+        matches!(intents[..], [GraphIntent::RemoveNode { node_id }] if node_id == stub),
+        "{intents:?}"
+    );
 }
 
 /// A node-body right-click selects the node it landed on before the menu

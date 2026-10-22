@@ -5,14 +5,17 @@ use ron::value::RawValue;
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::{DataType, TypeId};
-use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::binding::Binding;
 use crate::graph::binding_entry::BindingEntry;
 use crate::graph::detached::{DetachedNode, DetachedNodeParts};
-use crate::graph::error::{DetachedNodeError, GraphValidationError};
+use crate::graph::error::{
+    BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
+};
+use crate::graph::func::Func;
 use crate::graph::func::func_builder::FuncBuilder;
 use crate::graph::identity::{EventPort, FuncId};
-use crate::graph::node::{CacheMode, FuncResolution, Node, NodeKind};
+use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::reconciled::Repair;
 use crate::graph::subscription::Subscription;
 use crate::graph::{Graph, InputPort, NodeId, OutputPort};
 use crate::internals;
@@ -154,43 +157,33 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     );
 }
 
+/// The type half of admission: an `Int` output feeds an `Int` input and not a
+/// `String` one; a `String` literal never fits an `Int` input, a numeric one
+/// does (scalar coercion), and the two path shapes fit only their own picker
+/// mode.
 #[test]
-fn type_mismatches_degrade_at_lowering_not_at_validation() {
+fn admit_holds_wires_and_consts_to_the_input_type() {
     use crate::data::data_type::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
-    // Int and String never coerce (numerics coerce among themselves, but a
-    // string is a distinct kind), so this pair exercises a real mismatch.
-    // Validation always accepts; the compiled program's lowered input shows
-    // whether the binding survived the type gate or degraded to unbound.
     let mut g = TestGraph::new();
     g.add("int_src", |n| n.pure().output(DataType::Int));
     g.add("str_sink", |n| n.sink().input(DataType::String));
     g.add("int_sink", |n| n.sink().input(DataType::Int));
-    g.wire("int_src", "str_sink");
-    g.wire("int_src", "int_sink");
+    let wire = Binding::bind(g.id("int_src"), 0);
+    let admit = |sink: &str| {
+        g.graph
+            .admit(&g.library, InputPort::new(g.id(sink), 0), &wire)
+    };
+    assert_eq!(admit("str_sink"), Err(BindingRejection::WireMismatch));
+    assert_eq!(admit("int_sink"), Ok(()));
 
-    assert!(g.graph.validate_with(&g.library).is_ok());
-    let compiled = g.compile();
-    assert!(
-        matches!(compiled.binding("str_sink", 0), ExecutionBinding::None),
-        "Int into a String input lowers as unbound"
-    );
-    assert!(
-        matches!(compiled.binding("int_sink", 0), ExecutionBinding::Bind(_)),
-        "Int into an Int input binds"
-    );
-
-    // Constants: a String literal can't satisfy an Int input, a numeric one
-    // can (scalar coercion), and the two FsPath shapes only satisfy their
-    // matching picker mode.
     let path_type = |mode| DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
-    let satisfies = |declared: DataType, value: ConstValue| {
+    let admits = |declared: DataType, value: ConstValue| {
         let mut g = TestGraph::new();
         g.add("sink", |n| n.sink().input(declared));
-        g.constant("sink", 0, value);
-        assert!(g.graph.validate_with(&g.library).is_ok());
-        matches!(g.compile().binding("sink", 0), ExecutionBinding::Const(_))
+        let port = InputPort::new(g.id("sink"), 0);
+        g.graph.admit(&g.library, port, &Binding::Const(value))
     };
     let cases = [
         (DataType::Int, ConstValue::String("x".into()), false),
@@ -211,9 +204,14 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
             true,
         ),
     ];
-    for (declared, value, expected) in cases {
+    for (declared, value, admitted) in cases {
+        let expected = if admitted {
+            Ok(())
+        } else {
+            Err(BindingRejection::ConstMismatch)
+        };
         assert_eq!(
-            satisfies(declared.clone(), value.clone()),
+            admits(declared.clone(), value.clone()),
             expected,
             "const {value:?} on {declared:?}"
         );
@@ -610,62 +608,51 @@ fn loading_rejects_a_corrupt_graph() {
     );
 }
 
-/// Wiring the current library can't resolve is tolerated, never a validation
-/// error: it degrades to unbound at lowering time and revives if the library
-/// grows the ports back. The counterpart to
-/// [`type_mismatches_degrade_at_lowering_not_at_validation`].
+/// Admission refuses wiring past what a node declares — an input, a
+/// producer's output, an event — and a node listening to itself; `Null` fits
+/// an optional input and no required one.
 #[test]
-fn validate_tolerates_library_range_drift() {
+fn admit_refuses_undeclared_ports_events_and_a_self_subscription() {
     let mut g = TestGraph::new();
-    g.add("one_out", |n| n.pure().output(DataType::Int));
-    assert!(g.graph.validate_with(&g.library).is_ok());
-
-    // Input 5, output 7, and event 3 are all past what `one_out` declares.
-    let one_out = g.id("one_out");
-    g.graph
-        .set_input_binding(InputPort::new(one_out, 5), Binding::bind(one_out, 7));
-    g.graph.subscribe(EventPort::new(one_out, 3), one_out);
-    assert!(g.graph.validate_with(&g.library).is_ok());
-
-    // `Null` consts ("explicitly unset") are tolerated on both sides:
-    // meaningful on an optional input, degrading to a missing input on a
-    // required one at lowering (see `const_satisfies`).
-    g.add("nullable", |n| {
-        n.pure()
-            .optional(DataType::Int)
-            .input(DataType::Int)
-            .output(DataType::Int)
+    g.add("src", |n| {
+        n.output(DataType::Int)
+            .event("tick", internals::stub_event())
     });
-    g.constant("nullable", 0, ConstValue::Null);
-    g.constant("nullable", 1, ConstValue::Null);
-    assert!(g.graph.validate_with(&g.library).is_ok());
-}
-
-/// `Some(ports)` is an authoritative arity a caller may range-check against;
-/// `None` means "unknowable here" and must *not* read as an empty port list —
-/// the drift guards do `is_some_and(|p| idx >= p.len())`, so the two decide
-/// opposite ways.
-#[test]
-fn a_node_resolves_its_declaration_or_reads_unknown() {
-    let mut g = TestGraph::new();
-    g.add("sum", |n| {
-        n.pure()
-            .input(DataType::Int)
-            .optional(DataType::Int)
-            .output(DataType::Int)
+    g.add("dst", |n| {
+        n.sink().optional(DataType::Int).input(DataType::Int)
     });
+    let (src, dst) = (g.id("src"), g.id("dst"));
+    let admit = |port_idx, binding: Binding| {
+        g.graph
+            .admit(&g.library, InputPort::new(dst, port_idx), &binding)
+    };
+    assert_eq!(
+        admit(5, Binding::Const(ConstValue::Int(1))),
+        Err(BindingRejection::UndeclaredInput)
+    );
+    assert_eq!(
+        admit(0, Binding::bind(src, 7)),
+        Err(BindingRejection::UndeclaredOutput)
+    );
+    assert_eq!(admit(0, Binding::Const(ConstValue::Null)), Ok(()));
+    assert_eq!(
+        admit(1, Binding::Const(ConstValue::Null)),
+        Err(BindingRejection::ConstMismatch)
+    );
 
-    let declared = g.library.by_name("sum").unwrap().clone();
-    let node = g.graph.find(g.id("sum")).unwrap();
-    let ports = node.func(&g.library).unwrap();
-    assert_eq!(ports.name(), "sum");
-    assert_eq!(ports.inputs().len(), declared.inputs().len());
-    assert_eq!(ports.id(), declared.id());
-
-    // Library drift is unknown, not empty — otherwise every port on a node
-    // whose func went missing would read as out of range.
-    let missing_func = internals::unresolved_node(FuncId::unique());
-    assert!(missing_func.func(&g.library).is_none());
+    let subscribe = |event_idx, subscriber| {
+        let subscription = Subscription::new(EventPort::new(src, event_idx), subscriber);
+        g.graph.admit_subscription(&g.library, subscription)
+    };
+    assert_eq!(subscribe(0, dst), Ok(()));
+    assert_eq!(
+        subscribe(3, dst),
+        Err(SubscriptionRejection::UndeclaredEvent)
+    );
+    assert_eq!(
+        subscribe(0, src),
+        Err(SubscriptionRejection::SelfSubscription)
+    );
 }
 
 /// A named edit of a func's declaration.
@@ -743,47 +730,178 @@ fn a_signature_covers_the_ports_and_nothing_else() {
     assert_eq!(path(FsPathMode::Directory), path(FsPathMode::NewFile));
 }
 
-/// A node holds the address of the func it was made from — its id and the signature of its
-/// ports. Once the library's func moves its ports, the node resolves to nothing, as a stub, and a
-/// compile refuses it as changed rather than missing; a func the library lacks is refused as
-/// missing.
+/// A node resolves to the func with the ports it was authored against; a func
+/// whose ports moved since, and one the library lacks, are told apart.
 #[test]
-fn a_node_authored_against_other_ports_resolves_to_nothing() {
+fn func_of_resolves_a_node_or_says_why_not() {
     let mut g = TestGraph::new();
     g.add("f", |n| n.pure().input(DataType::Int).output(DataType::Int));
     let id = g.id("f");
     let func_id = g.graph.find(id).unwrap().func_id().unwrap();
-    assert!(matches!(
-        g.graph.find(id).unwrap().resolve(&g.library),
-        FuncResolution::Found(func) if func.id() == func_id
-    ));
-    assert!(g.graph.find(id).unwrap().func(&g.library).is_some());
+    let resolved = |g: &TestGraph| g.library.func_of(g.graph.find(id).unwrap()).map(Func::id);
+    assert_eq!(resolved(&g), Ok(func_id));
 
     g.edit_func("f", |func| func.inputs[0].data_type = DataType::String);
-    assert!(matches!(
-        g.graph.find(id).unwrap().resolve(&g.library),
-        FuncResolution::Changed(func) if func.id() == func_id
-    ));
-    assert!(g.graph.find(id).unwrap().func(&g.library).is_none());
-    let error = g.graph.validate_with(&g.library).unwrap_err();
-    assert!(
-        matches!(&error, GraphValidationError::FuncChanged { node_id, func_id: f, .. }
-            if *node_id == id && *f == func_id),
-        "{error}"
+    assert_eq!(resolved(&g), Err(Unresolved::ChangedPorts));
+
+    let missing = internals::unresolved_node(FuncId::from_u128(99));
+    assert_eq!(
+        g.library.func_of(&missing).map(Func::id),
+        Err(Unresolved::MissingFunc)
+    );
+}
+
+/// A reconcile removes exactly what the library cannot hold, reports each
+/// removal in a fixed order, detaches each node that does not resolve with the
+/// wiring that touched it — an edge between two such nodes going to the one
+/// detached first — and leaves a graph that validates and compiles. `Null`
+/// stays on an optional input.
+#[test]
+fn reconcile_removes_exactly_what_the_library_cannot_hold() {
+    let mut g = TestGraph::new();
+    g.add("src", |n| {
+        n.output(DataType::Int)
+            .event("tick", internals::stub_event())
+    });
+    g.add("dst", |n| {
+        n.sink()
+            .optional(DataType::Int)
+            .input(DataType::Int)
+            .optional(DataType::Int)
+            .const_only()
+            .input(DataType::String)
+            .input(DataType::String)
+    });
+    g.add("changed", |n| {
+        n.pure().input(DataType::Int).output(DataType::Int)
+    });
+    g.add("gone", |n| n.pure().output(DataType::Int));
+    g.add("a", |n| n.pure().input(DataType::Int).output(DataType::Int));
+    g.instance("b", "a");
+    let (src, dst, changed, gone) = (g.id("src"), g.id("dst"), g.id("changed"), g.id("gone"));
+    let nil_func = NodeId::from_u128(50);
+    let (absent_consumer, absent_emitter) = (NodeId::from_u128(77), NodeId::from_u128(79));
+
+    g.constant("dst", 0, ConstValue::Null);
+    g.wire(("src", 7), ("dst", 1));
+    g.wire("src", ("dst", 2));
+    g.constant("dst", 3, 1i64);
+    g.wire("src", ("dst", 4));
+    g.constant("dst", 5, 1i64);
+    g.wire("gone", "changed");
+    g.wire("a", "b");
+    g.wire("b", "a");
+    g.subscribe("src", 0, "dst");
+    g.subscribe("src", 0, "src");
+    g.subscribe("src", 3, "dst");
+    g.subscribe("src", 0, "gone");
+    let absent_port = InputPort::new(absent_consumer, 0);
+    g.graph
+        .set_input_binding(absent_port, Binding::Const(ConstValue::Int(2)));
+    let absent_event = EventPort::new(absent_emitter, 0);
+    g.graph.subscribe(absent_event, dst);
+    let src_func = g.library.by_name("src").unwrap();
+    g.graph.nodes.insert(NodeId::nil(), Node::from(src_func));
+    g.graph
+        .insert(nil_func, internals::unresolved_node(FuncId::nil()));
+    g.edit_func("changed", |func| {
+        func.inputs[0].data_type = DataType::String;
+    });
+    let gone_func = g.graph.find(gone).unwrap().func_id().unwrap();
+    g.library.remove(gone_func);
+
+    let reconciled = g.graph.reconcile(&g.library);
+
+    let rejected = |port_idx, binding, rejection| Repair::RejectedBinding {
+        port: InputPort::new(dst, port_idx),
+        binding,
+        rejection,
+    };
+    assert_eq!(
+        reconciled.repairs,
+        [
+            Repair::NilNode,
+            Repair::DanglingBinding {
+                port: absent_port,
+                binding: Binding::Const(ConstValue::Int(2)),
+            },
+            Repair::DanglingSubscription {
+                subscription: Subscription::new(absent_event, dst),
+            },
+            rejected(1, Binding::bind(src, 7), BindingRejection::UndeclaredOutput),
+            rejected(2, Binding::bind(src, 0), BindingRejection::WiredConstOnly),
+            rejected(
+                3,
+                Binding::Const(ConstValue::Int(1)),
+                BindingRejection::ConstMismatch
+            ),
+            rejected(4, Binding::bind(src, 0), BindingRejection::WireMismatch),
+            rejected(
+                5,
+                Binding::Const(ConstValue::Int(1)),
+                BindingRejection::UndeclaredInput
+            ),
+            Repair::RejectedSubscription {
+                subscription: Subscription::new(EventPort::new(src, 0), src),
+                rejection: SubscriptionRejection::SelfSubscription,
+            },
+            Repair::RejectedSubscription {
+                subscription: Subscription::new(EventPort::new(src, 3), dst),
+                rejection: SubscriptionRejection::UndeclaredEvent,
+            },
+            // The walk enters `a` first, reads `b`, and `b`'s wire from `a`
+            // returns to the path.
+            Repair::CycleWire {
+                port: InputPort::new(g.id("b"), 0),
+                producer: OutputPort::new(g.id("a"), 0),
+            },
+        ]
     );
 
-    let mut stubbed = TestGraph::new();
-    let stub = stubbed
-        .graph
-        .add(internals::unresolved_node(FuncId::from_u128(99)));
-    assert!(matches!(
-        stubbed.graph.find(stub).unwrap().resolve(&stubbed.library),
-        FuncResolution::Missing(id) if id == FuncId::from_u128(99)
-    ));
-    assert!(matches!(
-        stubbed.graph.validate_with(&stubbed.library).unwrap_err(),
-        GraphValidationError::MissingFunc { node_id, .. } if node_id == stub
-    ));
+    let detached: Vec<_> = reconciled
+        .detached
+        .iter()
+        .map(|detachment| (detachment.record.node_id(), detachment.reason))
+        .collect();
+    assert_eq!(
+        detached,
+        [
+            (changed, Unresolved::ChangedPorts),
+            (gone, Unresolved::MissingFunc),
+            (nil_func, Unresolved::MissingFunc),
+        ]
+    );
+    let changed_record = &reconciled.detached[0].record;
+    assert_eq!(
+        changed_record.bindings(),
+        [BindingEntry {
+            port: InputPort::new(changed, 0),
+            binding: Binding::bind(gone, 0),
+        }],
+        "detached first, so the edge to `gone` is `changed`'s"
+    );
+    let gone_record = &reconciled.detached[1].record;
+    assert!(gone_record.bindings().is_empty());
+    assert_eq!(
+        gone_record.subscriptions(),
+        [Subscription::new(EventPort::new(src, 0), gone)]
+    );
+
+    assert_eq!(
+        g.graph.input_bindings(dst).collect::<Vec<_>>(),
+        [(InputPort::new(dst, 0), &Binding::Const(ConstValue::Null))]
+    );
+    assert_eq!(
+        g.graph.subscriptions().collect::<Vec<_>>(),
+        [Subscription::new(EventPort::new(src, 0), dst)]
+    );
+    assert!(g.graph.validate_with(&g.library).is_ok());
+    assert_eq!(g.compile().program.e_nodes.len(), 4);
+
+    assert!(
+        g.graph.reconcile(&g.library).is_empty(),
+        "a reconciled graph needs nothing more"
+    );
 }
 
 /// A node's signature survives the document round trip.

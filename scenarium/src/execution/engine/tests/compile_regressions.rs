@@ -121,30 +121,23 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     assert_eq!(e.output_i64("generate", 1), Some(2));
 }
 
-/// Library drift: wiring that references ports/events the library no
-/// longer declares must still compile — the dangling binding degrades
-/// to unbound (a required input reports missing), and a dangling
-/// subscription wires nothing.
+/// A node the library lost is detached at reconcile with its wiring, and the
+/// rest still runs: the required input it fed reports missing, as with a
+/// disabled producer.
 #[tokio::test]
-async fn dangling_wiring_compiles_and_reports_missing_input() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    // sum's required input 0 bound to an output `get_a` doesn't have, plus a
-    // subscription to an event it doesn't emit — the drift a changed library
-    // leaves behind. Neither may fail the compile.
-    e.edit(|g| {
-        g.wire(("get_a", 9), "sum");
-        g.subscribe("get_a", 9, "sum");
-    });
+async fn a_detached_producer_leaves_its_consumer_missing_an_input() {
+    let mut g = TestGraph::sample();
+    let get_a = g.graph.find(g.id("get_a")).unwrap().func_id().unwrap();
+    g.library.remove(get_a);
+    let reconciled = g.graph.reconcile(&g.library);
+    assert_eq!(reconciled.detached.len(), 1);
+    assert!(g.graph.find(g.id("get_a")).is_none());
 
-    assert!(
-        e.engine.compiled().subscribers.is_empty(),
-        "the dangling subscription wires nothing"
-    );
+    let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
-
     assert_eq!(
         run.missing_ports("sum"),
         [0],
-        "the dangling binding degrades to a missing input on that exact port"
+        "the input `get_a` fed is missing on that exact port"
     );
 }

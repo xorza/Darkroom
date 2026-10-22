@@ -416,14 +416,15 @@ impl RunSchedule {
         // Event subscribers. A `RunSinks` sink among them fires no cone of its own — it
         // promotes this run to run all sinks (below), so it's skipped as a root here.
         let mut run_sinks = seeds.sinks;
+        // A fired event names the installed program: events arrive in a batch
+        // of their own, and each install rebuilds the event loop.
         for &event in &seeds.events {
-            let Some(owner_idx) = program.node(event.node_id) else {
-                return Err(Error::EventSeedNotFound { event });
-            };
-            let Some(e_event) = program.events[program[owner_idx].events].get(event.event_idx)
-            else {
-                return Err(Error::EventSeedNotFound { event });
-            };
+            let owner_idx = program
+                .node(event.node_id)
+                .expect("a fired event's emitter is in the installed program");
+            let e_event = program.events[program[owner_idx].events]
+                .get(event.event_idx)
+                .expect("a fired event is one its emitter declares");
             for &sub_idx in &program.subscribers[e_event.subscribers] {
                 if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                     run_sinks = true;

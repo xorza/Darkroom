@@ -8,13 +8,21 @@ use crate::core::document::graph_view::ItemPlacement;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
-/// Everything the document holds about one node: the graph record carrying
-/// every edge that touched it, where its body sits and how far forward it
-/// paints, and whether it was selected. What a removal takes out, and what an
-/// undo has to put back for the removal to have been reversible.
+/// Where a node's record lives in the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum Home {
+    Graph,
+    Stubs,
+}
+
+/// Everything the document holds about one node: the record carrying every
+/// edge that touched it and where it lives, where its body sits and how far
+/// forward it paints, and whether it was selected. What a removal takes out,
+/// and what an undo has to put back for the removal to have been reversible.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct NodeState {
     detached: DetachedNode,
+    home: Home,
     /// Restored verbatim rather than recomputed, so an undone delete comes
     /// back where it was and at the depth it had — not frontmost.
     placement: ItemPlacement,
@@ -23,27 +31,35 @@ pub(crate) struct NodeState {
 }
 
 impl NodeState {
-    /// Read `node_id`'s whole state out of `doc`, or `None` when the graph no
-    /// longer holds it — the ordinary outcome of an intent that spans frames.
+    /// Read `node_id`'s whole state out of `doc`, a graph node or a stub, or
+    /// `None` when the document no longer holds it — the ordinary outcome of
+    /// an intent that spans frames.
     ///
     /// One lookup answers both halves of the question: the snapshot *is* the
     /// existence check.
     pub(crate) fn capture(doc: &Document, node_id: NodeId) -> Option<Self> {
-        let detached = doc.graph.snapshot_node(node_id)?;
+        let (detached, home) = match doc.graph.snapshot_node(node_id) {
+            Some(detached) => (detached, Home::Graph),
+            None => (doc.stubs.get(node_id)?.clone(), Home::Stubs),
+        };
         Some(Self {
             placement: *doc
                 .main_view
                 .item_placements
                 .get(&node_id)
-                .expect("the view places every node the graph holds"),
+                .expect("the view places every node and stub"),
             selected: doc.main_view.selected.contains(&node_id),
             detached,
+            home,
         })
     }
 
     fn restore(&self, doc: &mut Document) {
         let node_id = self.detached.node_id();
-        doc.graph.attach_node(self.detached.clone());
+        match self.home {
+            Home::Graph => doc.graph.attach_node(self.detached.clone()),
+            Home::Stubs => doc.stubs.insert(self.detached.clone()),
+        }
         doc.main_view
             .item_placements
             .insert(node_id, self.placement);
@@ -82,6 +98,7 @@ impl NodePresence {
                 from: None,
                 to: Some(NodeState {
                     detached,
+                    home: Home::Graph,
                     placement,
                     selected: false,
                 }),
@@ -109,12 +126,15 @@ impl NodePresence {
     /// reverted against exactly the document its own apply produced: entries
     /// replay in reverse, and so do the steps inside one.
     fn take_out(&self, doc: &mut Document, dir: Direction) {
-        let removed = doc.remove_node(self.node_id);
         let recorded = self
             .state
             .half(dir.reversed())
             .as_ref()
             .expect("a presence step is an insertion or a removal, never two absences");
+        let removed = match recorded.home {
+            Home::Graph => doc.remove_node(self.node_id),
+            Home::Stubs => doc.remove_stub(self.node_id),
+        };
         assert_eq!(
             removed, recorded.detached,
             "removal diverged from the step that recorded it"

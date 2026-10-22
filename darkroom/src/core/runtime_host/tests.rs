@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::core::status_log::StatusLog;
 use common::TempDir;
 use lens::MlModelPaths;
-use scenarium::{Binding, CacheMode, ConstValue, Graph, InputPort, NodeId};
+use scenarium::{CacheMode, ConstValue, Graph, NodeId};
 
 use crate::core::io::cache;
 use crate::core::io::preferences::Preferences;
@@ -18,47 +18,29 @@ fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
         .clone()
 }
 
+/// An eviction reaches the seed's consumer cone in the program it installs —
+/// here the seed alone, as nothing reads it — and nothing for a node the
+/// program holds no work for.
 #[test]
-fn stale_wiring_survives_compilation_and_still_runs() {
+fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     let mut host = RuntimeHost::new(Arc::new(|| {}), &Preferences::default());
-
-    // Library drift: a wire into an output the func doesn't declare.
-    // Nothing prunes it — the authored wiring stays (it revives if the
-    // library gets the port back) and compilation tolerates it as an
-    // unbound input.
     let func = host
         .library
         .current()
         .by_name("ML Denoise")
         .expect("built-in present");
     let mut graph = Graph::default();
-    let producer = graph.add_func_node(func);
-    let consumer = graph.add_func_node(func);
-    let dangling = InputPort::new(consumer, 0);
-    graph.set_input_binding(dangling, Binding::bind(producer, 99));
+    let node = graph.add_func_node(func);
 
     let mut status = StatusLog::default();
-    assert!(
-        host.run_once(&graph, &mut status),
-        "the drifted graph compiles and is queued"
-    );
-    assert_eq!(
-        host.evict_cache(&graph, consumer, &mut status),
-        vec![consumer],
-        "the drifted graph compiles and queues an eviction reaching only \
-         the seed — its one incoming wire is unbound, so nothing reads it"
-    );
+    host.run_once(&graph, &mut status);
+    assert_eq!(host.evict_cache(&graph, node, &mut status), vec![node]);
     assert!(
         host.evict_cache(&graph, NodeId::unique(), &mut status)
             .is_empty(),
         "a node the program has no work for reaches nothing"
     );
-    assert_eq!(status.current(), None, "no compile failure was reported");
-    assert_eq!(
-        graph.bindings.get(&dangling),
-        Some(&Binding::bind(producer, 99)),
-        "the dangling wire is preserved, not pruned"
-    );
+    assert_eq!(status.current(), None);
 }
 
 #[test]
@@ -121,12 +103,12 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         .by_name("ML Denoise")
         .expect("built-in present");
     let node = memory_only.add_func_node(func);
-    assert!(host.run_once(&memory_only, &mut status));
+    host.run_once(&memory_only, &mut status);
     assert!(!first_root.exists(), "a memory-only program writes nothing");
 
     let mut disk_backed = memory_only;
     disk_backed.find_mut(node).unwrap().cache = CacheMode::Disk;
-    assert!(host.run_once(&disk_backed, &mut status));
+    host.run_once(&disk_backed, &mut status);
     assert!(
         first_root.join(".gitignore").is_file(),
         "a disk-backed program prepares the root before it can write"
@@ -136,7 +118,7 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     host.set_document_cache(Some(&second_path));
     assert_eq!(host.disk_root.as_deref(), Some(second_root.as_path()));
     assert!(!second_root.exists());
-    assert!(host.run_once(&disk_backed, &mut status));
+    host.run_once(&disk_backed, &mut status);
     assert!(second_root.join(".gitignore").is_file());
     host.set_document_cache(None);
     assert_eq!(host.disk_root, None);

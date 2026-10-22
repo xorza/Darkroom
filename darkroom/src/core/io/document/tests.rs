@@ -1,9 +1,7 @@
 use common::TempDir;
-use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use super::*;
 use crate::core::document::internals::DocFixture;
-use ron::ser;
 use std::fs;
 
 #[test]
@@ -67,41 +65,7 @@ fn document_extension_is_required_case_insensitively() {
 }
 
 #[test]
-fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
-    // Save validates with the same predicate as load, so a document
-    // the next launch would refuse can never replace the one on disk —
-    // in release builds too.
-    let dir = TempDir::new("darkroom-document-refused");
-    let path = dir.join("refused.darkroom");
-    let good = Document::default();
-    save(&good, &path).expect("a valid document saves");
-    let on_disk = fs::read(&path).unwrap();
-
-    // A binding whose consumer node isn't in the graph — structurally
-    // invalid without tripping an insertion assert.
-    let mut bad = Document::default();
-    bad.graph.bindings.insert(
-        InputPort::new(NodeId::unique(), 0),
-        Binding::Const(ConstValue::Int(1)),
-    );
-    assert!(
-        matches!(
-            save(&bad, &path).unwrap_err(),
-            DocumentSaveError::InvalidDocument { path: p, source }
-                if p == path && source.to_string().contains("binding")
-        ),
-        "the refusal names the path and the reason"
-    );
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        on_disk,
-        "the previously saved document is still intact"
-    );
-    assert_eq!(load(&path).unwrap(), good, "and still loads");
-}
-
-#[test]
-fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
+fn load_rejects_invalid_archives_and_malformed_documents() {
     let dir = TempDir::new("darkroom-document-rejects");
     let corrupt = dir.join("corrupt.darkroom");
     fs::write(&corrupt, b"not a zip archive").unwrap();
@@ -131,23 +95,6 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
             DocumentLoadError::DeserializeDocument { path, .. } if path == malformed
         ),
         "malformed RON reports its archive"
-    );
-
-    let invalid = dir.join("invalid.darkroom");
-    let mut document = Document::default();
-    document.graph.bindings.insert(
-        InputPort::new(NodeId::unique(), 0),
-        Binding::Const(ConstValue::Int(1)),
-    );
-    let encoded = ser::to_string(&document).unwrap();
-    write_test_archive(&invalid, DOCUMENT_ENTRY, encoded.as_bytes());
-    assert!(
-        matches!(
-            load(&invalid).unwrap_err(),
-            DocumentLoadError::InvalidDocument { path, source }
-                if path == invalid && source.to_string().contains("binding")
-        ),
-        "structural validation retains the archive path and reason"
     );
 }
 

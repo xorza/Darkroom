@@ -44,8 +44,9 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
     let sink = g.add("sink_func", NodeSpec::sink);
-    let ghost = g.graph.add(internals::unresolved_node(FuncId::unique()));
-    let fixture = GraphCtxFixture::over(g);
+    let mut fixture = DocFixture::from(g);
+    let ghost = fixture.add_stub(internals::unresolved_node(FuncId::unique()));
+    let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
     assert!(
@@ -78,10 +79,11 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     // And one authored against other ports of a func the library does hold.
     let add_id = library.by_name("Add").unwrap().id();
     let known_id = graph.add(known);
-    let ghost_id = graph.add(ghost);
-    let changed_id = graph.add(internals::unresolved_node(add_id));
+    let mut fixture = DocFixture::with_library(graph, library);
+    let ghost_id = fixture.add_stub(ghost);
+    let changed_id = fixture.add_stub(internals::unresolved_node(add_id));
 
-    let fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
+    let fixture = GraphCtxFixture::over(fixture);
     let graph_ctx = fixture.graph_ctx();
 
     // Both nodes resolve, not silently dropped — so the unresolvable one
@@ -91,12 +93,12 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
     // The flag tracks resolution; the label names what's missing.
-    assert!(!known_node.missing(), "a resolved func is not a stub");
-    assert!(ghost_node.missing());
+    assert!(!known_node.stub(), "a resolved func is not a stub");
+    assert!(ghost_node.stub());
     assert_eq!(ghost_node.kind_label(), "missing func");
     let changed_node = graph_ctx.node(changed_id).unwrap();
     assert!(
-        changed_node.missing(),
+        changed_node.stub(),
         "a func that moved its ports is a stub too"
     );
     assert_eq!(changed_node.kind_label(), "changed func");

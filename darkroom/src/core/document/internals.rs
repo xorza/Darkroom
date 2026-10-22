@@ -8,7 +8,8 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, internals,
+    DataType, DetachedNode, DetachedNodeParts, Func, FuncId, FuncInput, FuncOutput, Graph, Library,
+    Node, NodeId, internals,
 };
 
 use palantir::DockOperation;
@@ -48,6 +49,18 @@ pub(crate) fn nth_in_paint_order(view: &GraphView, i: usize) -> NodeId {
     let mut order = Vec::new();
     view.paint_order(&mut order);
     order.get(i).expect("the fixture placed that many nodes").id
+}
+
+/// The func of [`DocFixture::plain_node`].
+fn plain_func() -> Func {
+    internals::stub_func(
+        FuncId::literal("1ed07f16-02ed-4fb2-9677-5aa67801c7ae"),
+        "plain",
+    )
+    .inputs(["a", "b", "c"].map(|name| FuncInput::optional(name, DataType::Int)))
+    .output(FuncOutput::new("out", DataType::Int))
+    .event("tick", internals::stub_event())
+    .build()
 }
 
 /// The `i`th slot of the row [`spread`] lays out.
@@ -112,11 +125,54 @@ impl DocFixture {
         node_id
     }
 
-    /// Add a bare `Func`-kind node at exactly `pos`, naming a func no library
-    /// holds — a portless stub, for the tests that read only a node's identity
-    /// and where it sits.
+    /// A node of the fixture's plain func, which the library then holds: three
+    /// optional `Int` inputs, one `Int` output and one event — enough for any
+    /// edit a test makes of a node whose ports it does not care about.
+    pub(crate) fn plain_node(&mut self) -> Node {
+        let func = plain_func();
+        if self.library.by_id(func.id()).is_none() {
+            self.library.add(func.clone());
+        }
+        Node::from(&func)
+    }
+
+    /// Add a [`Self::plain_node`] at exactly `pos` — for the tests that read
+    /// only a node's identity and where it sits.
+    pub(crate) fn node_at(&mut self, pos: Vec2) -> NodeId {
+        let node = self.plain_node();
+        let node_id = self.doc.graph.add(node);
+        place(&mut self.doc.main_view, node_id, pos);
+        node_id
+    }
+
+    /// Add a stub at exactly `pos`: a node naming a func no library holds,
+    /// kept beside the graph with no wiring — for the tests that read only a
+    /// node's identity and where it sits.
     pub(crate) fn stub_at(&mut self, pos: Vec2) -> NodeId {
-        let node_id = self.doc.graph.add(Self::stub_node());
+        self.insert_stub(Self::stub_node(), pos)
+    }
+
+    /// Keep `node`, which the library must not resolve, as a stub with no
+    /// wiring at the next slot in the row.
+    pub(crate) fn add_stub(&mut self, node: Node) -> NodeId {
+        let slot = self.doc.main_view.item_placements.len();
+        self.insert_stub(node, row_pos(slot))
+    }
+
+    fn insert_stub(&mut self, node: Node, pos: Vec2) -> NodeId {
+        assert!(
+            self.library.func_of(&node).is_err(),
+            "a stub's func does not resolve"
+        );
+        let node_id = NodeId::unique();
+        let record = DetachedNode::new(DetachedNodeParts {
+            node_id,
+            node,
+            bindings: Vec::new(),
+            subscriptions: Vec::new(),
+        })
+        .expect("a stub with no wiring is a well-formed record");
+        self.doc.stubs.insert(record);
         place(&mut self.doc.main_view, node_id, pos);
         node_id
     }

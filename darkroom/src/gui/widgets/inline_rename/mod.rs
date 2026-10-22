@@ -51,6 +51,16 @@ pub(crate) struct InlineRename<'a> {
     name: &'a str,
     style: &'a InlineRenameTheme,
     max_chars: usize,
+    editing: Editing,
+}
+
+/// Whether a double-click opens the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Editing {
+    Allowed,
+    /// The label still clicks and drags, but never becomes an editor: for a
+    /// name no edit can change.
+    Refused,
 }
 
 impl<'a> InlineRename<'a> {
@@ -76,7 +86,14 @@ impl<'a> InlineRename<'a> {
             name,
             style,
             max_chars: DEFAULT_MAX_CHARS,
+            editing: Editing::Allowed,
         }
+    }
+
+    /// Show the label without the editor: a double-click opens nothing.
+    pub(crate) const fn read_only(mut self) -> Self {
+        self.editing = Editing::Refused;
+        self
     }
 
     /// Use `id` verbatim instead of the call-site default. The label and
@@ -100,6 +117,7 @@ impl<'a> InlineRename<'a> {
             name,
             style: theme,
             max_chars,
+            editing,
         } = self;
         // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
         // still present a clickable target, with the text flush left. Both
@@ -157,8 +175,7 @@ impl<'a> InlineRename<'a> {
                     })
                     .response;
                 let clicked = resp.left.clicked();
-                let double_clicked = resp.left.double_clicked();
-                if double_clicked {
+                if resp.left.double_clicked() && editing == Editing::Allowed {
                     st.active = true;
                     // Refilled, not replaced — the row's buffer keeps whatever
                     // capacity the last rename grew it to.

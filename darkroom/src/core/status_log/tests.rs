@@ -10,7 +10,7 @@ fn error_slot_tracks_the_last_failure_and_history_keeps_both() {
     // replaces the slot.
     log.error(StatusFamily::Document, "save failed: a".into());
     log.error(StatusFamily::Run, "compile failed: b".into());
-    assert_eq!(log.current(), Some("compile failed: b"));
+    assert_eq!(log.current(), Some(error("compile failed: b")));
     assert_eq!(
         log.lines().collect::<Vec<_>>(),
         ["save failed: a", "compile failed: b"]
@@ -28,7 +28,7 @@ fn a_success_clears_only_its_own_familys_failure() {
         log.succeeded(other);
         assert_eq!(
             log.current(),
-            Some("save failed: disk full"),
+            Some(error("save failed: disk full")),
             "{other:?} success"
         );
     }
@@ -38,4 +38,24 @@ fn a_success_clears_only_its_own_familys_failure() {
     // A success with nothing on the bar is a no-op.
     log.succeeded(StatusFamily::Run);
     assert_eq!(log.current(), None);
+
+    // A warning parks in the same slot, painted as a warning, and its
+    // family's success clears it too.
+    log.warn(StatusFamily::Document, "the load changed 2 item(s)".into());
+    assert_eq!(
+        log.current(),
+        Some(StatusMessage {
+            severity: Severity::Warning,
+            line: "the load changed 2 item(s)",
+        })
+    );
+    log.succeeded(StatusFamily::Document);
+    assert_eq!(log.current(), None);
+}
+
+const fn error(line: &str) -> StatusMessage<'_> {
+    StatusMessage {
+        severity: Severity::Error,
+        line,
+    }
 }

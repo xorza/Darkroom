@@ -106,9 +106,9 @@ impl DynamicValue {
     /// The value of a required input declared `Float` (or any scalar the
     /// declaration coerces).
     ///
-    /// The `required_*` reads state what the compiler guarantees a lambda: a
-    /// node runs only with every required input bound to a value of its
-    /// declared type. A lambda reading a required input as declared cannot
+    /// The `required_*` reads state what the load contract guarantees a
+    /// lambda: a graph holds only admitted wiring, and a node runs only with
+    /// every required input bound to a value of its declared type. A lambda reading a required input as declared cannot
     /// fail; one that panics here read a port as a type it does not declare.
     #[track_caller]
     pub fn required_f64(&self) -> f64 {
@@ -141,7 +141,8 @@ impl DynamicValue {
     }
 
     /// The variant of a required input declared `Enum`, parsed as `T`. The
-    /// compiler checked the variant against the enum type's names, so this
+    /// load and the edit gate admitted the variant against the enum type's
+    /// names, so this
     /// holds for a `T` that reads those names. See
     /// [`required_f64`](Self::required_f64).
     #[track_caller]
@@ -177,9 +178,8 @@ impl DynamicValue {
     #[track_caller]
     fn misread(&self, expected: &str) -> ! {
         panic!(
-            "a required input holds {self:?}, not {expected}: the compiler delivers every \
-             required input bound and of its declared type, so the lambda read a port as \
-             another type"
+            "a required input holds {self:?}, not {expected}: a run delivers every required \
+             input bound and of its declared type, so the lambda read a port as another type"
         )
     }
 

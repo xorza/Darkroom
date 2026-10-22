@@ -29,7 +29,6 @@ pub use execution::cache::runtime_cache::error::{
 };
 pub use execution::compile::Compiler;
 pub use execution::compile::compiled_graph::CompiledGraph;
-pub use execution::compile::error::CompileError;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::report::node_status::NodeExecutionStatus;
 pub use execution::report::node_status::NodeStatus;
@@ -38,7 +37,9 @@ pub use graph::Graph;
 pub use graph::binding::Binding;
 pub use graph::binding_entry::BindingEntry;
 pub use graph::detached::{DetachedNode, DetachedNodeParts};
-pub use graph::error::{DetachedNodeError, GraphValidationError};
+pub use graph::error::{
+    BindingRejection, DetachedNodeError, GraphValidationError, SubscriptionRejection, Unresolved,
+};
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult, OverrideRule};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::func::func_builder::FuncBuilder;
@@ -49,8 +50,9 @@ pub use graph::func::value_variant::ValueVariant;
 pub use graph::func::{Func, FuncBehavior, FuncEvent};
 pub use graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
-pub use graph::node::{CacheMode, FuncResolution, Node};
+pub use graph::node::{CacheMode, Node};
 pub use graph::node_ref::NodeRef;
+pub use graph::reconciled::{Detachment, Reconciled, Repair};
 pub use graph::subscription::Subscription;
 pub use library::Library;
 pub use library::type_entry::TypeEntry;

@@ -25,14 +25,12 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.canvas.bg, p.canvas_bg);
     assert_eq!(theme.card.header_fill, p.header_fill);
     assert_eq!(theme.ports.input, p.input_port);
-    assert_eq!(theme.ports.output, p.output_port);
     assert_eq!(theme.colors.badge_cache, p.badge_cache);
     assert_eq!(theme.colors.badge_impure, p.badge_impure);
     assert_eq!(theme.status.busy, p.status_busy);
     // Each of those is a distinct role, so a palette that collapsed them
     // onto one color would pass every assertion above.
     assert_ne!(theme.canvas.bg, theme.card.header_fill);
-    assert_ne!(theme.ports.input, theme.ports.output);
     // The palantir half is the same palette, not palantir's own default.
     assert_eq!(theme.palantir.window_clear, p.canvas_bg);
     assert!(theme.palantir.tooltip.max_size.h.is_infinite());

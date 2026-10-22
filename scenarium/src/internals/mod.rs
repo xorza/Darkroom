@@ -10,7 +10,9 @@
 //! [`NodeSpec`](test_graph::NodeSpec) names ports `in0`/`out0` by position, so a
 //! test about how an editor *renders* a port has to state its own [`Func`] —
 //! and a `Func` cannot be built without an implementation. Beside them is
-//! [`unresolved_node`], the node a document keeps for a func the library lost.
+//! [`unresolved_node`], the node a decoded document holds for a func the
+//! library lost, until [`Graph::reconcile`](crate::Graph::reconcile) detaches
+//! it.
 
 #[cfg(test)]
 pub(crate) mod blob;
@@ -43,7 +45,8 @@ pub fn stub_event() -> EventLambda {
 }
 
 /// A node of func `func_id`, authored against a func with no ports — for a
-/// fixture whose library holds no such func, the stub a stale document leaves.
+/// fixture whose library holds no such func: what a stale document decodes to
+/// before a reconcile detaches it.
 pub fn unresolved_node(func_id: FuncId) -> Node {
     Node::unresolved(portless_func_ref(func_id))
 }

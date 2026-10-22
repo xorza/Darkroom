@@ -3,10 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::Vec2;
-use scenarium::{Graph as CoreGraph, NodeId};
+use scenarium::{DetachedNode, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::GraphViewValidationError;
+use crate::core::document::stubs::Stubs;
 use crate::core::document::viewport::Viewport;
 
 /// Where one node body sits and how far forward it paints.
@@ -51,8 +52,8 @@ pub(crate) struct StackedItem {
 /// camera/selection changes alongside structural edits.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
-    /// Every node body's placement. Exactly one entry per graph node —
-    /// enforced by [`Self::validate`].
+    /// Every node body's placement. Exactly one entry per graph node and per
+    /// stub — enforced by [`Self::validate`].
     ///
     /// Order-insensitive on purpose: paint order rides in each entry's
     /// [`ItemPlacement::z`], so this map is free to be keyed and compared as a
@@ -70,8 +71,7 @@ impl GraphView {
     /// node, the default camera, nothing selected.
     ///
     /// The only way a view is built from a graph, so there is nowhere for the
-    /// two to disagree about which nodes are placed — which is exactly what
-    /// [`Self::validate`] checks on the way back in from disk.
+    /// two to disagree about which nodes are placed.
     pub(crate) fn new(graph: &CoreGraph) -> Self {
         Self {
             item_placements: graph
@@ -131,7 +131,11 @@ impl GraphView {
         })
     }
 
-    pub(super) fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
+    pub(super) fn validate(
+        &self,
+        graph: &CoreGraph,
+        stubs: &Stubs,
+    ) -> Result<(), GraphViewValidationError> {
         if !self.viewport.is_valid() {
             return Err(GraphViewValidationError::InvalidViewport);
         }
@@ -141,14 +145,19 @@ impl GraphView {
                 return Err(GraphViewValidationError::NonFinitePosition { item: *key });
             }
         }
-        // A map guarantees unique keys, so counts plus reverse membership
-        // prove the graph and view contain exactly the same node set.
-        if self.item_placements.len() != graph.len() {
+        // A map guarantees unique keys, and the graph and stubs are disjoint,
+        // so counts plus reverse membership prove the view places exactly
+        // their node set.
+        if self.item_placements.len() != graph.len() + stubs.len() {
             return Err(GraphViewValidationError::NodeCount);
         }
-        for node in graph.iter() {
-            if !self.item_placements.contains_key(&node.id) {
-                return Err(GraphViewValidationError::MissingNode { node_id: node.id });
+        let ids = graph
+            .iter()
+            .map(|node| node.id)
+            .chain(stubs.iter().map(DetachedNode::node_id));
+        for node_id in ids {
+            if !self.item_placements.contains_key(&node_id) {
+                return Err(GraphViewValidationError::MissingNode { node_id });
             }
         }
         for key in &self.selected {

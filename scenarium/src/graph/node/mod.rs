@@ -109,41 +109,30 @@ pub struct Node {
     pub disabled: bool,
 }
 
-/// How a node's declaration resolves against a library — the one rule every
-/// reader of a node asks, so the editor and a compile cannot disagree.
-#[derive(Clone, Copy, Debug)]
-pub enum FuncResolution<'a> {
-    /// The declaration the node was authored against: a library func with the
-    /// same ports, or a special node's built-in.
-    Found(&'a Func),
-    /// The library holds the node's func with other ports than the node was
-    /// authored against, so its wiring would land on the wrong ports.
-    Changed(&'a Func),
-    /// The library holds no func under the node's id.
-    Missing(FuncId),
-}
-
 impl Node {
-    /// How this node's declaration resolves against `library`. The caller
-    /// decides whether a stub is drift to tolerate (the editor renders it) or a
-    /// node to refuse (a compile).
-    pub fn resolve<'a>(&self, library: &'a Library) -> FuncResolution<'a> {
+    /// The declaration this node instantiates: a library func, or a special
+    /// node's built-in.
+    ///
+    /// # Panics
+    ///
+    /// If `library` holds no func under the node's id. A graph holds only nodes
+    /// that resolve — [`Graph::reconcile`](crate::Graph::reconcile) detaches the
+    /// rest at load — so a miss is a broken contract; a node that may not
+    /// resolve is asked through [`Library::func_of`].
+    pub fn func<'a>(&self, library: &'a Library) -> &'a Func {
         match &self.kind {
-            NodeKind::Func(func_ref) => match library.by_id(func_ref.id()) {
-                Some(func) if func.func_ref() == *func_ref => FuncResolution::Found(func),
-                Some(func) => FuncResolution::Changed(func),
-                None => FuncResolution::Missing(func_ref.id()),
-            },
-            NodeKind::Special(special) => FuncResolution::Found(special.func()),
-        }
-    }
-
-    /// The declaration this node instantiates, or `None` for a stub — see
-    /// [`resolve`](Self::resolve).
-    pub fn func<'a>(&self, library: &'a Library) -> Option<&'a Func> {
-        match self.resolve(library) {
-            FuncResolution::Found(func) => Some(func),
-            FuncResolution::Changed(_) | FuncResolution::Missing(_) => None,
+            NodeKind::Func(func_ref) => {
+                let func = library
+                    .by_id(func_ref.id())
+                    .expect("a graph node's func is in the library");
+                debug_assert_eq!(
+                    func.func_ref(),
+                    *func_ref,
+                    "a graph node's func has the ports it was authored against"
+                );
+                func
+            }
+            NodeKind::Special(special) => special.func(),
         }
     }
 

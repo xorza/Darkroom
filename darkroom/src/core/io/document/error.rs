@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use common::{DeserializeError, SerializeError};
 use zip::result::ZipError;
 
-use crate::core::document::error::DocumentValidationError;
 use crate::core::io::document::{DOCUMENT_ENTRY, EXTENSION, MAX_DOCUMENT_BYTES};
 
 #[derive(Debug, thiserror::Error)]
@@ -63,12 +62,6 @@ pub(crate) enum DocumentLoadError {
         #[source]
         source: Box<DeserializeError>,
     },
-    #[error("{path}: {source}", path = .path.display())]
-    InvalidDocument {
-        path: PathBuf,
-        #[source]
-        source: DocumentValidationError,
-    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -87,17 +80,6 @@ pub(crate) enum DocumentSaveError {
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    /// Refused *before* writing, so a document that the next
-    /// [`load`](crate::core::io::document::load) would reject can never
-    /// replace the file already on disk. Same predicate as
-    /// [`DocumentLoadError::InvalidDocument`] — the two directions can't
-    /// drift.
-    #[error("{path}: {source}", path = .path.display())]
-    InvalidDocument {
-        path: PathBuf,
-        #[source]
-        source: DocumentValidationError,
-    },
     #[error("{path}: {source}", path = .path.display())]
     Publish {
         path: PathBuf,
