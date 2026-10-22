@@ -3,7 +3,7 @@
 mod builtin;
 mod containers;
 mod data;
-mod execution;
+mod exec;
 mod graph;
 #[cfg(feature = "internals")]
 pub mod internals;
@@ -20,19 +20,17 @@ pub use data::const_value::{ConstValue, ValueText};
 pub use data::data_type::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
 pub use data::dynamic_value::{CustomValue, DynamicValue};
 pub use data::ram_usage::RamUsage;
-pub use execution::cache::disk_store::DiskStore;
-pub use execution::cache::disk_store::error::{
-    CodecFormatError, FrameError, RemovalError, StoreError,
-};
-pub use execution::cache::runtime_cache::error::{
+pub use exec::cache::disk_store::DiskStore;
+pub use exec::cache::disk_store::error::{CodecFormatError, FrameError, RemovalError, StoreError};
+pub use exec::cache::runtime_cache::error::{
     CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
 };
-pub use execution::compile::Compiler;
-pub use execution::compile::compiled_graph::CompiledGraph;
-pub use execution::error::{ExecutionError, ExecutionResult, RunError};
-pub use execution::report::node_status::NodeExecutionStatus;
-pub use execution::report::node_status::NodeStatus;
-pub use execution::report::run_reporter::RunPhase;
+pub use exec::compile::Compiler;
+pub use exec::compile::compiled_graph::CompiledGraph;
+pub use exec::error::{ExecError, ExecResult, RunError};
+pub use exec::report::node_status::NodeExecStatus;
+pub use exec::report::node_status::NodeStatus;
+pub use exec::report::run_reporter::RunPhase;
 pub use graph::Graph;
 pub use graph::binding::Binding;
 pub use graph::binding_entry::BindingEntry;

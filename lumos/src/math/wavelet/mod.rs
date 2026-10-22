@@ -32,7 +32,7 @@ pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: us
         .enumerate()
         .for_each_init(
             || vec![0.0f32; width],
-            |column, (y, out)| {
+            |col, (y, out)| {
                 let taps = if y >= 2 * step && y + 2 * step < height {
                     [y - 2 * step, y - step, y, y + step, y + 2 * step]
                 } else {
@@ -47,7 +47,7 @@ pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: us
                 };
                 SmoothRow {
                     rows: taps.map(|row| src.row(row)),
-                    column,
+                    col,
                     out,
                     step,
                 }
@@ -57,11 +57,11 @@ pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: us
 }
 
 /// One output row of [`atrous_smooth`]: its five source `rows` convolved down the columns into
-/// `column`, then `column` along itself at hole spacing `step` into `out`.
+/// `col`, then `col` along itself at hole spacing `step` into `out`.
 #[derive(Debug)]
 struct SmoothRow<'a> {
     rows: [&'a [f32]; 5],
-    column: &'a mut [f32],
+    col: &'a mut [f32],
     out: &'a mut [f32],
     step: usize,
 }
@@ -73,12 +73,12 @@ impl Kernel for SmoothRow<'_> {
     fn run<S: Isa>(self, isa: S) {
         let Self {
             rows,
-            column,
+            col,
             out,
             step,
         } = self;
-        five_taps(isa, rows, column);
-        let row: &[f32] = column;
+        five_taps(isa, rows, col);
+        let row: &[f32] = col;
         let width = row.len();
         // The interior `[lo, hi)` has all five taps in bounds; only the thin borders reflect.
         let lo = (2 * step).min(width);

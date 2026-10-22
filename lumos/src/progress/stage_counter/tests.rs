@@ -15,17 +15,14 @@ fn parallel_completions_report_in_order() {
     let callback = ProgressCallback::new({
         let reports = Arc::clone(&reports);
         move |progress| {
-            reports
-                .lock()
-                .unwrap()
-                .push((progress.current, progress.total));
+            reports.lock().unwrap().push((progress.cur, progress.total));
         }
     });
     let counter = StageCounter::new(&callback, StackingStage::Loading, 64);
     (0..64).into_par_iter().for_each(|_| {
         counter.complete_one();
     });
-    let expected: Vec<_> = (1..=64).map(|current| (current, 64)).collect();
+    let expected: Vec<_> = (1..=64).map(|cur| (cur, 64)).collect();
     assert_eq!(*reports.lock().unwrap(), expected);
 }
 
@@ -44,7 +41,7 @@ fn a_callback_that_uses_rayon_completes() {
                 (0..8).into_par_iter().for_each(|_| {
                     thread::sleep(Duration::from_micros(20));
                 });
-                reports.lock().unwrap().push(progress.current);
+                reports.lock().unwrap().push(progress.cur);
             }
         });
         let counter = StageCounter::new(&callback, StackingStage::Loading, 256);

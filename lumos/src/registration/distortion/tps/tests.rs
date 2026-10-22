@@ -303,7 +303,7 @@ fn tps_three_points_exact() {
 
     let tps = fit_default(&source, &target);
     assert_control_points_exact(&tps, &source, &target);
-    assert_eq!(tps.num_control_points(), 3);
+    assert_eq!(tps.control_point_count(), 3);
 }
 
 /// Identity: source == target. Control points and interior points map to themselves.
@@ -795,7 +795,7 @@ fn tps_accessors() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(1.0, 2.0)).collect();
     let tps = fit_default(&source, &target);
 
-    assert_eq!(tps.num_control_points(), 5);
+    assert_eq!(tps.control_point_count(), 5);
     assert_eq!(tps.control_points().len(), 5);
 }
 
@@ -817,7 +817,7 @@ fn tps_many_points() {
     }
 
     let tps = fit_default(&source, &target);
-    assert_eq!(tps.num_control_points(), source.len());
+    assert_eq!(tps.control_point_count(), source.len());
 
     // All residuals should be small
     let residuals = tps.compute_residuals(&target);

@@ -19,8 +19,8 @@ fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
     let result = pool.install(|| {
         try_par_map_bounded(items.len(), &mut [(); 3], |(), idx| {
             let value = &items[idx];
-            let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-            max_observed.fetch_max(current, Ordering::SeqCst);
+            let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            max_observed.fetch_max(cur, Ordering::SeqCst);
             barrier.wait();
             in_flight.fetch_sub(1, Ordering::SeqCst);
             Ok::<_, ()>(value * 2)

@@ -37,7 +37,7 @@
 //! # }
 //! ```
 
-mod background_mesh;
+mod bg_mesh;
 mod bit_buffer2;
 mod calibration;
 mod combine;
@@ -71,7 +71,7 @@ pub use calibration::error::{
     CalibrationError, DarkMismatch, MasterBuildError, MasterStackError, SubtractionError,
 };
 pub use error::InvalidConfigField;
-pub use image::background_split::BackgroundSplit;
+pub use image::bg_split::BgSplit;
 pub use image::calibration_state::CalibrationState;
 pub use image::cfa::cfa_color::CfaColor;
 pub use image::cfa::cfa_image::CfaImage;
@@ -134,8 +134,8 @@ pub use calibration::master_role::MasterRole;
 pub use star_detection::roundness::Roundness;
 pub use star_detection::star::Star;
 pub use star_detection::star_detection_config::StarDetectionConfig;
-pub use star_detection::star_detection_config::background_config::{
-    BackgroundConfig, BackgroundRefinement, IterativeRefinement,
+pub use star_detection::star_detection_config::bg_config::{
+    BgConfig, BgRefinement, IterativeRefinement,
 };
 pub use star_detection::star_detection_config::extraction_config::{
     Connectivity, Deblend, ExtractionConfig,
@@ -143,7 +143,7 @@ pub use star_detection::star_detection_config::extraction_config::{
 pub use star_detection::star_detection_config::filter_config::FilterConfig;
 pub use star_detection::star_detection_config::fwhm_config::{FwhmConfig, FwhmMode};
 pub use star_detection::star_detection_config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+    CentroidMethod, LocalBgMethod, MeasurementConfig,
 };
 pub use star_detection::star_detector::StarDetector;
 pub use star_detection::star_detector::detection_result::{
@@ -215,10 +215,10 @@ pub use drizzle::error::{DrizzleConfigError, DrizzleError};
 
 pub use image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 
-pub use image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+pub use image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 pub use image_ops::color_calibration::scnr::{Scnr, ScnrProtection};
 
-pub use image_ops::extract_background::{BackgroundMode, ExtractBackground};
+pub use image_ops::extract_bg::{BgMode, ExtractBg};
 
 pub use image_ops::denoise::{Denoise, Threshold};
 

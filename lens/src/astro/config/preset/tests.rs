@@ -1,8 +1,8 @@
 use std::fmt;
 
 use lumos::{
-    BackgroundMode, ColorMode, Combine, ExtractBackground, RegistrationConfig, Scnr,
-    ScnrProtection, StackConfig, StarDetectionConfig, Stretch, StretchMethod,
+    BgMode, ColorMode, Combine, ExtractBg, RegistrationConfig, Scnr, ScnrProtection, StackConfig,
+    StarDetectionConfig, Stretch, StretchMethod,
 };
 use scenarium::{ConstValue, DataType, DynamicValue, TypeId};
 
@@ -47,7 +47,7 @@ fn each_picker_offers_its_variants_under_their_labels() {
             ("auto_stf".to_owned(), "Auto STF")
         ]
     );
-    assert_eq!(names(offered::<BackgroundMode>()), ["subtract", "divide"]);
+    assert_eq!(names(offered::<BgMode>()), ["subtract", "divide"]);
     assert_eq!(
         names(offered::<ScnrProtection>()),
         [
@@ -112,12 +112,12 @@ fn each_pick_builds_the_preset_it_names() {
         &ScnrProtection::AdditiveMask.config(),
         &Scnr::additive_mask(1.0),
     );
-    assert_eq!(BackgroundMode::Divide.config().mode, BackgroundMode::Divide);
+    assert_eq!(BgMode::Divide.config().mode, BgMode::Divide);
     same(
-        &BackgroundMode::Subtract.config(),
-        &ExtractBackground {
-            mode: BackgroundMode::Subtract,
-            ..ExtractBackground::default()
+        &BgMode::Subtract.config(),
+        &ExtractBg {
+            mode: BgMode::Subtract,
+            ..ExtractBg::default()
         },
     );
     for (pick, preset) in [

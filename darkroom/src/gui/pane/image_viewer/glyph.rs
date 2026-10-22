@@ -14,7 +14,7 @@ use palantir::SrgbaU8;
 use palantir::prelude::*;
 use palantir::widget::Shape;
 
-use crate::core::io::preferences::ViewerBackground;
+use crate::core::io::preferences::ViewerBg;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
@@ -102,7 +102,7 @@ pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: RgbaF32) {
 /// is on.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Swatch {
-    pub(super) mode: ViewerBackground,
+    pub(super) mode: ViewerBg,
     pub(super) state: Toggle,
 }
 
@@ -152,12 +152,12 @@ impl Swatch {
 
 /// The single color `mode` paints, or `None` for the checker, which is a
 /// pattern. The one mapping the swatch and the viewer's backdrop both read.
-pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<RgbaF32> {
+pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBg) -> Option<RgbaF32> {
     match mode {
-        ViewerBackground::Theme => Some(theme.canvas.bg),
-        ViewerBackground::Black => Some(RgbaF32::BLACK),
-        ViewerBackground::White => Some(RgbaF32::WHITE),
-        ViewerBackground::Checker => None,
+        ViewerBg::Theme => Some(theme.canvas.bg),
+        ViewerBg::Black => Some(RgbaF32::BLACK),
+        ViewerBg::White => Some(RgbaF32::WHITE),
+        ViewerBg::Checker => None,
     }
 }
 
@@ -178,19 +178,10 @@ mod tests {
     #[test]
     fn each_flat_backdrop_has_one_fill_and_the_checker_none() {
         let theme = Theme::default();
-        assert_eq!(
-            flat_fill(&theme, ViewerBackground::Theme),
-            Some(theme.canvas.bg)
-        );
-        assert_eq!(
-            flat_fill(&theme, ViewerBackground::Black),
-            Some(RgbaF32::BLACK)
-        );
-        assert_eq!(
-            flat_fill(&theme, ViewerBackground::White),
-            Some(RgbaF32::WHITE)
-        );
-        assert_eq!(flat_fill(&theme, ViewerBackground::Checker), None);
+        assert_eq!(flat_fill(&theme, ViewerBg::Theme), Some(theme.canvas.bg));
+        assert_eq!(flat_fill(&theme, ViewerBg::Black), Some(RgbaF32::BLACK));
+        assert_eq!(flat_fill(&theme, ViewerBg::White), Some(RgbaF32::WHITE));
+        assert_eq!(flat_fill(&theme, ViewerBg::Checker), None);
     }
 
     #[test]

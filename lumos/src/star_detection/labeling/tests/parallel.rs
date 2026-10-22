@@ -106,7 +106,7 @@ fn tall_masks_count_as_worked_out() {
     for (name, mask, four, eight) in cases {
         let labelled = check(&mask);
         assert_eq!(
-            (labelled.four.num_labels(), labelled.eight.num_labels()),
+            (labelled.four.label_count(), labelled.eight.label_count()),
             (four, eight),
             "{name}"
         );
@@ -129,7 +129,7 @@ fn squares_across_every_band_boundary_stay_whole() {
         })
     });
     let labelled = check(&mask);
-    assert_eq!(labelled.four.num_labels(), boundaries.len());
+    assert_eq!(labelled.four.label_count(), boundaries.len());
     assert!(
         labelled
             .four

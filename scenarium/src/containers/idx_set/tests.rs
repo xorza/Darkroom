@@ -1,5 +1,5 @@
 use crate::containers::idx_set::IdxSet;
-use crate::execution::idx::NodeIdx;
+use crate::exec::idx::NodeIdx;
 
 /// 70 nodes span two words, so this covers the low word, both sides of the
 /// 64-bit boundary, and a bit inside the trailing partial word.

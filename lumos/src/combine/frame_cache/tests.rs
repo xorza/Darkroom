@@ -16,7 +16,7 @@ use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::frame_store::stored_frame::SpillFrame;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::ingest::error::AdmissionError;
@@ -39,8 +39,8 @@ fn request(planes: QualityPlanes) -> CombineRequest<'static> {
 /// one over its confidence.
 fn with_unit_noise(mut cache: FrameCache) -> FrameCache {
     for frame in &mut cache.frames {
-        for background in &mut frame.source_stats.background {
-            *background = BackgroundSplit::of_sigma(1.0);
+        for bg in &mut frame.source_stats.bg {
+            *bg = BgSplit::of_sigma(1.0);
         }
     }
     cache

@@ -7,9 +7,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::internals::synthetic::backgrounds::{
-    Gradient, NebulaConfig, Vignette, add_uniform_background,
-};
+use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette, add_uniform_bg};
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;
 use glam::DVec2;
@@ -25,21 +23,21 @@ pub(crate) struct TrueSource {
 }
 
 /// Astrophysical background (sky glow / light pollution / nebulosity), additive in
-/// normalized units. Delegates to the existing `backgrounds` generators.
+/// normalized units. Delegates to the existing `bgs` generators.
 #[derive(Debug, Clone)]
-pub(crate) enum BackgroundField {
+pub(crate) enum BgField {
     Uniform { level: f32 },
     Gradient(Gradient),
     Vignette(Vignette),
     Nebula(NebulaConfig),
 }
 
-impl BackgroundField {
+impl BgField {
     /// Render this background into a fresh `size`-sized buffer of normalized values.
     pub(crate) fn render(&self, size: Size2us) -> Buffer2<f32> {
         let mut pixels = Buffer2::new_default(size.width, size.height);
         match self {
-            Self::Uniform { level } => add_uniform_background(&mut pixels, *level),
+            Self::Uniform { level } => add_uniform_bg(&mut pixels, *level),
             Self::Gradient(gradient) => gradient.add_to(&mut pixels),
             Self::Vignette(vignette) => vignette.add_to(&mut pixels),
             Self::Nebula(cfg) => cfg.add_to(&mut pixels),
@@ -77,7 +75,7 @@ pub(crate) struct Scene {
     /// Sky extent in reference-frame pixels; sources/background live within this.
     pub(crate) size: Size2us,
     pub(crate) sources: Vec<TrueSource>,
-    pub(crate) background: BackgroundField,
+    pub(crate) bg: BgField,
 }
 
 /// Where [`Scene::scatter`] puts its sources.
@@ -102,22 +100,22 @@ pub(crate) struct Scatter {
 }
 
 impl Scene {
-    /// A single `source` over `background`. Useful for precise photometric/astrometric
+    /// A single `source` over `bg`. Useful for precise photometric/astrometric
     /// verification.
-    pub(crate) fn single(size: Size2us, source: TrueSource, background: BackgroundField) -> Self {
+    pub(crate) fn single(size: Size2us, source: TrueSource, bg: BgField) -> Self {
         Self {
             size,
             sources: vec![source],
-            background,
+            bg,
         }
     }
 
-    /// The sources `scatter` draws over `background`. Deterministic in its seed.
+    /// The sources `scatter` draws over `bg`. Deterministic in its seed.
     #[expect(
         clippy::cast_sign_loss,
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
-    pub(crate) fn scatter(size: Size2us, scatter: Scatter, background: BackgroundField) -> Self {
+    pub(crate) fn scatter(size: Size2us, scatter: Scatter, bg: BgField) -> Self {
         let Scatter {
             count,
             flux,
@@ -172,11 +170,7 @@ impl Scene {
                 sources
             }
         };
-        Self {
-            size,
-            sources,
-            background,
-        }
+        Self { size, sources, bg }
     }
 }
 
@@ -190,12 +184,12 @@ mod tests {
     /// The scene renders each background through its generator, so a uniform level is that
     /// level exactly and a gradient reaches both end levels exactly.
     #[test]
-    fn backgrounds_render_their_levels() {
-        let buf = BackgroundField::Uniform { level: 0.25 }.render(Size2us::new(32, 16));
+    fn bgs_render_their_levels() {
+        let buf = BgField::Uniform { level: 0.25 }.render(Size2us::new(32, 16));
         assert_eq!(buf.len(), 32 * 16);
         assert!(buf.iter().all(|&p| p == 0.25));
 
-        let bg = BackgroundField::Gradient(Gradient {
+        let bg = BgField::Gradient(Gradient {
             start: 0.0,
             end: 1.0,
             angle: 0.0,
@@ -206,7 +200,7 @@ mod tests {
 
     #[test]
     fn uniform_scatter_count_bounds_and_reproducibility() {
-        let bg = BackgroundField::Uniform { level: 0.05 };
+        let bg = BgField::Uniform { level: 0.05 };
         let a = Scene::scatter(
             Size2us::new(200, 200),
             Scatter {
@@ -248,13 +242,13 @@ mod tests {
                 pos: DVec2::new(32.0, 32.0),
                 flux: 5.0,
             },
-            BackgroundField::Uniform { level: 0.0 },
+            BgField::Uniform { level: 0.0 },
         );
         assert_eq!(scene.sources.len(), 1);
         assert_eq!(scene.sources[0].pos, DVec2::new(32.0, 32.0));
         // Empty-sky background really is empty.
         assert_eq!(
-            pixel_stats(&scene.background.render(Size2us::new(64, 64))).mean,
+            pixel_stats(&scene.bg.render(Size2us::new(64, 64))).mean,
             0.0
         );
     }
@@ -270,7 +264,7 @@ mod tests {
                 placement: Placement::Cluster,
                 seed: 7,
             },
-            BackgroundField::Uniform { level: 0.0 },
+            BgField::Uniform { level: 0.0 },
         );
         assert_eq!(scene.sources.len(), 500);
 

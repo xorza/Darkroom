@@ -1,7 +1,7 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
-use crate::image_ops::color_calibration::neutralize_background::*;
+use crate::image_ops::color_calibration::neutralize_bg::*;
 use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::{assert_close, assert_close_slice};
 use crate::internals::images::{gray_image, rgb_image};
@@ -19,10 +19,10 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     let b = [vec![0.1; 7], vec![0.5, 0.5]].concat();
     let mut img = rgb_image(Size2us::new(3, 3), [r.clone(), g, b.clone()]);
 
-    let before = channel_backgrounds(&img);
+    let before = channel_bgs(&img);
     assert_eq!((before.r, before.g, before.b), (0.1, 0.3, 0.1));
 
-    NeutralizeBackground.apply(&mut img).unwrap();
+    NeutralizeBg.apply(&mut img).unwrap();
 
     assert_eq!(img.channel(0).pixels(), r.as_slice(), "red stays");
     assert_eq!(img.channel(2).pixels(), b.as_slice(), "blue stays");
@@ -115,7 +115,7 @@ fn every_protection_blends_by_its_amount() {
 #[test]
 fn color_ops_are_noops_on_grayscale() {
     let mut g = gray_image(Size2us::new(2, 1), vec![0.3, 0.7]);
-    NeutralizeBackground.apply(&mut g).unwrap();
+    NeutralizeBg.apply(&mut g).unwrap();
     Scnr::average_neutral(1.0).apply(&mut g).unwrap();
     assert_eq!(
         g.channel(0).pixels(),

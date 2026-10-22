@@ -17,7 +17,7 @@ mod profile_fit;
 mod profile_problem;
 mod simd;
 mod stamp;
-mod stamp_background;
+mod stamp_bg;
 mod stamp_metrics;
 mod star_noise;
 mod windowed_centroid;
@@ -28,21 +28,21 @@ use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
-use crate::star_detection::background::sky_noise::SkyNoise;
+use crate::star_detection::bg::sky_noise::SkyNoise;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
 use crate::star_detection::centroid::profile_fit::{FitShape, ProfileFit};
 use crate::star_detection::centroid::stamp::{FitInputs, StampAt};
-use crate::star_detection::centroid::stamp_background::StampBackground;
-use crate::star_detection::centroid::stamp_metrics::{StampMetrics, StarBackground};
+use crate::star_detection::centroid::stamp_bg::StampBg;
+use crate::star_detection::centroid::stamp_metrics::{StampMetrics, StarBg};
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+    CentroidMethod, LocalBgMethod, MeasurementConfig,
 };
 
 /// The frame planes a star is measured on: the residual, its sky noise, and which pixels are
@@ -108,9 +108,9 @@ impl MeasurePlanes<'_> {
         // annulus leaves the map's noise at the star, held to the frame's floor, for the centroid
         // and the fit, but must NOT become a metrics override: the map's noise at one pixel stands
         // in for the stamp only where nothing better was measured.
-        let annulus_at = |at: DVec2| match config.local_background {
-            LocalBackgroundMethod::GlobalMap => None,
-            LocalBackgroundMethod::LocalAnnulus => StampBackground::measure(
+        let annulus_at = |at: DVec2| match config.local_bg {
+            LocalBgMethod::GlobalMap => None,
+            LocalBgMethod::LocalAnnulus => StampBg::measure(
                 MaskedPlane {
                     pixels: residual,
                     mask: no_data,
@@ -125,7 +125,7 @@ impl MeasurePlanes<'_> {
                 (local.offset, local.noise)
             });
         let noise = StarNoise {
-            background_sigma: f64::from(local_noise.max(sky.floor)),
+            bg_sigma: f64::from(local_noise.max(sky.floor)),
             electrons_per_unit: config.electrons_per_unit.map(f64::from),
         };
 
@@ -146,7 +146,7 @@ impl MeasurePlanes<'_> {
             pixels: residual,
             pos: at,
             grid: &grid.stamp,
-            background: local_offset,
+            bg: local_offset,
             noise: fit_noise,
         };
         let fit = match config.centroid_method {
@@ -169,9 +169,9 @@ impl MeasurePlanes<'_> {
         if holds_no_data(pos) {
             return None;
         }
-        // `StampBackground::measure` samples by rounded centre, so the annulus measured at the
+        // `StampBg::measure` samples by rounded centre, so the annulus measured at the
         // start stands unless the centre moved to another pixel.
-        let annulus_background = if pos.round() == start.round() {
+        let annulus_bg = if pos.round() == start.round() {
             start_annulus
         } else {
             annulus_at(pos)
@@ -182,13 +182,13 @@ impl MeasurePlanes<'_> {
         let metrics = StampMetrics::measure(
             stamp_at(pos),
             grid.window_sigma,
-            StarBackground {
-                offset: annulus_background.map_or(0.0, |local| local.offset),
-                noise: annulus_background.map_or(noise, |local| StarNoise {
-                    background_sigma: f64::from(local.noise.max(sky.floor)),
+            StarBg {
+                offset: annulus_bg.map_or(0.0, |local| local.offset),
+                noise: annulus_bg.map_or(noise, |local| StarNoise {
+                    bg_sigma: f64::from(local.noise.max(sky.floor)),
                     ..noise
                 }),
-                sky_samples: annulus_background.map(|local| local.samples),
+                sky_samples: annulus_bg.map(|local| local.samples),
             },
         )?;
         // A fit's widths replace the moments'.

@@ -11,7 +11,7 @@ use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
 use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
-use crate::star_detection::tests::stage_effects::{background_estimate, peaks};
+use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
 use glam::DVec2;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -30,16 +30,16 @@ const PEAK_RADIUS: f64 = 2.0;
 fn every_isolated_star_is_one_candidate() {
     init_tracing();
     let frame = Scenario {
-        num_stars: 15,
+        star_count: 15,
         ..Default::default()
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
     let size = Size2us::from(&pixels);
-    let background = background_estimate(&pixels);
+    let bg = bg_estimate(&pixels);
     let candidates = detect_stars_test(
-        &background.residual_of(&pixels),
-        &background.sky_noise(),
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         &ExtractionConfig::default(),
     );
     let found = peaks(&candidates);
@@ -88,7 +88,7 @@ fn every_isolated_star_is_one_candidate() {
 fn detection_is_invariant_to_the_frames_sample_scale() {
     let scale = 2.0f32.powi(-20);
     let pixels = Scenario {
-        num_stars: 15,
+        star_count: 15,
         ..Default::default()
     }
     .frame()
@@ -102,13 +102,9 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
     );
     let config = ExtractionConfig::default();
     let detect = |pixels: &Buffer2<f32>| {
-        let background = background_estimate(pixels);
-        let candidates = detect_stars_test(
-            &background.residual_of(pixels),
-            &background.sky_noise(),
-            &config,
-        );
-        (background.sky.floor, candidates)
+        let bg = bg_estimate(pixels);
+        let candidates = detect_stars_test(&bg.residual_of(pixels), &bg.sky_noise(), &config);
+        (bg.sky.floor, candidates)
     };
     let (native_floor, native) = detect(&pixels);
     let (scaled_floor, scaled) = detect(&scaled);
@@ -133,7 +129,7 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
 #[test]
 fn the_threshold_decides_per_star() {
     let frame = Scenario {
-        num_stars: 50,
+        star_count: 50,
         flux: (1.0, 10.0),
         full_well_e: 2_000.0,
         ..Default::default()
@@ -141,13 +137,13 @@ fn the_threshold_decides_per_star() {
     .frame();
     let pixels = frame.image.channel(0).clone();
     let size = Size2us::from(&pixels);
-    let background = background_estimate(&pixels);
-    let residual = background.residual_of(&pixels);
-    let sky = background.sky_noise();
+    let bg = bg_estimate(&pixels);
+    let residual = bg.residual_of(&pixels);
+    let sky = bg.sky_noise();
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
     let lone = isolated(&stars, &[], size);
 
-    let mut previous_detected = usize::MAX;
+    let mut prev_detected = usize::MAX;
     for k in [3.0f32, 5.0, 10.0, 20.0, 40.0] {
         let config = ExtractionConfig {
             sigma_threshold: k,
@@ -157,7 +153,7 @@ fn the_threshold_decides_per_star() {
         let (mut detected, mut missed) = (0, 0);
         for star in &lone {
             let pixel = (star.x.round() as usize, star.y.round() as usize);
-            let peak = frame.truth.clean[pixel] - background.background[pixel];
+            let peak = frame.truth.clean[pixel] - bg.bg[pixel];
             let sigma = sky.noise[pixel].max(sky.floor);
             if peak >= 2.0 * (k + 5.0) * sigma {
                 assert_eq!(near(*star, &found, PEAK_RADIUS), 1, "{k}σ: star at {star}");
@@ -167,9 +163,9 @@ fn the_threshold_decides_per_star() {
                 missed += 1;
             }
         }
-        assert!(detected <= previous_detected, "{k}σ: {detected} detected");
+        assert!(detected <= prev_detected, "{k}σ: {detected} detected");
         assert!(detected + missed > 0, "{k}σ decides no star");
-        previous_detected = detected;
+        prev_detected = detected;
     }
 }
 
@@ -179,15 +175,15 @@ fn the_threshold_decides_per_star() {
 #[test]
 fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         cosmic_rays: 20,
         ..Default::default()
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
     let size = Size2us::from(&pixels);
-    let background = background_estimate(&pixels);
-    let residual = background.residual_of(&pixels);
+    let bg = bg_estimate(&pixels);
+    let residual = bg.residual_of(&pixels);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
     let rays: Vec<DVec2> = frame
         .truth
@@ -203,11 +199,7 @@ fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
             min_area,
             ..Default::default()
         };
-        let found = peaks(&detect_stars_test(
-            &residual,
-            &background.sky_noise(),
-            &config,
-        ));
+        let found = peaks(&detect_stars_test(&residual, &bg.sky_noise(), &config));
         for ray in &lone_rays {
             assert_eq!(
                 near(*ray, &found, PEAK_RADIUS),

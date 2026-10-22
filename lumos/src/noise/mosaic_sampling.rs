@@ -5,13 +5,13 @@ use std::f32::consts::SQRT_2;
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
-use crate::noise::background_split;
+use crate::noise::bg_split;
 use crate::noise::binned_samples::BinnedSamples;
 
 /// The photosites of a `size` mosaic of `cfa_type` a statistic samples: those of the rows
@@ -100,7 +100,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
 
     /// How many pairs of each color [`Self::for_each_pair`] visits.
     pub(super) fn pair_counts(&self) -> ArrayVec<usize, 3> {
-        let mut counts: ArrayVec<usize, 3> = (0..self.cfa_type.num_colors()).map(|_| 0).collect();
+        let mut counts: ArrayVec<usize, 3> = (0..self.cfa_type.color_count()).map(|_| 0).collect();
         self.for_each_pair(|pair| counts[pair.color] += 1);
         counts
     }
@@ -130,18 +130,18 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
 
     /// Each color's background under the flat `gain` divided `mosaic` by: the noise of
     /// [`Self::noise`] measured over each of the color's gain bins on its own, a pair at the mean
-    /// of its two photosites' gain, and fitted by [`background_split::fit`]; unflattened, of
+    /// of its two photosites' gain, and fitted by [`bg_split::fit`]; unflattened, of
     /// [`Self::noise`], for a mosaic no flat divided.
-    pub(crate) fn backgrounds(
+    pub(crate) fn bgs(
         &self,
         mosaic: &Buffer2<f32>,
         gain: Option<&FlatGain>,
-    ) -> ArrayVec<BackgroundSplit, 3> {
+    ) -> ArrayVec<BgSplit, 3> {
         let Some(gain) = gain else {
             return self
                 .noise(mosaic)
                 .into_iter()
-                .map(BackgroundSplit::of_sigma)
+                .map(BgSplit::of_sigma)
                 .collect();
         };
         debug_assert_eq!(Size2us::from(mosaic), self.size, "the mosaic sampled");
@@ -160,15 +160,13 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
         binned
             .into_iter()
             .map(|color| {
-                background_split::fit(
-                    &color.measure(|differences| f64::from(sigma(differences)).powi(2)),
-                )
+                bg_split::fit(&color.measure(|differences| f64::from(sigma(differences)).powi(2)))
             })
             .collect()
     }
 
     /// The most bytes an estimate over the mosaic holds: every pair of every color, as
-    /// [`Self::backgrounds`] holds them, each with its gain bin.
+    /// [`Self::bgs`] holds them, each with its gain bin.
     pub(super) fn noise_heap_bytes(&self) -> usize {
         self.pair_counts()
             .into_iter()

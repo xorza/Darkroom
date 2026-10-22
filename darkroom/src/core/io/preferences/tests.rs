@@ -10,7 +10,7 @@ use palantir::ImageFilter;
 
 use crate::core::io::preferences;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
-use crate::core::io::preferences::{Preferences, ViewerBackground, ViewerPreferences, WindowState};
+use crate::core::io::preferences::{Preferences, ViewerBg, ViewerPreferences, WindowState};
 
 /// The file is named for the app, and lies in the OS's configuration directory
 /// (`platform/*` `resolve_config_dir` tests cover that resolution).
@@ -45,7 +45,7 @@ fn preferences_roundtrip() {
             pos: Some(IVec2::new(120, -40)),
         }),
         viewer: ViewerPreferences {
-            background: ViewerBackground::Checker,
+            bg: ViewerBg::Checker,
             mag_filter: ImageFilter::Linear,
         },
         ml_models: MlModelPaths {
@@ -94,7 +94,7 @@ fn default_preferences() {
     assert!(defaults.load_last_document);
     assert!(defaults.confirm_unsaved_changes);
     assert_eq!(defaults.window, None);
-    assert_eq!(defaults.viewer.background, ViewerBackground::Theme);
+    assert_eq!(defaults.viewer.bg, ViewerBg::Theme);
     assert_eq!(defaults.viewer.mag_filter, ImageFilter::Nearest);
     assert_eq!(defaults.ml_models, MlModelPaths::default());
 }

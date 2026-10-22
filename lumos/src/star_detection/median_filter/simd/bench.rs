@@ -31,11 +31,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {
-        let [above, curr, below] = rows();
+        let [above, cur, below] = rows();
         b.iter(|| {
             MedianRow {
                 above: black_box(above),
-                curr,
+                cur,
                 below,
                 output: &mut output,
             }
@@ -46,11 +46,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new(format!("row/{}", tier.id()), FRAME.width),
             |b| {
-                let [above, curr, below] = rows();
+                let [above, cur, below] = rows();
                 b.iter(|| {
                     tier.run(MedianRow {
                         above: black_box(above),
-                        curr,
+                        cur,
                         below,
                         output: &mut output,
                     });
@@ -59,11 +59,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
         );
     }
     group.bench_function(BenchmarkId::new("row/dispatch", FRAME.width), |b| {
-        let [above, curr, below] = rows();
+        let [above, cur, below] = rows();
         b.iter(|| {
             MedianRow {
                 above: black_box(above),
-                curr,
+                cur,
                 below,
                 output: &mut output,
             }

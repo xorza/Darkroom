@@ -83,7 +83,7 @@ impl Hdr {
         let size = Size2us::from(intensity);
         let scales = self.scales.min(wavelet::max_scales(size));
 
-        let mut c_curr = Buffer2::new(
+        let mut c_cur = Buffer2::new(
             size.width,
             size.height,
             intensity
@@ -94,10 +94,10 @@ impl Hdr {
         );
         let mut c_next = Buffer2::new_default(size.width, size.height);
         for j in 0..scales {
-            wavelet::atrous_smooth(&c_curr, &mut c_next, 1 << j);
-            mem::swap(&mut c_curr, &mut c_next);
+            wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
+            mem::swap(&mut c_cur, &mut c_next);
         }
-        let mut residual = c_curr;
+        let mut residual = c_cur;
 
         // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
         let mean = sum::mean_f32(residual.pixels());

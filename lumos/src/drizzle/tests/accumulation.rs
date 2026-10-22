@@ -819,7 +819,7 @@ fn a_band_scan_covers_every_reaching_drop() {
     assert!(
         scan(&straddling, 200, 0.5, 0.0)
             .iter()
-            .all(|(_, columns)| *columns == (0..16)),
+            .all(|(_, cols)| *cols == (0..16)),
         "an unbounded band scans every column"
     );
 
@@ -848,15 +848,12 @@ fn a_band_scan_covers_every_reaching_drop() {
         std::f64::consts::FRAC_PI_2,
     ));
     assert_eq!(rows(&quarter_turn, 6, 3.5, 0.0), 0..8);
-    let columns: Vec<_> = scan(&quarter_turn, 6, 3.5, 0.0)
+    let cols: Vec<_> = scan(&quarter_turn, 6, 3.5, 0.0)
         .into_iter()
-        .map(|(_, columns)| columns)
+        .map(|(_, cols)| cols)
         .collect();
-    assert!(
-        columns[..7].iter().all(|columns| *columns == (0..5)),
-        "{columns:?}"
-    );
-    assert!(columns[7].is_empty(), "the slack row reaches no column");
+    assert!(cols[..7].iter().all(|cols| *cols == (0..5)), "{cols:?}");
+    assert!(cols[7].is_empty(), "the slack row reaches no column");
 }
 
 #[test]

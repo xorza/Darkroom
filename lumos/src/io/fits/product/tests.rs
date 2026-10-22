@@ -98,7 +98,7 @@ fn rgb_product() -> StackProduct {
         report: RunReport {
             excluded_samples: FlagCounts::from_per_bit(excluded_samples),
             kept_flagged_samples: FlagCounts::from_per_bit(kept_flagged_samples),
-            variance_background_only: true,
+            variance_bg_only: true,
             unverified_dark_exposures: 1,
             unverified_dark_temperatures: 2,
             camera_temperature_darks: 3,

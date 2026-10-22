@@ -162,16 +162,16 @@ pub(super) struct RunJoin<'a> {
 impl RunJoin<'_> {
     /// Merge current row's runs with previous row's runs via union-find.
     ///
-    /// For each run in `curr_runs`, finds overlapping runs in `prev_runs` and merges
+    /// For each run in `cur_runs`, finds overlapping runs in `prev_runs` and merges
     /// their labels. Runs without overlap get a new label via `make_set`.
     #[inline]
-    pub(super) fn merge_with_prev(self, curr_runs: &mut [Run], prev_runs: &[Run]) {
+    pub(super) fn merge_with_prev(self, cur_runs: &mut [Run], prev_runs: &[Run]) {
         let Self {
             union_find: uf,
             connectivity,
         } = self;
         let mut prev_idx = 0;
-        for run in curr_runs.iter_mut() {
+        for run in cur_runs.iter_mut() {
             let window = run.search_window(connectivity);
 
             while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= window.start {

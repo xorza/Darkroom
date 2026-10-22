@@ -108,7 +108,7 @@ fn gaussian_fit_with_contamination() {
         pixels: &pixels,
         pos: DVec2::splat(15.0),
         grid: &StampGrid::new(8),
-        background: 0.1,
+        bg: 0.1,
         noise: None,
     })
     .expect("the fit lands");
@@ -234,7 +234,7 @@ fn gaussian_fit_rotated_ellipse() {
     let height = 31;
     let true_cx = 15.0f64;
     let true_cy = 15.0f64;
-    let background = 0.1f32;
+    let bg = 0.1f32;
 
     // Create 45° rotated ellipse
     let pixels = on_sky(
@@ -249,7 +249,7 @@ fn gaussian_fit_rotated_ellipse() {
         pixels: &pixels,
         pos: DVec2::new(true_cx, true_cy),
         grid: &StampGrid::new(8),
-        background,
+        bg,
         noise: None,
     });
 
@@ -290,7 +290,7 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         size,
         SyntheticStar::new(Vec2::new(32.0, 32.0), 0.8, ellipse(3.5, 2.0, FRAC_PI_4)),
     );
-    let bg = background_map::uniform(size, 0.1, 0.01);
+    let bg = bg_map::uniform(size, 0.1, 0.01);
     let config = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
         ..Default::default()

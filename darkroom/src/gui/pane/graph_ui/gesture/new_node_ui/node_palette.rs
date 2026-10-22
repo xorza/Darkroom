@@ -99,7 +99,7 @@ pub(super) enum Opening {
 /// [`PaletteRows`](crate::gui::pane::graph_ui::gesture::new_node_ui::palette_rows::PaletteRows),
 /// not a list of its own.
 #[derive(Debug)]
-struct PaletteColumn<'a> {
+struct PaletteCol<'a> {
     category: &'a str,
     rows: &'a [PaletteRow],
 }
@@ -116,7 +116,7 @@ impl<'a> NodePalette<'a> {
     }
 }
 
-impl PaletteColumn<'_> {
+impl PaletteCol<'_> {
     /// Record this column: its category name above its rows.
     fn show(
         self,
@@ -196,17 +196,17 @@ impl NodePalette<'_> {
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(12.0)
                     .show(ui, |ui| {
-                        for rows in search.rows.columns() {
+                        for rows in search.rows.cols() {
                             // A column whose funcs all left the library since
                             // the filtering has nothing to record.
                             let Some(first) = rows.iter().find_map(|row| row.entry(library)) else {
                                 continue;
                             };
-                            let column = PaletteColumn {
+                            let col = PaletteCol {
                                 category: first.category(),
                                 rows,
                             };
-                            if let Some(picked) = column.show(ui, popup, self) {
+                            if let Some(picked) = col.show(ui, popup, self) {
                                 chosen = Some(picked);
                             }
                         }

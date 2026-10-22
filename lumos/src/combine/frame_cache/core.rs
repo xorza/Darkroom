@@ -105,7 +105,7 @@ impl CacheCore {
         let width = dims.width();
         let height = dims.height();
         let mut output = LinearPixels::new_zeroed(dims);
-        let num_chunks = height.div_ceil(chunk_rows);
+        let chunk_count = height.div_ceil(chunk_rows);
         let range = |chunk: usize| {
             let start_row = chunk * chunk_rows;
             let end_row = (start_row + chunk_rows).min(height);
@@ -138,7 +138,7 @@ impl CacheCore {
                 );
                 self.monitor.progress.report(
                     chunk * channel_count + channel + 1,
-                    num_chunks * channel_count,
+                    chunk_count * channel_count,
                     StackingStage::Combining,
                 );
                 if self.monitor.cancel.is_cancelled() {
@@ -150,7 +150,7 @@ impl CacheCore {
             completed
         };
         if !self.tier.spills() {
-            for chunk in 0..num_chunks {
+            for chunk in 0..chunk_count {
                 let mut views: Vec<FrameChunk<'_>> = recycle::emptied(mem::take(&mut kept_views));
                 views.extend(
                     frames
@@ -166,15 +166,15 @@ impl CacheCore {
             return output;
         }
         let chunk_pixels = range(0).len();
-        let mut current = ChunkCopy::new(frames, chunk_pixels);
+        let mut cur = ChunkCopy::new(frames, chunk_pixels);
         let mut next = ChunkCopy::new(frames, chunk_pixels);
-        current.fill(frames, range(0));
-        for chunk in 0..num_chunks {
+        cur.fill(frames, range(0));
+        for chunk in 0..chunk_count {
             let completed = thread::scope(|scope| {
-                let reading = (chunk + 1 < num_chunks)
+                let reading = (chunk + 1 < chunk_count)
                     .then(|| scope.spawn(|| next.fill(frames, range(chunk + 1))));
                 let mut views: Vec<FrameChunk<'_>> = recycle::emptied(mem::take(&mut kept_views));
-                current.views_into(frames, &mut views);
+                cur.views_into(frames, &mut views);
                 let completed = reduce(&views, chunk);
                 kept_views = recycle::emptied(views);
                 if let Some(reading) = reading {
@@ -185,7 +185,7 @@ impl CacheCore {
             if !completed {
                 break;
             }
-            mem::swap(&mut current, &mut next);
+            mem::swap(&mut cur, &mut next);
         }
         output
     }

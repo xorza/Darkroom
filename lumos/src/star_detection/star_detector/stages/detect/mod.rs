@@ -71,7 +71,7 @@ impl Candidates {
         let mut regions = mem::take(&mut resources.regions);
         regions.clear();
         let label_map = resources.labeler.label(&mask, config.connectivity);
-        let connected_components = label_map.num_labels();
+        let connected_components = label_map.label_count();
         let labelled = LabelledPlane {
             plane,
             labels: label_map,
@@ -123,12 +123,12 @@ fn extract_candidates(
             size.height,
         );
     }
-    if label_map.num_labels() == 0 {
+    if label_map.label_count() == 0 {
         return 0;
     }
 
     tracing::debug!(
-        total_components = label_map.num_labels(),
+        total_components = label_map.label_count(),
         max_area = config.max_area,
         deblend = ?config.deblend,
         "Processing components for candidate extraction"
@@ -151,10 +151,10 @@ fn extract_candidates(
                 let mut split = mem::take(found);
                 let pushed = match config.deblend {
                     Deblend::MultiThreshold {
-                        n_thresholds,
+                        threshold_count,
                         min_contrast,
                     } => MultiThresholdParams {
-                        n_thresholds,
+                        threshold_count,
                         min_contrast,
                         min_separation: config.deblend_min_separation,
                         min_area: config.min_area,
@@ -210,7 +210,7 @@ fn extract_candidates(
 pub(crate) mod internals {
     use crate::math::size2us::Size2us;
     use crate::scratch_pool::Pooled;
-    use crate::star_detection::background::sky_noise::SkyNoise;
+    use crate::star_detection::bg::sky_noise::SkyNoise;
     use crate::star_detection::deblend::region::Region;
     use crate::star_detection::detection_plane::DetectionPlane;
     use crate::star_detection::resources::DetectionResources;

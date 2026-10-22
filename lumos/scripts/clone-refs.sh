@@ -64,7 +64,7 @@ EXTRA=(
   "drizzlepac|https://github.com/spacetelescope/drizzlepac||drizzle: full DrizzlePac pipeline"
   "DeepSkyStacker|https://github.com/deepskystacker/DSS||stacking/registration: alternate stacking pipeline"
   "kstars|https://github.com/KDE/kstars||all: KStars/Ekos capture+processing suite (large)"
-  "GraXpert|https://github.com/Steffenhir/GraXpert||star_detection/background: gradient/background extraction"
+  "GraXpert|https://github.com/Steffenhir/GraXpert||star_detection/bg: gradient/background extraction"
   "sirilic|https://gitlab.com/free-astro/sirilic||stacking: Siril batch-processing frontend"
 )
 

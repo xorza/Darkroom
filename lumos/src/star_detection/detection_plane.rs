@@ -7,10 +7,10 @@ use imaginarium::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::sky_noise::SkyNoise;
+use crate::star_detection::bg::sky_noise::SkyNoise;
 use crate::star_detection::median_filter;
 use crate::star_detection::resources::DetectionResources;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
@@ -46,7 +46,7 @@ pub(crate) struct PlaneSpec<'a> {
     /// known.
     pub(crate) mask: Option<&'a BitBuffer2>,
     /// The mesh the noise is measured by.
-    pub(crate) background: &'a BackgroundConfig,
+    pub(crate) bg: &'a BgConfig,
 }
 
 impl DetectionPlane {
@@ -76,9 +76,9 @@ impl DetectionPlane {
                 pixels: &residual,
                 mask: spec.mask,
             },
-            spec.background,
+            spec.bg,
             &resources.floats,
-            &mut resources.background,
+            &mut resources.bg,
         );
         Self {
             values: residual,

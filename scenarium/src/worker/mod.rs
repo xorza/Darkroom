@@ -26,9 +26,9 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
+    pub fn new<ExecCallback>(callback: ExecCallback) -> Self
     where
-        ExecutionCallback: Fn(WorkerReport) + Send + Sync + 'static,
+        ExecCallback: Fn(WorkerReport) + Send + Sync + 'static,
     {
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let run_cancel = CancelToken::new();

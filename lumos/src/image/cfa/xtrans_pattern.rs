@@ -75,14 +75,14 @@ impl XTransPattern {
         let mut counts = [0usize; 3];
         let mut row = 0;
         while row < 6 {
-            let mut column = 0;
-            while column < 6 {
-                let value = rows[row][column];
+            let mut col = 0;
+            while col < 6 {
+                let value = rows[row][col];
                 if value > 2 {
-                    return Err(XTransPatternError::Value { row, column, value });
+                    return Err(XTransPatternError::Value { row, col, value });
                 }
                 counts[value as usize] += 1;
-                column += 1;
+                col += 1;
             }
             row += 1;
         }
@@ -92,37 +92,37 @@ impl XTransPattern {
         let steps = [(0, 1), (1, 0), (0, 5), (5, 0)];
         let mut row = 0;
         while row < 6 {
-            let mut column = 0;
-            while column < 6 {
-                if rows[row][column] == 1 {
+            let mut col = 0;
+            while col < 6 {
+                if rows[row][col] == 1 {
                     let mut neighbors = [0usize; 3];
                     let mut step = 0;
                     while step < steps.len() {
                         // Five steps forward is one back, modulo the 6-pixel period.
                         let (dy, dx) = steps[step];
-                        neighbors[rows[(row + dy) % 6][(column + dx) % 6] as usize] += 1;
+                        neighbors[rows[(row + dy) % 6][(col + dx) % 6] as usize] += 1;
                         step += 1;
                     }
                     if neighbors[0] != neighbors[2] {
                         return Err(XTransPatternError::GreenNeighborhood {
                             row,
-                            column,
+                            col,
                             neighbors,
                         });
                     }
                 }
-                column += 1;
+                col += 1;
             }
             row += 1;
         }
         let mut row = 0;
         while row < 6 {
-            let mut column = 0;
-            while column < 6 {
-                if (rows[row][column] == 1) != (rows[row % 3][column % 3] == 1) {
-                    return Err(XTransPatternError::GreenPeriod { row, column });
+            let mut col = 0;
+            while col < 6 {
+                if (rows[row][col] == 1) != (rows[row % 3][col % 3] == 1) {
+                    return Err(XTransPatternError::GreenPeriod { row, col });
                 }
-                column += 1;
+                col += 1;
             }
             row += 1;
         }
@@ -132,13 +132,13 @@ impl XTransPattern {
         let mut colors = [[CfaColor::Green; 6]; 6];
         let mut row = 0;
         while row < 6 {
-            let mut column = 0;
-            while column < 6 {
-                colors[row][column] = match CfaColor::from_idx(rows[row][column] as usize) {
+            let mut col = 0;
+            while col < 6 {
+                colors[row][col] = match CfaColor::from_idx(rows[row][col] as usize) {
                     Some(color) => color,
                     None => unreachable!(),
                 };
-                column += 1;
+                col += 1;
             }
             row += 1;
         }
@@ -151,15 +151,15 @@ impl XTransPattern {
         hexagons(&self.rows()).expect("a pattern's hexagons were checked when it was made")
     }
 
-    /// The color indices, `[row][column]` over one 6×6 period.
+    /// The color indices, `[row][col]` over one 6×6 period.
     pub const fn rows(&self) -> [[u8; 6]; 6] {
         let mut rows = [[0; 6]; 6];
         let mut row = 0;
         while row < 6 {
-            let mut column = 0;
-            while column < 6 {
-                rows[row][column] = self.colors[row][column].idx() as u8;
-                column += 1;
+            let mut col = 0;
+            while col < 6 {
+                rows[row][col] = self.colors[row][col].idx() as u8;
+                col += 1;
             }
             row += 1;
         }
@@ -185,33 +185,33 @@ const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
     let mut solitary_count = 0;
     let mut row = 0;
     while row < 3 {
-        let mut column = 0;
-        while column < 3 {
-            let g = (rows[row][column] == 1) as usize;
+        let mut col = 0;
+        while col < 3 {
+            let g = (rows[row][col] == 1) as usize;
             let mut run = 0;
             let mut d = 0;
             while d < 10 {
                 // From `row + 6`, a unit step back stays in range and reads the same color.
                 let neighbour_row = (row + 6).wrapping_add_signed(ORTH[d] as isize);
-                let neighbour_column = (column + 6).wrapping_add_signed(ORTH[d + 2] as isize);
-                if rows[neighbour_row % 6][neighbour_column % 6] == 1 {
+                let neighbour_col = (col + 6).wrapping_add_signed(ORTH[d + 2] as isize);
+                if rows[neighbour_row % 6][neighbour_col % 6] == 1 {
                     run = 0;
                 } else {
                     run += 1;
                 }
                 if run == 4 {
-                    solitary = Some(Vec2us::new(column, row));
+                    solitary = Some(Vec2us::new(col, row));
                     solitary_count += 1;
                 }
                 if run == g + 1 {
                     let mut c = 0;
                     while c < 8 {
                         let entry = c ^ ((g * 2) & d);
-                        offsets[row][column][entry] = HexOffset {
+                        offsets[row][col][entry] = HexOffset {
                             dy: ORTH[d] * PATT[g][c * 2] + ORTH[d + 1] * PATT[g][c * 2 + 1],
                             dx: ORTH[d + 2] * PATT[g][c * 2] + ORTH[d + 3] * PATT[g][c * 2 + 1],
                         };
-                        set[row][column][entry] = true;
+                        set[row][col][entry] = true;
                         c += 1;
                     }
                 }
@@ -219,12 +219,12 @@ const fn hexagons(rows: &[[u8; 6]; 6]) -> Option<Hexagons> {
             }
             let mut entry = 0;
             while entry < 8 {
-                if !set[row][column][entry] {
+                if !set[row][col][entry] {
                     return None;
                 }
                 entry += 1;
             }
-            column += 1;
+            col += 1;
         }
         row += 1;
     }

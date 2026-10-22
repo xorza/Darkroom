@@ -16,7 +16,7 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
 use crate::registration::registration_config::RegistrationConfig;
@@ -378,7 +378,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             placement: Placement::Uniform { margin: 16.0 },
             seed,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let camera = Camera::realistic(4.0);
     let reference = render(&scene, &camera, &Observation::reference(seed));
@@ -427,7 +427,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             .unwrap();
         (
             result.transform().apply(DVec2::ZERO),
-            result.num_inliers(),
+            result.inlier_count(),
             stars,
         )
     };

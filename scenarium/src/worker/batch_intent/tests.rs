@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::execution::compile::Compiler;
+use crate::exec::compile::Compiler;
 use crate::graph::Graph;
 use crate::library::Library;
 

@@ -7,7 +7,7 @@ use tokio::sync::mpsc::{Receiver, channel};
 use tokio::task;
 use tokio::task::{Id, JoinSet};
 
-use crate::execution::report::event_trigger::EventTrigger;
+use crate::exec::report::event_trigger::EventTrigger;
 use crate::graph::identity::EventPort;
 use crate::graph::identity::NodeId;
 use crate::worker::pause_gate::PauseGate;
@@ -70,8 +70,8 @@ impl ActiveEventLoop {
                     }
                 }
             });
-            let previous = task_nodes.insert(task.id(), node_id);
-            debug_assert!(previous.is_none(), "duplicate event task id");
+            let prev = task_nodes.insert(task.id(), node_id);
+            debug_assert!(prev.is_none(), "duplicate event task id");
         }
 
         ready.wait().await;

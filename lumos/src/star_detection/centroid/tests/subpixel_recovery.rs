@@ -34,8 +34,8 @@ fn noisy_stars_land_within_their_reported_sigma() {
             .add_exact(&mut pixels);
     }
     patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 42);
-    let background = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let measured = Measured::of(&pixels, &background);
+    let bg = bg_map::estimate(&pixels, &BgConfig::default());
+    let measured = Measured::of(&pixels, &bg);
 
     for &(centre, amplitude) in &stars {
         let truth = centre.as_vec2().as_dvec2();
@@ -98,8 +98,7 @@ fn the_position_sigma_matches_the_scatter() {
         .map(|seed| {
             let mut pixels = clean.clone();
             patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);
-            let residual =
-                background_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
+            let residual = bg_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
             let windowed = WindowedCentroid::measure(
                 &residual,
                 &grid,
@@ -107,7 +106,7 @@ fn the_position_sigma_matches_the_scatter() {
                     start: truth.round(),
                     offset: 0.0,
                     noise: StarNoise {
-                        background_sigma: f64::from(NOISE),
+                        bg_sigma: f64::from(NOISE),
                         electrons_per_unit: None,
                     },
                 },
@@ -117,7 +116,7 @@ fn the_position_sigma_matches_the_scatter() {
                 pixels: &residual,
                 pos: windowed.pos,
                 grid: &grid.stamp,
-                background: 0.0,
+                bg: 0.0,
                 noise: None,
             })
             .unwrap();

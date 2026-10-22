@@ -15,15 +15,8 @@ fn callback_reports_exact_progress_and_default_is_silent() {
     callback.report(3, 5, StackingStage::Combining);
 
     let reports = reports.lock().unwrap();
-    let [
-        StackingProgress {
-            current,
-            total,
-            stage,
-        },
-    ] = reports.as_slice()
-    else {
+    let [StackingProgress { cur, total, stage }] = reports.as_slice() else {
         panic!("expected one progress report");
     };
-    assert_eq!((*current, *total, *stage), (3, 5, StackingStage::Combining));
+    assert_eq!((*cur, *total, *stage), (3, 5, StackingStage::Combining));
 }

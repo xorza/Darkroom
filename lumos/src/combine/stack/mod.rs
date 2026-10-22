@@ -24,7 +24,7 @@ use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Where the frames of a combine come from, for its log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FrameSource {
+pub(crate) enum FrameOrigin {
     /// Files decoded into the run's tier.
     Paths,
     /// Mosaic calibration frames decoded into the run's tier.
@@ -38,7 +38,7 @@ pub(crate) enum FrameSource {
 /// The frames a combine takes: where they come from, and how many there are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameSet {
-    pub(crate) source: FrameSource,
+    pub(crate) source: FrameOrigin,
     pub(crate) count: usize,
 }
 

@@ -28,12 +28,12 @@ pub enum OpError {
     /// A background division met a model whose mean is not positive, so it has no level to
     /// normalize the model to.
     #[error("background division needs a positive model mean, got {mean}")]
-    NonPositiveBackground { mean: f64 },
+    NonPositiveBg { mean: f64 },
     /// An auto stretch cannot map the measured background onto its target: the median sits at or
     /// below zero (nothing for a brightening curve to lift), or the curve's range does not reach
     /// the target from it.
     #[error("{method} cannot map a background median of {median} to the target {target}")]
-    UnreachableBackground {
+    UnreachableBg {
         method: AutoStretch,
         median: f32,
         target: f32,
@@ -73,5 +73,5 @@ pub enum MlError {
         "model output has {len} values, expected {} (NHWC [1,{WINDOW},{WINDOW},3])",
         WINDOW * WINDOW * 3
     )]
-    OutputLength { len: usize },
+    OutputLen { len: usize },
 }

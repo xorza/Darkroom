@@ -457,25 +457,25 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let flattened = flattened.demosaic_measured(MarkesteijnPasses::One);
     assert!(Arc::ptr_eq(flattened.flat_gain().unwrap(), &gain));
     let flattened_frame = FrameStats::measure(&flattened);
-    assert_eq!(flattened_frame.background, flattened_mosaic.background);
+    assert_eq!(flattened_frame.bg, flattened_mosaic.bg);
 
     let mosaic = FrameStats::measure(&cfa);
     let mut demosaiced = cfa.demosaic_measured(MarkesteijnPasses::One);
     assert_eq!(demosaiced.metadata.derived.quantization_sigma(), None);
     let frame = FrameStats::measure(&demosaiced);
-    assert_eq!(frame.background, mosaic.background);
+    assert_eq!(frame.bg, mosaic.bg);
     assert_eq!(frame.sky, mosaic.sky);
     assert_eq!(frame.quantization_sigma, mosaic.quantization_sigma);
-    assert!(frame.background.iter().all(|split| split.read_share == 0.0));
+    assert!(frame.bg.iter().all(|split| split.read_share == 0.0));
 
     demosaiced.metadata.derived.set_mosaic_noise(None);
     let correlated = FrameStats::measure(&demosaiced);
     for color in 0..3 {
         assert!(
-            correlated.background[color].variance < mosaic.background[color].variance,
+            correlated.bg[color].variance < mosaic.bg[color].variance,
             "color {color}: {:?} against the mosaic's {:?}",
-            correlated.background[color],
-            mosaic.background[color]
+            correlated.bg[color],
+            mosaic.bg[color]
         );
     }
 }
@@ -751,7 +751,7 @@ fn every_pattern_names_the_color_at_each_position() {
     assert_eq!(rows(bayer, 8, 64), (0..8).collect::<Vec<_>>());
     for cfa in [CfaType::Mono, bayer, xtrans] {
         for size in [Size2us::new(1, 1), Size2us::new(5, 3), Size2us::new(7, 13)] {
-            let mut counted = vec![0; cfa.num_colors()];
+            let mut counted = vec![0; cfa.color_count()];
             for y in 0..size.height {
                 for x in 0..size.width {
                     counted[cfa.slot_at(Vec2us::new(x, y))] += 1;

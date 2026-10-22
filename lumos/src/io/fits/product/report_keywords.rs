@@ -28,7 +28,7 @@ const COUNTS: [Field<u64>; 12] = [
 ];
 
 /// Each yes or no the report holds, by its keyword.
-const DECISIONS: [Field<bool>; 1] = [("LUMVBKG", |report| &mut report.variance_background_only)];
+const DECISIONS: [Field<bool>; 1] = [("LUMVBKG", |report| &mut report.variance_bg_only)];
 
 /// The prefix of each flag count's keyword, the flag's bit after it.
 const FLAG_COUNTS: [Field<FlagCounts>; 2] = [

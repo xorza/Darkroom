@@ -86,11 +86,11 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
         self.gains[self.pattern.color_at(at).idx()]
     }
 
-    /// Row `y`'s own samples over `columns`, as the input holds them.
+    /// Row `y`'s own samples over `cols`, as the input holds them.
     #[inline(always)]
-    pub(crate) fn samples(&self, y: usize, columns: Range<usize>) -> &[f32] {
+    pub(crate) fn samples(&self, y: usize, cols: Range<usize>) -> &[f32] {
         let start = y * self.size.width;
-        &self.data[start + columns.start..start + columns.end]
+        &self.data[start + cols.start..start + cols.end]
     }
 
     /// The pixel at `at` as a kernel writes it: its index, its color and its own sample.

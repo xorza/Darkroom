@@ -7,20 +7,20 @@ use std::num::NonZeroUsize;
 
 use crate::error::InvalidConfigField;
 
-pub(crate) mod background_config;
+pub(crate) mod bg_config;
 pub(crate) mod extraction_config;
 pub(crate) mod filter_config;
 pub(crate) mod fwhm_config;
 pub(crate) mod measurement_config;
 
-use crate::star_detection::star_detection_config::background_config::{
-    BackgroundConfig, BackgroundRefinement, IterativeRefinement,
+use crate::star_detection::star_detection_config::bg_config::{
+    BgConfig, BgRefinement, IterativeRefinement,
 };
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::star_detection::star_detection_config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
+    CentroidMethod, LocalBgMethod, MeasurementConfig,
 };
 
 /// Configuration for the star detection pipeline, composed by processing stage.
@@ -40,7 +40,7 @@ use crate::star_detection::star_detection_config::measurement_config::{
 #[derive(Debug, Clone, Default)]
 pub struct StarDetectionConfig {
     /// Background estimation and refinement settings.
-    pub background: BackgroundConfig,
+    pub bg: BgConfig,
     /// Candidate detection, deblending, and region-filtering settings.
     pub extraction: ExtractionConfig,
     /// Matched-filter FWHM selection and estimation settings.
@@ -54,7 +54,7 @@ pub struct StarDetectionConfig {
 impl StarDetectionConfig {
     /// Validate every parameter before constructing a detector.
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
-        self.background.validate()?;
+        self.bg.validate()?;
         self.extraction.validate()?;
         self.fwhm.validate()?;
         self.measurement.validate()?;
@@ -128,8 +128,8 @@ impl StarDetectionConfig {
     /// background refinement to re-estimate background after masking sources.
     pub fn crowded_field() -> Self {
         Self {
-            background: BackgroundConfig {
-                refinement: BackgroundRefinement::Iterative(IterativeRefinement {
+            bg: BgConfig {
+                refinement: BgRefinement::Iterative(IterativeRefinement {
                     iterations: NonZeroUsize::new(2).unwrap(),
                     mask_dilation: 3,
                     mask_sigma: 2.0,
@@ -138,7 +138,7 @@ impl StarDetectionConfig {
             },
             extraction: ExtractionConfig {
                 deblend: Deblend::MultiThreshold {
-                    n_thresholds: 32,
+                    threshold_count: 32,
                     min_contrast: 0.005,
                 },
                 deblend_min_separation: 2,
@@ -163,10 +163,10 @@ impl StarDetectionConfig {
     /// Local annulus background subtraction handles nebulosity near stars.
     pub fn precise_ground() -> Self {
         Self {
-            background: BackgroundConfig {
+            bg: BgConfig {
                 tile_size: 128,
                 sigma_clip_max_iterations: 3,
-                refinement: BackgroundRefinement::Iterative(IterativeRefinement {
+                refinement: BgRefinement::Iterative(IterativeRefinement {
                     iterations: NonZeroUsize::new(3).unwrap(),
                     mask_dilation: 5,
                     mask_sigma: 2.0,
@@ -178,7 +178,7 @@ impl StarDetectionConfig {
                 max_area: 2000,
                 edge_margin: 15,
                 deblend: Deblend::MultiThreshold {
-                    n_thresholds: 32,
+                    threshold_count: 32,
                     min_contrast: 0.003,
                 },
                 deblend_min_separation: 2,
@@ -192,7 +192,7 @@ impl StarDetectionConfig {
             },
             measurement: MeasurementConfig {
                 centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
-                local_background: LocalBackgroundMethod::LocalAnnulus,
+                local_bg: LocalBgMethod::LocalAnnulus,
                 ..Default::default()
             },
             filter: FilterConfig {

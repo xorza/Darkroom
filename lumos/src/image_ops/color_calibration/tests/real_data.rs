@@ -5,8 +5,8 @@
 use crate::image::rgb::Rgb;
 use crate::internals::visual;
 
-use crate::image_ops::color_calibration::neutralize_background;
-use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::neutralize_bg;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::stretch::Stretch;
 use crate::internals::init_tracing;
@@ -24,7 +24,7 @@ fn neutralize_then_stretch_removes_green() {
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds
     // differ.
-    let before = neutralize_background::channel_backgrounds(&image);
+    let before = neutralize_bg::channel_bgs(&image);
     let spread_before = spread(before);
     eprintln!(
         "background before: R={} G={} B={}  (spread {spread_before:.6})",
@@ -36,8 +36,8 @@ fn neutralize_then_stretch_removes_green() {
     );
 
     let mut img = image;
-    NeutralizeBackground.apply(&mut img).unwrap();
-    let after = neutralize_background::channel_backgrounds(&img);
+    NeutralizeBg.apply(&mut img).unwrap();
+    let after = neutralize_bg::channel_bgs(&img);
     let spread_after = spread(after);
     eprintln!(
         "background after:  R={} G={} B={}  (spread {spread_after:.6})",
@@ -59,6 +59,6 @@ fn neutralize_then_stretch_removes_green() {
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_scnr");
 
-    NeutralizeBackground.apply(&mut img).unwrap();
+    NeutralizeBg.apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_scnr_renorm");
 }

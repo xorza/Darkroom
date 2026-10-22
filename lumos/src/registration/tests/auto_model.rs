@@ -146,7 +146,7 @@ fn a_blend_buys_no_model() {
         result.transform().transform_type(),
         TransformType::Euclidean
     );
-    assert_eq!(result.num_inliers(), 50);
+    assert_eq!(result.inlier_count(), 50);
     assert!(
         result
             .matched_stars()

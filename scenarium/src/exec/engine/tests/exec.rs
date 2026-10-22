@@ -1,0 +1,155 @@
+use super::*;
+use crate::exec::report::node_status::NodeExecStatus;
+
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+
+/// A pure source whose value a test can move under it — the point being
+/// that a *pure* node's digest does not notice, so the cached value stands
+/// until something re-keys it.
+fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    move |n: NodeSpec| {
+        n.pure()
+            .cache(CacheMode::Ram)
+            .output(DataType::Int)
+            .compute(move |_| cell.load(Ordering::Relaxed).into())
+    }
+}
+
+#[tokio::test]
+async fn simple_compute() {
+    let b = Arc::new(AtomicI64::new(5));
+    let mut g = TestGraph::new();
+    g.add("a", shifting_source(Arc::new(AtomicI64::new(2))));
+    g.add("b", shifting_source(Arc::clone(&b)));
+    g.add("sum", |n| n.sum().cache(CacheMode::Ram));
+    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("print", NodeSpec::records);
+    g.wire("a", "sum");
+    g.wire("b", ("sum", 1));
+    g.wire("sum", "mult");
+    g.wire("b", ("mult", 1));
+    g.wire("mult", "print");
+
+    let mut e = TestEngine::over(g);
+    let run = e.run_sinks().await;
+    assert_eq!(run.logs(), ["35"], "sum = 2 + 5 = 7, mult = 7 * 5 = 35");
+
+    // Moving external state does not recompute: `b` is pure, so its digest
+    // is stable and the cached value stands.
+    b.store(7, Ordering::Relaxed);
+    let run = e.run_sinks().await;
+    assert_eq!(run.logs(), ["35"], "a pure node does not re-read the world");
+
+    // Declaring `b` impure re-keys it: now it re-reads on every run.
+    e.edit(|g| g.edit_func("b", |func| func.behavior = FuncBehavior::Impure));
+    let run = e.run_sinks().await;
+    assert_eq!(run.logs(), ["63"], "sum = 2 + 7 = 9, mult = 9 * 7 = 63");
+}
+
+#[tokio::test]
+async fn schedule_stable_across_repeated_runs() {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    // Three runs held at once — an outcome is a snapshot, so they can be
+    // compared rather than re-derived.
+    let run1 = e.run_sinks().await;
+    let run2 = e.run_sinks().await;
+    let run3 = e.run_sinks().await;
+
+    // The first run executes everything; once the pure upstream is cached,
+    // runs 2 and 3 must schedule identically — this guards the reused
+    // per-run buffers being reset cleanly, since a missed reset would drift.
+    assert_eq!(run1.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+    assert_eq!(run2.ran(), ["Print"]);
+    assert_eq!(run2.ran(), run3.ran());
+    assert_eq!(
+        run2.cached(),
+        ["get_a", "get_b", "mult", "sum"],
+        "everything the second run did not re-run was served from cache"
+    );
+
+    // The cached product stays correct every run: sum(1 + 11 = 12) * get_b(11) = 132.
+    assert_eq!(e.output_i64("mult", 0), Some(132));
+}
+
+/// Output buffers are wiped before a re-running node is invoked, so an
+/// unwritten output cannot retain a prior run's value. This sink has no
+/// demanded outputs, so leaving one port `Unbound` is valid.
+#[tokio::test]
+async fn unwritten_output_port_is_cleared_before_reexecution() {
+    use crate::async_lambda;
+
+    let invocations = Arc::new(AtomicUsize::new(0));
+    let mut g = TestGraph::new();
+    g.add("partial_writer", |n| {
+        let invocations = Arc::clone(&invocations);
+        n.pure()
+            .sink()
+            // Const-bound below; changing that const is what re-keys the
+            // digest between runs.
+            .optional(DataType::Int)
+            .output(DataType::Int)
+            .output(DataType::Int)
+            // Retained so the in-place buffer reuse is observable at all.
+            .cache(CacheMode::Ram)
+            .lambda(async_lambda!(
+                move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
+                    let run = invocations.fetch_add(1, Ordering::Relaxed);
+                    outputs[0] = ConstValue::Int(100 + i64::try_from(run).unwrap()).into();
+                    if run == 0 {
+                        // Only the first run writes the second port.
+                        outputs[1] = ConstValue::Int(20).into();
+                    }
+                    Ok(())
+                }
+            ))
+    });
+    g.constant("partial_writer", 0, 0i64);
+
+    let mut e = TestEngine::over(g);
+
+    let run = e.run_sinks().await;
+    assert!(run.errored().is_empty());
+    assert_eq!(e.output_i64("partial_writer", 0), Some(100));
+    assert_eq!(
+        e.output_i64("partial_writer", 1),
+        Some(20),
+        "run 1 writes both"
+    );
+
+    // Invalidate the pure node while keeping its resident buffer available
+    // for the next invocation. Run 2 writes only port 0, so port 1 must not
+    // retain run 1's value.
+    e.edit(|g| g.constant("partial_writer", 0, 1i64));
+    let run = e.run_sinks().await;
+
+    assert!(run.errored().is_empty());
+    assert_eq!(
+        e.output_i64("partial_writer", 0),
+        Some(101),
+        "port 0 rewritten"
+    );
+    assert!(
+        matches!(e.output("partial_writer", 1), Some(DynamicValue::Unbound)),
+        "the unwritten port is cleared before invoke, not left holding 20"
+    );
+}
+
+#[tokio::test]
+async fn executed_nodes_reported() {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    let run = e.run_sinks().await;
+
+    assert_eq!(run.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+    assert_eq!(run.executed_node_count, 5);
+    assert!(run.errored().is_empty());
+    assert!(run.missing_inputs().is_empty());
+
+    for name in run.ran() {
+        let Some(NodeExecStatus::Executed { elapsed_secs }) = run.status(name) else {
+            panic!("{name} ran, so it reports an elapsed time");
+        };
+        assert!(*elapsed_secs >= 0.0, "{name} has negative elapsed_secs");
+    }
+}

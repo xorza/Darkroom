@@ -9,7 +9,7 @@
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
-use crate::background_mesh::color_mesh::ColorMesh;
+use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;
@@ -19,7 +19,7 @@ use crate::math::vec2us::Vec2us;
 struct CfaSamplePhase {
     x_offset: usize,
     y_offset: usize,
-    columns: usize,
+    cols: usize,
     rows: usize,
     population: usize,
     sample_count: usize,
@@ -30,21 +30,17 @@ struct CfaSamplePhase {
 pub(super) struct ColorResiduals<'a> {
     pub(super) data: &'a Buffer2<f32>,
     pub(super) cfa_type: CfaType,
-    pub(super) background: &'a ColorMesh,
+    pub(super) bg: &'a ColorMesh,
 }
 
 impl ColorResiduals<'_> {
     /// The residuals of `target_color`'s stratified sample.
     pub(super) fn samples(self, target_color: usize) -> Vec<f32> {
-        let Self {
-            data,
-            cfa_type,
-            background,
-        } = self;
+        let Self { data, cfa_type, bg } = self;
         let size = Size2us::from(data);
         color_sample_idxs(size, cfa_type, target_color)
             .into_iter()
-            .map(|idx| data[idx] - background.at(target_color, size.point_of(idx)).sky)
+            .map(|idx| data[idx] - bg.at(target_color, size.point_of(idx)).sky)
             .collect()
     }
 }
@@ -75,14 +71,14 @@ pub(super) fn color_sample_idxs(
             if pattern.slot_at(Vec2us::new(x_offset, y_offset)) != target_color {
                 continue;
             }
-            let columns = (size.width - 1 - x_offset) / period + 1;
+            let cols = (size.width - 1 - x_offset) / period + 1;
             let rows = (size.height - 1 - y_offset) / period + 1;
             phases.push(CfaSamplePhase {
                 x_offset,
                 y_offset,
-                columns,
+                cols,
                 rows,
-                population: columns * rows,
+                population: cols * rows,
                 sample_count: 0,
             });
         }
@@ -108,8 +104,8 @@ pub(super) fn color_sample_idxs(
         if phase.sample_count == phase.population {
             for row in 0..phase.rows {
                 let y = phase.y_offset + row * period;
-                for column in 0..phase.columns {
-                    let x = phase.x_offset + column * period;
+                for col in 0..phase.cols {
+                    let x = phase.x_offset + col * period;
                     idxs.push(size.idx_of(Vec2us::new(x, y)));
                 }
             }
@@ -124,13 +120,12 @@ pub(super) fn color_sample_idxs(
             let row_sample_start = scaled_partition(sample_row, sampled_rows, phase.sample_count);
             let row_sample_end = scaled_partition(sample_row + 1, sampled_rows, phase.sample_count);
             let row_sample_count = row_sample_end - row_sample_start;
-            let rotation = (sample_row + phase_rotation) % phase.columns;
+            let rotation = (sample_row + phase_rotation) % phase.cols;
 
-            for sample_column in 0..row_sample_count {
-                let column = (stratified_center(sample_column, row_sample_count, phase.columns)
-                    + rotation)
-                    % phase.columns;
-                let x = phase.x_offset + column * period;
+            for sample_col in 0..row_sample_count {
+                let col = (stratified_center(sample_col, row_sample_count, phase.cols) + rotation)
+                    % phase.cols;
+                let x = phase.x_offset + col * period;
                 idxs.push(size.idx_of(Vec2us::new(x, y)));
             }
         }

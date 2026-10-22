@@ -14,14 +14,14 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Scene, TrueSource};
+use crate::internals::synthetic::scene::{BgField, Scene, TrueSource};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
 use crate::star_detection::centroid::stamp::FitInputs;
-use crate::star_detection::centroid::stamp_background::StampBackground;
+use crate::star_detection::centroid::stamp_bg::StampBg;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 
@@ -58,7 +58,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     pixels: black_box(&measured.residual),
                     pos: at,
                     grid: &measured.grid.stamp,
-                    background: 0.0,
+                    bg: 0.0,
                     noise: None,
                 })
             };
@@ -78,7 +78,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         pixels: black_box(&measured.residual),
                         pos: at,
                         grid: &measured.grid.stamp,
-                        background: 0.0,
+                        bg: 0.0,
                         noise: None,
                     },
                     BETA,
@@ -90,7 +90,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     }
     let star = Star::WIDE;
     let annulus = MeasureGrid::new(star.fwhm).annulus;
-    // The pixels whose centre lies between the radii, as `StampBackground::measure` takes them.
+    // The pixels whose centre lies between the radii, as `StampBg::measure` takes them.
     let side = 0..=2 * annulus.outer;
     let radii = annulus.inner.pow(2)..=annulus.outer.pow(2);
     let pixels = side
@@ -101,11 +101,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
         })
         .count();
     group.throughput(Throughput::Elements(pixels as u64));
-    group.bench_function(BenchmarkId::new("annulus_background", star.name()), |b| {
+    group.bench_function(BenchmarkId::new("annulus_bg", star.name()), |b| {
         let measured = Measured::of(star, PsfModel::gaussian(star.fwhm));
         let at = measured.centre();
         let measure = || {
-            StampBackground::measure(
+            StampBg::measure(
                 MaskedPlane::from(black_box(&measured.residual)),
                 at,
                 annulus,
@@ -155,7 +155,7 @@ impl Measured {
         let scene = Scene::single(
             SIZE,
             TrueSource { pos, flux },
-            BackgroundField::Uniform { level: SKY },
+            BgField::Uniform { level: SKY },
         );
         let camera = Camera {
             psf,
@@ -185,7 +185,7 @@ impl Measured {
             start: self.start,
             offset: 0.0,
             noise: StarNoise {
-                background_sigma: (shot + read * read).sqrt(),
+                bg_sigma: (shot + read * read).sqrt(),
                 electrons_per_unit: None,
             },
         }

@@ -187,7 +187,7 @@ impl Badge {
                     (Toggle::Off, true) => CHIP_TINT_ALPHA,
                     (Toggle::Off, false) => 0.0,
                 };
-                let mut background = Background {
+                let mut bg = Background {
                     border: Stroke::new(color, 1.0),
                     corners: Corners::all(3.0),
                     ..Default::default()
@@ -195,9 +195,9 @@ impl Badge {
                 // Left at the default (no fill at all) rather than a
                 // fully-transparent one, so a resting chip paints no quad.
                 if alpha > 0.0 {
-                    background.fill = color.with_alpha(alpha).into();
+                    bg.fill = color.with_alpha(alpha).into();
                 }
-                panel.background(background).id(wid).sense(Sense::CLICK)
+                panel.background(bg).id(wid).sense(Sense::CLICK)
             }
         };
         let chip = panel.show(ui, |ui| match glyph {

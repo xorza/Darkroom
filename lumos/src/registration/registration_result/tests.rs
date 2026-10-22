@@ -60,7 +60,7 @@ fn result_keeps_matches_and_derives_diagnostics() {
     assert_eq!(result.transform().matrix(), transform.matrix());
     assert!(result.sip().is_none());
     assert_eq!(result.matched_stars(), matches);
-    assert_eq!(result.num_inliers(), 3);
+    assert_eq!(result.inlier_count(), 3);
 
     // sqrt((0.1² + 0.2² + 0.15²) / 3) = sqrt(0.0725 / 3).
     let expected_rms = (0.0725_f64 / 3.0).sqrt();

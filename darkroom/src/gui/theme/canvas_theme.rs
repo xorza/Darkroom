@@ -14,7 +14,7 @@ pub(crate) struct CanvasTheme {
     pub(crate) dot: RgbaF32,
     /// World-space base spacing between dots. Wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into noise —
-    /// see `gui::pane::graph_ui::canvas_background`.
+    /// see `gui::pane::graph_ui::canvas_bg`.
     pub(crate) dot_spacing: f32,
     /// On-screen radius (px) of a backdrop dot.
     pub(crate) dot_radius: f32,

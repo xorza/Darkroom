@@ -109,7 +109,7 @@ struct ColorSums {
 fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
     let width = flat.data().width();
     let cfa_type = flat.cfa_type();
-    let colors = cfa_type.num_colors();
+    let colors = cfa_type.color_count();
     // Each row's sums, added in row order: a rayon `reduce` would add them in whatever tree its
     // work stealing built, and the means would move with the thread count.
     let rows: Vec<ColorSums> = {

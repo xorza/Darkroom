@@ -25,7 +25,7 @@ impl Kernel for GeneralPower {
     }
 }
 
-/// The Moffat at `[x0, y0, amplitude, alpha, background]`.
+/// The Moffat at `[x0, y0, amplitude, alpha, bg]`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MoffatBatch<'a> {
     model: &'a MoffatFixedBeta,

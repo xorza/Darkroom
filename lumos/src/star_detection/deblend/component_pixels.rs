@@ -68,19 +68,19 @@ impl ComponentPixels {
         let rows = row_starts.len() - 1;
         let span = |row: usize| row_starts[row] as usize..row_starts[row + 1] as usize;
         for row in 0..rows {
-            let current = span(row);
+            let cur = span(row);
             let up = if row > 0 {
                 span(row - 1)
             } else {
-                current.start..current.start
+                cur.start..cur.start
             };
             let down = if row + 1 < rows {
                 span(row + 1)
             } else {
-                current.end..current.end
+                cur.end..cur.end
             };
             let (mut j, mut k) = (up.start, down.start);
-            for i in current {
+            for i in cur {
                 let low = pixels[i].pos.x.saturating_sub(1);
                 while j < up.end && pixels[j].pos.x < low {
                     j += 1;

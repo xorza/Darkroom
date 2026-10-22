@@ -41,7 +41,7 @@ pub(crate) struct LabelRun {
 impl LabelMap {
     /// Number of connected components (excluding background).
     #[inline]
-    pub(super) const fn num_labels(&self) -> usize {
+    pub(super) const fn label_count(&self) -> usize {
         self.components.len()
     }
 
@@ -78,12 +78,12 @@ pub(crate) mod internals {
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
 
     impl LabelMap {
-        /// Adopt pre-computed labels `1..=num_labels`, bypassing connected-component analysis;
+        /// Adopt pre-computed labels `1..=label_count`, bypassing connected-component analysis;
         /// the components and their runs are collected by a scan of every pixel.
-        pub(crate) fn from_raw(labels: &Buffer2<u32>, num_labels: usize) -> Self {
+        pub(crate) fn from_raw(labels: &Buffer2<u32>, label_count: usize) -> Self {
             let size = Size2us::new(labels.width(), labels.height());
-            let mut components = vec![ComponentData::default(); num_labels];
-            let mut runs_by_label: Vec<Vec<LabelRun>> = vec![Vec::new(); num_labels];
+            let mut components = vec![ComponentData::default(); label_count];
+            let mut runs_by_label: Vec<Vec<LabelRun>> = vec![Vec::new(); label_count];
             for y in 0..size.height {
                 let mut x = 0;
                 while x < size.width {

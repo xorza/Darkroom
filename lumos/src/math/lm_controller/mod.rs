@@ -273,10 +273,10 @@ impl<const N: usize> Scale<N> {
         let factor = Cholesky::of(self.scaled(hessian, 0.0), 1.0)?;
         let mut diagonal = [0.0; N];
         for (i, value) in diagonal.iter_mut().enumerate() {
-            let mut column = [0.0; N];
-            column[i] = 1.0;
-            factor.solve(&mut column);
-            *value = self.factors[i] * column[i] * self.factors[i];
+            let mut col = [0.0; N];
+            col[i] = 1.0;
+            factor.solve(&mut col);
+            *value = self.factors[i] * col[i] * self.factors[i];
         }
         Some(diagonal)
     }

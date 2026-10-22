@@ -11,10 +11,10 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::internals::synthetic::background_map;
-use crate::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::internals::synthetic::bg_map;
+use crate::star_detection::bg::bg_estimate::BgEstimate;
 use crate::star_detection::deblend::region::Region;
-use crate::star_detection::star_detection_config::background_config::BackgroundConfig;
+use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::tests::near;
 
 mod cosmic_ray_tests;
@@ -22,8 +22,8 @@ mod deblend_tests;
 mod detection_tests;
 
 /// Estimate the background of `pixels` at the default tile size.
-fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
-    background_map::estimate(pixels, &BackgroundConfig::default())
+fn bg_estimate(pixels: &Buffer2<f32>) -> BgEstimate {
+    bg_map::estimate(pixels, &BgConfig::default())
 }
 
 /// The pixel positions of `regions`' peaks.

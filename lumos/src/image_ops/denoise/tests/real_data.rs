@@ -3,7 +3,7 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
-use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
 use crate::image_ops::stretch::Stretch;
@@ -36,7 +36,7 @@ fn denoise_reduces_linear_noise() {
     let mut img = real_data::linear_master();
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
-    NeutralizeBackground.apply(&mut img).unwrap();
+    NeutralizeBg.apply(&mut img).unwrap();
 
     let before: Vec<f32> = (0..3).map(|c| highfreq_noise(&img, c)).collect();
     Denoise::default().apply(&mut img).unwrap();

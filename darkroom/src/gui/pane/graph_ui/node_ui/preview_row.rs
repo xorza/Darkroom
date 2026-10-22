@@ -119,7 +119,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
         // rounded bottom, the way the header rounds the top.
-        .background(support::footer_background(theme, theme.card.inner_radius()))
+        .background(support::footer_bg(theme, theme.card.inner_radius()))
         .show(ui, |ui| {
             let size = image.preview.native_size;
             support::bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));

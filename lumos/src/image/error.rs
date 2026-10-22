@@ -9,28 +9,24 @@ use crate::image::image_dimensions::ImageDimensions;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum XTransPatternError {
     #[error(
-        "invalid X-Trans pattern value {value} at row {row}, column {column}; expected 0, 1, or 2"
+        "invalid X-Trans pattern value {value} at row {row}, column {col}; expected 0, 1, or 2"
     )]
-    Value {
-        row: usize,
-        column: usize,
-        value: u8,
-    },
+    Value { row: usize, col: usize, value: u8 },
     #[error("invalid X-Trans color counts: expected [8, 20, 8], got {actual:?}")]
     ColorCounts { actual: [usize; 3] },
-    #[error("invalid X-Trans green neighborhood at row {row}, column {column}: {neighbors:?}")]
+    #[error("invalid X-Trans green neighborhood at row {row}, column {col}: {neighbors:?}")]
     GreenNeighborhood {
         row: usize,
-        column: usize,
+        col: usize,
         neighbors: [usize; 3],
     },
     /// The demosaic reads greens in a 3×3 cell, so the 6×6 layout must repeat them every three.
     #[error(
-        "invalid X-Trans greens: row {row}, column {column} is not green as row {}, column {} is",
+        "invalid X-Trans greens: row {row}, column {col} is not green as row {}, column {} is",
         row % 3,
-        column % 3
+        col % 3
     )]
-    GreenPeriod { row: usize, column: usize },
+    GreenPeriod { row: usize, col: usize },
     /// Markesteijn's hexagons are built around a solitary green, a green whose four neighbours are
     /// none of them green, which the layout's 3×3 cell of greens must hold exactly one of. With
     /// greens that repeat every three, a layout has one exactly when every hexagon fills: of the

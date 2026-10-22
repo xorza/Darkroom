@@ -46,17 +46,15 @@ impl Spread {
         (centre.abs() * f32::EPSILON).max(SMALLEST_STEP)
     }
 
-    /// The σ to scale a band by: the measured one, raised to `background` and to the resolution at
+    /// The σ to scale a band by: the measured one, raised to `bg` and to the resolution at
     /// the centre. Always positive.
     ///
-    /// `background` is the noise the frames were measured to have away from this window. A
+    /// `bg` is the noise the frames were measured to have away from this window. A
     /// per-window MAD cannot see it when more than half the samples tie, as integer data with
     /// little noise does, and an outlier cannot raise it. With no background, a band about a tied
     /// majority holds the tied samples alone.
-    pub(crate) const fn floored(self, background: f32) -> f32 {
-        self.sigma
-            .max(background)
-            .max(Self::resolution(self.centre))
+    pub(crate) const fn floored(self, bg: f32) -> f32 {
+        self.sigma.max(bg).max(Self::resolution(self.centre))
     }
 }
 

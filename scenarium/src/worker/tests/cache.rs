@@ -1,5 +1,5 @@
 use super::*;
-use crate::execution::cache::disk_store::DiskStore;
+use crate::exec::cache::disk_store::DiskStore;
 use crate::internals::test_graph::NodeSpec;
 use std::fs;
 

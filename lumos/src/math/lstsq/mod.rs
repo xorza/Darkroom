@@ -3,7 +3,7 @@
 use nalgebra::{DMatrix, Dyn, QR, SVD};
 
 /// A design matrix factored by its SVD, with its numerical rank decided by one rule: a singular
-/// value at or below `max(rows, columns)·ε·σ_max` is indistinguishable from zero in f64, the
+/// value at or below `max(rows, cols)·ε·σ_max` is indistinguishable from zero in f64, the
 /// default cutoff of NumPy's `lstsq` and LAPACK's `gelsd`.
 ///
 /// A design taller than wide is first reduced by a Householder QR, `A = QR`, and its SVD taken of
@@ -16,14 +16,14 @@ pub(crate) struct Lstsq {
     /// for a design wider than tall, factored whole for its rank alone.
     qr: Option<QR<f64, Dyn, Dyn>>,
     svd: SVD<f64, Dyn, Dyn>,
-    columns: usize,
+    cols: usize,
     tolerance: f64,
 }
 
 impl Lstsq {
     pub(crate) fn new(design: DMatrix<f64>) -> Self {
-        let (rows, columns) = design.shape();
-        let (qr, svd) = if rows >= columns {
+        let (rows, cols) = design.shape();
+        let (qr, svd) = if rows >= cols {
             let qr = design.qr();
             let svd = qr.r().svd(true, true);
             (Some(qr), svd)
@@ -34,8 +34,8 @@ impl Lstsq {
         Self {
             qr,
             svd,
-            columns,
-            tolerance: rows.max(columns) as f64 * f64::EPSILON * largest,
+            cols,
+            tolerance: rows.max(cols) as f64 * f64::EPSILON * largest,
         }
     }
 
@@ -49,14 +49,14 @@ impl Lstsq {
     /// most its row count of independent columns.
     pub(crate) fn solve(&self, rhs: &DMatrix<f64>) -> Option<DMatrix<f64>> {
         let qr = self.qr.as_ref()?;
-        if self.rank() != self.columns {
+        if self.rank() != self.cols {
             return None;
         }
         let mut reflected = rhs.clone();
         qr.q_tr_mul(&mut reflected);
         let solution = self
             .svd
-            .solve(&reflected.rows(0, self.columns), self.tolerance);
+            .solve(&reflected.rows(0, self.cols), self.tolerance);
         Some(solution.expect("an SVD computed with both singular-vector sets can solve"))
     }
 }

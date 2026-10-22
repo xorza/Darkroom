@@ -24,7 +24,7 @@ use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::SpillFrame;
 use crate::frame_store::stratified_samples::{SAMPLE_LIMIT, StratifiedSamples};
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -44,10 +44,10 @@ use crate::progress::progress_monitor::ProgressMonitor;
 fn channel_stats(channels: &[(f32, f32)]) -> Admitted {
     let stats = FrameStats {
         medians: channels.iter().map(|&(median, _)| median).collect(),
-        background: channels
+        bg: channels
             .iter()
             .map(|&(_, mad)| statistics::internals::mad_to_sigma(mad))
-            .map(BackgroundSplit::of_sigma)
+            .map(BgSplit::of_sigma)
             .collect(),
         sky: channels.iter().map(|&(median, _)| median).collect(),
         spread: None,
@@ -1219,10 +1219,10 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
             let stats = &mut admitted.stats;
             stats.spread = Some(
                 stats
-                    .background
+                    .bg
                     .iter()
-                    .map(|&background| SlotSpread {
-                        sigma: background.sigma(),
+                    .map(|&bg| SlotSpread {
+                        sigma: bg.sigma(),
                         samples: 4096,
                     })
                     .collect(),
@@ -1332,7 +1332,7 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
                     .collect();
                 let mut admitted = channel_stats(&[(median, 0.0); 3]);
                 let stats = &mut admitted.stats;
-                stats.background = [BackgroundSplit::of_sigma(noise); 3].into_iter().collect();
+                stats.bg = [BgSplit::of_sigma(noise); 3].into_iter().collect();
                 stats.spread = Some(
                     [SlotSpread {
                         sigma: spread,
@@ -1410,7 +1410,7 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
     let frame = |reached: usize, median: f32, noise: f32, spread: f32| {
         let mut admitted = channel_stats(&[(median, 0.0); 3]);
         let stats = &mut admitted.stats;
-        stats.background = [BackgroundSplit::of_sigma(noise); 3].into_iter().collect();
+        stats.bg = [BgSplit::of_sigma(noise); 3].into_iter().collect();
         stats.spread = Some(
             [SlotSpread {
                 sigma: spread,

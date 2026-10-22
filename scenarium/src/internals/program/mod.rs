@@ -28,12 +28,12 @@ pub(crate) mod sweep;
 
 use crate::data::const_value::ConstValue;
 use crate::data::dynamic_value::DynamicValue;
-use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::error::ExecutionResult;
-use crate::execution::idx::{NodeIdx, OutputAddr};
-use crate::execution::schedule::planner::Planner;
-use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
-use crate::execution::seeds::RunSeeds;
+use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding};
+use crate::exec::error::ExecResult;
+use crate::exec::idx::{NodeIdx, OutputAddr};
+use crate::exec::schedule::planner::Planner;
+use crate::exec::schedule::{NodeState, RootFlags, RunSchedule};
+use crate::exec::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 use crate::internals::program::node_builder::NodeBuilder;
 use crate::internals::program::runs::Runs;
@@ -52,8 +52,8 @@ pub(crate) struct Placed {
 
 impl Placed {
     /// A binding reading this node's output `port`.
-    pub(crate) fn out(self, port: usize) -> ExecutionBinding {
-        ExecutionBinding::Wire(self.addr(port))
+    pub(crate) fn out(self, port: usize) -> ExecBinding {
+        ExecBinding::Wire(self.addr(port))
     }
 
     /// This node's output `port` as the interned address a binding carries —
@@ -101,7 +101,7 @@ impl ProgramBuilder {
 
     /// Plan `seeds` over the program, surfacing the planner's refusal — a
     /// dependency cycle, or a seed the program does not hold.
-    pub(crate) fn try_plan(&self, seeds: &RunSeeds) -> ExecutionResult<RunSchedule> {
+    pub(crate) fn try_plan(&self, seeds: &RunSeeds) -> ExecResult<RunSchedule> {
         let mut schedule = RunSchedule::default();
         Planner::default().plan(&self.program, seeds, &mut schedule)?;
         Ok(schedule)

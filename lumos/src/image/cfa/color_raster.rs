@@ -14,7 +14,7 @@ pub(crate) struct ColorRaster {
     width: usize,
     period: usize,
     /// For each row phase, the columns of the color within one period, ascending.
-    columns: ArrayVec<ArrayVec<u8, { CfaType::MAX_PERIOD }>, { CfaType::MAX_PERIOD }>,
+    cols: ArrayVec<ArrayVec<u8, { CfaType::MAX_PERIOD }>, { CfaType::MAX_PERIOD }>,
     /// For each row phase, the photosites of the color in one whole row.
     row_counts: ArrayVec<usize, { CfaType::MAX_PERIOD }>,
     /// The photosites of the color in one period of rows.
@@ -26,24 +26,21 @@ impl ColorRaster {
     /// The photosites of `color` of a `cfa_type` mosaic over an image of `size`.
     pub(crate) fn new(cfa_type: &CfaType, size: Size2us, color: usize) -> Self {
         let period = cfa_type.period();
-        let columns: ArrayVec<ArrayVec<u8, { CfaType::MAX_PERIOD }>, { CfaType::MAX_PERIOD }> = (0
+        let cols: ArrayVec<ArrayVec<u8, { CfaType::MAX_PERIOD }>, { CfaType::MAX_PERIOD }> = (0
             ..period)
             .map(|row| {
                 (0..period)
-                    .filter(|&column| cfa_type.slot_at(Vec2us::new(column, row)) == color)
-                    .map(|column| u8::try_from(column).expect("a column within the period"))
+                    .filter(|&col| cfa_type.slot_at(Vec2us::new(col, row)) == color)
+                    .map(|col| u8::try_from(col).expect("a column within the period"))
                     .collect()
             })
             .collect();
-        let row_counts: ArrayVec<usize, { CfaType::MAX_PERIOD }> = columns
+        let row_counts: ArrayVec<usize, { CfaType::MAX_PERIOD }> = cols
             .iter()
-            .map(|columns| {
+            .map(|cols| {
                 let tail = size.width % period;
-                (size.width / period) * columns.len()
-                    + columns
-                        .iter()
-                        .filter(|&&column| usize::from(column) < tail)
-                        .count()
+                (size.width / period) * cols.len()
+                    + cols.iter().filter(|&&col| usize::from(col) < tail).count()
             })
             .collect();
         let period_count = row_counts.iter().sum();
@@ -52,7 +49,7 @@ impl ColorRaster {
         Self {
             width: size.width,
             period,
-            columns,
+            cols,
             row_counts,
             period_count,
             count,
@@ -75,10 +72,9 @@ impl ColorRaster {
             phase += 1;
         }
         row += phase;
-        let columns = &self.columns[phase];
-        let column =
-            rank / columns.len() * self.period + usize::from(columns[rank % columns.len()]);
-        row * self.width + column
+        let cols = &self.cols[phase];
+        let col = rank / cols.len() * self.period + usize::from(cols[rank % cols.len()]);
+        row * self.width + col
     }
 }
 

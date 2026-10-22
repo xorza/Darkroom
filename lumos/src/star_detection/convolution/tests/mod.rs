@@ -21,10 +21,10 @@ use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
-/// `pixels` less `background`: the residual the matched filter takes.
-fn less(pixels: &Buffer2<f32>, background: &Buffer2<f32>) -> Buffer2<f32> {
+/// `pixels` less `bg`: the residual the matched filter takes.
+fn less(pixels: &Buffer2<f32>, bg: &Buffer2<f32>) -> Buffer2<f32> {
     let mut residual = pixels.clone();
-    for (value, &sky) in residual.iter_mut().zip(background.iter()) {
+    for (value, &sky) in residual.iter_mut().zip(bg.iter()) {
         *value -= sky;
     }
     residual
@@ -278,7 +278,7 @@ fn matched_filter_detects_star() {
     // nonzero term, so the peak is that product exactly, and the image maximum.
     let width = 32;
     let height = 32;
-    let background = Buffer2::new_filled(width, height, 0.1f32);
+    let bg = Buffer2::new_filled(width, height, 0.1f32);
     let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
     pixels[(16, 16)] = 0.5;
 
@@ -286,7 +286,7 @@ fn matched_filter_detects_star() {
     let mut temp = Buffer2::new_default(width, height);
     result
         .pixels_mut()
-        .copy_from_slice(less(&pixels, &background).pixels());
+        .copy_from_slice(less(&pixels, &bg).pixels());
     matched_filter_fresh(
         &mut result,
         MatchedFilter {
@@ -344,14 +344,14 @@ fn matched_filter_peaks_at_the_star() {
 fn matched_filter_preserves_negative_residuals() {
     let width = 16;
     let height = 16;
-    let background = Buffer2::new_filled(width, height, 0.5f32);
+    let bg = Buffer2::new_filled(width, height, 0.5f32);
     let pixels = Buffer2::new_filled(width, height, 0.3f32); // Below background
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     result
         .pixels_mut()
-        .copy_from_slice(less(&pixels, &background).pixels());
+        .copy_from_slice(less(&pixels, &bg).pixels());
     matched_filter_fresh(
         &mut result,
         MatchedFilter {
@@ -385,7 +385,7 @@ fn matched_filter_noise_normalization() {
     let mut pixels = Buffer2::new_filled(width, height, bg_level);
     patterns::add_gaussian_noise(pixels.pixels_mut(), noise_sigma, 42);
 
-    let background = Buffer2::new_filled(width, height, bg_level);
+    let bg = Buffer2::new_filled(width, height, bg_level);
 
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -393,7 +393,7 @@ fn matched_filter_noise_normalization() {
     for axis_ratio in [1.0, 0.7] {
         result
             .pixels_mut()
-            .copy_from_slice(less(&pixels, &background).pixels());
+            .copy_from_slice(less(&pixels, &bg).pixels());
         matched_filter_fresh(
             &mut result,
             MatchedFilter {

@@ -59,7 +59,7 @@ fn register_with_sip_recovers_barrel_distortion() {
         with_sip.transform().transform_type(),
         TransformType::Euclidean
     );
-    assert_eq!(with_sip.num_inliers(), 120);
+    assert_eq!(with_sip.inlier_count(), 120);
     let warp = with_sip.warp_transform();
     for y in (0..=1024).step_by(128) {
         for x in (0..=1024).step_by(128) {
@@ -77,6 +77,6 @@ fn register_with_sip_recovers_barrel_distortion() {
     .unwrap()
     .register(&ref_stars, &target_stars)
     .expect("linear registration should succeed");
-    assert!(no_sip.num_inliers() < 120, "{}", no_sip.num_inliers());
+    assert!(no_sip.inlier_count() < 120, "{}", no_sip.inlier_count());
     assert!(no_sip.rms_error() > 0.1, "{}", no_sip.rms_error());
 }

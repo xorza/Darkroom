@@ -265,7 +265,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use crate::image::background_split::BackgroundSplit;
+    use crate::image::bg_split::BgSplit;
     use crate::image::calibration_state::CalibrationState;
     use crate::image::derived_facts::DerivedFacts;
     use crate::image::mosaic_noise::MosaicNoise;
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn each_transition_moves_only_the_noise_facts_its_rule_names() {
         let noise = |sigma: f32| MosaicNoise {
-            background: [BackgroundSplit {
+            bg: [BgSplit {
                 variance: sigma * sigma,
                 read_share: 0.5,
             }; 3],

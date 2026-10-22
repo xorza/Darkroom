@@ -66,7 +66,7 @@ impl DecodedFitsImage {
 
     /// The image as the `cfa_type` mosaic its selection required.
     pub(super) fn into_cfa(self, cfa_type: CfaType) -> Result<CfaImage, FitsLoadError> {
-        check_gain_channels(self.flat_gain.as_deref(), cfa_type.num_colors())?;
+        check_gain_channels(self.flat_gain.as_deref(), cfa_type.color_count())?;
         let Self {
             mut metadata,
             pixels,

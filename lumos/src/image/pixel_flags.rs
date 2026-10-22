@@ -263,14 +263,14 @@ fn dilate_bytes(bits: &mut [u8], size: Size2us, spec: DilationSpec, scratch: &mu
     let block = reach.len();
     for y in 1..height {
         if y % block != 0 {
-            let (before, current) = prefix.split_at_mut(y * width);
-            or_into(&mut current[..width], &before[(y - 1) * width..]);
+            let (before, cur) = prefix.split_at_mut(y * width);
+            or_into(&mut cur[..width], &before[(y - 1) * width..]);
         }
     }
     for y in (0..height.saturating_sub(1)).rev() {
         if (y + 1) % block != 0 {
-            let (current, after) = suffix.split_at_mut((y + 1) * width);
-            or_into(&mut current[y * width..], &after[..width]);
+            let (cur, after) = suffix.split_at_mut((y + 1) * width);
+            or_into(&mut cur[y * width..], &after[..width]);
         }
     }
     let (prefix, suffix) = (&*prefix, &*suffix);
@@ -572,10 +572,9 @@ mod tests {
                     for x in 0..width {
                         let near = |flag: QualityFlags| {
                             let rows = reach.window(y, height);
-                            let columns = reach.window(x, width);
+                            let cols = reach.window(x, width);
                             (rows.first..=rows.last).any(|sy| {
-                                (columns.first..=columns.last)
-                                    .any(|sx| initial[sy * width + sx] == flag)
+                                (cols.first..=cols.last).any(|sx| initial[sy * width + sx] == flag)
                             })
                         };
                         let idx = y * width + x;

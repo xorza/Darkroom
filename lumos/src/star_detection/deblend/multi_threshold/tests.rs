@@ -98,7 +98,7 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
             .map(|pixel| pixel.value)
             .fold(f32::MAX, f32::min),
         high: component.peak().value,
-        n_thresholds: threshold_count,
+        threshold_count,
     };
     let saddle = pixels[(50, 50)];
     let split_level = (0..=threshold_count)
@@ -112,7 +112,7 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
     let result = deblend_multi_threshold_test(
         &Component::new(&data, &pixels, &labels),
         Ladder {
-            n_thresholds: threshold_count,
+            threshold_count,
             ..Ladder::STANDARD
         },
     );
@@ -157,7 +157,7 @@ fn threshold_ladder_is_exponential_from_floor_to_peak() {
     let ladder = ThresholdLadder {
         low: 0.1,
         high: 1.0,
-        n_thresholds: 10,
+        threshold_count: 10,
     };
     let tolerance = |value: f32| 8.0 * f32::EPSILON * value;
     assert_eq!(ladder.level(0), 0.1);
@@ -477,7 +477,7 @@ fn n_thresholds_effect() {
         deblend_multi_threshold_test(
             &component,
             Ladder {
-                n_thresholds: 4,
+                threshold_count: 4,
                 ..Ladder::STANDARD
             }
         )
@@ -487,7 +487,7 @@ fn n_thresholds_effect() {
     let split = deblend_multi_threshold_test(
         &component,
         Ladder {
-            n_thresholds: 64,
+            threshold_count: 64,
             ..Ladder::STANDARD
         },
     );
@@ -684,7 +684,7 @@ fn a_wide_split_keeps_every_child() {
     let result = deblend_multi_threshold_test(
         &Component::new(&data, &pixels, &labels),
         Ladder {
-            n_thresholds: 64,
+            threshold_count: 64,
             ..Ladder::STANDARD
         },
     );
@@ -728,7 +728,7 @@ fn buffer_reuse_consistency() {
             .map(|p| p.value)
             .fold(f32::INFINITY, f32::min);
         MultiThresholdParams {
-            n_thresholds: 32,
+            threshold_count: 32,
             min_contrast: 0.005,
             min_separation: 3,
             min_area: 1,
@@ -794,7 +794,7 @@ fn single_threshold_level() {
     let result = deblend_multi_threshold_test(
         &Component::new(&data, &pixels, &labels),
         Ladder {
-            n_thresholds: 1,
+            threshold_count: 1,
             ..Ladder::STANDARD
         },
     );
@@ -832,7 +832,7 @@ fn a_region_under_min_area_is_no_object() {
     let split = |min_area| {
         let mut regions = Vec::new();
         MultiThresholdParams {
-            n_thresholds: 32,
+            threshold_count: 32,
             min_contrast: 0.001,
             min_separation: 1,
             min_area,
@@ -875,7 +875,7 @@ fn the_scratch_follows_the_pixels_not_the_box() {
     let mut buffers = DeblendBuffers::default();
     let mut regions = Vec::new();
     MultiThresholdParams {
-        n_thresholds: 32,
+        threshold_count: 32,
         min_contrast: 0.005,
         min_separation: 3,
         min_area: 1,

@@ -212,7 +212,7 @@ impl CfaImage {
     pub(crate) fn set_flat_gain(&mut self, gain: Option<Arc<FlatGain>>) {
         debug_assert!(
             gain.as_ref()
-                .is_none_or(|gain| gain.covers(self.size(), self.cfa_type.num_colors())),
+                .is_none_or(|gain| gain.covers(self.size(), self.cfa_type.color_count())),
             "an image's flat gain covers another image's pixels"
         );
         self.flat_gain = gain;

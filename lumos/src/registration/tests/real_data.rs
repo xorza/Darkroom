@@ -74,7 +74,7 @@ fn register_two_lights() {
     let baseline_rms = result.rms_error();
 
     println!("Registration result:");
-    println!("  Matched stars: {}", result.num_inliers());
+    println!("  Matched stars: {}", result.inlier_count());
     println!("  RMS error:     {baseline_rms:.4} pixels");
 
     let t = result.transform().translation_components();
@@ -136,9 +136,9 @@ fn register_two_lights() {
     );
 
     assert!(
-        result.num_inliers() >= 5,
+        result.inlier_count() >= 5,
         "Expected at least 5 inlier matches, got {}",
-        result.num_inliers()
+        result.inlier_count()
     );
     assert!(
         result.rms_error() < 1.5,

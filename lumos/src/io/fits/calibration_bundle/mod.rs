@@ -263,23 +263,23 @@ impl BundleReader<'_> {
         };
         let table = self.reader.read_table(idx)?;
         let row_count = table.schema().nrows;
-        let column = |name: &'static str| {
+        let col = |name: &'static str| {
             table
                 .column_by_name(name)
-                .and_then(|column| column.raw())
-                .map_err(|_| DefectTableError::Column { column: name })
+                .and_then(|col| col.raw())
+                .map_err(|_| DefectTableError::Col { col: name })
         };
-        let ColumnData::Bytes(kinds) = column("KIND")? else {
-            return Err(DefectTableError::Column { column: "KIND" }.into());
+        let ColumnData::Bytes(kinds) = col("KIND")? else {
+            return Err(DefectTableError::Col { col: "KIND" }.into());
         };
-        let ColumnData::I64(idxs) = column("INDEX")? else {
-            return Err(DefectTableError::Column { column: "INDEX" }.into());
+        let ColumnData::I64(idxs) = col("INDEX")? else {
+            return Err(DefectTableError::Col { col: "INDEX" }.into());
         };
-        let ColumnData::F32(excess) = column("EXCESS")? else {
-            return Err(DefectTableError::Column { column: "EXCESS" }.into());
+        let ColumnData::F32(excess) = col("EXCESS")? else {
+            return Err(DefectTableError::Col { col: "EXCESS" }.into());
         };
         if kinds.len() != row_count || idxs.len() != row_count || excess.len() != row_count {
-            return Err(DefectTableError::ColumnLength.into());
+            return Err(DefectTableError::ColLen.into());
         }
         let mut hot = HotPixels::default();
         let mut cold = Vec::new();

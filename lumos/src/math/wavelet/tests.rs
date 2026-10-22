@@ -142,7 +142,7 @@ fn every_tier_smooths_a_row_as_the_scalar_order_does() {
                     .collect()
             })
             .collect();
-        let column: Vec<f32> = (0..width)
+        let col: Vec<f32> = (0..width)
             .map(|x| {
                 B3[0] * rows[0][x]
                     + B3[1] * rows[1][x]
@@ -153,13 +153,13 @@ fn every_tier_smooths_a_row_as_the_scalar_order_does() {
             .collect();
         for step in [1, 2, 4] {
             let expected: Vec<u32> = (0..width)
-                .map(|x| reference(&column, x, step).to_bits())
+                .map(|x| reference(&col, x, step).to_bits())
                 .collect();
             for tier in IsaTier::supported() {
                 let (mut scratch, mut out) = (vec![0.0; width], vec![0.0; width]);
                 tier.run(SmoothRow {
                     rows: [&rows[0], &rows[1], &rows[2], &rows[3], &rows[4]],
-                    column: &mut scratch,
+                    col: &mut scratch,
                     out: &mut out,
                     step,
                 });

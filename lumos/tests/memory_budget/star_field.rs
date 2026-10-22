@@ -111,9 +111,9 @@ impl StarField {
                     let pixel = [centre[0] as isize + dx, centre[1] as isize + dy];
                     let offset = [pixel[0] as f32 - centre[0], pixel[1] as f32 - centre[1]];
                     let distance = offset[0] * offset[0] + offset[1] * offset[1];
-                    let [column, row] = pixel
+                    let [col, row] = pixel
                         .map(|at| usize::try_from(at).expect("the stars keep clear of the edges"));
-                    pixels[row * side + column] += peak * (-distance / (2.0 * sigma * sigma)).exp();
+                    pixels[row * side + col] += peak * (-distance / (2.0 * sigma * sigma)).exp();
                 }
             }
         }

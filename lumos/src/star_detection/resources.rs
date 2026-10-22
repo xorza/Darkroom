@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
-use crate::star_detection::background::workspace::BackgroundWorkspace;
+use crate::star_detection::bg::workspace::BgWorkspace;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
@@ -28,7 +28,7 @@ pub(crate) struct DetectionResources {
     /// Threshold masks, dilation scratch.
     bitmasks: ScratchPool<BitBuffer2>,
     pub(crate) labeler: Labeler,
-    pub(crate) background: BackgroundWorkspace,
+    pub(crate) bg: BgWorkspace,
     /// The deblenders' working sets, one per rayon fold split.
     pub(crate) deblend: ScratchPool<DeblendBuffers>,
     /// The per-tile and per-star values a detection's medians sort, refilled for each.
@@ -91,7 +91,7 @@ impl DetectionResources {
         self.floats.reshape(dimensions);
         self.bitmasks.reshape(dimensions);
         self.labeler = Labeler::default();
-        self.background.clear();
+        self.bg.clear();
         self.deblend.clear();
     }
 }

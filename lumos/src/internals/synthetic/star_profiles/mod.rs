@@ -210,9 +210,9 @@ impl SyntheticStar {
         }
     }
 
-    /// A `size` buffer on a flat `background` holding exactly this star, rendered untruncated.
-    pub(crate) fn stamp(self, size: Size2us, background: f32) -> Buffer2<f32> {
-        let mut pixels = Buffer2::new_filled(size.width, size.height, background);
+    /// A `size` buffer on a flat `bg` holding exactly this star, rendered untruncated.
+    pub(crate) fn stamp(self, size: Size2us, bg: f32) -> Buffer2<f32> {
+        let mut pixels = Buffer2::new_filled(size.width, size.height, bg);
         self.add_exact(&mut pixels);
         pixels
     }

@@ -48,7 +48,7 @@ pub(super) struct GaussianFit {
 }
 
 /// The elliptical Gaussian for L-M optimization (7 parameters):
-/// `[x0, y0, amplitude, a, b, c, background]`.
+/// `[x0, y0, amplitude, a, b, c, bg]`.
 #[derive(Debug)]
 struct Gaussian2D {
     /// The σ the fit may take, in px.
@@ -162,12 +162,7 @@ impl GaussianFit {
     /// ([`profile_problem::fit_is_plausible`]), or an amplitude or shape pinned at one of
     /// [`Gaussian2D::constrain`]'s bounds.
     pub(super) fn new(inputs: FitInputs<'_>) -> Option<Self> {
-        let FitInputs {
-            pos,
-            grid,
-            background,
-            ..
-        } = inputs;
+        let FitInputs { pos, grid, bg, .. } = inputs;
         let mut fit = StampFit::prepare::<7>(inputs)?;
         let amplitude_seed = fit.amplitude_seed()?;
 
@@ -180,7 +175,7 @@ impl GaussianFit {
             curvature,
             0.0,
             curvature,
-            f64::from(background),
+            f64::from(bg),
         ];
 
         let mut model = Gaussian2D::new(
@@ -262,7 +257,7 @@ mod internals {
         /// Amplitude of Gaussian.
         pub(super) amplitude: f32,
         /// Background level.
-        pub(super) background: f32,
+        pub(super) bg: f32,
         /// RMS residual of fit.
         pub(super) rms_residual: f32,
         /// Number of iterations used.
@@ -286,10 +281,10 @@ mod internals {
         /// Derive the diagnostics from the optimizer's report, where `n` is the sample count the
         /// χ² was summed over. Gated with the struct, so a release build runs none of this.
         pub(super) fn of(result: &LmFit<7>, n: usize, order: usize) -> Self {
-            let [_, _, amplitude, _, _, _, background] = result.params;
+            let [_, _, amplitude, _, _, _, bg] = result.params;
             Self {
                 amplitude: amplitude as f32,
-                background: background as f32,
+                bg: bg as f32,
                 rms_residual: (result.chi2 / n as f64).sqrt() as f32,
                 iterations: result.iterations,
                 order,

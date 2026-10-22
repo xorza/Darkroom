@@ -140,7 +140,7 @@ pub enum FitsRefusal {
         maximum: f32,
     },
     /// A section of `rows` of `channel` read as `samples`, not the `expected` count.
-    SectionLength {
+    SectionLen {
         channel: usize,
         rows: Range<usize>,
         samples: usize,
@@ -381,7 +381,7 @@ impl Display for FitsRefusal {
                 "floating-point samples reach {maximum}, but nothing declares their scale; give \
                  FitsFloatScale::FullScale, or a DATAMAX"
             ),
-            Self::SectionLength {
+            Self::SectionLen {
                 channel,
                 rows,
                 samples,
@@ -499,7 +499,7 @@ impl Display for FitsRefusal {
                     f,
                     "{}: shape {shape:?} is not one or three {}x{} grids over the image's {}x{}",
                     LumosExtension::Gain,
-                    grid.columns,
+                    grid.cols,
                     grid.rows,
                     image.width,
                     image.height

@@ -16,19 +16,17 @@
 //! *not* track that type field-for-field.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{
-    BackgroundMode, ColorMode, ExtractBackground, Scnr, ScnrProtection, Stretch, StretchMethod,
-};
+use lumos::{BgMode, ColorMode, ExtractBg, Scnr, ScnrProtection, Stretch, StretchMethod};
 
 use crate::astro::config::preset::Preset;
 
 /// The pick is the extraction mode; every other field keeps its default.
-impl Preset for BackgroundMode {
-    type Knobs = ExtractBackground;
-    type Config = ExtractBackground;
+impl Preset for BgMode {
+    type Knobs = ExtractBg;
+    type Config = ExtractBg;
 
-    fn config(self) -> ExtractBackground {
-        ExtractBackground {
+    fn config(self) -> ExtractBg {
+        ExtractBg {
             mode: self,
             ..Default::default()
         }
@@ -74,12 +72,12 @@ impl Preset for StretchMethodChoice {
 }
 
 /// The editable knobs behind a [`Stretch`]. Both methods take a
-/// `target_background` and a `shadow_sigmas`, which sets their black point.
+/// `target_bg` and a `shadow_sigmas`, which sets their black point.
 #[derive(Debug, Clone, Introspect)]
 #[config(type_id = "b08bb9a1-db12-43d4-aa57-fe3e3732e917", name = "Stretch")]
 pub(crate) struct StretchKnobs {
     method: StretchMethodChoice,
-    target_background: f32,
+    target_bg: f32,
     shadow_sigmas: f32,
     color: ColorMode,
 }
@@ -90,7 +88,7 @@ impl Default for StretchKnobs {
     fn default() -> Self {
         Self {
             method: StretchMethodChoice::AutoAsinh,
-            target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
+            target_bg: StretchMethod::AUTO_TARGET_BG,
             shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
             color: Stretch::default().color,
         }
@@ -102,11 +100,11 @@ impl From<StretchKnobs> for Stretch {
         let method = match knobs.method {
             StretchMethodChoice::AutoAsinh => StretchMethod::AutoAsinh {
                 shadow_sigmas: knobs.shadow_sigmas,
-                target_background: knobs.target_background,
+                target_bg: knobs.target_bg,
             },
             StretchMethodChoice::AutoStf => StretchMethod::AutoStf {
                 shadow_sigmas: knobs.shadow_sigmas,
-                target_background: knobs.target_background,
+                target_bg: knobs.target_bg,
             },
         };
         Self {
@@ -120,8 +118,8 @@ impl From<StretchKnobs> for Stretch {
 mod tests {
     use common::{Introspect, IntrospectEnum};
     use lumos::{
-        BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, Stretch,
-        StretchMethod, Threshold,
+        BgMode, ColorMode, Denoise, ExtractBg, Hdr, LocalContrast, Stretch, StretchMethod,
+        Threshold,
     };
 
     use crate::astro::config::processing::{StretchKnobs, StretchMethodChoice};
@@ -138,7 +136,7 @@ mod tests {
     #[test]
     fn builder_ports_follow_the_lumos_field_order() {
         assert_eq!(
-            field_names::<ExtractBackground>(),
+            field_names::<ExtractBg>(),
             [
                 "tile_size",
                 "degree",
@@ -159,7 +157,7 @@ mod tests {
         );
         assert_eq!(
             field_names::<StretchKnobs>(),
-            ["method", "target_background", "shadow_sigmas", "color"]
+            ["method", "target_bg", "shadow_sigmas", "color"]
         );
     }
 
@@ -168,7 +166,7 @@ mod tests {
     /// would change what is already on disk.
     #[test]
     fn enum_ports_keep_their_stored_variant_names() {
-        assert_eq!(BackgroundMode::VARIANTS, ["subtract", "divide"]);
+        assert_eq!(BgMode::VARIANTS, ["subtract", "divide"]);
         assert_eq!(Threshold::VARIANTS, ["hard", "soft"]);
         assert_eq!(ColorMode::VARIANTS, ["color_preserving", "per_channel"]);
         assert_eq!(StretchMethodChoice::VARIANTS, ["auto_asinh", "auto_stf"]);
@@ -182,36 +180,36 @@ mod tests {
 
         let stretch: Stretch = StretchKnobs {
             method: StretchMethodChoice::AutoStf,
-            target_background: 0.25,
+            target_bg: 0.25,
             shadow_sigmas: 2.0,
             color: ColorMode::PerChannel,
         }
         .into();
         let StretchMethod::AutoStf {
             shadow_sigmas,
-            target_background,
+            target_bg,
         } = stretch.method
         else {
             panic!("expected auto-STF");
         };
         assert_eq!(shadow_sigmas, 2.0);
-        assert_eq!(target_background, 0.25);
+        assert_eq!(target_bg, 0.25);
         assert_eq!(stretch.color, ColorMode::PerChannel);
 
         let stretch: Stretch = StretchKnobs {
             method: StretchMethodChoice::AutoAsinh,
-            target_background: 0.3,
+            target_bg: 0.3,
             shadow_sigmas: 1.5,
             color: ColorMode::ColorPreserving,
         }
         .into();
         let StretchMethod::AutoAsinh {
             shadow_sigmas,
-            target_background,
+            target_bg,
         } = stretch.method
         else {
             panic!("expected auto-asinh");
         };
-        assert_eq!((shadow_sigmas, target_background), (1.5, 0.3));
+        assert_eq!((shadow_sigmas, target_bg), (1.5, 0.3));
     }
 }

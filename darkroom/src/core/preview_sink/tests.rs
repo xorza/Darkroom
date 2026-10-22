@@ -34,7 +34,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
     // input slot back after the call, which the invoker does not hand out.
     let invoke = async |value: i64| {
         let mut ctx = CtxManager::default();
-        ctx.set_current_node(first);
+        ctx.set_cur_node(first);
         let mut inputs = [DynamicValue::Static(ConstValue::Int(value))];
         func.lambda()
             .invoke(Invocation {

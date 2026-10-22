@@ -46,7 +46,7 @@ impl CentroidMethod {
 
 /// Method for computing local background during centroid refinement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LocalBackgroundMethod {
+pub enum LocalBgMethod {
     /// Use the global background map (default, fastest).
     #[default]
     GlobalMap,
@@ -62,7 +62,7 @@ pub struct MeasurementConfig {
     /// Centroid refinement algorithm.
     pub centroid_method: CentroidMethod,
     /// Background source used for per-star measurement.
-    pub local_background: LocalBackgroundMethod,
+    pub local_bg: LocalBgMethod,
     /// Electrons per normalized unit of the samples, for the photon noise of the star's own light
     /// in the SNR and the fit weights. A pixel value of `1.0` holds this many electrons: a physical
     /// gain converts as `electrons_per_adu · adu_per_normalized_unit`. `None` takes the noise to be
@@ -76,7 +76,7 @@ impl Default for MeasurementConfig {
     fn default() -> Self {
         Self {
             centroid_method: CentroidMethod::WeightedMoments,
-            local_background: LocalBackgroundMethod::GlobalMap,
+            local_bg: LocalBgMethod::GlobalMap,
             electrons_per_unit: None,
         }
     }

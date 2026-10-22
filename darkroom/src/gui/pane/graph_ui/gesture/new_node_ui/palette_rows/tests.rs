@@ -22,12 +22,9 @@ fn library() -> Library {
 /// into one `PaletteRows` the whole test reuses.
 fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(String, Vec<String>)> {
     rows.refilter(library, library.iter().map(PaletteEntry::Func), query_lc);
-    rows.columns()
-        .map(|column| {
-            let entries: Vec<_> = column
-                .iter()
-                .map(|row| row.entry(library).unwrap())
-                .collect();
+    rows.cols()
+        .map(|col| {
+            let entries: Vec<_> = col.iter().map(|row| row.entry(library).unwrap()).collect();
             (
                 entries[0].category().to_owned(),
                 entries.iter().map(|e| e.name().to_owned()).collect(),
@@ -44,9 +41,8 @@ fn shape(rows: &mut PaletteRows, library: &Library, query_lc: &str) -> Vec<(Stri
 fn rows_sort_into_one_contiguous_run_per_category() {
     let library = library();
     let mut rows = PaletteRows::default();
-    let owned = |columns: &[(&str, &[&str])]| -> Vec<(String, Vec<String>)> {
-        columns
-            .iter()
+    let owned = |cols: &[(&str, &[&str])]| -> Vec<(String, Vec<String>)> {
+        cols.iter()
             .map(|(category, names)| {
                 (
                     (*category).to_owned(),

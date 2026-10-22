@@ -47,10 +47,10 @@ pub(crate) struct SelectionUi {
 struct RubberBand {
     /// Anchor + live corner in inner-canvas pre-transform (world)
     /// coords — the same frame node positions live in — so the rect and
-    /// its hit-test need no extra transform. `current` is refreshed from
+    /// its hit-test need no extra transform. `cur` is refreshed from
     /// the pointer every frame.
     start: Vec2,
-    current: Vec2,
+    cur: Vec2,
     /// Pre-drag selection captured at latch (empty unless Shift extends).
     /// The swept set unions onto this each frame, so we never re-read
     /// `GraphView::selected` mid-drag — no dependency on the document staying
@@ -64,8 +64,8 @@ struct RubberBand {
 
 impl RubberBand {
     fn rect(&self) -> Rect {
-        let min = self.start.min(self.current);
-        let max = self.start.max(self.current);
+        let min = self.start.min(self.cur);
+        let max = self.start.max(self.cur);
         Rect::new(min.x, min.y, max.x - min.x, max.y - min.y)
     }
 }
@@ -109,7 +109,7 @@ impl SelectionUi {
             let w = graph_ctx.viewport().to_world(p);
             let band = RubberBand {
                 start: w,
-                current: w,
+                cur: w,
                 // Shift is a gesture *parameter* (extend vs replace), not
                 // arbitration — read it here, not in the classifier.
                 // Captured once, so the per-frame union never re-reads the
@@ -133,7 +133,7 @@ impl SelectionUi {
             return;
         };
         if let Some(p) = resp.pointer_local {
-            band.current = graph_ctx.viewport().to_world(p);
+            band.cur = graph_ctx.viewport().to_world(p);
         }
         let rect = band.rect();
         // Swept into the reused preview buffer: refilled from scratch every

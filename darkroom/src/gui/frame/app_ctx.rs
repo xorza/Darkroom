@@ -77,7 +77,7 @@ impl<'a> AppCtx<'a> {
     }
 
     /// The last failure or warning (the engine's
-    /// [`StatusLog::current`](crate::core::status_log::StatusLog::current)),
+    /// [`StatusLog::cur`](crate::core::status_log::StatusLog::cur)),
     /// shown in the status bar until a success of its family clears it.
     pub(crate) const fn status_message(self) -> Option<StatusMessage<'a>> {
         self.status.message

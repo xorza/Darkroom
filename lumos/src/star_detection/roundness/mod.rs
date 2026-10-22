@@ -92,8 +92,8 @@ impl<'a> Cutout<'a> {
         }
     }
 
-    const fn at(&self, row: usize, column: usize) -> f64 {
-        self.values[(self.origin + row) * self.stride + self.origin + column]
+    const fn at(&self, row: usize, col: usize) -> f64 {
+        self.values[(self.origin + row) * self.stride + self.origin + col]
     }
 
     /// `2·(−Q₁ + Q₂ − Q₃ + Q₄)/Σ|v|`, with the centre pixel left out. Rows and columns from the
@@ -105,16 +105,16 @@ impl<'a> Cutout<'a> {
         let size = 2 * c + 1;
         let (mut signed, mut absolute) = (0.0f64, 0.0f64);
         for row in 0..size {
-            for column in 0..size {
-                if row == c && column == c {
+            for col in 0..size {
+                if row == c && col == c {
                     continue;
                 }
-                let value = self.at(row, column);
-                let sign = if row <= c && column > c {
+                let value = self.at(row, col);
+                let sign = if row <= c && col > c {
                     -1.0
-                } else if row < c && column <= c {
+                } else if row < c && col <= c {
                     1.0
-                } else if row >= c && column < c {
+                } else if row >= c && col < c {
                     -1.0
                 } else {
                     1.0

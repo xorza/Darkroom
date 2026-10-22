@@ -15,8 +15,8 @@ use crate::math::size2us::Size2us;
 /// either gain. A σ of 0 is floored at one step at the sky, 2⁻²³.
 #[test]
 fn the_noise_adds_the_photons_above_the_local_sky() {
-    let pixel = |noise: f32, flat_gain: f32| PixelBackground {
-        local: LocalBackground { sky: 1.0, noise },
+    let pixel = |noise: f32, flat_gain: f32| PixelBg {
+        local: LocalBg { sky: 1.0, noise },
         flat_gain,
     };
     let gain = NoiseModel {
@@ -53,7 +53,7 @@ fn a_pixel_reads_its_mesh_and_its_flat_gain() {
         |_| false,
     );
     for (flat_gain, expected) in [(None, 1.0), (Some(&gain), 2.0)] {
-        let pixel = PixelBackgrounds {
+        let pixel = PixelBgs {
             mesh: &mesh,
             flat_gain,
         }

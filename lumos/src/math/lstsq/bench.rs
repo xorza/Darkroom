@@ -44,12 +44,12 @@ fn design(points: usize, degree: usize) -> DMatrix<f64> {
     let terms: Vec<(i32, i32)> = (0..=degree as i32)
         .flat_map(|total| (0..=total).map(move |i| (i, total - i)))
         .collect();
-    DMatrix::from_fn(points, terms.len(), |row, column| {
+    DMatrix::from_fn(points, terms.len(), |row, col| {
         let (x, y) = (
             f64::from(coordinates[2 * row].tanh()),
             f64::from(coordinates[2 * row + 1].tanh()),
         );
-        let (i, j) = terms[column];
+        let (i, j) = terms[col];
         x.powi(i) * y.powi(j)
     })
 }

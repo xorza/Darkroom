@@ -33,7 +33,7 @@ fn every_method_on_a_sub_pixel_grid() {
             pixels: &gaussian,
             pos: seed,
             grid: &StampGrid::new(8),
-            background: 0.1,
+            bg: 0.1,
             noise: None,
         })
         .expect("the Gaussian fit lands");
@@ -58,7 +58,7 @@ fn every_method_on_a_sub_pixel_grid() {
                 pixels: &moffat,
                 pos: seed,
                 grid: &StampGrid::new(8),
-                background: 0.1,
+                bg: 0.1,
                 noise: None,
             },
             beta,

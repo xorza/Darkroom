@@ -15,23 +15,23 @@ use crate::combine::stack_config::small_n::SmallN;
 use crate::internals::invariance::Affine;
 use crate::internals::test_rng::TestRng;
 
-/// A pixel's samples, each of background noise σ `background`.
+/// A pixel's samples, each of background noise σ `bg`.
 #[derive(Debug, Clone, Copy)]
 struct NoisySamples<'a> {
     values: &'a [f32],
-    background: f32,
+    bg: f32,
 }
 
 /// The gather positions `rejection` keeps of `samples`, ascending, keeping `min_survivors` at the
 /// least.
 fn kept_with(rejection: Rejection, samples: NoisySamples<'_>, min_survivors: usize) -> Vec<usize> {
-    let NoisySamples { values, background } = samples;
+    let NoisySamples { values, bg } = samples;
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(values);
-    let variances = vec![background * background; values.len()];
+    let variances = vec![bg * bg; values.len()];
     let zeros = vec![0.0; values.len()];
-    let noise = NoiseColumns {
-        background: &variances,
+    let noise = NoiseCols {
+        bg: &variances,
         sky: &zeros,
         per_unit: &zeros,
     };
@@ -48,10 +48,7 @@ fn kept_with(rejection: Rejection, samples: NoisySamples<'_>, min_survivors: usi
 fn kept(rejection: Rejection, values: &[f32]) -> Vec<usize> {
     kept_with(
         rejection,
-        NoisySamples {
-            values,
-            background: 0.0,
-        },
+        NoisySamples { values, bg: 0.0 },
         DEFAULT_MIN_SURVIVORS,
     )
 }
@@ -327,7 +324,7 @@ fn the_background_floors_a_window_of_tied_integers() {
             Rejection::sigma_clip(2.5),
             NoisySamples {
                 values: &values,
-                background: 0.7 * scale
+                bg: 0.7 * scale
             },
             DEFAULT_MIN_SURVIVORS
         ),
@@ -357,13 +354,13 @@ fn every_method_decides_the_same_at_every_scale() {
         Rejection::gesd(),
         Rejection::trim(10.0),
     ] {
-        for background in [0.0, 1e-4] {
+        for bg in [0.0, 1e-4] {
             let kept_under = |case: Affine| {
                 kept_with(
                     rejection,
                     NoisySamples {
                         values: &case.apply_all(&values),
-                        background: background * case.scale,
+                        bg: bg * case.scale,
                     },
                     DEFAULT_MIN_SURVIVORS,
                 )
@@ -510,7 +507,7 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
 fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
     let mut rng = ChaCha8Rng::seed_from_u64(0x51ed_270b_9a4c_33e1);
     let mut scratch = ScratchBuffers::default();
-    let mut previous = f64::INFINITY;
+    let mut prev = f64::INFINITY;
     for (count, trials, reference, per_trial_sd, reference_trials) in [
         (20usize, 5000usize, 0.011_638, 0.615, 1_000_000.0),
         (50, 2000, 0.006_147, 0.681, 400_000.0),
@@ -538,11 +535,8 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
             (share - reference).abs() <= 4.0 * standard_error,
             "{count} samples: rejected {share}, reference {reference} ± {standard_error}"
         );
-        assert!(
-            share < previous,
-            "{count} samples: {share} after {previous}"
-        );
-        previous = share;
+        assert!(share < prev, "{count} samples: {share} after {prev}");
+        prev = share;
     }
 }
 
@@ -686,8 +680,8 @@ fn sigma_clip_and_winsorized_reject_clean_data_at_their_reference_rates() {
             40_000.0,
         ),
     ] {
-        let noise = floor.then(|| NoiseColumns {
-            background: &unit[..count],
+        let noise = floor.then(|| NoiseCols {
+            bg: &unit[..count],
             sky: &zeros[..count],
             per_unit: &zeros[..count],
         });
@@ -1017,7 +1011,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
             Rejection::sigma_clip(2.5),
             NoisySamples {
                 values: &tied,
-                background: 0.0
+                bg: 0.0
             },
             3
         ),
@@ -1028,7 +1022,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
             Rejection::sigma_clip(2.5),
             NoisySamples {
                 values: &tied,
-                background: 0.0
+                bg: 0.0
             },
             9
         ),
@@ -1057,7 +1051,7 @@ fn the_driver_keeps_the_minimum_nearest_the_centre() {
                     rejection,
                     NoisySamples {
                         values: &values,
-                        background: 0.0,
+                        bg: 0.0,
                     },
                     minimum,
                 )
@@ -1191,8 +1185,8 @@ fn a_mean_weighs_each_survivor_by_its_own_weight() {
 fn the_survivors_make_the_sample() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
     let mut values = ramp;
-    let noise = NoiseColumns {
-        background: &[0.25; 8],
+    let noise = NoiseCols {
+        bg: &[0.25; 8],
         sky: &[0.5; 8],
         per_unit: &[0.25; 8],
     };
@@ -1235,15 +1229,15 @@ fn the_survivors_make_the_sample() {
 fn the_gathered_noise_floors_the_spread() {
     let values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5];
     let zeros = [0.0; 8];
-    let survivors = |background: Option<&[f32]>| {
+    let survivors = |bg: Option<&[f32]>| {
         let mut values = values;
         let mut scratch = ScratchBuffers::default();
         let sample = mean(Rejection::sigma_clip(2.0), SampleQuality::Measured)(
             PixelSamples {
                 values: &mut values,
                 weights: &[1.0; 8],
-                noise: background.map(|background| NoiseColumns {
-                    background,
+                noise: bg.map(|bg| NoiseCols {
+                    bg,
                     sky: &zeros,
                     per_unit: &zeros,
                 }),
@@ -1267,11 +1261,11 @@ fn the_gathered_noise_floors_the_spread() {
 #[test]
 fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
     let values = [99.0, 100.0, 100.0, 101.0, 100.0, 115.0];
-    let background = [0.01; 6];
+    let bg = [0.01; 6];
     let sky = [0.0; 6];
     let per_unit = [1.0; 6];
-    let noise = NoiseColumns {
-        background: &background,
+    let noise = NoiseCols {
+        bg: &bg,
         sky: &sky,
         per_unit: &per_unit,
     };
@@ -1298,10 +1292,10 @@ fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
 #[test]
 fn the_ccd_model_rejects_each_sample_by_its_own_noise() {
     let values = [100.0, 98.5, 100.0, 99.0, 100.05, 101.0, 99.95, 103.0, 100.4];
-    let background = [0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01];
+    let bg = [0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01, 4.0, 0.01];
     let zeros = [0.0; 9];
-    let noise = NoiseColumns {
-        background: &background,
+    let noise = NoiseCols {
+        bg: &bg,
         sky: &zeros,
         per_unit: &zeros,
     };

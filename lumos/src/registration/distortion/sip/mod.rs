@@ -332,8 +332,8 @@ impl<'a> SipSystem<'a> {
             let root = w.sqrt();
             evaluate_basis(self.norm.normalize(r), self.order.terms(), &mut basis[..k]);
             design[(row, 0)] = root;
-            for (column, &value) in basis[..k].iter().enumerate() {
-                design[(row, 1 + column)] = root * value;
+            for (col, &value) in basis[..k].iter().enumerate() {
+                design[(row, 1 + col)] = root * value;
             }
             let rest = t - linear * r;
             rhs[(row, 0)] = root * rest.x;
@@ -389,25 +389,25 @@ impl<'a> SipSystem<'a> {
                 DMat2::from_cols_array(&[cos, sin, -sin, cos]),
             )
         };
-        let (mut previous_angle, mut previous) = (start, at(start)?);
+        let (mut prev_angle, mut prev) = (start, at(start)?);
         let mut angle = start + 1e-6;
-        let mut current = at(angle)?;
+        let mut cur = at(angle)?;
         for _ in 0..MAX_SECANT_STEPS {
-            let slope = current.angle_derivative - previous.angle_derivative;
-            if current.angle_derivative == 0.0 || slope == 0.0 {
+            let slope = cur.angle_derivative - prev.angle_derivative;
+            if cur.angle_derivative == 0.0 || slope == 0.0 {
                 break;
             }
-            let next = angle - current.angle_derivative * (angle - previous_angle) / slope;
+            let next = angle - cur.angle_derivative * (angle - prev_angle) / slope;
             let step = (next - angle).abs();
-            previous_angle = angle;
-            previous = current;
+            prev_angle = angle;
+            prev = cur;
             angle = next;
-            current = at(angle)?;
+            cur = at(angle)?;
             if step <= 4.0 * f64::EPSILON * angle.abs().max(1.0) {
                 break;
             }
         }
-        Some(current.fit)
+        Some(cur.fit)
     }
 
     /// `A = [a −b; b a]`: the two shared coefficients couple the axes, so both rows of every pair
@@ -436,9 +436,9 @@ impl<'a> SipSystem<'a> {
             design[(x, 3)] = -root * u.y;
             design[(y, 2)] = root * u.y;
             design[(y, 3)] = root * u.x;
-            for (column, &value) in basis[..k].iter().enumerate() {
-                design[(x, 4 + column)] = root * value;
-                design[(y, 4 + k + column)] = root * value;
+            for (col, &value) in basis[..k].iter().enumerate() {
+                design[(x, 4 + col)] = root * value;
+                design[(y, 4 + k + col)] = root * value;
             }
             rhs[(x, 0)] = root * t.x;
             rhs[(y, 0)] = root * t.y;
@@ -483,8 +483,8 @@ impl<'a> SipSystem<'a> {
             design[(row, 0)] = root;
             design[(row, 1)] = root * u.x;
             design[(row, 2)] = root * u.y;
-            for (column, &value) in basis[..k].iter().enumerate() {
-                design[(row, 3 + column)] = root * value;
+            for (col, &value) in basis[..k].iter().enumerate() {
+                design[(row, 3 + col)] = root * value;
             }
             rhs[(row, 0)] = root * t.x;
             rhs[(row, 1)] = root * t.y;
@@ -629,8 +629,8 @@ pub(crate) mod internals {
                 let target = self
                     .norm
                     .normalize_delta(jacobian.inverse() * (t - transform.apply(r)));
-                for (column, &value) in basis[..k].iter().enumerate() {
-                    design[(row, column)] = root * value;
+                for (col, &value) in basis[..k].iter().enumerate() {
+                    design[(row, col)] = root * value;
                 }
                 rhs[(row, 0)] = root * target.x;
                 rhs[(row, 1)] = root * target.y;
@@ -664,11 +664,11 @@ pub(crate) mod internals {
                 // A correction held in normalized units is `scale` times larger in pixels, so the
                 // residual is divided by the scale instead of every column multiplied by it.
                 let residual = self.norm.normalize_delta(t - transform.apply(r));
-                for (column, &value) in basis[..k].iter().enumerate() {
-                    design[(2 * i, column)] = root * jacobian.x_axis.x * value;
-                    design[(2 * i, k + column)] = root * jacobian.y_axis.x * value;
-                    design[(2 * i + 1, column)] = root * jacobian.x_axis.y * value;
-                    design[(2 * i + 1, k + column)] = root * jacobian.y_axis.y * value;
+                for (col, &value) in basis[..k].iter().enumerate() {
+                    design[(2 * i, col)] = root * jacobian.x_axis.x * value;
+                    design[(2 * i, k + col)] = root * jacobian.y_axis.x * value;
+                    design[(2 * i + 1, col)] = root * jacobian.x_axis.y * value;
+                    design[(2 * i + 1, k + col)] = root * jacobian.y_axis.y * value;
                 }
                 rhs[(2 * i, 0)] = root * residual.x;
                 rhs[(2 * i + 1, 0)] = root * residual.y;

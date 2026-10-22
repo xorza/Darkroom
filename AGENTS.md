@@ -126,10 +126,16 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   `Const` or `Wire`; the GUI draws a wire and an event subscription alike as
   wires. Refused: edge, connection and link for it — "edge" is the graph's
   general word for a wire or a subscription, and "link" a text hyperlink.
-- **Fixed short forms.** `idx`, `pos`, `ctx`/`Ctx`, `dir`, and their plurals
-  with `s` (`idxs`, `poss`), in every name; prose and test names keep whole
-  words. A name a foreign API sets keeps its own form, as `Iterator::position`
-  and `std::task::Context`.
+- **Fixed short forms.** `idx`, `pos`, `ctx`/`Ctx`, `dir`, `bg`, `col`,
+  `exec`, `desc`, `cur`, `prev`, and their plurals with `s` (`idxs`, `poss`),
+  in every name; prose and test names keep whole words. A name a foreign API
+  sets keeps its own form, as `Iterator::position`, `std::task::Context` and
+  palantir's `Background`; a term of another meaning keeps its own, as a
+  sensor's dark current.
+- **`count` is a count, `len` a count of elements or bytes, `length` a
+  geometric length.** `*_count`, as std's `Iterator::count`; `len` as std's
+  `len()`. Refused: `num_*` and `n_*` for a count — `SmallN` is the statistics
+  term — and `length` for bytes.
 - **`*Config` is what a caller sets, `*Params` what a stage derives** from a
   config and reads. Refused: `*Options` and `*Settings`.
 - **An acronym is one word,** as the Rust API Guidelines case it: `GraphUi`,
@@ -137,4 +143,4 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
 - **A type name keeps one meaning in the workspace.** Where two crates would
   declare one name past its module, the narrower use takes a qualified one, as
   `DrawablePreview` beside `lumos::PreviewImage`; an error and its alias carry
-  their domain, as `ExecutionError` and `ExecutionResult`.
+  their domain, as `ExecError` and `ExecResult`.

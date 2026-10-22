@@ -170,7 +170,7 @@ impl App {
                 preferences: &mut preferences,
             },
             &mut status,
-            runtime.library.current(),
+            runtime.library.cur(),
         );
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
@@ -212,7 +212,7 @@ impl App {
             AppCommand::File(FileCommand::Open) => {
                 self.guard_discard(PendingTransition::OpenPicked);
             }
-            AppCommand::File(FileCommand::Save) => self.save_current(),
+            AppCommand::File(FileCommand::Save) => self.save_cur(),
             AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
             AppCommand::Run(RunCommand::Once) => self.run_graph(),
             AppCommand::Run(RunCommand::Node(node_id)) => self.run_node(node_id),
@@ -330,7 +330,7 @@ impl App {
             return;
         };
         if outcome.choice == DiscardChoice::Save {
-            self.save_current();
+            self.save_cur();
         }
         let resolution = outcome.resolve(self.session.open.dirty);
         if resolution.silence_prompt {
@@ -398,7 +398,7 @@ impl App {
                 input: pick.port,
                 to: Some(Binding::Const(value)),
             },
-            self.runtime.library.current(),
+            self.runtime.library.cur(),
         )
     }
 
@@ -458,7 +458,7 @@ impl App {
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
     fn load_document(&mut self, path: &Path) {
-        let loaded = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
+        let loaded = match OpenDocument::load(path.to_path_buf(), self.runtime.library.cur()) {
             Ok(loaded) => loaded,
             Err(err) => {
                 self.status
@@ -472,7 +472,7 @@ impl App {
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
-    fn save_current(&mut self) {
+    fn save_cur(&mut self) {
         match self.session.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
@@ -670,12 +670,12 @@ impl palantir::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = Arc::clone(self.runtime.library.current());
+        let library = Arc::clone(self.runtime.library.cur());
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
         let ctx = AppCtx::new(&self.theme, &library, &self.run_state).with_status(StatusInputs {
-            message: self.status.current(),
+            message: self.status.cur(),
             process_memory: self.process_memory.sample(Instant::now()),
         });
         // Reset here rather than inside the frame: the queue is `App`'s, and

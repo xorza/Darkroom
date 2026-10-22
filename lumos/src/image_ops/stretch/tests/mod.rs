@@ -179,17 +179,14 @@ fn auto_stretches_report_an_unreachable_background() {
         (1e-5, 1.0, false),
         (0.999_99, 1.0, true),
     ] {
-        let asinh = Background { median, sigma }.auto_asinh_curve(1.5, 0.2);
+        let asinh = Bg { median, sigma }.auto_asinh_curve(1.5, 0.2);
         assert_eq!(
             asinh.is_err(),
             asinh_fails,
             "asinh: median {median}, sigma {sigma}"
         );
         for (name, curve) in [
-            (
-                AutoStretch::Stf,
-                Background { median, sigma }.stf_curve(1.5, 0.2),
-            ),
+            (AutoStretch::Stf, Bg { median, sigma }.stf_curve(1.5, 0.2)),
             (AutoStretch::Asinh, asinh),
         ]
         .into_iter()
@@ -198,7 +195,7 @@ fn auto_stretches_report_an_unreachable_background() {
             assert!(
                 matches!(
                     curve,
-                    Err(OpError::UnreachableBackground { method, median: reported, .. })
+                    Err(OpError::UnreachableBg { method, median: reported, .. })
                         if reported == median && method == name
                 ),
                 "{name}: median {median}, sigma {sigma}"
@@ -211,7 +208,7 @@ fn auto_stretches_report_an_unreachable_background() {
     let mut image = gray_image(Size2us::new(2, 2), original.clone());
     assert!(matches!(
         Stretch::auto_asinh().apply(&mut image),
-        Err(OpError::UnreachableBackground { .. })
+        Err(OpError::UnreachableBg { .. })
     ));
     assert_eq!(image.channel(0).pixels(), original.as_slice());
 }
@@ -225,7 +222,7 @@ fn stf_params_hand_computed() {
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
     //
     // Each value takes a few f32 roundings along the way; 16ε of it holds them.
-    let c = Background {
+    let c = Bg {
         median: 0.1,
         sigma: 0.02,
     }
@@ -251,22 +248,18 @@ fn stf_params_hand_computed() {
 #[test]
 fn the_auto_black_point_is_autostfs() {
     assert_eq!(StretchMethod::AUTO_SHADOW_SIGMAS, 2.8);
-    assert_eq!(StretchMethod::AUTO_TARGET_BACKGROUND, 0.25);
-    let background = Background {
+    assert_eq!(StretchMethod::AUTO_TARGET_BG, 0.25);
+    let bg = Bg {
         median: 0.1,
         sigma: 0.02,
     };
-    let preset = |curve: fn(Background, f32, f32) -> Result<Curve, OpError>, shadow_sigmas: f32| {
-        curve(
-            background,
-            shadow_sigmas,
-            StretchMethod::AUTO_TARGET_BACKGROUND,
-        )
-        .unwrap()
-        .black
-        .black
+    let preset = |curve: fn(Bg, f32, f32) -> Result<Curve, OpError>, shadow_sigmas: f32| {
+        curve(bg, shadow_sigmas, StretchMethod::AUTO_TARGET_BG)
+            .unwrap()
+            .black
+            .black
     };
-    for curve in [Background::stf_curve, Background::auto_asinh_curve] {
+    for curve in [Bg::stf_curve, Bg::auto_asinh_curve] {
         assert_eq!(
             preset(curve, StretchMethod::AUTO_SHADOW_SIGMAS),
             0.1 - 2.8 * 0.02
@@ -656,7 +649,7 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     Stretch {
         method: StretchMethod::AutoStf {
             shadow_sigmas: 1.0,
-            target_background: 0.25,
+            target_bg: 0.25,
         },
         color: ColorMode::PerChannel,
     }
@@ -696,10 +689,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
 
     let mut img = gray_image(Size2us::new(10, 10), px);
     let stretch = Stretch::auto_stf();
-    let StretchMethod::AutoStf {
-        target_background, ..
-    } = stretch.method
-    else {
+    let StretchMethod::AutoStf { target_bg, .. } = stretch.method else {
         unreachable!("auto_stf is an auto STF")
     };
     stretch.apply(&mut img).unwrap();
@@ -709,8 +699,8 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let out_median = median_of(&out);
     assert!(out_median > input_median, "{out_median} > {input_median}");
     assert!(
-        (out_median - target_background).abs() <= 16.0 * f32::EPSILON * target_background,
-        "the background lands on {target_background}: {out_median}"
+        (out_median - target_bg).abs() <= 16.0 * f32::EPSILON * target_bg,
+        "the background lands on {target_bg}: {out_median}"
     );
     // Monotonic mapping: a star pixel (input 0.6) stays brighter than the background.
     assert!(out[95] > out[0], "stars stay brighter than the background");
@@ -784,8 +774,8 @@ fn the_auto_black_point_keeps_a_faint_color() {
     let mut intensities: Vec<f32> = (0..size.pixel_count())
         .map(|idx| (r[idx] + g[idx] + b[idx]) * (1.0 / 3.0))
         .collect();
-    let background = MedianMad::of_mut(&mut intensities);
-    let black = background.median - StretchMethod::AUTO_SHADOW_SIGMAS * background.sigma();
+    let bg = MedianMad::of_mut(&mut intensities);
+    let black = bg.median - StretchMethod::AUTO_SHADOW_SIGMAS * bg.sigma();
     let mut image = rgb_image(size, [r, g, b]);
     Stretch::auto_asinh().apply(&mut image).unwrap();
     let (out_r, out_g, out_b) = (

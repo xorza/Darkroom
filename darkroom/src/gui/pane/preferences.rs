@@ -26,7 +26,7 @@ use crate::platform;
 
 /// Cap on the settings column, so the form reads as a column on a wide
 /// window instead of a handful of controls in the corner of a bare sheet.
-const COLUMN_WIDTH: f32 = 720.0;
+const COL_WIDTH: f32 = 720.0;
 
 /// Gap between sections. Deliberately much larger than [`SECTION_GAP`] —
 /// proximity, not dividers, is what makes the groups read.
@@ -58,7 +58,7 @@ impl PreferencesForm<'_> {
                 Panel::vstack()
                     .id_salt("preferences_column")
                     .size((Sizing::FILL, Sizing::HUG))
-                    .max_size((COLUMN_WIDTH, f32::INFINITY))
+                    .max_size((COL_WIDTH, f32::INFINITY))
                     .gap(SECTIONS_GAP)
                     .show(ui, |ui| {
                         // Behavior — the startup + exit toggles.

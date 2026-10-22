@@ -62,16 +62,16 @@ impl Legendre {
     /// By Bonnet's recurrence `k·Pₖ = (2k − 1)·x·Pₖ₋₁ − (k − 1)·Pₖ₋₂`, and the slope from
     /// `(x² − 1)·Pₙ′ = n·(x·Pₙ − Pₙ₋₁)`, which holds inside `(−1, 1)` where every root lies.
     fn at(order: usize, x: f64) -> Self {
-        let (mut previous, mut value) = (1.0, x);
+        let (mut prev, mut value) = (1.0, x);
         for k in 2..=order {
             let k = k as f64;
-            let next = ((2.0 * k - 1.0) * x * value - (k - 1.0) * previous) / k;
-            previous = value;
+            let next = ((2.0 * k - 1.0) * x * value - (k - 1.0) * prev) / k;
+            prev = value;
             value = next;
         }
         Self {
             value,
-            slope: order as f64 * (x * value - previous) / (x * x - 1.0),
+            slope: order as f64 * (x * value - prev) / (x * x - 1.0),
         }
     }
 }

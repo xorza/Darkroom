@@ -1,9 +1,9 @@
-use crate::star_detection::star_detection_config::extraction_config::MAX_DEBLEND_N_THRESHOLDS;
+use crate::star_detection::star_detection_config::extraction_config::MAX_DEBLEND_THRESHOLD_COUNT;
 use crate::star_detection::star_detection_config::*;
 
-fn multi_threshold(n_thresholds: usize) -> Deblend {
+fn multi_threshold(threshold_count: usize) -> Deblend {
     Deblend::MultiThreshold {
-        n_thresholds,
+        threshold_count,
         min_contrast: 0.005,
     }
 }
@@ -93,18 +93,18 @@ fn inclusive_bounds_accept_their_edges() {
         }),
         ("deblend min_contrast 1", |c| {
             c.extraction.deblend = Deblend::MultiThreshold {
-                n_thresholds: 2,
+                threshold_count: 2,
                 min_contrast: 1.0,
             };
         }),
         ("deblend min_contrast 0", |c| {
             c.extraction.deblend = Deblend::MultiThreshold {
-                n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
+                threshold_count: MAX_DEBLEND_THRESHOLD_COUNT,
                 min_contrast: 0.0,
             };
         }),
         ("background refinement mask_dilation 50", |c| {
-            c.background.refinement = BackgroundRefinement::Iterative(IterativeRefinement {
+            c.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
                 iterations: NonZeroUsize::new(10).unwrap(),
                 mask_dilation: 50,
                 mask_sigma: 2.0,
@@ -133,47 +133,44 @@ fn inclusive_bounds_accept_their_edges() {
 fn config_invalid_parameters_return_exact_errors() {
     let cases = [
         (
-            configured(|config| config.background.tile_size = 10),
+            configured(|config| config.bg.tile_size = 10),
             "tile_size",
             10.0,
         ),
         (
-            configured(|config| config.background.sigma_clip_max_iterations = 11),
+            configured(|config| config.bg.sigma_clip_max_iterations = 11),
             "sigma_clip_max_iterations",
             11.0,
         ),
         (
             configured(|config| {
-                config.background.refinement =
-                    BackgroundRefinement::Iterative(IterativeRefinement {
-                        iterations: NonZeroUsize::new(11).unwrap(),
-                        mask_dilation: 3,
-                        mask_sigma: 2.0,
-                    });
+                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                    iterations: NonZeroUsize::new(11).unwrap(),
+                    mask_dilation: 3,
+                    mask_sigma: 2.0,
+                });
             }),
             "background refinement iterations",
             11.0,
         ),
         (
             configured(|config| {
-                config.background.refinement =
-                    BackgroundRefinement::Iterative(IterativeRefinement {
-                        iterations: NonZeroUsize::MIN,
-                        mask_dilation: 51,
-                        mask_sigma: 2.0,
-                    });
+                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                    iterations: NonZeroUsize::MIN,
+                    mask_dilation: 51,
+                    mask_sigma: 2.0,
+                });
             }),
             "background refinement mask_dilation",
             51.0,
         ),
         (
             configured(|config| {
-                config.background.refinement =
-                    BackgroundRefinement::Iterative(IterativeRefinement {
-                        iterations: NonZeroUsize::MIN,
-                        mask_dilation: 3,
-                        mask_sigma: 0.0,
-                    });
+                config.bg.refinement = BgRefinement::Iterative(IterativeRefinement {
+                    iterations: NonZeroUsize::MIN,
+                    mask_dilation: 3,
+                    mask_sigma: 0.0,
+                });
             }),
             "background refinement mask_sigma",
             0.0,
@@ -260,15 +257,15 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.extraction.deblend = multi_threshold(MAX_DEBLEND_N_THRESHOLDS + 1);
+                config.extraction.deblend = multi_threshold(MAX_DEBLEND_THRESHOLD_COUNT + 1);
             }),
             "deblend n_thresholds",
-            (MAX_DEBLEND_N_THRESHOLDS + 1) as f64,
+            (MAX_DEBLEND_THRESHOLD_COUNT + 1) as f64,
         ),
         (
             configured(|config| {
                 config.extraction.deblend = Deblend::MultiThreshold {
-                    n_thresholds: 32,
+                    threshold_count: 32,
                     min_contrast: -0.1,
                 };
             }),
@@ -363,7 +360,7 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
     assert_eq!(
         invalid.to_string(),
         format!(
-            "deblend n_thresholds must be between 2 and the deblend level cap ({MAX_DEBLEND_N_THRESHOLDS}), got 1"
+            "deblend n_thresholds must be between 2 and the deblend level cap ({MAX_DEBLEND_THRESHOLD_COUNT}), got 1"
         )
     );
 }
@@ -392,7 +389,7 @@ fn config_rejects_non_finite_float_parameters() {
         }),
         ("deblend min_contrast", |c, v| {
             c.extraction.deblend = Deblend::MultiThreshold {
-                n_thresholds: 32,
+                threshold_count: 32,
                 min_contrast: v,
             };
         }),

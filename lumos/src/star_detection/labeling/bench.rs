@@ -16,7 +16,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let stages = Stages::of(field);
             let connectivity = stages.config.extraction.connectivity;
             let mut labeler = Labeler::default();
-            b.iter(|| labeler.label(&stages.mask, connectivity).num_labels());
+            b.iter(|| labeler.label(&stages.mask, connectivity).label_count());
         });
     }
 }

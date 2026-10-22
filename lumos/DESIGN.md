@@ -1,7 +1,7 @@
 # Lumos design decisions
 
-- **Loading through `LoadContext`, saving through the `io` writer.** Loading is methods on
-  `LoadContext` (`linear`, `cfa`, `preview`, `cfa_info`, `product`, `calibration_masters`), and
+- **Loading through `LoadCtx`, saving through the `io` writer.** Loading is methods on
+  `LoadCtx` (`linear`, `cfa`, `preview`, `cfa_info`, `product`, `calibration_masters`), and
   saving is `io::writer`. Refused: load and save methods on the image types, which made the data
   layer import `io`.
 - **The stacked product is one FITS file in astropy `CCDData`'s layout.** The master is the

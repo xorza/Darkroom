@@ -53,7 +53,7 @@ fn filter_interior_row(pixels: &Buffer2<f32>, y: usize, output_row: &mut [f32]) 
 
     MedianRow {
         above: pixels.row(y - 1),
-        curr: pixels.row(y),
+        cur: pixels.row(y),
         below: pixels.row(y + 1),
         output: output_row,
     }

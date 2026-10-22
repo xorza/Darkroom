@@ -1,10 +1,10 @@
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-use crate::internals::synthetic::background_map;
+use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::scratch_pool::Pooled;
-use crate::star_detection::background::sky_noise::SkyNoise;
+use crate::star_detection::bg::sky_noise::SkyNoise;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::star_detector::stages::detect::internals::detect_test;
 use crate::star_detection::star_detector::stages::detect::*;
@@ -42,7 +42,7 @@ fn extracted(labelled: LabelledPlane<'_>, config: &ExtractionConfig) -> Extracte
 
 /// A flat sky noise of 0.01 over `size`.
 fn flat_sky(size: Size2us) -> SkyNoise {
-    background_map::uniform(size, 0.0, 0.01).sky_noise()
+    bg_map::uniform(size, 0.0, 0.01).sky_noise()
 }
 
 /// `values` as a detection plane under a flat noise of 0.01.
@@ -321,7 +321,7 @@ fn detect_counts_pixels_components_and_splits() {
     residual[(29, 40)] = 1.0;
     let config = ExtractionConfig {
         deblend: Deblend::MultiThreshold {
-            n_thresholds: 32,
+            threshold_count: 32,
             min_contrast: 0.005,
         },
         min_area: 1,

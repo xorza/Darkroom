@@ -11,12 +11,12 @@ use common::CancelToken;
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::internals::cfa::{constant_cfa, make_cfa};
-use crate::internals::synthetic::backgrounds::Vignette;
+use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, SensorDefects};
 use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
@@ -88,7 +88,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
             placement: Placement::Uniform { margin: 14.0 },
             seed: 7,
         },
-        BackgroundField::Uniform { level: 0.1 },
+        BgField::Uniform { level: 0.1 },
     );
     let camera = Camera {
         dark_current_e_per_s: 0.0,
@@ -152,7 +152,7 @@ fn defect_map_detects_the_cameras_hot_and_dead_pixels() {
                 placement: Placement::Uniform { margin: 0.0 },
                 seed,
             },
-            BackgroundField::Uniform { level },
+            BgField::Uniform { level },
         );
         let frame = render(&scene, &camera, &Observation::reference(seed));
         make_cfa(
@@ -248,7 +248,7 @@ fn a_pixel_only_the_bias_sets_apart_is_no_hot_pixel() {
 fn defect_correction_replaces_hot_pixels_with_neighbours() {
     let size = Size2us::new(32, 32);
     let n = size.pixel_count();
-    let background = 0.2f32;
+    let bg = 0.2f32;
 
     let hot: [(usize, usize); 2] = [(10, 10), (20, 15)];
     let mut dark = vec![0.05f32; n];
@@ -263,7 +263,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
         )
         .unwrap();
 
-    let mut img_px = vec![background; n];
+    let mut img_px = vec![bg; n];
     for &(x, y) in &hot {
         img_px[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
@@ -271,5 +271,5 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     map.correct(&mut img);
 
     // Each hot pixel takes its uniform neighbourhood's value; no other pixel changes.
-    assert!(img.data().pixels().iter().all(|&v| v == background));
+    assert!(img.data().pixels().iter().all(|&v| v == bg));
 }

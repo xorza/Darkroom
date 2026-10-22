@@ -31,7 +31,7 @@ fn windowed_centroid_limits() {
                 start: from,
                 offset: 0.0,
                 noise: StarNoise {
-                    background_sigma: 0.01,
+                    bg_sigma: 0.01,
                     electrons_per_unit: None,
                 },
             },
@@ -196,7 +196,7 @@ fn the_windowed_centroid_reports_its_propagated_noise() {
             start: centre,
             offset: 0.0,
             noise: StarNoise {
-                background_sigma: f64::from(noise),
+                bg_sigma: f64::from(noise),
                 electrons_per_unit: None,
             },
         },
@@ -301,14 +301,14 @@ fn moment_star_local_offset_removes_what_the_global_map_left() {
     let pos = DVec2::splat(32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::gaussian(2.5))
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.05, 0.01);
+    let bg = bg_map::uniform(Size2us::new(width, height), 0.05, 0.01);
     let residual = bg.residual_of(&pixels);
     let sky = bg.sky_noise();
-    let global_bg = global_background(&sky, pos);
-    let local_bg = StarBackground {
+    let global_bg = global_bg(&sky, pos);
+    let local_bg = StarBg {
         offset: 0.05,
         noise: StarNoise {
-            background_sigma: 0.05,
+            bg_sigma: 0.05,
             ..global_bg.noise
         },
         sky_samples: Some(900),
@@ -397,8 +397,8 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     }
     let measured = Measured::of(
         &pixels,
-        &BackgroundEstimate {
-            background: Pooled::loose(sky_plane, size),
+        &BgEstimate {
+            bg: Pooled::loose(sky_plane, size),
             sky: SkyNoise {
                 noise: Pooled::loose(Buffer2::new_filled(size.width, size.height, 0.01), size),
                 floor: 1e-6,
@@ -407,7 +407,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     );
     let config = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
-        local_background: LocalBackgroundMethod::LocalAnnulus,
+        local_bg: LocalBgMethod::LocalAnnulus,
         ..Default::default()
     };
     let radius = measure_grid::stamp_radius(4.0);
@@ -422,7 +422,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
-    let sky_at_fit = StampBackground::measure(
+    let sky_at_fit = StampBg::measure(
         MaskedPlane::from(&measured.residual),
         star.pos,
         MeasureGrid::new(4.0).annulus,
@@ -435,10 +435,10 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
             radius,
         },
         MeasureGrid::new(4.0).window_sigma,
-        StarBackground {
+        StarBg {
             offset: sky_at_fit.offset,
             noise: StarNoise {
-                background_sigma: f64::from(sky_at_fit.noise.max(measured.sky.floor)),
+                bg_sigma: f64::from(sky_at_fit.noise.max(measured.sky.floor)),
                 electrons_per_unit: None,
             },
             sky_samples: Some(sky_at_fit.samples),
@@ -471,7 +471,7 @@ fn sky_noise_adds_no_flux_or_snr() {
             SKY - SIGMA
         }
     });
-    let bg = background_map::uniform(size, SKY, SIGMA);
+    let bg = bg_map::uniform(size, SKY, SIGMA);
     let pos = DVec2::splat(24.0);
     let sky = bg.sky_noise();
     let mut residual = bg.residual_of(&pixels);
@@ -485,7 +485,7 @@ fn sky_noise_adds_no_flux_or_snr() {
                 radius,
             },
             1.0,
-            global_background(&sky, pos),
+            global_bg(&sky, pos),
         )
         .expect("a one-pixel star");
         assert_eq!(
@@ -514,7 +514,7 @@ fn empty_sky_stamps_measure_no_signal() {
     let sigma = 0.01f32;
     let mut residual = Buffer2::new_filled(side, side, 0.0f32);
     patterns::add_gaussian_noise(residual.pixels_mut(), sigma, 7);
-    let sky = background_map::uniform(size, 0.0, sigma).sky_noise();
+    let sky = bg_map::uniform(size, 0.0, sigma).sky_noise();
 
     for radius in [7usize, 13, 15] {
         let stride = 2 * radius + 1;
@@ -530,7 +530,7 @@ fn empty_sky_stamps_measure_no_signal() {
                         radius,
                     },
                     1.0,
-                    global_background(&sky, pos),
+                    global_bg(&sky, pos),
                 ) {
                     measured += 1;
                     assert!(
@@ -559,7 +559,7 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     let star = Measured::flat(&pixels, 0.1, 0.01);
     let region = star.region_at(centre);
     let config = MeasurementConfig {
-        local_background: LocalBackgroundMethod::LocalAnnulus,
+        local_bg: LocalBgMethod::LocalAnnulus,
         ..MeasurementConfig::default()
     };
     let grid = MeasureGrid::new(TEST_EXPECTED_FWHM);
@@ -597,8 +597,8 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
         masked.set_at(Vec2us::new(x, 32), true);
         filled[(x, 32)] = 0.02;
     }
-    let all = StampBackground::measure(MaskedPlane::from(&star.residual), centre, annulus).unwrap();
-    let without = StampBackground::measure(
+    let all = StampBg::measure(MaskedPlane::from(&star.residual), centre, annulus).unwrap();
+    let without = StampBg::measure(
         MaskedPlane {
             pixels: &filled,
             mask: Some(&masked),
@@ -608,7 +608,7 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
     )
     .unwrap();
     assert_eq!(without.samples, all.samples - right.count());
-    let unfilled = StampBackground::measure(
+    let unfilled = StampBg::measure(
         MaskedPlane {
             pixels: &star.residual,
             mask: Some(&masked),

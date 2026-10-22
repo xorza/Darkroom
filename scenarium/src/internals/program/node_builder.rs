@@ -1,11 +1,9 @@
 //! [`NodeBuilder`]: one node of a hand-built program, under construction.
 
-use crate::containers::column::Span;
+use crate::containers::col::Span;
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
-use crate::execution::compile::compiled_graph::{
-    ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
-};
+use crate::exec::compile::compiled_graph::{ExecBinding, ExecEvent, ExecInput, ExecNode};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::func_output::FuncOutput;
 use crate::graph::func::lambda::FuncLambda;
@@ -21,10 +19,10 @@ use crate::internals::program::{Placed, ProgramBuilder};
 #[derive(Debug)]
 pub(crate) struct NodeBuilder<'a> {
     owner: &'a mut ProgramBuilder,
-    e_node: ExecutionNode,
-    inputs: Vec<ExecutionInput>,
+    e_node: ExecNode,
+    inputs: Vec<ExecInput>,
     outputs: Vec<FuncOutput>,
-    events: Vec<ExecutionEvent>,
+    events: Vec<ExecEvent>,
     func_id: Option<FuncId>,
     node_id: Option<NodeId>,
 }
@@ -33,7 +31,7 @@ impl<'a> NodeBuilder<'a> {
     pub(super) fn new(owner: &'a mut ProgramBuilder) -> Self {
         Self {
             owner,
-            e_node: ExecutionNode::bare(),
+            e_node: ExecNode::bare(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
@@ -82,8 +80,8 @@ impl<'a> NodeBuilder<'a> {
     }
 
     /// An optional input reading `binding`.
-    pub(crate) fn input(self, binding: ExecutionBinding) -> Self {
-        self.push_input(ExecutionInput {
+    pub(crate) fn input(self, binding: ExecBinding) -> Self {
+        self.push_input(ExecInput {
             required: false,
             stamps_fs_path: false,
             binding,
@@ -91,10 +89,10 @@ impl<'a> NodeBuilder<'a> {
         })
     }
 
-    /// A required input reading `binding` — [`ExecutionBinding::None`] for the
+    /// A required input reading `binding` — [`ExecBinding::None`] for the
     /// unbound case the planner verdicts `MissingInputs`.
-    pub(crate) fn required(self, binding: ExecutionBinding) -> Self {
-        self.push_input(ExecutionInput {
+    pub(crate) fn required(self, binding: ExecBinding) -> Self {
+        self.push_input(ExecInput {
             required: true,
             stamps_fs_path: false,
             binding,
@@ -104,14 +102,14 @@ impl<'a> NodeBuilder<'a> {
 
     /// An optional input carrying a literal.
     pub(crate) fn const_input(self, value: impl Into<ConstValue>) -> Self {
-        self.input(ExecutionBinding::Const(value.into()))
+        self.input(ExecBinding::Const(value.into()))
     }
 
     /// An input whose delivered value's filesystem referent folds into this
     /// node's digest — what the compiler writes for an `FsPath`-declared port,
     /// and the only thing that makes a path re-key its consumer.
-    pub(crate) fn fs_path_input(self, binding: ExecutionBinding) -> Self {
-        self.push_input(ExecutionInput {
+    pub(crate) fn fs_path_input(self, binding: ExecBinding) -> Self {
+        self.push_input(ExecInput {
             required: false,
             stamps_fs_path: true,
             binding,
@@ -119,7 +117,7 @@ impl<'a> NodeBuilder<'a> {
         })
     }
 
-    fn push_input(mut self, input: ExecutionInput) -> Self {
+    fn push_input(mut self, input: ExecInput) -> Self {
         self.inputs.push(input);
         self
     }
@@ -146,7 +144,7 @@ impl<'a> NodeBuilder<'a> {
             .program
             .subscribers
             .append(subscribers.into_iter().map(|node| node.node_idx));
-        self.events.push(ExecutionEvent {
+        self.events.push(ExecEvent {
             subscribers,
             lambda: internals::stub_event(),
         });

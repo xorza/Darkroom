@@ -5,7 +5,7 @@
   `BatchIntent`, where the last `Update` wins but the `RunNodes` seeds of every
   message accumulate. A run-to-node followed, before the worker wakes, by an
   install of a graph without that node fails the run with `NodeSeedNotFound`
-  (`scenarium/src/execution/schedule/mod.rs:410`), and the editor reports it as
+  (`scenarium/src/exec/schedule/mod.rs:409`), and the editor reports it as
   a run error.
 
 - **The release build of the darkroom binary and bench does not link on

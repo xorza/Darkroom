@@ -110,10 +110,10 @@ fn jacobian_is_the_derivative_of_correct() {
             .enumerate()
         {
             let difference = (sip.correct(p + step) - sip.correct(p - step)) / (2.0 * h);
-            let column = jacobian.col(axis);
+            let col = jacobian.col(axis);
             assert!(
-                (column - difference).length() < 1e-9,
-                "at {p:?} axis {axis}: {column:?} against {difference:?}"
+                (col - difference).length() < 1e-9,
+                "at {p:?} axis {axis}: {col:?} against {difference:?}"
             );
         }
     }

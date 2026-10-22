@@ -53,21 +53,21 @@ impl UnionFind {
 
     #[inline]
     pub(super) fn find(&self, label: u32) -> u32 {
-        let mut current = label;
+        let mut cur = label;
         loop {
             // Relaxed: find is idempotent — stale reads just cause extra
             // iterations, union's CAS provides the synchronization.
-            let parent = self.parent_of(current).load(Ordering::Relaxed);
-            if parent == current {
-                return current;
+            let parent = self.parent_of(cur).load(Ordering::Relaxed);
+            if parent == cur {
+                return cur;
             }
             let grandparent = self.parent_of(parent).load(Ordering::Relaxed);
-            // Path halving. The grandparent is an ancestor of `current` whatever other threads did
-            // in between, so the shortcut keeps `current` in its component and keeps
+            // Path halving. The grandparent is an ancestor of `cur` whatever other threads did
+            // in between, so the shortcut keeps `cur` in its component and keeps
             // `parent <= label`; only non-roots are rewritten, so it never races `union`'s CAS on a
             // root. A lost exchange leaves the longer path, which is still correct.
             if grandparent != parent {
-                self.parent_of(current)
+                self.parent_of(cur)
                     .compare_exchange_weak(
                         parent,
                         grandparent,
@@ -76,7 +76,7 @@ impl UnionFind {
                     )
                     .ok();
             }
-            current = grandparent;
+            cur = grandparent;
         }
     }
 
@@ -98,9 +98,9 @@ impl UnionFind {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => break,
-                Err(current) => {
+                Err(cur) => {
                     root_a = self.find(root_a);
-                    root_b = self.find(current);
+                    root_b = self.find(cur);
                 }
             }
         }

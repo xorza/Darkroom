@@ -17,7 +17,7 @@ pub struct RunReport {
     /// The inverse variance plane holds the background noise only: some frame did not state its
     /// gain, so the photon noise of the signal above the sky is missing from the variance it
     /// inverts.
-    pub variance_background_only: bool,
+    pub variance_bg_only: bool,
     /// Lights calibrated with a dark whose exposure, or their own, was not declared, so the two
     /// were not compared.
     pub unverified_dark_exposures: u64,

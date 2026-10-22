@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn the_background_follows_the_flat_gain() {
     let noise = CcdNoise {
-        background: BackgroundSplit {
+        bg: BgSplit {
             variance: 0.25,
             read_share: 0.5,
         },
@@ -16,8 +16,8 @@ fn the_background_follows_the_flat_gain() {
         sky: 1.0,
         electrons_per_unit: Some(4.0),
     };
-    assert_eq!(noise.at(1.0).background, 0.25);
-    assert_eq!(noise.at(2.0).background, 0.75);
+    assert_eq!(noise.at(1.0).bg, 0.25);
+    assert_eq!(noise.at(2.0).bg, 0.75);
     // Above the sky of 1, a unit at gain 2 adds 2/4: x = 3 lies 2 units up, 3/4 + 2·1/2 = 7/4;
     // below the sky only the background remains. A warp's confidence of 2 halves both.
     assert_eq!(noise.at(2.0).variance(3.0), 1.75);
@@ -29,20 +29,20 @@ fn the_background_follows_the_flat_gain() {
     };
     for (read_share, expected) in [(1.0, 1.0), (0.0, 0.5)] {
         let split = CcdNoise {
-            background: BackgroundSplit {
+            bg: BgSplit {
                 variance: 0.25,
                 read_share,
             },
             ..no_gain
         };
-        assert_eq!(split.at(2.0).background, expected, "ρ {read_share}");
+        assert_eq!(split.at(2.0).bg, expected, "ρ {read_share}");
         // With no gain, a sample above the sky adds nothing to the background.
         assert_eq!(split.at(2.0).variance(3.0), expected, "ρ {read_share}");
     }
     let silent = CcdNoise {
-        background: BackgroundSplit::unflattened(0.0),
+        bg: BgSplit::unflattened(0.0),
         quantization_variance: 1.0 / 16.0,
         ..no_gain
     };
-    assert_eq!(silent.at(2.0).background, 0.25);
+    assert_eq!(silent.at(2.0).bg, 0.25);
 }

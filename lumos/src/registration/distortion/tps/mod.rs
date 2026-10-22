@@ -192,7 +192,7 @@ impl ThinPlateSpline {
         energy
     }
 
-    const fn num_control_points(&self) -> usize {
+    const fn control_point_count(&self) -> usize {
         self.control_points.len()
     }
 

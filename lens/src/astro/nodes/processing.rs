@@ -9,8 +9,8 @@ use std::{fmt, mem};
 
 use common::Introspect;
 use lumos::{
-    BackgroundMode, Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast,
-    NeutralizeBackground, OpError, Scnr, ScnrProtection, Stretch,
+    BgMode, Denoise, ExtractBg, Hdr, LinearImage, LocalContrast, NeutralizeBg, OpError, Scnr,
+    ScnrProtection, Stretch,
 };
 use scenarium::{
     DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library, async_lambda,
@@ -24,17 +24,16 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::node_spec::NodeSpec;
 
 const AUTO_STRETCH_FUNC_ID: FuncId = FuncId::literal("c15248e0-006a-4a4a-9aae-b1fc7886dea1");
-const EXTRACT_BACKGROUND_FUNC_ID: FuncId = FuncId::literal("e27c2a02-ec2a-4c6d-afea-60d1276ff8e1");
+const EXTRACT_BG_FUNC_ID: FuncId = FuncId::literal("e27c2a02-ec2a-4c6d-afea-60d1276ff8e1");
 const DENOISE_FUNC_ID: FuncId = FuncId::literal("61c17dfa-8369-446b-b6e7-d91d62d344ee");
 const SCNR_FUNC_ID: FuncId = FuncId::literal("ef0c2661-8553-4302-9251-95b2d383af19");
-const NEUTRALIZE_BACKGROUND_FUNC_ID: FuncId =
-    FuncId::literal("5a8c9043-61ca-4a5a-8e55-ce27c804e84b");
+const NEUTRALIZE_BG_FUNC_ID: FuncId = FuncId::literal("5a8c9043-61ca-4a5a-8e55-ce27c804e84b");
 const HDR_COMPRESSION_FUNC_ID: FuncId = FuncId::literal("300a2ec5-0ccd-47ec-b282-030eea41441c");
 const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-0a91d385458a");
 
 pub(crate) fn register(library: &mut Library) {
     StretchMethodChoice::register(library);
-    BackgroundMode::register(library);
+    BgMode::register(library);
     ScnrProtection::register(library);
     library.add(preset_func::<StretchMethodChoice>(
         NodeSpec {
@@ -44,9 +43,9 @@ pub(crate) fn register(library: &mut Library) {
         },
         "Method",
     ));
-    library.add(preset_func::<BackgroundMode>(
+    library.add(preset_func::<BgMode>(
         NodeSpec {
-            id: EXTRACT_BACKGROUND_FUNC_ID,
+            id: EXTRACT_BG_FUNC_ID,
             name: "Extract Background",
             description: "Fits and removes a smooth sky-background gradient.",
         },
@@ -110,7 +109,7 @@ pub(crate) fn register(library: &mut Library) {
     ));
     library.add(processing_func(
         NodeSpec {
-            id: NEUTRALIZE_BACKGROUND_FUNC_ID,
+            id: NEUTRALIZE_BG_FUNC_ID,
             name: "Neutralize Background",
             description: "Shifts each channel so the background reads neutral gray.",
         },
@@ -119,8 +118,7 @@ pub(crate) fn register(library: &mut Library) {
                                 inputs, outputs, ..
                             }| {
             let value = mem::take(&mut inputs[0]);
-            outputs[0] =
-                runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image)).await?;
+            outputs[0] = runtime::run_frame_op(value, |image| NeutralizeBg.apply(image)).await?;
             Ok(())
         }),
     ));
@@ -137,7 +135,7 @@ impl FrameOp for Stretch {
     }
 }
 
-impl FrameOp for ExtractBackground {
+impl FrameOp for ExtractBg {
     fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.apply(image)
     }

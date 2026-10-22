@@ -58,7 +58,7 @@ use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::background_mesh::color_mesh::ColorMesh;
+use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::defect_map::defect_summary::{ColorDefects, ColorShares, DefectSummary};
 use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
@@ -299,7 +299,7 @@ const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Broad dark-current model tile size. Each tile has enough Bayer red/blue samples for a robust
 /// median while remaining much smaller than normal sensor-scale gradients and amp glow.
-const DARK_BACKGROUND_TILE_SIZE: usize = 64;
+const DARK_BG_TILE_SIZE: usize = 64;
 
 /// `1 / Φ⁻¹(0.99)`: the 1st percentile of `N(m, σ)` lies `Φ⁻¹(0.99)·σ` below `m`, so this turns
 /// that distance back into σ.
@@ -329,11 +329,7 @@ fn detect_hot_pixels(
     let size = Size2us::from(data);
     let total = size.pixel_count();
     let cfa_type = image.cfa_type();
-    let background = ColorMesh::measure(
-        MaskedPlane::from(data),
-        &cfa_type,
-        DARK_BACKGROUND_TILE_SIZE,
-    );
+    let bg = ColorMesh::measure(MaskedPlane::from(data), &cfa_type, DARK_BG_TILE_SIZE);
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
@@ -341,7 +337,7 @@ fn detect_hot_pixels(
     let residuals = ColorResiduals {
         data,
         cfa_type,
-        background: &background,
+        bg: &bg,
     };
     let stats = compute_per_color_residual_stats(residuals, sigma_floor);
 
@@ -358,7 +354,7 @@ fn detect_hot_pixels(
             let point = size.point_of(i);
             let color = cfa_type.slot_at(point);
             let ColorStats { median, sigma } = stats[color];
-            let local = background.at(color, point);
+            let local = bg.at(color, point);
             let cut = sigma_threshold * sigma.max(local.noise);
             let residual = data[i] - local.sky;
             if residual <= median + cut {
@@ -460,10 +456,10 @@ fn compute_per_color_residual_stats(
     residuals: ColorResiduals<'_>,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
-    let num_colors = residuals.cfa_type.num_colors();
+    let color_count = residuals.cfa_type.color_count();
     let mut stats = ArrayVec::new();
 
-    for color in 0..num_colors {
+    for color in 0..color_count {
         let mut samples = residuals.samples(color);
 
         if samples.is_empty() {

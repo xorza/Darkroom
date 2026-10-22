@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::quality_flags::QualityFlags;
@@ -29,8 +29,8 @@ pub(crate) struct FrameStats {
     /// by how a flat amplified it: per color of a mosaic by [`MosaicNoiseMeasure`], per color of
     /// the mosaic a demosaiced frame came from, or per channel by [`NoisePlane`]. Measured over the
     /// pixels no flag names; unflattened for a frame no flat divided.
-    pub(crate) background: ArrayVec<BackgroundSplit, 3>,
-    /// The level `background` was measured at, in the same slots: each color's median of the
+    pub(crate) bg: ArrayVec<BgSplit, 3>,
+    /// The level `bg` was measured at, in the same slots: each color's median of the
     /// mosaic, or each channel's median.
     pub(crate) sky: ArrayVec<f32, 3>,
     /// Each slot's robust spread over the same pixels as its median: noise and signal together.
@@ -107,8 +107,8 @@ impl FrameStats {
                 );
             }),
         };
-        let background: ArrayVec<BackgroundSplit, 3> = match &mosaic_noise {
-            Some(mosaic_noise) => ArrayVec::from(mosaic_noise.background),
+        let bg: ArrayVec<BgSplit, 3> = match &mosaic_noise {
+            Some(mosaic_noise) => ArrayVec::from(mosaic_noise.bg),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
             None => (0..dimensions.channels())
@@ -118,7 +118,7 @@ impl FrameStats {
                         samples: image.channel(channel),
                         excluded,
                     }
-                    .background(image.flat_gain().map(|gain| PixelGains {
+                    .bg(image.flat_gain().map(|gain| PixelGains {
                         gain: move |idx| {
                             gain.at(
                                 channel,
@@ -135,7 +135,7 @@ impl FrameStats {
         let measured =
             |idx: usize| nulls.is_none_or(|nulls| !nulls.at(idx).intersects(QualityFlags::NO_DATA));
         let levels: Vec<SlotLevel> = match mosaic {
-            Some(cfa_type) => (0..cfa_type.num_colors())
+            Some(cfa_type) => (0..cfa_type.color_count())
                 .into_par_iter()
                 .map(|color| {
                     SlotLevel::of(image.channel(0), spreads, |idx, pos| {
@@ -164,7 +164,7 @@ impl FrameStats {
         };
         Self {
             medians,
-            background,
+            bg,
             sky,
             spread,
             quantization_sigma: match mosaic_noise {
@@ -177,7 +177,7 @@ impl FrameStats {
 
     /// The white noise of a slot where no flat amplified it, raised to the quantization σ.
     pub(crate) fn slot_noise(&self, slot: usize) -> f32 {
-        self.background[slot]
+        self.bg[slot]
             .sigma()
             .max(self.quantization_sigma.unwrap_or(0.0))
     }
@@ -186,7 +186,7 @@ impl FrameStats {
     pub(crate) fn ccd_noise(&self, slot: usize) -> CcdNoise {
         let step = self.quantization_sigma.unwrap_or(0.0);
         CcdNoise {
-            background: self.background[slot],
+            bg: self.bg[slot],
             quantization_variance: step * step,
             sky: self.sky[slot],
             electrons_per_unit: self.electrons_per_unit,

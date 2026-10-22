@@ -42,14 +42,14 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         )
         .stamp(Size2us::new(128, 128), SKY);
         let truth = truth.as_vec2().as_dvec2();
-        let background = background_map::estimate(
+        let bg = bg_map::estimate(
             &pixels,
-            &BackgroundConfig {
+            &BgConfig {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let estimated = Measured::of(&pixels, &background);
+        let estimated = Measured::of(&pixels, &bg);
         let exact = Measured::flat(&pixels, SKY, 0.01);
 
         let candidates = detect_stars_test(&estimated.residual, &estimated.sky, &config.extraction);
@@ -84,8 +84,8 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         // against stars whose stamp sums to ≥ 31: a relative change of ≤ 225 · 3e-8 / 31 = 2.2e-7
         // in every sum the metrics are built from. 1e-6 holds it with room for the f32 rounding of
         // each metric.
-        let sky_error = background
-            .background
+        let sky_error = bg
+            .bg
             .iter()
             .map(|&level| (level - SKY).abs())
             .fold(0.0, f32::max);

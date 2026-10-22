@@ -11,7 +11,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackgrounds};
+use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::bayer_phase::BayerPhase;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::math::size2us::Size2us;
@@ -68,7 +68,7 @@ impl<'a> BayerDetector<'a> {
     pub(super) fn reject(
         &mut self,
         data: &mut Buffer2<f32>,
-        backgrounds: &PixelBackgrounds<'_>,
+        bgs: &PixelBgs<'_>,
         kept_out: Option<&KeptOut>,
     ) -> &BitBuffer2 {
         let size = Size2us::from(&*data);
@@ -87,8 +87,7 @@ impl<'a> BayerDetector<'a> {
             }
             phase.deinterleave(data, plane);
             let color = pattern.color_at(phase.origin()).idx();
-            let local =
-                |idx: usize| backgrounds.at(color, phase.to_mosaic(plane_size.point_of(idx)));
+            let local = |idx: usize| bgs.at(color, phase.to_mosaic(plane_size.point_of(idx)));
             let phase_kept_out = kept_out.map(|kept_out| {
                 kept_out.sample_into(plane_kept_out, phase);
                 &*plane_kept_out

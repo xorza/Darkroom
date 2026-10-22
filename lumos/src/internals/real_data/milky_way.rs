@@ -7,9 +7,7 @@
 use crate::image::linear_image::LinearImage;
 use crate::internals::{init_tracing, real_data, visual};
 use crate::math::statistics;
-use crate::{
-    ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
-};
+use crate::{ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBg, Scnr, Stretch, StretchMethod};
 
 fn median(image: &LinearImage) -> f32 {
     statistics::median_mut(&mut image.intensity_plane().into_vec())
@@ -23,7 +21,7 @@ fn assert_displayable(image: &LinearImage, label: &str) {
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
             (lo.min(v), hi.max(v))
         });
-    // The renorm `NeutralizeBackground` shifts the background additively (so it dips negative — as
+    // The renorm `NeutralizeBg` shifts the background additively (so it dips negative — as
     // in the reference renorm image; save_png clamps the floor). Only the highlight ceiling is a
     // hard display limit; the floor just shouldn't be absurd.
     assert!(
@@ -37,20 +35,20 @@ fn milky_way_best_pipeline() {
     init_tracing();
     let mut img = real_data::linear_master();
 
-    NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
+    NeutralizeBg.apply(&mut img).unwrap(); // equalize the green-elevated background
     Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)
 
     Stretch {
         method: StretchMethod::AutoStf {
             shadow_sigmas: 1.5,
-            target_background: 0.2,
+            target_bg: 0.2,
         },
         color: ColorMode::ColorPreserving,
     }
     .apply(&mut img)
     .unwrap();
     Scnr::average_neutral(1.0).apply(&mut img).unwrap();
-    NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
+    NeutralizeBg.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
     visual::save_linear(&img, "milky_way/stretched");

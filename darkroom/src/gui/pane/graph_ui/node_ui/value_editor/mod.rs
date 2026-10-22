@@ -128,31 +128,31 @@ impl ConstEdit<'_> {
             // locking to the kind first entered.
             DataType::Any => field.any_smart(ui, value),
             DataType::Int => {
-                let Some(current) = value.as_i64() else {
+                let Some(cur) = value.as_i64() else {
                     return field.unset(ui, value);
                 };
-                field.int(ui, current)
+                field.int(ui, cur)
             }
             DataType::Float => {
-                let Some(current) = value.as_f64() else {
+                let Some(cur) = value.as_f64() else {
                     return field.unset(ui, value);
                 };
-                field.float(ui, current)
+                field.float(ui, cur)
             }
             DataType::Bool => {
-                let Some(current) = value.as_bool() else {
+                let Some(cur) = value.as_bool() else {
                     return field.unset(ui, value);
                 };
-                let mut draft = current;
+                let mut draft = cur;
                 Checkbox::new(&mut draft).id(field.id).show(ui);
-                (draft != current).then_some(ConstValue::Bool(draft))
+                (draft != cur).then_some(ConstValue::Bool(draft))
             }
             DataType::String => {
-                let Some(current) = value.as_string() else {
+                let Some(cur) = value.as_string() else {
                     return field.unset(ui, value);
                 };
-                let edited = field.text(ui, current, format_string)?;
-                (edited != current).then_some(ConstValue::String(edited))
+                let edited = field.text(ui, cur, format_string)?;
+                (edited != cur).then_some(ConstValue::String(edited))
             }
             DataType::FsPath(config) => {
                 // The admitted literal is the shape the mode takes; the pick
@@ -178,7 +178,7 @@ impl ConstEdit<'_> {
                 // A dropdown over the port's registered variants. The variant list
                 // lives on the library's `Enum` type entry, not on the value or the
                 // id-only `DataType`; an admitted literal names one of them.
-                let Some(current) = value.as_enum() else {
+                let Some(cur) = value.as_enum() else {
                     return field.unset(ui, value);
                 };
                 let variants = library
@@ -186,7 +186,7 @@ impl ConstEdit<'_> {
                     .expect("an admitted enum literal's type is registered");
                 let before = variants
                     .iter()
-                    .position(|v| v == current)
+                    .position(|v| v == cur)
                     .expect("an admitted enum literal names a registered variant");
                 let picked = field.combo(
                     ui,
@@ -314,25 +314,25 @@ impl Field<'_> {
     /// document value every frame and is emitted only on the widget's
     /// `committed` frame, which carries the gesture's final value — one scrub
     /// or typed entry lands as one change.
-    fn int(self, ui: &mut Ui, current: i64) -> Option<ConstValue> {
-        let mut draft = current;
+    fn int(self, ui: &mut Ui, cur: i64) -> Option<ConstValue> {
+        let mut draft = cur;
         let committed = DragValue::new(&mut draft)
             .editable(true)
-            .speed(int_speed(current))
+            .speed(int_speed(cur))
             .style(&self.theme.drag_value)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
             .id(self.id)
             .show(ui)
             .committed;
-        (committed && draft != current).then_some(ConstValue::Int(draft))
+        (committed && draft != cur).then_some(ConstValue::Int(draft))
     }
 
     /// `Float` sibling of [`Self::int`].
-    fn float(self, ui: &mut Ui, current: f64) -> Option<ConstValue> {
-        let mut draft = current;
+    fn float(self, ui: &mut Ui, cur: f64) -> Option<ConstValue> {
+        let mut draft = cur;
         let committed = DragValue::new(&mut draft)
             .editable(true)
-            .speed(float_speed(current))
+            .speed(float_speed(cur))
             .decimals(3)
             .style(&self.theme.drag_value)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
@@ -341,7 +341,7 @@ impl Field<'_> {
             .committed;
         // Bit-exact: matches ConstValue's PartialEq, so `1.0` → `1`
         // (same value, different textual form) doesn't emit a change.
-        (committed && draft.to_bits() != current.to_bits()).then_some(ConstValue::Float(draft))
+        (committed && draft.to_bits() != cur.to_bits()).then_some(ConstValue::Float(draft))
     }
 }
 

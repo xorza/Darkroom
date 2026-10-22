@@ -283,7 +283,7 @@ impl HduDecode<'_> {
             Cancelled::check(&ctx.cancel)?;
             let samples = section.samples();
             if samples.len() != expected_chunk {
-                return Err(FitsLoadError::from(FitsRefusal::SectionLength {
+                return Err(FitsLoadError::from(FitsRefusal::SectionLen {
                     channel,
                     rows: row_start..row_end,
                     samples: samples.len(),

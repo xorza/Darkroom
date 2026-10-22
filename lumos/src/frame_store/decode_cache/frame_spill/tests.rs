@@ -14,7 +14,7 @@ use crate::frame_store::decode_cache::frame_spill::{
     Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -39,10 +39,10 @@ use crate::math::statistics;
 fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
     let stats = FrameStats {
         medians: channels.iter().map(|&(median, _)| median).collect(),
-        background: channels
+        bg: channels
             .iter()
             .map(|&(_, mad)| statistics::internals::mad_to_sigma(mad))
-            .map(BackgroundSplit::of_sigma)
+            .map(BgSplit::of_sigma)
             .collect(),
         sky: channels.iter().map(|&(median, _)| median).collect(),
         spread: Some(
@@ -155,16 +155,16 @@ fn metadata() -> ImageMetadata {
             })
             .quantization_sigma(Some(4.4e-6))
             .mosaic_noise(Some(MosaicNoise {
-                background: [
-                    BackgroundSplit {
+                bg: [
+                    BgSplit {
                         variance: 1e-4,
                         read_share: 0.25,
                     },
-                    BackgroundSplit {
+                    BgSplit {
                         variance: 4e-4,
                         read_share: 0.5,
                     },
-                    BackgroundSplit {
+                    BgSplit {
                         variance: 9e-4,
                         read_share: 0.75,
                     },

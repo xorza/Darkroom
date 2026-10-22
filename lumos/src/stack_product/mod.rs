@@ -58,7 +58,7 @@ pub struct StackProduct {
     ///
     /// `vᵢ` is the sample's CCD noise model: the frame's measured background noise, plus the photon
     /// noise of the signal above the sky when the frame states its gain
-    /// ([`RunReport::variance_background_only`] says when one did not), both scaled by the gain the
+    /// ([`RunReport::variance_bg_only`] says when one did not), both scaled by the gain the
     /// frame's flat applied at the sample — the read noise and dark current by its square — carried
     /// through normalization and divided by the warp's confidence, or a drizzled frame's drops'
     /// Kish size. The combine takes it at the combined value. Drizzle spreads one input pixel over

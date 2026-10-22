@@ -14,7 +14,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
-use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
+use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
@@ -139,7 +139,7 @@ impl<'a> MonoDetector<'a> {
     pub(super) fn reject(
         &mut self,
         data: &mut Buffer2<f32>,
-        local: &(dyn Fn(usize) -> PixelBackground + Sync),
+        local: &(dyn Fn(usize) -> PixelBg + Sync),
         kept_out: Option<&KeptOut>,
     ) -> &BitBuffer2 {
         let size = Size2us::from(&*data);
@@ -488,7 +488,7 @@ fn median_of_lanes(lanes: &mut [[i32; LANES]]) -> [i32; LANES] {
 struct PixelNoise<'a> {
     model: NoiseModel,
     /// Each pixel's background sky and σ and its flat gain, by flat index into the plane.
-    local: &'a (dyn Fn(usize) -> PixelBackground + Sync),
+    local: &'a (dyn Fn(usize) -> PixelBg + Sync),
 }
 
 /// Hand-written: the `local` closure has no `Debug`.
@@ -551,7 +551,7 @@ pub(super) struct PixelRepair<'a> {
     pub(super) unread: Option<&'a BitBuffer2>,
     /// Each pixel's local background, whose sky stands in where no neighbour within
     /// [`REPAIR_REACH`] is measured.
-    pub(super) local: &'a (dyn Fn(usize) -> PixelBackground + Sync),
+    pub(super) local: &'a (dyn Fn(usize) -> PixelBg + Sync),
 }
 
 /// The widest ring a repair reaches for a measured neighbour, a 15×15 window: past twice the
@@ -642,13 +642,13 @@ fn ring(centre: Vec2us, reach: usize, size: Size2us) -> impl Iterator<Item = (us
 pub(crate) mod internals {
     use imaginarium::Buffer2;
 
-    use crate::background_mesh::color_mesh::LocalBackground;
+    use crate::bg_mesh::color_mesh::LocalBg;
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
     use crate::calibration::cosmic_ray::mono::{
         MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian,
     };
-    use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBackground};
+    use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
     use crate::image::image_metadata::ImageMetadata;
     use crate::scratch_pool::ScratchPool;
 
@@ -671,8 +671,8 @@ pub(crate) mod internals {
         MonoDetector::new(config, noise)
     }
 
-    const FLAT: PixelBackground = PixelBackground {
-        local: LocalBackground {
+    const FLAT: PixelBg = PixelBg {
+        local: LocalBg {
             sky: 0.1,
             noise: 0.01,
         },

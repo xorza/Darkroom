@@ -3,7 +3,7 @@
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::camera::PsfModel;
-use crate::internals::synthetic::scene::BackgroundField;
+use crate::internals::synthetic::scene::BgField;
 use crate::star_detection::tests::pipeline_tests::PipelineCase;
 use crate::star_detection::tests::{Scenario, synthetic_config};
 
@@ -13,7 +13,7 @@ fn pipeline_sparse_field() {
     init_tracing();
 
     let frame = Scenario {
-        num_stars: 15,
+        star_count: 15,
         ..Default::default()
     }
     .frame();
@@ -33,7 +33,7 @@ fn pipeline_dense_field() {
     init_tracing();
 
     let frame = Scenario {
-        num_stars: 80,
+        star_count: 80,
         ..Default::default()
     }
     .frame();
@@ -56,13 +56,13 @@ fn pipeline_moffat_profile() {
         // Moffat's broad 8α wings merge close neighbours and elevate the local background, so
         // use fewer, well-separated stars at moderate (unsaturated) brightness — the scenario
         // still exercises detection on a realistic atmospheric PSF.
-        num_stars: 15,
+        star_count: 15,
         psf: Some(PsfModel::Moffat {
             fwhm: 4.0,
             beta: 2.5,
         }),
         flux: (5.0, 11.0),
-        background: BackgroundField::Uniform { level: 0.05 },
+        bg: BgField::Uniform { level: 0.05 },
         ..Default::default()
     }
     .frame();
@@ -82,7 +82,7 @@ fn pipeline_wider_psf() {
     init_tracing();
 
     let frame = Scenario {
-        num_stars: 25,
+        star_count: 25,
         fwhm: 4.5,
         ..Default::default()
     }
@@ -103,7 +103,7 @@ fn pipeline_dynamic_range() {
     init_tracing();
 
     let frame = Scenario {
-        num_stars: 30,
+        star_count: 30,
         // Faint end near the detection limit.
         flux: (2.5, 22.0),
         ..Default::default()
@@ -125,7 +125,7 @@ fn pipeline_low_noise() {
     init_tracing();
 
     let frame = Scenario {
-        num_stars: 25,
+        star_count: 25,
         // Deep well + low read noise → very clean.
         full_well_e: 120_000.0,
         read_noise_e: 1.0,

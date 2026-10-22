@@ -17,8 +17,8 @@ pub(super) struct WindowedStamp<'a> {
     size: usize,
     pos: DVec2,
     inv_two_window: f64,
-    column_weights: [f64; MAX_STAMP_SIZE],
-    column_offsets: [f64; MAX_STAMP_SIZE],
+    col_weights: [f64; MAX_STAMP_SIZE],
+    col_offsets: [f64; MAX_STAMP_SIZE],
 }
 
 /// One row of a [`WindowedStamp`]: its pixels, their window weight along y and offset from the
@@ -55,12 +55,12 @@ impl<'a> WindowedStamp<'a> {
         let inv_two_window = 1.0 / (2.0 * window_sq);
         let size = 2 * radius + 1;
         let (x0, y0) = (centre.x - radius, centre.y - radius);
-        let mut column_weights = [0.0; MAX_STAMP_SIZE];
-        let mut column_offsets = [0.0; MAX_STAMP_SIZE];
-        for column in 0..size {
-            let dx = (x0 + column) as f64 - pos.x;
-            column_offsets[column] = dx;
-            column_weights[column] = (-dx * dx * inv_two_window).exp();
+        let mut col_weights = [0.0; MAX_STAMP_SIZE];
+        let mut col_offsets = [0.0; MAX_STAMP_SIZE];
+        for col in 0..size {
+            let dx = (x0 + col) as f64 - pos.x;
+            col_offsets[col] = dx;
+            col_weights[col] = (-dx * dx * inv_two_window).exp();
         }
         Some(Self {
             residual,
@@ -69,8 +69,8 @@ impl<'a> WindowedStamp<'a> {
             size,
             pos,
             inv_two_window,
-            column_weights,
-            column_offsets,
+            col_weights,
+            col_offsets,
         })
     }
 
@@ -87,13 +87,13 @@ impl<'a> WindowedStamp<'a> {
     }
 
     /// Each column's window weight along x, left to right.
-    pub(super) fn column_weights(&self) -> &[f64] {
-        &self.column_weights[..self.size]
+    pub(super) fn col_weights(&self) -> &[f64] {
+        &self.col_weights[..self.size]
     }
 
     /// Each column's offset from the centre, left to right.
-    pub(super) fn column_offsets(&self) -> &[f64] {
-        &self.column_offsets[..self.size]
+    pub(super) fn col_offsets(&self) -> &[f64] {
+        &self.col_offsets[..self.size]
     }
 }
 
@@ -104,13 +104,13 @@ impl Moments {
         let mut moments = Self::default();
         for row in stamp.rows() {
             let mut row_sum = Self::default();
-            for ((&value, &column_weight), &dx) in row
+            for ((&value, &col_weight), &dx) in row
                 .pixels
                 .iter()
-                .zip(stamp.column_weights())
-                .zip(stamp.column_offsets())
+                .zip(stamp.col_weights())
+                .zip(stamp.col_offsets())
             {
-                let wv = column_weight * f64::from(value - offset);
+                let wv = col_weight * f64::from(value - offset);
                 row_sum.weight += wv;
                 row_sum.x += wv * dx;
                 row_sum.xx += wv * dx * dx;

@@ -1,0 +1,86 @@
+use super::*;
+
+/// A program of `ids`, nothing but identities — enough for the pairing the
+/// engine establishes at install.
+fn program(ids: &[NodeId]) -> Arc<CompiledGraph> {
+    Arc::new(CompiledGraph::bare(ids.iter().copied()))
+}
+
+#[test]
+fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
+    let compiled = program(&[NodeId::from_u128(1)]);
+    let mut engine = ExecEngine::default();
+
+    engine.install(Arc::clone(&compiled));
+
+    assert!(Arc::ptr_eq(&engine.compiled, &compiled));
+    engine.validate().unwrap();
+}
+
+/// A reinstall re-pairs the slots by stable id against the program being
+/// left, which the engine supplies — so a node that survives the recompile
+/// keeps its slot even when its dense index moves.
+#[test]
+fn install_carries_slots_across_a_shifted_index_space() {
+    let surviving = NodeId::from_u128(2);
+
+    let mut engine = ExecEngine::default();
+    engine.install(program(&[NodeId::from_u128(1), surviving]));
+    // Index 1 before the recompile: ids place in ascending order.
+    engine.executor.nodes[NodeIdx(1)].state.set(17_u32);
+
+    // Node 1 is dropped, so the survivor slides to index 0.
+    engine.install(program(&[surviving, NodeId::from_u128(3)]));
+
+    assert_eq!(
+        engine.executor.nodes[NodeIdx(0)].state.get::<u32>(),
+        Some(&17)
+    );
+    assert!(engine.executor.nodes[NodeIdx(1)].state.is_none());
+    engine.validate().unwrap();
+}
+
+#[test]
+fn validation_rejects_a_cache_with_the_wrong_node_count() {
+    let engine = ExecEngine {
+        compiled: program(&[NodeId::from_u128(1)]),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        engine.validate().unwrap_err().to_string(),
+        "runtime cache spans 0 nodes, not the compiled program's 1"
+    );
+}
+
+/// Every authored node reaches the program under the id it was authored with,
+/// which is what lets its cache slot survive a recompile.
+#[test]
+fn func_nodes_keep_identity() {
+    let e = TestEngine::over(TestGraph::sample());
+
+    assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());
+    for node in e.graph.graph.iter() {
+        assert!(e.engine.compiled().contains(node.id), "id preserved");
+    }
+}
+
+#[tokio::test]
+async fn clear_resets_graph() {
+    let mut e = TestEngine::over(TestGraph::sample());
+    e.run_sinks().await;
+    assert!(!e.engine.compiled().e_nodes.is_empty());
+
+    let planned = e.engine.schedule.process_order.capacity();
+    assert!(planned > 0);
+
+    e.engine.clear();
+
+    assert!(e.engine.is_empty());
+    assert_eq!(e.engine.cache.slot_count(), 0);
+    assert_eq!(
+        e.engine.schedule.process_order.capacity(),
+        planned,
+        "the schedule keeps its buffers for the next run"
+    );
+}

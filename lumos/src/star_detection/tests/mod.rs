@@ -7,7 +7,7 @@
 //!
 //! One question decides it: **does the test call several stages together, or one function?**
 //!
-//! - One function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes in that
+//! - One function — `bg_map::estimate`, `gaussian_convolve`, `measure_star` — goes in that
 //!   module's own `tests/`, beside the unit tests for the same code. It does not belong here
 //!   however realistic its fixture is.
 //! - Several stages — `detect_stars_test`, which runs thresholding, labeling and deblending as the
@@ -38,7 +38,7 @@ use crate::internals::synthetic::fixtures::{
     STAR_FIELD_FLUX, STAR_FIELD_FWHM, STAR_FIELD_MARGIN, STAR_FIELD_SKY, star_field,
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
@@ -111,12 +111,12 @@ fn detected_poss(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
 #[derive(Debug, Clone)]
 pub(super) struct Scenario {
     pub(super) size: Size2us,
-    pub(super) num_stars: usize,
+    pub(super) star_count: usize,
     /// Log-uniform total-flux range; higher = brighter / easier to detect.
     pub(super) flux: (f32, f32),
     pub(super) fwhm: f32,
     pub(super) psf: Option<PsfModel>,
-    pub(super) background: BackgroundField,
+    pub(super) bg: BgField,
     /// Sensor full well (electrons) — lower deepens shot noise.
     pub(super) full_well_e: f32,
     pub(super) read_noise_e: f32,
@@ -132,11 +132,11 @@ impl Default for Scenario {
         let camera = Camera::realistic(STAR_FIELD_FWHM);
         Self {
             size: Size2us::new(256, 256),
-            num_stars: 30,
+            star_count: 30,
             flux: STAR_FIELD_FLUX,
             fwhm: STAR_FIELD_FWHM,
             psf: None,
-            background: BackgroundField::Uniform {
+            bg: BgField::Uniform {
                 level: STAR_FIELD_SKY,
             },
             full_well_e: camera.full_well_e,
@@ -156,12 +156,12 @@ impl Scenario {
         let scene = Scene::scatter(
             self.size,
             Scatter {
-                count: self.num_stars,
+                count: self.star_count,
                 flux: self.flux,
                 placement: self.placement,
                 seed: self.seed,
             },
-            self.background.clone(),
+            self.bg.clone(),
         );
         let camera = Camera {
             psf: self.psf.unwrap_or_else(|| PsfModel::gaussian(self.fwhm)),
@@ -204,7 +204,7 @@ impl Scenario {
 fn the_default_scenario_is_the_star_field() {
     let scenario = Scenario::default();
     let frame = scenario.frame();
-    let field = star_field(scenario.size, scenario.num_stars, scenario.seed);
+    let field = star_field(scenario.size, scenario.star_count, scenario.seed);
     assert_eq!(
         frame.image.channel(0).pixels(),
         field.image.channel(0).pixels()

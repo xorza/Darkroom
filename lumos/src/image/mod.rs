@@ -1,7 +1,7 @@
 //! What an image is: the linear image the pipeline works on, the sensor mosaic it starts from, the
 //! display preview, and what each carries beside its samples.
 
-pub(crate) mod background_split;
+pub(crate) mod bg_split;
 pub(crate) mod calibration_state;
 pub(crate) mod cfa;
 pub(crate) mod channel_layout;

@@ -33,16 +33,16 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             CfaType::XTrans(_) => 6,
         };
 
-        for target_color in 0..cfa_type.num_colors() {
+        for target_color in 0..cfa_type.color_count() {
             let mut expected_rows = vec![false; height];
-            let mut expected_columns = vec![false; width];
+            let mut expected_cols = vec![false; width];
             let mut expected_phases = vec![false; period * period];
             let mut population = 0;
             for y in 0..height {
                 for x in 0..width {
                     if cfa_type.slot_at(Vec2us::new(x, y)) == target_color {
                         expected_rows[y] = true;
-                        expected_columns[x] = true;
+                        expected_cols[x] = true;
                         expected_phases[(y % period) * period + x % period] = true;
                         population += 1;
                     }
@@ -62,14 +62,14 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             );
 
             let mut sampled_rows = vec![false; height];
-            let mut sampled_columns = vec![false; width];
+            let mut sampled_cols = vec![false; width];
             let mut sampled_phases = vec![false; period * period];
             for idx in idxs {
                 let x = idx % width;
                 let y = idx / width;
                 assert_eq!(cfa_type.slot_at(Vec2us::new(x, y)), target_color);
                 sampled_rows[y] = true;
-                sampled_columns[x] = true;
+                sampled_cols[x] = true;
                 sampled_phases[(y % period) * period + x % period] = true;
             }
             assert_eq!(
@@ -77,7 +77,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
                 "{width}x{height} color {target_color} must span every applicable row"
             );
             assert_eq!(
-                sampled_columns, expected_columns,
+                sampled_cols, expected_cols,
                 "{width}x{height} color {target_color} must span every applicable column"
             );
             assert_eq!(
@@ -460,16 +460,12 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
     let data = Buffer2::from_fn(size.width, size.height, |x, y| {
         0.02 + 0.0001 * x as f32 + 0.0002 * y as f32
     });
-    let background = ColorMesh::measure(
-        MaskedPlane::from(&data),
-        &CfaType::Mono,
-        DARK_BACKGROUND_TILE_SIZE,
-    );
+    let bg = ColorMesh::measure(MaskedPlane::from(&data), &CfaType::Mono, DARK_BG_TILE_SIZE);
 
     for y in 0..size.height {
         for x in 0..size.width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
-            let sky = background.at(0, Vec2us::new(x, y)).sky;
+            let sky = bg.at(0, Vec2us::new(x, y)).sky;
             assert!(
                 (sky - expected).abs() < 2e-7,
                 "affine background mismatch at ({x}, {y}): expected {expected}, got {sky}"
@@ -500,10 +496,10 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
             let baseline = [0.01, 0.02, 0.03][color];
             let gradient = [0.012, 0.018, 0.024][color] * x_unit + 0.01 * y_unit;
             let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
-            let column_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
+            let col_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
             let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
             pixels[size.idx_of(Vec2us::new(x, y))] =
-                baseline + gradient + amp_glow + column_noise + noise;
+                baseline + gradient + amp_glow + col_noise + noise;
         }
     }
 

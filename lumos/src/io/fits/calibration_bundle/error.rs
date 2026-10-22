@@ -89,11 +89,11 @@ pub enum DefectTableError {
     #[error("no valid sensor extent")]
     Extent,
     /// A column is missing or of another type.
-    #[error("column {column} is missing or of another type")]
-    Column { column: &'static str },
+    #[error("column {col} is missing or of another type")]
+    Col { col: &'static str },
     /// A column's length is not the table's row count.
     #[error("the column lengths do not match the row count")]
-    ColumnLength,
+    ColLen,
     /// A row's kind is neither hot (0) nor cold (1).
     #[error("row {row} has kind {kind}, neither hot (0) nor cold (1)")]
     Kind { row: usize, kind: u8 },

@@ -10,10 +10,10 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::linear_image::LinearImage;
-use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
-use crate::image_ops::extract_background::ExtractBackground;
+use crate::image_ops::extract_bg::ExtractBg;
 use crate::image_ops::hdr::Hdr;
 use crate::image_ops::local_contrast::LocalContrast;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
@@ -64,7 +64,7 @@ enum Op {
     Neutralize,
     Denoise,
     Scnr,
-    ExtractBackground,
+    ExtractBg,
     Hdr,
     LocalContrast,
 }
@@ -77,7 +77,7 @@ impl Op {
         Self::Neutralize,
         Self::Denoise,
         Self::Scnr,
-        Self::ExtractBackground,
+        Self::ExtractBg,
         Self::Hdr,
         Self::LocalContrast,
     ];
@@ -90,7 +90,7 @@ impl Op {
             Self::Neutralize => "neutralize",
             Self::Denoise => "denoise",
             Self::Scnr => "scnr",
-            Self::ExtractBackground => "extract_background",
+            Self::ExtractBg => "extract_bg",
             Self::Hdr => "hdr",
             Self::LocalContrast => "local_contrast",
         }
@@ -100,7 +100,7 @@ impl Op {
     const fn stretched(self) -> bool {
         matches!(
             self,
-            Self::Scnr | Self::ExtractBackground | Self::Hdr | Self::LocalContrast
+            Self::Scnr | Self::ExtractBg | Self::Hdr | Self::LocalContrast
         )
     }
 
@@ -120,10 +120,10 @@ impl Op {
                 color: ColorMode::ColorPreserving,
             }
             .apply(image),
-            Self::Neutralize => NeutralizeBackground.apply(image),
+            Self::Neutralize => NeutralizeBg.apply(image),
             Self::Denoise => Denoise::default().apply(image),
             Self::Scnr => Scnr::average_neutral(1.0).apply(image),
-            Self::ExtractBackground => ExtractBackground::default().apply(image),
+            Self::ExtractBg => ExtractBg::default().apply(image),
             Self::Hdr => Hdr::default().apply(image),
             Self::LocalContrast => LocalContrast::default().apply(image),
         }

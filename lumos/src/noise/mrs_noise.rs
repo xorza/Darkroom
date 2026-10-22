@@ -8,13 +8,13 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
-use crate::noise::background_split;
+use crate::noise::bg_split;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
 
 /// Layers of the transform; PixInsight's default.
@@ -242,19 +242,19 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
 
     /// The background under the flat `gains` names: the noise measured over each of its bins on
     /// its own — the support thresholds against the bin's own σ — and fitted by
-    /// [`background_split::fit`]; unflattened, of [`Self::sigma`], for a plane no flat divided.
-    pub(crate) fn background(
+    /// [`bg_split::fit`]; unflattened, of [`Self::sigma`], for a plane no flat divided.
+    pub(crate) fn bg(
         &self,
         gains: Option<PixelGains<'_, impl Fn(usize) -> f32 + Sync>>,
-    ) -> BackgroundSplit {
+    ) -> BgSplit {
         let Some(PixelGains { gain, bins }) = gains else {
-            return BackgroundSplit::of_sigma(self.sigma());
+            return BgSplit::of_sigma(self.sigma());
         };
         let size = Size2us::from(self.samples);
         let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
             gain(coefficients.idx[pos])
         });
-        background_split::fit(&binned.measure(|run| sigma(run, size).powi(2)))
+        bg_split::fit(&binned.measure(|run| sigma(run, size).powi(2)))
     }
 
     /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
@@ -441,11 +441,11 @@ fn tiles(size: Size2us) -> Vec<Tile> {
             })
             .collect()
     };
-    let columns = spans(size.width);
+    let cols = spans(size.width);
     let rows = spans(size.height);
     rows.iter()
         .flat_map(|&[y0, y1]| {
-            columns.iter().map(move |&[x0, x1]| Tile {
+            cols.iter().map(move |&[x0, x1]| Tile {
                 core: URect::new(Vec2us::new(x0, y0), Vec2us::new(x1, y1)),
                 region: URect::new(
                     Vec2us::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
@@ -650,9 +650,9 @@ mod tests {
         let b = [1.0, 4.0, 6.0, 4.0, 1.0].map(|tap: f64| tap / 16.0);
         let mut energy = 0.0;
         for (i, row) in b.iter().enumerate() {
-            for (j, column) in b.iter().enumerate() {
+            for (j, col) in b.iter().enumerate() {
                 let delta = if i == 2 && j == 2 { 1.0 } else { 0.0 };
-                energy += (delta - row * column).powi(2);
+                energy += (delta - row * col).powi(2);
             }
         }
         assert!((energy.sqrt() - wavelet::white_noise_sigma(0)).abs() < 1e-15);

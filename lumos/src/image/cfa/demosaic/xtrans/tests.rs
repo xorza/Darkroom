@@ -50,7 +50,7 @@ fn xtrans_pattern_invalid_metadata() {
         invalid_value,
         XTransPatternError::Value {
             row: 1,
-            column: 2,
+            col: 2,
             value: 3,
         }
     );
@@ -75,7 +75,7 @@ fn xtrans_pattern_invalid_metadata() {
         invalid_geometry,
         XTransPatternError::GreenNeighborhood {
             row: 1,
-            column: 1,
+            col: 1,
             neighbors: [1, 0, 3],
         }
     );
@@ -93,7 +93,7 @@ fn xtrans_pattern_invalid_metadata() {
             [1, 1, 1, 1, 2, 2],
         ])
         .unwrap_err(),
-        XTransPatternError::GreenPeriod { row: 0, column: 4 }
+        XTransPatternError::GreenPeriod { row: 0, col: 4 }
     );
 
     // Greens every three rows and columns, and every other check met, but every green has a green
@@ -150,13 +150,13 @@ fn the_hexagons_are_dcraws() {
     ];
     let hexagons = XTRANS_PATTERN.hexagons();
     for (row, cells) in expected.iter().enumerate() {
-        for (column, cell) in cells.iter().enumerate() {
+        for (col, cell) in cells.iter().enumerate() {
             let actual: Vec<(i8, i8)> = hexagons
-                .at(Vec2us::new(column + 6, row + 3))
+                .at(Vec2us::new(col + 6, row + 3))
                 .iter()
                 .map(|offset| (offset.dy, offset.dx))
                 .collect();
-            assert_eq!(actual, cell, "row {row}, column {column}");
+            assert_eq!(actual, cell, "row {row}, column {col}");
         }
     }
     assert_eq!(hexagons.solitary(), Vec2us::new(2, 2));

@@ -3,17 +3,17 @@
 
 use common::CancelToken;
 
-use crate::containers::column::Column;
+use crate::containers::col::Col;
 use crate::data::dynamic_value::DynamicValue;
 use crate::data::ram_usage::RamUsage;
-use crate::execution::cache::runtime_cache::RuntimeCache;
-use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::error::RunError;
-use crate::execution::executor::{CollectRequest, Executor, RunRequest};
-use crate::execution::report::execution_outcome::ExecutionOutcome;
-use crate::execution::report::run_reporter::internals::DiscardedReports;
-use crate::execution::resolve;
-use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
+use crate::exec::cache::runtime_cache::RuntimeCache;
+use crate::exec::compile::compiled_graph::CompiledGraph;
+use crate::exec::error::RunError;
+use crate::exec::executor::{CollectRequest, Executor, RunRequest};
+use crate::exec::report::exec_outcome::ExecOutcome;
+use crate::exec::report::run_reporter::internals::DiscardedReports;
+use crate::exec::resolve;
+use crate::exec::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
 use crate::internals::program::{Placed, ProgramBuilder};
 
@@ -36,7 +36,7 @@ pub(crate) struct Runs<'a> {
     schedule: RunSchedule,
     cache: RuntimeCache,
     executor: Executor,
-    outcome: ExecutionOutcome,
+    outcome: ExecOutcome,
     resolve: bool,
     cancel: CancelToken,
 }
@@ -53,7 +53,7 @@ impl<'a> Runs<'a> {
             schedule,
             cache,
             executor,
-            outcome: ExecutionOutcome::default(),
+            outcome: ExecOutcome::default(),
             resolve: false,
             cancel: CancelToken::never(),
         };
@@ -157,7 +157,7 @@ impl<'a> Runs<'a> {
             .await;
         // No RAM is measured: filling that column is the engine's post-run
         // release sweep, which is not part of the run loop under test.
-        let mut node_ram = Column::default();
+        let mut node_ram = Col::default();
         node_ram.reset(program.e_nodes.len(), RamUsage::default());
         executor.collect_outcome(
             CollectRequest {

@@ -33,12 +33,12 @@ struct MoffatCase {
     beta: f32,
     /// Shape the fitter is told to assume; differs from `beta` only in `wrong_beta`.
     fixed_beta: f32,
-    background: f32,
+    bg: f32,
     guess: DVec2,
     fit_radius: usize,
     perturbation: Perturbation,
     /// Background handed to the fitter; `None` gives it the true one.
-    fit_background: Option<f32>,
+    fit_bg: Option<f32>,
 }
 
 /// The relative error a clean stamp's fitted parameters keep where the star dominates its
@@ -58,7 +58,7 @@ impl MoffatCase {
             self.center.y,
             f64::from(self.amplitude),
             f64::from(self.alpha),
-            f64::from(self.background),
+            f64::from(self.bg),
         ];
         model.integrate_at(model.sufficient_order(&params));
         let (cx, cy) = (self.guess.x.round() as isize, self.guess.y.round() as isize);
@@ -88,11 +88,11 @@ const fn clean(name: &'static str) -> MoffatCase {
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
-        background: 0.1,
+        bg: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
-        fit_background: None,
+        fit_bg: None,
     }
 }
 
@@ -122,22 +122,22 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         ..clean("guess_two_pixels_off")
     },
     MoffatCase {
-        fit_background: Some(0.12),
+        fit_bg: Some(0.12),
         ..clean("wrong_background_estimate")
     },
     MoffatCase {
         amplitude: 10000.0,
-        background: 100.0,
+        bg: 100.0,
         ..clean("very_high_amplitude")
     },
     MoffatCase {
         amplitude: 0.01,
-        background: 0.001,
+        bg: 0.001,
         ..clean("very_low_amplitude")
     },
     MoffatCase {
         amplitude: 0.1,
-        background: 0.5,
+        bg: 0.5,
         ..clean("faint_on_bright_sky")
     },
     // The narrowest α the fit admits at β 2.5 is 1.025, the FWHM of a Gaussian of σ 0.5.
@@ -200,7 +200,7 @@ fn moffat_fit_recovers_known_parameters() {
                 beta: case.beta,
             },
         )
-        .stamp(Size2us::new(case.stamp, case.stamp), case.background);
+        .stamp(Size2us::new(case.stamp, case.stamp), case.bg);
         case.perturbation.apply(&mut pixels);
 
         let beta = case.fixed_beta;
@@ -209,7 +209,7 @@ fn moffat_fit_recovers_known_parameters() {
                 pixels: &pixels,
                 pos: case.guess,
                 grid: &StampGrid::new(case.fit_radius),
-                background: case.fit_background.unwrap_or(case.background),
+                bg: case.fit_bg.unwrap_or(case.bg),
                 noise: None,
             },
             beta,
@@ -225,8 +225,7 @@ fn moffat_fit_recovers_known_parameters() {
                 offset.length()
             );
         } else if matches!(case.perturbation, Perturbation::None) {
-            let bound =
-                EXACT * f64::from(case.amplitude + case.background) / f64::from(case.amplitude);
+            let bound = EXACT * f64::from(case.amplitude + case.bg) / f64::from(case.amplitude);
             let relative = |got: f32, want: f32| f64::from((got - want).abs() / want);
             for (what, error) in [
                 ("position", offset.length()),
@@ -237,8 +236,7 @@ fn moffat_fit_recovers_known_parameters() {
                 ),
                 (
                     "background",
-                    f64::from((result.debug.background - case.background).abs())
-                        / f64::from(case.amplitude),
+                    f64::from((result.debug.bg - case.bg).abs()) / f64::from(case.amplitude),
                 ),
                 (
                     "FWHM",
@@ -293,7 +291,7 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
                 pixels,
                 pos: seed,
                 grid: &StampGrid::new(8),
-                background: sky,
+                bg: sky,
                 noise: None,
             },
             2.5,

@@ -219,7 +219,7 @@ fn inverse_variance_weights_downweight_bright_pixels() {
     // In f64 from decimal inputs, so within 1e-9 relative.
     let bg = 0.125;
     let noise = StarNoise {
-        background_sigma: 0.02,
+        bg_sigma: 0.02,
         electrons_per_unit: Some(1_000.0),
     };
     for (signal, weight) in [(0.0, 2500.0), (0.5, 1e4 / 9.0), (1.0, 5e3 / 7.0)] {
@@ -235,7 +235,7 @@ fn inverse_variance_weights_downweight_bright_pixels() {
         pixels: &pixels,
         pos: DVec2::splat(16.0),
         grid: &StampGrid::new(3),
-        background: bg as f32,
+        bg: bg as f32,
         noise: Some(noise),
     })
     .expect("stamp at centre");

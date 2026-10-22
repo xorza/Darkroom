@@ -71,7 +71,7 @@ impl RegistrationResult {
     }
 
     /// Number of matched stars used by the fitted transform.
-    pub const fn num_inliers(&self) -> usize {
+    pub const fn inlier_count(&self) -> usize {
         self.matched_stars.len()
     }
 
@@ -84,7 +84,7 @@ impl RegistrationResult {
     /// share of 20. A result exists only above `min_matches` inliers, so no floor is needed here.
     pub fn quality_score(&self) -> f64 {
         let error_factor = (-self.rms_error / QUALITY_ERROR_SCALE).exp();
-        let count_factor = (self.num_inliers() as f64 / QUALITY_INLIER_SATURATION).min(1.0);
+        let count_factor = (self.inlier_count() as f64 / QUALITY_INLIER_SATURATION).min(1.0);
         error_factor * count_factor
     }
 }

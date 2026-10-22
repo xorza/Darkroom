@@ -4,11 +4,11 @@ use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_cache::sample_noise::SampleNoise;
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SlotNorm};
-use crate::combine::reducer::pixel_samples::NoiseColumns;
+use crate::combine::reducer::pixel_samples::NoiseCols;
 use crate::combine::rejection::pass::SampleBand;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::vec2us::Vec2us;
@@ -17,11 +17,7 @@ use crate::noise::ccd_noise::CcdNoise;
 fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {
     FrameStats {
         medians: [0.5].into_iter().collect(),
-        background: noise
-            .iter()
-            .copied()
-            .map(BackgroundSplit::of_sigma)
-            .collect(),
+        bg: noise.iter().copied().map(BgSplit::of_sigma).collect(),
         sky: noise.iter().map(|_| 0.5).collect(),
         spread: None,
         quantization_sigma,
@@ -65,15 +61,15 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
         assert_eq!(
             noise.model(0, slot),
             CcdNoise {
-                background: BackgroundSplit::unflattened(0.25),
+                bg: BgSplit::unflattened(0.25),
                 quantization_variance: 0.0,
                 sky,
                 electrons_per_unit: Some(electrons)
             }
         );
     }
-    assert_eq!(noise.model(1, 0).at(1.0).background, 0.25);
-    assert_eq!(noise.model(1, 2).at(1.0).background, 1.0);
+    assert_eq!(noise.model(1, 0).at(1.0).bg, 0.25);
+    assert_eq!(noise.model(1, 2).at(1.0).bg, 1.0);
     assert_eq!(noise.first_without_gain(), Some(1));
 
     let mosaic_slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
@@ -90,11 +86,7 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
     ] {
         let slot = mosaic_slots.slot(0, Vec2us::new(x, y));
         assert_eq!(slot, color, "({x}, {y})");
-        assert_eq!(
-            mosaic.model(0, slot).at(1.0).background,
-            variance,
-            "({x}, {y})"
-        );
+        assert_eq!(mosaic.model(0, slot).at(1.0).bg, variance, "({x}, {y})");
         assert_eq!(mosaic.model(0, slot).sky, sky, "({x}, {y})");
     }
     assert_eq!(mosaic.first_without_gain(), None);
@@ -107,21 +99,21 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
 /// 2.5 is outside sample 0's band and inside sample 1's.
 #[test]
 fn columns_evaluate_the_model_per_sample() {
-    let columns = NoiseColumns {
-        background: &[0.25, 0.75],
+    let cols = NoiseCols {
+        bg: &[0.25, 0.75],
         sky: &[1.0, 1.0],
         per_unit: &[0.25, 0.0],
     };
-    assert_eq!(columns.variance_at(0, 3.0), 0.75);
-    assert_eq!(columns.variance_at(0, 0.0), 0.25);
-    assert_eq!(columns.variance_at(1, 3.0), 0.75);
+    assert_eq!(cols.variance_at(0, 3.0), 0.75);
+    assert_eq!(cols.variance_at(0, 0.0), 0.25);
+    assert_eq!(cols.variance_at(1, 3.0), 0.75);
     let band = SampleBand {
         centre: 1.0,
         bounds: SigmaBounds::symmetric(2.0),
     };
-    assert!(band.keeps(&columns, 0, 2.0));
-    assert!(!band.keeps(&columns, 0, 2.5));
-    assert!(band.keeps(&columns, 1, 2.5));
-    assert!(band.keeps(&columns, 1, -0.5));
-    assert!(!band.keeps(&columns, 1, -0.75));
+    assert!(band.keeps(&cols, 0, 2.0));
+    assert!(!band.keeps(&cols, 0, 2.5));
+    assert!(band.keeps(&cols, 1, 2.5));
+    assert!(band.keeps(&cols, 1, -0.5));
+    assert!(!band.keeps(&cols, 1, -0.75));
 }

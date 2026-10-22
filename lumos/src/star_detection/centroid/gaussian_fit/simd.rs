@@ -5,7 +5,7 @@ use crate::simd::Isa;
 use crate::simd::math::Math;
 use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
 
-/// The Gaussian at `[x0, y0, amplitude, a, b, c, background]`.
+/// The Gaussian at `[x0, y0, amplitude, a, b, c, bg]`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GaussianBatch {
     params: [f64; 7],

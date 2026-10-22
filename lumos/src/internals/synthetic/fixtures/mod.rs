@@ -6,7 +6,7 @@
 
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 
 /// The total-flux range of [`star_field`]'s stars, log-uniform: bright, and clear of saturation on
@@ -22,20 +22,20 @@ pub(crate) const STAR_FIELD_MARGIN: f64 = 16.0;
 /// [`star_field`]'s PSF FWHM, in pixels.
 pub(crate) const STAR_FIELD_FWHM: f32 = 4.0;
 
-/// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
+/// A uniform-random field of `star_count` bright, cleanly-detected stars over a modest sky —
 /// the general-purpose populated field.
-pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn star_field(size: Size2us, star_count: usize, seed: u64) -> SimFrame {
     let scene = Scene::scatter(
         size,
         Scatter {
-            count: num_stars,
+            count: star_count,
             flux: STAR_FIELD_FLUX,
             placement: Placement::Uniform {
                 margin: STAR_FIELD_MARGIN,
             },
             seed,
         },
-        BackgroundField::Uniform {
+        BgField::Uniform {
             level: STAR_FIELD_SKY,
         },
     );
@@ -46,18 +46,18 @@ pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame
     )
 }
 
-/// A crowded central cluster of `num_stars` with heavy blending over a dark sky — for
+/// A crowded central cluster of `star_count` with heavy blending over a dark sky — for
 /// deblend, labeling, and crowded-detection stress.
-pub(crate) fn cluster_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn cluster_field(size: Size2us, star_count: usize, seed: u64) -> SimFrame {
     let scene = Scene::scatter(
         size,
         Scatter {
-            count: num_stars,
+            count: star_count,
             flux: (5.0, 20.0),
             placement: Placement::Cluster,
             seed,
         },
-        BackgroundField::Uniform { level: 0.05 },
+        BgField::Uniform { level: 0.05 },
     );
     render(
         &scene,

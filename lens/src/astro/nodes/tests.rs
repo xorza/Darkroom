@@ -2,7 +2,7 @@
 //! nodes' invocation at the input boundary.
 
 use lumos::{
-    Denoise, ExtractBackground, Hdr, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
+    Denoise, ExtractBg, Hdr, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
     SigmaThreshold,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
@@ -263,7 +263,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     assert_eq!(builder.outputs()[0].name, "Config");
     assert_eq!(
         builder.outputs()[0].data_type,
-        config_data_type::<ExtractBackground>()
+        config_data_type::<ExtractBg>()
     );
 
     let mut inputs: Vec<DynamicValue> = builder

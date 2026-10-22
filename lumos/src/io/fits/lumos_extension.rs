@@ -123,9 +123,9 @@ impl LumosExtension {
         let plane = |width: usize, height: usize| [width, height] == [size.width, size.height];
         match (self, shape) {
             (Self::Flags, [width, height]) => plane(*width, *height),
-            (Self::Gain, [columns, rows, 1 | 3]) => {
+            (Self::Gain, [cols, rows, 1 | 3]) => {
                 let grid = GainGrid::of(size);
-                [*columns, *rows] == [grid.columns, grid.rows]
+                [*cols, *rows] == [grid.cols, grid.rows]
             }
             (Self::Mask, [width, height]) => plane(*width, *height) && channels == 1,
             (Self::Mask, [width, height, planes]) => {

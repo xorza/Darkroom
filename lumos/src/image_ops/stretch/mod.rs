@@ -65,17 +65,11 @@ const MIDTONES_MAX: f32 = 1.0 - 1e-4;
 pub enum StretchMethod {
     /// Screen-Transfer-Function (MTF) auto-stretch. Black point `= median − shadow_sigmas·σ`
     /// (σ the normalized MAD), and the midtones balance is chosen so the rescaled median lands on
-    /// `target_background`.
-    AutoStf {
-        shadow_sigmas: f32,
-        target_background: f32,
-    },
+    /// `target_bg`.
+    AutoStf { shadow_sigmas: f32, target_bg: f32 },
     /// Normalized arcsinh after the same black point as [`Self::AutoStf`], with softening `β`
-    /// chosen so the rescaled median maps to `target_background`.
-    AutoAsinh {
-        shadow_sigmas: f32,
-        target_background: f32,
-    },
+    /// chosen so the rescaled median maps to `target_bg`.
+    AutoAsinh { shadow_sigmas: f32, target_bg: f32 },
     /// Normalized arcsinh after `black_point`, with an explicit softening `β` (smaller = stronger
     /// stretch).
     Asinh { black_point: f32, beta: f32 },
@@ -113,7 +107,7 @@ pub enum ColorMode {
 
 impl StretchMethod {
     /// The background level the automatic presets place the median on: PixInsight AutoSTF's.
-    pub const AUTO_TARGET_BACKGROUND: f32 = 0.25;
+    pub const AUTO_TARGET_BG: f32 = 0.25;
     /// How many normalized MADs below the median the automatic presets put the black point:
     /// PixInsight AutoSTF's shadows clipping, −2.8.
     pub const AUTO_SHADOW_SIGMAS: f32 = 2.8;
@@ -132,7 +126,7 @@ impl Stretch {
         Self {
             method: StretchMethod::AutoAsinh {
                 shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
-                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
+                target_bg: StretchMethod::AUTO_TARGET_BG,
             },
             color: ColorMode::ColorPreserving,
         }
@@ -143,7 +137,7 @@ impl Stretch {
         Self {
             method: StretchMethod::AutoStf {
                 shadow_sigmas: StretchMethod::AUTO_SHADOW_SIGMAS,
-                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
+                target_bg: StretchMethod::AUTO_TARGET_BG,
             },
             color: ColorMode::ColorPreserving,
         }
@@ -153,7 +147,7 @@ impl Stretch {
     ///
     /// # Errors
     /// [`OpError::Config`] on out-of-range parameters, and
-    /// [`OpError::UnreachableBackground`] when an auto method cannot place the measured background
+    /// [`OpError::UnreachableBg`] when an auto method cannot place the measured background
     /// on its target. The image is unchanged on error.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
@@ -176,15 +170,15 @@ impl Stretch {
         match self.method {
             StretchMethod::AutoStf {
                 shadow_sigmas,
-                target_background,
+                target_bg,
             }
             | StretchMethod::AutoAsinh {
                 shadow_sigmas,
-                target_background,
+                target_bg,
             } => {
                 ConfigField::new("shadow_sigmas", shadow_sigmas)
                     .finite_and("finite and non-negative", |value| value >= 0.0)?;
-                ensure_target_background(target_background)
+                ensure_target_bg(target_bg)
             }
             StretchMethod::Asinh { black_point, beta } => {
                 ensure_black_point(black_point)?;
@@ -227,7 +221,7 @@ impl Default for Stretch {
 }
 
 /// `Ok(())` if `t` is a valid target background in `(0, 1)`.
-fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
+fn ensure_target_bg(t: f32) -> Result<(), InvalidConfigField> {
     ConfigField::new("target_background", t)
         .finite_and("finite and in (0, 1)", |value| value > 0.0 && value < 1.0)
 }
@@ -333,24 +327,24 @@ impl BlackPoint {
 
 /// The background an automatic method measures: its median, and its spread in Gaussian units.
 #[derive(Debug, Clone, Copy)]
-struct Background {
+struct Bg {
     median: f32,
     sigma: f32,
 }
 
-impl Background {
+impl Bg {
     /// The STF curve for this background: the black point `shadow_sigmas·sigma` below the median,
     /// and the midtones that put the median on `target`.
     fn stf_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
-        let unreachable = || OpError::UnreachableBackground {
+        let unreachable = || OpError::UnreachableBg {
             method: AutoStretch::Stf,
             median: self.median,
             target,
         };
-        let background = AutoBackground::new(self, shadow_sigmas, unreachable)?;
-        let tone = MtfCurve::new(background.rescaled, target).ok_or_else(unreachable)?;
+        let bg = AutoBg::new(self, shadow_sigmas, unreachable)?;
+        let tone = MtfCurve::new(bg.rescaled, target).ok_or_else(unreachable)?;
         Ok(Curve {
-            black: background.black,
+            black: bg.black,
             tone: Tone::Mtf(tone),
         })
     }
@@ -358,15 +352,15 @@ impl Background {
     /// The auto-asinh curve for this background: the black point [`Self::stf_curve`] takes, and
     /// the softening that puts the median on `target`.
     fn auto_asinh_curve(self, shadow_sigmas: f32, target: f32) -> Result<Curve, OpError> {
-        let unreachable = || OpError::UnreachableBackground {
+        let unreachable = || OpError::UnreachableBg {
             method: AutoStretch::Asinh,
             median: self.median,
             target,
         };
-        let background = AutoBackground::new(self, shadow_sigmas, unreachable)?;
-        let beta = solve_asinh_beta(background.rescaled, target).ok_or_else(unreachable)?;
+        let bg = AutoBg::new(self, shadow_sigmas, unreachable)?;
+        let beta = solve_asinh_beta(bg.rescaled, target).ok_or_else(unreachable)?;
         Ok(Curve {
-            black: background.black,
+            black: bg.black,
             tone: Tone::Asinh(AsinhCurve::new(beta)),
         })
     }
@@ -374,21 +368,21 @@ impl Background {
 
 /// An automatic method's black point, and the background median after it.
 #[derive(Debug, Clone, Copy)]
-struct AutoBackground {
+struct AutoBg {
     black: BlackPoint,
     rescaled: f32,
 }
 
-impl AutoBackground {
+impl AutoBg {
     /// The black point `shadow_sigmas` times the background's σ below its median, held at 0 from
     /// below; `unreachable` when the black point reaches white, or the median sits at or below it
     /// or at white: nothing for a curve to place.
     fn new(
-        background: Background,
+        bg: Bg,
         shadow_sigmas: f32,
         unreachable: impl FnOnce() -> OpError,
     ) -> Result<Self, OpError> {
-        let Background { median, sigma } = background;
+        let Bg { median, sigma } = bg;
         let black = (median - shadow_sigmas * sigma).max(0.0);
         if black >= 1.0 {
             return Err(unreachable());
@@ -639,7 +633,7 @@ fn mtf(m: f32, x: f32) -> f32 {
     }
 }
 
-/// Choose the arcsinh softening `β` so a background of `median` maps to `target_background`;
+/// Choose the arcsinh softening `β` so a background of `median` maps to `target_bg`;
 /// `None` when no `β` does.
 ///
 /// `g(β) = asinh(median/β) / asinh(1/β)` is monotonically decreasing in `β`, ranging from ~1 as
@@ -647,15 +641,15 @@ fn mtf(m: f32, x: f32) -> f32 {
 /// `(median, 1)`. Bisect `log₁₀ β` over `[−30, 5]` — wide enough for medians down to ~1e-20 — and
 /// then check the result, because a target past the range's end converges onto the bound rather
 /// than onto the target.
-fn solve_asinh_beta(median: f32, target_background: f32) -> Option<f32> {
-    if !(median > 0.0 && median < target_background) {
+fn solve_asinh_beta(median: f32, target_bg: f32) -> Option<f32> {
+    if !(median > 0.0 && median < target_bg) {
         return None;
     }
     let g = |beta: f32| (median / beta).asinh() / (1.0 / beta).asinh();
     let (mut lo, mut hi) = (-30.0f32, 5.0f32);
     for _ in 0..60 {
         let mid = f32::midpoint(lo, hi);
-        if g(10.0f32.powf(mid)) > target_background {
+        if g(10.0f32.powf(mid)) > target_bg {
             lo = mid;
         } else {
             hi = mid;
@@ -664,7 +658,7 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> Option<f32> {
     let beta = 10.0f32.powf(f32::midpoint(lo, hi));
     // A reachable target is met to the f32 accuracy of the two `asinh` evaluations (a few ulp,
     // ~1e-6); a target past the range's end misses by far more than this.
-    ((g(beta) - target_background).abs() <= 1e-4).then_some(beta)
+    ((g(beta) - target_bg).abs() <= 1e-4).then_some(beta)
 }
 
 /// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The
@@ -672,19 +666,19 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> Option<f32> {
 /// never reach here.
 fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
     let measured = MedianMad::of_mut(samples);
-    let background = Background {
+    let bg = Bg {
         median: measured.median,
         sigma: measured.sigma(),
     };
     match method {
         StretchMethod::AutoStf {
             shadow_sigmas,
-            target_background,
-        } => background.stf_curve(shadow_sigmas, target_background),
+            target_bg,
+        } => bg.stf_curve(shadow_sigmas, target_bg),
         StretchMethod::AutoAsinh {
             shadow_sigmas,
-            target_background,
-        } => background.auto_asinh_curve(shadow_sigmas, target_background),
+            target_bg,
+        } => bg.auto_asinh_curve(shadow_sigmas, target_bg),
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
             unreachable!("explicit methods are built by explicit_curve, not build_curve")
         }

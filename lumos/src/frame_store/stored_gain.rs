@@ -72,7 +72,7 @@ impl StoredGain {
         GainRows::new(
             grid,
             nodes.start,
-            self.nodes(nodes.start * grid.columns..nodes.end * grid.columns),
+            self.nodes(nodes.start * grid.cols..nodes.end * grid.cols),
         )
     }
 
@@ -83,13 +83,13 @@ impl StoredGain {
             Self::Resident(gain) => Arc::clone(gain),
             Self::Mapped { size, planes } => {
                 let grid = GainGrid::of(*size);
-                let count = grid.columns * grid.rows;
+                let count = grid.cols * grid.rows;
                 Arc::new(FlatGain::from_nodes(
                     *size,
                     planes
                         .iter()
                         .map(|plane| {
-                            Buffer2::new(grid.columns, grid.rows, plane.chunk(0..count).to_vec())
+                            Buffer2::new(grid.cols, grid.rows, plane.chunk(0..count).to_vec())
                         })
                         .collect(),
                 ))

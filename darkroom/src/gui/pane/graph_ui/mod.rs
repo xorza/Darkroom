@@ -14,7 +14,7 @@
 //! runs outside them.
 
 pub(crate) mod canvas;
-pub(crate) mod canvas_background;
+pub(crate) mod canvas_bg;
 pub(crate) mod canvas_ctx;
 pub(crate) mod draw_ctx;
 pub(crate) mod frame;
@@ -32,7 +32,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph_ui::canvas_background::CanvasBackground;
+use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts, Selection};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
@@ -101,7 +101,7 @@ pub(crate) struct GraphUi {
     /// would open a gap here while the canvas never went anywhere, and the next
     /// frame would drop every in-flight gesture.
     last_prepass_frame: Option<u64>,
-    background: CanvasBackground,
+    bg: CanvasBg,
     /// Port centers, node sizes and world rects, cached across frames and
     /// rebuilt in [`Self::prepass`]. Outlives the scene on purpose — a culled
     /// node's ports still resolve off it — so it is swept by
@@ -182,7 +182,7 @@ impl GraphUi {
             // Survivors: caches and panels that outlive the scene on purpose,
             // and the frame-local facts `prepass` rewrites before anything
             // reads them.
-            background: _,
+            bg: _,
             geometry: _,
             inspectors: _,
             last_prepass_frame: _,
@@ -215,7 +215,7 @@ impl GraphUi {
             node_menu,
             selection_ui,
             camera,
-            background: _,
+            bg: _,
             geometry: _,
             inspectors: _,
             last_prepass_frame: _,
@@ -470,7 +470,7 @@ impl GraphUi {
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
-                self.background.draw(ui, theme, viewport);
+                self.bg.draw(ui, theme, viewport);
                 Panel::canvas()
                     .id(canvas::inner_wid())
                     .size((Sizing::FILL, Sizing::FILL))

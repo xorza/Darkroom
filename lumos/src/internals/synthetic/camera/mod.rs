@@ -11,7 +11,7 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
-use crate::internals::synthetic::backgrounds::Vignette;
+use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
 use crate::math::size2us::Size2us;
@@ -151,8 +151,8 @@ pub(crate) struct SensorDefects {
 pub(crate) struct BiasField {
     /// Constant additive pedestal (normalized).
     pub(crate) offset: f32,
-    /// `(column_x, excess_offset)` — bad columns sit above the base bias.
-    pub(crate) bad_columns: Vec<(usize, f32)>,
+    /// `(col_x, excess_offset)` — bad columns sit above the base bias.
+    pub(crate) bad_cols: Vec<(usize, f32)>,
 }
 
 /// The instrument + sensor: PSF, charge capacity & noise, flat, defects, bias.

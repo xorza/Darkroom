@@ -1,6 +1,8 @@
 use imaginarium::Buffer2;
 
-use crate::image_ops::local_contrast::{LocalContrast, N_BINS, TileAxis, TileGrid, clip_histogram};
+use crate::image_ops::local_contrast::{
+    BIN_COUNT, LocalContrast, TileAxis, TileGrid, clip_histogram,
+};
 use crate::internals::images::{gray_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
@@ -92,7 +94,7 @@ fn clahe_tile_mappings_are_monotonic() {
         f32::midpoint(x as f32 / 79.0, y as f32 / 79.0)
     });
     let grid = TileGrid {
-        columns: TileAxis::new(80, 4),
+        cols: TileAxis::new(80, 4),
         rows: TileAxis::new(80, 4),
     };
     let luts = grid.luts(&intensity, 2.0);
@@ -134,10 +136,10 @@ fn clahe_is_color_preserving() {
 /// ends at 10 + 3 + 1. A remainder of 100 strides by 2: bins 0, 2, …, 198. The count is kept.
 #[test]
 fn clipping_spreads_the_excess_across_the_range() {
-    let mut hist = [0u32; N_BINS];
+    let mut hist = [0u32; BIN_COUNT];
     hist[0] = 1000;
     clip_histogram(&mut hist, 10);
-    let mut expected = [3u32; N_BINS];
+    let mut expected = [3u32; BIN_COUNT];
     for bin in &mut expected[..222] {
         *bin += 1;
     }
@@ -145,10 +147,10 @@ fn clipping_spreads_the_excess_across_the_range() {
     assert_eq!(hist, expected);
     assert_eq!(hist.iter().sum::<u32>(), 1000);
 
-    let mut hist = [0u32; N_BINS];
+    let mut hist = [0u32; BIN_COUNT];
     hist[100] = 10 + 100;
     clip_histogram(&mut hist, 10);
-    let mut expected = [0u32; N_BINS];
+    let mut expected = [0u32; BIN_COUNT];
     expected[100] = 10;
     for bin in (0..200).step_by(2) {
         expected[bin] += 1;

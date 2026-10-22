@@ -32,7 +32,7 @@ const ROW_ALIGNMENT_BITS: usize = 128;
 #[derive(Debug)]
 struct BitLayout {
     stride: usize,
-    num_words: usize,
+    word_count: usize,
 }
 
 impl BitLayout {
@@ -40,7 +40,7 @@ impl BitLayout {
         if size.width == 0 || size.height == 0 {
             return Self {
                 stride: 0,
-                num_words: 0,
+                word_count: 0,
             };
         }
 
@@ -58,7 +58,7 @@ impl BitLayout {
         debug_assert!(total_bits.is_multiple_of(BITS_PER_WORD));
         Self {
             stride,
-            num_words: total_bits / BITS_PER_WORD,
+            word_count: total_bits / BITS_PER_WORD,
         }
     }
 }
@@ -101,7 +101,7 @@ impl BitBuffer2 {
     pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
         let layout = BitLayout::of(size);
         let mut buffer = Self {
-            words: vec![0; layout.num_words],
+            words: vec![0; layout.word_count],
             size,
             stride: layout.stride,
         };
@@ -113,7 +113,7 @@ impl BitBuffer2 {
 
     /// The bytes a buffer of `size` allocates, rows padded and all.
     pub(crate) const fn heap_bytes(size: Size2us) -> usize {
-        BitLayout::of(size).num_words * size_of::<u64>()
+        BitLayout::of(size).word_count * size_of::<u64>()
     }
 
     #[inline]
@@ -135,7 +135,7 @@ impl BitBuffer2 {
     pub(crate) fn clear_to(&mut self, size: Size2us) {
         let layout = BitLayout::of(size);
         self.words.clear();
-        self.words.resize(layout.num_words, 0);
+        self.words.resize(layout.word_count, 0);
         self.size = size;
         self.stride = layout.stride;
     }

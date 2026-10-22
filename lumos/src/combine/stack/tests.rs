@@ -23,7 +23,7 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
 use crate::frame_store::stored_frame::SpillFrame;
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -68,8 +68,8 @@ fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct
 /// `frame` measured to have white noise `sigma` in every slot, so each of its samples has variance
 /// `sigma²` over its confidence.
 fn with_noise(mut frame: StackFrame, sigma: f32) -> StackFrame {
-    for background in &mut frame.admitted.stats.background {
-        *background = BackgroundSplit::of_sigma(sigma);
+    for bg in &mut frame.admitted.stats.bg {
+        *bg = BgSplit::of_sigma(sigma);
     }
     frame
 }
@@ -1191,9 +1191,9 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
             );
             frame.admitted.stats = FrameStats {
                 medians: [median].into_iter().collect(),
-                background: [statistics::internals::mad_to_sigma(mad)]
+                bg: [statistics::internals::mad_to_sigma(mad)]
                     .into_iter()
-                    .map(BackgroundSplit::of_sigma)
+                    .map(BgSplit::of_sigma)
                     .collect(),
                 sky: [median].into_iter().collect(),
                 spread: None,
@@ -1555,12 +1555,7 @@ fn registered_confidence_divides_the_noise_and_leaves_the_weight() {
         .chunk(pixel..pixel + 1)[0];
     assert_eq!(identity_confidence, 1.0);
     assert_eq!(half_pixel_confidence, 4.0);
-    let sigma_squared = source_stats(&cache)
-        .next()
-        .unwrap()
-        .ccd_noise(0)
-        .at(1.0)
-        .background;
+    let sigma_squared = source_stats(&cache).next().unwrap().ccd_noise(0).at(1.0).bg;
 
     let product = StackConfig {
         combine: Combine {
@@ -1757,7 +1752,7 @@ fn noise_weights_read_a_demosaiced_frames_mosaic_noise() {
             .metadata
             .derived
             .set_mosaic_noise(sigma.map(|sigma| MosaicNoise {
-                background: sigma.map(BackgroundSplit::of_sigma),
+                bg: sigma.map(BgSplit::of_sigma),
                 sky: [value; 3],
                 quantization_sigma: None,
             }));
@@ -2161,7 +2156,7 @@ fn noise_weights_survive_rejection() {
         Normalization::None,
     );
     for (frame, sigma) in cache.frames.iter_mut().zip([1.0 / 16.0, 4.0, 1.0]) {
-        frame.source_stats.background[0] = BackgroundSplit::of_sigma(sigma);
+        frame.source_stats.bg[0] = BgSplit::of_sigma(sigma);
     }
     let config = StackConfig {
         combine: Combine {
@@ -2344,7 +2339,7 @@ fn each_samples_noise_reads_the_gain_its_flat_applied() {
             image.set_flat_gain(Some(Arc::clone(&gain)));
         }
         let mut frame = with_noise(image.into(), 1.0);
-        frame.admitted.stats.background[0].read_share = read_share;
+        frame.admitted.stats.bg[0].read_share = read_share;
         frame.admitted.stats.electrons_per_unit = electrons;
         frame
     };
@@ -2414,7 +2409,7 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
         known.inverse_variance.as_ref().unwrap().channel(0).pixels(),
         &[2.0 / 3.0; 2]
     );
-    assert!(!known.report.variance_background_only);
+    assert!(!known.report.variance_bg_only);
 
     let unknown = combine(vec![frame(10.0, Some(0.5)), frame(14.0, None)], &config).unwrap();
     assert_eq!(
@@ -2426,7 +2421,7 @@ fn the_inverse_variance_plane_carries_the_source_term_above_the_sky() {
             .pixels(),
         &[2.0 / 3.0; 2]
     );
-    assert!(unknown.report.variance_background_only);
+    assert!(unknown.report.variance_bg_only);
 
     // CCD-model rejection holds each sample to its own model, whose photon term needs the gain:
     // a set is refused before the combine, naming frame 1, the first that states none, and with

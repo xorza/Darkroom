@@ -16,7 +16,7 @@ use crate::image_ops::error::OpError;
 use crate::math::size2us::Size2us;
 
 /// Histogram resolution for the per-tile mappings.
-const N_BINS: usize = 256;
+const BIN_COUNT: usize = 256;
 
 /// Local contrast enhancement of a *stretched* (display-domain) image in place via CLAHE.
 ///
@@ -66,12 +66,12 @@ impl LocalContrast {
         // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is
         // meaningful; on a small image this caps the requested tile count (a no-op on a real
         // megapixel frame).
-        let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * N_BINS) as f64)
+        let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * BIN_COUNT) as f64)
             .sqrt() as usize)
             .max(1);
         let tiles = self.tiles.min(max_tiles);
         let grid = TileGrid {
-            columns: TileAxis::new(intensity.width(), tiles),
+            cols: TileAxis::new(intensity.width(), tiles),
             rows: TileAxis::new(intensity.height(), tiles),
         };
         let luts = grid.luts(intensity, self.clip_limit);
@@ -88,15 +88,15 @@ impl LocalContrast {
     }
 }
 
-/// A tile's mapping: the clipped histogram's cumulative fraction at each bin edge, `N_BINS + 1`
+/// A tile's mapping: the clipped histogram's cumulative fraction at each bin edge, `BIN_COUNT + 1`
 /// nodes from 0 to 1. Between edges the mapping is linear, the CDF of the histogram's own
 /// piecewise-uniform density — so a value maps continuously, not to its bin's one level.
-type TileLut = [f32; N_BINS + 1];
+type TileLut = [f32; BIN_COUNT + 1];
 
 /// Clip every bin at `clip` and hand the excess back evenly: an equal share to every bin, and the
-/// remainder one apiece to bins spread across the range at a stride of `N_BINS / remainder`, as
+/// remainder one apiece to bins spread across the range at a stride of `BIN_COUNT / remainder`, as
 /// OpenCV's CLAHE does — given to the lowest bins instead, it would lift the dark end alone.
-fn clip_histogram(hist: &mut [u32; N_BINS], clip: u32) {
+fn clip_histogram(hist: &mut [u32; BIN_COUNT], clip: u32) {
     let mut excess = 0u32;
     for c in hist.iter_mut() {
         if *c > clip {
@@ -104,15 +104,15 @@ fn clip_histogram(hist: &mut [u32; N_BINS], clip: u32) {
             *c = clip;
         }
     }
-    let share = excess / N_BINS as u32;
-    let mut remainder = (excess % N_BINS as u32) as usize;
+    let share = excess / BIN_COUNT as u32;
+    let mut remainder = (excess % BIN_COUNT as u32) as usize;
     for c in hist.iter_mut() {
         *c += share;
     }
-    if let Some(stride) = N_BINS.checked_div(remainder) {
+    if let Some(stride) = BIN_COUNT.checked_div(remainder) {
         let stride = stride.max(1);
         let mut bin = 0;
-        while bin < N_BINS && remainder > 0 {
+        while bin < BIN_COUNT && remainder > 0 {
             hist[bin] += 1;
             bin += stride;
             remainder -= 1;
@@ -177,7 +177,7 @@ impl TileAxis {
 /// The tiles over a plane: how its columns and its rows split.
 #[derive(Debug)]
 struct TileGrid {
-    columns: TileAxis,
+    cols: TileAxis,
     rows: TileAxis,
 }
 
@@ -188,19 +188,19 @@ impl TileGrid {
         reason = "the clip limit is at least 1 by construction"
     )]
     fn luts(&self, intensity: &Buffer2<f32>, clip_limit: f32) -> Vec<TileLut> {
-        let Self { columns, rows } = self;
-        let mut luts = vec![[0.0f32; N_BINS + 1]; columns.tiles() * rows.tiles()];
+        let Self { cols, rows } = self;
+        let mut luts = vec![[0.0f32; BIN_COUNT + 1]; cols.tiles() * rows.tiles()];
         luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
-            let (tx, ty) = (idx % columns.tiles(), idx / columns.tiles());
-            let (x0, x1) = (columns.bounds[tx], columns.bounds[tx + 1]);
-            let mut hist = [0u32; N_BINS];
+            let (tx, ty) = (idx % cols.tiles(), idx / cols.tiles());
+            let (x0, x1) = (cols.bounds[tx], cols.bounds[tx + 1]);
+            let mut hist = [0u32; BIN_COUNT];
             for y in rows.bounds[ty]..rows.bounds[ty + 1] {
                 for &v in &intensity.row(y)[x0..x1] {
                     hist[bin_of(v)] += 1;
                 }
             }
             let count: u32 = hist.iter().sum();
-            let clip = (clip_limit * count as f32 / N_BINS as f32).max(1.0) as u32;
+            let clip = (clip_limit * count as f32 / BIN_COUNT as f32).max(1.0) as u32;
             clip_histogram(&mut hist, clip);
             let total: u32 = hist.iter().sum();
             let mut cum = 0u32;
@@ -216,22 +216,22 @@ impl TileGrid {
     /// Map each pixel's intensity through the bilinearly-interpolated four-tile mapping, blended
     /// with the original by `strength`.
     fn apply(&self, intensity: &Buffer2<f32>, luts: &[TileLut], strength: f32) -> Buffer2<f32> {
-        let Self { columns, rows } = self;
+        let Self { cols, rows } = self;
         let size = Size2us::from(intensity);
-        let column_blends: Vec<Blend> = (0..size.width).map(|x| columns.blend(x)).collect();
+        let col_blends: Vec<Blend> = (0..size.width).map(|x| cols.blend(x)).collect();
         let mut out = Buffer2::new_default(size.width, size.height);
         out.pixels_mut()
             .par_chunks_mut(size.width)
             .enumerate()
             .for_each(|(y, orow)| {
                 let row = rows.blend(y);
-                let (top, bottom) = (row.lower * columns.tiles(), row.upper * columns.tiles());
-                for ((o, &v), column) in orow.iter_mut().zip(intensity.row(y)).zip(&column_blends) {
+                let (top, bottom) = (row.lower * cols.tiles(), row.upper * cols.tiles());
+                for ((o, &v), col) in orow.iter_mut().zip(intensity.row(y)).zip(&col_blends) {
                     let at = |tile: usize| map_through(&luts[tile], v);
-                    let upper_row = at(top + column.lower)
-                        + column.weight * (at(top + column.upper) - at(top + column.lower));
-                    let lower_row = at(bottom + column.lower)
-                        + column.weight * (at(bottom + column.upper) - at(bottom + column.lower));
+                    let upper_row = at(top + col.lower)
+                        + col.weight * (at(top + col.upper) - at(top + col.lower));
+                    let lower_row = at(bottom + col.lower)
+                        + col.weight * (at(bottom + col.upper) - at(bottom + col.lower));
                     let mapped = upper_row + row.weight * (lower_row - upper_row);
                     *o = v + strength * (mapped - v);
                 }
@@ -247,8 +247,8 @@ impl TileGrid {
     reason = "the value is clamped into [0, 1] first"
 )]
 fn map_through(lut: &TileLut, v: f32) -> f32 {
-    let pos = v.clamp(0.0, 1.0) * N_BINS as f32;
-    let bin = (pos as usize).min(N_BINS - 1);
+    let pos = v.clamp(0.0, 1.0) * BIN_COUNT as f32;
+    let bin = (pos as usize).min(BIN_COUNT - 1);
     let fraction = pos - bin as f32;
     lut[bin] + fraction * (lut[bin + 1] - lut[bin])
 }
@@ -260,7 +260,7 @@ fn map_through(lut: &TileLut, v: f32) -> f32 {
     reason = "the value is clamped into [0, 1] first"
 )]
 fn bin_of(v: f32) -> usize {
-    ((v.clamp(0.0, 1.0) * N_BINS as f32) as usize).min(N_BINS - 1)
+    ((v.clamp(0.0, 1.0) * BIN_COUNT as f32) as usize).min(BIN_COUNT - 1)
 }
 
 #[cfg(test)]

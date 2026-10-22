@@ -26,12 +26,12 @@ pub(super) enum ConversionFormat {
 }
 
 impl ConversionFormat {
-    /// The format to convert an image in `current` to, or `None` when it
+    /// The format to convert an image in `cur` to, or `None` when it
     /// stays as it is.
-    pub(super) fn target(self, current: ColorFormat) -> Option<ColorFormat> {
+    pub(super) fn target(self, cur: ColorFormat) -> Option<ColorFormat> {
         match self {
             Self::AsIs => None,
-            Self::To(format) => (format != current).then_some(format),
+            Self::To(format) => (format != cur).then_some(format),
         }
     }
 }

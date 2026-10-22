@@ -55,7 +55,7 @@ impl FrameWeights {
                         let gain = frame_norms.map_or(1.0, |norms| norms[idx].slots[slot].gain);
                         // The frame's noise where no flat amplified it, as normalization scaled
                         // it: the flat's gain changes across the frame, not between frames.
-                        let variance = stats.ccd_noise(slot).at(1.0).background * gain * gain;
+                        let variance = stats.ccd_noise(slot).at(1.0).bg * gain * gain;
                         let weight = 1.0 / variance;
                         if !weight.is_finite() {
                             return Err(StackError::NoNoiseToWeigh { idx });

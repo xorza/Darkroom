@@ -1,13 +1,13 @@
 //! The [`Compiled`] view [`TestGraph::compile`] hands back.
 //!
 //! Gated, and `pub(crate)`, because every accessor here answers with a
-//! crate-private type — an `ExecutionNode`, an `ExecutionBinding`. Nothing
+//! crate-private type — an `ExecNode`, an `ExecBinding`. Nothing
 //! outside this crate could read one, so nothing outside it is offered one.
 
 use hashbrown::HashMap;
 
-use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionNode};
-use crate::execution::idx::NodeIdx;
+use crate::exec::compile::compiled_graph::{CompiledGraph, ExecBinding, ExecNode};
+use crate::exec::idx::NodeIdx;
 use crate::graph::identity::NodeId;
 
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its
@@ -65,14 +65,14 @@ impl Compiled {
             .unwrap_or_else(|| panic!("{node_id:?} is not a node this fixture named"))
     }
 
-    pub(crate) fn node(&self, name: &str) -> &ExecutionNode {
+    pub(crate) fn node(&self, name: &str) -> &ExecNode {
         &self.program[self.idx(name)]
     }
 
     /// What `name`'s input `input` lowered to: a wire interned to its
     /// producer's address, a literal that satisfied the port, or nothing —
     /// which is where a type-mismatched binding ends up.
-    pub(crate) fn binding(&self, name: &str, input: usize) -> &ExecutionBinding {
+    pub(crate) fn binding(&self, name: &str, input: usize) -> &ExecBinding {
         let e_node = self.node(name);
         assert!(
             input < e_node.inputs.len as usize,

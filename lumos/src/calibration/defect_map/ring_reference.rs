@@ -190,17 +190,17 @@ impl Plane {
             return None;
         }
         let rhs = [sz, sxz, syz];
-        let with_column = |column: usize| {
+        let with_col = |col: usize| {
             let mut m = matrix;
             for (row, value) in rhs.iter().enumerate() {
-                m[row][column] = *value;
+                m[row][col] = *value;
             }
             det3(m) / det
         };
         Some(Self {
-            a: with_column(0),
-            b: with_column(1),
-            c: with_column(2),
+            a: with_col(0),
+            b: with_col(1),
+            c: with_col(2),
         })
     }
 

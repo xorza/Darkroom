@@ -186,11 +186,11 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 5. Label map, of the mask as it stands — the stage labels it undilated.
     let label_map = pool.labeler.label(&mask, config.extraction.connectivity);
-    let num_labels = label_map.num_labels();
+    let label_count = label_map.label_count();
     let labels_buf = Buffer2::new(width, height, label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
     visual::save_rgb(&labels_rgb, &out("06_label_map"));
-    println!("Saved: 06_label_map ({num_labels} components)");
+    println!("Saved: 06_label_map ({label_count} components)");
     drop(mask);
 
     // The stage itself, on the same plane, saw what these images show.
@@ -203,7 +203,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
         &mut pool,
     );
     assert_eq!(stage.pixels_above_threshold, pixels_above);
-    assert_eq!(stage.connected_components, num_labels);
+    assert_eq!(stage.connected_components, label_count);
 }
 
 /// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
@@ -247,7 +247,7 @@ fn weighted_fit_registration_rms() {
             .expect("registration should succeed");
         Registered {
             rms: r.rms_error(),
-            inliers: r.num_inliers(),
+            inliers: r.inlier_count(),
         }
     };
 

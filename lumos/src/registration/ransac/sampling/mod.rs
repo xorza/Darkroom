@@ -29,7 +29,7 @@ pub(super) struct Sampler {
     rng: ChaCha8Rng,
     sample_size: usize,
     /// Iterations in each guided phase.
-    phase_length: usize,
+    phase_len: usize,
     /// The pairs by descending confidence, ties in index order.
     by_confidence: Vec<usize>,
     /// Each pair's sampling weight, `(confidence + 0.1)²`, which favours the confident ones.
@@ -50,7 +50,7 @@ impl Sampler {
         Self {
             rng: ChaCha8Rng::seed_from_u64(config.seed),
             sample_size,
-            phase_length: guided_phase_iterations(sample_size, config),
+            phase_len: guided_phase_iterations(sample_size, config),
             by_confidence,
             weights: confidences.iter().map(|&c| (c + 0.1).powi(2)).collect(),
             shuffle: Vec::new(),
@@ -60,7 +60,7 @@ impl Sampler {
 
     /// The iterations the guided phases take, which the adaptive stop does not count.
     pub(super) const fn guided_iterations(&self) -> usize {
-        GUIDED_POOL_FRACTIONS.len() * self.phase_length
+        GUIDED_POOL_FRACTIONS.len() * self.phase_len
     }
 
     /// The sample of `iteration`, numbered from 1, into `sample`.
@@ -69,7 +69,7 @@ impl Sampler {
         reason = "the sampling fraction of a pair count is non-negative"
     )]
     pub(super) fn draw(&mut self, iteration: usize, sample: &mut Vec<usize>) {
-        match GUIDED_POOL_FRACTIONS.get((iteration - 1) / self.phase_length) {
+        match GUIDED_POOL_FRACTIONS.get((iteration - 1) / self.phase_len) {
             Some(&fraction) => {
                 let n = self.by_confidence.len();
                 let pool_size = ((n as f64 * fraction).ceil() as usize).max(self.sample_size);

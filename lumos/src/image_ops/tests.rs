@@ -1,13 +1,13 @@
-use crate::image::background_split::BackgroundSplit;
+use crate::image::bg_split::BgSplit;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::mosaic_noise::MosaicNoise;
-use crate::image_ops::color_calibration::neutralize_background::NeutralizeBackground;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
 use crate::image_ops::error::OpError;
-use crate::image_ops::extract_background::ExtractBackground;
+use crate::image_ops::extract_bg::ExtractBg;
 use crate::image_ops::hdr::Hdr;
 use crate::image_ops::local_contrast::LocalContrast;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
@@ -42,7 +42,7 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
             .derived
             .set_quantization_sigma(Some(1.0 / 65_536.0));
         image.metadata.derived.set_mosaic_noise(Some(MosaicNoise {
-            background: [BackgroundSplit::of_sigma(0.01); 3],
+            bg: [BgSplit::of_sigma(0.01); 3],
             sky: [0.1, 0.15, 0.2],
             quantization_sigma: Some(1.0 / 65_536.0),
         }));
@@ -52,9 +52,9 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
         ("stretch", |image| Stretch::default().apply(image)),
         ("denoise", |image| Denoise::default().apply(image)),
         ("background extraction", |image| {
-            ExtractBackground {
+            ExtractBg {
                 tile_size: 16,
-                ..ExtractBackground::default()
+                ..ExtractBg::default()
             }
             .apply(image)
         }),
@@ -62,9 +62,7 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
             LocalContrast::default().apply(image)
         }),
         ("hdr", |image| Hdr::default().apply(image)),
-        ("neutralize background", |image| {
-            NeutralizeBackground.apply(image)
-        }),
+        ("neutralize background", |image| NeutralizeBg.apply(image)),
         ("scnr", |image| Scnr::default().apply(image)),
     ];
     for (name, op) in ops {
@@ -103,7 +101,7 @@ fn every_op_apply_rejects_an_invalid_config() {
 
     for degree in [0, 7] {
         rejects("background extraction degree", |image| {
-            ExtractBackground {
+            ExtractBg {
                 degree,
                 ..Default::default()
             }

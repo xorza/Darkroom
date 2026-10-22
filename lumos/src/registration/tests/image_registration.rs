@@ -7,7 +7,7 @@ use glam::DVec2;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, render};
-use crate::internals::synthetic::scene::{BackgroundField, Placement, Scatter, Scene};
+use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, max_deviation};
@@ -60,7 +60,7 @@ impl Rendered {
                 placement: Placement::Uniform { margin: 16.0 },
                 seed: self.seed,
             },
-            BackgroundField::Uniform { level: 0.1 },
+            BgField::Uniform { level: 0.1 },
         );
         let reference = render(&scene, &self.camera, &Observation::reference(self.seed));
         let target = render(
@@ -88,7 +88,7 @@ impl Rendered {
 
         let sigma =
             metrics::centroid_sigma(&[(&reference, &reference_stars), (&target, &target_stars)]);
-        let n = result.num_inliers() as f64;
+        let n = result.inlier_count() as f64;
         let pair_sigma = sigma * 2f64.sqrt();
         let bound = 5.0 * pair_sigma * (2.0 * 7.0 / n).sqrt();
         let deviation = max_deviation(

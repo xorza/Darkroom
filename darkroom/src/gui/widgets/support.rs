@@ -78,7 +78,7 @@ impl<V: Display> LabeledValue<'_, V> {
 /// on only its bottom two corners so it seats under whatever rounds the
 /// top (a header bar, or the card's own top edge). Shared by a node body's
 /// memory footer and a preview node's image-info footer.
-pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background {
+pub(crate) fn footer_bg(theme: &Theme, corner_radius: f32) -> Background {
     Background::rounded(
         theme.colors.chrome_fill,
         Corners::new(0.0, 0.0, corner_radius, corner_radius),
@@ -91,7 +91,7 @@ pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background
 /// not the card's outer radius, else the band's corner leaves a wedge of the
 /// card's plain fill showing through. Used by a node body's header — the one
 /// title bar in the tree, kept here beside its footer peer.
-pub(crate) fn header_background(theme: &Theme, corner_radius: f32) -> Background {
+pub(crate) fn header_bg(theme: &Theme, corner_radius: f32) -> Background {
     Background::rounded(
         theme.card.header_fill,
         Corners::new(corner_radius, corner_radius, 0.0, 0.0),

@@ -1,6 +1,6 @@
 //! The noise model one cosmic-ray pass thresholds against, resolved for its frame.
 
-use crate::background_mesh::color_mesh::{ColorMesh, LocalBackground};
+use crate::bg_mesh::color_mesh::{ColorMesh, LocalBg};
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::image::flat_gain::FlatGain;
@@ -53,12 +53,12 @@ impl NoiseModel {
     /// the variance a unit adds were the sky photon-limited, `σ² = sky·g/electrons`. Measured at
     /// the pixel's flat, it holds `g` already; read noise in σ² only raises it, which raises the
     /// noise and flags fewer pixels, the side a guess has to err on.
-    pub(crate) fn noise(self, signal: f32, pixel: PixelBackground) -> f32 {
+    pub(crate) fn noise(self, signal: f32, pixel: PixelBg) -> f32 {
         let local = pixel.local;
         let sigma = local.noise.max(Spread::resolution(local.sky));
         let variance = sigma * sigma;
         NoiseAt {
-            background: variance,
+            bg: variance,
             sky: local.sky,
             per_unit: match self.electrons_per_unit {
                 Some(electrons) => pixel.flat_gain / electrons,
@@ -73,22 +73,22 @@ impl NoiseModel {
 /// What the noise model reads at one pixel: its color's local background, and the gain a flat
 /// multiplied it by.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PixelBackground {
-    pub(crate) local: LocalBackground,
+pub(crate) struct PixelBg {
+    pub(crate) local: LocalBg,
     pub(crate) flat_gain: f32,
 }
 
-/// The [`PixelBackground`] of every pixel of a frame: its color mesh, and its flat's gain.
+/// The [`PixelBg`] of every pixel of a frame: its color mesh, and its flat's gain.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PixelBackgrounds<'a> {
+pub(crate) struct PixelBgs<'a> {
     pub(crate) mesh: &'a ColorMesh,
     /// `None` for a frame no flat divided, whose gain is 1 everywhere.
     pub(crate) flat_gain: Option<&'a FlatGain>,
 }
 
-impl PixelBackgrounds<'_> {
-    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> PixelBackground {
-        PixelBackground {
+impl PixelBgs<'_> {
+    pub(crate) fn at(&self, color: usize, pos: Vec2us) -> PixelBg {
+        PixelBg {
             local: self.mesh.at(color, pos),
             flat_gain: self
                 .flat_gain

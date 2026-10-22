@@ -133,7 +133,7 @@ pub(super) fn show(ui: &mut Ui, rec: &mut NodeRecord<'_, '_>) -> bool {
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
         .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
-        .background(support::header_background(theme, r))
+        .background(support::header_bg(theme, r))
         .show(ui, |ui| {
             // The run affordance leads the band, ahead of the title — the
             // one control that *does* something with the node's output
