@@ -7,6 +7,7 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flag_counts::FlagCounts;
 use crate::image::flat_gain::FlatGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
@@ -26,6 +27,11 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     /// No default: both implementors know the answer, and a default of "none" would let a decoder
     /// that starts recording flags have them silently dropped here.
     fn flags(&self) -> Option<&PixelFlags>;
+
+    /// How many pixels hold each flag, for an image that carries any.
+    fn flag_counts(&self) -> Option<&FlagCounts> {
+        self.flags().map(PixelFlags::counts)
+    }
 
     /// The image's channel planes, its flags and its flat gain, moved out.
     fn into_parts(self) -> ImageParts;

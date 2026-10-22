@@ -1,6 +1,5 @@
 use std::panic;
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
 
 use imaginarium::Buffer2;
 
@@ -137,22 +136,11 @@ fn a_lease_outlives_its_pool_handle() {
     assert!(lease.0.is_empty());
 }
 
-/// `into_inner` takes a value out for good, releasing the lease's share of the pool; `clear`
-/// drops the free values, so the next acquire builds afresh.
+/// `clear` drops the free values, so the next acquire builds afresh.
 #[test]
-fn into_inner_and_clear_take_values_out_of_the_pool() {
+fn clear_takes_values_out_of_the_pool() {
     let mut pool: ScratchPool<Row> = ScratchPool::new(2);
-    let mut kept = pool.acquire();
-    kept.0.fill(5);
     let mut returned = pool.acquire();
-    assert_eq!(Arc::strong_count(&pool.shelf), 3);
-
-    let kept = kept.into_inner();
-    assert_eq!(kept.0, [5, 5]);
-    assert_eq!(Arc::strong_count(&pool.shelf), 2);
-    drop(kept);
-    assert_eq!(pool.pooled(), 0, "a value taken out is not shelved");
-
     returned.0.fill(6);
     drop(returned);
     assert_eq!(pool.pooled(), 1);

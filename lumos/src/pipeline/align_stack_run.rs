@@ -7,6 +7,7 @@ use std::path::Path;
 use common::CancelToken;
 
 use crate::concurrency;
+use crate::frame_store::file_set::Loaded;
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -26,6 +27,7 @@ use crate::pipeline::registered_set::RegisteredSet;
 use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
 use crate::registration::registrar::Registrar;
+use crate::registration::resample::WarpResult;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::star_detector::detection_result::DetectionResult;
 
@@ -44,6 +46,14 @@ pub(super) struct AlignStackRun<'a> {
 struct DetectedLights {
     lights: Vec<DetectedLight>,
     stage: StagePlan,
+}
+
+/// What a worker of a single pass carries from one light to the next: its detector's warmed
+/// buffers, and the set its lights warp into.
+#[derive(Debug)]
+struct PassWorker {
+    detector: StarDetector,
+    warped: Option<WarpResult>,
 }
 
 /// How each light is taken in: admitted to the set, then its stars detected.
@@ -173,10 +183,10 @@ impl AlignStackRun<'_> {
                 intake
                     .intake
                     .map(0..count, &mut detectors, |detector, idx| {
-                        let image = files.prepare(idx, intake.intake.ctx())?;
+                        let Loaded { image, kept } = files.prepare(idx, intake.intake.ctx())?;
                         let DetectedLight { frame, diagnostics } =
                             intake.detect(detector, idx, image)?;
-                        let frame = frame.parked(&stage.parking)?;
+                        let frame = frame.parked(&stage.parking, kept)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
                     })?
@@ -245,19 +255,18 @@ impl AlignStackRun<'_> {
             StageCounter::new(&self.ingest.progress, StackingStage::Registering, count - 1);
         // Taking each detected light by value frees its input image as soon as the warped output
         // exists, so this stage never holds the complete input and warped sets simultaneously.
-        let parked = concurrency::try_par_map_bounded_owned(
-            frames,
-            &mut vec![(); warp_width],
-            |(), idx, frame| {
-                let parked = registrar.park(idx, frame)?;
+        let mut warped: Vec<Option<WarpResult>> = (0..warp_width).map(|_| None).collect();
+        let parked =
+            concurrency::try_par_map_bounded_owned(frames, &mut warped, |warped, idx, frame| {
+                let parked = registrar.park(warped, idx, frame)?;
                 if idx != reference {
                     registering.complete_one();
                 }
                 Ok::<_, AlignStackError>(parked)
-            },
-        )?;
-        // The registrar's warp sets are a warped frame's worth each, and the combine sizes its
-        // chunks against the memory without them.
+            })?;
+        // The workers' warp sets are a warped frame's worth each, and the registrar's scratch a
+        // warp's flag planes: the combine sizes its chunks against the memory without them.
+        drop(warped);
         drop(registrar);
 
         RegisteredSet {
@@ -307,17 +316,24 @@ impl AlignStackRun<'_> {
         );
         let slots = workers.min(count);
         let intake = self.intake(shape.dimensions, count, slots);
-        let mut detectors = self.detectors(slots)?;
+        let mut workers: Vec<PassWorker> = self
+            .detectors(slots)?
+            .into_iter()
+            .map(|detector| PassWorker {
+                detector,
+                warped: None,
+            })
+            .collect();
 
         if self.cancel().is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
         // The reference decodes alone, on every thread a decode may use.
-        let image = files.prepare(reference, &ingest.ctx)?;
+        let Loaded { image, kept } = files.prepare(reference, &ingest.ctx)?;
         let DetectedLight {
             frame: mut first,
             diagnostics,
-        } = intake.detect(&mut detectors[0], reference, image)?;
+        } = intake.detect(&mut workers[0].detector, reference, image)?;
         ReferenceCandidate {
             stars: first.stars.len(),
             median_fwhm: diagnostics.median_fwhm,
@@ -336,7 +352,11 @@ impl AlignStackRun<'_> {
             },
         );
         let reference_light = ParkedLight {
-            parked: registrar.park(reference, first.resident())?,
+            parked: registrar.park(
+                &mut workers[0].warped,
+                reference,
+                first.in_place(&parking, kept),
+            )?,
             detection: diagnostics,
         };
         intake.intake.complete_one();
@@ -344,10 +364,11 @@ impl AlignStackRun<'_> {
         let others: Vec<usize> = (0..count).filter(|&idx| idx != reference).collect();
         let mut lights = intake
             .intake
-            .map_owned(others, &mut detectors, |detector, _, idx| {
-                let image = files.prepare(idx, intake.intake.ctx())?;
-                let DetectedLight { frame, diagnostics } = intake.detect(detector, idx, image)?;
-                let parked = registrar.park(idx, frame.resident())?;
+            .map_owned(others, &mut workers, |worker, _, idx| {
+                let Loaded { image, .. } = files.prepare(idx, intake.intake.ctx())?;
+                let DetectedLight { frame, diagnostics } =
+                    intake.detect(&mut worker.detector, idx, image)?;
+                let parked = registrar.park(&mut worker.warped, idx, frame.resident())?;
                 intake.intake.complete_one();
                 Ok::<_, AlignStackError>(ParkedLight {
                     parked,
@@ -355,10 +376,11 @@ impl AlignStackRun<'_> {
                 })
             })?;
         lights.insert(reference, reference_light);
-        // The registrar's warp sets are a warped frame's worth each, and a detector's pool the
-        // planes detection holds: the combine sizes its chunks against the memory without them.
+        // A worker's warp set is a warped frame's worth, its detector's pool the planes detection
+        // holds, and the registrar's scratch a warp's flag planes: the combine sizes its chunks
+        // against the memory without them.
+        drop(workers);
         drop(registrar);
-        drop(detectors);
 
         RegisteredSet {
             lights,

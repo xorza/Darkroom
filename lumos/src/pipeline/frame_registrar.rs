@@ -1,6 +1,7 @@
 //! [`FrameRegistrar`]: each light's registration to the reference, its warp, and where it parks.
 
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::storage_tier::Stored;
+use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
@@ -10,7 +11,6 @@ use crate::registration::error::RegistrationError;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::warp_transform::WarpTransform;
-use crate::scratch_pool::ScratchPool;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detector::detection_result::DetectionDiagnostics;
 
@@ -23,8 +23,8 @@ pub(super) struct FrameRegistrar<'a> {
     run: &'a AlignStackRun<'a>,
     parking: &'a FrameParking,
     count: usize,
-    /// The sets the lights warp into, one per light in flight at most.
-    warps: ScratchPool<WarpResult>,
+    /// The dimensions of every light, and so of the sets they warp into.
+    dimensions: ImageDimensions,
     /// What each warp works in beside its result.
     scratch: WarpScratch,
 }
@@ -87,18 +87,25 @@ impl<'a> FrameRegistrar<'a> {
             run,
             parking,
             count,
-            warps: ScratchPool::new(dimensions),
+            dimensions,
             scratch: WarpScratch::default(),
         }
     }
 
-    /// Register light `idx`, `frame`, warp it into a set leased from the registrar and park it.
-    /// See [`FrameParking::store`] for where the set goes.
+    /// Register light `idx`, `frame`, warp it into the set its worker carries in `warped`, or a
+    /// new one, and park it. The resident tier keeps the set as the stored frame; the spilled tier
+    /// writes it and hands it back to `warped`, so the next light warps into pages already faulted
+    /// in.
     ///
     /// # Errors
     ///
     /// [`AlignStackError::Cancelled`] when the run was cancelled, or the frame store.
-    pub(super) fn park(&self, idx: usize, frame: DetectedFrame) -> Result<Parked, AlignStackError> {
+    pub(super) fn park(
+        &self,
+        warped: &mut Option<WarpResult>,
+        idx: usize,
+        frame: DetectedFrame,
+    ) -> Result<Parked, AlignStackError> {
         if self.run.cancel().is_cancelled() {
             return Err(AlignStackError::Cancelled);
         }
@@ -133,16 +140,23 @@ impl<'a> FrameRegistrar<'a> {
         let inliers = registration.inlier_count();
         let rms_error = registration.rms_error();
         let warp = registration.into_warp();
-        let mut warped = self.warps.acquire();
+        let mut result = warped
+            .take()
+            .unwrap_or_else(|| WarpResult::new(self.dimensions));
         let image = image.into_resident();
         let job = Warp {
             transform: &warp,
             params: self.run.config.warp,
         };
-        warped.warp_into(&SourceImage::of(&image), job, &self.scratch);
+        result.warp_into(&SourceImage::of(&image), job, &self.scratch);
         drop(image);
+        let Stored { frame, returned } =
+            self.parking
+                .tier()
+                .store(result, admitted, SetKind::Registered)?;
+        *warped = returned;
         Ok(Parked::Registered {
-            frame: self.parking.store(warped, admitted)?,
+            frame,
             warp: Box::new(warp),
             inliers,
             rms_error,

@@ -7,7 +7,7 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
 use crate::math::size2us::Size2us;
@@ -24,13 +24,17 @@ pub(crate) enum StoredGain {
 }
 
 impl StoredGain {
-    /// Write each channel's nodes to `scratch` and memory-map them back.
-    pub(crate) fn spill(scratch: &RunScratch, gain: &FlatGain) -> Result<Self, FrameStoreError> {
+    /// Each channel's nodes of `gain` written to `sink` and mapped back.
+    pub(crate) fn write(
+        gain: &FlatGain,
+        mut sink: impl PlaneSink,
+    ) -> Result<Self, FrameStoreError> {
         Ok(Self::Mapped {
             size: gain.size(),
             planes: gain
                 .planes()
-                .map(|nodes| scratch.store(nodes))
+                .enumerate()
+                .map(|(channel, nodes)| sink.write(PlaneRole::Gain(channel), nodes))
                 .collect::<Result<_, _>>()?,
         })
     }
@@ -76,6 +80,15 @@ impl StoredGain {
         )
     }
 
+    /// The gain's mapped node planes, one per channel; none for a resident gain.
+    pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
+        let planes = match self {
+            Self::Resident(_) => None,
+            Self::Mapped { planes, .. } => Some(planes),
+        };
+        planes.into_iter().flatten()
+    }
+
     /// The gain as a [`FlatGain`] in RAM: shared when it is one already, copied out of its maps
     /// otherwise.
     pub(super) fn to_flat_gain(&self) -> Arc<FlatGain> {
@@ -94,23 +107,6 @@ impl StoredGain {
                         .collect(),
                 ))
             }
-        }
-    }
-}
-
-#[cfg(feature = "internals")]
-pub(crate) mod internals {
-    use crate::frame_store::stored_gain::StoredGain;
-    use crate::frame_store::stored_plane::StoredPlane;
-
-    impl StoredGain {
-        /// The gain's mapped node planes, one per channel; none for a resident gain.
-        pub(crate) fn planes(&self) -> impl Iterator<Item = &StoredPlane> {
-            let planes = match self {
-                Self::Resident(_) => None,
-                Self::Mapped { planes, .. } => Some(planes),
-            };
-            planes.into_iter().flatten()
         }
     }
 }

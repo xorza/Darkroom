@@ -10,7 +10,7 @@ use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, SlotSpread};
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::decode_cache::frame_spill::{
-    Carries, Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN,
+    Commit, Decoded, FrameSpill, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
 use crate::image::bg_split::BgSplit;
@@ -23,6 +23,7 @@ use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+use crate::image::flag_counts::FlagCounts;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
@@ -30,6 +31,7 @@ use crate::image::image_provenance::{
 };
 use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::observation_header::ObservationHeader;
+use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::image::temperature_difference::TemperatureDifference;
 use crate::image::temperature_source::TemperatureSource;
@@ -186,11 +188,11 @@ fn metadata() -> ImageMetadata {
     }
 }
 
-/// What a decode of 4 × 3 mono left, carrying `carries`, with [`metadata`].
-fn decoded(carries: Carries) -> Decoded {
+/// What a decode of 4 × 3 mono left, its flags of `flags`, with [`metadata`].
+fn decoded(flags: Option<FlagCounts>) -> Decoded {
     Decoded {
         dimensions: ImageDimensions::new((4, 3), ChannelLayout::Mono),
-        carries,
+        flags,
         gain_channels: 0,
         metadata: metadata(),
     }
@@ -228,7 +230,7 @@ fn sidecar_layout_is_pinned() {
         width: 6024,
         height: 4022,
         channels: 1,
-        carries: Carries::NullMask,
+        flags: Some(FlagCounts::from_per_bit([1, 2, 3, 4, 5, 6, 7, 8])),
         gain_channels: 3,
         digests: PlaneDigests {
             channels: vec![[3; 32], [5; 32]],
@@ -258,16 +260,22 @@ fn sidecar_layout_is_pinned() {
 fn committed_reads_back_only_a_valid_record_under_its_key() {
     let dir = TempDir::new("frame_spill_commit");
     let spill = FrameSpill::named(dir.path(), "frame", key(7));
-    for (stats, carries) in [
-        (stats(&[(42.5, 3.25)], Some(2e-5)), Carries::NullMask),
+    let nulls = FlagCounts::of(&[
+        QualityFlags::NO_DATA.byte(),
+        0,
+        QualityFlags::NO_DATA.byte(),
+    ]);
+    let saturated = FlagCounts::of(&[QualityFlags::SATURATED.byte()]);
+    for (stats, flags) in [
+        (stats(&[(42.5, 3.25)], Some(2e-5)), Some(nulls)),
         (
             stats(&[(100.0, 1.5), (200.0, 2.5), (300.0, 3.5)], None),
-            Carries::Flags,
+            Some(saturated),
         ),
     ] {
-        spill.commit(&decoded(carries), digests(), &stats).unwrap();
+        spill.commit(&decoded(flags), digests(), &stats).unwrap();
         let committed = spill.committed().unwrap();
-        assert_eq!(committed.decoded.carries, carries);
+        assert_eq!(committed.decoded.flags, flags);
         assert_eq!(
             committed.decoded.dimensions,
             ImageDimensions::new((4, 3), ChannelLayout::Mono)
@@ -302,7 +310,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     for sigma in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
         spill
             .commit(
-                &decoded(Carries::Channels),
+                &decoded(None),
                 digests(),
                 &stats(&[(42.5, 3.25)], Some(sigma)),
             )
@@ -310,9 +318,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
         assert!(spill.committed().is_none(), "a sigma of {sigma}");
     }
 
-    spill
-        .commit(&decoded(Carries::Channels), digests(), &valid)
-        .unwrap();
+    spill.commit(&decoded(None), digests(), &valid).unwrap();
     let commit = fs::read(spill.commit_path()).unwrap();
     fs::write(spill.commit_path(), b"bad").unwrap();
     assert!(spill.committed().is_none(), "a corrupt record");
@@ -326,9 +332,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
 
     // A damaged commit that would still decode reads as absent: one byte of its payload
     // flipped, and the file cut short.
-    spill
-        .commit(&decoded(Carries::Channels), digests(), &valid)
-        .unwrap();
+    spill.commit(&decoded(None), digests(), &valid).unwrap();
     let commit = fs::read(spill.commit_path()).unwrap();
     let mut flipped = commit.clone();
     *flipped.last_mut().unwrap() ^= 0x10;
@@ -339,16 +343,14 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
     fs::write(spill.commit_path(), &commit).unwrap();
     assert!(spill.committed().is_some(), "the commit as written");
 
-    spill
-        .commit(&decoded(Carries::Channels), digests(), &valid)
-        .unwrap();
+    spill.commit(&decoded(None), digests(), &valid).unwrap();
     fs::remove_file(spill.commit_path()).unwrap();
     assert!(spill.committed().is_none(), "no commit record");
 
     let blocker = dir.join("not_a_directory");
     fs::write(&blocker, b"file").unwrap();
     let error = FrameSpill::named(&blocker, "frame", key(7))
-        .commit(&decoded(Carries::Channels), digests(), &valid)
+        .commit(&decoded(None), digests(), &valid)
         .unwrap_err();
     let expected = blocker.join("frame.commit");
     assert!(matches!(

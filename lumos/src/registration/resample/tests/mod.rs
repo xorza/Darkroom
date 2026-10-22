@@ -20,7 +20,6 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::scratch_pool::Scratch;
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -317,7 +316,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     };
                     let fresh = params.warp(image, transform);
 
-                    let mut sentinel = WarpResult::build(dimensions);
+                    let mut sentinel = WarpResult::new(dimensions);
                     for plane in sentinel.image.planes_mut() {
                         plane.pixels_mut().fill(f32::NAN);
                     }
@@ -329,7 +328,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                         &scratch,
                     );
 
-                    let mut reused = WarpResult::build(dimensions);
+                    let mut reused = WarpResult::new(dimensions);
                     reused.warp_into(
                         &SourceImage::of(&prev),
                         Warp {

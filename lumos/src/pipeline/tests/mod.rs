@@ -890,7 +890,7 @@ fn kept_lights_are_read_back_by_the_next_run() {
 
 /// Calibrated lights on disk stack through `AlignStackConfig::align_stack_paths` as they do decoded
 /// and held, with the found reference. The spilled two-pass run parks every light and reads back
-/// every registered frame. A cosmic-ray pass, which runs on mosaics alone, is refused for linear
+/// every registered frame, and writes none it parks when the decode cache keeps them. A cosmic-ray pass, which runs on mosaics alone, is refused for linear
 /// lights by both entries.
 #[test]
 fn calibrated_lights_on_disk_stack_as_held_ones_do_around_the_found_reference() {
@@ -934,7 +934,8 @@ fn calibrated_lights_on_disk_stack_as_held_ones_do_around_a_named_reference() {
 
 /// The held run of `lights`, read as RGB, registers every light, and
 /// `AlignStackConfig::align_stack_paths` matches it bit for bit resident and spilled, under the
-/// reference `reference` makes of the held run's.
+/// reference `reference` makes of the held run's. A spilled run that keeps a decode cache parks
+/// each light, the reference among them, in the planes the cache keeps, and writes none for it.
 fn assert_tiers_stack_as_held(
     lights: &LinearLights,
     scratch: &TempDir,
@@ -960,9 +961,10 @@ fn assert_tiers_stack_as_held(
         Reference::Auto => paths.len() as u64,
         Reference::Idx(_) => 0,
     };
-    for (memory, cache, parked, spilled) in [
-        (u64::MAX, "ram", 0, 0),
-        (1, "spill", parked_when_spilled, registered as u64),
+    for (memory, cache, keep_cache, parked, spilled) in [
+        (u64::MAX, "ram", false, 0, 0),
+        (1, "spill", false, parked_when_spilled, registered as u64),
+        (1, "kept", true, 0, registered as u64),
     ] {
         let config = AlignStackConfig {
             reference,
@@ -971,6 +973,7 @@ fn assert_tiers_stack_as_held(
         let ingest = IngestConfig {
             memory_override: Some(memory),
             cache_dir: scratch.join(cache),
+            keep_cache,
             ..ingest.clone()
         };
         let result = config

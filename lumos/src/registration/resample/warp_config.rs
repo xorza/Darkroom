@@ -6,7 +6,6 @@ use crate::image::linear_image::LinearImage;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::warp_transform::WarpTransform;
-use crate::scratch_pool::Scratch;
 
 /// Interpolation method for image resampling.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -124,7 +123,7 @@ impl WarpConfig {
     /// # }
     /// ```
     pub fn warp(self, image: &LinearImage, transform: &WarpTransform) -> WarpResult {
-        let mut result = WarpResult::build(image.dimensions());
+        let mut result = WarpResult::new(image.dimensions());
         let warp = Warp {
             transform,
             params: self,

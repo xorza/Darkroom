@@ -1,7 +1,4 @@
-//! One frame as the combine engine sees it.
-
-use std::borrow::Borrow;
-use std::fmt::Debug;
+//! One frame as the combine engine sees it, and the writer every frame a sink holds goes through.
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
@@ -11,8 +8,9 @@ use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::run_scratch::RunScratch;
+use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_gain::StoredGain;
+use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::frame_store::stratified_samples::StratifiedSamples;
 use crate::image::cfa::cfa_type::CfaType;
@@ -20,15 +18,15 @@ use crate::image::stackable_image::{ImageParts, StackableImage};
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
 /// if a warp produced one or its source declared pixels with no measurement, its flags when its
-/// quality is a mask of them or it carries any but `NO_DATA` (which quality planes already hold),
-/// the gain a flat applied to its pixels, and the statistics measured on the source before any
-/// interpolation.
+/// quality [keeps](FrameQuality::keeps) them, the gain a flat applied to its pixels, and the
+/// statistics measured on the source before any interpolation.
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
-    /// Each slot's [`StratifiedSamples`], gathered as a frame of no quality went to disk, where
-    /// reading them from its planes would read every page; `None` for a frame in memory, or one
-    /// whose quality makes normalization sample the pixels the frames share instead.
+    /// Each slot's [`StratifiedSamples`], gathered as a frame of no quality in a set of
+    /// [`SetKind::Unwarped`] went to disk, where reading them from its planes would read every
+    /// page; `None` for a frame in memory, or one whose quality or set makes normalization sample
+    /// the pixels the frames share instead.
     pub(crate) samples: Option<ArrayVec<StoredPlane, 3>>,
     pub(crate) quality: FrameQuality<StoredPlane>,
     pub(crate) flags: Option<StoredPlane<u8>>,
@@ -38,6 +36,7 @@ pub(crate) struct StoredFrame {
 }
 
 impl StoredFrame {
+    /// `image` with `quality` in RAM, as the resident tier keeps it: its buffers moved in.
     pub(crate) fn from_memory(
         image: impl StackableImage,
         quality: FrameQuality<Buffer2<f32>>,
@@ -49,88 +48,118 @@ impl StoredFrame {
             flags,
             flat_gain,
         } = image.into_parts();
-        let flat_gain = flat_gain.map(StoredGain::Resident);
         let flags = flags
-            .filter(|flags| quality.keeps(flags))
+            .filter(|flags| quality.keeps(flags.counts()))
             .map(|flags| StoredPlane::Memory(flags.into_buffer()));
         Self {
             channels: planes.into_iter().map(StoredPlane::Memory).collect(),
             samples: None,
             quality: quality.map(StoredPlane::Memory),
             flags,
-            flat_gain,
+            flat_gain: flat_gain.map(StoredGain::Resident),
             source_stats: stats,
             facts,
         }
     }
-
-    /// Each slot's [`StratifiedSamples`] of `image`, each stored by `store(slot, samples)`.
-    pub(super) fn store_samples<P>(
-        image: &impl StackableImage,
-        mut store: impl FnMut(usize, &[f32]) -> Result<P, FrameStoreError>,
-    ) -> Result<ArrayVec<P, 3>, FrameStoreError> {
-        let size = image.dimensions().size();
-        let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
-        let slots = mosaic.map_or_else(|| image.dimensions().channels(), |cfa| cfa.color_count());
-        (0..slots)
-            .map(|slot| {
-                let plane = image.channel(if mosaic.is_some() { 0 } else { slot });
-                let samples = StratifiedSamples::new(size, mosaic.as_ref(), slot).gather(plane);
-                store(slot, &samples)
-            })
-            .collect()
-    }
 }
 
-/// A frame on its way to a run's scratch: its image, its quality planes, and what its admission
-/// found of its source.
+/// How the frames of a set cover its pixels, which decides whether a frame of no quality gathers
+/// its own samples as it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetKind {
+    /// Frames nothing warped, each of which may cover every pixel: normalization then samples
+    /// each slot at the same stratified pixels of every frame.
+    Unwarped,
+    /// Frames registered onto one grid, by a warp or a drizzle, each covering a part of it:
+    /// normalization samples the pixels they share, and reads no frame's own samples, the
+    /// reference's among them.
+    Registered,
+}
+
+/// A frame on its way to a [`PlaneSink`]: its image and its quality planes, borrowed, and the kind
+/// of set it is of.
 #[derive(Debug)]
-pub(crate) struct SpillFrame<'a, I, Q> {
+pub(crate) struct FrameWrite<'a, I> {
     pub(crate) image: &'a I,
-    pub(crate) quality: &'a FrameQuality<Q>,
-    pub(crate) admitted: Admitted,
+    pub(crate) quality: FrameQuality<&'a Buffer2<f32>>,
+    pub(crate) set: SetKind,
 }
 
-impl<I: StackableImage, Q: Borrow<Buffer2<f32>>> SpillFrame<'_, I, Q> {
-    /// Write the frame's channels, quality planes, flags and gain to `scratch` and memory-map them
-    /// back.
+/// The planes a [`FrameWrite`] wrote: the frame they make once its admission joins them.
+#[derive(Debug)]
+pub(crate) struct WrittenFrame {
+    pub(crate) image: StoredImage,
+    pub(crate) samples: Option<ArrayVec<StoredPlane, 3>>,
+    pub(crate) quality: FrameQuality<StoredPlane>,
+}
+
+impl<I: StackableImage> FrameWrite<'_, I> {
+    /// Write the planes the frame keeps to `sink` and map them back: its channels, its flags when
+    /// its quality [keeps](FrameQuality::keeps) them, each slot's samples when it has no quality
+    /// in a set of [`SetKind::Unwarped`], its quality planes and its flat gain.
     ///
-    /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
-    /// stage hand the same ones to the next frame rather than allocating a set that has to be
-    /// faulted in from scratch.
-    pub(crate) fn spill(self, scratch: &RunScratch) -> Result<StoredFrame, FrameStoreError> {
+    /// Borrows everything it writes: the caller keeps its buffers, which is what lets a producer
+    /// fill the same ones for its next frame rather than a fresh set that has to be faulted in.
+    pub(crate) fn write(self, mut sink: impl PlaneSink) -> Result<WrittenFrame, FrameStoreError> {
         let Self {
             image,
             quality,
-            admitted: Admitted { stats, facts },
+            set,
         } = self;
-        let channels = (0..image.dimensions().channels())
-            .map(|channel| scratch.store(image.channel(channel)))
-            .collect::<Result<_, _>>()?;
-        let samples = quality
-            .is_none()
-            .then(|| StoredFrame::store_samples(image, |_, samples| scratch.store(samples)))
+        let flags = image.flags().filter(|flags| quality.keeps(flags.counts()));
+        let stored = StoredImage::write(image, flags, &mut sink)?;
+        let samples = (quality.is_none() && set == SetKind::Unwarped)
+            .then(|| store_samples(image, &mut sink))
             .transpose()?;
-        let quality = quality.try_map(|_, buffer| scratch.store(buffer.borrow().pixels()))?;
+        let quality = quality.try_map(|_, plane| sink.write(PlaneRole::Quality, plane.pixels()))?;
+        Ok(WrittenFrame {
+            image: stored,
+            samples,
+            quality,
+        })
+    }
+}
+
+impl WrittenFrame {
+    /// The frame the planes make, as its admission found it.
+    pub(crate) fn into_frame(self, admitted: Admitted) -> StoredFrame {
+        let Self {
+            image,
+            samples,
+            quality,
+        } = self;
+        let Admitted { stats, facts } = admitted;
         let flags = image
-            .flags()
-            .filter(|flags| quality.keeps(flags))
-            .map(|flags| scratch.store(flags.bytes()))
-            .transpose()?;
-        let flat_gain = image
-            .flat_gain()
-            .map(|gain| StoredGain::spill(scratch, gain))
-            .transpose()?;
-        Ok(StoredFrame {
-            channels,
+            .flags
+            .filter(|flags| quality.keeps(&flags.counts))
+            .map(|flags| flags.plane);
+        StoredFrame {
+            channels: image.channels,
             samples,
             quality,
             flags,
-            flat_gain,
+            flat_gain: image.flat_gain,
             source_stats: stats,
             facts,
-        })
+        }
     }
+}
+
+/// Each slot's [`StratifiedSamples`] of `image`, written to `sink`.
+fn store_samples(
+    image: &impl StackableImage,
+    mut sink: impl PlaneSink,
+) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
+    let size = image.dimensions().size();
+    let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
+    let slots = mosaic.map_or_else(|| image.dimensions().channels(), |cfa| cfa.color_count());
+    (0..slots)
+        .map(|slot| {
+            let plane = image.channel(if mosaic.is_some() { 0 } else { slot });
+            let samples = StratifiedSamples::new(size, mosaic.as_ref(), slot).gather(plane);
+            sink.write(PlaneRole::Samples(slot), &samples)
+        })
+        .collect()
 }
 
 #[cfg(feature = "internals")]
@@ -181,7 +210,7 @@ mod tests {
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::FrameQuality;
     use crate::frame_store::run_scratch::RunScratch;
-    use crate::frame_store::stored_frame::SpillFrame;
+    use crate::frame_store::stored_frame::{FrameWrite, SetKind};
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
@@ -205,14 +234,14 @@ mod tests {
             coverage: plane(1.0),
             confidence: plane(0.5),
         };
-        let stats = Admitted::measure(&image);
-        let frame = SpillFrame {
+        let frame = FrameWrite {
             image: &image,
-            quality: &quality,
-            admitted: stats,
+            quality: quality.as_ref(),
+            set: SetKind::Unwarped,
         }
-        .spill(&scratch)
-        .unwrap();
+        .write(&scratch)
+        .unwrap()
+        .into_frame(Admitted::measure(&image));
         assert_eq!(frame.planes().count(), 5);
         assert_eq!(frame.evict(), MappedFile::EVICTS);
         for (channel, level) in frame.channels.iter().zip([0.25, 0.5, 0.75]) {

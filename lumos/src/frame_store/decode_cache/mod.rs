@@ -95,6 +95,7 @@ pub(crate) mod internals {
         ) -> Option<D::Image> {
             let source = CachedSource::of(path, D::KIND, ctx).ok()?;
             KeptFrame::reuse_image(&self.spill(&source), self.committed(&source)?)
+                .map(|kept| kept.image)
         }
 
         /// Edit channel 0 of the frame kept for `path` decoded by `D` under `ctx`, as anything

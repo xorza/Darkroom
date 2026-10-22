@@ -1,59 +1,73 @@
 //! [`StoredImage`]: an image whose planes are memory maps, between the stages that read it.
 
-use std::fmt::Debug;
-use std::sync::Arc;
-
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::error::FrameStoreError;
-use crate::frame_store::run_scratch::RunScratch;
-use crate::frame_store::stored_frame::StoredFrame;
+use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
+use crate::frame_store::stored_frame::{StoredFrame, WrittenFrame};
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::flat_gain::FlatGain;
+use crate::image::flag_counts::FlagCounts;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
-use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 
-/// An image whose channels and flags are memory maps: a calibrated light parked between detection
-/// and registration, or a kept frame read back from the decode cache.
+/// An image whose channels, flags and flat gain are memory maps: a calibrated light parked between
+/// detection and registration, or a frame the decode cache keeps.
 #[derive(Debug)]
 pub(crate) struct StoredImage {
     pub(crate) metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
-    /// The image's [`PixelFlags`] bytes, for an image that carries any. Stored with the channels:
-    /// without them the fill under every null reads back as a measurement.
-    pub(crate) flags: Option<StoredPlane<u8>>,
+    /// The image's [`PixelFlags`], for an image that carries any and keeps them. Stored with the
+    /// channels: without them the fill under every null reads back as a measurement.
+    pub(crate) flags: Option<StoredFlags>,
     /// The gain a flat applied to the image's pixels, for an image a flat divided.
-    pub(crate) flat_gain: Option<Arc<FlatGain>>,
+    pub(crate) flat_gain: Option<StoredGain>,
+}
+
+/// A stored image's flag bytes, and how many pixels hold each flag, counted before they were
+/// written: what a frame keeps of them is decided without a read of the plane.
+#[derive(Debug)]
+pub(crate) struct StoredFlags {
+    pub(crate) plane: StoredPlane<u8>,
+    pub(crate) counts: FlagCounts,
 }
 
 impl StoredImage {
-    /// Write `image`'s channels and flags to `scratch` and memory-map them back.
-    pub(crate) fn spill(
-        scratch: &RunScratch,
-        image: &LinearImage,
+    /// `image`'s channels, `flags` and flat gain written to `sink` and mapped back: `flags` are
+    /// the image's own, or none when the frame does not keep them.
+    pub(crate) fn write<I: StackableImage>(
+        image: &I,
+        flags: Option<&PixelFlags>,
+        mut sink: impl PlaneSink,
     ) -> Result<Self, FrameStoreError> {
-        let flags = image
-            .flags()
-            .map(|flags| scratch.store(flags.bytes()))
-            .transpose()?;
-        let channels = (0..image.channels())
-            .map(|channel| scratch.store(image.channel(channel).pixels()))
+        let dimensions = image.dimensions();
+        let channels = (0..dimensions.channels())
+            .map(|channel| sink.write(PlaneRole::Channel(channel), image.channel(channel).pixels()))
             .collect::<Result<_, _>>()?;
+        let flags = match flags {
+            Some(flags) => Some(StoredFlags {
+                plane: sink.write(PlaneRole::Flags, flags.bytes())?,
+                counts: *flags.counts(),
+            }),
+            None => None,
+        };
+        let flat_gain = image
+            .flat_gain()
+            .map(|gain| StoredGain::write(gain, &mut sink))
+            .transpose()?;
         Ok(Self {
-            metadata: image.metadata.clone(),
-            dimensions: image.dimensions(),
+            metadata: image.metadata().clone(),
+            dimensions,
             channels,
             flags,
-            flat_gain: image.flat_gain().cloned(),
+            flat_gain,
         })
     }
 
@@ -65,75 +79,59 @@ impl StoredImage {
             .map(move |plane| plane.chunk(0..samples))
     }
 
-    /// The image read back into RAM, of `cfa_type`: its channels, flags and metadata, each plane
-    /// copied out of its map front to back.
+    /// How many pixels hold each flag, for an image that keeps its flags.
+    pub(crate) fn flag_counts(&self) -> Option<&FlagCounts> {
+        self.flags.as_ref().map(|flags| &flags.counts)
+    }
+
+    /// The image read back into RAM, of `cfa_type`: its channels, flags, flat gain and metadata,
+    /// each plane copied out of its map front to back.
     pub(crate) fn into_image<I: StackableImage>(self, cfa_type: Option<CfaType>) -> I {
         let size = self.dimensions.size();
+        let planes = self
+            .planes()
+            .map(|plane| Buffer2::new(size.width, size.height, plane.to_vec()))
+            .collect();
+        let flags = self.flags.and_then(|flags| {
+            let bytes = flags.plane.chunk(0..size.pixel_count()).to_vec();
+            PixelFlags::from_counted(Buffer2::new(size.width, size.height, bytes), flags.counts)
+        });
         let parts = ImageParts {
-            planes: self
-                .planes()
-                .map(|plane| Buffer2::new(size.width, size.height, plane.to_vec()))
-                .collect(),
-            flags: self.flags(),
-            flat_gain: self.flat_gain,
+            planes,
+            flags,
+            flat_gain: self.flat_gain.as_ref().map(StoredGain::to_flat_gain),
         };
         I::from_parts(parts, cfa_type, self.metadata)
     }
 
-    /// The image's flags, copied out of the map: a byte a pixel, against the four a channel
-    /// costs.
-    pub(crate) fn flags(&self) -> Option<PixelFlags> {
-        let size = self.dimensions.size();
-        let plane = self.flags.as_ref()?;
-        PixelFlags::from_bytes(Buffer2::new(
-            size.width,
-            size.height,
-            plane.chunk(0..size.pixel_count()).to_vec(),
-        ))
-    }
-
-    /// The image as the reference frame of a registered stack, its channels and flags the planes
-    /// already on disk — see [`FrameQuality::for_reference`] — and its quality planes and gain
-    /// written to `scratch`.
-    pub(crate) fn into_reference_frame(
-        self,
-        scratch: &RunScratch,
-        admitted: Admitted,
-    ) -> Result<StoredFrame, FrameStoreError> {
-        let Admitted { stats, facts } = admitted;
-        let flags = self.flags();
-        let quality = FrameQuality::for_reference(flags.as_ref())
-            .try_map(|_, buffer| scratch.store(buffer.pixels()))?;
-        let keeps = flags.as_ref().is_some_and(|flags| quality.keeps(flags));
-        let flat_gain = self
-            .flat_gain
-            .as_deref()
-            .map(|gain| StoredGain::spill(scratch, gain))
-            .transpose()?;
-        Ok(StoredFrame {
-            channels: self.channels,
+    /// The image as the reference frame of a registered stack, every plane where it lies: its
+    /// quality is the mask of its flags [`FrameQuality::for_reference`] reads, which holds no
+    /// plane, so nothing is written.
+    pub(crate) fn into_reference_frame(self, admitted: Admitted) -> StoredFrame {
+        let quality = FrameQuality::for_reference(self.flag_counts());
+        WrittenFrame {
+            image: self,
             samples: None,
             quality,
-            flags: self.flags.filter(|_| keeps),
-            flat_gain,
-            source_stats: stats,
-            facts,
-        })
+        }
+        .into_frame(admitted)
     }
 }
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_image::StoredImage;
-    use crate::frame_store::stored_plane::StoredPlane;
 
     impl StoredImage {
-        /// Drop the image's pages from the page cache, its channels' and its flags', so its next
-        /// read comes from the disk; whether each plane went, which a resident one does not.
+        /// Drop the image's pages from the page cache, its channels', its flags' and its gain's,
+        /// so its next read comes from the disk; whether each plane went, which a resident one
+        /// does not.
         pub(crate) fn evict(&self) -> bool {
-            let flags = self.flags.as_ref().is_none_or(StoredPlane::evict);
+            let flags = self.flags.as_ref().is_none_or(|flags| flags.plane.evict());
             self.channels
                 .iter()
+                .chain(self.flat_gain.iter().flat_map(StoredGain::planes))
                 .fold(flags, |all, plane| plane.evict() & all)
         }
     }
@@ -169,7 +167,7 @@ mod tests {
             size.height,
             bytes.clone(),
         )));
-        let parked = StoredImage::spill(&scratch, &image).unwrap();
+        let parked = StoredImage::write(&image, image.flags(), &scratch).unwrap();
         assert_eq!(parked.evict(), MappedFile::EVICTS);
         let loaded: LinearImage = parked.into_image(None);
         for channel in 0..3 {

@@ -8,6 +8,8 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
+use crate::frame::frame_quality::FrameQuality;
+use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
@@ -22,7 +24,7 @@ use crate::registration::resample::row_poss::RowPoss;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
-use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
+use crate::scratch_pool::{ScratchPool, Shapeless};
 
 mod flagged_sources;
 mod frame_sampler;
@@ -54,10 +56,10 @@ mod warp_kernel;
 /// sub-pixel phase across a rotated field. The price is that the mean's weights no longer make each
 /// weighted variance equal, `wᵢvᵢ = 1`, at a warped pixel.
 ///
-/// Every field is written in full by a warp, so a result can be leased again for the next frame
-/// without clearing. That is the point of pooling them: a fresh plane costs its whole area in
-/// first-touch page faults, and the spill tier discards its planes once they are on disk, so a warp
-/// stage that reuses one set per worker pays that once instead of once per frame. Worth ~22% of a
+/// Every field is written in full by a warp, so a result can take the next frame without clearing.
+/// That is the point of reusing them: a fresh plane costs its whole area in first-touch page
+/// faults, and the spill tier is done with a set once it is on disk, so a warp stage that reuses
+/// one set per worker pays that once instead of once per frame. Worth ~22% of a
 /// 16 MP warp (`bench_warp_into_fresh_4k` against `..._reused_4k`), or ~0.1 ms per MiB of plane —
 /// the faults are spread across rayon's workers, so this is a fraction of what a single thread
 /// would pay for the same pages.
@@ -96,31 +98,35 @@ pub(crate) struct RowScratch {
 
 impl Shapeless for RowScratch {}
 
-/// A set for frames of one shape, reused as it is.
-impl Scratch for WarpResult {
-    type Shape = ImageDimensions;
+/// A warped frame on its way to its tier: the resident tier keeps the set as the frame, and the
+/// spilled one hands it back for the next frame's warp.
+impl FrameBuffers for WarpResult {
+    type Image = LinearImage;
 
-    fn build(dimensions: ImageDimensions) -> Self {
-        Self {
-            image: LinearImage::new(
-                LinearPixels::new_zeroed(dimensions),
-                None,
-                ImageMetadata::default(),
-            ),
-            coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
-            confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
+    fn image(&self) -> &LinearImage {
+        &self.image
+    }
+
+    fn quality(&self) -> FrameQuality<&Buffer2<f32>> {
+        FrameQuality::Planes {
+            coverage: &self.coverage,
+            confidence: &self.confidence,
         }
     }
 
-    fn fit(&mut self, dimensions: ImageDimensions) {
-        debug_assert!(self.has_shape(dimensions));
-    }
-
-    fn has_shape(&self, dimensions: ImageDimensions) -> bool {
-        let size = dimensions.size();
-        self.image.dimensions() == dimensions
-            && Size2us::from(&self.coverage) == size
-            && Size2us::from(&self.confidence) == size
+    fn into_new(self) -> NewFrame<LinearImage> {
+        let Self {
+            image,
+            coverage,
+            confidence,
+        } = self;
+        NewFrame {
+            image,
+            quality: FrameQuality::Planes {
+                coverage,
+                confidence,
+            },
+        }
     }
 }
 
@@ -132,6 +138,19 @@ pub(crate) struct Warp<'a> {
 }
 
 impl WarpResult {
+    /// A set for frames of `dimensions`, every plane zeroed.
+    pub(crate) fn new(dimensions: ImageDimensions) -> Self {
+        Self {
+            image: LinearImage::new(
+                LinearPixels::new_zeroed(dimensions),
+                None,
+                ImageMetadata::default(),
+            ),
+            coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
+            confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
+        }
+    }
+
     /// Warp `image` by `warp` into this result, overwriting all three planes completely and
     /// replacing the flags and the metadata, in `scratch`.
     ///

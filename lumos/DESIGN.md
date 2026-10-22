@@ -86,3 +86,21 @@
 - **A digest is taken of bytes in RAM, never of a map read back.** A keep hashes the slice it
   writes; a reuse into RAM copies each plane first and hashes the copy, and skips the samples an
   image does not carry. Only a mapped reuse hashes its maps, whose pages the combine reads next.
+- **One writer decides what a stored frame keeps.** `FrameWrite` writes every frame a sink
+  holds, the run's scratch or a kept frame's files in the decode cache, and `FrameQuality::keeps`
+  and the set's `SetKind` decide its flags and samples, for the resident tier and a parked
+  reference too. Refused: a writer per tier and one for the cache, which disagreed on whether a
+  reference gathers samples no normalization of a registered set reads.
+- **A tier hands back the buffers it writes.** `StorageTier::store` takes a frame's buffers by
+  value and returns them on the spilled tier, so a warp worker refills the set in its slot; the
+  resident tier moves them into the frame. Refused: a pool of warp sets left through an unsafe
+  `into_inner` on the resident tier.
+- **A light the decode cache keeps parks where it lies.** On the spilled tier, a linear light's
+  decode returns the cache's maps beside its image, and parking takes them, the reference's
+  too, rather than write the same bytes to the scratch. A light written for its parking writes
+  its flat gain with its planes, as no plan prices a gain held in RAM. A mosaic changes in its
+  preparation, and still spills.
+- **A flag plane travels with its counts.** A stored image keeps the `FlagCounts` its writer
+  had, and a commit records them, so a reference's mask, a kept frame's quality and whether its
+  flags stay are decided without a read of the plane. Refused: the `Carries` tag, one
+  consequence of the counts; a copy of the plane to count it.

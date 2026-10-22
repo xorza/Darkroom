@@ -8,6 +8,7 @@ use imaginarium::Buffer2;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::image::linear_image::LinearImage;
+use crate::image::stackable_image::StackableImage;
 use crate::registration::resample::WarpResult;
 
 /// One input frame for
@@ -43,7 +44,7 @@ impl StackFrame {
 impl From<LinearImage> for StackFrame {
     fn from(image: LinearImage) -> Self {
         let admitted = Admitted::measure(&image);
-        let quality = FrameQuality::for_unwarped(&image);
+        let quality = FrameQuality::for_unwarped(image.flag_counts());
         Self {
             image,
             quality,

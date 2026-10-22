@@ -4,14 +4,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
+use crate::frame_store::frame_buffers::NewFrame;
 use crate::frame_store::storage_tier::StorageTier;
-use crate::frame_store::stored_frame::{SpillFrame, StoredFrame};
+use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_image::StoredImage;
 use crate::image::linear_image::LinearImage;
+use crate::image::stackable_image::StackableImage;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::pipeline_frame::PipelineFrame;
-use crate::registration::resample::WarpResult;
-use crate::scratch_pool::Pooled;
 
 /// The memory decisions the register-warp stage reads, both taken from one
 /// [`RunPlan`](crate::memory::run_plan::RunPlan): where a frame parks, and how many frames are
@@ -24,7 +24,7 @@ pub(super) struct StagePlan {
 
 /// Where the pipeline keeps its frames: the run's [`StorageTier`], chosen once from the
 /// [`RunPlan`](crate::memory::run_plan::RunPlan) and threaded through the pipeline body, which is
-/// otherwise identical either way, and how many calibrated lights it parked on disk before their
+/// otherwise identical either way, and how many calibrated lights it wrote to disk before their
 /// registration, for the run's report.
 #[derive(Debug)]
 pub(super) struct FrameParking {
@@ -44,60 +44,41 @@ impl FrameParking {
         self.tier.spills()
     }
 
-    /// Park a calibrated frame between detection and registration.
-    pub(super) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, AlignStackError> {
-        match &self.tier {
-            StorageTier::Resident { .. } => Ok(PipelineFrame::Resident(image)),
-            StorageTier::Spilled { scratch, .. } => {
-                let stored = StoredImage::spill(scratch, &image)?;
+    /// The tier a warped frame is stored in.
+    pub(super) const fn tier(&self) -> &StorageTier {
+        &self.tier
+    }
+
+    /// A calibrated light, `image`, where it lies: on the spilled tier, in the planes the decode
+    /// cache keeps of it, `kept`, when it keeps any; in RAM otherwise.
+    pub(super) fn in_place(&self, image: LinearImage, kept: Option<StoredImage>) -> PipelineFrame {
+        match kept.filter(|_| self.spills()) {
+            Some(kept) => PipelineFrame::Spilled(kept),
+            None => PipelineFrame::Resident(image),
+        }
+    }
+
+    /// Park a calibrated light, `image`, between detection and registration: on the spilled tier,
+    /// in the planes the decode cache keeps of it, `kept`, or written to the scratch when it keeps
+    /// none; in RAM on the resident tier.
+    pub(super) fn hold(
+        &self,
+        image: LinearImage,
+        kept: Option<StoredImage>,
+    ) -> Result<PipelineFrame, AlignStackError> {
+        match (&self.tier, kept) {
+            (StorageTier::Spilled { scratch, .. }, None) => {
+                let stored = StoredImage::write(&image, image.flags(), scratch)?;
                 self.parked.fetch_add(1, Ordering::Relaxed);
                 Ok(PipelineFrame::Spilled(stored))
             }
+            (_, kept) => Ok(self.in_place(image, kept)),
         }
     }
 
     /// The calibrated lights [`Self::hold`] wrote to disk.
     pub(super) fn parked_lights(&self) -> u64 {
         self.parked.load(Ordering::Relaxed)
-    }
-
-    /// Hand a warped frame to the combine's frame store.
-    ///
-    /// The RAM tier keeps the planes — they *are* the stored frame — so the set leaves its pool and
-    /// the next frame builds its own, which it must anyway. The spill tier writes them to disk and
-    /// memory-maps the files, and the set goes back to its pool when its lease drops: the next
-    /// frame warps straight into pages already faulted in rather than into a fresh set.
-    pub(super) fn store(
-        &self,
-        warped: Pooled<WarpResult>,
-        admitted: Admitted,
-    ) -> Result<StoredFrame, AlignStackError> {
-        match &self.tier {
-            StorageTier::Resident { .. } => {
-                let WarpResult {
-                    image,
-                    coverage,
-                    confidence,
-                } = warped.into_inner();
-                let quality = FrameQuality::Planes {
-                    coverage,
-                    confidence,
-                };
-                Ok(StoredFrame::from_memory(image, quality, admitted))
-            }
-            StorageTier::Spilled { scratch, .. } => {
-                let quality = FrameQuality::Planes {
-                    coverage: &warped.coverage,
-                    confidence: &warped.confidence,
-                };
-                Ok(SpillFrame {
-                    image: &warped.image,
-                    quality: &quality,
-                    admitted,
-                }
-                .spill(scratch)?)
-            }
-        }
     }
 
     /// Park a reference frame, which is stored unwarped: it carries a mask of its flags only if its
@@ -111,14 +92,15 @@ impl FrameParking {
     ) -> Result<StoredFrame, AlignStackError> {
         match (&self.tier, frame) {
             (_, PipelineFrame::Resident(image)) => {
-                let quality = FrameQuality::for_reference(image.flags());
-                self.tier
-                    .store(image, quality, admitted)
-                    .map_err(AlignStackError::from)
+                let quality = FrameQuality::for_reference(image.flag_counts());
+                Ok(self
+                    .tier
+                    .store(NewFrame { image, quality }, admitted, SetKind::Registered)?
+                    .frame)
             }
-            (StorageTier::Spilled { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
-                .into_reference_frame(scratch, admitted)
-                .map_err(AlignStackError::from),
+            (StorageTier::Spilled { .. }, PipelineFrame::Spilled(stored)) => {
+                Ok(stored.into_reference_frame(admitted))
+            }
             (StorageTier::Resident { .. }, PipelineFrame::Spilled(_)) => {
                 unreachable!("the resident tier parks no frame on disk")
             }
@@ -141,6 +123,7 @@ mod tests {
     use crate::frame::admitted::Admitted;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::storage_tier::StorageTier;
+    use crate::frame_store::stored_image::StoredImage;
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
@@ -150,9 +133,13 @@ mod tests {
     use crate::pipeline::pipeline_frame::PipelineFrame;
 
     /// A reference leaves out what the warp leaves out of every other frame and keeps the flags it
-    /// carries, on either tier and whether or not it was parked on disk. Four pixels, the second a
-    /// cosmic ray: a mask of the excluded flags gathers every pixel but that one, and the flags the
-    /// mask reads stay, the first's saturation among them when it is saturated.
+    /// carries, on either tier, whether or not it was parked on disk, and whether it parked in
+    /// planes the decode cache keeps or ones written for it. Four pixels, the second a cosmic ray:
+    /// a mask of the excluded flags gathers every pixel but that one, and the flags the mask reads
+    /// stay, the first's saturation among them when it is saturated. Only the light written for
+    /// its parking counts as parked. A reference of a registered set gathers no samples, as
+    /// normalization samples the pixels the warped frames share: one with no flag either, which
+    /// carries no quality, on the spilled tier.
     #[test]
     fn a_reference_leaves_out_the_excluded_and_keeps_the_carried() {
         let dir = TempDir::new("frame_tier_reference");
@@ -163,6 +150,7 @@ mod tests {
             })
         };
         let dims = ImageDimensions::new((4, 1), ChannelLayout::Mono);
+        let kept_scratch = RunScratch::create(dir.path()).unwrap();
         for saturated in [false, true] {
             let mut image = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
             image.set_flags(PixelFlags::from_fn(dims.size(), |idx| match idx {
@@ -170,19 +158,21 @@ mod tests {
                 1 => QualityFlags::COSMIC_RAY,
                 _ => QualityFlags::default(),
             }));
-            for (label, tier, parked) in [
-                ("ram", FrameParking::new(StorageTier::UNPLANNED), false),
-                ("spill", spill(), false),
-                ("parked", spill(), true),
+            let kept = || StoredImage::write(&image, image.flags(), &kept_scratch).unwrap();
+            for (label, tier, parking, parked) in [
+                ("ram", FrameParking::new(StorageTier::UNPLANNED), None, 0),
+                ("spill", spill(), None, 0),
+                ("parked", spill(), Some(None), 1),
+                ("kept", spill(), Some(Some(kept())), 0),
             ] {
-                let frame = if parked {
-                    tier.hold(image.clone()).unwrap()
-                } else {
-                    PipelineFrame::Resident(image.clone())
+                let frame = match parking {
+                    Some(kept) => tier.hold(image.clone(), kept).unwrap(),
+                    None => PipelineFrame::Resident(image.clone()),
                 };
                 let stored = tier
                     .store_reference(frame, Admitted::measure(&image))
                     .unwrap();
+                assert_eq!(tier.parked_lights(), parked, "{label} {saturated}");
                 let gate = FrameGate::of(&stored, 0, 0..4);
                 assert_eq!(
                     (0..4)
@@ -201,7 +191,18 @@ mod tests {
                     [first, QualityFlags::COSMIC_RAY.byte(), 0, 0],
                     "{label} {saturated}"
                 );
+                assert!(stored.samples.is_none(), "{label} {saturated}");
             }
         }
+        let plain = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
+        let stored = spill()
+            .store_reference(
+                PipelineFrame::Resident(plain.clone()),
+                Admitted::measure(&plain),
+            )
+            .unwrap();
+        assert!(stored.quality.is_none());
+        assert!(stored.flags.is_none());
+        assert!(stored.samples.is_none());
     }
 }

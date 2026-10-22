@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::calibration::cosmic_ray;
 use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_stats::FrameStats;
-use crate::frame_store::file_set::{FileSet, SetPeek};
+use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -126,16 +126,18 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     }
 
     /// Load light `idx` and make it ready: a mosaic calibrated by the masters, cleaned of cosmic
-    /// rays when asked, and demosaiced; a linear image as it decodes.
+    /// rays when asked, and demosaiced, which the decode cache keeps no planes of; a linear image
+    /// as it decodes, with its planes where the cache keeps them.
     pub(super) fn prepare(
         &self,
         idx: usize,
         ctx: &LoadCtx,
-    ) -> Result<LinearImage, AlignStackError> {
+    ) -> Result<Loaded<LinearImage>, AlignStackError> {
         match self {
-            Self::Calibrate { files, mosaic } => {
-                mosaic.prepare(files.decode(idx, ctx)?, files.path(idx), ctx)
-            }
+            Self::Calibrate { files, mosaic } => Ok(Loaded {
+                image: mosaic.prepare(files.decode(idx, ctx)?.image, files.path(idx), ctx)?,
+                kept: None,
+            }),
             Self::Linear(files) => Ok(files.decode(idx, ctx)?),
         }
     }

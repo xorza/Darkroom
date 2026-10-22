@@ -63,7 +63,8 @@ pub struct RunReport {
     /// Zero for frames registered without SIP, and for a stack that drizzled nothing.
     pub unconverged_points: u64,
     /// Calibrated lights written to disk between their detection and their registration, because
-    /// the reference was not known until every light was detected: zero for a resident run, and
-    /// for one whose reference was named, which registers each light as it arrives.
+    /// the reference was not known until every light was detected: zero for a resident run, for
+    /// one whose reference was named, which registers each light as it arrives, and for lights the
+    /// decode cache keeps, which park where it keeps them.
     pub parked_lights: u64,
 }

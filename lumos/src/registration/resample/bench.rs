@@ -21,7 +21,6 @@ use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::warp_transform::WarpTransform;
-use crate::scratch_pool::Scratch;
 
 pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
@@ -142,7 +141,7 @@ fn warp(b: &mut Bencher<'_>, case: WarpCase<'_>) {
         },
     };
     let source = SourceImage::of(light);
-    let mut buffers = WarpResult::build(light.dimensions());
+    let mut buffers = WarpResult::new(light.dimensions());
     let scratch = WarpScratch::default();
     b.iter(|| buffers.warp_into(&source, warp, &scratch));
 }

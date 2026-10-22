@@ -15,7 +15,6 @@ use std::fmt::Debug;
 use std::mem;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
-use std::ptr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
@@ -177,21 +176,6 @@ pub(crate) struct Pooled<T: Scratch> {
     shape: T::Shape,
     generation: u64,
     shelf: Arc<Mutex<Shelf<T>>>,
-}
-
-impl<T: Scratch> Pooled<T> {
-    /// The value, leaving the pool for good: what a warp filled becomes the frame it parks.
-    pub(crate) fn into_inner(self) -> T {
-        let mut lease = ManuallyDrop::new(self);
-        let (value, shelf) = unsafe {
-            (
-                ManuallyDrop::take(&mut lease.value),
-                ptr::read(&raw const lease.shelf),
-            )
-        };
-        drop(shelf);
-        value
-    }
 }
 
 impl<T: Scratch> Deref for Pooled<T> {
