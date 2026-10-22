@@ -11,6 +11,16 @@
 //! binding to the producer it names, and interning every id-named reference
 //! into the dense index space.
 //!
+//! # Decisions
+//!
+//! - **One release assert checks the contract.** [`Compiler::compile`] is
+//!   public API off the hot path, so it asserts [`Graph::validate_with`] in
+//!   every build: a host's bug stops on the host's thread naming the bad node
+//!   or binding, not in a lambda on the worker that misreads an input. The
+//!   checks inside the walk and the planner's cycle check stay
+//!   `debug_assert!`. Refused: a `CompileError`, as a graph the host keeps has
+//!   no expected way to fail.
+//!
 //! **The sort comes first.** [`Graph::iter`] is a `HashMap` walk, so the order
 //! nodes are reached in is not an order an artifact may depend on. Sorting the
 //! ids *before* emitting anything settles the whole dense index space up front:

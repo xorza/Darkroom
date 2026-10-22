@@ -6,6 +6,18 @@
 //! outcomes. Keeping the history here rather than on a frontend is what makes
 //! that true — the two are one unit, replaced together when a different file
 //! is opened.
+//!
+//! # Decisions
+//!
+//! - **What a load cannot keep is removed and reported.** A binding or
+//!   subscription the library refuses goes, and the document is dirty, so a
+//!   save accepts the change. Refused: refusing the document, which then does
+//!   not open; resetting the port to its default, which changes the meaning
+//!   with no warning.
+//! - **The report is one status line plus the log.** One warning line says how
+//!   many changes the load made, and one `tracing` warning names each; the next
+//!   success of the document family, such as a save, clears the line. Refused: a list in the editor, as new UI to design
+//!   and build.
 
 use std::path;
 use std::path::{Path, PathBuf};

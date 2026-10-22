@@ -1,3 +1,30 @@
+//! The document being edited, and how a decoded one is made consistent.
+//!
+//! # Decisions
+//!
+//! - **Stubs are darkroom's, not scenarium's.** A node the library cannot
+//!   resolve is kept beside the graph as the record a detach leaves — the node
+//!   with every edge that touched it — so your settings survive a library that
+//!   lost its func. Refused: stubs as graph nodes, as every reader then needs
+//!   a "declares nothing" branch; dropping them, as the settings are lost;
+//!   remapping by port name, as a value whose meaning changed still goes
+//!   through.
+//! - **A graph with a stub runs the rest.** A consumer a stub fed sees an
+//!   unbound input, as with a disabled producer. Refused: one stub refusing
+//!   every run.
+//! - **A stub can be selected, moved and deleted, not edited or copied.** It
+//!   has no ports and a read-only title, and Duplicate skips it: a copy of a
+//!   node that cannot run has little use.
+//! - **A stub's record is a frozen snapshot.** When its func resolves at a
+//!   later load it is attached again; an edge whose other end is gone, or whose
+//!   input the graph bound since, is dropped and reported. An edge between two
+//!   stubs belongs to the record detached first.
+//! - **View and layout state is repaired, not refused.** Refused: refusing the
+//!   file, as a bad viewport alone would keep the graph closed.
+//! - **A removal closes its node's viewer.** Every removal — an edit, an undo,
+//!   a redo — goes through [`Document::remove_node`]; an undo of the removal
+//!   does not reopen the tab. Refused: scanning every tab each frame.
+
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
