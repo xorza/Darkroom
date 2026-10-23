@@ -21,7 +21,6 @@ use crate::error::InvalidConfigField;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
@@ -65,7 +64,22 @@ impl OnnxModel {
     /// The model over `image` in 512² tiles at `stride`, feather-blended, written into `image`'s
     /// planes: see [`run_tiles`].
     pub(crate) fn run(&mut self, image: &mut LinearImage, stride: usize) -> Result<(), MlError> {
-        run_tiles(image, stride, |input, output| self.infer(input, output))
+        run_tiles(Planes::InPlace(image), stride, |input, output| {
+            self.infer(input, output)
+        })
+    }
+
+    /// [`Self::run`] over `input`, written into `output`'s planes, of `input`'s dimensions.
+    pub(crate) fn run_into(
+        &mut self,
+        input: &LinearImage,
+        output: &mut LinearImage,
+        stride: usize,
+    ) -> Result<(), MlError> {
+        debug_assert_eq!(output.dimensions(), input.dimensions());
+        run_tiles(Planes::Apart { input, output }, stride, |input, output| {
+            self.infer(input, output)
+        })
     }
 
     /// The model's output tile for the `input` tile, written into `output`.
@@ -81,41 +95,72 @@ impl OnnxModel {
     }
 }
 
-/// Run `infer` over `image` in 512² tiles at `stride` (NHWC `[0,1]` in, NHWC out), feather-blending
-/// the overlaps, and write the blend into `image`'s planes: its metadata and flags stay, as every
-/// other op keeps them. Grayscale is replicated to RGB for the model, then averaged back. Expects a
-/// display-domain `[0, 1]` master.
+/// Where a run reads its tiles and writes its blend: one image's planes, read and then
+/// overwritten, or another image's planes, of the input's dimensions.
+#[derive(Debug)]
+enum Planes<'a> {
+    InPlace(&'a mut LinearImage),
+    Apart {
+        input: &'a LinearImage,
+        output: &'a mut LinearImage,
+    },
+}
+
+impl Planes<'_> {
+    const fn input(&self) -> &LinearImage {
+        match self {
+            Self::InPlace(image) => image,
+            Self::Apart { input, .. } => input,
+        }
+    }
+
+    const fn output(&mut self) -> &mut LinearImage {
+        match self {
+            Self::InPlace(image) => image,
+            Self::Apart { output, .. } => output,
+        }
+    }
+}
+
+/// Run `infer` over `planes`' input in 512² tiles at `stride` (NHWC `[0,1]` in, NHWC out),
+/// feather-blending the overlaps, and write the blend into its output's planes: their metadata
+/// and flags stay, as every other op keeps them. Grayscale is replicated to RGB for the model,
+/// then averaged back. Expects a display-domain `[0, 1]` master.
 ///
-/// The tile loop reads the input until its last tile, so the blend gathers in buffers of its own
-/// and reaches the planes once every tile is in. One input and one output buffer serve every tile.
+/// The tiles run a row of them at a time, and every row above the next tile row's start is then
+/// final: no later tile adds to it or reads it. So the blend gathers in a band of [`WINDOW`] rows
+/// and writes each final row as the tile row ends, which an image read in place allows too. One
+/// input and one output buffer serve every tile.
 ///
 /// # Errors
 /// [`MlError::Config`] for a stride that does not cover the frame at full weight, refused before
 /// any tile runs; [`MlError::TooSmall`] for an image smaller than a tile; and what `infer` returns.
 fn run_tiles(
-    image: &mut LinearImage,
+    mut planes: Planes<'_>,
     stride: usize,
     mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,
 ) -> Result<(), MlError> {
     validate_stride(stride)?;
-    let size = Size2us::new(image.width(), image.height());
+    let dimensions = planes.input().dimensions();
+    let size = dimensions.size();
     if size.width < WINDOW || size.height < WINDOW {
         return Err(MlError::TooSmall(size));
     }
-    let mut blend = FeatherBlend::new(image.dimensions());
+    let mut blend = FeatherBlend::new(dimensions);
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     let mut output = vec![0.0f32; WINDOW * WINDOW * 3];
     let xs = tile_starts(size.width, stride);
     let ys = tile_starts(size.height, stride);
-    for &ty in &ys {
+    for (row, &ty) in ys.iter().enumerate() {
         for &tx in &xs {
             let tile = Vec2us::new(tx, ty);
-            fill_tile_input(image, tile, &mut input);
+            fill_tile_input(planes.input(), tile, &mut input);
             infer(&input, &mut output)?;
             blend.add(&output, tile);
         }
+        let final_rows = ys.get(row + 1).copied().unwrap_or(size.height);
+        blend.write_rows(planes.output(), final_rows);
     }
-    blend.write_into(image);
     Ok(())
 }
 
@@ -204,23 +249,28 @@ const fn feather(i: usize) -> f32 {
     FEATHER_LUT[i]
 }
 
-/// The model's tiles over a frame, each feathered by its weight: the weighted sum of each output
-/// channel and the sum of the weights, normalized into the frame's planes once every tile is in.
+/// The model's tiles over a band of [`WINDOW`] rows of a frame, each feathered by its weight: the
+/// weighted sum of each output channel and the sum of the weights, row `y` of the frame in band
+/// row `y mod WINDOW`. The rows a tile row spans are `WINDOW` consecutive ones, so none of them
+/// shares a band row, and a row is normalized into the frame's planes and cleared once final.
 #[derive(Debug)]
 struct FeatherBlend {
     dimensions: ImageDimensions,
     channels: [Vec<f32>; 3],
     weight: Vec<f32>,
+    /// The frame rows written so far: every row above this one.
+    written: usize,
 }
 
 impl FeatherBlend {
     /// Nothing yet over a frame of `dimensions`, whose channel count the image it makes takes.
     fn new(dimensions: ImageDimensions) -> Self {
-        let pixels = dimensions.pixel_count();
+        let band = WINDOW * dimensions.width();
         Self {
             dimensions,
-            channels: [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]],
-            weight: vec![0.0f32; pixels],
+            channels: [vec![0.0f32; band], vec![0.0; band], vec![0.0; band]],
+            weight: vec![0.0f32; band],
+            written: 0,
         }
     }
 
@@ -229,7 +279,7 @@ impl FeatherBlend {
         let width = self.dimensions.width();
         for hh in 0..WINDOW {
             let fy = feather(hh);
-            let row = (tile.y + hh) * width + tile.x;
+            let row = (tile.y + hh) % WINDOW * width + tile.x;
             for ww in 0..WINDOW {
                 let fw = feather(ww) * fy;
                 let idx = row + ww;
@@ -242,28 +292,45 @@ impl FeatherBlend {
         }
     }
 
-    /// Write the normalized blend over `image`'s planes, of the frame it was made for: a
-    /// grayscale frame takes the mean of the model's three channels.
-    fn write_into(self, image: &mut LinearImage) {
+    /// Write the normalized blend of every row above `end` not written yet over `image`'s rows,
+    /// of the frame it was made for, and clear their band rows: a grayscale frame takes the mean
+    /// of the model's three channels.
+    fn write_rows(&mut self, image: &mut LinearImage, end: usize) {
         let Self {
             dimensions,
             channels,
             weight,
+            written,
         } = self;
-        debug_assert_eq!(image.dimensions(), dimensions);
-        if dimensions.is_rgb() {
-            for (plane, channel) in image.planes_mut().zip(&channels) {
-                for ((out, &sum), &wt) in plane.pixels_mut().iter_mut().zip(channel).zip(&weight) {
-                    *out = (sum / wt).clamp(0.0, 1.0);
+        debug_assert_eq!(image.dimensions(), *dimensions);
+        let width = dimensions.width();
+        for y in *written..end {
+            let band = y % WINDOW * width..(y % WINDOW + 1) * width;
+            let weight = &mut weight[band.clone()];
+            if dimensions.is_rgb() {
+                for (c, channel) in channels.iter_mut().enumerate() {
+                    let sums = &mut channel[band.clone()];
+                    let row = image.channel_mut(c).row_mut(y);
+                    for ((out, &sum), &wt) in row.iter_mut().zip(&*sums).zip(&*weight) {
+                        *out = (sum / wt).clamp(0.0, 1.0);
+                    }
+                    sums.fill(0.0);
+                }
+            } else {
+                let [red, green, blue] = channels
+                    .each_mut()
+                    .map(|channel| &mut channel[band.clone()]);
+                let row = image.channel_mut(0).row_mut(y);
+                for (i, out) in row.iter_mut().enumerate() {
+                    *out = ((red[i] + green[i] + blue[i]) / (3.0 * weight[i])).clamp(0.0, 1.0);
+                }
+                for sums in [red, green, blue] {
+                    sums.fill(0.0);
                 }
             }
-        } else {
-            let plane = image.channel_mut(0).pixels_mut();
-            for (i, out) in plane.iter_mut().enumerate() {
-                *out = ((channels[0][i] + channels[1][i] + channels[2][i]) / (3.0 * weight[i]))
-                    .clamp(0.0, 1.0);
-            }
+            weight.fill(0.0);
         }
+        *written = end;
     }
 }
 

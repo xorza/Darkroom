@@ -131,3 +131,12 @@
   keeps one file for each key, written once a run. The plan charges a gain for each frame the
   cache does not hold, the most there can be before they decode. Refused: a header read of every
   file before the plan, which reads each file twice.
+- **An ML run blends its tiles in a band of 512 rows.** Tiles run a row of them at a time, so the
+  rows above the next tile row are final once a row ends, and each is written then: the four
+  accumulators hold a band, not a frame, with the same sums in the same order, and `split` reads
+  the input into new starless planes rather than a copy. Refused: a separable product weight, or
+  one mono accumulator, which change the rounding.
+- **An image's intensity is read from its channels where it is needed.** `Intensity` borrows a
+  grayscale channel and computes `Rgb::intensity` of the three at a pixel, bit for bit the plane
+  it replaces. Refused: an intensity plane for each enhancement, a copy of a mono channel or a
+  new RGB plane of the frame.

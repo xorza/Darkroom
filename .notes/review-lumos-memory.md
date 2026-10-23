@@ -79,8 +79,6 @@ root causes.
   configuration and adds a mode.
 - **A sparse index list for the `imposed` flags.** It needs two representations with a
   break-even switch. Only the duplicated builder is merged (batch 10).
-- **A separable product weight, or one mono accumulator, in the ML blend.** Both change
-  rounding. The band ring in batch 9 keeps the same sums in the same order.
 - **The demosaic's dilation scratch kept on `LoadCtx`.** It puts a private field in a public
   struct that callers build with `..Default::default()`, to save a few megabytes of page faults
   beside a demosaic of the whole frame. The scratch is priced in `FrameInfo::demosaiced` instead.
@@ -121,6 +119,8 @@ source gains, landed, and 7, reuse across frames and jobs. The other batches are
 A bug: an input reaches an allocation that aborts the process. Files:
 `imaginarium/src/image/io.rs`, `io/raster.rs`.
 
+Waiting on a decision: see `review-lumos-memory_QUESTIONS.md`.
+
 - [ ] `imaginarium/src/image/io.rs:86-97` and `io/raster.rs:30-41,74-78,136` — a raster TIFF
   decodes with `Limits::unlimited()`, and the `MAX_SIDE` check runs after the decode. A crafted
   header makes the decoder try to allocate up to 65535² × channels × 4 bytes. Target:
@@ -132,27 +132,12 @@ A bug: an input reaches an allocation that aborts the process. Files:
 
 ### 9. Cold image operations
 
-Once for each master, but each holds hundreds of MB. Files: `image_ops/ml/{backend/mod.rs,
-remove_stars.rs}`, `image/linear_image.rs`, `image_ops/{local_contrast, hdr}/mod.rs`,
-`io/raster.rs`, `image/linear_pixels.rs`, `io/raw/unpacked_raw.rs`.
+Once for each master, but each holds hundreds of MB. Files: `io/raster.rs`,
+`image/linear_pixels.rs`.
 
-- [ ] `image_ops/ml/backend/mod.rs:99-118,210-275` — `FeatherBlend` holds 3 channel
-  accumulators and a weight plane over the whole frame (384 MB), mono included. Tiles run in
-  row-major order and tile starts are monotone, so the rows above the next tile row's start are
-  final, and no later tile reads them. Target: accumulate into a ring band of `WINDOW` rows,
-  with the same three channels and weight in the same order, and write each finished row's
-  result in place. A mono frame keeps three band channels, so its mean is the same sum.
-  `RemoveStars::split` (`remove_stars.rs:59`) clones the input so that the model can read the
-  original while it writes. With a run that reads one image and writes another, `split`
-  allocates the starless planes without the copy.
-- [ ] `image/linear_image.rs:233-261` — `remap_intensity` clones channel 0 of a mono image
-  (96 MB) to borrow it, and makes a new intensity plane for RGB. Target: borrow `channel(0)` for
-  mono. For RGB, `local_contrast` and `hdr` compute `Rgb::intensity` where they read it, which
-  gives the same bits.
 - [ ] `io/raster.rs:107` — `LinearImage::from(&decoded)` copies even an `L_F32` image. Target:
-  `From<Image>` by value, so a mono f32 plane moves.
-- [ ] `io/raw/unpacked_raw.rs:476` — `vec![vec![0.0; n]; colors]` clones a zeroed plane before
-  every sample is written. Target: build each plane directly.
+  `From<Image>` by value, so a mono f32 plane moves. Waiting on the imaginarium decision in
+  `review-lumos-memory_QUESTIONS.md`.
 
 ### 10. Consolidation
 

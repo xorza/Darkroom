@@ -15,6 +15,7 @@ pub(crate) mod flat_gain;
 pub(crate) mod image_dimensions;
 pub(crate) mod image_metadata;
 pub(crate) mod image_provenance;
+pub(crate) mod intensity;
 pub(crate) mod linear_image;
 pub(crate) mod linear_pixels;
 pub(crate) mod masked_plane;
