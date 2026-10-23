@@ -31,6 +31,10 @@ pub enum ImageError {
         source: imaginarium::Error,
     },
 
+    /// A raster whose decode, by its header, holds more at its peak than the load's memory limit.
+    #[error("failed to load image '{path}': the decode {budget}")]
+    ImageOverBudget { path: PathBuf, budget: OverBudget },
+
     #[error("failed to load raw file '{path}': {source}")]
     Raw { path: PathBuf, source: RawError },
 

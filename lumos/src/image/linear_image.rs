@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::{array, slice};
 
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
@@ -195,7 +196,12 @@ impl LinearImage {
     /// # Panics
     /// If `image` is not one of those two formats. Callers check the format themselves — the
     /// ops live on `LinearImage`, so there is no shared gate to name.
-    fn from_f32_image(image: &Image) -> Self {
+    fn from_f32_image<I>(image: I) -> Self
+    where
+        I: Borrow<Image>,
+        [Buffer2<f32>; 1]: TryFrom<I, Error = imaginarium::Error>,
+        [Buffer2<f32>; 3]: TryFrom<I, Error = imaginarium::Error>,
+    {
         Self::new(
             LinearPixels::from_f32_image(image),
             None,
@@ -359,12 +365,21 @@ impl From<&Image> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
     /// source is not already in one, rather than asking the caller to arrive with one.
     fn from(image: &Image) -> Self {
-        let target = f32_target_format(image);
+        let target = f32_target_format(image.desc().color_format);
         if image.desc().color_format == target {
             Self::from_f32_image(image)
         } else {
-            Self::from_f32_image(&image.convert_to(target))
+            Self::from_f32_image(image.convert_to(target))
         }
+    }
+}
+
+impl From<Image> for LinearImage {
+    /// The borrowing conversion, taking the image: a grayscale `f32` image keeps its allocation as
+    /// its plane.
+    fn from(image: Image) -> Self {
+        let target = f32_target_format(image.desc().color_format);
+        Self::from_f32_image(image.convert(target))
     }
 }
 
@@ -374,10 +389,10 @@ impl From<LinearImage> for Image {
     }
 }
 
-/// The `f32` format `image` deinterleaves into: `L_F32` for grayscale, `RGB_F32` for color, an
-/// alpha channel dropped.
-pub(crate) const fn f32_target_format(image: &Image) -> ColorFormat {
-    match image.desc().color_format.channel_count {
+/// The `f32` format an image of `format` deinterleaves into: `L_F32` for grayscale, `RGB_F32` for
+/// color, an alpha channel dropped.
+pub(crate) const fn f32_target_format(format: ColorFormat) -> ColorFormat {
+    match format.channel_count {
         ChannelCount::L => ColorFormat::L_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }

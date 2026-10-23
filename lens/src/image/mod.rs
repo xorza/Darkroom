@@ -112,7 +112,7 @@ impl Image {
     fn into_planar(self) -> LinearImage {
         match self.pixels {
             Pixels::PlanarCpu(planar) => planar,
-            Pixels::InterleavedCpu(image) => LinearImage::from(&image),
+            Pixels::InterleavedCpu(image) => LinearImage::from(image),
         }
     }
 

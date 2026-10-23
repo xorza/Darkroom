@@ -7,8 +7,8 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use common::{fs, task};
-use imaginarium::{FileFormat, SUPPORTED_EXTENSIONS};
+use common::{FixedFile, SystemMemory, fs, task};
+use imaginarium::{AdmittedDecodeError, FileFormat, SUPPORTED_EXTENSIONS};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
@@ -24,10 +24,44 @@ pub(super) fn register(library: &mut Library) {
     register_save(library);
 }
 
-/// The image in the file at `path`, in the format its extension names.
-fn read(path: &Path) -> Result<imaginarium::Image, imaginarium::Error> {
+/// Why an image file did not load.
+#[derive(Debug, thiserror::Error)]
+enum ReadError {
+    #[error(transparent)]
+    Image(#[from] imaginarium::Error),
+    #[error("the decode needs {required} bytes, past the {available} this process can allocate")]
+    OverMemory { required: u64, available: u64 },
+}
+
+/// The image in the file at `path`, in the format its extension names, refused from its header
+/// when it needs more than this process can allocate: the image, beside the file when the format
+/// reads its whole input, which is refused before it is read.
+fn read(path: &Path) -> Result<imaginarium::Image, ReadError> {
     let format = FileFormat::from_path(path)?;
-    imaginarium::Image::decode(BufReader::new(fs::open(path)?), format)
+    let file = FixedFile::open(path).map_err(imaginarium::Error::from)?;
+    let held = if format.reads_whole_input() {
+        file.len()
+    } else {
+        0
+    };
+    let available = SystemMemory::available();
+    let admit = |required: u64| {
+        if required > available {
+            return Err(ReadError::OverMemory {
+                required,
+                available,
+            });
+        }
+        Ok(())
+    };
+    admit(held)?;
+    imaginarium::Image::decode_admitted(BufReader::new(file), format, |desc| {
+        admit(held + u64::try_from(desc.size_in_bytes()).expect("a byte count fits u64"))
+    })
+    .map_err(|error| match error {
+        AdmittedDecodeError::Refused(error) => error,
+        AdmittedDecodeError::Decode(error) => ReadError::Image(error),
+    })
 }
 
 /// `image` written to `path` in the format its extension names, published durably: a reader sees
@@ -125,4 +159,57 @@ fn image_fs_path(mode: FsPathMode) -> DataType {
             .map(ToString::to_string)
             .collect(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use common::{TempDir, fs};
+
+    use crate::image::nodes::io::{ReadError, read};
+
+    /// A TIFF whose header declares 1 000 000 × 1 000 000 grey f32 pixels, 4 TB, over one strip of
+    /// four bytes, its tables consistent, is refused from its header for those bytes.
+    #[test]
+    fn a_load_past_memory_is_refused_from_its_header() {
+        const SIDE: u32 = 1_000_000;
+        // Tag, type (3 SHORT, 4 LONG), value: one value each, held in its entry.
+        let entries: [(u16, u16, u32); 10] = [
+            (256, 4, SIDE),
+            (257, 4, SIDE),
+            (258, 3, 32),
+            (259, 3, 1),
+            (262, 3, 1),
+            (273, 4, 8),
+            (277, 3, 1),
+            (278, 4, SIDE),
+            (279, 4, 4),
+            (339, 3, 3),
+        ];
+        let mut tiff = b"II*\0".to_vec();
+        tiff.extend(12u32.to_le_bytes());
+        tiff.extend(0.5f32.to_le_bytes());
+        tiff.extend(10u16.to_le_bytes());
+        for (tag, kind, value) in entries {
+            tiff.extend(tag.to_le_bytes());
+            tiff.extend(kind.to_le_bytes());
+            tiff.extend(1u32.to_le_bytes());
+            tiff.extend(value.to_le_bytes());
+        }
+        tiff.extend(0u32.to_le_bytes());
+
+        let dir = TempDir::new("lens-image-io");
+        let path = dir.join("crafted.tiff");
+        fs::write(&path, &tiff).unwrap();
+        let refused = read(&path);
+        assert!(
+            matches!(
+                refused,
+                Err(ReadError::OverMemory {
+                    required: 4_000_000_000_000,
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
+    }
 }

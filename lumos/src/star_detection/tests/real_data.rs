@@ -31,7 +31,7 @@ fn rho_opiuchi_path() -> PathBuf {
 
 /// The dataset's `rho-opiuchi.jpg` as one luminance plane.
 pub(crate) fn rho_opiuchi() -> LinearImage {
-    let image = raster::read_image(&rho_opiuchi_path())
+    let image = raster::internals::read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::L_F32);
     LinearImage::from_interleaved(
@@ -87,7 +87,7 @@ fn detect_rho_opiuchi() {
     }
 
     // Load original image for visualization (RGB_F32 for drawing functions)
-    let mut output_img = raster::read_image(&rho_opiuchi_path())
+    let mut output_img = raster::internals::read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::RGB_F32);
 
