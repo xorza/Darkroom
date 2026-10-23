@@ -79,9 +79,7 @@ impl FitsChecksumPolicy {
         match self {
             Self::Ignore => unreachable!("ignore policy returned before verification"),
             Self::VerifyIfPresent => {
-                if report.datasum == ChecksumStatus::Invalid
-                    || report.checksum == ChecksumStatus::Invalid
-                {
+                if report.has_invalid() {
                     return Err(FitsLoadError::from(FitsRefusal::InvalidChecksum {
                         hdu: idx,
                         report,
@@ -89,9 +87,7 @@ impl FitsChecksumPolicy {
                 }
             }
             Self::RequireValid => {
-                if report.datasum != ChecksumStatus::Valid
-                    || report.checksum != ChecksumStatus::Valid
-                {
+                if !report.is_valid() {
                     return Err(FitsLoadError::from(FitsRefusal::ChecksumRequired {
                         hdu: idx,
                         report,
