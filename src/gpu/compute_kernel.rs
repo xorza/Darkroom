@@ -79,31 +79,19 @@ impl ComputeKernel {
         }
     }
 
-    /// Runs `invocations` invocations over `buffers` — in binding order, the written one
-    /// last — with `params` as the uniform block. `clear` zeroes the written buffer first,
-    /// for a shader that ORs sub-word elements into it.
-    pub(crate) fn run(
-        &self,
-        gpu: &Gpu,
-        params: &[u8],
-        buffers: &[&wgpu::Buffer],
-        invocations: u32,
-        clear: bool,
-    ) {
+    pub(crate) fn run(&self, gpu: &Gpu, job: KernelJob<'_>) {
         let row_length = gpu.device.limits().max_compute_workgroups_per_dimension;
-        self.dispatch(gpu, params, buffers, invocations, clear, row_length);
+        self.dispatch(gpu, job, row_length);
     }
 
     /// [`Self::run`] with rows of at most `row_length` workgroups.
-    fn dispatch(
-        &self,
-        gpu: &Gpu,
-        params: &[u8],
-        buffers: &[&wgpu::Buffer],
-        invocations: u32,
-        clear: bool,
-        row_length: u32,
-    ) {
+    fn dispatch(&self, gpu: &Gpu, job: KernelJob<'_>, row_length: u32) {
+        let KernelJob {
+            params,
+            buffers,
+            invocations,
+            output,
+        } = job;
         let device = &gpu.device;
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(self.label),
@@ -127,7 +115,7 @@ impl ComputeKernel {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(self.label),
         });
-        if clear {
+        if output == OutputStart::Zeroed {
             let output = buffers.last().expect("a kernel writes one buffer");
             encoder.clear_buffer(output, 0, None);
         }
@@ -150,6 +138,25 @@ impl ComputeKernel {
     }
 }
 
+/// One run of a [`ComputeKernel`]: `invocations` invocations over `buffers` — in binding order,
+/// the written one last — with `params` as the uniform block, the written buffer starting as
+/// `output` says.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct KernelJob<'a> {
+    pub(crate) params: &'a [u8],
+    pub(crate) buffers: &'a [&'a wgpu::Buffer],
+    pub(crate) invocations: u32,
+    pub(crate) output: OutputStart,
+}
+
+/// How a kernel's written buffer starts: as it is, for a shader that writes every word, or
+/// zeroed, for one that ORs sub-word elements into it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputStart {
+    AsIs,
+    Zeroed,
+}
+
 /// Workgroup counts covering `invocations`, as rows of at most `row_length` groups.
 fn workgroups(invocations: u32, row_length: u32) -> [u32; 2] {
     let groups = invocations.div_ceil(WORKGROUP_SIZE).max(1);
@@ -162,7 +169,7 @@ mod tests {
     use wgpu::util::DeviceExt;
 
     use crate::common::internals::gpu::test_gpu;
-    use crate::gpu::compute_kernel::{ComputeKernel, workgroups};
+    use crate::gpu::compute_kernel::{ComputeKernel, KernelJob, OutputStart, workgroups};
     use crate::gpu::gpu_image;
 
     /// 24 MP of `RGB_F32` is 72 M words: 281 250 groups of 256, which one row of at most
@@ -212,10 +219,12 @@ mod tests {
             let params = [count, 0, 0, 0];
             kernel.dispatch(
                 &gpu,
-                bytemuck::cast_slice(&params),
-                &[&output],
-                count,
-                false,
+                KernelJob {
+                    params: bytemuck::cast_slice(&params),
+                    buffers: &[&output],
+                    invocations: count,
+                    output: OutputStart::AsIs,
+                },
                 row_length,
             );
             let image = gpu_image::internals::download_words(&gpu, &output, count);

@@ -1,6 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::gpu::Gpu;
+use crate::gpu::compute_kernel::{KernelJob, OutputStart};
 use crate::gpu::gpu_image::GpuImage;
 use crate::gpu::packed_layout::PackedLayout;
 use crate::ops::contrast_brightness::ContrastBrightness;
@@ -26,10 +27,12 @@ pub(super) fn apply(
     };
     pipeline.kernel.run(
         ctx,
-        bytemuck::bytes_of(&uniform),
-        &[input.read_buffer(), output.write_buffer()],
-        uniform.layout.words(),
-        false,
+        KernelJob {
+            params: bytemuck::bytes_of(&uniform),
+            buffers: &[input.read_buffer(), output.write_buffer()],
+            invocations: uniform.layout.words(),
+            output: OutputStart::AsIs,
+        },
     );
 }
 
