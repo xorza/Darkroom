@@ -8,6 +8,7 @@ use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::XTRANS_PATTERN;
 
 pub(crate) fn atomic(c: &mut Criterion) {
@@ -19,17 +20,17 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for (operation, cfa_type, passes) in [
         (
             "rcd/rggb",
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             MarkesteijnPasses::One,
         ),
         (
             "markesteijn/xtrans_1pass",
-            CfaType::XTrans(XTRANS_PATTERN),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
             MarkesteijnPasses::One,
         ),
         (
             "markesteijn/xtrans_3pass",
-            CfaType::XTrans(XTRANS_PATTERN),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
             MarkesteijnPasses::Three,
         ),
     ] {

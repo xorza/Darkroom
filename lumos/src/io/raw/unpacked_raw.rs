@@ -8,6 +8,7 @@ use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_dimensions::ImageDimensions;
@@ -43,7 +44,7 @@ pub(super) struct UnpackedRaw {
     /// The span LibRaw's own processing scales by: `maximum` less its integer black.
     processed_span: f64,
     pub(super) visible_filters: u32,
-    /// The mosaic lumos demosaics itself, or `None` when LibRaw has to process the image.
+    /// The sensor pattern lumos reads itself, or `None` when LibRaw has to process the image.
     cfa_type: Option<CfaType>,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
@@ -306,8 +307,10 @@ impl UnpackedRaw {
     fn channel_map(&self) -> impl Fn(usize, usize) -> usize + Sync + use<> {
         let (cfa_type, filters) = (self.cfa_type, self.visible_filters);
         move |x: usize, y: usize| match cfa_type {
-            Some(CfaType::XTrans(pattern)) => pattern.color_at(Vec2us::new(x, y)).idx(),
-            Some(CfaType::Bayer(_)) => raw::filter_color(filters, y, x),
+            Some(CfaType::Mosaic(Mosaic::XTrans(pattern))) => {
+                pattern.color_at(Vec2us::new(x, y)).idx()
+            }
+            Some(CfaType::Mosaic(Mosaic::Bayer(_))) => raw::filter_color(filters, y, x),
             Some(CfaType::Mono) | None => 0,
         }
     }

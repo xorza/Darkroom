@@ -18,7 +18,7 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &Buffer2<f32>;
     fn metadata(&self) -> &ImageMetadata;
-    /// The mosaic pattern of an undemosaiced sensor frame; `None` for any other image.
+    /// The sensor pattern of an undemosaiced sensor frame; `None` for any other image.
     fn cfa_type(&self) -> Option<CfaType>;
 
     /// The image's data-quality flags, for an image that carries any.

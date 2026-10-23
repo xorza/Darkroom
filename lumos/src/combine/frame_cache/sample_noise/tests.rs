@@ -10,7 +10,7 @@ use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::frame::frame_stats::FrameStats;
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::math::vec2us::Vec2us;
 use crate::noise::ccd_noise::CcdNoise;
 
@@ -72,7 +72,7 @@ fn models_follow_the_normalization_and_the_quantization_floor() {
     assert_eq!(noise.model(1, 2).at(1.0).bg, 1.0);
     assert_eq!(noise.first_without_gain(), Some(1));
 
-    let mosaic_slots = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
+    let mosaic_slots = Slots::new(Some(Mosaic::Bayer(CfaPattern::Rggb)), 1);
     let mosaic = SampleNoise::new(NormalizedStats {
         stats: &[stats(&[0.25, 0.5, 1.0], None, Some(8.0))],
         norms: Some(&[norms(&[2.0, 2.0, 0.5], 0.125)]),

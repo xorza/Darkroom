@@ -170,7 +170,7 @@ impl CfaImage {
         &mut self.data
     }
 
-    /// The mosaic pattern the samples lie under.
+    /// The sensor pattern the samples lie under.
     pub const fn cfa_type(&self) -> CfaType {
         self.cfa_type
     }
@@ -269,7 +269,7 @@ impl CfaImage {
         mosaic_noise: Option<MosaicNoise>,
         cancel: &CancelToken,
     ) -> Result<LinearImage, Cancelled> {
-        debug_assert_eq!(mosaic_noise.is_some(), self.cfa_type.is_mosaic());
+        debug_assert_eq!(mosaic_noise.is_some(), self.cfa_type.mosaic().is_some());
         // Calibration repairs a light's nulls, and this leaves those alone; it repairs the rest: a
         // frame no calibration touched, or one read back from a file, which holds the decoder's
         // fill under each null.
@@ -284,7 +284,7 @@ impl CfaImage {
             provenance.color = cfa_type.planes_color();
             provenance.demosaic = demosaic.provenance();
         }
-        if cfa_type.is_mosaic() {
+        if cfa_type.mosaic().is_some() {
             metadata.derived.after_interpolation(mosaic_noise);
         }
         // The direction decisions compare neighbours of different colors, so the kernels balance
@@ -324,7 +324,7 @@ impl CfaImage {
         const GREEN: usize = CfaColor::Green.idx();
         let size = self.size();
         let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
-        if !self.cfa_type.is_mosaic() {
+        if self.cfa_type == CfaType::Mono {
             let mut image = LinearImage::from_interleaved(dimensions, self.data.pixels().to_vec());
             image.metadata = self.metadata.clone();
             image.set_flags(self.flags.clone());

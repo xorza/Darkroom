@@ -179,7 +179,7 @@ impl PreferencesForm<'_> {
                                 edit = edit.style(&theme.path_field_error);
                             }
                             let response = edit.show(ui);
-                            if response.canceled {
+                            if response.ended == Some(EditEnd::Canceled) {
                                 // Escape drops the draft: the field shows the
                                 // committed path again.
                                 field.text.clone_from(&field.seen);

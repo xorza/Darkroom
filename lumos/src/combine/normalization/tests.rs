@@ -28,6 +28,7 @@ use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -884,13 +885,13 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     assert_eq!(every(Size2us::new(10, 1)), (0..10).collect::<Vec<_>>());
 
     let size = Size2us::new(4096, 64);
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = Mosaic::Bayer(CfaPattern::Rggb);
     for (slot, expected) in [[65_536, 0, 0, 0], [0, 32_768, 32_768, 0], [0, 0, 0, 65_536]]
         .into_iter()
         .enumerate()
     {
         let mut phases = [0; 4];
-        for idx in StratifiedSamples::new(size, Some(&rggb), slot).idxs() {
+        for idx in StratifiedSamples::new(size, Some(rggb), slot).idxs() {
             phases[(idx / 4096 % 2) * 2 + idx % 2] += 1;
         }
         assert_eq!(
@@ -1006,7 +1007,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
 #[test]
 fn twilight_flats_normalize_per_color() {
     let size = Size2us::new(16, 16);
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let pattern: Vec<f32> = (0..size.pixel_count())
         .map(|idx| 0.25 + (37 * idx % 64) as f32 / 1024.0)
         .collect();
@@ -1060,7 +1061,7 @@ fn twilight_flats_normalize_per_color() {
 #[test]
 fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
     let size = Size2us::new(300, 240);
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let pixels = |frame: usize, channel: usize| -> Vec<f32> {
         let mut rng = TestRng::new(frame as u64 * 3 + channel as u64);
         let gain = 1.0 + 0.25 * frame as f32;
@@ -1159,7 +1160,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
             })
             .collect(),
         ImageDimensions::new(size, ChannelLayout::Mono),
-        Some(&rggb),
+        rggb.mosaic(),
     );
 }
 
@@ -1550,7 +1551,7 @@ fn the_working_set_is_what_the_measurement_holds() {
             "{normalization:?}, {coverage:?}, {threads} workers"
         );
     }
-    let rggb = Slots::new(Some(CfaType::Bayer(CfaPattern::Rggb)), 1);
+    let rggb = Slots::new(Some(Mosaic::Bayer(CfaPattern::Rggb)), 1);
     assert_eq!(
         bytes(rggb, Normalization::Global, SetCoverage::Common, 2),
         729_344

@@ -14,9 +14,10 @@ use crate::calibration::defect_map::{DefectMap, sampling};
 use crate::calibration::subtraction::internals::subtract_bias;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mut group = Kind::Atomic.group(c, "calibration/defect_map/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // As `CalibrationMasters::from_images` builds it: hot pixels from the dark as stacked, dead

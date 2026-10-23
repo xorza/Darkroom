@@ -132,6 +132,15 @@ mod tests {
     use crate::pipeline::frame_parking::FrameParking;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 
+    /// How a reference reaches its store: in hand, as the single pass takes it, or parked by
+    /// [`FrameParking::hold`], written for its parking or in the planes the decode cache keeps.
+    #[derive(Debug, Clone, Copy)]
+    enum Arrival {
+        InHand,
+        Written,
+        Kept,
+    }
+
     /// A reference leaves out what the warp leaves out of every other frame and keeps the flags it
     /// carries, on either tier, whether or not it was parked on disk, and whether it parked in
     /// planes the decode cache keeps or ones written for it. Four pixels, the second a cosmic ray:
@@ -159,15 +168,21 @@ mod tests {
                 _ => QualityFlags::default(),
             }));
             let kept = || StoredImage::write(&image, image.flags(), &kept_scratch).unwrap();
-            for (label, tier, parking, parked) in [
-                ("ram", FrameParking::new(StorageTier::UNPLANNED), None, 0),
-                ("spill", spill(), None, 0),
-                ("parked", spill(), Some(None), 1),
-                ("kept", spill(), Some(Some(kept())), 0),
+            for (label, tier, arrival, parked) in [
+                (
+                    "ram",
+                    FrameParking::new(StorageTier::UNPLANNED),
+                    Arrival::InHand,
+                    0,
+                ),
+                ("spill", spill(), Arrival::InHand, 0),
+                ("parked", spill(), Arrival::Written, 1),
+                ("kept", spill(), Arrival::Kept, 0),
             ] {
-                let frame = match parking {
-                    Some(kept) => tier.hold(image.clone(), kept).unwrap(),
-                    None => PipelineFrame::Resident(image.clone()),
+                let frame = match arrival {
+                    Arrival::InHand => PipelineFrame::Resident(image.clone()),
+                    Arrival::Written => tier.hold(image.clone(), None).unwrap(),
+                    Arrival::Kept => tier.hold(image.clone(), Some(kept())).unwrap(),
                 };
                 let stored = tier
                     .store_reference(frame, Admitted::measure(&image))

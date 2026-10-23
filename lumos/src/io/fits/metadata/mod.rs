@@ -9,6 +9,7 @@ use fits_well::image::SampleType;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
@@ -387,11 +388,11 @@ pub(super) fn write_cfa(
         CfaType::Mono => {
             header.set("CFATYPE", "MONO")?;
         }
-        CfaType::Bayer(pattern) => {
+        CfaType::Mosaic(Mosaic::Bayer(pattern)) => {
             header.set("CFATYPE", "BAYER")?;
             header.set("BAYERPAT", pattern.bayerpat())?;
         }
-        CfaType::XTrans(pattern) => {
+        CfaType::Mosaic(Mosaic::XTrans(pattern)) => {
             header.set("CFATYPE", "XTRANS")?;
             for (row, values) in pattern.rows().iter().enumerate() {
                 let keyword = format!("XTRNROW{row}");
@@ -446,7 +447,7 @@ fn set_optional_integer(
     Ok(())
 }
 
-/// The mosaic pattern a header declares, or `None` for an image that is no mosaic.
+/// The sensor pattern a header declares, or `None` for an image it declares none for.
 /// `unstated_bayer_pattern` stands in for a `BAYERPAT` of `'TRUE'`.
 pub(super) fn read_cfa(
     header: &Header,
@@ -459,7 +460,9 @@ pub(super) fn read_cfa(
             return Bayerpat::Required.read_cfa(header, height, unstated_bayer_pattern);
         }
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
-            return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
+            return Ok(Some(CfaType::Mosaic(Mosaic::XTrans(read_xtrans_pattern(
+                header,
+            )?))));
         }
         Some(value) => {
             return Err(FitsRefusal::CfaTypeKeyword {
@@ -580,7 +583,7 @@ impl Bayerpat {
             pattern = pattern.flip_horizontal();
         }
 
-        Ok(Some(CfaType::Bayer(pattern)))
+        Ok(Some(CfaType::Mosaic(Mosaic::Bayer(pattern))))
     }
 }
 

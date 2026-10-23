@@ -2,6 +2,7 @@
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::error::XTransPatternError;
 use crate::io::raw;
@@ -43,8 +44,10 @@ impl LibrawFilters {
         Ok(match filters {
             0 => None,
             // LibRaw's marker for the 6×6 X-Trans layout, whose pattern it keeps apart.
-            libraw_sys::LIBRAW_XTRANS => Some(CfaType::XTrans(XTransPattern::new(xtrans)?)),
-            _ => Self::bayer(filters).map(CfaType::Bayer),
+            libraw_sys::LIBRAW_XTRANS => {
+                Some(CfaType::Mosaic(Mosaic::XTrans(XTransPattern::new(xtrans)?)))
+            }
+            _ => Self::bayer(filters).map(|pattern| CfaType::Mosaic(Mosaic::Bayer(pattern))),
         })
     }
 

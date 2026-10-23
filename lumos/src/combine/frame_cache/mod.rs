@@ -140,25 +140,18 @@ impl FrameCache {
         // contracts, checked in debug builds only — on the spill tier a release check would fault
         // every plane in from disk once before the combine reads it again. What the frames' sources
         // stated (domain, row order, pattern) is the input's, and is checked here always.
-        let mut facts = SetFacts::default();
+        Cancelled::check(&core.monitor.cancel)?;
+        SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
         for (idx, frame) in frames.iter().enumerate() {
-            Cancelled::check(&core.monitor.cancel)?;
-            facts.admit(idx, &frame.facts)?;
-            #[expect(
-                clippy::debug_assert_with_mut_call,
-                reason = "the facts it writes are a fresh set the check owns"
-            )]
-            {
-                debug_assert!(
-                    FrameCheck {
-                        idx,
-                        cancel: &CancelToken::never(),
-                    }
-                    .stored(frame, core.dimensions, &mut SetFacts::default())
-                    .is_ok(),
-                    "stored frame {idx} breaks the pipeline's own frame contract"
-                );
-            }
+            debug_assert!(
+                FrameCheck {
+                    idx,
+                    cancel: &CancelToken::never(),
+                }
+                .stored(frame, core.dimensions)
+                .is_ok(),
+                "stored frame {idx} breaks the pipeline's own frame contract"
+            );
         }
         Self::measured(frames, core, normalization)
     }
@@ -194,13 +187,13 @@ impl FrameCache {
             .into_iter()
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.admitted))
             .collect::<Vec<_>>();
-        let mut facts = SetFacts::default();
+        SetFacts::check_set(stored.iter().map(|frame| &frame.facts))?;
         for (idx, frame) in stored.iter().enumerate() {
             FrameCheck {
                 idx,
                 cancel: &monitor.cancel,
             }
-            .stored(frame, dimensions, &mut facts)?;
+            .stored(frame, dimensions)?;
         }
         Self::measured(
             stored,
@@ -722,10 +715,7 @@ impl FrameCache {
         let LoadedCache { frames, core } = loaded;
         // The loader ran each frame's own checks as it decoded, and its facts against frame 0's;
         // the facts a later frame states first are compared here, in order.
-        let mut facts = SetFacts::default();
-        for (idx, frame) in frames.iter().enumerate() {
-            facts.admit(idx, &frame.facts)?;
-        }
+        SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
         Self::measured(frames, core, normalization)
     }
 }

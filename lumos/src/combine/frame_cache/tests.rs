@@ -19,6 +19,7 @@ use crate::frame_store::stored_frame::{FrameWrite, SetKind};
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::math::statistics;
@@ -171,13 +172,13 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 
 /// Every frame of `frames` through the per-frame checks, in order.
 fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), StackError> {
-    let mut facts = SetFacts::default();
+    SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
     for (idx, frame) in frames.iter().enumerate() {
         FrameCheck {
             idx,
             cancel: &CancelToken::never(),
         }
-        .stored(frame, dimensions, &mut facts)?;
+        .stored(frame, dimensions)?;
     }
     Ok(())
 }
@@ -284,8 +285,8 @@ fn stored_frames_must_share_one_cfa_pattern() {
         let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
-    let bggr = CfaType::Bayer(CfaPattern::Bggr);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let bggr = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr));
 
     for (frames, actual, expected) in [
         (vec![mosaic(rggb), mosaic(bggr)], Some(bggr), Some(rggb)),
@@ -687,7 +688,7 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
     }
     for cache in caches(&[10.0, 20.0]) {
-        let slots = Slots::new(cache.frames[0].facts.cfa_type, 1);
+        let slots = Slots::new(cache.frames[0].facts.cfa_type.and_then(CfaType::mosaic), 1);
         let weights = FrameWeights::resolve(
             &Weighting::Manual(vec![1.0, 3.0]),
             NormalizedStats {

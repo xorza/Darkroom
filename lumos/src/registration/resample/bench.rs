@@ -13,6 +13,7 @@ use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
@@ -44,7 +45,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     }
     let rgb = || {
         field
-            .mosaic(FRAME, CfaType::Bayer(CfaPattern::Rggb))
+            .mosaic(FRAME, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)))
             .demosaic_measured(MarkesteijnPasses::One)
     };
     let method = InterpolationMethod::default();

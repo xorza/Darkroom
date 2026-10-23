@@ -91,7 +91,6 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         recipe: MasterRecipe::of(MasterRole::Dark, &IngestConfig::default()),
     };
     let cache = SourceDirCache {
-        caching: Caching::BesideFrames,
         cancel: &CancelToken::never(),
     };
     let master = CfaImage::from_plane(
@@ -100,15 +99,14 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         ImageMetadata::default(),
     );
     let missing = || match cache.load(&inputs).unwrap() {
-        CachedMaster::Missing(Some(place)) => place,
-        CachedMaster::Missing(None) => panic!("the cache is on"),
+        CachedMaster::Missing(place) => place,
         CachedMaster::Kept(_) => panic!("no master is kept for the frames as they are"),
     };
 
     let place = missing();
     let read = place.key.clone();
     fs::write(&frame, b"bb").unwrap();
-    cache.store(Some(place), &master).unwrap();
+    cache.store(place, &master).unwrap();
     assert_eq!(
         fs::read_to_string(dir.join("master_dark.fits.source")).unwrap(),
         read
@@ -116,7 +114,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
     let place = missing();
     assert_ne!(place.key, read);
 
-    cache.store(Some(place), &master).unwrap();
+    cache.store(place, &master).unwrap();
     assert!(matches!(
         cache.load(&inputs).unwrap(),
         CachedMaster::Kept(kept) if kept.data() == master.data()
@@ -132,7 +130,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
     };
     assert!(matches!(
         cache.load(&restacked).unwrap(),
-        CachedMaster::Missing(Some(_))
+        CachedMaster::Missing(_)
     ));
 }
 

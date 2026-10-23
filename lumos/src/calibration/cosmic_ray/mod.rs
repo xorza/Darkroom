@@ -44,6 +44,7 @@ use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
@@ -74,8 +75,8 @@ impl Layout {
     const fn of(cfa_type: &CfaType) -> Result<Self, CosmicRayError> {
         match cfa_type {
             CfaType::Mono => Ok(Self::Mono),
-            CfaType::Bayer(pattern) => Ok(Self::Bayer(*pattern)),
-            CfaType::XTrans(_) => Err(CosmicRayError::XTransUnsupported),
+            CfaType::Mosaic(Mosaic::Bayer(pattern)) => Ok(Self::Bayer(*pattern)),
+            CfaType::Mosaic(Mosaic::XTrans(_)) => Err(CosmicRayError::XTransUnsupported),
         }
     }
 }

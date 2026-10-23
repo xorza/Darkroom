@@ -7,8 +7,8 @@ use common::fs::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
-    MasterBuildError, MasterCache, MasterInputs, MasterRole, ProgressCallback, ProgressMonitor,
-    SigmaThreshold, WriteError, writer,
+    MasterBuildError, MasterCache, MasterInputs, MasterRole, NoMasterCache, ProgressCallback,
+    ProgressMonitor, SigmaThreshold, WriteError, writer,
 };
 use scenarium::{
     DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
@@ -72,6 +72,19 @@ struct MastersRequest {
 
 impl MastersRequest {
     fn build(&self, cancel: &CancelToken) -> Result<CalibrationMasters, BuildMastersError> {
+        match self.caching {
+            Caching::Off => self
+                .build_with(&NoMasterCache, cancel)
+                .map_err(MasterBuildError::with_cache_error),
+            Caching::BesideFrames => self.build_with(&SourceDirCache { cancel }, cancel),
+        }
+    }
+
+    fn build_with<C: MasterCache<PathBuf>>(
+        &self,
+        cache: &C,
+        cancel: &CancelToken,
+    ) -> Result<CalibrationMasters, MasterBuildError<C::Error>> {
         CalibrationMasters::build(
             MasterBuild {
                 frames: CalibrationSet {
@@ -81,10 +94,7 @@ impl MastersRequest {
                     flat_dark: self.frames.flat_dark.as_slice(),
                 },
                 sigma_threshold: self.sigma,
-                cache: &SourceDirCache {
-                    caching: self.caching,
-                    cancel,
-                },
+                cache,
             },
             &IngestConfig::default(),
             ProgressMonitor::new(ProgressCallback::default(), cancel.clone()),
@@ -207,12 +217,12 @@ fn frames_input(name: &str, what: &str) -> FuncInput {
 
 /// Each master kept next to its frames, which must share one directory, beside a marker that keys
 /// it by them, by the frames of each master subtracted from them, and by lumos's recipe for it, so
-/// a flat cached before its bias changed, or by an older lumos, is stacked again. Off, it keeps
-/// nothing and keys nothing: a key is a `stat` per frame, and one that fails would fail a build
-/// that never reads the cache.
+/// a flat cached before its bias changed, or by an older lumos, is stacked again.
+///
+/// Caching off builds with lumos's `NoMasterCache` instead, which keys nothing: a key is a `stat`
+/// per frame, and one that fails would fail a build that never reads the cache.
 #[derive(Debug)]
 struct SourceDirCache<'a> {
-    caching: Caching,
     cancel: &'a CancelToken,
 }
 
@@ -247,16 +257,12 @@ impl CachePlace {
 
 impl MasterCache<PathBuf> for SourceDirCache<'_> {
     type Error = CacheError;
-    /// `None` with the cache off.
-    type Key = Option<CachePlace>;
+    type Key = CachePlace;
 
     fn load(
         &self,
         inputs: &MasterInputs<'_, PathBuf>,
-    ) -> Result<CachedMaster<Option<CachePlace>>, CacheError> {
-        if self.caching == Caching::Off {
-            return Ok(CachedMaster::Missing(None));
-        }
+    ) -> Result<CachedMaster<CachePlace>, CacheError> {
         let place = CachePlace::of(inputs)?;
         let marked =
             fs::read_to_string(&place.paths.marker).is_ok_and(|marker| marker == place.key);
@@ -274,13 +280,14 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
                 ),
             }
         }
-        Ok(CachedMaster::Missing(Some(place)))
+        Ok(CachedMaster::Missing(place))
     }
 
-    fn store(&self, place: Option<CachePlace>, master: &CfaImage) -> Result<(), CacheError> {
-        let Some(CachePlace { paths, key }) = place else {
-            return Ok(());
-        };
+    fn store(
+        &self,
+        CachePlace { paths, key }: CachePlace,
+        master: &CfaImage,
+    ) -> Result<(), CacheError> {
         writer::cfa_fits(master, &paths.master).map_err(|source| CacheError::WriteMaster {
             path: paths.master.clone(),
             source,

@@ -3,9 +3,8 @@
 use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::color_raster::ColorRaster;
-use crate::image::cfa::xtrans_pattern::XTransPattern;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_provenance::ColorProvenance;
 use crate::math::size2us::Size2us;
@@ -17,10 +16,8 @@ use crate::math::vec2us::Vec2us;
 pub enum CfaType {
     /// No CFA pattern (monochrome sensor)
     Mono,
-    /// 2x2 Bayer pattern
-    Bayer(CfaPattern),
-    /// 6x6 X-Trans pattern
-    XTrans(XTransPattern),
+    /// A mosaic of color filters
+    Mosaic(Mosaic),
 }
 
 impl CfaType {
@@ -34,22 +31,23 @@ impl CfaType {
     pub const fn slot_at(&self, pos: Vec2us) -> usize {
         match self {
             Self::Mono => 0,
-            Self::Bayer(pattern) => pattern.color_at(pos).idx(),
-            Self::XTrans(pattern) => pattern.color_at(pos).idx(),
+            Self::Mosaic(mosaic) => mosaic.slot_at(pos),
         }
     }
 
-    /// Whether the pattern is a mosaic of colors: Bayer or X-Trans, not mono.
-    pub(crate) const fn is_mosaic(&self) -> bool {
-        matches!(self, Self::Bayer(_) | Self::XTrans(_))
+    /// The mosaic of colors, `None` on a mono sensor.
+    pub const fn mosaic(self) -> Option<Mosaic> {
+        match self {
+            Self::Mono => None,
+            Self::Mosaic(mosaic) => Some(mosaic),
+        }
     }
 
-    /// The pattern's period on each axis: `color_at` repeats every `period` pixels.
+    /// The pattern's period on each axis: `slot_at` repeats every `period` pixels.
     pub(crate) const fn period(&self) -> usize {
         match self {
             Self::Mono => 1,
-            Self::Bayer(_) => 2,
-            Self::XTrans(_) => 6,
+            Self::Mosaic(mosaic) => mosaic.period(),
         }
     }
 
@@ -77,7 +75,7 @@ impl CfaType {
     pub const fn color_layout(&self) -> ChannelLayout {
         match self {
             Self::Mono => ChannelLayout::Mono,
-            Self::Bayer(_) | Self::XTrans(_) => ChannelLayout::Rgb,
+            Self::Mosaic(mosaic) => mosaic.color_layout(),
         }
     }
 
@@ -94,7 +92,13 @@ impl CfaType {
     pub(crate) const fn planes_color(self) -> ColorProvenance {
         match self {
             Self::Mono => ColorProvenance::Monochrome,
-            Self::Bayer(_) | Self::XTrans(_) => ColorProvenance::SensorRgb,
+            Self::Mosaic(mosaic) => mosaic.planes_color(),
         }
+    }
+}
+
+impl From<Mosaic> for CfaType {
+    fn from(mosaic: Mosaic) -> Self {
+        Self::Mosaic(mosaic)
     }
 }

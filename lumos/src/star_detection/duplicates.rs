@@ -7,8 +7,22 @@ use crate::star_detection::star::Star;
 /// its index, and which stars it keeps.
 #[derive(Debug, Default)]
 pub(crate) struct Duplicates {
-    members: Vec<((i64, i64), usize)>,
+    members: Vec<Member>,
     kept: Vec<bool>,
+}
+
+/// A grid cell of side `min_separation`, row-major in its order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Cell {
+    y: i64,
+    x: i64,
+}
+
+/// A star in its cell; sorted, each cell's run is in input order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Member {
+    cell: Cell,
+    star: usize,
 }
 
 impl Duplicates {
@@ -37,34 +51,36 @@ impl Duplicates {
         }
         let min_sep_sq = f64::from(min_separation).powi(2);
         let cell_size = f64::from(min_separation);
-        let cell_of = |star: &Star| {
-            (
-                (star.pos.y / cell_size).floor() as i64,
-                (star.pos.x / cell_size).floor() as i64,
-            )
+        let cell_of = |star: &Star| Cell {
+            y: (star.pos.y / cell_size).floor() as i64,
+            x: (star.pos.x / cell_size).floor() as i64,
         };
         let Self { members, kept } = self;
         members.clear();
-        members.extend(
-            stars
-                .iter()
-                .enumerate()
-                .map(|(idx, star)| (cell_of(star), idx)),
-        );
+        members.extend(stars.iter().enumerate().map(|(idx, star)| Member {
+            cell: cell_of(star),
+            star: idx,
+        }));
         members.sort_unstable();
         kept.clear();
         kept.resize(stars.len(), true);
         for i in 0..stars.len() {
             let star = stars[i].pos;
-            let (cell_y, cell_x) = cell_of(&stars[i]);
+            let home = cell_of(&stars[i]);
             let duplicate = (-1..=1).any(|dy| {
                 (-1..=1).any(|dx| {
-                    let cell = (cell_y + dy, cell_x + dx);
-                    let start = members.partition_point(|&(member, _)| member < cell);
+                    let cell = Cell {
+                        y: home.y + dy,
+                        x: home.x + dx,
+                    };
+                    let start = members.partition_point(|member| member.cell < cell);
                     members[start..]
                         .iter()
-                        .take_while(|&&(member, j)| member == cell && j < i)
-                        .any(|&(_, j)| kept[j] && star.distance_squared(stars[j].pos) < min_sep_sq)
+                        .take_while(|member| member.cell == cell && member.star < i)
+                        .any(|member| {
+                            kept[member.star]
+                                && star.distance_squared(stars[member.star].pos) < min_sep_sq
+                        })
                 })
             });
             kept[i] = !duplicate;

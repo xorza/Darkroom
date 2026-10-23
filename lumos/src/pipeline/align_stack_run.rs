@@ -146,7 +146,7 @@ impl AlignStackRun<'_> {
             budget,
         );
         let storage = match &lights {
-            LightSource::Held(_) => &RunStorage::holding(ingest),
+            LightSource::Held(_) => RunStorage::holding(ingest),
             LightSource::Files(files) => files.storage(),
         };
         let stage = shape.stage_plan(&plan, LightShape::WARP, storage)?;

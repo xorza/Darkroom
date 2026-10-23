@@ -9,6 +9,7 @@ use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
@@ -261,10 +262,22 @@ fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let size = Size2us::new(130, 130);
     let data = ramp(size);
     for (cfa_type, passes) in [
-        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
-        (CfaType::Bayer(CfaPattern::Gbrg), MarkesteijnPasses::One),
-        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
-        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
+        (
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            MarkesteijnPasses::One,
+        ),
+        (
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg)),
+            MarkesteijnPasses::One,
+        ),
+        (
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+            MarkesteijnPasses::One,
+        ),
+        (
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+            MarkesteijnPasses::Three,
+        ),
     ] {
         let mut cfa = make_cfa(size, data.pixels().to_vec(), cfa_type);
         cfa.metadata.header.camera_white_balance = Some([2.13, 1.0, 1.71, 1.0]);

@@ -18,6 +18,7 @@ use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights};
@@ -41,7 +42,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 /// configuration asks it, and demosaiced. The default configuration leaves cosmic rays in.
 fn prepare(c: &mut Criterion) {
     let field = Field::Typical;
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let masters = OnceCell::new();
     let mut group = Kind::Integration.group(c, "prepare", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
@@ -142,7 +143,7 @@ const SPILLED_MACHINE_BYTES: u64 = 4 << 30;
 /// combined. Resident, and spilled on the memory of a 4 GiB machine.
 fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let masters = OnceCell::new();
     // The slowest bench's iteration, `rggb/spilled`'s median on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(18_340);

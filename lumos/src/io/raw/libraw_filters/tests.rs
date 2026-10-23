@@ -1,5 +1,6 @@
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::error::XTransPatternError;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::libraw_filters::LibrawFilters;
@@ -27,14 +28,17 @@ fn from_libraw_classifies_the_sensor() {
     assert_eq!(classify(0, 1), Some(CfaType::Mono));
     assert_eq!(classify(0x9494_9494, 1), Some(CfaType::Mono));
     assert_eq!(classify(0, 3), None);
-    assert_eq!(classify(9, 3), Some(CfaType::XTrans(XTRANS_PATTERN)));
+    assert_eq!(
+        classify(9, 3),
+        Some(CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)))
+    );
     assert_eq!(
         classify(0x9494_9494, 3),
-        Some(CfaType::Bayer(CfaPattern::Rggb))
+        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)))
     );
     assert_eq!(
         classify(0x1616_1616, 3),
-        Some(CfaType::Bayer(CfaPattern::Bggr))
+        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
     );
     assert_eq!(classify(0x1234_5678, 3), None);
     for (filters, cdesc) in [(0x9c9c_9c9c, *b"RGBE"), (0x1e1e_1e1e, *b"CMYG")] {

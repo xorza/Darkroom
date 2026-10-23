@@ -69,8 +69,8 @@ pub enum AdmissionError {
         expected: RowOrder,
     },
 
-    /// Two frames carry different mosaic patterns, or one is a mosaic and the other is not, so
-    /// the same pixel is a different color in each.
+    /// Two frames carry different sensor patterns, or one carries a pattern and the other none,
+    /// so the same pixel is a different color in each.
     #[error("frame {idx} has CFA pattern {actual:?}, but frame {reference_idx} has {expected:?}")]
     CfaPatternMismatch {
         idx: usize,

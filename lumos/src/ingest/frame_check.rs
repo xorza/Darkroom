@@ -16,7 +16,6 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
-use crate::ingest::set_facts::SetFacts;
 
 /// The checks one frame of a set must pass, reporting their failures against its `idx` and
 /// polling `cancel` once per chunk.
@@ -35,19 +34,16 @@ impl FrameCheck<'_> {
     }
 
     /// A stored frame, in the one fixed order every cache constructor uses: its geometry against
-    /// the cache's, its facts against the set's ([`SetFacts`]), then its samples and its quality
-    /// planes. Geometry first because every later read slices a plane to `pixel_count`, and the
-    /// facts before the samples because they are a comparison, while the samples are a pass over
-    /// every pixel.
+    /// the cache's, then its samples and its quality planes. Geometry first because every later
+    /// read slices a plane to `pixel_count`. Its facts are the set's to check, before any frame's
+    /// pixels: see [`SetFacts::check_set`](crate::ingest::set_facts::SetFacts::check_set).
     pub(crate) fn stored(
         self,
         frame: &StoredFrame,
         dimensions: ImageDimensions,
-        facts: &mut SetFacts,
     ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
         self.geometry(frame, dimensions)?;
-        facts.admit(self.idx, &frame.facts)?;
         self.stored_samples(&frame.channels, dimensions.pixel_count())?;
         self.stored_quality(frame, dimensions)
     }

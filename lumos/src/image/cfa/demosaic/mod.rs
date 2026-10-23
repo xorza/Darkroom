@@ -17,6 +17,7 @@ use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
@@ -41,8 +42,8 @@ impl Demosaic {
     pub(crate) const fn of(cfa_type: CfaType, passes: MarkesteijnPasses) -> Self {
         match cfa_type {
             CfaType::Mono => Self::None,
-            CfaType::Bayer(pattern) => Self::Rcd(pattern),
-            CfaType::XTrans(pattern) => Self::Markesteijn { pattern, passes },
+            CfaType::Mosaic(Mosaic::Bayer(pattern)) => Self::Rcd(pattern),
+            CfaType::Mosaic(Mosaic::XTrans(pattern)) => Self::Markesteijn { pattern, passes },
         }
     }
 
@@ -121,6 +122,7 @@ mod memory_tests {
     use crate::image::cfa::demosaic::bayer::rcd;
     use crate::image::cfa::demosaic::xtrans::markesteijn;
     use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+    use crate::image::cfa::mosaic::Mosaic;
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::internals::cfa::XTRANS_PATTERN;
@@ -138,11 +140,11 @@ mod memory_tests {
 
         for (cfa_type, workspace) in [
             (
-                CfaType::Bayer(CfaPattern::Rggb),
+                CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
                 rcd::internals::workspace_bytes(4),
             ),
             (
-                CfaType::XTrans(XTRANS_PATTERN),
+                CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
                 markesteijn::internals::workspace_bytes(4),
             ),
         ] {

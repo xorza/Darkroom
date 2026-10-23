@@ -11,6 +11,7 @@ use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::internals::fits::write_fits;
 use crate::io::writer;
@@ -112,7 +113,7 @@ pub(crate) fn write_mosaic_u16(path: &Path, mosaic: &CfaImage) {
     let shape = vec![mosaic.data().width(), mosaic.data().height()];
     let image = Image::from_u16(shape, &quantize(mosaic.data().pixels())).unwrap();
     let mut header = Header::new();
-    if let CfaType::Bayer(pattern) = mosaic.cfa_type() {
+    if let CfaType::Mosaic(Mosaic::Bayer(pattern)) = mosaic.cfa_type() {
         header.set("BAYERPAT", pattern.bayerpat()).unwrap();
     }
     write_fits(path, &image, Some(&header));
@@ -165,14 +166,15 @@ mod tests {
             decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.channel(0).pixels(), render.channel(0).pixels());
 
-        let mosaic = field.light(size, CfaType::Bayer(CfaPattern::Rggb));
+        let mosaic = field.light(size, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
         let path = dir.join("mosaic.fits");
         write_mosaic_u16(&path, &mosaic);
         let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.cfa_type(), mosaic.cfa_type());
         within_half_step(loaded.data().pixels(), mosaic.data().pixels());
 
-        let calibrated = field.mosaic_exposure(size, CfaType::Bayer(CfaPattern::Rggb), 1);
+        let calibrated =
+            field.mosaic_exposure(size, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)), 1);
         let path = dir.join("calibrated.fits");
         writer::cfa_fits(&calibrated, &path).unwrap();
         let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();

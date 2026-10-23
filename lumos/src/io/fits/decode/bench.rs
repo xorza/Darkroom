@@ -11,6 +11,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::fits::decode;
 use crate::io::load_ctx::LoadCtx;
@@ -67,7 +68,10 @@ impl FitsFile {
             Format::U16 => write_mosaic_u16(&path, &field.light(FRAME, CfaType::Mono)),
             Format::F32 => write_mono_f32(&path, &field.render(FRAME).image),
             Format::CfaU16 => {
-                write_mosaic_u16(&path, &field.light(FRAME, CfaType::Bayer(CfaPattern::Rggb)));
+                write_mosaic_u16(
+                    &path,
+                    &field.light(FRAME, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))),
+                );
             }
         }
         Self { path, _dir: dir }

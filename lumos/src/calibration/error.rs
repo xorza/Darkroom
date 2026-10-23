@@ -1,5 +1,7 @@
 //! Why a calibration bundle does not fit the frame it was asked to calibrate.
 
+use std::convert::Infallible;
+
 use crate::calibration::calibration_component::CalibrationComponent;
 use crate::calibration::master_role::MasterRole;
 use crate::combine::error::StackError;
@@ -217,6 +219,19 @@ pub enum MasterBuildError<E> {
     /// assembled.
     #[error("calibration master build cancelled")]
     Cancelled,
+}
+
+impl MasterBuildError<Infallible> {
+    /// The same failure as a build under a cache that fails with `E`: a build with no cache fails
+    /// every way but by its cache.
+    pub fn with_cache_error<E>(self) -> MasterBuildError<E> {
+        match self {
+            Self::Stack(error) => MasterBuildError::Stack(error),
+            Self::Calibration(error) => MasterBuildError::Calibration(error),
+            Self::Cache(never) => match never {},
+            Self::Cancelled => MasterBuildError::Cancelled,
+        }
+    }
 }
 
 /// A cancel inside a role's stack is the build's cancel.

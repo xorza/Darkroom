@@ -9,6 +9,7 @@ use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
@@ -16,7 +17,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (operation, cfa_type) in [
         ("reject/mono", CfaType::Mono),
-        ("reject/rggb", CfaType::Bayer(CfaPattern::Rggb)),
+        (
+            "reject/rggb",
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        ),
     ] {
         group.bench_function(BenchmarkId::new(operation, field.name()), |b| {
             let mosaic = field.mosaic(FRAME, cfa_type);

@@ -17,6 +17,7 @@ use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::math::size2us::Size2us;
@@ -77,7 +78,7 @@ fn stage(c: &mut Criterion) {
 /// dither, and the drops combined with the light preset's noise weighting.
 fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(64_730);
     let mut group = Kind::Integration.group(c, "pipeline/drizzle", Scale::Set { iteration });

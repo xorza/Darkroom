@@ -6,6 +6,7 @@ use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
 use crate::calibration::subtraction::internals::subtract_bias;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
@@ -33,7 +34,7 @@ fn divide(prepared: PreparedFlat, light: &mut CfaImage) {
 }
 
 fn standard_xtrans() -> CfaType {
-    CfaType::XTrans(XTRANS_PATTERN)
+    CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))
 }
 
 #[test]
@@ -110,10 +111,13 @@ fn a_flats_mean_leaves_out_what_it_did_not_measure() {
 
 #[test]
 fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
-    for cfa_type in [CfaType::Bayer(CfaPattern::Rggb), standard_xtrans()] {
+    for cfa_type in [
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        standard_xtrans(),
+    ] {
         let size = match cfa_type {
-            CfaType::Bayer(_) => Size2us::new(4, 4),
-            CfaType::XTrans(_) => Size2us::new(6, 6),
+            CfaType::Mosaic(Mosaic::Bayer(_)) => Size2us::new(4, 4),
+            CfaType::Mosaic(Mosaic::XTrans(_)) => Size2us::new(6, 6),
             CfaType::Mono => unreachable!(),
         };
         let means = [0.5f32, 1.0, 0.25];
@@ -164,7 +168,7 @@ fn preparation_does_not_depend_on_the_thread_count() {
         .collect();
     for cfa_type in [
         CfaType::Mono,
-        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
         standard_xtrans(),
     ] {
         let run = |threads: usize| {

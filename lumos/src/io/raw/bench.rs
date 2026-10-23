@@ -7,6 +7,7 @@ use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{BIAS, FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::sensor_layout::SensorLayout;
@@ -78,7 +79,7 @@ impl RawSensor {
             masked: [0; 8],
         })
         .unwrap();
-        let light = field.light(active, CfaType::Bayer(CfaPattern::Rggb));
+        let light = field.light(active, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
         let span = black.span();
         let mut raw: Vec<u16> = (0..layout.raw.pixel_count())
             .map(|idx| {
@@ -127,7 +128,7 @@ mod tests {
         assert_eq!(sensor.raw.len(), 92 * 64);
         let span = sensor.black.span();
         assert_eq!(span, 15_871.0);
-        let light = Field::Typical.light(active, CfaType::Bayer(CfaPattern::Rggb));
+        let light = Field::Typical.light(active, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
         let decoded = sensor.decode();
         assert_eq!(decoded.pixels.len(), active.pixel_count());
         let headroom =

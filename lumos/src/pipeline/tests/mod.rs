@@ -21,6 +21,7 @@ use crate::combine::stack_config::small_n::SmallN;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::image_dimensions::ImageDimensions;
@@ -756,7 +757,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     let cfa = make_cfa(
         Size2us::new(36, 36),
         vec![0.1; 36 * 36],
-        CfaType::XTrans(XTRANS_PATTERN),
+        CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     );
     cfa::save(&xtrans, &cfa).expect("write synthetic X-Trans light");
     let cosmic = AlignStackConfig {

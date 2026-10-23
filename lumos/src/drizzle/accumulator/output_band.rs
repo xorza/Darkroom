@@ -499,12 +499,21 @@ mod tests {
     use crate::registration::transform::Transform;
     use crate::registration::warp_transform::WarpTransform;
 
+    /// One warp of [`the_corner_lattice_maps_the_corners_each_drop_would`].
+    #[derive(Debug)]
+    struct LatticeCase {
+        name: &'static str,
+        warp: WarpTransform,
+        /// Whether the warp folds over the frame, so some drops cannot invert.
+        folds: bool,
+    }
+
     /// The corner lattice gives every drop at pixfrac 1 the quadrilateral it would map itself, bit
     /// for bit — corners, weight, and the failures of a SIP inverse alike — whatever order its
     /// drops are asked for in: rows forward, as the scan walks them, and a column at a time, which
     /// leaves every lattice row half stale. Over a homography, whose corners each divide by their
     /// own denominator, and a SIP warp whose field `−0.05·d²` folds 10 pixels right of the centre,
-    /// so its inverse fails at the input pixels past the fold.
+    /// so its inverse fails at the input pixels past the fold, and only there.
     #[test]
     fn the_corner_lattice_maps_the_corners_each_drop_would() {
         let size = Size2us::new(24, 16);
@@ -525,13 +534,18 @@ mod tests {
         }
         .fitted_under(&identity, &reference, &target);
         let warps = [
-            (
-                "homography",
-                WarpTransform::new(Transform::homography([
+            LatticeCase {
+                name: "homography",
+                warp: WarpTransform::new(Transform::homography([
                     1.01, 0.02, 1.5, -0.01, 0.99, -0.7, 3e-4, -2e-4,
                 ])),
-            ),
-            ("sip", WarpTransform::with_sip(identity, sip)),
+                folds: false,
+            },
+            LatticeCase {
+                name: "sip",
+                warp: WarpTransform::with_sip(identity, sip),
+                folds: true,
+            },
         ];
         let same = |a: Drop<DropQuad>, b: Drop<DropQuad>| match (a, b) {
             (Drop::Landed(a), Drop::Landed(b)) => {
@@ -542,7 +556,7 @@ mod tests {
             (Drop::Empty, Drop::Empty) | (Drop::Unconverged, Drop::Unconverged) => true,
             _ => false,
         };
-        for (name, warp) in warps {
+        for LatticeCase { name, warp, folds } in warps {
             let frame = DrizzleFrame::new(image.clone(), warp);
             let source = FrameSource::new(&frame, Deposit::of(&image), OutputGrid::new(2.0, size));
             let pixel = |x: usize, y: usize| InputPixel {
@@ -567,9 +581,11 @@ mod tests {
                     assert!(same(own, shared), "{name} {order}: pixel ({x}, {y})");
                 }
             }
-            if name == "sip" {
-                assert!(unconverged > 0, "the SIP fixture must fail somewhere");
-            }
+            assert_eq!(
+                unconverged > 0,
+                folds,
+                "{name}: {unconverged} drops unconverged"
+            );
         }
     }
 }

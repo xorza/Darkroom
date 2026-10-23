@@ -39,18 +39,12 @@ impl StampBg {
             mask: no_data,
         } = residual;
         let spans = || AnnulusSpans::about(pos, annulus, Size2us::from(residual));
-        let measured = |&(x, y): &(usize, usize)| {
-            no_data.is_none_or(|no_data| !no_data.get_at(Vec2us::new(x, y)))
-        };
+        let measured = |&at: &Vec2us| no_data.is_none_or(|no_data| !no_data.get_at(at));
         // The annulus pixels inside the frame that hold a measurement, row by row, as image
         // positions.
-        let pixels = || {
-            spans()
-                .flat_map(|(y, xs)| xs.map(move |x| (x, y)))
-                .filter(measured)
-        };
+        let pixels = || spans().flat_map(RowSpan::pixels).filter(measured);
         let count = match no_data {
-            None => spans().map(|(_, xs)| xs.len()).sum(),
+            None => spans().map(|span| span.xs.len()).sum(),
             Some(_) => pixels().count(),
         };
         if count < 10 {
@@ -60,7 +54,7 @@ impl StampBg {
 
         // Stack scratch: this runs per star inside the parallel measure loop, so it must not allocate.
         let mut values: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
-        values.extend(pixels().step_by(stride).map(|(x, y)| residual.row(y)[x]));
+        values.extend(pixels().step_by(stride).map(|at| residual.row(at.y)[at.x]));
         let mut deviations: ArrayVec<f32, MAX_ANNULUS_SAMPLES> = ArrayVec::new();
         let samples = values.len();
         let stats = ClippedStats::sigma_clipped(
@@ -95,7 +89,22 @@ struct AnnulusSpans {
     size: Size2us,
     rows: RangeInclusive<isize>,
     /// The right span of the row the left one was handed out of.
-    pending: Option<(usize, Range<usize>)>,
+    pending: Option<RowSpan>,
+}
+
+/// A span of x on the image row `y`.
+#[derive(Debug, Clone)]
+struct RowSpan {
+    y: usize,
+    xs: Range<usize>,
+}
+
+impl RowSpan {
+    /// The span's pixels, left to right.
+    fn pixels(self) -> impl Iterator<Item = Vec2us> {
+        let Self { y, xs } = self;
+        xs.map(move |x| Vec2us::new(x, y))
+    }
 }
 
 impl AnnulusSpans {
@@ -124,8 +133,7 @@ impl AnnulusSpans {
 }
 
 impl Iterator for AnnulusSpans {
-    /// A row's image y, and a span of its x.
-    type Item = (usize, Range<usize>);
+    type Item = RowSpan;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(right) = self.pending.take() {
@@ -142,11 +150,20 @@ impl Iterator for AnnulusSpans {
             let dy_sq = dy.unsigned_abs().pow(2);
             let outer = isize::try_from((self.outer_sq - dy_sq).isqrt()).expect("within reach");
             let Some(hole) = self.inner_sq.checked_sub(dy_sq + 1) else {
-                return Some((y, self.clipped(-outer..outer + 1)));
+                return Some(RowSpan {
+                    y,
+                    xs: self.clipped(-outer..outer + 1),
+                });
             };
             let hole = isize::try_from(hole.isqrt()).expect("within reach");
-            self.pending = Some((y, self.clipped(hole + 1..outer + 1)));
-            return Some((y, self.clipped(-outer..-hole)));
+            self.pending = Some(RowSpan {
+                y,
+                xs: self.clipped(hole + 1..outer + 1),
+            });
+            return Some(RowSpan {
+                y,
+                xs: self.clipped(-outer..-hole),
+            });
         }
     }
 }
@@ -190,13 +207,15 @@ mod tests {
                             .ok()
                             .filter(|&x| x < 40)
                             .zip(usize::try_from(y).ok().filter(|&y| y < 30));
-                        if let Some(at) = inside.filter(|_| (inner_sq..=outer_sq).contains(&r_sq)) {
-                            walked.push(at);
+                        if let Some((x, y)) =
+                            inside.filter(|_| (inner_sq..=outer_sq).contains(&r_sq))
+                        {
+                            walked.push(Vec2us::new(x, y));
                         }
                     }
                 }
                 let spanned: Vec<_> = AnnulusSpans::about(pos, annulus, size)
-                    .flat_map(|(y, xs)| xs.map(move |x| (x, y)))
+                    .flat_map(RowSpan::pixels)
                     .collect();
                 assert_eq!(spanned, walked, "{annulus:?} about {pos}");
             }

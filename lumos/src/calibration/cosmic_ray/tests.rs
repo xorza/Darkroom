@@ -214,7 +214,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
     }
-    let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
+    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data().pixels();
     for &p in &crs {
@@ -287,7 +287,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
     }
-    let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
+    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
     reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data().pixels();
     // CR rejection still works — the injected CRs are removed.
@@ -736,7 +736,7 @@ fn a_clipped_star_core_is_kept_and_a_saturated_hit_is_not() {
 /// memory charge is refused the same way.
 #[test]
 fn an_xtrans_mosaic_is_refused_untouched() {
-    let cfa = CfaType::XTrans(XTRANS_PATTERN);
+    let cfa = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     let size = Size2us::new(36, 36);
     let mut data: Vec<f32> = (0..size.pixel_count())
         .map(|idx| 0.04 + 0.01 * cfa.slot_at(size.point_of(idx)) as f32)

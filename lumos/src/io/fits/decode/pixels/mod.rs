@@ -147,7 +147,7 @@ impl HduDecode<'_> {
                 hdu: self.hdu,
                 checksum,
             }),
-            color: if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
+            color: if cfa_type.and_then(CfaType::mosaic).is_some() {
                 ColorProvenance::SensorCfa
             } else if plan.dimensions.is_grayscale() {
                 ColorProvenance::Monochrome

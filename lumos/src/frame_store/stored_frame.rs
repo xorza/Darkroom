@@ -152,12 +152,15 @@ fn store_samples(
     mut sink: impl PlaneSink,
 ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
     let size = image.dimensions().size();
-    let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
-    let slots = mosaic.map_or_else(|| image.dimensions().channels(), |cfa| cfa.color_count());
+    let mosaic = image.cfa_type().and_then(CfaType::mosaic);
+    let slots = mosaic.map_or_else(
+        || image.dimensions().channels(),
+        |mosaic| mosaic.color_count(),
+    );
     (0..slots)
         .map(|slot| {
             let plane = image.channel(if mosaic.is_some() { 0 } else { slot });
-            let samples = StratifiedSamples::new(size, mosaic.as_ref(), slot).gather(plane);
+            let samples = StratifiedSamples::new(size, mosaic, slot).gather(plane);
             sink.write(PlaneRole::Samples(slot), &samples)
         })
         .collect()

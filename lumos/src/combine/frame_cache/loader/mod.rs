@@ -15,7 +15,7 @@ use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::decode_cache::kept_frame::KeptFrame;
 use crate::frame_store::file_set::{FileSet, SetPeek, Taken};
 use crate::frame_store::frame_buffers::NewFrame;
-use crate::frame_store::run_storage::{RunStorage, RunWrites};
+use crate::frame_store::run_storage::RunWrites;
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_layout::StoredLayout;
@@ -104,7 +104,7 @@ where
     // A decode-level memo: looked up before any decode on every tier. An unstepped frame is its
     // kept planes, mapped from the files whatever the tier, since a mapped plane reads as a
     // resident one does.
-    let files = FileSet::<_, D>::new(paths, stack(RunStorage::decoding(&run))?, &run.ctx);
+    let files = FileSet::<_, D>::new(paths, &run).map_err(StackError::from)?;
     let kept = files.storage().kept().filter(|_| !step.changes_frames());
 
     // Dimensions drive the in-memory-vs-disk tier decision. A header answers without a decode

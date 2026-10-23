@@ -58,17 +58,13 @@ pub(super) fn color_sample_idxs(
         "color sampling needs non-zero dimensions"
     );
 
-    let pattern = cfa_type;
-    let period = match pattern {
-        CfaType::Mono => 1,
-        CfaType::Bayer(_) => 2,
-        CfaType::XTrans(_) => 6,
-    };
+    let period = cfa_type.period();
 
-    let mut phases = ArrayVec::<CfaSamplePhase, 36>::new();
+    let mut phases =
+        ArrayVec::<CfaSamplePhase, { CfaType::MAX_PERIOD * CfaType::MAX_PERIOD }>::new();
     for y_offset in 0..period.min(size.height) {
         for x_offset in 0..period.min(size.width) {
-            if pattern.slot_at(Vec2us::new(x_offset, y_offset)) != target_color {
+            if cfa_type.slot_at(Vec2us::new(x_offset, y_offset)) != target_color {
                 continue;
             }
             let cols = (size.width - 1 - x_offset) / period + 1;

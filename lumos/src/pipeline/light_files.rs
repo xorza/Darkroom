@@ -51,13 +51,12 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
         preparation: Preparation<'a>,
         run: &IngestRun,
     ) -> Result<Self, AlignStackError> {
-        let storage = RunStorage::decoding(run)?;
         Ok(match preparation {
             Preparation::Calibrate(mosaic) => Self::Calibrate {
-                files: FileSet::new(paths, storage, &run.ctx),
+                files: FileSet::new(paths, run)?,
                 mosaic,
             },
-            Preparation::Linear => Self::Linear(FileSet::new(paths, storage, &run.ctx)),
+            Preparation::Linear => Self::Linear(FileSet::new(paths, run)?),
         })
     }
 
@@ -69,7 +68,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
     }
 
     /// Where the lights are read from and written to.
-    pub(super) const fn storage(&self) -> &RunStorage {
+    pub(super) fn storage(&self) -> RunStorage<'_> {
         match self {
             Self::Calibrate { files, .. } => files.storage(),
             Self::Linear(files) => files.storage(),

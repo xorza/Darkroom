@@ -17,6 +17,7 @@ use libraw_sys as sys;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -50,7 +51,7 @@ fn camera_white_balance(
     }
 
     let mut multipliers = cam_mul;
-    if matches!(cfa_type, Some(CfaType::XTrans(_))) || multipliers[3] == 0.0 {
+    if matches!(cfa_type, Some(CfaType::Mosaic(Mosaic::XTrans(_)))) || multipliers[3] == 0.0 {
         multipliers[3] = multipliers[1];
     }
     if multipliers
@@ -85,7 +86,7 @@ fn color_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
     [a, b, c, d]
 }
 
-/// The mosaic LibRaw's state `data` describes — see [`LibrawFilters::cfa_type`].
+/// The sensor pattern LibRaw's state `data` describes — see [`LibrawFilters::cfa_type`].
 fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawError> {
     let idata = &data.idata;
     Ok(LibrawFilters {

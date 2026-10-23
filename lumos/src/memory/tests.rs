@@ -6,6 +6,7 @@ use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::internals::cfa::XTRANS_PATTERN;
@@ -361,11 +362,11 @@ fn demosaic_costs_in_planes() {
     assert_eq!(mono(plane_bytes), Footprint::kept(plane_bytes));
     for (cfa_type, workspace) in [
         (
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             rcd::internals::workspace_bytes(4),
         ),
         (
-            CfaType::XTrans(XTRANS_PATTERN),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
             markesteijn::internals::workspace_bytes(4),
         ),
     ] {
@@ -501,8 +502,11 @@ fn a_plan_never_overshoots_its_budget() {
         for &frames in &[4usize, 12, 30, 60] {
             let runs: Vec<Vec<Stage>> = [
                 mono(plane_bytes),
-                demosaic(CfaType::Bayer(CfaPattern::Rggb), plane_bytes),
-                demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes),
+                demosaic(
+                    CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                    plane_bytes,
+                ),
+                demosaic(CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)), plane_bytes),
                 three_channel(plane_bytes, 7),
                 three_channel(plane_bytes, 22),
             ]

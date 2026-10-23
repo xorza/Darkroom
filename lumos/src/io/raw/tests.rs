@@ -238,7 +238,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
 
 #[test]
 fn camera_white_balance_is_canonicalized() {
-    let bayer = Some(CfaType::Bayer(CfaPattern::Rggb));
+    let bayer = Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
     assert_eq!(
         camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
@@ -249,7 +249,7 @@ fn camera_white_balance_is_canonicalized() {
     );
     assert_eq!(
         camera_white_balance(
-            Some(CfaType::XTrans(XTRANS_PATTERN)),
+            Some(CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
             [2.0, 1.0, 1.5, 9.0],
             0
         ),
@@ -284,7 +284,7 @@ fn invalid_camera_white_balance_is_absent() {
         [2.0, f32::NAN, 1.5, 1.0],
         [2.0, f32::INFINITY, 1.5, 1.0],
     ];
-    let cfa_type = Some(CfaType::Bayer(CfaPattern::Rggb));
+    let cfa_type = Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
 
     for input in invalid {
         assert!(

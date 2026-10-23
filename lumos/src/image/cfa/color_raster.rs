@@ -83,6 +83,7 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::color_raster::ColorRaster;
+    use crate::image::cfa::mosaic::Mosaic;
     use crate::image::cfa::xtrans_pattern::XTransPattern;
     use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
@@ -102,9 +103,9 @@ mod tests {
         ])
         .unwrap();
         for cfa in [
-            CfaType::Bayer(CfaPattern::Rggb),
-            CfaType::Bayer(CfaPattern::Gbrg),
-            CfaType::XTrans(xtrans),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg)),
+            CfaType::Mosaic(Mosaic::XTrans(xtrans)),
         ] {
             for (width, height) in [(12, 12), (13, 7), (7, 13), (1, 1), (5, 2)] {
                 let size = Size2us::new(width, height);

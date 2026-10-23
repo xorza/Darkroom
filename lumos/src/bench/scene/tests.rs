@@ -5,6 +5,7 @@ use crate::CalibrationMasters;
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::synthetic::camera::FlatField;
 use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
@@ -14,7 +15,7 @@ use crate::math::vec2us::Vec2us;
 /// ⌈240 / 100⌉ = 3 hot pixels and ⌈24 / 100⌉ = 1 dead one.
 const SMALL: Size2us = Size2us::new(600, 400);
 
-const RGGB: CfaType = CfaType::Bayer(CfaPattern::Rggb);
+const RGGB: CfaType = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
 
 #[test]
 fn a_field_keeps_its_density_on_a_smaller_frame() {

@@ -11,7 +11,6 @@ use crate::calibration::error::CalibrationError;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::quality_flags::QualityFlags;
@@ -156,11 +155,9 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
         let mean = sums[color] / counts[color] as f64;
         if mean.is_nan() || mean <= 0.0 {
             return Err(CalibrationError::NonPositiveFlat {
-                color: if cfa_type == CfaType::Mono {
-                    None
-                } else {
-                    Some(CfaColor::from_idx(color).expect("a mosaic has three colors"))
-                },
+                color: cfa_type
+                    .mosaic()
+                    .map(|_| CfaColor::from_idx(color).expect("a mosaic has three colors")),
             });
         }
         means[color] = mean;

@@ -3,13 +3,14 @@
 use glam::DVec2;
 
 use crate::registration::kd_tree::KdTree;
+use crate::registration::match_idxs::MatchIdxs;
 use crate::registration::triangle::geometry::{Orientation, Triangle};
 use crate::registration::triangle::matching::{
     form_triangles_from_neighbors, form_triangles_kdtree,
 };
 use crate::registration::triangle::reference_triangles::ReferenceTriangles;
 use crate::registration::triangle::triangle_config::TriangleConfig;
-use crate::registration::triangle::voting::{PointMatch, Votes};
+use crate::registration::triangle::voting::{PairVotes, PointMatch, Votes};
 
 /// The 3-4-5 right triangle: sides 3, 4 and 5, so ratios (0.6, 0.8), all exact.
 const THREE_FOUR_FIVE: [DVec2; 3] = [
@@ -71,12 +72,20 @@ fn cast_votes(target: &[Triangle], reference: Vec<Triangle>, config: &TriangleCo
         .vote(target, config)
 }
 
-/// Build a `Votes` from (`ref_idx`, `target_idx`, votes) entries.
-fn votes_from_entries(entries: &[(usize, usize, usize)]) -> Votes {
+/// `votes` for the pair of reference star `reference` and target star `target`.
+const fn tally(reference: usize, target: usize, votes: usize) -> PairVotes {
+    PairVotes {
+        pair: MatchIdxs { reference, target },
+        votes,
+    }
+}
+
+/// Build a `Votes` that casts each entry's votes for its pair.
+fn votes_from_entries(entries: &[PairVotes]) -> Votes {
     let mut vm = Votes::default();
-    for &(r, t, count) in entries {
-        for _ in 0..count {
-            vm.increment(r, t);
+    for &PairVotes { pair, votes } in entries {
+        for _ in 0..votes {
+            vm.increment(pair.reference, pair.target);
         }
     }
     vm

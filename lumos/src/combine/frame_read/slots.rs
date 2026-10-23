@@ -2,6 +2,7 @@
 
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::math::vec2us::Vec2us;
 
@@ -9,22 +10,24 @@ use crate::math::vec2us::Vec2us;
 /// one channel holds three colors with their own noise.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Slots {
-    mosaic: Option<CfaType>,
+    mosaic: Option<Mosaic>,
     count: usize,
 }
 
 impl Slots {
-    pub(crate) fn new(cfa_type: Option<CfaType>, channels: usize) -> Self {
-        let mosaic = cfa_type.filter(CfaType::is_mosaic);
+    pub(crate) fn new(mosaic: Option<Mosaic>, channels: usize) -> Self {
         Self {
             mosaic,
-            count: mosaic.map_or(channels, |cfa| cfa.color_count()),
+            count: mosaic.map_or(channels, |mosaic| mosaic.color_count()),
         }
     }
 
     /// The slots of `frames`, whose sources the set's facts agreed on, at `dimensions`.
     pub(crate) fn of_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Self {
-        Self::new(frames[0].facts.cfa_type, dimensions.channels())
+        Self::new(
+            frames[0].facts.cfa_type.and_then(CfaType::mosaic),
+            dimensions.channels(),
+        )
     }
 
     pub(crate) const fn count(self) -> usize {
@@ -34,13 +37,13 @@ impl Slots {
     /// The slot of the pixel at `pos` in `channel`.
     pub(crate) const fn slot(&self, channel: usize, pos: Vec2us) -> usize {
         match &self.mosaic {
-            Some(cfa) => cfa.slot_at(pos),
+            Some(mosaic) => mosaic.slot_at(pos),
             None => channel,
         }
     }
 
     /// The mosaic whose colors the slots are, `None` when each is a channel.
-    pub(crate) const fn mosaic(self) -> Option<CfaType> {
+    pub(crate) const fn mosaic(self) -> Option<Mosaic> {
         self.mosaic
     }
 

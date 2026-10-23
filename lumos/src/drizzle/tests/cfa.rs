@@ -11,6 +11,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::synthetic::camera::Camera;
@@ -62,7 +63,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
     ];
 
     let size = Size2us::new(18, 18);
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let dithers = |side: i64| -> Vec<(i64, i64)> {
         (0..side)
             .flat_map(|dy| (0..side).map(move |dx| (dx, dy)))
@@ -70,7 +71,7 @@ fn a_cfa_drizzle_puts_each_photosite_in_its_color_alone() {
     };
     for ((cfa_type, dithers), ingest) in [
         (rggb, dithers(2)),
-        (CfaType::XTrans(XTRANS_PATTERN), dithers(3)),
+        (CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)), dithers(3)),
     ]
     .into_iter()
     .flat_map(|set| tiers.iter().map(move |ingest| (set.clone(), ingest)))
@@ -168,7 +169,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     const FRAMES: usize = 8;
 
     let size = Size2us::new(48, 48);
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let levels = [0.2f32, 0.5, 0.3];
     let sky = |c: usize, x: f64| levels[c] * (1.0 + x as f32 / 256.0);
     let mut rng = TestRng::new(5);
@@ -251,7 +252,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
 #[test]
 fn a_cfa_drizzle_above_scale_one_is_normalized_frame_by_frame() {
     let size = Size2us::new(32, 32);
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let scene = |y: usize| 0.25 + (y % 8) as f32 / 32.0;
     let affine = [
         (1.0f32, 0.0f32),
@@ -329,7 +330,11 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
     let size = Size2us::new(6, 6);
     let frame = |pattern| {
         DrizzleFrame::new(
-            make_cfa(size, vec![0.5; size.pixel_count()], CfaType::Bayer(pattern)),
+            make_cfa(
+                size,
+                vec![0.5; size.pixel_count()],
+                CfaType::Mosaic(Mosaic::Bayer(pattern)),
+            ),
             warp_of(Transform::identity()),
         )
     };
@@ -348,8 +353,8 @@ fn a_cfa_drizzle_refuses_a_frame_of_another_pattern() {
             error,
             DrizzleError::Stack(StackError::Admission(AdmissionError::CfaPatternMismatch {
                 idx: 1,
-                expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
-                actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
+                expected: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))),
+                actual: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))),
                 reference_idx: 0,
             }))
         ),
@@ -390,7 +395,7 @@ fn the_green_proxy_registers_a_pair_as_the_demosaiced_pair_does() {
             ..Observation::reference(seed + 1)
         },
     );
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mosaic = |frame: &SimFrame| -> CfaImage {
         let gains = [0.6, 1.0, 0.8];
         let pixels = frame

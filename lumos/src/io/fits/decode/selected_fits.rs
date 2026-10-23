@@ -187,8 +187,7 @@ impl<'r> SelectedFits<'r> {
     /// Whether the header declares a mosaic, which loads as a `CfaImage`: a mono sensor frame has
     /// none to demosaic, so it is linear data like any other single-plane image.
     pub(super) fn is_mosaic(&self) -> bool {
-        self.cfa_type
-            .is_some_and(|cfa_type| cfa_type != CfaType::Mono)
+        self.cfa_type.and_then(CfaType::mosaic).is_some()
     }
 
     /// The pattern of a sensor frame, which a CFA load requires: one plane, and a pattern its

@@ -82,7 +82,7 @@ impl LightShape {
         &self,
         plan: &RunPlan,
         warp: usize,
-        storage: &RunStorage,
+        storage: RunStorage<'_>,
     ) -> Result<StagePlan, AlignStackError> {
         let tier = storage.tier(
             plan,

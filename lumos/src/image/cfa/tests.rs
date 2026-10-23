@@ -15,6 +15,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::*;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::flat_gain::FlatGain;
@@ -159,7 +160,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
 fn a_flat_gain_survives_the_fits_round_trip() {
     type Edit = fn(&mut Header, &mut Vec<u8>);
     let size = Size2us::new(12, 6);
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
         &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
         &bayer,
@@ -334,7 +335,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
 /// load with the first's gain, one allocation; through a run of its own the second is refused.
 #[test]
 fn a_gain_the_run_holds_is_not_read_again() {
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
         &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
         &bayer,
@@ -514,7 +515,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
 #[test]
 fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let size = Size2us::new(64, 64);
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
     let mut rng = TestRng::new(7);
     let pixels = (0..size.pixel_count())
@@ -632,7 +633,7 @@ fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
 fn master_cfa_save_load_round_trips_data_and_pattern() {
     let cfa = CfaImage::from_plane(
         Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
-        CfaType::Bayer(CfaPattern::Bggr),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
         ImageMetadata {
             header: ObservationHeader {
                 camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
@@ -651,12 +652,18 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         info.dimensions,
         ImageDimensions::new((2, 2), ChannelLayout::Mono)
     );
-    assert_eq!(info.cfa_type, CfaType::Bayer(CfaPattern::Bggr));
+    assert_eq!(
+        info.cfa_type,
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))
+    );
     let loaded = LoadCtx::default().cfa(&path).unwrap();
 
     assert_eq!((loaded.data().width(), loaded.data().height()), (2, 2));
     assert_eq!(loaded.data().to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
-    assert_eq!(loaded.cfa_type(), CfaType::Bayer(CfaPattern::Bggr));
+    assert_eq!(
+        loaded.cfa_type(),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))
+    );
     assert_eq!(
         loaded.metadata.header.camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
@@ -707,7 +714,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
     let dir = TempDir::new("lumos-cfa-types");
     for (name, cfa_type) in [
         ("mono", CfaType::Mono),
-        ("xtrans", CfaType::XTrans(XTRANS_PATTERN)),
+        ("xtrans", CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
     ] {
         let image = CfaImage::from_plane(
             Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
@@ -745,12 +752,12 @@ fn each_pattern_names_its_demosaic() {
             ColorProvenance::Monochrome,
         ),
         (
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             DemosaicProvenance::LumosRcd,
             ColorProvenance::SensorRgb,
         ),
         (
-            CfaType::XTrans(XTRANS_PATTERN),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
             DemosaicProvenance::LumosMarkesteijn {
                 passes: MarkesteijnPasses::Three,
             },
@@ -795,7 +802,10 @@ fn every_pattern_names_the_color_at_each_position() {
                 let expected = color_of(spelling[(y % 2) * 2 + x % 2]);
                 let pos = Vec2us::new(x, y);
                 assert_eq!(pattern.color_at(pos).idx(), expected, "{pattern:?} {pos:?}");
-                assert_eq!(CfaType::Bayer(pattern).slot_at(pos), expected);
+                assert_eq!(
+                    CfaType::Mosaic(Mosaic::Bayer(pattern)).slot_at(pos),
+                    expected
+                );
                 assert_eq!(raw::filter_color(filters, y, x), expected);
             }
         }
@@ -805,14 +815,14 @@ fn every_pattern_names_the_color_at_each_position() {
             let pos = Vec2us::new(x, y);
             assert_eq!(CfaType::Mono.slot_at(pos), 0);
             assert_eq!(
-                CfaType::XTrans(XTRANS_PATTERN).slot_at(pos),
+                CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)).slot_at(pos),
                 usize::from(XTRANS_PATTERN.rows()[y % 6][x % 6])
             );
         }
     }
 
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
-    let xtrans = CfaType::XTrans(XTRANS_PATTERN);
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let xtrans = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     assert_eq!(
         bayer.photosites_per_color(Size2us::new(5, 3)).as_slice(),
         [6, 7, 2]
@@ -859,9 +869,18 @@ fn every_pattern_names_the_color_at_each_position() {
 fn the_demosaic_support_bounds_every_impulse_response() {
     const SIDE: usize = 64;
     for (cfa_type, passes) in [
-        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
-        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
-        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
+        (
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            MarkesteijnPasses::One,
+        ),
+        (
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+            MarkesteijnPasses::One,
+        ),
+        (
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+            MarkesteijnPasses::Three,
+        ),
     ] {
         let size = Size2us::new(SIDE, SIDE);
         let mut reach = 0usize;
@@ -905,7 +924,7 @@ fn demosaic_spreads_flags_by_its_support() {
     let mut cfa = make_cfa(
         size,
         vec![0.25; size.pixel_count()],
-        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
     );
     cfa.set_flags(PixelFlags::from_fn(size, |idx| match idx {
         idx if idx == 20 * 48 + 20 => QualityFlags::SATURATED,
@@ -950,8 +969,8 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
         |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).tanh();
     let scenes: [&dyn Fn(usize, usize) -> f32; 2] = [&star, &soft_edge];
     for cfa_type in [
-        CfaType::Bayer(CfaPattern::Rggb),
-        CfaType::XTrans(XTRANS_PATTERN),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     ] {
         for (scene_idx, scene) in scenes.iter().enumerate() {
             let samples: Vec<f32> = (0..size.pixel_count())
@@ -1003,7 +1022,11 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| (idx % 6 + 10 * (idx / 6)) as f32)
         .collect();
-    let mut bayer = make_cfa(size, pixels.clone(), CfaType::Bayer(CfaPattern::Rggb));
+    let mut bayer = make_cfa(
+        size,
+        pixels.clone(),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+    );
     bayer.add_flags_where(QualityFlags::SATURATED, |idx| idx == 1);
     let proxy = bayer.green_proxy();
     let plane = proxy.channel(0);
@@ -1028,7 +1051,12 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
             .map(|_| DemosaicProvenance::GreenProxy)
     );
 
-    let xtrans = make_cfa(size, pixels.clone(), CfaType::XTrans(XTRANS_PATTERN)).green_proxy();
+    let xtrans = make_cfa(
+        size,
+        pixels.clone(),
+        CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+    )
+    .green_proxy();
     let r = FRAC_1_SQRT_2;
     let expected = ((4.0 + 24.0 * r) / (2.0 + 2.0 * r)) as f32;
     let actual = xtrans.channel(0)[(2, 0)];
@@ -1044,7 +1072,7 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         frame.metadata.derived.set_quantization_sigma(Some(0.25));
         frame
     };
-    let bayer = quantized(CfaType::Bayer(CfaPattern::Rggb)).green_proxy();
+    let bayer = quantized(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))).green_proxy();
     assert_eq!(bayer.metadata.derived.quantization_sigma(), None);
     let mono = quantized(CfaType::Mono);
     let proxy = mono.green_proxy();

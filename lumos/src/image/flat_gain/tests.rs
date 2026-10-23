@@ -3,6 +3,7 @@ use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, FlatGainRecord};
@@ -32,7 +33,7 @@ fn a_node_is_its_colors_mean_gain() {
     assert_eq!(unflagged.at(0, 4.0, 4.0), (58.0f64 / 25.0) as f32);
     assert_eq!(unflagged.at(0, 0.0, 0.0), 2.0);
 
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let divisor = Buffer2::from_fn(8, 8, |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
         0 => 0.5,
         1 => 1.0,

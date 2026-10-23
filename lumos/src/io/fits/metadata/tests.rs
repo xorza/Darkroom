@@ -4,6 +4,7 @@ use fits_well::image::SampleType;
 use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_metadata::ImageMetadata;
@@ -30,7 +31,7 @@ fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {
 
 fn pattern_of(header: &Header, height: usize) -> CfaPattern {
     match Bayerpat::Required.read_cfa(header, height, None).unwrap() {
-        Some(CfaType::Bayer(pattern)) => pattern,
+        Some(CfaType::Mosaic(Mosaic::Bayer(pattern))) => pattern,
         other => panic!("expected a Bayer pattern, got {other:?}"),
     }
 }
@@ -209,7 +210,7 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
         Bayerpat::Required
             .read_cfa(&header, 4, Some(CfaPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Bayer(CfaPattern::Grbg))
+        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Grbg)))
     );
     // Bottom-up with an even height swaps GRBG's two rows: GR then BG becomes BG then GR, BGGR.
     let bottom_up = bayer_header("TRUE", Some("BOTTOM-UP"));
@@ -217,7 +218,7 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
         Bayerpat::Required
             .read_cfa(&bottom_up, 4, Some(CfaPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Bayer(CfaPattern::Bggr))
+        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
     );
     // A stated phase wins over the option, which only stands in for 'TRUE'.
     let stated = bayer_header("BGGR", None);
@@ -225,7 +226,7 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
         Bayerpat::Required
             .read_cfa(&stated, 4, Some(CfaPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Bayer(CfaPattern::Bggr))
+        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
     );
 }
 
