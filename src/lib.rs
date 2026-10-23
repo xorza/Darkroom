@@ -12,7 +12,7 @@ pub use glam::{Affine2, Vec2};
 
 pub use crate::common::color::Color;
 pub use crate::common::color_format::{ALL_FORMATS, ChannelCount, ColorFormat, SampleType};
-pub use crate::common::error::{Error, Result};
+pub use crate::common::error::{AdmittedDecodeError, Error, Result};
 
 pub use crate::common::buffer2::Buffer2;
 pub use crate::image::Image;

@@ -174,6 +174,20 @@ impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
             Buffer2::new(self.width, self.height, plane)
         })
     }
+
+    /// [`Self::deinterleave`], taking the buffer: one channel keeps its allocation, as its pixels
+    /// already are its plane.
+    pub fn into_planes(self) -> [Buffer2<T>; N] {
+        if N > 1 {
+            return self.deinterleave();
+        }
+        let mut plane = Some(Buffer2::new(
+            self.width,
+            self.height,
+            self.pixels.into_flattened(),
+        ));
+        array::from_fn(|_| plane.take().expect("one channel"))
+    }
 }
 
 impl<T> Index<(usize, usize)> for Buffer2<T> {
@@ -374,7 +388,8 @@ mod tests {
         assert_eq!(buffer.row(2), [9, 9]);
     }
 
-    /// RGB 2×1: R = [1, 4], G = [2, 5], B = [3, 6] ⟷ pixels [[1, 2, 3], [4, 5, 6]].
+    /// RGB 2×1: R = [1, 4], G = [2, 5], B = [3, 6] ⟷ pixels [[1, 2, 3], [4, 5, 6]], borrowed or
+    /// taken; a one-channel buffer taken is its plane, in the same allocation.
     #[test]
     fn interleave_and_deinterleave_are_inverse() {
         let planes = [
@@ -385,6 +400,13 @@ mod tests {
         let interleaved = Buffer2::interleave(planes.each_ref());
         assert_eq!(interleaved.pixels(), &[[1, 2, 3], [4, 5, 6]]);
         assert_eq!(interleaved.deinterleave(), planes);
+        assert_eq!(interleaved.into_planes(), planes);
+
+        let grey = Buffer2::new(3, 1, vec![[7.0f32], [8.0], [9.0]]);
+        let pointer = grey.pixels().as_ptr().cast::<f32>();
+        let [plane] = grey.into_planes();
+        assert_eq!(plane, Buffer2::new(3, 1, vec![7.0, 8.0, 9.0]));
+        assert_eq!(plane.pixels().as_ptr(), pointer);
     }
 
     #[test]

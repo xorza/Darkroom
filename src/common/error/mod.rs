@@ -28,5 +28,15 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
+/// Why [`Image::decode_admitted`](crate::Image::decode_admitted) made no image: the caller's
+/// admission refused the header, or the decode failed.
+#[derive(Debug, Error)]
+pub enum AdmittedDecodeError<E> {
+    #[error("the decode was refused: {0}")]
+    Refused(E),
+    #[error(transparent)]
+    Decode(#[from] Error),
+}
+
 #[cfg(test)]
 mod tests;

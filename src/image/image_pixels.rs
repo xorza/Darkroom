@@ -26,6 +26,7 @@ pub(crate) enum ImagePixels {
 pub(crate) trait Stored<const N: usize>: Sample {
     fn wrap(pixels: Buffer2<[Self; N]>) -> ImagePixels;
     fn unwrap(pixels: &ImagePixels) -> Option<&Buffer2<[Self; N]>>;
+    fn unwrap_owned(pixels: ImagePixels) -> Option<Buffer2<[Self; N]>>;
 }
 
 /// Implements [`Stored`] for one variant.
@@ -37,6 +38,13 @@ macro_rules! stored {
             }
 
             fn unwrap(pixels: &ImagePixels) -> Option<&Buffer2<[Self; $n]>> {
+                match pixels {
+                    ImagePixels::$variant(pixels) => Some(pixels),
+                    _ => None,
+                }
+            }
+
+            fn unwrap_owned(pixels: ImagePixels) -> Option<Buffer2<[Self; $n]>> {
                 match pixels {
                     ImagePixels::$variant(pixels) => Some(pixels),
                     _ => None,

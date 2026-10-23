@@ -24,6 +24,13 @@ impl FileFormat {
         }
     }
 
+    /// Whether a decode reads its whole input into memory before its header, and holds it until
+    /// the image is made: JPEG, whose codec parses from memory. Such an input is read before any
+    /// admission, so a caller that bounds a decode bounds the input's length first.
+    pub const fn reads_whole_input(self) -> bool {
+        matches!(self, Self::Jpeg)
+    }
+
     /// The format `extension` names, in any case.
     pub fn from_extension(extension: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|format| {

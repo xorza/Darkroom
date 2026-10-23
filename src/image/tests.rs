@@ -1,9 +1,11 @@
-use std::io::Cursor;
+use std::cell::Cell;
+use std::io;
+use std::io::{BufRead, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::common::buffer2::Buffer2;
 use crate::common::color_format::{ALL_FORMATS, ColorFormat};
-use crate::common::error::Error;
+use crate::common::error::{AdmittedDecodeError, Error};
 use crate::common::internals::{create_test_image, lena};
 use crate::image::Image;
 use crate::image::file_format::FileFormat;
@@ -56,7 +58,8 @@ fn every_format_round_trips_through_tiff() {
 }
 
 /// `encode` writes what `save_file` puts in the file, and `decode` reads it back as `read_file`
-/// does: the file calls are the bytes calls plus the file.
+/// does: the file calls are the bytes calls plus the file. An admitted decode reads the same, and
+/// its admission sees the image it makes before it is made.
 fn assert_bytes_match_the_file(image: &Image, format: FileFormat, path: &Path) {
     let mut encoded = Cursor::new(Vec::new());
     image.encode(&mut encoded, format).unwrap();
@@ -65,6 +68,187 @@ fn assert_bytes_match_the_file(image: &Image, format: FileFormat, path: &Path) {
     let decoded = Image::decode(Cursor::new(&on_disk), format).unwrap();
     assert_eq!(decoded.desc(), image.desc(), "{format:?}");
     assert_eq!(decoded.bytes(), image.bytes(), "{format:?}");
+    let mut admitted = None;
+    let decoded = Image::decode_admitted(Cursor::new(&on_disk), format, |desc| {
+        admitted = Some(*desc);
+        Ok::<_, ()>(())
+    })
+    .unwrap();
+    assert_eq!(admitted, Some(image.desc()), "{format:?}");
+    assert_eq!(decoded.bytes(), image.bytes(), "{format:?}");
+}
+
+/// A refusal ends the decode before any pixel is allocated or read. A TIFF whose directory
+/// declares 60 000 × 60 000 RGB f32, 43 GB, over 64 × 48 pixels is refused with that
+/// description; a PNG cut short after its header, which does not decode, is refused with the
+/// description its header gives.
+#[test]
+fn a_refused_decode_reads_no_pixel() {
+    let encoded = |color_format, format| {
+        let mut encoded = Cursor::new(Vec::new());
+        create_test_image(color_format, 64, 48, 1)
+            .encode(&mut encoded, format)
+            .unwrap();
+        encoded.into_inner()
+    };
+
+    let mut tiff = encoded(ColorFormat::RGB_F32, FileFormat::Tiff);
+    declare_tiff_size(&mut tiff, 60_000);
+    let refused = Image::decode_admitted(Cursor::new(&tiff), FileFormat::Tiff, |desc| Err(*desc));
+    assert!(matches!(
+        refused,
+        Err(AdmittedDecodeError::Refused(desc))
+            if desc == ImageDesc::new(60_000, 60_000, ColorFormat::RGB_F32)
+    ));
+
+    let mut png = encoded(ColorFormat::L_U16, FileFormat::Png);
+    png.truncate(png.len() / 2);
+    assert!(
+        Image::decode(Cursor::new(&png), FileFormat::Png).is_err(),
+        "premise: the pixels are not all there"
+    );
+    let refused = Image::decode_admitted(Cursor::new(&png), FileFormat::Png, |desc| Err(*desc));
+    assert!(matches!(
+        refused,
+        Err(AdmittedDecodeError::Refused(desc))
+            if desc == ImageDesc::new(64, 48, ColorFormat::L_U16)
+    ));
+}
+
+/// A TIFF of a sample type imaginarium stores no format of is refused from its header, by that
+/// type's name, before any admission: 2 × 1 grey u32 and grey i16.
+#[test]
+fn a_tiff_of_another_sample_type_is_refused_from_its_header() {
+    use tiff::encoder::TiffEncoder;
+    use tiff::encoder::colortype::{Gray32, GrayI16};
+
+    let mut u32_tiff = Cursor::new(Vec::new());
+    TiffEncoder::new(&mut u32_tiff)
+        .unwrap()
+        .write_image::<Gray32>(2, 1, &[1, 2])
+        .unwrap();
+    let mut i16_tiff = Cursor::new(Vec::new());
+    TiffEncoder::new(&mut i16_tiff)
+        .unwrap()
+        .write_image::<GrayI16>(2, 1, &[-1, 2])
+        .unwrap();
+    for (tiff, name) in [(u32_tiff, "u32"), (i16_tiff, "i16")] {
+        let refused = Image::decode_admitted(
+            Cursor::new(tiff.get_ref()),
+            FileFormat::Tiff,
+            |_| -> Result<(), ()> { panic!("a header of another sample type is not admitted") },
+        );
+        assert!(
+            matches!(
+                &refused,
+                Err(AdmittedDecodeError::Decode(Error::UnsupportedFormat(message)))
+                    if *message == format!("TIFF sample format not supported: {name}")
+            ),
+            "{refused:?}"
+        );
+    }
+}
+
+/// At its admission a decode has read its whole input only where its format says so: a 512 × 512
+/// RGB u8 image of noise, 768 KiB raw, is read whole by JPEG and only to its header by
+/// PNG and TIFF.
+#[test]
+fn only_a_format_that_reads_its_whole_input_has_read_it_at_admission() {
+    let mut state = 1u32;
+    let noise: Vec<u8> = (0..512 * 512 * 3)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
+    let image = Image::new_with_data(ImageDesc::new(512, 512, ColorFormat::RGB_U8), noise).unwrap();
+    for format in FileFormat::ALL {
+        let mut encoded = Cursor::new(Vec::new());
+        image.encode(&mut encoded, format).unwrap();
+        let len = encoded.get_ref().len();
+        let read = Cell::new(0);
+        let input = Counted {
+            inner: Cursor::new(encoded.get_ref()),
+            read: &read,
+        };
+        let mut at_admission = 0;
+        Image::decode_admitted(input, format, |_| {
+            at_admission = read.get();
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert_eq!(
+            at_admission == len,
+            format.reads_whole_input(),
+            "{format:?}: {at_admission} of {len} bytes read at admission"
+        );
+    }
+}
+
+/// A reader that counts the bytes read through it.
+#[derive(Debug)]
+struct Counted<'a, R> {
+    inner: R,
+    read: &'a Cell<usize>,
+}
+
+impl<R: Read> Read for Counted<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(buf)?;
+        self.read.set(self.read.get() + count);
+        Ok(count)
+    }
+}
+
+impl<R: BufRead> BufRead for Counted<'_, R> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, amount: usize) {
+        self.read.set(self.read.get() + amount);
+        self.inner.consume(amount);
+    }
+}
+
+impl<R: Seek> Seek for Counted<'_, R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+/// Rewrite the first directory of the little-endian `tiff` to declare `side` × `side` pixels in
+/// one strip, its tables consistent as a crafted header's are: the width, the height and the rows
+/// a strip holds are `side`, and the strip tables keep their first entry.
+fn declare_tiff_size(tiff: &mut [u8], side: u32) {
+    let u16_at = |tiff: &[u8], at: usize| u16::from_le_bytes([tiff[at], tiff[at + 1]]);
+    let u32_at = |tiff: &[u8], at: usize| u32::from_le_bytes(tiff[at..at + 4].try_into().unwrap());
+    assert_eq!(&tiff[..2], b"II", "a little-endian TIFF");
+    let directory = u32_at(tiff, 4) as usize;
+    let mut patched = 0;
+    for entry in 0..usize::from(u16_at(tiff, directory)) {
+        let at = directory + 2 + entry * 12;
+        let (tag, kind, count) = (u16_at(tiff, at), u16_at(tiff, at + 2), u32_at(tiff, at + 4));
+        let value = match tag {
+            // ImageWidth, ImageLength, RowsPerStrip.
+            256 | 257 | 278 => side,
+            // StripOffsets, StripByteCounts: the first strip's, held in the entry once it is one.
+            273 | 279 if count > 1 => {
+                assert_eq!(kind, 4, "a table of LONGs");
+                u32_at(tiff, u32_at(tiff, at + 8) as usize)
+            }
+            273 | 279 => u32_at(tiff, at + 8),
+            _ => continue,
+        };
+        tiff[at + 2..at + 4].copy_from_slice(&4u16.to_le_bytes());
+        tiff[at + 4..at + 8].copy_from_slice(&1u32.to_le_bytes());
+        tiff[at + 8..at + 12].copy_from_slice(&value.to_le_bytes());
+        patched += 1;
+    }
+    assert_eq!(
+        patched, 5,
+        "the size, the rows of a strip and the strip tables"
+    );
 }
 
 /// PNG stores the integer formats and reads them back byte for byte; it has no float.
@@ -194,16 +378,28 @@ fn planes_interleave_into_the_format_they_spell() {
 
     let back: [Buffer2<u8>; 3] = (&image).try_into().unwrap();
     assert_eq!(back, planes);
+    let taken: [Buffer2<u8>; 3] = image.try_into().unwrap();
+    assert_eq!(taken, planes);
 
     let grey = Image::from([&Buffer2::new(3, 1, vec![10u16, 20, 30])]);
     assert_eq!(grey.desc().color_format, ColorFormat::L_U16);
     assert_eq!(grey.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
+    // A grey image taken is its one plane, in the same allocation.
+    let pointer = grey.bytes().as_ptr();
+    let [plane]: [Buffer2<u16>; 1] = grey.try_into().unwrap();
+    assert_eq!(plane.pixels(), &[10, 20, 30]);
+    assert_eq!(plane.pixels().as_ptr().cast::<u8>(), pointer);
 }
 
 #[test]
 fn deinterleaving_into_another_format_is_refused() {
     let image = Image::new_black(ImageDesc::new(2, 2, ColorFormat::RGB_U8)).unwrap();
     let result: Result<[Buffer2<f32>; 1], Error> = (&image).try_into();
+    assert!(matches!(
+        result,
+        Err(Error::InvalidColorFormat(message)) if message == "cannot deinterleave a RGB u8 image into 1 f32 planes"
+    ));
+    let result: Result<[Buffer2<f32>; 1], Error> = image.try_into();
     assert!(matches!(
         result,
         Err(Error::InvalidColorFormat(message)) if message == "cannot deinterleave a RGB u8 image into 1 f32 planes"
