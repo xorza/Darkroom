@@ -2,7 +2,7 @@ use std::io::{BufRead, Seek, Write};
 
 use bytemuck::Pod;
 use image as image_lib;
-use tiff::decoder::{Decoder, DecodingResult, Limits};
+use tiff::decoder::{Decoder, DecodingResult, DecodingSampleType, Limits};
 use tiff::encoder::colortype::{
     ColorType, Gray8, Gray16, Gray32Float, RGB8, RGB16, RGB32Float, RGBA8, RGBA16, RGBA32Float,
 };
@@ -24,11 +24,17 @@ pub(super) trait BufReadSeek: BufRead + Seek {}
 
 impl<T: BufRead + Seek> BufReadSeek for T {}
 
-pub(super) fn load(input: &mut dyn BufReadSeek, format: FileFormat) -> Result<Image> {
+/// The image `input` holds in `format`, once `admit` accepts the description its header gives:
+/// `None` when it refuses, before any pixel is allocated or read.
+pub(super) fn load(
+    input: &mut dyn BufReadSeek,
+    format: FileFormat,
+    admit: &mut dyn FnMut(&ImageDesc) -> bool,
+) -> Result<Option<Image>> {
     match format {
-        FileFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png),
-        FileFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg),
-        FileFormat::Tiff => load_tiff(input),
+        FileFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png, admit),
+        FileFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg, admit),
+        FileFormat::Tiff => load_tiff(input, admit),
     }
 }
 
@@ -40,95 +46,120 @@ pub(super) fn save(image: &Image, format: FileFormat, out: &mut dyn WriteSeek) -
     }
 }
 
-fn load_png_jpeg(input: &mut dyn BufReadSeek, format: image_lib::ImageFormat) -> Result<Image> {
-    use image_lib::DynamicImage;
+fn load_png_jpeg(
+    input: &mut dyn BufReadSeek,
+    format: image_lib::ImageFormat,
+    admit: &mut dyn FnMut(&ImageDesc) -> bool,
+) -> Result<Option<Image>> {
+    use image_lib::{ColorType, DynamicImage, ImageDecoder};
 
-    let img = image_lib::ImageReader::with_format(input, format).decode()?;
-    let (width, height) = (img.width() as usize, img.height() as usize);
-    let desc = |format| ImageDesc::new(width, height, format);
-    // Each decoded buffer is handed over whole. Grey with alpha has no format of its own here;
-    // it widens to RGBA, which keeps the alpha.
-    match img {
-        DynamicImage::ImageLuma8(buffer) => {
-            Image::from_samples(desc(ColorFormat::L_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageLuma16(buffer) => {
-            Image::from_samples(desc(ColorFormat::L_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb8(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGB_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb16(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGB_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb32F(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGB_F32), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba8(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGBA_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba16(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGBA_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba32F(buffer) => {
-            Image::from_samples(desc(ColorFormat::RGBA_F32), buffer.into_raw())
-        }
-        DynamicImage::ImageLumaA8(_) => {
-            Image::from_samples(desc(ColorFormat::RGBA_U8), img.into_rgba8().into_raw())
-        }
-        DynamicImage::ImageLumaA16(_) => {
-            Image::from_samples(desc(ColorFormat::RGBA_U16), img.into_rgba16().into_raw())
-        }
-        img => Err(Error::UnsupportedColorType(format!("{:?}", img.color()))),
+    let mut reader = image_lib::ImageReader::with_format(input, format);
+    // The admission bounds the decode, not the codec's default of 512 MiB.
+    reader.no_limits();
+    let decoder = reader.into_decoder()?;
+    let (width, height) = decoder.dimensions();
+    // Grey with alpha has no format of its own here; it widens to RGBA, which keeps the alpha.
+    let color_format = match decoder.color_type() {
+        ColorType::L8 => ColorFormat::L_U8,
+        ColorType::L16 => ColorFormat::L_U16,
+        ColorType::Rgb8 => ColorFormat::RGB_U8,
+        ColorType::Rgb16 => ColorFormat::RGB_U16,
+        ColorType::Rgb32F => ColorFormat::RGB_F32,
+        ColorType::Rgba8 | ColorType::La8 => ColorFormat::RGBA_U8,
+        ColorType::Rgba16 | ColorType::La16 => ColorFormat::RGBA_U16,
+        ColorType::Rgba32F => ColorFormat::RGBA_F32,
+        color => return Err(Error::UnsupportedColorType(format!("{color:?}"))),
+    };
+    let desc = ImageDesc::new(width as usize, height as usize, color_format);
+    desc.validate()?;
+    if !admit(&desc) {
+        return Ok(None);
     }
+    // Each decoded buffer is handed over whole.
+    let image = match DynamicImage::from_decoder(decoder)? {
+        DynamicImage::ImageLuma8(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageLuma16(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgb8(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgb16(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgb32F(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgba8(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgba16(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        DynamicImage::ImageRgba32F(buffer) => Image::from_samples(desc, buffer.into_raw()),
+        img @ DynamicImage::ImageLumaA8(_) => {
+            Image::from_samples(desc, img.into_rgba8().into_raw())
+        }
+        img @ DynamicImage::ImageLumaA16(_) => {
+            Image::from_samples(desc, img.into_rgba16().into_raw())
+        }
+        _ => unreachable!("a decoder makes the color type its header names"),
+    }?;
+    Ok(Some(image))
 }
 
-fn load_tiff(input: &mut dyn BufReadSeek) -> Result<Image> {
-    // Use unlimited to support large astrophotography images
-    let limits = Limits::unlimited();
-    let mut decoder = Decoder::new(input)?.with_limits(limits);
-
+fn load_tiff(
+    input: &mut dyn BufReadSeek,
+    admit: &mut dyn FnMut(&ImageDesc) -> bool,
+) -> Result<Option<Image>> {
+    // The header reads under the codec's default limits, which bound its tag arrays.
+    let mut decoder = Decoder::new(input)?;
     let channel_count = match decoder.colortype()? {
         tiff::ColorType::Gray(_) => ChannelCount::L,
         tiff::ColorType::RGB(_) => ChannelCount::Rgb,
         tiff::ColorType::RGBA(_) => ChannelCount::Rgba,
         color => return Err(Error::UnsupportedColorType(format!("{color:?}"))),
     };
-    let (width, height) = decoder.dimensions()?;
-    let desc = |sample_type| {
-        ImageDesc::new(
-            width as usize,
-            height as usize,
-            ColorFormat::new(channel_count, sample_type),
-        )
+    let sample_type = match decoder.image_buffer_layout()?.sample_type {
+        Some(DecodingSampleType::U8) => SampleType::U8,
+        Some(DecodingSampleType::U16) => SampleType::U16,
+        Some(DecodingSampleType::F32) => SampleType::F32,
+        other => {
+            return Err(Error::UnsupportedFormat(format!(
+                "TIFF sample format not supported: {}",
+                sample_format_name(other)
+            )));
+        }
     };
+    let (width, height) = decoder.dimensions()?;
+    let desc = ImageDesc::new(
+        width as usize,
+        height as usize,
+        ColorFormat::new(channel_count, sample_type),
+    );
+    desc.validate()?;
+    if !admit(&desc) {
+        return Ok(None);
+    }
+    // Each strip or tile streams through a reader its byte count bounds, so the image is the one
+    // allocation a header sizes: the decoder may make no larger one than was admitted.
+    let mut limits = Limits::unlimited();
+    limits.decoding_buffer_size = desc.size_in_bytes();
+    let mut decoder = decoder.with_limits(limits);
 
     // The decoded samples are handed over whole.
-    match decoder.read_image()? {
-        DecodingResult::U8(samples) => Image::from_samples(desc(SampleType::U8), samples),
-        DecodingResult::U16(samples) => Image::from_samples(desc(SampleType::U16), samples),
-        DecodingResult::F32(samples) => Image::from_samples(desc(SampleType::F32), samples),
-        result => Err(Error::UnsupportedFormat(format!(
-            "TIFF sample format not supported: {}",
-            sample_format_name(&result)
-        ))),
-    }
+    let image = match decoder.read_image()? {
+        DecodingResult::U8(samples) => Image::from_samples(desc, samples),
+        DecodingResult::U16(samples) => Image::from_samples(desc, samples),
+        DecodingResult::F32(samples) => Image::from_samples(desc, samples),
+        _ => unreachable!("a TIFF decodes to the sample type its header names"),
+    }?;
+    Ok(Some(image))
 }
 
-/// The sample type a TIFF decoded to, without the samples.
-const fn sample_format_name(result: &DecodingResult) -> &'static str {
-    match result {
-        DecodingResult::U8(_) => "u8",
-        DecodingResult::U16(_) => "u16",
-        DecodingResult::U32(_) => "u32",
-        DecodingResult::U64(_) => "u64",
-        DecodingResult::I8(_) => "i8",
-        DecodingResult::I16(_) => "i16",
-        DecodingResult::I32(_) => "i32",
-        DecodingResult::I64(_) => "i64",
-        DecodingResult::F16(_) => "f16",
-        DecodingResult::F32(_) => "f32",
-        DecodingResult::F64(_) => "f64",
+/// The sample type a TIFF header names, or what it names when the codec reads no type of it.
+const fn sample_format_name(sample_type: Option<DecodingSampleType>) -> &'static str {
+    match sample_type {
+        Some(DecodingSampleType::U8) => "u8",
+        Some(DecodingSampleType::U16) => "u16",
+        Some(DecodingSampleType::U32) => "u32",
+        Some(DecodingSampleType::U64) => "u64",
+        Some(DecodingSampleType::I8) => "i8",
+        Some(DecodingSampleType::I16) => "i16",
+        Some(DecodingSampleType::I32) => "i32",
+        Some(DecodingSampleType::I64) => "i64",
+        Some(DecodingSampleType::F16) => "f16",
+        Some(DecodingSampleType::F32) => "f32",
+        Some(DecodingSampleType::F64) => "f64",
+        None => "a bit depth the codec reads no sample type of",
     }
 }
 
