@@ -128,18 +128,23 @@ consolidation. The other batches are independent.
 ### 8. Raster decode bound
 
 A bug: an input reaches an allocation that aborts the process. Files:
-`imaginarium/src/image/io.rs`, `io/raster.rs`.
+`imaginarium/src/image/{mod.rs, io.rs}`, `io/raster.rs`. Facts:
+`lumos/research/2026-10-23-raster-decode-bounds.md`.
 
-Waiting on a decision: see `review-lumos-memory_QUESTIONS.md`.
+Decided: an admission callback, committed on imaginarium `main`. Refused: a limits value (one
+number cannot state lumos's peak, 2× to 5× the decode by sample type), a probe then a decode (two
+opens, and a file replaced between them decodes unbounded), and a header read in lumos through
+`tiff` (a second decoder, the same race, previews left unbounded).
 
 - [ ] `imaginarium/src/image/io.rs:86-97` and `io/raster.rs:30-41,74-78,136` — a raster TIFF
   decodes with `Limits::unlimited()`, and the `MAX_SIDE` check runs after the decode. A crafted
   header makes the decoder try to allocate up to 65535² × channels × 4 bytes. Target:
-  imaginarium decodes with an admission callback, `Image::decode_admitted(reader, format,
-  admit: impl FnOnce(&ImageDesc) -> Result<(), E>)`. It reads the header, calls `admit` with the
-  description, and continues on the same decoder, so the file is opened and read once. lumos
-  passes the side check and `OverBudget::check`. This is a submodule change, and imaginarium
-  stays valid as a standalone checkout.
+  `Image::decode_admitted(reader, format, admit: impl FnOnce(&ImageDesc) -> Result<(), E>)`
+  reads the header, calls `admit`, and decodes on the same decoder: TIFF through
+  `Decoder::dimensions` before `read_image`, PNG and JPEG through `ImageReader::into_decoder`
+  and `DynamicImage::from_decoder`, with the `image` crate's 512 MiB default lifted so the
+  admission alone bounds them. Its error tells a refusal (`E`) from a decode error. lumos's
+  linear and preview paths admit `MAX_SIDE` and `OverBudget::check` on their whole peak.
 
 ### 9. Cold image operations
 
@@ -147,5 +152,6 @@ Once for each master, but each holds hundreds of MB. Files: `io/raster.rs`,
 `image/linear_pixels.rs`.
 
 - [ ] `io/raster.rs:107` — `LinearImage::from(&decoded)` copies even an `L_F32` image. Target:
-  `From<Image>` by value, so a mono f32 plane moves. Waiting on the imaginarium decision in
-  `review-lumos-memory_QUESTIONS.md`.
+  imaginarium's `planar_conversions!` gains `TryFrom<Image> for [Buffer2<T>; N]` beside the
+  borrowing one, N = 1 moving its buffer, in batch 8's commit; lumos takes `From<Image> for
+  LinearImage`, and the linear path's admission charges 1× for mono f32, 2× otherwise.
