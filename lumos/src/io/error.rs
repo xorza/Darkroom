@@ -31,10 +31,6 @@ pub enum ImageError {
         source: imaginarium::Error,
     },
 
-    /// A raster whose decode, by its header, holds more at its peak than the load's memory limit.
-    #[error("failed to load image '{path}': the decode {budget}")]
-    ImageOverBudget { path: PathBuf, budget: OverBudget },
-
     #[error("failed to load raw file '{path}': {source}")]
     Raw { path: PathBuf, source: RawError },
 
@@ -159,26 +155,6 @@ impl From<fits_well::FitsError> for WriteError {
             fits_well::FitsError::Io(source) => Self::Io(source),
             source => Self::Fits(source),
         }
-    }
-}
-
-/// A decode that needs `required` bytes, past `limit`, the load's
-/// [`memory_limit_bytes`](crate::LoadCtx::memory_limit_bytes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("needs {required} bytes, past the load's memory limit of {limit} bytes")]
-pub struct OverBudget {
-    pub required: u64,
-    pub limit: u64,
-}
-
-impl OverBudget {
-    /// Refuse `required` bytes past `limit`: the one admission step every decoder takes before it
-    /// allocates.
-    pub(crate) const fn check(required: u64, limit: u64) -> Result<(), Self> {
-        if required > limit {
-            return Err(Self { required, limit });
-        }
-        Ok(())
     }
 }
 

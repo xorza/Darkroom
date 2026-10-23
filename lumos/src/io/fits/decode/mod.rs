@@ -31,7 +31,7 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
-use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -136,11 +136,6 @@ pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, Im
                 .into_linear();
         }
         let info = selected.cfa_frame_info()?;
-        info.admit_demosaic(ctx)
-            .map_err(|budget| FitsRefusal::OverBudget {
-                allocation: FitsAllocation::Demosaic,
-                budget,
-            })?;
         let cfa = selected
             .read(ctx, Checksum::Judged, &SharedGains::default())?
             .into_cfa(info.cfa_type)?;

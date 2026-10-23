@@ -433,7 +433,6 @@ mod tests {
     use crate::io::decoder::linear_decoder::LinearDecoder;
     use crate::io::frame_info::{DecoderBytes, FrameInfo};
     use crate::io::writer;
-    use crate::memory::run_memory::RunMemory;
 
     /// A float TIFF of `width` × 2 RGB at `level` in `dir`, which no header read answers for.
     fn tiff(dir: &Path, name: &str, width: usize, level: f32) -> PathBuf {
@@ -452,7 +451,7 @@ mod tests {
             keep_cache,
             ..IngestConfig::with_cache_dir(cache_dir.to_path_buf())
         };
-        IngestRun::planned(RunMemory::new(1 << 30, None), &ingest)
+        IngestRun::planned(1 << 30, &ingest)
     }
 
     /// The level of channel 0's first sample.

@@ -13,7 +13,6 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
-use crate::io::error::OverBudget;
 use crate::io::fits::cfa;
 use crate::io::fits::decode;
 use crate::io::fits::decode::plan::internals::HduSpec;
@@ -29,7 +28,7 @@ fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
 }
 
 fn load_ctx() -> LoadCtx {
-    LoadCtx::new(CancelToken::never(), u64::MAX)
+    LoadCtx::new(CancelToken::never())
 }
 
 /// A cube read as RGB. Its float samples run to 400 with no `DATAMAX`, so they are said to be
@@ -164,11 +163,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
             source_bytes: 0,
         }
         .description()
-        .plan(
-            FitsCubeInterpretation::Reject,
-            FitsFloatScale::Auto,
-            u64::MAX,
-        )
+        .plan(FitsCubeInterpretation::Reject, FitsFloatScale::Auto)
         .unwrap_err(),
     );
     assert_eq!(reason, FitsRefusal::PlaneCount { planes: 4 });
@@ -176,7 +171,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
 }
 
 #[test]
-fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
+fn preflight_sizes_the_source_the_output_and_the_peak() {
     let rgb_shape = [100, 100, 3];
     let rgb = image_header(-64, &rgb_shape);
     let plan = HduSpec {
@@ -187,7 +182,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         source_bytes: 241_920,
     }
     .description()
-    .plan(FitsCubeInterpretation::Rgb, FitsFloatScale::Auto, u64::MAX)
+    .plan(FitsCubeInterpretation::Rgb, FitsFloatScale::Auto)
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
     assert_eq!(plan.decoded_bytes, 120_000);
@@ -211,69 +206,10 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         );
     }
     assert_eq!(plan.rows_per_chunk, 100);
-    HduSpec {
-        header: &rgb,
-        kind: HduKind::Primary,
-        shape: &rgb_shape,
-        bitpix: Bitpix::F64,
-        source_bytes: 241_920,
-    }
-    .description()
-    .plan(
-        FitsCubeInterpretation::Rgb,
-        FitsFloatScale::Auto,
-        plan.peak_bytes,
-    )
-    .unwrap();
-    let reason = fits_refusal(
-        HduSpec {
-            header: &rgb,
-            kind: HduKind::Primary,
-            shape: &rgb_shape,
-            bitpix: Bitpix::F64,
-            source_bytes: 241_920,
-        }
-        .description()
-        .plan(
-            FitsCubeInterpretation::Rgb,
-            FitsFloatScale::Auto,
-            plan.peak_bytes - 1,
-        )
-        .unwrap_err(),
-    );
-    assert_eq!(
-        reason,
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::PeakMemory,
-            budget: OverBudget {
-                required: 290_000,
-                limit: 289_999
-            }
-        }
-    );
-    assert_eq!(
-        reason.to_string(),
-        "estimated peak memory needs 290000 bytes, past the load's memory limit of 289999 bytes"
-    );
-    // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
-    // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
-    plan.admit_flags_extension(140_000).unwrap();
-    let reason = fits_refusal(plan.admit_flags_extension(139_999).unwrap_err());
-    assert_eq!(
-        reason,
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::DecodedOutputWithFlags,
-            budget: OverBudget {
-                required: 140_000,
-                limit: 139_999
-            }
-        }
-    );
 
     // An integer image with no BLANK holds no null, so it has no flag plane until a DATAMAX gives
     // the decode a level to flag against: 40 000 decoded bytes of f32 and two chunks of 100 rows
-    // at 2 bytes a sample, 80 000, then 10 000 more. Without the DATAMAX a flags extension adds
-    // its own 10 000 bytes to the decoded 40 000 and no decode plane: 50 000.
+    // at 2 bytes a sample, 80 000, then 10 000 more.
     let mono_shape = [100, 100];
     let mut mono = image_header(16, &mono_shape);
     let plan_of = |header: &Header| {
@@ -285,52 +221,39 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
             source_bytes: 20_160,
         }
         .description()
-        .plan(
-            FitsCubeInterpretation::Reject,
-            FitsFloatScale::Auto,
-            u64::MAX,
-        )
+        .plan(FitsCubeInterpretation::Reject, FitsFloatScale::Auto)
         .unwrap()
     };
     let without = plan_of(&mono);
     assert_eq!(without.peak_bytes, 80_000);
-    without.admit_flags_extension(50_000).unwrap();
-    assert!(without.admit_flags_extension(49_999).is_err());
     mono.set("DATAMAX", 30_000.0).unwrap();
     assert_eq!(plan_of(&mono).peak_bytes, 90_000);
 
-    let compressed_shape = [1024, 1024];
-    let compressed = compressed_header(-32, &compressed_shape);
-    let reason = fits_refusal(
+    // A compressed image holds its 2880 B of tiles twice beside what the same image holds stored
+    // plain: 5760 B more.
+    let shape = [1024, 1024];
+    let peak = |header: &Header, kind| {
         HduSpec {
-            header: &compressed,
-            kind: HduKind::CompressedImage,
-            shape: &compressed_shape,
+            header,
+            kind,
+            shape: &shape,
             bitpix: Bitpix::F32,
             source_bytes: 2_880,
         }
         .description()
-        .plan(
-            FitsCubeInterpretation::Reject,
-            FitsFloatScale::Auto,
-            4 * 1024 * 1024 - 1,
-        )
-        .unwrap_err(),
-    );
+        .plan(FitsCubeInterpretation::Reject, FitsFloatScale::Auto)
+        .unwrap()
+        .peak_bytes
+    };
     assert_eq!(
-        reason,
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::DecodedOutput,
-            budget: OverBudget {
-                required: 4_194_304,
-                limit: 4_194_303
-            }
-        }
+        peak(&compressed_header(-32, &shape), HduKind::CompressedImage)
+            - peak(&image_header(-32, &shape), HduKind::Primary),
+        5_760
     );
 }
 
 #[test]
-fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
+fn truncated_data_is_an_error() {
     let dir = TempDir::new("fits_preflight");
     let path = dir.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
@@ -339,20 +262,8 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
     bytes.truncate(BLOCK_SIZE);
     fs::write(&path, bytes).unwrap();
 
-    let reason =
-        fits_refusal(load_linear(&path, &LoadCtx::new(CancelToken::never(), 1)).unwrap_err());
-    assert_eq!(
-        reason,
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::StoredDataUnit,
-            budget: OverBudget {
-                required: 2880,
-                limit: 1
-            }
-        }
-    );
     assert!(matches!(
-        load_linear(&path, &LoadCtx::new(CancelToken::never(), 10_000)).unwrap_err(),
+        load_linear(&path, &load_ctx()).unwrap_err(),
         ImageError::Fits { .. }
     ));
 }
@@ -606,7 +517,7 @@ fn cancellation_prevents_fits_selection() {
     write_fits(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(), None);
     let cancel = CancelToken::new();
     cancel.cancel();
-    let ctx = LoadCtx::new(cancel, u64::MAX);
+    let ctx = LoadCtx::new(cancel);
     assert!(matches!(
         load_linear(&path, &ctx),
         Err(ImageError::Cancelled { .. })

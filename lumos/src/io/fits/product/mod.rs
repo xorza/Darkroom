@@ -22,9 +22,9 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::quality_map::QualityMap;
-use crate::io::error::{ImageError, OverBudget, WriteError};
+use crate::io::error::{ImageError, WriteError};
 use crate::io::fits::decode::selected_fits::{self, Checksum, SelectedFits};
-use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
 use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension;
@@ -140,7 +140,7 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     })
 }
 
-/// Read the stack product at `path`, under `ctx`'s options and memory limit.
+/// Read the stack product at `path`, under `ctx`'s options.
 pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ImageError> {
     read(path, ctx).map_err(|error| ImageError::fits_load(path, error))
 }
@@ -186,20 +186,6 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
             found.push(Found { extension, idx });
         }
     }
-    // Each plane is read straight into its own buffer, so what the planes hold is what they store.
-    let plane_bytes: u64 = found
-        .iter()
-        .map(|plane| reader.hdus()[plane.idx].data_bytes)
-        .sum();
-    let image_bytes = u64::try_from(image.sample_count() * size_of::<f32>() + image.pixel_count())
-        .expect("a size fits u64");
-    OverBudget::check(image_bytes + plane_bytes, ctx.memory_limit_bytes).map_err(|budget| {
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::QualityPlanes,
-            budget,
-        }
-    })?;
-
     let described = DescribedImage {
         size: image.dimensions().size(),
         channels: image.channels(),

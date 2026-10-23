@@ -112,11 +112,9 @@ fn drizzle_output_grid_is_the_input_scaled() {
 }
 
 /// A scale is refused before any output plane is allocated: one whose grid passes
-/// `ImageDimensions::MAX_SIDE` (2 × 10⁹ pixels a side from 2 × 2 at 10⁹) as no image's size, and
-/// one whose grid is an image but holds past the machine's memory (8 × 10⁵ pixels a side from
-/// 2 × 2 at 4 × 10⁵: 6.4 × 10¹¹ pixels, each at least a 4-byte sample) as over the run's budget.
+/// `ImageDimensions::MAX_SIDE` (2 × 10⁹ pixels a side from 2 × 2 at 10⁹) as no image's size.
 #[test]
-fn a_scale_past_any_image_or_the_memory_is_refused() {
+fn a_scale_past_any_image_is_refused() {
     let frames = || {
         vec![DrizzleFrame::new(
             constant_image(Size2us::new(2, 2), 1.0),
@@ -131,5 +129,4 @@ fn a_scale_past_any_image_or_the_memory_is_refused() {
             height: 2_000_000_000,
         }))
     ));
-    assert!(matches!(at(4e5), Err(DrizzleError::OutputOverBudget(_))));
 }

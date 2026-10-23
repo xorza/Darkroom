@@ -28,7 +28,7 @@ use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::writer;
-use crate::memory::run_memory::RunMemory;
+use crate::memory::budget::Budget;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Frame `idx` of a set of `dimensions`, decoded from `source`.
@@ -50,7 +50,7 @@ impl SetFrame<'_> {
         // A fresh intake per call: these tests are about one frame's cache files, not the set it
         // belongs to, so no frame 0 is admitted before it.
         let run = IngestRun::planned(
-            RunMemory::new(1 << 40, None),
+            1 << 40,
             &IngestConfig {
                 keep_cache: true,
                 ..IngestConfig::with_cache_dir(cache_dir.to_path_buf())
@@ -67,7 +67,7 @@ impl SetFrame<'_> {
         );
         let tier = StorageTier::Spilled {
             scratch: RunScratch::create(cache_dir).unwrap(),
-            combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
+            combine: CombineBudget::new(Budget::of_memory(1 << 30, 1)),
         };
         let paths = vec![source; idx + 1];
         let files = FileSet::<_, D>::new(&paths, &run).unwrap();
@@ -364,7 +364,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
                     normalization: config.normalization,
                     quality: config.quality,
                 },
-                IngestRun::planned(RunMemory::new(1 << 30, memory_override), &ingest),
+                IngestRun::planned(memory_override.unwrap_or(1 << 30), &ingest),
             )
             .unwrap()
         };

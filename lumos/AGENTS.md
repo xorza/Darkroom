@@ -22,6 +22,21 @@ source extraction, error bars.
 - **Precision outranks speed.** Never trade the stacked result's accuracy for
   throughput.
 
+## Memory
+
+- **The memory budget is soft: it steers caching and spilling, and never refuses
+  work.** A run reads the memory it plans for once, at its entry
+  (`IngestConfig::memory_override`, else what the system reports available),
+  and `Budget` takes 75 % of it. `RunPlan` decides from the budget whether
+  frames stay resident or spill to the run's scratch, and how wide each stage
+  runs: it trades memory for disk I/O. A stage that needs more than the budget
+  runs anyway; it logs its overcommit and continues.
+- **No decode or stage is refused for its size.** Nothing compares what a file
+  or a stage needs with the budget or with the system's memory. An allocation
+  the system cannot back stops the process. Refused: a ceiling of 75 % of the
+  available memory, which blocked files the machine could load, and one of the
+  physical RAM.
+
 ## Verification
 
 `cargo drive check`, from the darkroom root (its Verification section says

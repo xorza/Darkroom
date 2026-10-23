@@ -21,8 +21,8 @@
 //!   [`IntrospectInteger`], [`IntrospectFloat`] and [`IntrospectError`] are
 //!   exported for generated code to name rather than for hand-written `use`s.
 //! - The one route outside `common` to what the program does beyond its own memory:
-//!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and [`FixedFile`],
-//!   and beside it [`MappedFile`] and [`ScratchFile`]; [`env`] for the environment;
+//!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and,
+//!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`] for the environment;
 //!   [`process`] for other processes; [`thread`], [`task`] and [`BgRuntime`] for
 //!   a new thread, pool or runtime; [`SystemMemory`], [`ResidentMemory`],
 //!   [`FileSystem`] and [`UserCache`] for what the system states. The workspace's `clippy.toml`
@@ -59,7 +59,6 @@ pub use bg_runtime::BgRuntime;
 pub use cancel_token::CancelToken;
 pub use float_ext::FloatExt;
 pub use fs::file_identity::{FileId, FileIdentity};
-pub use fs::fixed_file::FixedFile;
 pub use id::Id;
 #[cfg(feature = "internals")]
 pub use internals::temp_dir::TempDir;

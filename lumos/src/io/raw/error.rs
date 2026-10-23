@@ -8,7 +8,6 @@ use libraw_sys as sys;
 
 use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
-use crate::io::error::OverBudget;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -80,9 +79,6 @@ pub enum RawError {
     /// through a camera matrix lumos does not check.
     #[error("a four-color sensor ({colors}) is not supported")]
     FourColorSensor { colors: String },
-    /// What the decode holds at its peak is past the load's memory limit.
-    #[error("the decode {0}")]
-    OverBudget(#[from] OverBudget),
     /// The load's cancel token stopped the decode.
     #[error("the decode was cancelled")]
     Cancelled,

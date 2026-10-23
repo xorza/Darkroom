@@ -78,7 +78,6 @@ mod tests {
     use crate::ingest::ingest_config::IngestConfig;
     use crate::ingest::ingest_run::IngestRun;
     use crate::memory::budget::Budget;
-    use crate::memory::run_memory::RunMemory;
     use crate::memory::run_plan::RunPlan;
     use crate::memory::stage::{Stage, Units};
 
@@ -94,7 +93,7 @@ mod tests {
             keep_cache: true,
             ..IngestConfig::with_cache_dir(dir.path().to_path_buf())
         };
-        let run = IngestRun::planned(RunMemory::new(1 << 30, None), &ingest);
+        let run = IngestRun::planned(1 << 30, &ingest);
         let cache = DecodeCache::open(&run.cache_dir).unwrap();
         let storage = RunStorage::new(&run.cache_dir, Some(&cache));
         let free = FileSystem::free_space(dir.path()).expect("the test's disk is read");

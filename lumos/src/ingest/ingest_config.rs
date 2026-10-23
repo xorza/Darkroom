@@ -31,8 +31,8 @@ pub struct IngestConfig {
     /// A run's own scratch is never kept either way.
     pub keep_cache: bool,
     /// Plan the tiers as if the machine had this many bytes available, instead of what the system
-    /// reports. It never raises what one file's decode may allocate, which stays bound by the
-    /// system reading.
+    /// reports: what stays in memory and what spills to disk. Like the system reading, it refuses
+    /// no work.
     pub memory_override: Option<u64>,
     /// How FITS frames are read; ignored for every other format.
     pub fits: FitsLoadConfig,

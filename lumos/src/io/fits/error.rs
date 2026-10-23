@@ -13,7 +13,6 @@ use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
 use crate::image::flat_gain::{self, GainGrid};
 use crate::image::image_dimensions::ImageDimensions;
-use crate::io::error::OverBudget;
 use crate::io::fits::cfa::{CFA_FITS_FORMAT, CFA_FITS_VERSION};
 use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
@@ -109,11 +108,6 @@ pub enum FitsRefusal {
     },
     SizeOverflow {
         allocation: FitsAllocation,
-    },
-    /// `allocation` is past the load's memory limit.
-    OverBudget {
-        allocation: FitsAllocation,
-        budget: OverBudget,
     },
     /// The `BSCALE` of a lumos-written file, which is not finite and positive, or comes with a
     /// `BZERO` other than 0.
@@ -364,7 +358,6 @@ impl Display for FitsRefusal {
                 write!(f, "FITS sample count overflows: {shape:?}")
             }
             Self::SizeOverflow { allocation } => write!(f, "FITS {allocation} size overflows"),
-            Self::OverBudget { allocation, budget } => write!(f, "{allocation} {budget}"),
             Self::RecordedScale { bscale, bzero } => write!(
                 f,
                 "a lumos-written BSCALE {bscale} must be finite and positive, with BZERO 0 \
@@ -624,17 +617,14 @@ impl Display for FitsRefusal {
     }
 }
 
-/// What a FITS decode sizes against the load's memory limit.
+/// What a FITS decode sizes, refused when the size overflows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitsAllocation {
     /// The HDU's data unit as stored, padded to whole FITS blocks.
     StoredDataUnit,
     DecodedOutput,
-    /// The decoded output beside a flags extension as read and the decode's own flag plane.
-    DecodedOutputWithFlags,
     /// The most the decode holds at once.
     PeakMemory,
-    FlagsExtension,
     /// The byte per pixel the decode flags nulls and saturation in.
     FlagPlane,
     /// One row of the decoded output.
@@ -643,10 +633,6 @@ pub enum FitsAllocation {
     DecodeChunk,
     /// One chunk of samples as stored.
     NativeDecodeChunk,
-    /// A stack product's image beside the quality planes read after it.
-    QualityPlanes,
-    /// A mosaic's decode, then its demosaic, which a preview makes.
-    Demosaic,
 }
 
 impl Display for FitsAllocation {
@@ -654,15 +640,11 @@ impl Display for FitsAllocation {
         f.write_str(match self {
             Self::StoredDataUnit => "stored data unit",
             Self::DecodedOutput => "decoded output",
-            Self::DecodedOutputWithFlags => "decoded output with its flags",
             Self::PeakMemory => "estimated peak memory",
-            Self::FlagsExtension => "flags extension",
             Self::FlagPlane => "flag plane",
             Self::OutputRow => "output row",
             Self::DecodeChunk => "decode chunk",
             Self::NativeDecodeChunk => "native decode chunk",
-            Self::QualityPlanes => "image with its quality planes",
-            Self::Demosaic => "mosaic with its demosaic",
         })
     }
 }
