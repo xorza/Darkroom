@@ -3,6 +3,7 @@
 //! same-directory publication; and the identity a cache keyed on a file compares.
 
 pub(crate) mod file_identity;
+pub(crate) mod fixed_file;
 
 use std::fs::{self, File, Metadata, OpenOptions, Permissions, ReadDir};
 use std::io::{self, Seek, SeekFrom, Write};

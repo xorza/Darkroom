@@ -1,5 +1,6 @@
 //! [`LinearPixels`]: the planes of a [`LinearImage`](crate::image::linear_image::LinearImage).
 
+use std::borrow::Borrow;
 use std::{array, slice};
 
 use arrayvec::ArrayVec;
@@ -91,8 +92,15 @@ impl LinearPixels {
         }
     }
 
-    pub(super) fn from_f32_image(image: &Image) -> Self {
-        match image.desc().color_format.channel_count {
+    /// The planes of an `L_F32` or `RGB_F32` image, borrowed or taken: a grayscale image taken
+    /// keeps its allocation.
+    pub(super) fn from_f32_image<I>(image: I) -> Self
+    where
+        I: Borrow<Image>,
+        [Buffer2<f32>; 1]: TryFrom<I, Error = imaginarium::Error>,
+        [Buffer2<f32>; 3]: TryFrom<I, Error = imaginarium::Error>,
+    {
+        match image.borrow().desc().color_format.channel_count {
             ChannelCount::L => {
                 let [plane]: [Buffer2<f32>; 1] = image
                     .try_into()

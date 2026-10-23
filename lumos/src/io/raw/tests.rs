@@ -1,4 +1,4 @@
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, fs};
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;

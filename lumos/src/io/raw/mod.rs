@@ -12,7 +12,7 @@ use std::ffi;
 use std::io::Read;
 use std::path::Path;
 
-use common::fs;
+use common::FixedFile;
 use libraw_sys as sys;
 
 use crate::image::cfa::cfa_image::CfaImage;
@@ -107,13 +107,11 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<RawFile, ImageError> {
         path: path.to_path_buf(),
         source,
     };
-    let file = fs::open(path).map_err(io_error)?;
-    let len = file.metadata().map_err(io_error)?.len();
-    OverBudget::check(len, ctx.memory_limit_bytes)
+    let mut file = FixedFile::open(path).map_err(io_error)?;
+    OverBudget::check(file.len(), ctx.memory_limit_bytes)
         .map_err(|budget| ImageError::raw(path, budget.into()))?;
-    let mut bytes = Vec::with_capacity(usize::try_from(len).expect("a file within the limit"));
-    // The length admitted, not what the file grew to since.
-    file.take(len).read_to_end(&mut bytes).map_err(io_error)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(io_error)?;
     Ok(RawFile { bytes })
 }
 
