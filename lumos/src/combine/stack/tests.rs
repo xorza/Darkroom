@@ -265,11 +265,12 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             // chunks — the one reduced and the next one read — of 64 rows of every channel of the
             // 12 frames and the six coverage-and-confidence pairs, 2 × 24 × 64 × (48c + 48) B; the
             // four flat gain grids are read where they are mapped, in no chunk: 190 656c +
-            // 165 456 B in all. The stack is the same.
+            // 165 456 B in all, and a combine scratch for the 12 frames on each worker of the
+            // pool, 62 × 12 + 8 × 12² + 8 = 1904 B. The stack is the same.
             let starved = spilled(0);
             assert_eq!(
                 starved.report.overcommit_bytes,
-                190_656 * channels as u64 + 165_456,
+                190_656 * channels as u64 + 165_456 + rayon::current_num_threads() as u64 * 1904,
                 "{label}"
             );
             for channel in 0..channels {

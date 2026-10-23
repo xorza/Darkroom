@@ -6,7 +6,7 @@ use std::sync::{Arc, Barrier};
 use common::thread;
 
 use crate::concurrency;
-use crate::concurrency::{try_par_map_bounded, try_par_map_bounded_owned};
+use crate::concurrency::{try_par_map_at_most, try_par_map_bounded_owned};
 
 #[test]
 fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
@@ -17,7 +17,7 @@ fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
     let items: Vec<usize> = (0..6).collect();
 
     let result = pool.install(|| {
-        try_par_map_bounded(items.len(), &mut [(); 3], |(), idx| {
+        try_par_map_at_most(items.len(), 3, |idx| {
             let value = &items[idx];
             let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             max_observed.fetch_max(cur, Ordering::SeqCst);
@@ -54,7 +54,7 @@ fn bounded_map_propagates_error_and_stops_taking_work() {
     let failed = AtomicBool::new(false);
     let items: Vec<usize> = (0..1000).collect();
 
-    let result = try_par_map_bounded(items.len(), &mut [(); SLOTS], |(), idx| {
+    let result = try_par_map_at_most(items.len(), SLOTS, |idx| {
         let value = &items[idx];
         started.fetch_add(1, Ordering::SeqCst);
         if *value == 0 {
@@ -81,7 +81,7 @@ fn bounded_map_propagates_error_and_stops_taking_work() {
 #[test]
 fn the_lowest_failing_index_is_reported() {
     let failed = AtomicBool::new(false);
-    let result = try_par_map_bounded(4, &mut [(); 2], |(), idx| match idx {
+    let result = try_par_map_at_most(4, 2, |idx| match idx {
         0 => {
             wait_for_failure(&failed);
             Err(0)
@@ -97,14 +97,14 @@ fn the_lowest_failing_index_is_reported() {
 
 #[test]
 fn bounded_map_accepts_empty_input() {
-    let result = try_par_map_bounded(0, &mut [(); 2], |(), idx| Ok::<_, ()>(idx));
+    let result = try_par_map_at_most(0, 2, Ok::<_, ()>);
     assert_eq!(result.unwrap(), Vec::<usize>::new());
 }
 
 #[test]
 #[should_panic(expected = "a bounded map needs at least one slot")]
 fn bounded_map_rejects_zero_slots() {
-    let _refused = try_par_map_bounded(1, &mut [(); 0], |(), idx| Ok::<_, ()>(idx));
+    let _refused = try_par_map_at_most(1, 0, Ok::<_, ()>);
 }
 
 #[test]

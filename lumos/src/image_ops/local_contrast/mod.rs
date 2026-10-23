@@ -11,9 +11,9 @@ use rayon::prelude::*;
 
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::intensity::Intensity;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
-use crate::math::size2us::Size2us;
 
 /// Histogram resolution for the per-tile mappings.
 const BIN_COUNT: usize = 256;
@@ -62,17 +62,17 @@ impl LocalContrast {
     /// The CLAHE mapping on the combined intensity plane; [`Self::apply`] computes the intensity,
     /// runs this, then remaps the image's channels to it.
     #[expect(clippy::cast_sign_loss, reason = "a square root is non-negative")]
-    fn map(&self, intensity: &Buffer2<f32>) -> Buffer2<f32> {
+    fn map(&self, intensity: Intensity<'_>) -> Buffer2<f32> {
+        let size = intensity.size();
         // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is
         // meaningful; on a small image this caps the requested tile count (a no-op on a real
         // megapixel frame).
-        let max_tiles = (((intensity.width() * intensity.height()) as f64 / (4 * BIN_COUNT) as f64)
-            .sqrt() as usize)
-            .max(1);
+        let max_tiles =
+            ((size.pixel_count() as f64 / (4 * BIN_COUNT) as f64).sqrt() as usize).max(1);
         let tiles = self.tiles.min(max_tiles);
         let grid = TileGrid {
-            cols: TileAxis::new(intensity.width(), tiles),
-            rows: TileAxis::new(intensity.height(), tiles),
+            cols: TileAxis::new(size.width, tiles),
+            rows: TileAxis::new(size.height, tiles),
         };
         let luts = grid.luts(intensity, self.clip_limit);
         grid.apply(intensity, &luts, self.strength)
@@ -187,7 +187,8 @@ impl TileGrid {
         clippy::cast_sign_loss,
         reason = "the clip limit is at least 1 by construction"
     )]
-    fn luts(&self, intensity: &Buffer2<f32>, clip_limit: f32) -> Vec<TileLut> {
+    fn luts(&self, intensity: Intensity<'_>, clip_limit: f32) -> Vec<TileLut> {
+        let width = intensity.size().width;
         let Self { cols, rows } = self;
         let mut luts = vec![[0.0f32; BIN_COUNT + 1]; cols.tiles() * rows.tiles()];
         luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
@@ -195,8 +196,8 @@ impl TileGrid {
             let (x0, x1) = (cols.bounds[tx], cols.bounds[tx + 1]);
             let mut hist = [0u32; BIN_COUNT];
             for y in rows.bounds[ty]..rows.bounds[ty + 1] {
-                for &v in &intensity.row(y)[x0..x1] {
-                    hist[bin_of(v)] += 1;
+                for idx in y * width + x0..y * width + x1 {
+                    hist[bin_of(intensity.at(idx))] += 1;
                 }
             }
             let count: u32 = hist.iter().sum();
@@ -215,9 +216,9 @@ impl TileGrid {
 
     /// Map each pixel's intensity through the bilinearly-interpolated four-tile mapping, blended
     /// with the original by `strength`.
-    fn apply(&self, intensity: &Buffer2<f32>, luts: &[TileLut], strength: f32) -> Buffer2<f32> {
+    fn apply(&self, intensity: Intensity<'_>, luts: &[TileLut], strength: f32) -> Buffer2<f32> {
         let Self { cols, rows } = self;
-        let size = Size2us::from(intensity);
+        let size = intensity.size();
         let col_blends: Vec<Blend> = (0..size.width).map(|x| cols.blend(x)).collect();
         let mut out = Buffer2::new_default(size.width, size.height);
         out.pixels_mut()
@@ -226,7 +227,8 @@ impl TileGrid {
             .for_each(|(y, orow)| {
                 let row = rows.blend(y);
                 let (top, bottom) = (row.lower * cols.tiles(), row.upper * cols.tiles());
-                for ((o, &v), col) in orow.iter_mut().zip(intensity.row(y)).zip(&col_blends) {
+                for (x, (o, col)) in orow.iter_mut().zip(&col_blends).enumerate() {
+                    let v = intensity.at(y * size.width + x);
                     let at = |tile: usize| map_through(&luts[tile], v);
                     let upper_row = at(top + col.lower)
                         + col.weight * (at(top + col.upper) - at(top + col.lower));

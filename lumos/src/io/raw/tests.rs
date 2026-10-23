@@ -6,8 +6,9 @@ use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::error::LibrawCode;
+use crate::io::raw::libraw::ProcessedSamples;
 use crate::io::raw::libraw::internals::BayerDump;
-use crate::io::raw::unpacked_raw::{instrument, saturation_level};
+use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -611,4 +612,24 @@ fn the_instrument_joins_the_normalized_make_and_model() {
             "{make:?} {model:?}"
         );
     }
+}
+
+/// LibRaw's processed samples, three colors interleaved a pixel, become one plane a color over
+/// 65535: pixel 1's green, 65535, is 1 exactly, and pixel 0's blue, 0, is 0.
+#[test]
+fn processed_samples_split_into_one_plane_a_color() {
+    let samples = [100, 200, 300, 400, 65_535, 0];
+    let processed = ProcessedSamples {
+        samples: &samples,
+        dimensions: ImageDimensions::new((2, 1), ChannelLayout::Rgb),
+    };
+    let split: Vec<Vec<f32>> = planes(&processed).collect();
+    assert_eq!(
+        split,
+        [
+            vec![100.0 / 65535.0, 400.0 / 65535.0],
+            vec![200.0 / 65535.0, 1.0],
+            vec![300.0 / 65535.0, 0.0],
+        ]
+    );
 }

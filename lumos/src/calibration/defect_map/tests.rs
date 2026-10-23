@@ -278,7 +278,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     for &(x, y) in &hot {
         light.data_mut()[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
-    defect_map.correct(&mut light);
+    defect_map.correct(&mut light, None);
 
     // (6,6)'s only good red neighbours (4,8),(8,4),(8,8) are all 0.5 → median 0.5, despite the
     // five hot neighbours that would otherwise dominate.
@@ -326,7 +326,7 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
     assert_eq!(defect_map.hot().idxs, [2, 24]);
 
     let mut light = build(&[r_hot, b_hot]);
-    defect_map.correct(&mut light);
+    defect_map.correct(&mut light, None);
 
     let r_val = light.data()[r_hot.1 * size.width + r_hot.0];
     let b_val = light.data()[b_hot.1 * size.width + b_hot.0];
@@ -375,7 +375,7 @@ fn cfa_hot_pixel_correction_bayer() {
     let mut image = make_cfa(size, pixels, pattern);
     DefectMap::from_lists(size, hot(vec![2 * 6 + 2]), vec![])
         .unwrap()
-        .correct(&mut image);
+        .correct(&mut image, None);
     assert_eq!(image.data()[2 * 6 + 2], 100.0);
 }
 
@@ -387,7 +387,7 @@ fn cfa_hot_pixel_correction_mono() {
 
     let defect_map = DefectMap::from_lists(Size2us::new(3, 3), hot(vec![4]), vec![]).unwrap();
 
-    defect_map.correct(&mut image);
+    defect_map.correct(&mut image, None);
 
     // Median of [10, 20, 30, 40, 50, 60, 70, 80] = 45
     assert_eq!(image.data()[4], 45.0);
@@ -762,7 +762,7 @@ fn correct_cfa_dimension_mismatch() {
 
     let defect_map = DefectMap::from_lists(Size2us::new(2, 2), hot(vec![]), vec![]).unwrap();
 
-    defect_map.correct(&mut image);
+    defect_map.correct(&mut image, None);
 }
 
 /// A pixel both hot and dead is one defective pixel: 4 × 4 with hot {1, 2} and cold {2, 3} is
@@ -898,4 +898,44 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
 fn hot(idxs: Vec<usize>) -> HotPixels {
     let excess = vec![1.0; idxs.len()];
     HotPixels { idxs, excess }
+}
+
+/// A defect is not repaired from another repair: the hot red photosite at (4, 4) of a 10 × 10
+/// RGGB frame has its four nearest reds, at distance 2, flagged REPAIRED at 1000. Masked, they
+/// leave the median the four at 2√2 and the four at 4, every one 100, so the repair is 100; read,
+/// they would make four of its eight neighbours 1000.
+#[test]
+fn a_defect_is_not_repaired_from_a_repair() {
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let size = Size2us::new(10, 10);
+    let baseline = [100.0f32, 200.0, 50.0];
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|i| baseline[pattern.slot_at(size.point_of(i))])
+        .collect();
+    let repaired = [4 * 10 + 2, 4 * 10 + 6, 2 * 10 + 4, 6 * 10 + 4];
+    for idx in repaired {
+        pixels[idx] = 1000.0;
+    }
+    pixels[4 * 10 + 4] = 10000.0;
+    let mut image = make_cfa(size, pixels, pattern);
+    image.add_flags_at(QualityFlags::REPAIRED, &repaired);
+    let map = DefectMap::from_lists(size, hot(vec![4 * 10 + 4]), vec![]).unwrap();
+    let mut read = image.clone();
+    map.correct(&mut read, None);
+    assert_ne!(
+        read.data()[4 * 10 + 4],
+        100.0,
+        "premise: the repairs, read, move it"
+    );
+    let mut unmeasured = image.unmeasured_mask();
+    assert!(
+        unmeasured.is_some(),
+        "premise: a repair alone builds the mask"
+    );
+    map.correct(&mut image, unmeasured.as_mut());
+    assert_eq!(image.data()[4 * 10 + 4], 100.0);
+    assert!(
+        unmeasured.unwrap().get(4 * 10 + 4),
+        "the defect joins the mask"
+    );
 }

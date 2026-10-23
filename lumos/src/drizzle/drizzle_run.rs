@@ -95,9 +95,11 @@ impl DrizzleRun<'_> {
             .map(|frame| frame.source.as_ref().to_path_buf())
             .collect();
         let files = FileSet::<_, D>::new(&sources, run)?;
+        let peek = files.peek(&ctx)?;
         let origin = FrameOrigin::Files {
             uncached: files.uncached(),
-            gains: files.peek(&ctx)?.gains,
+            gains: peek.gains,
+            decoder: peek.info.decoder,
         };
         // Lazy, so only the frame currently being drizzled is resident.
         let loaded = frames

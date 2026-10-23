@@ -99,40 +99,22 @@ pub(super) struct PlaneSampling<'a> {
     pub(super) idxs: &'a [usize],
 }
 
-/// What [`PlaneSampling::measure`] measures of a plane.
-#[derive(Debug)]
-pub(super) struct PlaneMeasurement {
-    pub(super) median: Option<f32>,
-    pub(super) samples: Vec<f32>,
-}
-
 impl PlaneSampling<'_> {
-    /// `values`' median over the domain when there is one, and its values at the indices.
-    pub(super) fn measure(
-        &self,
-        values: &[f32],
-        median: &mut RadixMedian,
-        cancel: &CancelToken,
-    ) -> Result<PlaneMeasurement, StackError> {
-        Ok(PlaneMeasurement {
-            median: self.median(values, median, cancel)?,
-            samples: self.samples(values, cancel)?,
-        })
-    }
-
-    /// `values` at the indices.
+    /// `values` at the indices, into `samples`.
     pub(super) fn samples(
         &self,
         values: &[f32],
+        samples: &mut Vec<f32>,
         cancel: &CancelToken,
-    ) -> Result<Vec<f32>, StackError> {
+    ) -> Result<(), StackError> {
         debug_assert!(self.idxs.is_sorted(), "the sample indices ascend");
-        let mut samples = Vec::with_capacity(self.idxs.len());
+        samples.clear();
+        samples.reserve_exact(self.idxs.len());
         for chunk in self.idxs.chunks(CANCEL_POLL_CHUNK) {
             Cancelled::check(cancel)?;
             samples.extend(chunk.iter().map(|&idx| values[idx]));
         }
-        Ok(samples)
+        Ok(())
     }
 
     /// `values`' median over the domain; `None` without one.

@@ -276,29 +276,19 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
 }
 
 /// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
-/// computed from the planes directly — never materializing the full intensity plane just to throw
-/// all but every `stride`-th value away. Identical samples to subsampling
-/// [`LinearImage::intensity_plane`](crate::image::linear_image::LinearImage::intensity_plane).
+/// read from the planes through [`LinearImage::intensity`] — never materializing the full
+/// intensity plane just to throw all but every `stride`-th value away.
 fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
-    let plane = image.channel(0).pixels();
     if !image.is_rgb() {
-        return Subsample::statistic_values(plane);
+        return Subsample::statistic_values(image.channel(0).pixels());
     }
-    let sample = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES);
-    let (g, b) = (image.channel(1).pixels(), image.channel(2).pixels());
+    let intensity = image.intensity();
+    let sample = Subsample::new(intensity.size().pixel_count(), MAX_STATISTIC_SAMPLES);
     // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
     // pixel; running it in parallel hides that latency — the work is a pure map over indices.
     (0..sample.count())
         .into_par_iter()
-        .map(|k| {
-            let i = sample.idx(k);
-            Rgb {
-                r: plane[i],
-                g: g[i],
-                b: b[i],
-            }
-            .intensity()
-        })
+        .map(|k| intensity.at(sample.idx(k)))
         .collect()
 }
 

@@ -71,6 +71,8 @@ impl PlannedCombine {
                 coverage_planes,
                 flag_planes: 1,
                 frame_pixel_bytes: count * layout.pixel_bytes(),
+                frame_count: count,
+                workers,
             }
             .stage(kept),
         ]

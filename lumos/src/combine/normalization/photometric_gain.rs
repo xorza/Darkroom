@@ -212,16 +212,21 @@ pub(super) struct PairSide<'a> {
 }
 
 impl<'a> PairSide<'a> {
-    /// `samples`, measured for their median and MAD, of noise variance `noise_variance`.
+    /// `samples`, measured for their median and MAD in a copy in `work`, of noise variance
+    /// `noise_variance`.
     pub(super) fn new(
         samples: &'a [f32],
         noise_variance: f64,
+        work: &mut Vec<f32>,
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         Cancelled::check(cancel)?;
+        work.clear();
+        work.reserve_exact(samples.len());
+        work.extend_from_slice(samples);
         Ok(Self {
             samples,
-            stats: MedianMad::of_mut(&mut samples.to_vec()),
+            stats: MedianMad::of_mut(work),
             noise_variance,
         })
     }
@@ -237,17 +242,22 @@ pub(super) struct SamplePair<'a> {
 
 impl SamplePair<'_> {
     /// The gain that carries the frame onto the reference: seeded on the lever-arm pairs, then the
-    /// Deming fit over the pairs its window admits, re-windowed on the fitted gain.
-    pub(super) fn photometric_gain(&self, cancel: &CancelToken) -> Result<PairedGain, StackError> {
+    /// Deming fit over the pairs its window admits, re-windowed on the fitted gain. The seed's
+    /// ratios and each fit's residuals take `work` in turn.
+    pub(super) fn photometric_gain(
+        &self,
+        work: &mut Vec<f32>,
+        cancel: &CancelToken,
+    ) -> Result<PairedGain, StackError> {
         let (frame_noise, reference_noise) =
             (self.frame.noise_variance, self.reference.noise_variance);
-        let seed = self.seed(cancel)?;
+        let seed = self.seed(work, cancel)?;
         let mut paired = PairedGain {
             gain: seed.gain,
             relative_error: seed.relative_error,
         };
         for _ in 0..FITS {
-            let window = match self.residuals(paired.gain, seed, cancel)? {
+            let window = match self.residuals(paired.gain, seed, work, cancel)? {
                 Residuals::Window(window) => window,
                 Residuals::Exact => {
                     return Ok(PairedGain {
@@ -283,14 +293,15 @@ impl SamplePair<'_> {
             .zip(self.reference.samples.chunks(CANCEL_POLL_CHUNK))
     }
 
-    /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, or the ratio of
-    /// the sky spreads when there are too few of them.
-    fn seed(&self, cancel: &CancelToken) -> Result<Seed, StackError> {
+    /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, gathered in
+    /// `ratios`, or the ratio of the sky spreads when there are too few of them.
+    fn seed(&self, ratios: &mut Vec<f32>, cancel: &CancelToken) -> Result<Seed, StackError> {
         let (frame_stats, reference_stats) = (self.frame.stats, self.reference.stats);
         let frame_floor = LEVER_SIGMAS * frame_stats.sigma();
         let reference_floor = LEVER_SIGMAS * reference_stats.sigma();
         // Every pair at most, so the ratios never grow past the room they took.
-        let mut ratios = Vec::with_capacity(self.frame.samples.len());
+        ratios.clear();
+        ratios.reserve_exact(self.frame.samples.len());
         for (frame_chunk, reference_chunk) in self.chunks() {
             Cancelled::check(cancel)?;
             ratios.extend(frame_chunk.iter().zip(reference_chunk).filter_map(
@@ -302,7 +313,7 @@ impl SamplePair<'_> {
             ));
         }
         if ratios.len() >= MIN_LEVER_PAIRS {
-            let ratio_stats = MedianMad::of_mut(&mut ratios);
+            let ratio_stats = MedianMad::of_mut(ratios);
             let scatter = ratio_stats.sigma();
             return Ok(Seed {
                 gain: ratio_stats.median,
@@ -329,18 +340,20 @@ impl SamplePair<'_> {
         }
     }
 
-    /// The window at `gain`, widened by `seed`'s scatter; [`Residuals::Exact`] or
-    /// [`Residuals::Degenerate`] when the residuals' MAD is under their resolution and no lever-arm
-    /// scatter widens the window.
+    /// The window at `gain`, widened by `seed`'s scatter, its residuals measured in `residuals`;
+    /// [`Residuals::Exact`] or [`Residuals::Degenerate`] when the residuals' MAD is under their
+    /// resolution and no lever-arm scatter widens the window.
     fn residuals(
         &self,
         gain: f32,
         seed: Seed,
+        residuals: &mut Vec<f32>,
         cancel: &CancelToken,
     ) -> Result<Residuals, StackError> {
         let (frame_stats, reference_stats) = (self.frame.stats, self.reference.stats);
         let offset = reference_stats.median - frame_stats.median * gain;
-        let mut residuals = Vec::with_capacity(self.frame.samples.len());
+        residuals.clear();
+        residuals.reserve_exact(self.frame.samples.len());
         for (frame_chunk, reference_chunk) in self.chunks() {
             Cancelled::check(cancel)?;
             residuals.extend(frame_chunk.iter().zip(reference_chunk).map(
@@ -348,7 +361,7 @@ impl SamplePair<'_> {
             ));
         }
         // Measuring leaves the residuals' absolute deviations from their median in the buffer.
-        let residual_stats = MedianMad::of_mut(&mut residuals);
+        let residual_stats = MedianMad::of_mut(residuals);
         let resolution = Spread::resolution(reference_stats.median);
         if residual_stats.mad <= resolution && seed.scatter == 0.0 {
             let exact = residuals.iter().all(|&deviation| deviation <= resolution);

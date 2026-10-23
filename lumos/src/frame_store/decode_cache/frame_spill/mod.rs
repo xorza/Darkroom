@@ -5,6 +5,7 @@
 //! and a later run looking for it cannot disagree about where it is. What one run alone needs has
 //! no name at all: it goes to [`RunScratch`](crate::frame_store::run_scratch::RunScratch).
 
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::Write;
@@ -141,9 +142,9 @@ impl<'a> FrameSpill<'a> {
                 flags: decoded.flags,
                 gain: decoded.gain,
                 digests,
-                metadata: decoded.metadata.clone(),
-                stats: admitted.stats.clone(),
-                facts: admitted.facts.clone(),
+                metadata: Cow::Borrowed(&decoded.metadata),
+                stats: Cow::Borrowed(&admitted.stats),
+                facts: Cow::Borrowed(&admitted.facts),
             },
         )
     }
@@ -151,7 +152,7 @@ impl<'a> FrameSpill<'a> {
     /// What the frame committed here for this source under this key recorded; `None` for no commit
     /// record, one of another source or under another key, or statistics that are not valid.
     pub(crate) fn committed(&self) -> Option<Committed> {
-        let commit: Commit = read_sidecar(&self.commit_path())?;
+        let commit: Commit<'static> = read_sidecar(&self.commit_path())?;
         if commit.key != self.key || commit.source != self.source.as_os_str().as_encoded_bytes() {
             return None;
         }
@@ -169,14 +170,14 @@ impl<'a> FrameSpill<'a> {
             ImageDimensions::checked(Size2us::new(commit.width, commit.height), layout).ok()?;
         Some(Committed {
             admitted: Admitted {
-                stats: commit.stats,
-                facts: commit.facts,
+                stats: commit.stats.into_owned(),
+                facts: commit.facts.into_owned(),
             },
             decoded: Decoded {
                 dimensions,
                 flags: commit.flags,
                 gain: commit.gain,
-                metadata: commit.metadata,
+                metadata: commit.metadata.into_owned(),
             },
             digests: commit.digests,
         })
@@ -195,8 +196,11 @@ impl<'a> FrameSpill<'a> {
 /// changed under its name, or one a power loss left zeroed behind its commit, a cache to rebuild
 /// too. The metadata holds no flat gain: the commit names its file by its key, which a reuse checks
 /// the file against.
+///
+/// A commit written borrows the decode's metadata and its admission's figures, which a `Cow`
+/// serializes as the value itself; one read back owns them.
 #[derive(Debug, Serialize, Deserialize)]
-struct Commit {
+struct Commit<'a> {
     key: CacheKey,
     /// The source's canonical path, as its platform encodes it.
     source: Vec<u8>,
@@ -206,9 +210,9 @@ struct Commit {
     flags: Option<FlagCounts>,
     gain: Option<KeptGain>,
     digests: PlaneDigests,
-    metadata: ImageMetadata,
-    stats: FrameStats,
-    facts: FrameFacts,
+    metadata: Cow<'a, ImageMetadata>,
+    stats: Cow<'a, FrameStats>,
+    facts: Cow<'a, FrameFacts>,
 }
 
 /// What a decode left beside its planes, which a commit records: the frame's shape, the counts of
@@ -348,7 +352,7 @@ pub(crate) mod internals {
         /// Commit the frame again with the digest of channel 0 as it is on disk now: a test that
         /// edits that plane on purpose, to see it read back, keeps it reusable.
         pub(crate) fn reseal(&self) {
-            let mut commit: Commit = read_sidecar(&self.commit_path()).unwrap();
+            let mut commit: Commit<'static> = read_sidecar(&self.commit_path()).unwrap();
             commit.digests.channels[0] =
                 blake3::hash(&fs::read(self.channel_path(0)).unwrap()).into();
             write_sidecar(&self.commit_path(), &commit).unwrap();

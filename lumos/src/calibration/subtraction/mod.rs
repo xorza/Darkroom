@@ -6,12 +6,12 @@ use arrayvec::ArrayVec;
 use crate::calibration::calibration_pass::{CalibrationPass, Saturation, Subtracted};
 use crate::calibration::dark_match::{DarkBias, DarkMatch};
 use crate::calibration::error::SubtractionFault;
+use crate::calibration::imposed_flags;
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtractor::Subtractor;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{DomainMap, SampleDomain};
 
 /// The additive masters taken from one frame, in order, resolved against it: each one's map into
@@ -141,22 +141,7 @@ impl<'a> Subtraction<'a> {
 /// as a pass imposes it: the value subtracted there is not one either. `None` when none holds
 /// such a pixel.
 pub(crate) fn unmeasured(subtractors: &[Subtractor<'_>]) -> Option<PixelFlags> {
-    let flags: ArrayVec<&PixelFlags, 2> = subtractors
-        .iter()
-        .filter_map(|subtractor| subtractor.master.flags())
-        .filter(|flags| flags.contains(QualityFlags::UNMEASURED))
-        .collect();
-    let size = flags.first()?.size();
-    PixelFlags::from_fn(size, |idx| {
-        if flags
-            .iter()
-            .any(|flags| flags.at(idx).intersects(QualityFlags::UNMEASURED))
-        {
-            QualityFlags::NO_DATA
-        } else {
-            QualityFlags::default()
-        }
-    })
+    imposed_flags::of(subtractors.iter().map(|subtractor| subtractor.master), None)
 }
 
 #[cfg(feature = "internals")]

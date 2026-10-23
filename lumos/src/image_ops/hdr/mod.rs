@@ -19,9 +19,9 @@ use rayon::prelude::*;
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::intensity::Intensity;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
-use crate::math::size2us::Size2us;
 use crate::math::{sum, wavelet};
 
 /// The least intensity the log base reads: one 16-bit display step. A pixel below it is black on
@@ -79,17 +79,16 @@ impl Hdr {
     /// either way; an intensity at or below zero stays there. Only the smoothed residual is ever
     /// computed — a streaming à trous over two reused planes — never the layer pyramid (`scales`
     /// full planes at ~100 MB each on a real master).
-    fn compress(&self, intensity: &Buffer2<f32>) -> Buffer2<f32> {
-        let size = Size2us::from(intensity);
+    fn compress(&self, intensity: Intensity<'_>) -> Buffer2<f32> {
+        let size = intensity.size();
         let scales = self.scales.min(wavelet::max_scales(size));
 
         let mut c_cur = Buffer2::new(
             size.width,
             size.height,
-            intensity
-                .pixels()
-                .par_iter()
-                .map(|&i| i.max(LOG_FLOOR).ln())
+            (0..size.pixel_count())
+                .into_par_iter()
+                .map(|idx| intensity.at(idx).max(LOG_FLOOR).ln())
                 .collect(),
         );
         let mut c_next = Buffer2::new_default(size.width, size.height);
@@ -105,10 +104,11 @@ impl Hdr {
         residual
             .pixels_mut()
             .par_chunks_mut(SAMPLES_PER_BLOCK)
-            .zip(intensity.pixels().par_chunks(SAMPLES_PER_BLOCK))
-            .for_each(|(residual, intensity)| {
-                for (r, &i) in residual.iter_mut().zip(intensity) {
-                    *r = i * (-amount * (*r - mean)).exp();
+            .enumerate()
+            .for_each(|(block, residual)| {
+                let start = block * SAMPLES_PER_BLOCK;
+                for (idx, r) in (start..).zip(residual) {
+                    *r = intensity.at(idx) * (-amount * (*r - mean)).exp();
                 }
             });
         residual

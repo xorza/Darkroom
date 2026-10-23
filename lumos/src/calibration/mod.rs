@@ -11,6 +11,7 @@ pub(crate) mod dark_match;
 pub(crate) mod dark_scale;
 pub(crate) mod defect_map;
 pub(crate) mod error;
+pub(crate) mod imposed_flags;
 pub(crate) mod master_cache;
 pub(crate) mod master_recipe;
 pub(crate) mod master_role;

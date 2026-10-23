@@ -160,8 +160,9 @@ where
     };
 
     // Frame 0 carries the stack metadata, which a kept frame keeps with it.
-    let mut slots = vec![(); plan.width(DECODE)];
-    let loaded = intake.map(0..paths.len(), &mut slots, |(), idx| store.frame::<E>(idx))?;
+    let loaded = intake.map_at_most(0..paths.len(), plan.width(DECODE), |idx| {
+        store.frame::<E>(idx)
+    })?;
     let mut metadata = None;
     let mut frames = Vec::with_capacity(paths.len());
     for loaded in loaded {

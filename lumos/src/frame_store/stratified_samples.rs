@@ -52,8 +52,10 @@ impl StratifiedSamples {
         })
     }
 
-    /// The values of `plane`, a whole channel, at the sampled pixels.
-    pub(crate) fn gather(&self, plane: &[f32]) -> Vec<f32> {
-        self.idxs().map(|idx| plane[idx]).collect()
+    /// The values of `plane`, a whole channel, at the sampled pixels, into `samples`.
+    pub(crate) fn gather(&self, plane: &[f32], samples: &mut Vec<f32>) {
+        samples.clear();
+        samples.reserve_exact(self.retained);
+        samples.extend(self.idxs().map(|idx| plane[idx]));
     }
 }

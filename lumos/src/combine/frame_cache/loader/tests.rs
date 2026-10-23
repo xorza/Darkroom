@@ -446,14 +446,18 @@ fn cache_frame_dimension_mismatch() {
     ));
 }
 
-/// Three 100 × 100 RGGB mosaics stacked to the image alone, with no normalization. A frame
-/// resides as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a
-/// row over 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and
-/// holds 49 000 more in work, beside the 30 000 B file the peek read for its frame's decode; the
-/// normalization holds nothing; the combine holds the image and its flag byte, 5 B a pixel,
-/// 50 000 B, and a row copies three frames of 5 B a pixel over 100 pixels into each of its two
-/// chunk copies, 3000 B. The frames share a flat gain of the three colors, 26 × 26 nodes of 4 B
-/// each, 8112 B, which every stage holds beside it.
+/// Three 100 × 100 RGGB mosaics stacked to the image alone, with no normalization. A frame resides
+/// as 40 000 B of samples and 10 000 B of flags, and its statistics hold its pairs, 98 a row over
+/// 100 rows at 4 bytes and a bin byte, 49 000 B: the decode keeps 50 000 B a frame and holds 49 000
+/// more in work, beside the 30 000 B file the peek read for its frame's decode; the normalization
+/// holds nothing; the combine holds the image and its flag byte, 5 B a pixel, 50 000 B, and a row
+/// copies three frames of 5 B a pixel over 100 pixels into each of its two chunk copies, 3000 B.
+/// The frames share a flat gain of the three colors, 26 × 26 nodes of 4 B each, 8112 B, which every
+/// stage holds beside it. A combine scratch for three frames on its one worker is 266 B: a value, a
+/// weight, three noise columns and a flag byte a frame, 21 B, the sorted keys, values, positions
+/// and kept marks, 17 B, the weights and the clamped copy, 8 B, four GESD critical values of 8 B,
+/// and the normal scores, a row of three for each of the three counts and their counts, 72 + 24 B:
+/// 3 × 46 + 32 + 96.
 #[test]
 fn stages_charge_the_decode_the_normalization_and_the_combine() {
     let peek = SetPeek {
@@ -489,7 +493,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
             },
             Stage {
                 kept,
-                held: 58_112,
+                held: 58_112 + 266,
                 in_flight: 3000,
                 units: Units::Rows(100),
             },

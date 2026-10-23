@@ -109,6 +109,25 @@ impl<'a> FrameIntake<'a> {
         })
     }
 
+    /// [`Self::map`] for jobs whose workers carry nothing from one frame to the next: at most
+    /// `width` frames in flight.
+    pub(crate) fn map_at_most<R, E>(
+        &self,
+        idxs: Range<usize>,
+        width: usize,
+        job: impl Fn(usize) -> Result<R, E> + Sync,
+    ) -> Result<Vec<R>, E>
+    where
+        R: Send,
+        E: Send + From<Cancelled>,
+    {
+        let start = idxs.start;
+        concurrency::try_par_map_at_most(idxs.len(), width, |offset| {
+            Cancelled::check(&self.ctx.cancel)?;
+            job(start + offset)
+        })
+    }
+
     /// [`Self::map`] over `items` the caller hands over, each moved into its job, so a frame's
     /// input is freed as soon as its job is done with it.
     pub(crate) fn map_owned<T, S, R, E>(

@@ -10,10 +10,11 @@ use crate::memory::footprint::Footprint;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 /// A 10 × 8 frame decodes to 320 B of samples and 80 of flags, 400 B kept, 500 at the peak with
-/// a decoder of 100 B beside the frame, and as much with a source of 300 B freed before it. A Bayer demosaic on 4 workers then holds the mosaic, three planes and its
-/// tiles, 4 · 320 B and RCD's workspace, and keeps the three planes, 960 B, with the 80 flag
-/// bytes on both. A mono frame's demosaic keeps its one plane: 320 + 80 = 400 B, and its way
-/// peaks at the decoder's 500 B.
+/// a decoder of 100 B beside the frame, and as much with a source of 300 B freed before it. A
+/// Bayer demosaic on 4 workers then holds the mosaic, three planes and its tiles, 4 · 320 B and
+/// RCD's workspace, and keeps the three planes, 960 B, with the 80 flag bytes on both; before it
+/// the flags grow in block ORs beside the mosaic. A mono frame's demosaic keeps its one plane:
+/// 320 + 80 = 400 B, and its way peaks at the decoder's 500 B.
 #[test]
 fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
     let dimensions = ImageDimensions::new((10, 8), ChannelLayout::Mono);
@@ -56,9 +57,19 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
         info(rggb).demosaiced(info(rggb).decoded(), MarkesteijnPasses::One, 4),
         Footprint {
             kept: 960 + 80,
-            peak: demosaic_peak.max(400 + noise).max(500),
+            peak: demosaic_peak.max(400 + noise.max(640)).max(500),
         }
     );
+    // A way that keeps more than the demosaic holds at its peak shows what is held beside it, one
+    // step after the other: the noise, 320 B, then the flags' growth, two block ORs of the
+    // 10-column strip down the 8 rows on each of the 4 workers, 4 × 2 × 80 = 640 B, the larger.
+    assert_eq!(
+        info(rggb)
+            .demosaiced(Footprint::kept(2_000_000), MarkesteijnPasses::One, 4)
+            .peak,
+        2_000_000 + 640
+    );
+    assert_eq!(noise, 320, "premise: the growth is the larger step");
     let mono = info(CfaType::Mono);
     assert_eq!(
         mono.demosaiced(mono.decoded(), MarkesteijnPasses::One, 4),

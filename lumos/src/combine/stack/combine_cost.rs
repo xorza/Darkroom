@@ -1,5 +1,6 @@
 //! [`CombineCost`]: what a combine holds, priced once for the plan and the frame cache alike.
 
+use crate::combine::frame_cache::sample::CombineScratch;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::stage::{Stage, Units};
 use crate::stack_product::quality_planes::QualityPlanes;
@@ -9,7 +10,8 @@ use crate::stack_product::quality_planes::QualityPlanes;
 const CHUNK_COPIES: usize = 2;
 
 /// What a combine of `dimensions` holds: the output planes `quality` asks for, its
-/// `coverage_planes` and `flag_planes`, throughout; and on the spill tier, for each output row,
+/// `coverage_planes` and `flag_planes`, and a [`CombineScratch`] for `frame_count` frames on each
+/// of its `workers`, throughout; and on the spill tier, for each output row,
 /// [`CHUNK_COPIES`] copies of every frame's row, `frame_pixel_bytes` a pixel over all the frames.
 /// A resident combine reads its frames where they lie, which [`Units::Rows`] charges nothing for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +21,8 @@ pub(crate) struct CombineCost {
     pub(crate) coverage_planes: usize,
     pub(crate) flag_planes: usize,
     pub(crate) frame_pixel_bytes: usize,
+    pub(crate) frame_count: usize,
+    pub(crate) workers: usize,
 }
 
 impl CombineCost {
@@ -30,11 +34,14 @@ impl CombineCost {
             coverage_planes,
             flag_planes,
             frame_pixel_bytes,
+            frame_count,
+            workers,
         } = self;
         Stage {
             kept,
             held: quality.pixel_bytes(dimensions.channels(), coverage_planes, flag_planes)
-                * dimensions.pixel_count(),
+                * dimensions.pixel_count()
+                + workers.saturating_mul(CombineScratch::heap_bytes(frame_count)),
             in_flight: CHUNK_COPIES * frame_pixel_bytes * dimensions.width(),
             units: Units::Rows(dimensions.height()),
         }

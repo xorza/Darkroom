@@ -8,6 +8,7 @@ use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
+use crate::image::linear_pixels::LinearPixels;
 use crate::image_ops::error::MlError;
 use crate::image_ops::ml::backend::OnnxModel;
 
@@ -50,14 +51,23 @@ impl RemoveStars {
 
     /// Both layers: the starless image and the stars unscreened out of it.
     ///
-    /// Takes `image` by value: once `starless` is computed, `image`'s original pixels are no
-    /// longer needed, so `build_stars` overwrites `image`'s own buffer in place to become `stars`
-    /// instead of allocating a fresh one — one fewer full-image allocation than building `stars`
-    /// as a new `Image`. Callers who still need the original pixels afterward should `.clone()`
-    /// before calling. Both layers keep `image`'s metadata and flags.
+    /// Takes `image` by value: the model reads it into new starless planes, and once those are
+    /// done its original pixels are no longer needed, so `build_stars` overwrites `image`'s own
+    /// buffer in place to become `stars` — a copy of the input and a fresh stars image both
+    /// spared. Callers who still need the original pixels afterward should `.clone()` before
+    /// calling. Both layers keep `image`'s metadata, flags and flat gain.
     pub fn split(&mut self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
-        let mut starless = image.clone();
-        self.model.run(&mut starless, self.stride)?;
+        let dimensions = image.dimensions();
+        let mut starless = LinearImage::new(
+            LinearPixels::from_planar_channels(
+                dimensions,
+                (0..dimensions.channels()).map(|_| vec![0.0; dimensions.pixel_count()]),
+            ),
+            image.flags().cloned(),
+            image.metadata.clone(),
+        );
+        starless.set_flat_gain(image.flat_gain().cloned());
+        self.model.run_into(&image, &mut starless, self.stride)?;
         build_stars(&mut image, &starless);
         Ok(StarRemovalResult {
             starless,

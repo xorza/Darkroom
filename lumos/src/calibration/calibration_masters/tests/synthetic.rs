@@ -268,7 +268,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
         img_px[size.idx_of(Vec2us::new(x, y))] = 0.95;
     }
     let mut img = make_cfa(size, img_px, CfaType::Mono);
-    map.correct(&mut img);
+    map.correct(&mut img, None);
 
     // Each hot pixel takes its uniform neighbourhood's value; no other pixel changes.
     assert!(img.data().pixels().iter().all(|&v| v == bg));

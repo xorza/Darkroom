@@ -482,14 +482,15 @@ fn iso(speed: f32) -> Option<u32> {
     (speed > 0.0).then(|| speed.round() as u32)
 }
 
-/// `samples`' interleaved colors as one plane each, over 65535.
-fn planes(samples: &ProcessedSamples<'_>) -> Vec<Vec<f32>> {
+/// `samples`' interleaved colors as one plane each, over 65535, each plane written once as it is
+/// made.
+pub(super) fn planes<'a>(samples: &'a ProcessedSamples<'_>) -> impl Iterator<Item = Vec<f32>> + 'a {
     let colors = samples.dimensions.channels();
-    let mut planes = vec![vec![0.0f32; samples.dimensions.pixel_count()]; colors];
-    for (channel, plane) in planes.iter_mut().enumerate() {
-        plane.par_iter_mut().enumerate().for_each(|(pixel, value)| {
-            *value = f32::from(samples.samples[pixel * colors + channel]) / 65535.0;
-        });
-    }
-    planes
+    let pixels = samples.dimensions.pixel_count();
+    (0..colors).map(move |channel| {
+        (0..pixels)
+            .into_par_iter()
+            .map(|pixel| f32::from(samples.samples[pixel * colors + channel]) / 65535.0)
+            .collect()
+    })
 }

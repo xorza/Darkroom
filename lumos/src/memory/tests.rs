@@ -367,7 +367,7 @@ fn demosaic_costs_in_planes() {
         ),
         (
             CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
-            markesteijn::internals::workspace_bytes(4),
+            markesteijn::internals::workspace_bytes(MarkesteijnPasses::One, 4),
         ),
     ] {
         assert_eq!(

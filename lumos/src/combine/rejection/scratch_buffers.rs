@@ -17,9 +17,19 @@ pub(crate) struct GesdScratch {
 }
 
 impl GesdScratch {
-    /// Room for the critical values of up to `frame_count` samples, so no pixel allocates.
+    /// Room for the critical values of up to `frame_count` samples, so no pixel allocates; the
+    /// values already found stay.
     fn reserve(&mut self, frame_count: usize) {
-        self.critical_values.reserve(frame_count + 1);
+        let table = frame_count + 1;
+        self.critical_values
+            .reserve_exact(table.saturating_sub(self.critical_values.len()));
+    }
+
+    /// The bytes [`Self::reserve`] holds for `frame_count` samples.
+    const fn heap_bytes(frame_count: usize) -> usize {
+        frame_count
+            .saturating_add(1)
+            .saturating_mul(size_of::<f64>())
     }
 
     /// Forget the critical values when alpha changed.
@@ -74,12 +84,51 @@ pub(crate) struct ScratchBuffers {
 }
 
 impl ScratchBuffers {
-    /// Reserve room for `frame_count` samples, so the per-pixel refills never allocate.
+    /// Room for `frame_count` samples, so the per-pixel refills never allocate. The buffers a
+    /// pixel refills are emptied first, so a lease that held samples keeps its size, not twice it.
     pub(crate) fn reserve(&mut self, frame_count: usize) {
-        self.sorted.reserve(frame_count);
-        self.weights.reserve(frame_count);
-        self.methods.clamped.reserve(frame_count);
-        self.methods.scores.reserve(frame_count);
-        self.methods.gesd.reserve(frame_count);
+        let Self {
+            sorted,
+            weights,
+            methods,
+        } = self;
+        sorted.reserve(frame_count);
+        weights.clear();
+        weights.reserve_exact(frame_count);
+        methods.clamped.clear();
+        methods.clamped.reserve_exact(frame_count);
+        methods.scores.reserve(frame_count);
+        methods.gesd.reserve(frame_count);
+    }
+
+    /// The bytes the buffers hold at most for `frame_count` samples.
+    pub(crate) const fn heap_bytes(frame_count: usize) -> usize {
+        SortedSamples::heap_bytes(frame_count)
+            .saturating_add(frame_count.saturating_mul(2 * size_of::<f32>()))
+            .saturating_add(NormalScores::heap_bytes(frame_count))
+            .saturating_add(GesdScratch::heap_bytes(frame_count))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::combine::rejection::scratch_buffers::ScratchBuffers;
+
+    /// A lease that held a pixel's eight samples keeps room for eight when it is fitted again, not
+    /// sixteen: the buffers a pixel refills are emptied before the reserve, and the GESD table
+    /// keeps the critical value it found, for 4 samples, beside room for 8 + 1.
+    #[test]
+    fn a_refit_scratch_keeps_its_size() {
+        let mut scratch = ScratchBuffers::default();
+        scratch.reserve(8);
+        scratch.weights.extend([1.0; 8]);
+        scratch.methods.clamped.extend([1.0; 8]);
+        scratch.methods.gesd.prepare(0.05);
+        let found = scratch.methods.gesd.critical_value(4);
+        scratch.reserve(8);
+        assert_eq!(scratch.weights.capacity(), 8);
+        assert_eq!(scratch.methods.clamped.capacity(), 8);
+        assert_eq!(scratch.methods.gesd.critical_values.capacity(), 9);
+        assert_eq!(scratch.methods.gesd.critical_value(4), found);
     }
 }

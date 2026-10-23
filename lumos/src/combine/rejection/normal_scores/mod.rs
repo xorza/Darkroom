@@ -37,12 +37,38 @@ impl NormalScores {
         }
     }
 
+    /// The bytes the cache holds at most for counts up to `max_count`: its rows of scores and
+    /// their counts; none for no count.
+    pub(crate) const fn heap_bytes(max_count: usize) -> usize {
+        if max_count == 0 {
+            return 0;
+        }
+        let rows = Self::rows(max_count);
+        rows * max_count * size_of::<f64>() + rows * size_of::<usize>()
+    }
+
+    /// The rows a cache for counts up to `max_count` keeps: as many as fit [`CACHE_BYTES`], at
+    /// least one and at most a row for each count.
+    const fn rows(max_count: usize) -> usize {
+        let fit = CACHE_BYTES / (max_count * size_of::<f64>());
+        if fit > max_count {
+            max_count
+        } else if fit == 0 {
+            1
+        } else {
+            fit
+        }
+    }
+
     pub(super) fn of_count(&mut self, n: usize) -> &[f64] {
         debug_assert!(n > 0, "the scores of no samples");
         self.reserve(n);
         if self.counts.is_empty() {
-            let rows = (CACHE_BYTES / (self.max_count * size_of::<f64>())).clamp(1, self.max_count);
+            let rows = Self::rows(self.max_count);
+            // Exact, so the cache holds what `heap_bytes` says.
+            self.counts.reserve_exact(rows);
             self.counts.resize(rows, 0);
+            self.scores.reserve_exact(rows * self.max_count);
             self.scores.resize(rows * self.max_count, 0.0);
         }
         let row = n % self.counts.len();

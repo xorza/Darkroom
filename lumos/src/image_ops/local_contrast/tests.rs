@@ -1,5 +1,6 @@
 use imaginarium::Buffer2;
 
+use crate::image::intensity::Intensity;
 use crate::image_ops::local_contrast::{
     BIN_COUNT, LocalContrast, TileAxis, TileGrid, clip_histogram,
 };
@@ -97,7 +98,10 @@ fn clahe_tile_mappings_are_monotonic() {
         cols: TileAxis::new(80, 4),
         rows: TileAxis::new(80, 4),
     };
-    let luts = grid.luts(&intensity, 2.0);
+    let luts = grid.luts(
+        Intensity::mono(Size2us::from(&intensity), intensity.pixels()),
+        2.0,
+    );
     for lut in &luts {
         for w in lut.windows(2) {
             assert!(

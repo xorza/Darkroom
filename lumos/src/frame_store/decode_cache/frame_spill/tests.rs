@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 use common::{FileId, FileIdentity, SerdeFormat, TempDir, fs};
@@ -241,9 +242,9 @@ fn sidecar_layout_is_pinned() {
             flags: Some([7; 32]),
             samples: vec![[9; 32]],
         },
-        metadata: metadata(),
-        stats: admitted.stats,
-        facts: admitted.facts,
+        metadata: Cow::Owned(metadata()),
+        stats: Cow::Owned(admitted.stats),
+        facts: Cow::Owned(admitted.facts),
     };
     SerdeFormat::Bitcode
         .serialize_into(&commit, &mut bytes)

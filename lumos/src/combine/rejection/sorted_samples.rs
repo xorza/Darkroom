@@ -21,12 +21,29 @@ pub(crate) struct SortedSamples {
 }
 
 impl SortedSamples {
-    /// Reserve room for `count` samples, so the per-pixel refill never allocates.
+    /// Emptied, with room for `count` samples, so the per-pixel refill never allocates.
     pub(crate) fn reserve(&mut self, count: usize) {
-        self.keys.reserve(count);
-        self.values.reserve(count);
-        self.poss.reserve(count);
-        self.kept.reserve(count);
+        let Self {
+            keys,
+            values,
+            poss,
+            kept,
+        } = self;
+        keys.clear();
+        keys.reserve_exact(count);
+        values.clear();
+        values.reserve_exact(count);
+        poss.clear();
+        poss.reserve_exact(count);
+        kept.clear();
+        kept.reserve_exact(count);
+    }
+
+    /// The bytes [`Self::reserve`] holds for `count` samples.
+    pub(crate) const fn heap_bytes(count: usize) -> usize {
+        count.saturating_mul(
+            size_of::<u64>() + size_of::<f32>() + size_of::<u32>() + size_of::<bool>(),
+        )
     }
 
     /// Sort `values`, which must be finite, remembering where each came from.

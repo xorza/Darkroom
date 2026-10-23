@@ -142,6 +142,20 @@ where
         .collect())
 }
 
+/// [`try_par_map_bounded`] for jobs whose workers carry nothing from one index to the next: at
+/// most `width` of them at a time.
+pub(crate) fn try_par_map_at_most<R, E>(
+    len: usize,
+    width: usize,
+    job: impl Fn(usize) -> Result<R, E> + Sync,
+) -> Result<Vec<R>, E>
+where
+    R: Send,
+    E: Send,
+{
+    try_par_map_bounded(len, &mut vec![(); width], |(), idx| job(idx))
+}
+
 /// Consuming counterpart to [`try_par_map_bounded`]: each item moved into its job.
 ///
 /// Taking items by value is what lets a caller drop each input as soon as its output exists — the
