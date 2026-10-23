@@ -33,7 +33,7 @@ pub(crate) fn rewrite_fits(
     let mut writer = FitsWriter::new(Vec::new()).with_checksums();
     for idx in 0..reader.hdus().len() {
         let mut header = reader.hdus()[idx].header.clone();
-        let mut data = reader.read_data_raw(idx).unwrap().into_data();
+        let mut data = reader.read_data_unit(idx).unwrap().into_data();
         if edit(idx, &mut header, &mut data) {
             writer.write_raw_hdu(&header, &data).unwrap();
         }

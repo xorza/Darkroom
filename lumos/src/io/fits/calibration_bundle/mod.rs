@@ -150,7 +150,7 @@ impl BundleReader<'_> {
     fn validate_primary(&self) -> Result<(), BundleError> {
         let primary = self.reader.hdus().first().ok_or(BundleError::NotABundle)?;
         if primary.kind != HduKind::Primary
-            || primary.header.naxis()? != 0
+            || primary.header.require_integer("NAXIS")? != 0
             || primary.header.get_text(FORMAT_KEYWORD)? != Some(BUNDLE_FORMAT)
         {
             return Err(BundleError::NotABundle);
@@ -214,7 +214,10 @@ impl BundleReader<'_> {
     /// The `role` master at HDU `idx`.
     fn master(&mut self, idx: usize, role: MasterRole) -> Result<CfaImage, BundleError> {
         let hdu = &self.reader.hdus()[idx];
-        if hdu.kind != HduKind::Image || hdu.header.bitpix()? != Bitpix::F32 {
+        if hdu.kind != HduKind::Image
+            || !hdu.is_image()
+            || hdu.image_metadata()?.bitpix != Bitpix::F32
+        {
             return Err(BundleError::MasterEncoding { role });
         }
         let prepared = hdu.header.get_logical("LUMPREP")?.unwrap_or(false);
@@ -256,7 +259,7 @@ impl BundleReader<'_> {
             return Err(DefectTableError::Extent.into());
         };
         let table = self.reader.read_table(idx)?;
-        let row_count = table.schema().nrows;
+        let row_count = table.schema().row_count;
         let kinds: Vec<u8> = defect_column(&table, "KIND")?;
         let idxs: Vec<i64> = defect_column(&table, "INDEX")?;
         let excess: Vec<f32> = defect_column(&table, "EXCESS")?;

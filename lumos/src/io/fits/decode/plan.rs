@@ -54,7 +54,7 @@ impl<'a> FitsHduDescription<'a> {
         let dimensions = dimensions_from_shape(self.image.shape, cube)?;
         let stored_bitpix = self.image.bitpix;
         let scaling = self.image.scaling;
-        let sample_type = SampleType::from_scaling(stored_bitpix, &scaling);
+        let sample_type = SampleType::from_scaling(stored_bitpix, scaling);
         let data_max = self.data_max(float_scale)?;
         let sample_scale = self.sample_scale(float_scale, data_max)?;
         let decoded_bytes = checked_bytes(
@@ -372,13 +372,13 @@ pub(super) fn dimensions_from_shape(
 #[cfg(test)]
 pub(super) mod internals {
     use fits_well::header::Header;
-    use fits_well::image::{Bitpix, Metadata as FitsMetadata};
+    use fits_well::image::{Bitpix, Metadata as FitsMetadata, Scaling};
     use fits_well::io::HduKind;
 
     use crate::io::fits::decode::plan::FitsHduDescription;
 
-    /// An HDU of `kind` whose image is `shape` samples of `bitpix`, scaled as `header` declares,
-    /// its data unit `source_bytes` as stored.
+    /// An HDU of `kind` whose image is `shape` unscaled samples of `bitpix`, its data unit
+    /// `source_bytes` as stored.
     #[derive(Debug, Clone, Copy)]
     pub(crate) struct HduSpec<'a> {
         pub(crate) header: &'a Header,
@@ -396,7 +396,7 @@ pub(super) mod internals {
                 image: FitsMetadata {
                     shape: self.shape,
                     bitpix: self.bitpix,
-                    scaling: self.header.scaling().unwrap(),
+                    scaling: Scaling::IDENTITY,
                 },
                 source_bytes: self.source_bytes,
             }

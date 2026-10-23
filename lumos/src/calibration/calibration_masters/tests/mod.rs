@@ -1206,7 +1206,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 6);
-    assert_eq!(reader.hdus()[0].header.naxis().unwrap(), 0);
+    assert_eq!(reader.hdus()[0].header.require_integer("NAXIS").unwrap(), 0);
     assert_eq!(
         reader.hdus()[0].header.get_text(FORMAT_KEYWORD).unwrap(),
         Some("CALMASTR")
@@ -1233,7 +1233,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     );
     for image_idx in [1, 3, 4] {
         assert_eq!(
-            reader.hdus()[image_idx].header.bitpix().unwrap(),
+            reader.hdus()[image_idx].image_metadata().unwrap().bitpix,
             Bitpix::F32
         );
     }

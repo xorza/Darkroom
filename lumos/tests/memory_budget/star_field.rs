@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use common::{TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::Image as FitsImage;
+use fits_well::image::{Image as FitsImage, Scaling};
 use imaginarium::Buffer2;
 use lumos::ChannelLayout;
 use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage, Mosaic};
@@ -97,7 +97,7 @@ impl StarField {
         let mut writer = FitsWriter::new(fs::create(path).unwrap());
         writer
             .write_image(
-                FitsImage::new([self.side, self.side], self.render(idx))
+                FitsImage::new([self.side, self.side], self.render(idx), Scaling::IDENTITY)
                     .unwrap()
                     .view(),
                 Some(&header),

@@ -271,7 +271,7 @@ mod tests {
                     Some(&flags),
                 ),
             },
-            &Image::new_scaled(vec![3, 2, 2], blanked, scaling).unwrap(),
+            &Image::new(vec![3, 2, 2], blanked, scaling).unwrap(),
         );
         streams_as_written(
             &PlaneHdu {
@@ -280,7 +280,7 @@ mod tests {
                 scaling: Scaling::IDENTITY,
                 source: FloatPlanes::new([red.as_slice()].into_iter().collect()),
             },
-            &Image::new(vec![3, 2], red.clone()).unwrap(),
+            &Image::new(vec![3, 2], red.clone(), Scaling::IDENTITY).unwrap(),
         );
         streams_as_written(
             &PlaneHdu {
@@ -299,6 +299,7 @@ mod tests {
                     QualityFlags::NO_DATA.byte(),
                     0,
                 ],
+                Scaling::IDENTITY,
             )
             .unwrap(),
         );
@@ -309,7 +310,12 @@ mod tests {
                 scaling: Scaling::IDENTITY,
                 source: NoDataMask(&flags),
             },
-            &Image::new(vec![3, 2, 2], vec![0u8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0]).unwrap(),
+            &Image::new(
+                vec![3, 2, 2],
+                vec![0u8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+                Scaling::IDENTITY,
+            )
+            .unwrap(),
         );
     }
 }
