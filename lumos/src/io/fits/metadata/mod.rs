@@ -580,7 +580,9 @@ fn read_dec_deg(header: &Header) -> Option<f64> {
 /// `CRVALn` of the axis whose `CTYPEn` starts with `prefix`, the four-character equatorial
 /// coordinate name of FITS WCS paper II. Galactic, ecliptic and non-celestial axes name another
 /// coordinate, so a header that has only those gives no pointing, and an axis-swapped one gives
-/// each value from its own axis.
+/// each value from its own axis. §8.2 requires degrees for a celestial `CRVALn`, so the value needs
+/// no unit, and two keywords need no WCS parse, which a `PC`/`CD` conflict or a singular matrix
+/// would fail.
 fn celestial_reference(header: &Header, prefix: &str) -> Option<f64> {
     let axes = optional("NAXIS", header.get_integer(keywords::NAXIS))?;
     (1..=usize::try_from(axes).ok()?).find_map(|axis| {

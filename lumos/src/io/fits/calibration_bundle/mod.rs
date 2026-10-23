@@ -14,7 +14,7 @@ use std::path::Path;
 use common::fs;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
-use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
+use fits_well::io::{HduKind, StreamReader};
 use fits_well::table::{Builder as TableBuilder, ColumnData, Table, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
@@ -168,10 +168,12 @@ impl BundleReader<'_> {
         Ok(())
     }
 
+    /// Refuse the bundle unless every HDU's checksums verify, before any of its bytes is read as a
+    /// master.
     fn verify_checksums(&mut self) -> Result<(), BundleError> {
         for hdu in 0..self.reader.hdus().len() {
             let report = self.reader.verify_checksum(hdu)?;
-            if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
+            if !report.is_valid() {
                 return Err(BundleError::Checksum { hdu });
             }
         }

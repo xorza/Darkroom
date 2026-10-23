@@ -16,3 +16,10 @@ drive bench` fails before any case runs.
   one scratch a worker, does not count.
 
 - The installed cargo-drive now marks FitsReader and FitsWriter as "[shape differs by feature]" and lists no feature-gated method. So .notes/API_SURFACE.md does not record the compressed writes. The cause is the tool, not fits-well.
+
+- **lumos's memory plan counts a compressed image's decode as two times its
+  stored data unit.** `FitsHduDescription::plan` (`lumos/src/io/fits/decode/plan.rs`)
+  adds `2 × padded_data_bytes` to the peak for a `CompressedImage`, a figure no
+  measurement backs. A section read holds the compressed rows and heap of the
+  tiles it touches and one decoded tile for each decode thread, which the figure
+  does not count.
