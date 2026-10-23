@@ -4,9 +4,10 @@ use std::ops::Range;
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
+use fits_well::ImageReader;
 use fits_well::header::Header;
 use fits_well::image::{Scaling, View as FitsView};
-use fits_well::io::StreamReader;
+use fits_well::io::StreamSource;
 use rayon::prelude::*;
 
 use crate::concurrency;
@@ -22,7 +23,6 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::image::sample_domain::SampleDomain;
 use crate::io::fits::decode::DecodedFitsImage;
-use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::plan::FitsDecodePlan;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::FitsChecksumPolicy;
@@ -50,30 +50,29 @@ impl HduDecode<'_> {
     /// the decode it would, at the cost of the decode.
     pub(super) fn read_stream(
         self,
-        reader: &mut StreamReader<File>,
+        image: ImageReader<'_, StreamSource<File>>,
         policy: FitsChecksumPolicy,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let idx = self.hdu.idx;
         let ctx = self.ctx;
         if policy == FitsChecksumPolicy::Ignore {
-            return self.read(&mut HduSections::new(reader, idx), |_| {
-                Ok(FitsChecksumProvenance::NOT_CHECKED)
-            });
+            return self.read(image, |_| Ok(FitsChecksumProvenance::NOT_CHECKED));
         }
-        let mut sections = HduSections::summed(reader, idx)?;
-        self.read(&mut sections, |sections| {
+        self.read(image.with_checksum(), |image| {
             Cancelled::check(&ctx.cancel)?;
-            let report = sections.finish_checksum()?;
+            let report = image.finish()?;
             policy.judge(report, idx)
         })
     }
 
-    /// Decode the HDU through `sections`, and take its checksum provenance from `checksum` once
-    /// the planes are read.
-    pub(super) fn read(
+    /// Decode the HDU through `image`, and take its checksum provenance from `checksum` once the
+    /// planes are read.
+    pub(super) fn read<'r>(
         self,
-        sections: &mut HduSections<'_>,
-        checksum: impl FnOnce(&mut HduSections<'_>) -> Result<FitsChecksumProvenance, FitsLoadError>,
+        mut image: ImageReader<'r, StreamSource<File>>,
+        checksum: impl FnOnce(
+            ImageReader<'r, StreamSource<File>>,
+        ) -> Result<FitsChecksumProvenance, FitsLoadError>,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let Self {
             header,
@@ -102,10 +101,11 @@ impl HduDecode<'_> {
             .filter(|unit| !unit.is_empty());
         let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
         let mut planes = ArrayVec::<DecodedPlane, 3>::new();
+        let mut words = Vec::new();
         for channel in 0..channel_count {
-            planes.push(self.read_plane(channel, sections)?);
+            planes.push(self.read_plane(channel, &mut image, &mut words)?);
         }
-        let checksum = checksum(sections)?;
+        let checksum = checksum(image)?;
         let scan = planes
             .iter()
             .map(|plane| plane.scan)
@@ -260,11 +260,12 @@ impl HduDecode<'_> {
         Ok(Some(flags))
     }
 
-    /// Decode plane `channel` through `sections`, a chunk of rows at a time.
+    /// Decode plane `channel` from `image`, a chunk of rows at a time, each swapped into `words`.
     fn read_plane(
         &self,
         channel: usize,
-        sections: &mut HduSections<'_>,
+        image: &mut ImageReader<'_, StreamSource<File>>,
+        words: &mut Vec<u64>,
     ) -> Result<DecodedPlane, FitsLoadError> {
         let plan = self.plan;
         let ctx = self.ctx;
@@ -278,8 +279,8 @@ impl HduDecode<'_> {
             Cancelled::check(&ctx.cancel)?;
             let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
             let expected_chunk = (row_end - row_start) * width;
-            let section =
-                sections.read_section(&channel_ranges(plan, channel, row_start..row_end))?;
+            let ranges = channel_ranges(plan, channel, row_start..row_end);
+            let section = image.view(ranges.as_slice(), words)?;
             Cancelled::check(&ctx.cancel)?;
             let samples = section.samples();
             if samples.len() != expected_chunk {
@@ -330,8 +331,13 @@ struct DecodedPlane {
     scan: SampleScan,
 }
 
-fn channel_ranges(plan: &FitsDecodePlan, channel: usize, rows: Range<usize>) -> Vec<Range<usize>> {
-    let mut ranges = vec![0..plan.dimensions.width(), rows];
+fn channel_ranges(
+    plan: &FitsDecodePlan,
+    channel: usize,
+    rows: Range<usize>,
+) -> ArrayVec<Range<usize>, 3> {
+    let mut ranges: ArrayVec<Range<usize>, 3> =
+        [0..plan.dimensions.width(), rows].into_iter().collect();
     if plan.shape.len() == 3 {
         ranges.push(channel..channel + 1);
     }

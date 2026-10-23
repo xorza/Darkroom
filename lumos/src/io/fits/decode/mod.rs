@@ -36,7 +36,6 @@ use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
-mod hdu_sections;
 mod pixels;
 mod plan;
 pub(crate) mod selected_fits;
