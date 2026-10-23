@@ -7,6 +7,7 @@ mod input_map;
 pub(crate) mod kernel_plan;
 mod output_band;
 
+use std::mem;
 use std::slice::ChunksMut;
 
 use arrayvec::ArrayVec;
@@ -30,6 +31,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::math::size2us::Size2us;
+use crate::recycle;
 use crate::scratch_pool::ScratchPool;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
@@ -61,6 +63,8 @@ pub(crate) struct Drizzler {
     plan: KernelPlan,
     /// The input pixels each band scans, recomputed per frame.
     scans: Vec<BandScan>,
+    /// The allocation of the bands each frame is scattered by, empty between frames.
+    bands: Vec<OutputBand<'static>>,
     radial: ScratchPool<RadialScratch>,
     lattice: ScratchPool<CornerLattice>,
 }
@@ -108,6 +112,7 @@ impl Drizzler {
             grid,
             plan,
             scans: Vec::new(),
+            bands: Vec::new(),
             radial: ScratchPool::default(),
             lattice: ScratchPool::new(input_dims.width()),
         }
@@ -189,6 +194,7 @@ impl Drizzler {
                 source.band_scan(&(start..(start + band_rows).min(height)), width, reach)
             }));
 
+        let mut bands: Vec<OutputBand<'_>> = recycle::emptied(mem::take(&mut self.bands));
         let Self {
             scans,
             radial,
@@ -203,31 +209,31 @@ impl Drizzler {
             .flags
             .as_mut()
             .map(|flags| flags.pixels_mut().chunks_mut(span_len));
-        let bands: Vec<OutputBand<'_>> = (0..height.div_ceil(band_rows))
-            .map(|band| {
-                let start = band * band_rows;
-                OutputBand {
-                    rows: start..(start + band_rows).min(height),
-                    width,
-                    planes: PlaneSpan {
-                        data: next_band(&mut data),
-                        weight: next_band(&mut weight),
-                        weight_sq: next_band(&mut weight_sq),
-                        flags: flags
-                            .as_mut()
-                            .map(|chunks| chunks.next().expect("one chunk per band")),
-                    },
-                    idx: band,
-                    scans,
-                    radial,
-                    lattice,
-                }
-            })
-            .collect();
-        Ok(bands
-            .into_par_iter()
+        bands.extend((0..height.div_ceil(band_rows)).map(|band| {
+            let start = band * band_rows;
+            OutputBand {
+                rows: start..(start + band_rows).min(height),
+                width,
+                planes: PlaneSpan {
+                    data: next_band(&mut data),
+                    weight: next_band(&mut weight),
+                    weight_sq: next_band(&mut weight_sq),
+                    flags: flags
+                        .as_mut()
+                        .map(|chunks| chunks.next().expect("one chunk per band")),
+                },
+                idx: band,
+                scans,
+                radial,
+                lattice,
+            }
+        }));
+        let unconverged = bands
+            .par_drain(..)
             .map(|mut band| band.distribute(&source, plan))
-            .sum::<usize>())
+            .sum::<usize>();
+        self.bands = recycle::emptied(bands);
+        Ok(unconverged)
     }
 
     /// Refuse a frame whose pixel weights do not fit it; debug-assert what admission already

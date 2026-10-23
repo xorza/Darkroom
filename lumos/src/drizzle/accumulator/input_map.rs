@@ -2,7 +2,7 @@
 
 use glam::DVec2;
 
-use crate::drizzle::accumulator::band_scan::Outline;
+use crate::drizzle::accumulator::band_scan::{Corners, Outline};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::registration::warp_transform::inverse_warp::InverseWarp;
@@ -104,11 +104,10 @@ impl InputMap {
                 {
                     return None;
                 }
-                Some(Outline {
-                    vertices: corners.map(|corner| to_input.apply(corner)).to_vec(),
+                Some(Outline::Corners(Corners {
+                    vertices: corners.map(|corner| to_input.apply(corner)),
                     reach: input_margin,
-                    bounds_cols: true,
-                })
+                }))
             }
             Self::Sip(sip) => {
                 // A non-linear map bends straight edges, so the outline is sampled rather than its
@@ -128,16 +127,17 @@ impl InputMap {
                 let right_edge = along(height).map(|dy| DVec2::new(right, low + dy));
                 let top = along(width).map(|dx| DVec2::new(right - dx, high));
                 let left_edge = along(height).map(|dy| DVec2::new(left, high - dy));
-                Some(Outline {
-                    vertices: bottom
-                        .chain(right_edge)
-                        .chain(top)
-                        .chain(left_edge)
-                        .map(back)
-                        .collect(),
-                    reach: input_margin + 1.0,
-                    bounds_cols: false,
-                })
+                let reach = input_margin + 1.0;
+                let [first, last] = bottom
+                    .chain(right_edge)
+                    .chain(top)
+                    .chain(left_edge)
+                    .map(back)
+                    .fold(
+                        [f64::INFINITY, f64::NEG_INFINITY],
+                        |[first, last], vertex| [first.min(vertex.y), last.max(vertex.y)],
+                    );
+                Some(Outline::Rows([first - reach, last + reach]))
             }
         }
     }

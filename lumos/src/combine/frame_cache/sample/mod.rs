@@ -34,6 +34,16 @@ pub(crate) struct CombineScratch {
     pub(super) buffers: ScratchBuffers,
 }
 
+impl CombineScratch {
+    /// The bytes one scratch holds at most for `frame_count` frames: a value, weight and flag
+    /// byte and three noise columns a frame, and the rejection methods' buffers.
+    pub(crate) const fn heap_bytes(frame_count: usize) -> usize {
+        frame_count
+            .saturating_mul(5 * size_of::<f32>() + size_of::<u8>())
+            .saturating_add(ScratchBuffers::heap_bytes(frame_count))
+    }
+}
+
 impl Scratch for CombineScratch {
     /// The frame count.
     type Shape = usize;

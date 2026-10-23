@@ -30,8 +30,9 @@
   allocators and buffer reuse pay where the allocation is a large share of the work. Source:
   `research/2026-10-16-cosmic-ray-page-faults.md`.
 - **A price sits beside what it prices, and one price serves the plan and the run.** The combine
-  is priced by `CombineCost` for the plan and the frame cache alike, two chunk copies included, and
-  a chunk is priced by what `ChunkCopy` copies, not the flat gain it reads where it is mapped.
+  is priced by `CombineCost` for the plan and the frame cache alike, two chunk copies and a pooled
+  `CombineScratch` for each worker included, and a chunk is priced by what `ChunkCopy` copies, not
+  the flat gain it reads where it is mapped.
   Refused: a formula per caller, which drifted (the drizzle's frames left out their flat gain).
 - **A run reports the peak its plan expects, and the budget test holds a resident run to it.**
   `RunReport::planned_peak_bytes`, written as `LUMPLNB`, is what `tests/memory_budget` measures a
@@ -98,6 +99,11 @@
   next frame, which holds C + 2W output planes through the next frame's decode and statistics,
   past what the plan charges, to save their page faults, a small share of a frame's scatter (the
   trade the cosmic-ray detector refuses).
+- **A demosaic grows its flags in block ORs it makes for the frame, and its price says so.**
+  `FrameInfo::demosaiced` charges the dilation's scratch beside the mosaic. Refused: the scratch
+  kept on `LoadCtx` for the next frame, which would put a private field in a public struct that
+  callers build with `..Default::default()`, to save a few megabytes of page faults beside a
+  demosaic of the whole frame.
 - **A parallel job's scratch is one set a worker, from `map_init`.** The MRS tiles and the
   normalization fits refill one set a worker for each call, which their prices already charged.
   Refused: a pool owner for the MRS tile scratch across calls, as no type spans the calls of one

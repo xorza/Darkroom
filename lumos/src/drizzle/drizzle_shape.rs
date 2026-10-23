@@ -195,14 +195,18 @@ mod tests {
     ///
     /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, 16
     /// flag bytes, and its flat gain warped onto the output, a node at pixels 0 and 4 of each axis,
-    /// 2 × 2 nodes of 4 B: 224 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B,
-    /// measured by MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of
-    /// transform a pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 184
-    /// past the frame it keeps. The depth of the one weight plane, 64 B, is held through every
-    /// stage. The combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth,
-    /// and a row copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies,
-    /// 312 B; the gain is read where it lies. The source gain the frames share, 2 × 2 nodes of
-    /// 4 B, 16 B, is held beside the depth.
+    /// 2 × 2 nodes of 4 B: 224 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B, measured
+    /// by MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of transform a
+    /// pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 184 past the
+    /// frame it keeps. The depth of the one weight plane, 64 B, is held through every stage. The
+    /// combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row
+    /// copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies, 312 B; the
+    /// gain is read where it lies. The source gain the frames share, 2 × 2 nodes of 4 B, 16 B, is
+    /// held beside the depth. A combine scratch for three frames on its one worker is 266 B: a
+    /// value, a weight, three noise columns and a flag byte a frame, 21 B, the sorted keys, values,
+    /// positions and kept marks, 17 B, the weights and the clamped copy, 8 B, four GESD critical
+    /// values of 8 B, and the normal scores, a row of three for each of the three counts and their
+    /// counts, 72 + 24 B: 3 × 46 + 32 + 96.
     #[test]
     fn the_depth_and_the_shared_gains_are_held_through_every_stage() {
         let stack = StackConfig {
@@ -235,7 +239,7 @@ mod tests {
                     },
                     Stage {
                         kept: 224,
-                        held: 144 + gains,
+                        held: 144 + 266 + gains,
                         in_flight: 312,
                         units: Units::Rows(4),
                     },

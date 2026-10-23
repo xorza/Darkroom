@@ -81,6 +81,9 @@ root causes.
   break-even switch. Only the duplicated builder is merged (batch 10).
 - **A separable product weight, or one mono accumulator, in the ML blend.** Both change
   rounding. The band ring in batch 9 keeps the same sums in the same order.
+- **The demosaic's dilation scratch kept on `LoadCtx`.** It puts a private field in a public
+  struct that callers build with `..Default::default()`, to save a few megabytes of page faults
+  beside a demosaic of the whole frame. The scratch is priced in `FrameInfo::demosaiced` instead.
 - **The drizzler keeping the output sums its tier returns, for the next frame.** It holds
   C + 2W output planes through the next frame's decode and statistics, which no stage charges,
   to save their page faults; `tests/memory_budget` measured a spilled drizzle past its budget.
@@ -104,41 +107,14 @@ root causes.
 ## Plan
 
 Each batch leaves `cargo drive check` and `cargo drive test` green. A batch that changes a
-kernel or a hot loop (3, 4, 7) runs its benches before and after (`cargo drive bench <group>`),
+kernel or a hot loop runs its benches before and after (`cargo drive bench <group>`),
 and a slowdown is a defect of the batch. A batch that changes a vector kernel runs the inline
 check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 `lumos/DESIGN.md` as a bullet, and its items are deleted here.
 
 Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
 set, 4, the warp working set, 5, each input read once, 6, one stored-frame writer, and 11, shared
-source gains, landed, and with batch 6 the warp's slot from batch 7. The other batches are
-independent.
-
-### 7. Reuse across frames and jobs
-
-Files: `drizzle/{accumulator/mod.rs, drizzle_run.rs, input_map.rs}`, `concurrency/mod.rs`,
-`ingest/frame_intake.rs`, `noise/mrs_noise.rs`,
-`combine/normalization/{norm_fit.rs, photometric_gain.rs, slot_planes.rs}`,
-`frame_store/stratified_samples.rs`, `combine/frame_cache/{loader/mod.rs, sample/mod.rs}`,
-`combine/rejection/{scratch_buffers.rs, sorted_samples.rs}`, `image/{pixel_flags.rs,
-cfa/cfa_image.rs}`, `io/{raw/unpacked_raw.rs, fits/decode/mod.rs}`, `pipeline/mosaic_preparation.rs`.
-
-- [ ] `drizzle/accumulator/mod.rs:206-226`, `drizzle/input_map.rs:108,131-137` — `bands`,
-  the affine outline and the SIP outline are collected for each frame, and the SIP outline is
-  used only for its row extent (`band_scan.rs:112`). Target: `bands` kept on `Drizzler` like
-  `scans` (through `recycle::emptied`, as its elements borrow), the affine outline in an
-  `ArrayVec<DVec2, 4>`, and the SIP outline folded straight to its row extent.
-- [ ] `combine/frame_cache/sample/mod.rs:54`, `combine/rejection/scratch_buffers.rs:78-84`,
-  `sorted_samples.rs:25-30` — `reserve(frame_count)` adds to the stale length that a lease
-  carries, so capacities settle near 2 × `frame_count`. Target: clear first, then
-  `reserve_exact(frame_count)`. Add the pooled `CombineScratch` (frames × 54 B plus
-  `NormalScores` up to 1 MiB, for each worker) to the combine's `held`.
-- [ ] `image/pixel_flags.rs` `PixelFlags::dilate_window`, `image/cfa/cfa_image.rs:305` — each
-  demosaic makes a new `DilationScratch`: up to `workers × 2 × height × 64` B of block ORs (8 MB
-  at 24 MP on 16 workers), allocated for each frame and priced nowhere. Its callers
-  (`io/raw/unpacked_raw.rs`, `io/fits/decode/mod.rs`, `pipeline/mosaic_preparation.rs`) reach
-  the demosaic through `LoadCtx`. Target: the scratch on the owner that decodes frame after
-  frame, through `LoadCtx`, and its `heap_bytes` in the decode's price.
+source gains, landed, and 7, reuse across frames and jobs. The other batches are independent.
 
 ### 8. Raster decode bound
 

@@ -205,7 +205,8 @@ mod tests {
     /// frame's 16 pixels at 41 B, 656 B: 2104 B.
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
     /// row copies 12 + 1 B a pixel of three over 4 pixels into each of two chunk copies, 312 B;
-    /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B. A warp's
+    /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B, and its
+    /// one worker a combine scratch for three frames, 266 B (see the drizzle shape's test). A warp's
     /// flag planes are the grown flags and the warped flags', a byte a pixel each, 32 B, and its
     /// worker's block ORs of the growth, two of a strip of the 4 columns down the 4 rows, 32 B:
     /// 64 B.
@@ -238,7 +239,7 @@ mod tests {
         let tail = |kept| {
             [
                 stage(kept, 0, 0, Units::Whole),
-                stage(kept, 80, 312, Units::Rows(4)),
+                stage(kept, 80 + 266, 312, Units::Rows(4)),
             ]
         };
         let decoded = LightShape::decoded(peek, 3, 1);

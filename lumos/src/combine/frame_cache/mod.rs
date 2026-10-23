@@ -661,6 +661,10 @@ impl FrameCache {
                 .iter()
                 .map(|frame| StoredLayout::of(frame).pixel_bytes())
                 .sum(),
+            frame_count: self.frames.len(),
+            // The pool the combine leases from holds one scratch for each worker of the pool it
+            // runs on.
+            workers: rayon::current_num_threads(),
         }
         .stage(0)
     }
