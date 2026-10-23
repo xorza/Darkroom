@@ -4,7 +4,6 @@
 use std::mem;
 use std::ops::Range;
 
-use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -56,6 +55,18 @@ const MARGIN: usize = 32;
 /// The bytes a tile's transform holds for each pixel of its region: the image, the smooth and the
 /// next smooth in f32, and the first layer and the significance in f64.
 const TILE_BYTES_PER_PIXEL: usize = 3 * size_of::<f32>() + 2 * size_of::<f64>();
+
+/// The planes one tile's transform works in, kept by a worker from one tile to the next: the
+/// image, the smooth and the next smooth, the first layer and the significance. Each tile refills
+/// them at its own region's size.
+#[derive(Debug, Default)]
+struct TileScratch {
+    image: Buffer2<f32>,
+    smooth: Buffer2<f32>,
+    next: Buffer2<f32>,
+    first_layer: Vec<f64>,
+    significance: Vec<f64>,
+}
 
 /// The analysed pixels, one column for each figure, so that a pass of the support iteration reads
 /// only the columns it tests and sums: each pixel's row-major index in the image, its first detail
@@ -177,16 +188,19 @@ impl Samples for Coefficients {
 }
 
 /// The most bytes an estimate over a `size` image holds at once, with `threads` workers to share
-/// its tiles: a split's coefficients, each with its gain bin, the five planes of every tile in
-/// work, the largest first, the row each worker smooths through, as wide as the widest region, and
-/// the tile list beside them. An estimate of σ holds no bins and so a byte a coefficient less.
+/// its tiles: a split's coefficients, each with its gain bin, a [`TileScratch`] for each worker
+/// that takes a tile, grown to the largest region, the row each worker smooths through, as wide
+/// as the widest region, and the tile list beside them. An estimate of σ holds no bins and so a
+/// byte a coefficient less.
 pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
     let tiles = tiles(size);
     let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
-    let mut regions: ArrayVec<usize, { TILES_PER_AXIS * TILES_PER_AXIS }> =
-        tiles.iter().map(|tile| tile.region.area()).collect();
-    regions.sort_unstable_by(|a, b| b.cmp(a));
-    let in_work: usize = regions.iter().take(threads.max(1)).sum();
+    let largest = tiles
+        .iter()
+        .map(|tile| tile.region.area())
+        .max()
+        .unwrap_or(0);
+    let in_work = threads.max(1).min(tiles.len()) * largest;
     let widest = tiles
         .iter()
         .map(|tile| tile.region.width())
@@ -271,7 +285,9 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         tiles
             .par_iter()
             .zip(shares)
-            .map(|(&tile, mut share)| self.tile_coefficients(tile, scales, &mut share))
+            .map_init(TileScratch::default, |scratch, (&tile, mut share)| {
+                self.tile_coefficients(tile, scales, &mut share, scratch)
+            })
             .collect_into_vec(&mut kept);
         let (mut start, mut end) = (0, 0);
         for (tile, kept) in tiles.iter().zip(kept) {
@@ -283,46 +299,62 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         coefficients
     }
 
-    /// The transform of one tile, and the coefficients of its core pixels that `excluded` does not
-    /// name, written to the front of `share`, one place a core pixel; how many it wrote.
+    /// The transform of one tile in `scratch`, and the coefficients of its core pixels that
+    /// `excluded` does not name, written to the front of `share`, one place a core pixel; how many
+    /// it wrote.
     fn tile_coefficients(
         &self,
         tile: Tile,
         scales: usize,
         share: &mut CoefficientShare<'_>,
+        scratch: &mut TileScratch,
     ) -> usize {
         let Self {
             samples: plane,
             excluded,
         } = self;
+        let TileScratch {
+            image,
+            smooth,
+            next,
+            first_layer,
+            significance,
+        } = scratch;
         let size = Size2us::from(*plane);
         debug_assert_eq!(share.idx.len(), tile.core.area());
         let region = tile.region;
         let (width, height) = (region.width(), region.height());
-        let mut pixels = Vec::with_capacity(region.area());
-        for y in region.min.y..region.max.y {
-            pixels.extend_from_slice(
+        image.reshape(width, height, 0.0);
+        for (row, y) in image
+            .pixels_mut()
+            .chunks_exact_mut(width)
+            .zip(region.min.y..region.max.y)
+        {
+            row.copy_from_slice(
                 &plane[y * size.width + region.min.x..y * size.width + region.max.x],
             );
         }
-        let image = Buffer2::new(width, height, pixels);
-        let mut smooth = Buffer2::new_default(width, height);
-        let mut next = Buffer2::new_default(width, height);
+        smooth.reshape(width, height, 0.0);
+        next.reshape(width, height, 0.0);
         // The first layer is built as it is first smoothed, so neither it nor the significance is
         // cleared first: the largest significance of one layer is that layer's.
-        wavelet::atrous_smooth(&image, &mut smooth, 1);
-        let first_layer: Vec<f64> = smooth
-            .pixels()
-            .iter()
-            .zip(image.pixels())
-            .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse))
-            .collect();
-        let mut significance: Vec<f64> = first_layer
-            .iter()
-            .map(|detail| detail.abs() / LAYER_SIGMA[0])
-            .collect();
+        wavelet::atrous_smooth(image, smooth, 1);
+        first_layer.clear();
+        first_layer.extend(
+            smooth
+                .pixels()
+                .iter()
+                .zip(image.pixels())
+                .map(|(&coarse, &fine)| f64::from(fine) - f64::from(coarse)),
+        );
+        significance.clear();
+        significance.extend(
+            first_layer
+                .iter()
+                .map(|detail| detail.abs() / LAYER_SIGMA[0]),
+        );
         for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
-            wavelet::atrous_smooth(&smooth, &mut next, 1 << scale);
+            wavelet::atrous_smooth(smooth, next, 1 << scale);
             for ((significance, &coarse), &fine) in significance
                 .iter_mut()
                 .zip(next.pixels())
@@ -331,7 +363,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
                 let detail = f64::from(fine) - f64::from(coarse);
                 *significance = significance.max(detail.abs() / layer_sigma);
             }
-            mem::swap(&mut smooth, &mut next);
+            mem::swap(smooth, next);
         }
         let core = tile.core;
         let mut kept = 0;

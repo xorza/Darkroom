@@ -167,13 +167,19 @@ fn reference_selection_uses_lowest_channel_noise_in_one_domain() {
 
 /// `samples`, of noise variance `noise_variance`, as one side of a pair.
 fn side(samples: &[f32], noise_variance: f64) -> PairSide<'_> {
-    PairSide::new(samples, noise_variance, &CancelToken::never()).unwrap()
+    PairSide::new(
+        samples,
+        noise_variance,
+        &mut Vec::new(),
+        &CancelToken::never(),
+    )
+    .unwrap()
 }
 
 /// The gain [`SamplePair::photometric_gain`] fits of `frame` onto `reference`.
 fn paired_gain(frame: PairSide<'_>, reference: PairSide<'_>) -> PairedGain {
     SamplePair { frame, reference }
-        .photometric_gain(&CancelToken::never())
+        .photometric_gain(&mut Vec::new(), &CancelToken::never())
         .unwrap()
 }
 
@@ -1082,9 +1088,12 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
                 .as_ref()
                 .expect("a frame of no quality on disk");
             assert_eq!(samples.len(), slots.count());
+            let mut expected = Vec::new();
             for (slot, stored) in samples.iter().enumerate() {
-                let expected = StratifiedSamples::new(dimensions.size(), mosaic, slot)
-                    .gather(frame.channels[slots.channel(slot)].chunk(0..size.pixel_count()));
+                StratifiedSamples::new(dimensions.size(), mosaic, slot).gather(
+                    frame.channels[slots.channel(slot)].chunk(0..size.pixel_count()),
+                    &mut expected,
+                );
                 assert_eq!(stored.chunk(0..stored.samples()), expected, "slot {slot}");
             }
         }

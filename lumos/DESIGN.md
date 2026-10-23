@@ -94,7 +94,14 @@
 - **A tier hands back the buffers it writes.** `StorageTier::store` takes a frame's buffers by
   value and returns them on the spilled tier, so a warp worker refills the set in its slot; the
   resident tier moves them into the frame. Refused: a pool of warp sets left through an unsafe
-  `into_inner` on the resident tier.
+  `into_inner` on the resident tier; the drizzler keeping a frame's returned output sums for the
+  next frame, which holds C + 2W output planes through the next frame's decode and statistics,
+  past what the plan charges, to save their page faults, a small share of a frame's scatter (the
+  trade the cosmic-ray detector refuses).
+- **A parallel job's scratch is one set a worker, from `map_init`.** The MRS tiles and the
+  normalization fits refill one set a worker for each call, which their prices already charged.
+  Refused: a pool owner for the MRS tile scratch across calls, as no type spans the calls of one
+  light without a pool threaded through `FrameStats` and the detector.
 - **A light the decode cache keeps parks where it lies.** On the spilled tier, a linear light's
   decode returns the cache's maps beside its image, and parking takes them, the reference's
   too, rather than write the same bytes to the scratch. A mosaic changes in its preparation, and

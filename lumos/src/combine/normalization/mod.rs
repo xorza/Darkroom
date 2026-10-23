@@ -17,6 +17,7 @@
 //! see [`FrameNorm::measure`].
 
 pub(crate) mod common_domain;
+mod fit_scratch;
 mod norm_fit;
 mod per_channel_norms;
 pub(crate) mod photometric_gain;

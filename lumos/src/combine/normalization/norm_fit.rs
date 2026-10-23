@@ -5,12 +5,13 @@ use rayon::prelude::*;
 
 use crate::combine::error::StackError;
 use crate::combine::normalization::common_domain::{ChannelCoverage, CommonDomain};
+use crate::combine::normalization::fit_scratch::FitScratch;
 use crate::combine::normalization::per_channel_norms::{PerChannelNorms, SlotEstimate};
 use crate::combine::normalization::photometric_gain::{
     MAD_SIGMA_VARIANCE, MEDIAN_ERROR, PairSide, SamplePair,
 };
 use crate::combine::normalization::slot_pixels::SlotPixels;
-use crate::combine::normalization::slot_planes::{PlaneMeasurement, PlaneSampling, SlotPlanes};
+use crate::combine::normalization::slot_planes::{PlaneSampling, SlotPlanes};
 use crate::combine::normalization::{FrameNorm, Normalization, SlotNorm};
 use crate::frame::frame_stats::SlotSpread;
 use crate::frame_store::stored_frame::StoredFrame;
@@ -140,12 +141,18 @@ impl NormFit<'_> {
         let slot_count = planes.slots.count();
         let fitted = (0..frames.len() * slot_count)
             .into_par_iter()
-            .map_init(RadixMedian::default, |median, pair_idx| {
+            .map_init(FitScratch::default, |scratch, pair_idx| {
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;
                 if frame_idx == reference {
                     return Ok(Some(SlotEstimate::EXACT_IDENTITY));
                 }
+                let FitScratch {
+                    median,
+                    frame: ours,
+                    reference: theirs,
+                    work,
+                } = scratch;
                 let pair = [&frames[frame_idx], &frames[reference]];
                 let coverage = ChannelCoverage {
                     frames: &pair,
@@ -175,14 +182,13 @@ impl NormFit<'_> {
                 );
                 match self.normalization {
                     Fitted::Global => {
-                        let [ours, theirs] = [frame_idx, reference]
-                            .map(|idx| sampling.samples(planes.values(idx, slot), cancel));
-                        let (ours, theirs) = (ours?, theirs?);
+                        sampling.samples(planes.values(frame_idx, slot), ours, cancel)?;
+                        sampling.samples(planes.values(reference, slot), theirs, cancel)?;
                         let pair = SamplePair {
-                            frame: PairSide::new(&ours, frame_variance, cancel)?,
-                            reference: PairSide::new(&theirs, reference_variance, cancel)?,
+                            frame: PairSide::new(ours, frame_variance, work, cancel)?,
+                            reference: PairSide::new(theirs, reference_variance, work, cancel)?,
                         };
-                        let paired = pair.photometric_gain(cancel)?;
+                        let paired = pair.photometric_gain(work, cancel)?;
                         Ok(Some(SlotEstimate {
                             norm: SlotNorm {
                                 gain: paired.gain,
@@ -346,63 +352,69 @@ impl NormFit<'_> {
             .iter()
             .map(|pixels| pixels.idxs(cancel))
             .collect::<Result<ArrayVec<_, 3>, StackError>>()?;
-        let measure = |frame: usize, slot: usize, median: &mut RadixMedian| {
-            if let (SlotPixels::Everywhere(_), Some(samples)) =
-                (&pixels[slot], &frames[frame].samples)
-            {
-                let samples = &samples[slot];
-                debug_assert_eq!(samples.samples(), idxs[slot].len());
-                return Ok(PlaneMeasurement {
-                    median: None,
-                    samples: samples.chunk(0..samples.samples()).to_vec(),
-                });
-            }
-            PlaneSampling {
-                domain: pixels[slot].shared(),
-                idxs: &idxs[slot],
-            }
-            .measure(planes.values(frame, slot), median, cancel)
+        let sampled = SlotSamples {
+            planes,
+            pixels,
+            idxs: &idxs,
         };
         let reference_slots = (0..slot_count)
             .into_par_iter()
             .map(|slot| {
-                let frame = &frames[reference];
-                let measured = measure(reference, slot, &mut RadixMedian::default())?;
+                let mut scratch = FitScratch::default();
+                let median = sampled.median(reference, slot, &mut scratch.median)?;
+                let samples = if let Some(stored) = sampled.stored(reference, slot) {
+                    stored.to_vec()
+                } else {
+                    sampled.gather(reference, slot, &mut scratch.reference)?;
+                    scratch.reference
+                };
                 let side = PairSide::new(
-                    &measured.samples,
+                    &samples,
                     planes.noise_variance(reference, slot, &idxs[slot])?,
+                    &mut scratch.work,
                     cancel,
                 )?;
                 Ok(ReferenceSlot {
-                    median: measured.median.unwrap_or(frame.source_stats.medians[slot]),
+                    median,
                     stats: side.stats,
                     noise_variance: side.noise_variance,
-                    samples: measured.samples,
+                    samples,
                 })
             })
             .collect::<Result<Vec<_>, StackError>>()?;
 
         let fitted = (0..frames.len() * slot_count)
             .into_par_iter()
-            .map_init(RadixMedian::default, |median, pair_idx| {
+            .map_init(FitScratch::default, |scratch, pair_idx| {
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;
                 if frame_idx == reference {
                     return Ok(SlotNorm::IDENTITY);
                 }
-                let frame = &frames[frame_idx];
-                let measured = measure(frame_idx, slot, median)?;
-                let median = measured.median.unwrap_or(frame.source_stats.medians[slot]);
+                let FitScratch {
+                    median,
+                    frame,
+                    work,
+                    ..
+                } = scratch;
+                let median = sampled.median(frame_idx, slot, median)?;
+                let samples = if let Some(stored) = sampled.stored(frame_idx, slot) {
+                    stored
+                } else {
+                    sampled.gather(frame_idx, slot, frame)?;
+                    frame
+                };
                 let reference = &reference_slots[slot];
                 let pair = SamplePair {
                     frame: PairSide::new(
-                        &measured.samples,
+                        samples,
                         planes.noise_variance(frame_idx, slot, &idxs[slot])?,
+                        work,
                         cancel,
                     )?,
                     reference: reference.side(),
                 };
-                let gain = pair.photometric_gain(cancel)?.gain;
+                let gain = pair.photometric_gain(work, cancel)?.gain;
                 Ok(SlotNorm {
                     gain,
                     offset: reference.median - median * gain,
@@ -435,6 +447,55 @@ impl ReferenceSlot {
             samples: self.samples.as_slice(),
             stats: self.stats,
             noise_variance: self.noise_variance,
+        }
+    }
+}
+
+/// Where the global fit reads a frame's slot: its own samples when it stores them and every frame
+/// covers every pixel, its values at the slot's `idxs` otherwise.
+#[derive(Debug, Clone, Copy)]
+struct SlotSamples<'a> {
+    planes: SlotPlanes<'a>,
+    pixels: &'a [SlotPixels<'a>],
+    idxs: &'a [Vec<usize>],
+}
+
+impl<'a> SlotSamples<'a> {
+    /// Frame `frame`'s median of `slot`: over the pixels the frames share, or the source's.
+    fn median(
+        &self,
+        frame: usize,
+        slot: usize,
+        median: &mut RadixMedian,
+    ) -> Result<f32, StackError> {
+        let shared = self.sampling(slot).median(
+            self.planes.values(frame, slot),
+            median,
+            self.planes.cancel,
+        )?;
+        Ok(shared.unwrap_or(self.planes.frames[frame].source_stats.medians[slot]))
+    }
+
+    /// Frame `frame`'s stored samples of `slot`, when it stores them over every pixel.
+    fn stored(&self, frame: usize, slot: usize) -> Option<&'a [f32]> {
+        let SlotPixels::Everywhere(_) = &self.pixels[slot] else {
+            return None;
+        };
+        let samples = &self.planes.frames[frame].samples.as_ref()?[slot];
+        debug_assert_eq!(samples.samples(), self.idxs[slot].len());
+        Some(samples.chunk(0..samples.samples()))
+    }
+
+    /// Frame `frame`'s values of `slot` at its indices, into `samples`.
+    fn gather(&self, frame: usize, slot: usize, samples: &mut Vec<f32>) -> Result<(), StackError> {
+        self.sampling(slot)
+            .samples(self.planes.values(frame, slot), samples, self.planes.cancel)
+    }
+
+    fn sampling(&self, slot: usize) -> PlaneSampling<'a> {
+        PlaneSampling {
+            domain: self.pixels[slot].shared(),
+            idxs: &self.idxs[slot],
         }
     }
 }

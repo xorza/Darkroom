@@ -132,9 +132,9 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
 ///
 /// MRS over 1024²: 4 × 4 tiles of 256², so 1 048 576 coefficients of 32 bytes and a bin byte,
 /// 34 603 008. The tiles start at 0, 256, 512 and 768 on each axis and reach 32 past their core,
-/// clipped to the frame: regions 288, 320, 320 and 288 wide. All sixteen in work on 16 threads
-/// hold (288 + 320 + 320 + 288)² = 1216² pixels at 28 bytes, 41 402 368; on 4, the four largest,
-/// 4 × 320² × 28 = 11 468 800. Each worker smooths through a row of the widest region, 320 × 4
+/// clipped to the frame: regions 288, 320, 320 and 288 wide. A worker's tile scratch grows to the
+/// largest region it takes, so each of the workers that take a tile is charged the largest, 320²
+/// pixels at 28 bytes: 16 × 2 867 200 = 45 875 200 on 16 threads, 4 × 2 867 200 = 11 468 800 on 4. Each worker smooths through a row of the widest region, 320 × 4
 /// bytes: 20 480 on 16, 5120 on 4. Each tile's place in the list, its share of the four columns and
 /// its count are 64 + 64 + 8 bytes, 2176 for sixteen. A 192² frame is one tile, its region the
 /// frame: 36 864 × 33 + 36 864 × 28 + 16 × 192 × 4 + 136.
@@ -143,7 +143,7 @@ fn working_sets_are_what_the_buffers_hold() {
     let wide = Size2us::new(1024, 1024);
     assert_eq!(
         mrs_noise::heap_bytes(wide, 16),
-        34_603_008 + 41_402_368 + 20_480 + 2176
+        34_603_008 + 45_875_200 + 20_480 + 2176
     );
     assert_eq!(
         mrs_noise::heap_bytes(wide, 4),

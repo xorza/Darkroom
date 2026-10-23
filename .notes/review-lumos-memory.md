@@ -81,12 +81,13 @@ root causes.
   break-even switch. Only the duplicated builder is merged (batch 10).
 - **A separable product weight, or one mono accumulator, in the ML blend.** Both change
   rounding. The band ring in batch 9 keeps the same sums in the same order.
+- **The drizzler keeping the output sums its tier returns, for the next frame.** It holds
+  C + 2W output planes through the next frame's decode and statistics, which no stage charges,
+  to save their page faults; `tests/memory_budget` measured a spilled drizzle past its budget.
+  DESIGN.md refuses the same trade for the cosmic-ray detector.
 - **Pricing the one-pass warp scratch beside `prepared.kept` only.** The worker keeps its
   `FlagScratch` from one light to the next, so the scratch is also held during the next decode.
   The current sum is correct.
-- **A pool owner for the MRS tile scratch across calls.** No type spans the 2–4 calls for each
-  light without a pool threaded through `FrameStats` and the detector. A scratch for each
-  worker in each call removes nearly all of the allocations.
 - **Reusing the reference's KdTree and triangles across registrations.** This saves CPU, not
   memory, and is out of scope.
 
@@ -122,26 +123,6 @@ Files: `drizzle/{accumulator/mod.rs, drizzle_run.rs, input_map.rs}`, `concurrenc
 `combine/rejection/{scratch_buffers.rs, sorted_samples.rs}`, `image/{pixel_flags.rs,
 cfa/cfa_image.rs}`, `io/{raw/unpacked_raw.rs, fits/decode/mod.rs}`, `pipeline/mosaic_preparation.rs`.
 
-- [ ] `drizzle/accumulator/mod.rs:121-145` with `drizzle_run.rs:228-238` — `drizzle` builds a
-  new `OutputSums` for each frame, and on the spill tier the store writes it and frees it. That
-  is C + 2W output planes for each frame (1.9 GB at 2× of 24 MP RGB) faulted in again each time.
-  The warp recycles its output for this reason (`FrameRegistrar::park`). Target: the `Drizzler`
-  keeps the `OutputSums` that the store returns (`FrameBuffers`) and zeroes it in parallel before
-  the next frame. The spilled plan already charges one frame in flight.
-- [ ] `combine/frame_cache/loader/mod.rs:155` — the decode map's workers carry nothing, and it
-  passes `vec![(); width]` as their slots. Target: a width argument for a map whose workers
-  carry no state.
-- [ ] `noise/mrs_noise.rs:288-335` — `tile_coefficients` allocates `pixels`, `smooth`, `next`
-  and two f64 vectors for each tile (about 2.8 MB each, 80–320 allocations for each light).
-  `heap_bytes` (`:183-197`) already prices one set for each worker. Target: one tile scratch
-  for each worker in each call, from `for_each_init`, refilled for each tile.
-- [ ] `combine/normalization/norm_fit.rs:357`, `photometric_gain.rs:224,293,343` — each
-  (frame, slot) job copies a stored sample plane that `PairSide` only borrows, and allocates the
-  `MedianMad` copy, `ratios` and `residuals` (the last one in each fit pass), 256 KB each.
-  Target: `PlaneMeasurement.samples` borrows when the frame stores its samples, and one buffer
-  set for each worker from `map_init`, beside `RadixMedian`, serves the rest.
-- [ ] `frame_store/stratified_samples.rs:55-57` — `gather` returns a new `Vec` for each slot
-  of each stored frame. Target: gather into a buffer the writer reuses.
 - [ ] `drizzle/accumulator/mod.rs:206-226`, `drizzle/input_map.rs:108,131-137` — `bands`,
   the affine outline and the SIP outline are collected for each frame, and the SIP outline is
   used only for its row extent (`band_scan.rs:112`). Target: `bands` kept on `Drizzler` like
