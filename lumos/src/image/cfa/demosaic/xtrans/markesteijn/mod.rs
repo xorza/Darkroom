@@ -94,10 +94,14 @@ impl MarkesteijnPasses {
     }
 }
 
-/// What a demosaic of a frame of `size` holds on `workers` — see [`tiled::footprint`] — charged
-/// at eight directions, the most.
-pub(crate) const fn footprint(size: Size2us, workers: usize) -> Footprint {
-    tiled::footprint(size, Tile::bytes(8), workers)
+/// What a demosaic of a frame of `size` in `passes` holds on `workers` — see
+/// [`tiled::footprint`] — its tiles holding the directions the passes take.
+pub(crate) const fn footprint(
+    size: Size2us,
+    passes: MarkesteijnPasses,
+    workers: usize,
+) -> Footprint {
+    tiled::footprint(size, Tile::bytes(passes.directions()), workers)
 }
 
 /// Demosaic an X-Trans frame with `passes` passes, its colors balanced by its gains.
@@ -138,10 +142,9 @@ pub(crate) mod internals {
         }
     }
 
-    /// The tile buffers of `workers` — see [`tiled::workspace_bytes`] — charged at eight
-    /// directions, the most.
-    pub(crate) fn workspace_bytes(workers: usize) -> usize {
-        tiled::workspace_bytes(Tile::bytes(8), workers)
+    /// The tile buffers of `workers` in `passes` — see [`tiled::workspace_bytes`].
+    pub(crate) fn workspace_bytes(passes: MarkesteijnPasses, workers: usize) -> usize {
+        tiled::workspace_bytes(Tile::bytes(passes.directions()), workers)
     }
 }
 

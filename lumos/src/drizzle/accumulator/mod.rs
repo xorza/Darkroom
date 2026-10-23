@@ -7,7 +7,6 @@ mod input_map;
 pub(crate) mod kernel_plan;
 mod output_band;
 
-use std::mem;
 use std::slice::ChunksMut;
 
 use arrayvec::ArrayVec;
@@ -31,7 +30,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::math::size2us::Size2us;
-use crate::recycle;
+use crate::recycle::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
@@ -64,7 +63,7 @@ pub(crate) struct Drizzler {
     /// The input pixels each band scans, recomputed per frame.
     scans: Vec<BandScan>,
     /// The allocation of the bands each frame is scattered by, empty between frames.
-    bands: Vec<OutputBand<'static>>,
+    bands: Recycled<OutputBand<'static>>,
     radial: ScratchPool<RadialScratch>,
     lattice: ScratchPool<CornerLattice>,
 }
@@ -112,7 +111,7 @@ impl Drizzler {
             grid,
             plan,
             scans: Vec::new(),
-            bands: Vec::new(),
+            bands: Recycled::default(),
             radial: ScratchPool::default(),
             lattice: ScratchPool::new(input_dims.width()),
         }
@@ -194,13 +193,15 @@ impl Drizzler {
                 source.band_scan(&(start..(start + band_rows).min(height)), width, reach)
             }));
 
-        let mut bands: Vec<OutputBand<'_>> = recycle::emptied(mem::take(&mut self.bands));
         let Self {
             scans,
             radial,
             lattice,
+            bands: kept_bands,
             ..
-        } = &*self;
+        } = self;
+        let (scans, radial, lattice) = (&*scans, &*radial, &*lattice);
+        let mut bands: Vec<OutputBand<'_>> = kept_bands.take();
         let span_len = width * band_rows;
         let mut data = band_chunks(&mut sums.data, span_len);
         let mut weight = band_chunks(&mut sums.weight, span_len);
@@ -232,7 +233,7 @@ impl Drizzler {
             .par_drain(..)
             .map(|mut band| band.distribute(&source, plan))
             .sum::<usize>();
-        self.bands = recycle::emptied(bands);
+        kept_bands.put(bands);
         Ok(unconverged)
     }
 

@@ -98,7 +98,9 @@ impl Demosaic {
                 Footprint::kept(dimensions.pixel_count().saturating_mul(size_of::<f32>()))
             }
             Self::Rcd(_) => rcd::footprint(dimensions.size(), workers),
-            Self::Markesteijn { .. } => markesteijn::footprint(dimensions.size(), workers),
+            Self::Markesteijn { passes, .. } => {
+                markesteijn::footprint(dimensions.size(), passes, workers)
+            }
         }
     }
 
@@ -145,7 +147,7 @@ mod memory_tests {
             ),
             (
                 CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
-                markesteijn::internals::workspace_bytes(4),
+                markesteijn::internals::workspace_bytes(MarkesteijnPasses::One, 4),
             ),
         ] {
             for dimensions in [even, odd] {
@@ -160,5 +162,15 @@ mod memory_tests {
                 );
             }
         }
+        // Three passes hold eight directions to one pass's four.
+        let xtrans = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
+        let [one, three] = [MarkesteijnPasses::One, MarkesteijnPasses::Three]
+            .map(|passes| Demosaic::of(xtrans, passes).footprint(even, 4).peak);
+        assert_eq!(
+            three - one,
+            markesteijn::internals::workspace_bytes(MarkesteijnPasses::Three, 4)
+                - markesteijn::internals::workspace_bytes(MarkesteijnPasses::One, 4)
+        );
+        assert!(three > one, "the directions are charged");
     }
 }

@@ -140,3 +140,10 @@
   grayscale channel and computes `Rgb::intensity` of the three at a pixel, bit for bit the plane
   it replaces. Refused: an intensity plane for each enhancement, a copy of a mono channel or a
   new RGB plane of the frame.
+- **A spilled chunk is copied into one sample buffer and one flag buffer.** Every frame's planes
+  of a chunk take consecutive slots of `stride` pixels, so a `ChunkCopy` is two allocations, not
+  up to ten a frame, and the readers split them into the runs their frames own. The spilled
+  light combine measured 5 % faster. Refused: a `Vec` per plane.
+- **A buffer of borrows outlives what it borrows through `Recycled`.** `take` lends its
+  allocation for the elements of one chunk or frame, and `put` keeps it emptied, so a loop over
+  chunks allocates it once. Refused: `recycle::emptied(mem::take(..))` written out at each site.

@@ -1,6 +1,7 @@
 //! [`FrameChunk`]: one frame over one chunk of rows, as the combine reads it.
 
 use std::convert::Infallible;
+use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
@@ -45,75 +46,115 @@ const READERS: usize = 4;
 /// chunk: the bytes a spilled combine reads, held where its budget counts them rather than in the
 /// page cache, and read front to back once per plane, so the cache needs no more than its
 /// readahead.
+///
+/// One buffer of samples and one of flag bytes, each plane `stride` long: a frame's channels and
+/// then its quality planes in [`FrameQuality::present`] order take consecutive planes of the
+/// samples, frame after frame, and each frame with flags a plane of the flag bytes.
 #[derive(Debug)]
 pub(crate) struct ChunkCopy {
-    frames: Vec<FrameBuffers>,
+    samples: Vec<f32>,
+    flags: Vec<u8>,
+    frames: Vec<FramePlanes>,
+    /// The pixels a plane has room for: the largest chunk.
+    stride: usize,
+    /// The pixels the last [`Self::fill`] copied into each plane.
+    len: usize,
 }
 
-/// One frame's buffers: a channel each, the quality planes in [`FrameQuality::present`] order, and
-/// the flags.
-#[derive(Debug)]
-struct FrameBuffers {
-    channels: ArrayVec<Vec<f32>, 3>,
-    quality: Vec<Vec<f32>>,
-    flags: Option<Vec<u8>>,
+/// Where one frame's planes lie in a [`ChunkCopy`]: its planes of samples, and its plane of flag
+/// bytes when it carries flags.
+#[derive(Debug, Clone)]
+struct FramePlanes {
+    samples: Range<usize>,
+    flags: Option<usize>,
 }
 
 impl ChunkCopy {
     /// Buffers for `frames`' planes, each sized for a chunk of `pixels` and filled by
     /// [`Self::fill`].
     pub(crate) fn new(frames: &[StoredFrame], pixels: usize) -> Self {
+        let (mut sample_planes, mut flag_planes) = (0, 0);
+        let frames: Vec<FramePlanes> = frames
+            .iter()
+            .map(|frame| {
+                let start = sample_planes;
+                sample_planes += frame.channels.len() + frame.quality.present().count();
+                let flags = frame.flags.as_ref().map(|_| {
+                    flag_planes += 1;
+                    flag_planes - 1
+                });
+                FramePlanes {
+                    samples: start..sample_planes,
+                    flags,
+                }
+            })
+            .collect();
         Self {
-            frames: frames
-                .iter()
-                .map(|frame| FrameBuffers {
-                    channels: frame
-                        .channels
-                        .iter()
-                        .map(|_| Vec::with_capacity(pixels))
-                        .collect(),
-                    quality: frame
-                        .quality
-                        .present()
-                        .map(|_| Vec::with_capacity(pixels))
-                        .collect(),
-                    flags: frame.flags.as_ref().map(|_| Vec::with_capacity(pixels)),
-                })
-                .collect(),
+            samples: vec![0.0; sample_planes * pixels],
+            flags: vec![0; flag_planes * pixels],
+            frames,
+            stride: pixels,
+            len: 0,
         }
     }
 
     /// Copy `frames`' pixels `range` into the buffers, plane by plane, on [`READERS`] threads of
-    /// its own, each taking a run of the frames.
+    /// its own, each taking a run of the frames and the disjoint run of planes they own.
     pub(crate) fn fill(&mut self, frames: &[StoredFrame], range: Range<usize>) {
         debug_assert_eq!(frames.len(), self.frames.len());
+        debug_assert!(range.len() <= self.stride, "a chunk fits its planes");
+        self.len = range.len();
+        let stride = self.stride;
         let per_reader = frames.len().div_ceil(READERS).max(1);
+        let (mut samples, mut flags) = (self.samples.as_mut_slice(), self.flags.as_mut_slice());
         thread::scope(|scope| {
-            for (frames, buffers) in frames
+            for (frames, planes) in frames
                 .chunks(per_reader)
-                .zip(self.frames.chunks_mut(per_reader))
+                .zip(self.frames.chunks(per_reader))
             {
+                let sample_planes = planes
+                    .iter()
+                    .map(|planes| planes.samples.len())
+                    .sum::<usize>();
+                let flag_planes = planes
+                    .iter()
+                    .filter(|planes| planes.flags.is_some())
+                    .count();
+                let (own_samples, rest) =
+                    mem::take(&mut samples).split_at_mut(sample_planes * stride);
+                samples = rest;
+                let (own_flags, rest) = mem::take(&mut flags).split_at_mut(flag_planes * stride);
+                flags = rest;
                 let range = range.clone();
                 scope.spawn("lumos-frame-reader", move || {
-                    Self::fill_frames(frames, buffers, range);
+                    Self::fill_frames(frames, own_samples, own_flags, stride, range);
                 });
             }
         });
     }
 
-    fn fill_frames(frames: &[StoredFrame], buffers: &mut [FrameBuffers], range: Range<usize>) {
-        for (frame, buffers) in frames.iter().zip(buffers) {
-            for (plane, buffer) in frame.channels.iter().zip(&mut buffers.channels) {
-                buffer.clear();
-                buffer.extend_from_slice(plane.chunk(range.clone()));
+    /// Copy each of `frames`' planes over `range` into the next plane of `samples` or `flags`,
+    /// `stride` apart.
+    fn fill_frames(
+        frames: &[StoredFrame],
+        samples: &mut [f32],
+        flags: &mut [u8],
+        stride: usize,
+        range: Range<usize>,
+    ) {
+        let mut sample_planes = samples.chunks_mut(stride);
+        let mut flag_planes = flags.chunks_mut(stride);
+        for frame in frames {
+            let quality = frame.quality.present().map(|(_, plane)| plane);
+            for plane in frame.channels.iter().chain(quality) {
+                let buffer = sample_planes
+                    .next()
+                    .expect("a plane for every sample plane");
+                buffer[..range.len()].copy_from_slice(plane.chunk(range.clone()));
             }
-            for ((_, plane), buffer) in frame.quality.present().zip(&mut buffers.quality) {
-                buffer.clear();
-                buffer.extend_from_slice(plane.chunk(range.clone()));
-            }
-            if let (Some(plane), Some(buffer)) = (&frame.flags, &mut buffers.flags) {
-                buffer.clear();
-                buffer.extend_from_slice(plane.chunk(range.clone()));
+            if let Some(plane) = &frame.flags {
+                let buffer = flag_planes.next().expect("a plane for every flag plane");
+                buffer[..range.len()].copy_from_slice(plane.chunk(range.clone()));
             }
         }
     }
@@ -121,23 +162,31 @@ impl ChunkCopy {
     /// Into `out`, cleared first, each frame's chunk as the last [`Self::fill`] left it, shaped
     /// as `frames` are.
     pub(crate) fn views_into<'a>(&'a self, frames: &[StoredFrame], out: &mut Vec<FrameChunk<'a>>) {
+        let Self {
+            samples,
+            flags,
+            stride,
+            len,
+            ..
+        } = self;
+        let plane = |idx: usize| &samples[idx * stride..][..*len];
         out.clear();
-        out.extend(frames.iter().zip(&self.frames).map(|(frame, buffers)| {
-            let mut quality = buffers.quality.iter();
+        out.extend(frames.iter().zip(&self.frames).map(|(frame, planes)| {
+            let channels = frame.channels.len();
+            let mut quality = planes.samples.start + channels..planes.samples.end;
             FrameChunk {
-                channels: buffers.channels.iter().map(Vec::as_slice).collect(),
+                channels: (planes.samples.start..planes.samples.start + channels)
+                    .map(plane)
+                    .collect(),
                 quality: frame
                     .quality
                     .try_map(|_, _| {
-                        Ok::<_, Infallible>(
-                            quality
-                                .next()
-                                .expect("a buffer for every quality plane")
-                                .as_slice(),
-                        )
+                        Ok::<_, Infallible>(plane(
+                            quality.next().expect("a plane for every quality plane"),
+                        ))
                     })
                     .unwrap_or_else(|never| match never {}),
-                flags: buffers.flags.as_deref(),
+                flags: planes.flags.map(|idx| &flags[idx * stride..][..*len]),
             }
         }));
     }
@@ -162,7 +211,7 @@ mod tests {
 
     /// A copied chunk reads what the planes hold there, plane for plane, for a frame with warp
     /// planes and flags and for a drizzled one with drops per channel, spilled and resident alike:
-    /// six pixels of three channels, the chunk pixels 2 to 5.
+    /// six pixels of three channels, the chunk pixels 2 to 5, then the last pixel alone.
     #[test]
     fn a_copied_chunk_reads_as_the_planes_do() {
         let dir = TempDir::new("frame_chunk_copy");
@@ -230,6 +279,17 @@ mod tests {
             };
             assert_eq!(planes(&copied), planes(&borrowed));
             assert_eq!(copied.channels[1], [12.0, 13.0, 14.0]);
+        }
+
+        // The last chunk is shorter than the planes' room, one pixel: each plane reads it alone.
+        copy.fill(&frames, 5..6);
+        let mut last = Vec::new();
+        copy.views_into(&frames, &mut last);
+        for (frame, copied) in frames.iter().zip(&last) {
+            let borrowed = FrameChunk::borrowed(frame, 5..6);
+            assert_eq!(copied.channels, borrowed.channels);
+            assert_eq!(copied.flags, borrowed.flags);
+            assert_eq!(copied.channels[2], [25.0]);
         }
     }
 }

@@ -1,6 +1,8 @@
-//! [`emptied`]: one `Vec`'s allocation for elements that borrow something else.
+//! [`Recycled`]: one `Vec`'s allocation for elements that borrow something else.
 
 use std::mem::ManuallyDrop;
+
+pub(crate) mod recycled;
 
 /// `vec`'s allocation with no elements, as a `Vec<U>`: how a buffer of borrows outlives what it
 /// borrowed, so a loop over chunks allocates it once rather than once a chunk.
@@ -9,7 +11,7 @@ use std::mem::ManuallyDrop;
 /// not zero, and one alignment. That is the layout the allocation was made with, so it is the
 /// layout `U`'s `Vec` frees it with, and with no element in it nothing of `U` is read before it is
 /// written. The elements are dropped first, and the old `Vec` is kept from freeing the allocation.
-pub(crate) fn emptied<T, U>(vec: Vec<T>) -> Vec<U> {
+fn emptied<T, U>(vec: Vec<T>) -> Vec<U> {
     const {
         assert!(
             size_of::<T>() == size_of::<U>()

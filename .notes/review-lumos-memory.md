@@ -86,6 +86,11 @@ root causes.
   C + 2W output planes through the next frame's decode and statistics, which no stage charges,
   to save their page faults; `tests/memory_budget` measured a spilled drizzle past its budget.
   DESIGN.md refuses the same trade for the cosmic-ray detector.
+- **One flat buffer for an RCD tile's 33 planes.** A tile is made once for each worker of a
+  frame, not for each tile, and its kernels borrow its planes apart through `get_disjoint_mut`; a
+  flat buffer trades that for `split_at_mut` chains in a vector kernel, to save about 33
+  allocations a worker beside a demosaic of the whole frame. The X-Trans tile is priced by its
+  passes' directions instead of the most.
 - **Pricing the one-pass warp scratch beside `prepared.kept` only.** The worker keeps its
   `FlagScratch` from one light to the next, so the scratch is also held during the next decode.
   The current sum is correct.
@@ -143,16 +148,6 @@ Once for each master, but each holds hundreds of MB. Files: `io/raster.rs`,
 
 Small items, each local. Files as named.
 
-- [ ] `combine/frame_read/frame_chunk.rs:48-84` — `ChunkCopy` is `Vec<FrameBuffers>` of up to
-  10 `Vec`s each, two copies (`core.rs:171-172`). Target: one `Vec<f32>` and one `Vec<u8>` for
-  each `ChunkCopy`, with plane offsets computed in `new`. Readers fill disjoint `split_at_mut`
-  runs.
-- [ ] `combine/frame_cache/mod.rs:371-465`, `core.rs:119-184` — five near-identical blocks
-  attach output row slices, and six `recycle::emptied(mem::take(..))` sites repeat one pattern.
-  Target: one `ChunkViews` owner of the recycled vectors, with `begin` and `end`.
-- [ ] `image/cfa/demosaic/bayer/rcd/tile.rs:132-155` — each RCD tile is about 33 `Vec`s.
-  Target: one flat buffer with constant plane offsets. In `xtrans/markesteijn/mod.rs:100,144`,
-  price the tile by `passes.directions()`.
 - [ ] `calibration/defect_map/mod.rs:276` with `image/cfa/cfa_image.rs:246-248` — the
   `NO_DATA` mask is built four times for each light. Target: one predicate
   (`NO_DATA && !REPAIRED`) for `nulls`, and one mask that `calibrate` builds and shares.
