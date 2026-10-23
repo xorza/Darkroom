@@ -15,7 +15,7 @@ use common::fs;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::{ChecksumStatus, HduKind, StreamReader};
-use fits_well::table::{Builder as TableBuilder, ColumnData, WriteColumn};
+use fits_well::table::{Builder as TableBuilder, ColumnData, Table, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
 use crate::calibration::calibration_component::CalibrationComponent;
@@ -255,21 +255,9 @@ impl BundleReader<'_> {
         };
         let table = self.reader.read_table(idx)?;
         let row_count = table.schema().nrows;
-        let col = |name: &'static str| {
-            table
-                .column_by_name(name)
-                .and_then(|col| col.raw())
-                .map_err(|_| DefectTableError::Col { col: name })
-        };
-        let ColumnData::Bytes(kinds) = col("KIND")? else {
-            return Err(DefectTableError::Col { col: "KIND" }.into());
-        };
-        let ColumnData::I64(idxs) = col("INDEX")? else {
-            return Err(DefectTableError::Col { col: "INDEX" }.into());
-        };
-        let ColumnData::F32(excess) = col("EXCESS")? else {
-            return Err(DefectTableError::Col { col: "EXCESS" }.into());
-        };
+        let kinds: Vec<u8> = defect_column(&table, "KIND")?;
+        let idxs: Vec<i64> = defect_column(&table, "INDEX")?;
+        let excess: Vec<f32> = defect_column(&table, "EXCESS")?;
         if kinds.len() != row_count || idxs.len() != row_count || excess.len() != row_count {
             return Err(DefectTableError::ColLen.into());
         }
@@ -296,6 +284,18 @@ impl BundleReader<'_> {
     }
 }
 
+/// The values of the defect table's column `name`, refused unless it holds `T`.
+fn defect_column<T>(table: &Table, name: &'static str) -> Result<Vec<T>, DefectTableError>
+where
+    Vec<T>: TryFrom<ColumnData>,
+{
+    let values = table.column(name).and_then(|col| col.raw());
+    values
+        .ok()
+        .and_then(|values| Vec::try_from(values).ok())
+        .ok_or(DefectTableError::Col { col: name })
+}
+
 #[derive(Debug)]
 struct EncodedDefectMap {
     table: TableBuilder,
@@ -317,10 +317,10 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
         .chain(cold)
         .map(|&idx| i64::try_from(idx).map_err(|_| BundleError::DefectIdxOutOfRange { idx }))
         .collect::<Result<Vec<_>, _>>()?;
-    let table = TableBuilder::explicit(
+    let table = TableBuilder::with_columns(
         kinds.len(),
         [
-            WriteColumn::scalar("KIND", ColumnData::Bytes(kinds)),
+            WriteColumn::scalar("KIND", ColumnData::U8(kinds)),
             WriteColumn::scalar("INDEX", ColumnData::I64(idxs)),
             WriteColumn::scalar("EXCESS", ColumnData::F32(excess)),
         ],
