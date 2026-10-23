@@ -97,7 +97,9 @@ impl StarField {
         let mut writer = FitsWriter::new(fs::create(path).unwrap());
         writer
             .write_image(
-                &FitsImage::new([self.side, self.side], self.render(idx)).unwrap(),
+                FitsImage::new([self.side, self.side], self.render(idx))
+                    .unwrap()
+                    .view(),
                 Some(&header),
             )
             .unwrap();

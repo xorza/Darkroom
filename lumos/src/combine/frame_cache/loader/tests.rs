@@ -341,7 +341,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
                 let path = dir.join(format!("light_{idx}.{format}"));
                 let pixels = vec![0.25 + 0.25 * idx as f32; 12];
                 if format == "fits" {
-                    write_fits(&path, &FitsImage::new([4, 3], pixels).unwrap(), None);
+                    write_fits(&path, FitsImage::new([4, 3], pixels).unwrap().view(), None);
                 } else {
                     writer::raster(&LinearImage::from_interleaved(dims, pixels), &path).unwrap();
                 }

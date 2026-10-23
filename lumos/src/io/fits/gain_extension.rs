@@ -6,7 +6,7 @@
 //! its noise model would read every pixel as undivided.
 
 use arrayvec::ArrayVec;
-use fits_well::header::Header;
+use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 use fits_well::io::Hdu;
 use imaginarium::Buffer2;
@@ -25,10 +25,10 @@ pub(super) const GAIN_EXTNAME: &str = "LUMGAIN";
 pub(super) const GAIN_FORMAT: &str = "FLATGAIN";
 pub(super) const GAIN_VERSION: i64 = 1;
 /// The keyword that states the pixels between nodes, which a reader must share.
-const STEP_KEYWORD: &str = "LUMGSTEP";
+const STEP_KEYWORD: Keyword = Keyword::new("LUMGSTEP");
 /// The keyword that states the gain's [`GainKey`], so a reader that holds that gain already reads
 /// no node. A file without it is read whole.
-const KEY_KEYWORD: &str = "LUMGSUM";
+const KEY_KEYWORD: Keyword = Keyword::new("LUMGSUM");
 
 /// A gain extension [`locate`] found: its HDU, and the key its header states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,12 +48,12 @@ pub(crate) fn encode<'a>(
     };
     let mut header = Header::new();
     header
-        .set("EXTNAME", GAIN_EXTNAME)
-        .and_then(|header| header.set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY)))
-        .and_then(|header| header.set(FORMAT_KEYWORD, GAIN_FORMAT))
-        .and_then(|header| header.set(VERSION_KEYWORD, GAIN_VERSION))
-        .and_then(|header| header.set(STEP_KEYWORD, flat_gain::STEP as i64))
-        .and_then(|header| header.set(KEY_KEYWORD, gain.key().to_string()))?;
+        .set("EXTNAME", GAIN_EXTNAME)?
+        .set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY))?
+        .set(FORMAT_KEYWORD, GAIN_FORMAT)?
+        .set(VERSION_KEYWORD, GAIN_VERSION)?
+        .set(STEP_KEYWORD, flat_gain::STEP as i64)?
+        .set(KEY_KEYWORD, gain.key().to_string())?;
     let grid = GainGrid::of(gain.size());
     Ok(Some(PlaneHdu {
         header,

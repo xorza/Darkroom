@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use common::TempDir;
 use fits_well::header::Header;
-use fits_well::image::Image;
+use fits_well::image::{Borrowed, Image, Scaling, View};
 
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_set::CalibrationSet;
@@ -99,10 +99,11 @@ impl MasterFiles {
 /// `image`'s one plane as normalized 32-bit floats.
 pub(crate) fn write_mono_f32(path: &Path, image: &LinearImage) {
     let plane = image.channel(0);
-    let shape = vec![plane.width(), plane.height()];
+    let shape = [plane.width(), plane.height()];
+    let samples = View::F32(plane.pixels());
     write_fits(
         path,
-        &Image::new(shape, plane.pixels().to_vec()).unwrap(),
+        Borrowed::new(&shape, samples, Scaling::IDENTITY).unwrap(),
         None,
     );
 }
@@ -116,7 +117,7 @@ pub(crate) fn write_mosaic_u16(path: &Path, mosaic: &CfaImage) {
     if let CfaType::Mosaic(Mosaic::Bayer(pattern)) = mosaic.cfa_type() {
         header.set("BAYERPAT", pattern.bayerpat()).unwrap();
     }
-    write_fits(path, &image, Some(&header));
+    write_fits(path, image.view(), Some(&header));
 }
 
 /// `samples` in `[0, 1]` to the 16-bit full scale, rounded.

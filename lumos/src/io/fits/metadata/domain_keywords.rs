@@ -7,7 +7,7 @@
 //! scale included, so a reload gives back the same domain and a saved master stays commensurate
 //! with the frames it was made from.
 
-use fits_well::header::Header;
+use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 
 use crate::image::image_metadata::ImageMetadata;
@@ -16,14 +16,14 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 
 /// Whether the `BSCALE` the samples carry was declared or assumed. Its presence marks a
 /// lumos-written scale; see `SampleScale` in the decoder for how a reader uses it.
-pub(crate) const SCALE_ORIGIN: &str = "LUMSORIG";
-pub(crate) const PEDESTAL: &str = "LUMPED";
-pub(crate) const PEDESTAL_LEVEL: &str = "LUMPEDLV";
+pub(crate) const SCALE_ORIGIN: Keyword = Keyword::new("LUMSORIG");
+pub(crate) const PEDESTAL: Keyword = Keyword::new("LUMPED");
+pub(crate) const PEDESTAL_LEVEL: Keyword = Keyword::new("LUMPEDLV");
 /// In the samples' own (normalized) units, so a reader takes it as it stands.
-const QUANTIZATION_SIGMA: &str = "LUMQSIG";
+const QUANTIZATION_SIGMA: Keyword = Keyword::new("LUMQSIG");
 /// That every saturated pixel is flagged in the image's flags extension. A calibrated frame has no
 /// level left to mark them by, so a reload learns it here; `DATAMAX` says it for a frame as decoded.
-const SATURATION_FLAGGED: &str = "LUMSATF";
+const SATURATION_FLAGGED: Keyword = Keyword::new("LUMSATF");
 
 const DECLARED: &str = "DECLARED";
 const ASSUMED: &str = "ASSUMED";
@@ -124,7 +124,7 @@ pub(crate) fn read_quantization_sigma(header: &Header) -> Result<Option<f32>, Fi
                 Ok(value)
             } else {
                 Err(FitsRefusal::KeywordOutOfRange {
-                    keyword: QUANTIZATION_SIGMA.to_owned(),
+                    keyword: QUANTIZATION_SIGMA.to_string(),
                 }
                 .into())
             }

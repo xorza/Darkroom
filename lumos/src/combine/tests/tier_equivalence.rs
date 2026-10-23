@@ -33,7 +33,7 @@ fn write_const_fits(path: &Path, size: Size2us, value: u16) {
     .expect("valid image");
     let mut buf = Vec::new();
     FitsWriter::new(&mut buf)
-        .write_image(&image, None)
+        .write_image(image.view(), None)
         .expect("encode fits");
     fs::write(path, &buf).expect("write fits");
 }

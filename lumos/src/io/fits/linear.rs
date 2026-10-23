@@ -31,8 +31,8 @@ pub(crate) fn hdu(
 ) -> Result<PlaneHdu<FloatPlanes<'_>>, WriteError> {
     let mut header = Header::new();
     header
-        .set(FORMAT_KEYWORD, LINEAR_FITS_FORMAT)
-        .and_then(|header| header.set(VERSION_KEYWORD, LINEAR_FITS_VERSION))?;
+        .set(FORMAT_KEYWORD, LINEAR_FITS_FORMAT)?
+        .set(VERSION_KEYWORD, LINEAR_FITS_VERSION)?;
     metadata::write_image(
         &mut header,
         &linear.metadata,

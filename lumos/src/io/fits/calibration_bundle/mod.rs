@@ -60,7 +60,7 @@ pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), Bund
     let defects = masters.defect_map().map(encode_defect_map).transpose()?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer.write_raw_hdu(&bundle_primary_header()?, &[])?;
+        writer.write_empty_primary(Some(&bundle_primary_header()?))?;
 
         let mut flags_written = 0;
         for (role, image) in masters.masters() {
@@ -133,12 +133,8 @@ pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, Bun
 fn bundle_primary_header() -> Result<Header, WriteError> {
     let mut header = Header::new();
     header
-        .set("SIMPLE", true)
-        .and_then(|header| header.set("BITPIX", 8))
-        .and_then(|header| header.set("NAXIS", 0))
-        .and_then(|header| header.set("EXTEND", true))
-        .and_then(|header| header.set(FORMAT_KEYWORD, BUNDLE_FORMAT))
-        .and_then(|header| header.set(VERSION_KEYWORD, BUNDLE_VERSION))?;
+        .set(FORMAT_KEYWORD, BUNDLE_FORMAT)?
+        .set(VERSION_KEYWORD, BUNDLE_VERSION)?;
     Ok(header)
 }
 
@@ -331,9 +327,9 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
     )?;
     let mut header = Header::new();
     header
-        .set("EXTNAME", CalibrationComponent::Defects.extname())
-        .and_then(|header| header.set(FORMAT_KEYWORD, DEFECT_FORMAT))
-        .and_then(|header| header.set(VERSION_KEYWORD, BUNDLE_VERSION))?;
+        .set("EXTNAME", CalibrationComponent::Defects.extname())?
+        .set(FORMAT_KEYWORD, DEFECT_FORMAT)?
+        .set(VERSION_KEYWORD, BUNDLE_VERSION)?;
     let dimensions = map.dimensions();
     let (Ok(width), Ok(height)) = (
         i64::try_from(dimensions.width),
@@ -344,9 +340,7 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
             height: dimensions.height,
         });
     };
-    header
-        .set("LUMWID", width)
-        .and_then(|header| header.set("LUMHEI", height))?;
+    header.set("LUMWID", width)?.set("LUMHEI", height)?;
     Ok(EncodedDefectMap { table, header })
 }
 

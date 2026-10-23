@@ -5,7 +5,7 @@ use std::ops::Range;
 use arrayvec::ArrayVec;
 use common::CancelToken;
 use fits_well::ImageReader;
-use fits_well::header::Header;
+use fits_well::header::{Header, keywords};
 use fits_well::image::{Scaling, View as FitsView};
 use fits_well::io::StreamSource;
 use rayon::prelude::*;
@@ -96,7 +96,7 @@ impl HduDecode<'_> {
         // blanks are a writer artifact rather than part of a unit name, so both ends go, and the
         // domain comparison downstream is then plain equality — see `SampleDomain::conversion_to`
         // for why it stops there and does not fold case.
-        let unit = metadata::read_text(header, "BUNIT")?
+        let unit = metadata::read_text(header, keywords::BUNIT)?
             .map(|unit| unit.trim().to_owned())
             .filter(|unit| !unit.is_empty());
         let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };

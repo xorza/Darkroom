@@ -90,8 +90,8 @@ pub(crate) fn hdu<'a>(
 ) -> Result<PlaneHdu<FloatPlanes<'a>>, WriteError> {
     let mut header = Header::new();
     header
-        .set(FORMAT_KEYWORD, CFA_FITS_FORMAT)
-        .and_then(|header| header.set(VERSION_KEYWORD, CFA_FITS_VERSION))?;
+        .set(FORMAT_KEYWORD, CFA_FITS_FORMAT)?
+        .set(VERSION_KEYWORD, CFA_FITS_VERSION)?;
     if let Some(extname) = hdu_metadata.extname {
         header.set("EXTNAME", extname)?;
         header.set("LUMROLE", extname)?;

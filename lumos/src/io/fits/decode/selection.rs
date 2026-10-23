@@ -1,4 +1,5 @@
-use fits_well::io::Hdu;
+use fits_well::header::keywords;
+use fits_well::io::{Hdu, HduSelector};
 
 use crate::image::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
@@ -13,7 +14,7 @@ pub(super) fn selected_hdu(hdus: &[Hdu], idx: usize) -> Result<FitsHduProvenance
             hdus: hdus.len(),
         })
     })?;
-    let extname = metadata::read_text(&hdu.header, "EXTNAME")?;
+    let extname = metadata::read_text(&hdu.header, keywords::EXTNAME)?;
     let extver = if extname.is_some() {
         Some(hdu.header.get_integer("EXTVER")?.unwrap_or(1))
     } else {
@@ -52,7 +53,12 @@ pub(super) fn select_image_hdu(
         FitsHduSelector::Name { extname, extver } => {
             let mut matches = Vec::new();
             for (idx, hdu) in hdus.iter().enumerate() {
-                if hdu.matches_extension(extname, *extver, None)? {
+                let extension = HduSelector::Extension {
+                    name: extname,
+                    version: *extver,
+                    level: None,
+                };
+                if hdu.matches(extension)? {
                     matches.push(idx);
                 }
             }

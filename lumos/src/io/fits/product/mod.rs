@@ -13,7 +13,7 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 use common::fs;
 use fits_well::FitsWriter;
-use fits_well::header::Header;
+use fits_well::header::{Header, Keyword};
 use fits_well::io::StreamReader;
 use imaginarium::Buffer2;
 
@@ -47,13 +47,13 @@ pub(super) const QUALITY_VERSION: i64 = 1;
 pub(super) const INVERSE_VARIANCE: &str = "InverseVariance";
 
 /// The primary header's keyword that names a stack product, and states its version.
-const PRODUCT_KEYWORD: &str = "LUMPRODV";
+const PRODUCT_KEYWORD: Keyword = Keyword::new("LUMPRODV");
 /// The keyword astropy's `CCDData` reads an uncertainty's kind from.
-const UNCERTAINTY_TYPE: &str = "UTYPE";
+const UNCERTAINTY_TYPE: Keyword = Keyword::new("UTYPE");
 /// The primary header's keyword for a coverage of one value at every pixel, which no plane holds.
-const UNIFORM_COVERAGE: &str = "LUMCOVU";
+const UNIFORM_COVERAGE: Keyword = Keyword::new("LUMCOVU");
 /// The primary header's keyword for what the frame weights the `WEIGHT` plane sums were.
-const WEIGHT_KIND: &str = "LUMWGTK";
+const WEIGHT_KIND: Keyword = Keyword::new("LUMWGTK");
 /// Each [`WeightKind`] by the value [`WEIGHT_KIND`] names it with.
 const WEIGHT_KINDS: [(WeightKind, &str); 3] = [
     (WeightKind::Count, "COUNT"),
@@ -167,7 +167,7 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
                 Ok(coverage)
             } else {
                 Err(FitsRefusal::KeywordOutOfRange {
-                    keyword: UNIFORM_COVERAGE.to_owned(),
+                    keyword: UNIFORM_COVERAGE.to_string(),
                 })
             }
         })
@@ -265,14 +265,14 @@ fn read_weight_kind(header: &Header) -> Result<WeightKind, FitsLoadError> {
     let name = header
         .get_text(WEIGHT_KIND)?
         .ok_or_else(|| FitsRefusal::MissingKeyword {
-            keyword: WEIGHT_KIND.to_owned(),
+            keyword: WEIGHT_KIND.to_string(),
         })?;
     WEIGHT_KINDS
         .into_iter()
         .find_map(|(kind, named)| (named == name).then_some(kind))
         .ok_or_else(|| {
             FitsRefusal::KeywordOutOfRange {
-                keyword: WEIGHT_KIND.to_owned(),
+                keyword: WEIGHT_KIND.to_string(),
             }
             .into()
         })
@@ -319,10 +319,10 @@ fn plane_hdu<S: PlaneSource>(
 ) -> Result<PlaneHdu<S>, WriteError> {
     let mut header = Header::new();
     header
-        .set("EXTNAME", extension.extname())
-        .and_then(|header| header.set(IMAGE_KEYWORD, PRIMARY))
-        .and_then(|header| header.set(FORMAT_KEYWORD, QUALITY_FORMAT))
-        .and_then(|header| header.set(VERSION_KEYWORD, QUALITY_VERSION))?;
+        .set("EXTNAME", extension.extname())?
+        .set(IMAGE_KEYWORD, PRIMARY)?
+        .set(FORMAT_KEYWORD, QUALITY_FORMAT)?
+        .set(VERSION_KEYWORD, QUALITY_VERSION)?;
     if extension == LumosExtension::Uncertainty {
         header.set(UNCERTAINTY_TYPE, INVERSE_VARIANCE)?;
     }

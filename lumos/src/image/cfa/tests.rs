@@ -269,7 +269,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     write();
     rewrite_fits(&path, |idx, header, _| {
         if idx == 1 {
-            header.remove("LUMGSUM");
+            header.remove("LUMGSUM").unwrap();
         }
         true
     });
@@ -674,7 +674,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     let mut invalid_version = original.clone();
     let version_card = invalid_version
         .windows(8)
-        .position(|window| window == VERSION_KEYWORD.as_bytes())
+        .position(|window| window == VERSION_KEYWORD.as_str().as_bytes())
         .unwrap();
     let version_digit = invalid_version[version_card..version_card + 80]
         .iter()
