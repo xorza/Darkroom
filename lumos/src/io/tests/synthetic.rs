@@ -61,13 +61,13 @@ use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, Previe
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = dir.join(format!("{name}.fits"));
-    write_fits(&path, image, None);
+    write_fits(&path, image.view(), None);
     decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default())
 }
 
 /// Write `image` with `header`'s cards to `path`.
 fn write_with_header(path: PathBuf, image: &Image, header: &Header) -> PathBuf {
-    write_fits(&path, image, Some(header));
+    write_fits(&path, image.view(), Some(header));
     path
 }
 
@@ -447,7 +447,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         let mut header = Header::new();
         header.set("DATAMAX", datamax).unwrap();
         for (keyword, value) in keywords {
-            header.set(keyword, *value).unwrap();
+            header.set(*keyword, *value).unwrap();
         }
         write_with_header(dir.join(format!("{name}.fits")), &image, &header)
     };

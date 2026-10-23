@@ -3,7 +3,7 @@ pub(crate) mod domain_keywords;
 
 use std::fmt::Display;
 
-use fits_well::header::Header;
+use fits_well::header::{Header, Keyword, keywords};
 use fits_well::image::SampleType;
 
 use crate::image::calibration_state::CalibrationState;
@@ -19,9 +19,12 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
 
 /// The keyword that names the Lumos format of an HDU, as `CFAIMAGE` or `LUMFLAGS`'s `PIXFLAGS`.
-pub(crate) const FORMAT_KEYWORD: &str = "LUMOSFMT";
+pub(crate) const FORMAT_KEYWORD: Keyword = Keyword::new("LUMOSFMT");
+/// The root of the six keywords that state an X-Trans pattern, a row each: `XTRNROW0` to
+/// `XTRNROW5`.
+const XTRANS_ROW: Keyword = Keyword::new("XTRNROW");
 /// The keyword that states the version of an HDU's Lumos format.
-pub(crate) const VERSION_KEYWORD: &str = "LUMOSVER";
+pub(crate) const VERSION_KEYWORD: Keyword = Keyword::new("LUMOSVER");
 
 /// A metadata field and every keyword it is read from: the standard or most common spelling first,
 /// which is also the one written, then the aliases other writers use, as Siril reads them
@@ -244,96 +247,55 @@ pub(super) fn write_image(
     image_type: Option<&str>,
 ) -> fits_well::Result<()> {
     use MetadataField as Field;
-    set_optional_text(
-        header,
-        Field::Object.keyword(),
-        metadata.header.object.as_deref(),
-    )?;
-    set_optional_text(
-        header,
+    header.set_optional(Field::Object.keyword(), metadata.header.object.as_deref())?;
+    header.set_optional(
         Field::Instrument.keyword(),
         metadata.header.instrument.as_deref(),
     )?;
-    set_optional_text(
-        header,
+    header.set_optional(
         Field::Telescope.keyword(),
         metadata.header.telescope.as_deref(),
     )?;
-    set_optional_text(
-        header,
+    header.set_optional(
         Field::DateObs.keyword(),
         metadata.header.date_obs.as_deref(),
     )?;
-    set_optional_text(
-        header,
+    header.set_optional(
         Field::DateLocal.keyword(),
         metadata.header.date_local.as_deref(),
     )?;
-    set_optional_real(
-        header,
-        Field::ExposureTime.keyword(),
-        metadata.header.exposure_time,
-    )?;
-    set_optional_integer(
-        header,
-        Field::Iso.keyword(),
-        metadata.header.iso.map(i64::from),
-    )?;
-    set_optional_text(
-        header,
-        Field::Filter.keyword(),
-        metadata.header.filter.as_deref(),
-    )?;
-    set_optional_real(header, Field::Gain.keyword(), metadata.header.gain)?;
-    set_optional_real(header, Field::Egain.keyword(), metadata.header.egain)?;
-    set_optional_real(header, Field::CcdTemp.keyword(), metadata.header.ccd_temp)?;
-    set_optional_real(
-        header,
-        Field::CameraTemp.keyword(),
-        metadata.header.camera_temp,
-    )?;
-    set_optional_text(
-        header,
+    header.set_optional(Field::ExposureTime.keyword(), metadata.header.exposure_time)?;
+    header.set_optional(Field::Iso.keyword(), metadata.header.iso.map(i64::from))?;
+    header.set_optional(Field::Filter.keyword(), metadata.header.filter.as_deref())?;
+    header.set_optional(Field::Gain.keyword(), metadata.header.gain)?;
+    header.set_optional(Field::Egain.keyword(), metadata.header.egain)?;
+    header.set_optional(Field::CcdTemp.keyword(), metadata.header.ccd_temp)?;
+    header.set_optional(Field::CameraTemp.keyword(), metadata.header.camera_temp)?;
+    header.set_optional(
         Field::ImageType.keyword(),
         image_type.or(metadata.header.image_type.as_deref()),
     )?;
-    set_optional_integer(
-        header,
+    header.set_optional(
         Field::XBinning.keyword(),
         metadata.header.xbinning.map(i64::from),
     )?;
-    set_optional_integer(
-        header,
+    header.set_optional(
         Field::YBinning.keyword(),
         metadata.header.ybinning.map(i64::from),
     )?;
-    set_optional_real(header, Field::SetTemp.keyword(), metadata.header.set_temp)?;
-    set_optional_integer(
-        header,
+    header.set_optional(Field::SetTemp.keyword(), metadata.header.set_temp)?;
+    header.set_optional(
         Field::Offset.keyword(),
         metadata.header.offset.map(i64::from),
     )?;
-    set_optional_real(
-        header,
-        Field::FocalLength.keyword(),
-        metadata.header.focal_length,
-    )?;
-    set_optional_real(header, Field::Airmass.keyword(), metadata.header.airmass)?;
-    set_optional_real(header, "RA", metadata.header.ra_deg)?;
-    set_optional_real(header, "DEC", metadata.header.dec_deg)?;
-    set_optional_real(
-        header,
-        Field::PixelSizeX.keyword(),
-        metadata.header.pixel_size_x,
-    )?;
-    set_optional_real(
-        header,
-        Field::PixelSizeY.keyword(),
-        metadata.header.pixel_size_y,
-    )?;
+    header.set_optional(Field::FocalLength.keyword(), metadata.header.focal_length)?;
+    header.set_optional(Field::Airmass.keyword(), metadata.header.airmass)?;
+    header.set_optional("RA", metadata.header.ra_deg)?;
+    header.set_optional("DEC", metadata.header.dec_deg)?;
+    header.set_optional(Field::PixelSizeX.keyword(), metadata.header.pixel_size_x)?;
+    header.set_optional(Field::PixelSizeY.keyword(), metadata.header.pixel_size_y)?;
     // DATAMAX is a physical value, so it carries the `BSCALE` the samples are written with.
-    set_optional_real(
-        header,
+    header.set_optional(
         Field::DataMax.keyword(),
         metadata
             .header
@@ -395,12 +357,12 @@ pub(super) fn write_cfa(
         CfaType::Mosaic(Mosaic::XTrans(pattern)) => {
             header.set("CFATYPE", "XTRANS")?;
             for (row, values) in pattern.rows().iter().enumerate() {
-                let keyword = format!("XTRNROW{row}");
+                let keyword = XTRANS_ROW.indexed(row)?;
                 let value = values
                     .iter()
                     .map(|value| char::from(b'0' + *value))
                     .collect::<String>();
-                header.set(&keyword, value)?;
+                header.set(keyword, value)?;
             }
         }
     }
@@ -410,39 +372,6 @@ pub(super) fn write_cfa(
         header.set("LUMWBG1", f64::from(green_1))?;
         header.set("LUMWBB", f64::from(blue))?;
         header.set("LUMWBG2", f64::from(green_2))?;
-    }
-    Ok(())
-}
-
-fn set_optional_text(
-    header: &mut Header,
-    keyword: &str,
-    value: Option<&str>,
-) -> fits_well::Result<()> {
-    if let Some(value) = value {
-        header.set(keyword, value)?;
-    }
-    Ok(())
-}
-
-fn set_optional_real(
-    header: &mut Header,
-    keyword: &str,
-    value: Option<f64>,
-) -> fits_well::Result<()> {
-    if let Some(value) = value {
-        header.set(keyword, value)?;
-    }
-    Ok(())
-}
-
-fn set_optional_integer(
-    header: &mut Header,
-    keyword: &str,
-    value: Option<i64>,
-) -> fits_well::Result<()> {
-    if let Some(value) = value {
-        header.set(keyword, value)?;
     }
     Ok(())
 }
@@ -482,7 +411,7 @@ pub(super) fn read_cfa(
 /// pattern as written applies to the rows as written" — or a reload would apply the phase
 /// correction a second time. That leaves nowhere to say which way up the sky actually is, which is
 /// the question two frames have to agree on, so it goes here.
-const SOURCE_ROW_ORDER: &str = "LUMROWO";
+const SOURCE_ROW_ORDER: Keyword = Keyword::new("LUMROWO");
 
 /// Which way up the stored rows actually are.
 ///
@@ -592,7 +521,7 @@ fn read_xtrans_pattern(header: &Header) -> Result<XTransPattern, FitsLoadError> 
     for (row, values) in pattern.iter_mut().enumerate() {
         let refused = || FitsLoadError::from(FitsRefusal::XTransRow { row });
         let value = header
-            .get_text(&format!("XTRNROW{row}"))?
+            .get_text(XTRANS_ROW.indexed(row)?)?
             .ok_or_else(refused)?;
         if value.len() != 6 {
             return Err(refused());
@@ -653,13 +582,19 @@ fn read_dec_deg(header: &Header) -> Option<f64> {
 /// coordinate, so a header that has only those gives no pointing, and an axis-swapped one gives
 /// each value from its own axis.
 fn celestial_reference(header: &Header, prefix: &str) -> Option<f64> {
-    let axes = optional("NAXIS", header.get_integer("NAXIS"))?;
-    (1..=axes).find_map(|axis| {
-        let ctype = optional("CTYPE", header.get_text(&format!("CTYPE{axis}")))?;
+    let axes = optional("NAXIS", header.get_integer(keywords::NAXIS))?;
+    (1..=usize::try_from(axes).ok()?).find_map(|axis| {
+        let ctype = optional(
+            "CTYPE",
+            header.get_text(keywords::CTYPE.indexed(axis).ok()?),
+        )?;
         if !ctype.starts_with(prefix) {
             return None;
         }
-        optional("CRVAL", header.get_real(&format!("CRVAL{axis}")))
+        optional(
+            "CRVAL",
+            header.get_real(keywords::CRVAL.indexed(axis).ok()?),
+        )
     })
 }
 
@@ -680,7 +615,10 @@ fn parse_sexagesimal(value: &str) -> Option<f64> {
     Some(sign * (parts[0].abs() + parts[1] / 60.0 + parts[2] / 3600.0))
 }
 
-pub(super) fn read_text(header: &Header, key: &str) -> Result<Option<String>, FitsLoadError> {
+pub(super) fn read_text(
+    header: &Header,
+    key: impl TryInto<Keyword, Error: Into<fits_well::FitsError>>,
+) -> Result<Option<String>, FitsLoadError> {
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 

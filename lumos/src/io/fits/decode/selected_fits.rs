@@ -149,7 +149,7 @@ impl<'r> SelectedFits<'r> {
             extension_bytes.push(plan.dimensions.pixel_count() as u64);
         }
         let gain_bytes = if let Some(gain) = gain {
-            let image = reader.hdus()[gain.hdu].image()?;
+            let image = reader.hdus()[gain.hdu].image_metadata()?;
             let nodes = image.shape.iter().product::<usize>();
             extension_bytes.push((nodes * image.bitpix.elem_size()) as u64);
             nodes * size_of::<f32>()
@@ -303,7 +303,7 @@ fn read_extension_in_chunks<T: ExtensionSample>(
     idx: usize,
     chunk_bytes: usize,
 ) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
-    let shape = ArrayVec::<usize, 3>::try_from(reader.hdus()[idx].image()?.shape)
+    let shape = ArrayVec::<usize, 3>::try_from(reader.hdus()[idx].image_metadata()?.shape)
         .expect("the extension's check admitted at most three axes");
     debug_assert!(shape.len() >= 2, "an extension is a plane at least");
     let (width, height) = (shape[0], shape[1]);
@@ -356,10 +356,10 @@ mod tests {
         let path = dir.join("extension.fits");
         let mut writer = FitsWriter::new(fs::create(&path).unwrap()).with_checksums();
         writer
-            .write_image(&Image::new([3, 5, 3], samples.clone()).unwrap(), None)
+            .write_image(Image::new([3, 5, 3], samples.clone()).unwrap().view(), None)
             .unwrap();
         writer
-            .write_image(&Image::new([3, 5], bytes.clone()).unwrap(), None)
+            .write_image(Image::new([3, 5], bytes.clone()).unwrap().view(), None)
             .unwrap();
         drop(writer);
 

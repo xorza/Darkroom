@@ -808,7 +808,7 @@ impl LinearLights {
                     .collect();
                 write_fits(
                     &path,
-                    &FitsImage::new([width, height, 3], planar).unwrap(),
+                    FitsImage::new([width, height, 3], planar).unwrap().view(),
                     None,
                 );
                 path

@@ -1,7 +1,7 @@
 use common::{CancelToken, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
+use fits_well::image::{Bitpix, Compression, CompressionConfig, Image};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus, HduKind};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -51,7 +51,7 @@ fn image_header(bitpix: i64, shape: &[usize]) -> Header {
     header.set("NAXIS", shape.len() as i64).unwrap();
     for (idx, &axis) in shape.iter().enumerate() {
         header
-            .set(&format!("NAXIS{}", idx + 1), i64::try_from(axis).unwrap())
+            .set(format!("NAXIS{}", idx + 1), i64::try_from(axis).unwrap())
             .unwrap();
     }
     header
@@ -71,7 +71,7 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
     header.set("ZNAXIS", shape.len() as i64).unwrap();
     for (idx, &axis) in shape.iter().enumerate() {
         header
-            .set(&format!("ZNAXIS{}", idx + 1), i64::try_from(axis).unwrap())
+            .set(format!("ZNAXIS{}", idx + 1), i64::try_from(axis).unwrap())
             .unwrap();
     }
     header
@@ -79,19 +79,14 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
 
 fn write_named_multi_image(path: &Path) {
     let mut writer = FitsWriter::new(fs::create(path).unwrap());
-    let mut primary = Header::new();
-    primary.set("SIMPLE", true).unwrap();
-    primary.set("BITPIX", 8).unwrap();
-    primary.set("NAXIS", 0).unwrap();
-    primary.set("EXTEND", true).unwrap();
-    writer.write_raw_hdu(&primary, &[]).unwrap();
+    writer.write_empty_primary(None).unwrap();
 
     let mut first_header = Header::new();
     first_header.set("EXTNAME", "SCI").unwrap();
     first_header.set("EXTVER", 1).unwrap();
     writer
         .write_image(
-            &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(),
+            Image::new([2, 1], vec![1.0f32, 2.0]).unwrap().view(),
             Some(&first_header),
         )
         .unwrap();
@@ -101,7 +96,9 @@ fn write_named_multi_image(path: &Path) {
     second_header.set("EXTVER", 2).unwrap();
     writer
         .write_image(
-            &Image::new([2, 1, 3], vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0]).unwrap(),
+            Image::new([2, 1, 3], vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0])
+                .unwrap()
+                .view(),
             Some(&second_header),
         )
         .unwrap();
@@ -257,7 +254,7 @@ fn truncated_data_is_an_error() {
     let dir = TempDir::new("fits_preflight");
     let path = dir.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-    write_fits(&path, &image, None);
+    write_fits(&path, image.view(), None);
     let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(BLOCK_SIZE);
     fs::write(&path, bytes).unwrap();
@@ -274,7 +271,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let zero_path = dir.join("zero.fits");
     write_fits(
         &zero_path,
-        &Image::new([0, 2], Vec::<f32>::new()).unwrap(),
+        Image::new([0, 2], Vec::<f32>::new()).unwrap().view(),
         None,
     );
     let zero_axis = FitsRefusal::ZeroAxis { shape: vec![0, 2] };
@@ -287,7 +284,11 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
-    write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
+    write_fits(
+        &rgb_path,
+        Image::new([2, 2, 3], planar).unwrap().view(),
+        None,
+    );
     let loaded = load_linear(&rgb_path, &rgb_load_ctx()).unwrap();
     assert_eq!(
         loaded.dimensions(),
@@ -341,9 +342,8 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
     let image = Image::new([2, 2, 3], planar).unwrap();
     FitsWriter::new(fs::create(&path).unwrap())
         .write_compressed_image(
-            &image,
-            Compression::GZIP,
-            &CompressionOptions::tiled([2, 2, 1]),
+            image.view(),
+            &CompressionConfig::new(Compression::GZIP).tiled([2, 2, 1]),
             None,
         )
         .unwrap();
@@ -446,7 +446,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let dir = TempDir::new("fits_checksum_policy");
     let absent_path = dir.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
-    write_fits(&absent_path, &image, None);
+    write_fits(&absent_path, image.view(), None);
 
     let verified_absent = load_linear(&absent_path, &load_ctx()).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&verified_absent);
@@ -475,7 +475,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let valid_path = dir.join("valid.fits");
     FitsWriter::new(fs::create(&valid_path).unwrap())
         .with_checksums()
-        .write_image(&image, None)
+        .write_image(image.view(), None)
         .unwrap();
     let valid = load_linear(&valid_path, &require).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&valid);
@@ -514,7 +514,11 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
 fn cancellation_prevents_fits_selection() {
     let dir = TempDir::new("fits_cancel");
     let path = dir.join("frame.fits");
-    write_fits(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(), None);
+    write_fits(
+        &path,
+        Image::new([2, 1], vec![1.0f32, 2.0]).unwrap().view(),
+        None,
+    );
     let cancel = CancelToken::new();
     cancel.cancel();
     let ctx = LoadCtx::new(cancel);
@@ -534,7 +538,7 @@ fn a_zero_datamax_is_no_saturation_level() {
     let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
     let mut header = Header::new();
     header.set("DATAMAX", 0.0).unwrap();
-    write_fits(&path, &image, Some(&header));
+    write_fits(&path, image.view(), Some(&header));
     let loaded = load_linear(&path, &load_ctx()).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
     assert_eq!(loaded.metadata.header.data_max, None);
@@ -550,7 +554,7 @@ fn a_header_only_image_extension_is_no_second_image() {
     let path = dir.join("one_image.fits");
     let mut writer = FitsWriter::new(fs::create(&path).unwrap());
     let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
-    writer.write_image(&image, None).unwrap();
+    writer.write_image(image.view(), None).unwrap();
     let mut empty = Header::new();
     empty.set("XTENSION", "IMAGE").unwrap();
     empty.set("BITPIX", -32).unwrap();

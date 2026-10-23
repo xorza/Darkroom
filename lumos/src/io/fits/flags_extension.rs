@@ -8,7 +8,7 @@
 //! NaN there, not the repair, and a reader fills it again. An image whose flags hold nothing but
 //! `NO_DATA` needs no extension: its NaNs carry all of it.
 
-use fits_well::header::Header;
+use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 use fits_well::io::Hdu;
 use imaginarium::Buffer2;
@@ -48,13 +48,13 @@ pub(crate) fn encode<'a>(
     }
     let mut header = Header::new();
     header
-        .set("EXTNAME", FLAGS_EXTNAME)
-        .and_then(|header| header.set("EXTVER", extver))
-        .and_then(|header| header.set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY)))
-        .and_then(|header| header.set(FORMAT_KEYWORD, FLAGS_FORMAT))
-        .and_then(|header| header.set(VERSION_KEYWORD, FLAGS_VERSION))?;
+        .set("EXTNAME", FLAGS_EXTNAME)?
+        .set("EXTVER", extver)?
+        .set(IMAGE_KEYWORD, image_name.unwrap_or(PRIMARY))?
+        .set(FORMAT_KEYWORD, FLAGS_FORMAT)?
+        .set(VERSION_KEYWORD, FLAGS_VERSION)?;
     for (flag, name) in QualityFlags::NAMED {
-        header.set(&bit_keyword(flag), name)?;
+        header.set(bit_keyword(flag)?, name)?;
     }
     let size = flags.size();
     Ok(Some(PlaneHdu {
@@ -129,8 +129,10 @@ pub(crate) fn plane(bytes: Vec<u8>, size: Size2us) -> Buffer2<u8> {
 }
 
 /// The keyword that names the flag at its bit `i`: `LUMFBi`.
-fn bit_keyword(flag: QualityFlags) -> String {
-    format!("LUMFB{}", flag.byte().trailing_zeros())
+fn bit_keyword(flag: QualityFlags) -> fits_well::Result<Keyword> {
+    const FLAG_BIT: Keyword = Keyword::new("LUMFB");
+    let bit = usize::try_from(flag.byte().trailing_zeros()).expect("a bit of a byte");
+    FLAG_BIT.indexed(bit)
 }
 
 #[cfg(test)]

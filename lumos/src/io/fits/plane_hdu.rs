@@ -1,13 +1,12 @@
 //! [`PlaneHdu`]: an image HDU written from the planes the caller holds, a chunk of rows at a time.
 
 use std::io::{Seek, Write};
-use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Data, Scaling};
+use fits_well::image::{Bitpix, Metadata, Scaling, View};
 use rayon::prelude::*;
 
 use crate::image::pixel_flags::PixelFlags;
@@ -15,43 +14,26 @@ use crate::image::quality_flags::QualityFlags;
 use crate::io::error::WriteError;
 use crate::io::fits::CHUNK_BYTES;
 
-/// A sample type an HDU stores, and the owned [`Data`] a chunk of it is written as.
+/// A sample type an HDU stores, and the [`View`] a chunk of it is written as.
 pub(crate) trait PlaneSample: Copy + Send + Sync {
     const BITPIX: Bitpix;
 
-    fn into_data(samples: Vec<Self>) -> Data;
-
-    /// The samples of `data`, which [`Self::into_data`] made.
-    fn from_data(data: Data) -> Vec<Self>;
+    fn view(samples: &[Self]) -> View<'_>;
 }
 
 impl PlaneSample for f32 {
     const BITPIX: Bitpix = Bitpix::F32;
 
-    fn into_data(samples: Vec<Self>) -> Data {
-        Data::F32(samples)
-    }
-
-    fn from_data(data: Data) -> Vec<Self> {
-        let Data::F32(samples) = data else {
-            unreachable!("a chunk of f32 samples is F32 data");
-        };
-        samples
+    fn view(samples: &[Self]) -> View<'_> {
+        View::F32(samples)
     }
 }
 
 impl PlaneSample for u8 {
     const BITPIX: Bitpix = Bitpix::U8;
 
-    fn into_data(samples: Vec<Self>) -> Data {
-        Data::U8(samples)
-    }
-
-    fn from_data(data: Data) -> Vec<Self> {
-        let Data::U8(samples) = data else {
-            unreachable!("a chunk of bytes is U8 data");
-        };
-        samples
+    fn view(samples: &[Self]) -> View<'_> {
+        View::U8(samples)
     }
 }
 
@@ -59,8 +41,14 @@ impl PlaneSample for u8 {
 pub(crate) trait PlaneSource: Sync {
     type Sample: PlaneSample;
 
-    /// Append the samples of `pixels`, pixel indices of slice `slice`, to `out`.
-    fn extend(&self, slice: usize, pixels: Range<usize>, out: &mut Vec<Self::Sample>);
+    /// The samples of `pixels`, pixel indices of slice `slice`: the plane's own, or ones made
+    /// into `scratch`.
+    fn samples<'a>(
+        &'a self,
+        slice: usize,
+        pixels: Range<usize>,
+        scratch: &'a mut Vec<Self::Sample>,
+    ) -> &'a [Self::Sample];
 }
 
 /// `f32` planes, a slice each, as they are but at each pixel `nulls` flags as holding no data:
@@ -93,20 +81,27 @@ impl<'a> FloatPlanes<'a> {
 impl PlaneSource for FloatPlanes<'_> {
     type Sample = f32;
 
-    fn extend(&self, slice: usize, pixels: Range<usize>, out: &mut Vec<f32>) {
+    fn samples<'a>(
+        &'a self,
+        slice: usize,
+        pixels: Range<usize>,
+        scratch: &'a mut Vec<f32>,
+    ) -> &'a [f32] {
         let samples = &self.planes[slice][pixels.clone()];
-        match self.nulls {
-            None => out.extend_from_slice(samples),
-            Some(nulls) => out.par_extend(samples.par_iter().zip(&nulls.bytes()[pixels]).map(
-                |(&sample, &byte)| {
-                    if QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA) {
-                        f32::NAN
-                    } else {
-                        sample
-                    }
-                },
-            )),
-        }
+        let Some(nulls) = self.nulls else {
+            return samples;
+        };
+        scratch.clear();
+        scratch.par_extend(samples.par_iter().zip(&nulls.bytes()[pixels]).map(
+            |(&sample, &byte)| {
+                if QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA) {
+                    f32::NAN
+                } else {
+                    sample
+                }
+            },
+        ));
+        scratch
     }
 }
 
@@ -129,12 +124,14 @@ impl FlagBytes<'_> {
 impl PlaneSource for FlagBytes<'_> {
     type Sample = u8;
 
-    fn extend(&self, _: usize, pixels: Range<usize>, out: &mut Vec<u8>) {
-        out.par_extend(
+    fn samples<'a>(&'a self, _: usize, pixels: Range<usize>, scratch: &'a mut Vec<u8>) -> &'a [u8] {
+        scratch.clear();
+        scratch.par_extend(
             self.0.bytes()[pixels]
                 .par_iter()
                 .map(|&byte| Self::stored(byte)),
         );
+        scratch
     }
 }
 
@@ -146,16 +143,19 @@ pub(crate) struct NoDataMask<'a>(pub(crate) &'a PixelFlags);
 impl PlaneSource for NoDataMask<'_> {
     type Sample = u8;
 
-    fn extend(&self, _: usize, pixels: Range<usize>, out: &mut Vec<u8>) {
-        out.par_extend(self.0.bytes()[pixels].par_iter().map(|&byte| {
+    fn samples<'a>(&'a self, _: usize, pixels: Range<usize>, scratch: &'a mut Vec<u8>) -> &'a [u8] {
+        scratch.clear();
+        scratch.par_extend(self.0.bytes()[pixels].par_iter().map(|&byte| {
             u8::from(QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA))
         }));
+        scratch
     }
 }
 
 /// One image HDU written from the planes the caller holds: its header, its `shape` — width,
 /// height, and the slices of a cube when it has a third axis — its scaling, and the `source` of
-/// its samples, which the write reads a chunk of rows at a time into one buffer it reuses.
+/// its samples, which the write reads a chunk of rows at a time, borrowed from the plane or made
+/// into one buffer it reuses.
 #[derive(Debug)]
 pub(crate) struct PlaneHdu<S> {
     pub(crate) header: Header,
@@ -166,7 +166,7 @@ pub(crate) struct PlaneHdu<S> {
 
 impl<S: PlaneSource> PlaneHdu<S> {
     /// Write the HDU to `writer`, the bytes [`FitsWriter::write_image`] writes of the same image,
-    /// holding beside the planes a chunk of at most [`CHUNK_BYTES`] of samples and fits-well's
+    /// holding beside the planes at most a chunk of [`CHUNK_BYTES`] of samples and fits-well's
     /// encoding of it.
     pub(crate) fn write<W: Write + Seek>(
         &self,
@@ -184,22 +184,20 @@ impl<S: PlaneSource> PlaneHdu<S> {
         debug_assert!(self.shape.len() >= 2, "an image HDU is a plane at least");
         let (width, height) = (self.shape[0], self.shape[1]);
         let rows = (chunk_bytes / (width * size_of::<S::Sample>()).max(1)).clamp(1, height);
-        let mut stream = writer.stream_image(
-            &self.shape,
-            S::Sample::BITPIX,
-            self.scaling,
-            Some(&self.header),
-        )?;
-        let mut chunk = Vec::with_capacity(rows * width);
+        let layout = Metadata {
+            shape: &self.shape,
+            bitpix: S::Sample::BITPIX,
+            scaling: self.scaling,
+        };
+        let mut stream = writer.stream_image(layout, Some(&self.header))?;
+        let mut scratch = Vec::new();
         for slice in 0..self.shape.get(2).copied().unwrap_or(1) {
             for start in (0..height).step_by(rows) {
-                chunk.clear();
                 let end = (start + rows).min(height);
-                self.source
-                    .extend(slice, start * width..end * width, &mut chunk);
-                let data = S::Sample::into_data(mem::take(&mut chunk));
-                stream.write_chunk(&data)?;
-                chunk = S::Sample::from_data(data);
+                let samples = self
+                    .source
+                    .samples(slice, start * width..end * width, &mut scratch);
+                stream.write_chunk(S::Sample::view(samples))?;
             }
         }
         stream.finish()?;
@@ -227,7 +225,7 @@ mod tests {
         let mut streamed = FitsWriter::new(Cursor::new(Vec::new())).with_checksums();
         hdu.write_in_chunks(&mut streamed, 8).unwrap();
         let mut whole = FitsWriter::new(Cursor::new(Vec::new())).with_checksums();
-        whole.write_image(image, Some(&hdu.header)).unwrap();
+        whole.write_image(image.view(), Some(&hdu.header)).unwrap();
         assert_eq!(
             streamed.into_inner().into_inner(),
             whole.into_inner().into_inner()

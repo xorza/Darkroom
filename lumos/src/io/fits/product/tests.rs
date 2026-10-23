@@ -214,7 +214,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
             "DISPERSION"
         ]
     );
-    let scaling = |idx: usize| file.hdus()[idx].image().unwrap().scaling;
+    let scaling = |idx: usize| file.hdus()[idx].image_metadata().unwrap().scaling;
     assert_eq!(scaling(0).bscale, SCALE);
     assert_eq!(scaling(2), Scaling::IDENTITY);
     assert_eq!(scaling(3).bscale, 1.0 / (SCALE * SCALE));
@@ -230,7 +230,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
         file.hdus()[3].header.get_text("UTYPE").unwrap(),
         Some("InverseVariance")
     );
-    let mask = file.hdus()[2].image().unwrap();
+    let mask = file.hdus()[2].image_metadata().unwrap();
     assert_eq!(
         (mask.bitpix, mask.shape.to_vec()),
         (Bitpix::U8, vec![4, 3, 3])
@@ -291,7 +291,10 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let bytes = fs::read(&path).unwrap();
     let file = FitsReader::from_bytes(&bytes).unwrap();
     assert_eq!(file.hdus().len(), 2, "the primary and WEIGHT");
-    assert_eq!(file.hdus()[1].image().unwrap().scaling, Scaling::IDENTITY);
+    assert_eq!(
+        file.hdus()[1].image_metadata().unwrap().scaling,
+        Scaling::IDENTITY
+    );
     assert_eq!(read.weight_kind, WeightKind::Count);
 
     let rgb = rgb_product().image;
@@ -324,7 +327,7 @@ fn a_product_edited_out_of_its_format_is_refused() {
             "no product version",
             Box::new(|idx, header, _| {
                 if idx == 0 {
-                    header.remove("LUMPRODV");
+                    header.remove("LUMPRODV").unwrap();
                 }
                 true
             }),
@@ -344,7 +347,7 @@ fn a_product_edited_out_of_its_format_is_refused() {
             "no weight kind",
             Box::new(|idx, header, _| {
                 if idx == 0 {
-                    header.remove("LUMWGTK");
+                    header.remove("LUMWGTK").unwrap();
                 }
                 true
             }),
@@ -385,7 +388,7 @@ fn a_product_edited_out_of_its_format_is_refused() {
             "a report field missing",
             Box::new(|idx, header, _| {
                 if idx == 0 {
-                    header.remove("LUMSPIL");
+                    header.remove("LUMSPIL").unwrap();
                 }
                 true
             }),

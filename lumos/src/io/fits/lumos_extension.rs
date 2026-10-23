@@ -2,7 +2,6 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use fits_well::header::Header;
 use fits_well::image::{Bitpix, Scaling};
 use fits_well::io::{Hdu, HduKind};
 
@@ -161,7 +160,7 @@ impl LumosExtension {
         if hdu.kind != HduKind::Image {
             return Err(FitsRefusal::ExtensionNotImage { extension: self }.into());
         }
-        let stored = hdu.image()?;
+        let stored = hdu.image_metadata()?;
         if stored.bitpix != self.bitpix() || stored.scaling != self.scaling(image) {
             return Err(FitsRefusal::ExtensionSamples {
                 extension: self,
@@ -190,14 +189,9 @@ impl LumosExtension {
 
     /// Whether `header` is this extension's: its `EXTNAME`, and for a plane of a name other
     /// writers use, its `LUMOSFMT`.
-    pub(crate) fn names(self, header: &Header) -> Result<bool, FitsLoadError> {
-        let named = header
-            .get_text("EXTNAME")?
-            .is_some_and(|extname| extname.eq_ignore_ascii_case(self.extname()));
-        Ok(
-            named
-                && (self.named_alone() || header.get_text(FORMAT_KEYWORD)? == Some(self.format())),
-        )
+    pub(crate) fn names(self, hdu: &Hdu) -> Result<bool, FitsLoadError> {
+        Ok(hdu.matches(self.extname())?
+            && (self.named_alone() || hdu.header.get_text(FORMAT_KEYWORD)? == Some(self.format())))
     }
 }
 

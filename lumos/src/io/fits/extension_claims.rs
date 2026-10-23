@@ -1,6 +1,7 @@
 //! [`ExtensionClaims`]: the Lumos image extensions of a FITS file that describe another of its
 //! images, and the image each is for.
 
+use fits_well::header::Keyword;
 use fits_well::io::Hdu;
 
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
@@ -8,7 +9,7 @@ use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
 /// The keyword that names the image HDU an extension is for: its `EXTNAME`, or [`PRIMARY`].
-pub(super) const IMAGE_KEYWORD: &str = "LUMFOR";
+pub(super) const IMAGE_KEYWORD: Keyword = Keyword::new("LUMFOR");
 /// The name of a primary HDU without an `EXTNAME`, as astropy and fitsio name it.
 pub(super) const PRIMARY: &str = "PRIMARY";
 
@@ -33,7 +34,7 @@ impl ExtensionClaims {
         let mut images = Vec::new();
         let mut claims = Vec::new();
         for (idx, hdu) in hdus.iter().enumerate() {
-            if extension.names(&hdu.header)? {
+            if extension.names(hdu)? {
                 let image = metadata::read_text(&hdu.header, IMAGE_KEYWORD)?.ok_or_else(|| {
                     FitsLoadError::from(FitsRefusal::ClaimsNoImage {
                         extension,
@@ -41,22 +42,22 @@ impl ExtensionClaims {
                     })
                 })?;
                 claims.push(Claim { hdu: idx, image });
-            } else if Self::holds_image(hdu)?
-                && let Some(name) = image_name(hdus, idx)?
-            {
-                images.push(name);
+            } else if Self::holds_image(hdu)? {
+                images.push(hdu);
             }
         }
         for (pos, claim) in claims.iter().enumerate() {
-            let same = |name: &String| name.eq_ignore_ascii_case(&claim.image);
-            if !images.iter().any(same) {
+            if !names_any(&images, &claim.image)? {
                 return Err(FitsLoadError::from(FitsRefusal::ClaimsMissingImage {
                     extension,
                     hdu: claim.hdu,
                     image: claim.image.clone(),
                 }));
             }
-            if claims[..pos].iter().any(|earlier| same(&earlier.image)) {
+            if claims[..pos]
+                .iter()
+                .any(|earlier| earlier.image.eq_ignore_ascii_case(&claim.image))
+            {
                 return Err(FitsLoadError::from(FitsRefusal::DuplicateClaim {
                     extension,
                     image: claim.image.clone(),
@@ -72,14 +73,12 @@ impl ExtensionClaims {
         hdus: &[Hdu],
         image: usize,
     ) -> Result<Option<usize>, FitsLoadError> {
-        let Some(name) = image_name(hdus, image)? else {
-            return Ok(None);
-        };
-        Ok(self
-            .claims
-            .iter()
-            .find(|claim| claim.image.eq_ignore_ascii_case(&name))
-            .map(|claim| claim.hdu))
+        for claim in &self.claims {
+            if hdus[image].matches(claim.image.as_str())? {
+                return Ok(Some(claim.hdu));
+            }
+        }
+        Ok(None)
     }
 
     /// Whether `hdu` is an image of its own: an image HDU with at least one axis, which no lumos
@@ -92,7 +91,7 @@ impl ExtensionClaims {
     /// Whether `hdu` is an extension that describes another image rather than being one.
     fn describes_another(hdu: &Hdu) -> Result<bool, FitsLoadError> {
         for extension in LumosExtension::ALL {
-            if extension.names(&hdu.header)? {
+            if extension.names(hdu)? {
                 return Ok(true);
             }
         }
@@ -100,12 +99,13 @@ impl ExtensionClaims {
     }
 }
 
-/// The name an extension refers to the image at HDU `idx` by: its `EXTNAME`, or [`PRIMARY`] for
-/// an unnamed primary HDU; `None` for an unnamed extension, which none can name.
-fn image_name(hdus: &[Hdu], idx: usize) -> Result<Option<String>, FitsLoadError> {
-    let extname = metadata::read_text(&hdus[idx].header, "EXTNAME")?;
-    Ok(match extname {
-        Some(extname) => Some(extname),
-        None => (idx == 0).then(|| PRIMARY.to_owned()),
-    })
+/// Whether `name` names one of `images`: as an `EXTNAME`, or [`PRIMARY`] for an unnamed
+/// primary HDU, as [`Hdu::matches`] reads it.
+fn names_any(images: &[&Hdu], name: &str) -> Result<bool, FitsLoadError> {
+    for hdu in images {
+        if hdu.matches(name)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

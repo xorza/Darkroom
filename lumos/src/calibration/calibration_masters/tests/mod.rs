@@ -1273,7 +1273,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let mut invalid_version = cache_bytes.clone();
     let version_card = invalid_version
         .windows(8)
-        .position(|window| window == VERSION_KEYWORD.as_bytes())
+        .position(|window| window == VERSION_KEYWORD.as_str().as_bytes())
         .unwrap();
     let version_digit = invalid_version[version_card..version_card + 80]
         .iter()
@@ -1380,7 +1380,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         })
     };
     assert!(matches!(
-        set(0, FORMAT_KEYWORD, "OTHER"),
+        set(0, FORMAT_KEYWORD.as_str(), "OTHER"),
         BundleError::NotABundle
     ));
     assert!(matches!(

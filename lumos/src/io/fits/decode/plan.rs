@@ -32,7 +32,7 @@ pub(super) struct FitsHduDescription<'a> {
 impl<'a> FitsHduDescription<'a> {
     /// The image at HDU `idx`, `hdu`.
     pub(super) fn from_hdu(hdu: &'a Hdu, idx: usize) -> Result<Self, FitsLoadError> {
-        let image = hdu.image().map_err(|source| match source {
+        let image = hdu.image_metadata().map_err(|source| match source {
             FitsError::NotAnImage => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: idx }),
             source => FitsLoadError::from(source),
         })?;
@@ -130,7 +130,7 @@ impl<'a> FitsHduDescription<'a> {
     fn data_max(&self, float_scale: FitsFloatScale) -> Result<Option<f64>, FitsLoadError> {
         let decides_scale = matches!(self.image.bitpix, FitsBitpix::F32 | FitsBitpix::F64)
             && float_scale == FitsFloatScale::Auto
-            && self.header.get(domain_keywords::SCALE_ORIGIN).is_none();
+            && self.header.get(domain_keywords::SCALE_ORIGIN)?.is_none();
         if !decides_scale {
             return Ok(metadata::read_data_max(self.header));
         }
