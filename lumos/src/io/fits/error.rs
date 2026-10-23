@@ -620,8 +620,6 @@ impl Display for FitsRefusal {
 /// What a FITS decode sizes, refused when the size overflows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitsAllocation {
-    /// The HDU's data unit as stored, padded to whole FITS blocks.
-    StoredDataUnit,
     DecodedOutput,
     /// The most the decode holds at once.
     PeakMemory,
@@ -638,7 +636,6 @@ pub enum FitsAllocation {
 impl Display for FitsAllocation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::StoredDataUnit => "stored data unit",
             Self::DecodedOutput => "decoded output",
             Self::PeakMemory => "estimated peak memory",
             Self::FlagPlane => "flag plane",

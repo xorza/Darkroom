@@ -7,7 +7,6 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 use common::fs;
 use fits_well::FitsReader;
-use fits_well::header::Header;
 use fits_well::image::View as FitsView;
 use fits_well::io::StreamReader;
 
@@ -18,7 +17,6 @@ use crate::image::fits_transfer_provenance::FitsHduProvenance;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::fits::CHUNK_BYTES;
-use crate::io::fits::decode::hdu_sections::HduSections;
 use crate::io::fits::decode::pixels::HduDecode;
 use crate::io::fits::decode::plan::{FitsDecodePlan, FitsHduDescription};
 use crate::io::fits::decode::{DecodedFitsImage, selection};
@@ -216,10 +214,6 @@ impl<'r> SelectedFits<'r> {
         self.plan.beside_frame_bytes(&self.extension_bytes)
     }
 
-    fn header(&self) -> &Header {
-        &self.reader.hdus()[self.selected.idx].header
-    }
-
     /// Decode the selected image, its checksum settled as `checksum` says, then its flags and gain
     /// extensions, whose checksums are always required. The gain is the one `gains` holds of the
     /// key its extension states, read from no node, or the one it reads, shared through `gains`.
@@ -230,11 +224,10 @@ impl<'r> SelectedFits<'r> {
         gains: &SharedGains,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let size = self.plan.dimensions.size();
-        let idx = self.selected.idx;
-        let header = self.header().clone();
+        let image = self.reader.image(self.selected.idx)?;
         let decode = HduDecode {
             hdu: self.selected,
-            header: &header,
+            header: image.header(),
             plan: &self.plan,
             cfa_type: self.cfa_type,
             ctx,
@@ -246,11 +239,9 @@ impl<'r> SelectedFits<'r> {
                 } else {
                     ctx.fits.checksum
                 };
-                decode.read_stream(self.reader, policy)?
+                decode.read_stream(image, policy)?
             }
-            Checksum::Verified(verified) => {
-                decode.read(&mut HduSections::new(self.reader, idx), |_| Ok(verified))?
-            }
+            Checksum::Verified(verified) => decode.read(image, |_| Ok(verified))?,
         };
         if let Some(flags_hdu) = self.flags_hdu {
             Cancelled::check(&ctx.cancel)?;
@@ -283,19 +274,15 @@ pub(crate) trait ExtensionSample: Copy {
 
 impl ExtensionSample for u8 {
     fn of(view: FitsView<'_>) -> &[Self] {
-        let FitsView::U8(samples) = view else {
-            unreachable!("the extension's check admitted only BITPIX = 8");
-        };
-        samples
+        view.as_u8()
+            .expect("the extension's check admitted only BITPIX = 8")
     }
 }
 
 impl ExtensionSample for f32 {
     fn of(view: FitsView<'_>) -> &[Self] {
-        let FitsView::F32(samples) = view else {
-            unreachable!("the extension's check admitted only BITPIX = -32");
-        };
-        samples
+        view.as_f32()
+            .expect("the extension's check admitted only BITPIX = -32")
     }
 }
 
@@ -321,7 +308,8 @@ fn read_extension_in_chunks<T: ExtensionSample>(
     debug_assert!(shape.len() >= 2, "an extension is a plane at least");
     let (width, height) = (shape[0], shape[1]);
     let rows_per_chunk = (chunk_bytes / (width * size_of::<T>()).max(1)).max(1);
-    let mut sections = HduSections::summed(reader, idx)?;
+    let mut image = reader.image(idx)?.with_checksum();
+    let mut words = Vec::new();
     let mut planes = ArrayVec::new();
     for slice in 0..shape.get(2).copied().unwrap_or(1) {
         let mut plane = Vec::with_capacity(width * height);
@@ -333,11 +321,11 @@ fn read_extension_in_chunks<T: ExtensionSample>(
             if shape.len() == 3 {
                 ranges.push(slice..slice + 1);
             }
-            plane.extend_from_slice(T::of(sections.read_section(&ranges)?.samples()));
+            plane.extend_from_slice(T::of(image.view(ranges.as_slice(), &mut words)?.samples()));
         }
         planes.push(plane);
     }
-    let report = sections.finish_checksum()?;
+    let report = image.finish()?;
     FitsChecksumPolicy::RequireValid.judge(report, idx)?;
     Ok(planes)
 }

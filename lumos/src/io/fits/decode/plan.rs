@@ -1,7 +1,7 @@
 use fits_well::FitsError;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType, Scaling};
-use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
+use fits_well::io::{Hdu, HduKind};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
@@ -40,7 +40,7 @@ impl<'a> FitsHduDescription<'a> {
             header: &hdu.header,
             kind: hdu.kind,
             image,
-            source_bytes: padded_data_bytes(hdu.data_bytes)?,
+            source_bytes: hdu.padded_data_bytes(),
         })
     }
 
@@ -322,16 +322,6 @@ fn checked_bytes(
         .checked_mul(element_bytes)
         .and_then(|bytes| u64::try_from(bytes).ok())
         .ok_or_else(|| overflow(allocation))
-}
-
-fn padded_data_bytes(bytes: u64) -> Result<u64, FitsLoadError> {
-    if bytes == 0 {
-        return Ok(0);
-    }
-    bytes
-        .checked_add(BLOCK_SIZE as u64 - 1)
-        .map(|padded| padded / BLOCK_SIZE as u64 * BLOCK_SIZE as u64)
-        .ok_or_else(|| overflow(FitsAllocation::StoredDataUnit))
 }
 
 pub(super) fn dimensions_from_shape(
