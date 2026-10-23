@@ -258,26 +258,25 @@ impl DefectMap {
     /// [`QualityFlags::REPAIRED`]: the value left there is the neighbours', and a combine with
     /// other frames at that pixel can leave it out.
     ///
-    /// The image is the map's sensor size.
-    pub(crate) fn correct(&self, image: &mut CfaImage) {
+    /// The image is the map's sensor size, and `unmeasured` its [`CfaImage::unmeasured_mask`],
+    /// which the defects join: the mask then covers every pixel no later repair may read either.
+    pub(crate) fn correct(&self, image: &mut CfaImage, unmeasured: Option<&mut BitBuffer2>) {
         self.assert_dimensions(image);
         if self.count == 0 {
             return;
         }
         // Every defect is masked, and every pixel that holds no measurement, so each repair draws
         // only on measured neighbours: a clustered defect (hot column, adjacent same-color pixels)
-        // cannot pull a bad or half-corrected value into a neighbour's median, a fill cannot pass
-        // for a measurement, and the order of the lists does not matter. A pixel in both lists is
-        // repaired twice to the same value.
-        let with_nulls = image
-            .flags()
-            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
-            .map(|flags| {
-                let mut mask = flags.mask_of(QualityFlags::NO_DATA);
-                mask.or_with(&self.mask);
-                mask
-            });
-        let mask = with_nulls.as_ref().unwrap_or(&self.mask);
+        // cannot pull a bad or half-corrected value into a neighbour's median, a fill or another
+        // repair cannot pass for a measurement, and the order of the lists does not matter. A pixel
+        // in both lists is repaired twice to the same value.
+        let mask = match unmeasured {
+            Some(unmeasured) => {
+                unmeasured.or_with(&self.mask);
+                &*unmeasured
+            }
+            None => &self.mask,
+        };
         let lattice = CfaLattice::new(&image.cfa_type());
         let mut scratch = Gathered::default();
         for &idx in self.hot.idxs.iter().chain(&self.cold_idxs) {

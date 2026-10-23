@@ -485,10 +485,12 @@ fn the_combine_stage_counts_active_inputs_and_full_outputs() {
     };
     let cache = frames(false);
     // A row of the 2 × 1 output copies `input` bytes a pixel of every frame, into each of the two
-    // chunk copies, and the output holds `output` bytes a pixel throughout.
+    // chunk copies, and the output holds `output` bytes a pixel throughout, beside a combine
+    // scratch for the three frames on each worker of the pool, 266 B (see the drizzle shape's test).
+    let scratch = rayon::current_num_threads() * 266;
     let stage = |input: usize, output: usize| Stage {
         kept: 0,
-        held: output * 2,
+        held: output * 2 + scratch,
         in_flight: 2 * input * 2,
         units: Units::Rows(1),
     };

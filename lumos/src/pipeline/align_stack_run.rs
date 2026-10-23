@@ -361,10 +361,11 @@ impl AlignStackRun<'_> {
         };
         intake.intake.complete_one();
 
-        let others: Vec<usize> = (0..count).filter(|&idx| idx != reference).collect();
+        // Every other light, the `k`th of them light `k`, or `k + 1` from the reference on.
         let mut lights = intake
             .intake
-            .map_owned(others, &mut workers, |worker, _, idx| {
+            .map(0..count - 1, &mut workers, |worker, other| {
+                let idx = other + usize::from(other >= reference);
                 let Loaded { image, .. } = files.prepare(idx, intake.intake.ctx())?;
                 let DetectedLight { frame, diagnostics } =
                     intake.detect(&mut worker.detector, idx, image)?;

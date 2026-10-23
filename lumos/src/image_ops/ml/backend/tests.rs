@@ -3,6 +3,7 @@ use std::array;
 use imaginarium::Buffer2;
 
 use crate::image_ops::ml::backend::*;
+use crate::math::size2us::Size2us;
 
 /// A plane whose every sample names its pixel and channel: `c/4 + (x + y·w)/(4·w·h)`, inside
 /// `[c/4, c/4 + 1/4)` so nothing reaches the clamp, and distinct at f32 resolution — a wrong tile
@@ -117,10 +118,14 @@ fn an_identity_model_reproduces_the_input() {
     for image in [rgb, gray] {
         let mut output = image.clone();
         output.metadata.header.exposure_time = Some(30.0);
-        run_tiles(&mut output, OnnxModel::DEFAULT_STRIDE, |input, tile| {
-            tile.copy_from_slice(input);
-            Ok(())
-        })
+        run_tiles(
+            Planes::InPlace(&mut output),
+            OnnxModel::DEFAULT_STRIDE,
+            |input, tile| {
+                tile.copy_from_slice(input);
+                Ok(())
+            },
+        )
         .unwrap();
         assert_eq!(output.channels(), image.channels());
         assert_eq!(output.metadata.header.exposure_time, Some(30.0));
@@ -158,7 +163,7 @@ fn the_stride_must_cover_the_frame() {
     }
     for stride in [0, MAX_STRIDE + 1, WINDOW] {
         let mut image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
-        let error = run_tiles(&mut image, stride, |_, _| {
+        let error = run_tiles(Planes::InPlace(&mut image), stride, |_, _| {
             panic!("a stride refused runs no tile")
         })
         .unwrap_err();
@@ -166,5 +171,131 @@ fn the_stride_must_cover_the_frame() {
             matches!(&error, MlError::Config(invalid) if invalid.field == "ML tile stride"),
             "{stride}: {error:?}"
         );
+    }
+}
+
+/// The whole-frame blend the band replaced: every tile's feathered sums over the frame, normalized
+/// once every tile is in, a grayscale frame the mean of the three channels.
+fn whole_frame_blend(
+    image: &LinearImage,
+    stride: usize,
+    mut infer: impl FnMut(&[f32], &mut [f32]),
+) -> Vec<Vec<f32>> {
+    let (width, height) = (image.width(), image.height());
+    let mut sums = [
+        vec![0.0f32; width * height],
+        vec![0.0; width * height],
+        vec![0.0; width * height],
+    ];
+    let mut weight = vec![0.0f32; width * height];
+    let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
+    let mut output = vec![0.0f32; WINDOW * WINDOW * 3];
+    for &ty in &tile_starts(height, stride) {
+        for &tx in &tile_starts(width, stride) {
+            fill_tile_input(image, Vec2us::new(tx, ty), &mut input);
+            infer(&input, &mut output);
+            for hh in 0..WINDOW {
+                for ww in 0..WINDOW {
+                    let fw = feather(ww) * feather(hh);
+                    let idx = (ty + hh) * width + tx + ww;
+                    let s = (hh * WINDOW + ww) * 3;
+                    for c in 0..3 {
+                        sums[c][idx] += output[s + c] * fw;
+                    }
+                    weight[idx] += fw;
+                }
+            }
+        }
+    }
+    if image.is_rgb() {
+        sums.iter()
+            .map(|sum| {
+                sum.iter()
+                    .zip(&weight)
+                    .map(|(&sum, &wt)| (sum / wt).clamp(0.0, 1.0))
+                    .collect()
+            })
+            .collect()
+    } else {
+        vec![
+            (0..width * height)
+                .map(|i| {
+                    ((sums[0][i] + sums[1][i] + sums[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0)
+                })
+                .collect(),
+        ]
+    }
+}
+
+/// A band of [`WINDOW`] rows blends what the whole frame blended, bit for bit, read in place or
+/// written apart: each pixel gathers the same tiles' sums in the same order. A model that squares
+/// its input and adds a tenth of the tile's count makes every overlap matter; 600 × 1100 at 384
+/// runs tile rows at 0, 384 and 588, so a band row is reused and the last tile row is short.
+#[test]
+fn a_band_blends_what_the_whole_frame_blended() {
+    let size = Size2us::new(600, 1100);
+    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
+        ramp(size.width, size.height, c)
+    }));
+    let gray = LinearImage::from(ramp(size.width, size.height, 1));
+    let model = || {
+        let mut count = 0.0f32;
+        move |input: &[f32], output: &mut [f32]| {
+            count += 1.0;
+            for (out, &value) in output.iter_mut().zip(input) {
+                *out = value * value + count / 10.0;
+            }
+        }
+    };
+    for image in [rgb, gray] {
+        let expected = whole_frame_blend(&image, MAX_STRIDE, model());
+        let mut in_place = image.clone();
+        let mut infer = model();
+        run_tiles(
+            Planes::InPlace(&mut in_place),
+            MAX_STRIDE,
+            |input, output| {
+                infer(input, output);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let zeroed = || Buffer2::new_filled(size.width, size.height, 0.0f32);
+        let mut apart = if image.is_rgb() {
+            LinearImage::from(array::from_fn::<_, 3, _>(|_| zeroed()))
+        } else {
+            LinearImage::from(zeroed())
+        };
+        let mut infer = model();
+        run_tiles(
+            Planes::Apart {
+                input: &image,
+                output: &mut apart,
+            },
+            MAX_STRIDE,
+            |input, output| {
+                infer(input, output);
+                Ok(())
+            },
+        )
+        .unwrap();
+        for (c, expected) in expected.iter().enumerate() {
+            let bits = |plane: &[f32]| {
+                plane
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                bits(in_place.channel(c).pixels()),
+                bits(expected),
+                "channel {c} in place"
+            );
+            assert_eq!(
+                bits(apart.channel(c).pixels()),
+                bits(expected),
+                "channel {c} apart"
+            );
+        }
     }
 }

@@ -9,7 +9,6 @@ pub(crate) mod sample;
 pub(crate) mod sample_noise;
 
 use std::convert::Infallible;
-use std::mem;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -62,7 +61,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::memory::stage::Stage;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::recycle;
+use crate::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
@@ -362,10 +361,10 @@ impl FrameCache {
         let scratch_pool = ScratchPool::<CombineScratch>::new(self.frames.len());
         // What each chunk borrows its planes through, kept empty between chunks so the combine
         // allocates each once.
-        let mut kept_gates: Vec<FrameGate<'static>> = Vec::new();
-        let mut kept_flags: Vec<Option<&'static [u8]>> = Vec::new();
-        let mut kept_gains: Vec<Option<GainRows<'static>>> = Vec::new();
-        let mut kept_rows: Vec<QualityRows<'static>> = Vec::new();
+        let mut kept_gates: Recycled<FrameGate<'static>> = Recycled::default();
+        let mut kept_flags: Recycled<Option<&'static [u8]>> = Recycled::default();
+        let mut kept_gains: Recycled<Option<GainRows<'static>>> = Recycled::default();
+        let mut kept_rows: Recycled<QualityRows<'static>> = Recycled::default();
         let pixels = self
             .core
             .process_chunks(&self.frames, chunking.units, |output_slice, ctx| {
@@ -380,19 +379,18 @@ impl FrameCache {
                 let chunk_pixels = output_slice.len();
                 debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
                 let chunk_end = pixel_offset + chunk_pixels;
-                let mut gates: Vec<FrameGate<'_>> = recycle::emptied(mem::take(&mut kept_gates));
+                let mut gates: Vec<FrameGate<'_>> = kept_gates.take();
                 gates.extend(
                     chunks
                         .iter()
                         .map(|chunk| FrameGate::of_chunk(chunk, channel)),
                 );
-                let mut flags: Vec<Option<&[u8]>> = recycle::emptied(mem::take(&mut kept_flags));
+                let mut flags: Vec<Option<&[u8]>> = kept_flags.take();
                 flags.extend(chunks.iter().map(|chunk| chunk.flags));
                 // The node rows of each frame's flat gain the chunk reads, for the noise model, and
                 // the grid they share: every frame has the stack's size.
                 let gain_grid = GainGrid::of(dimensions.size());
-                let mut gains: Vec<Option<GainRows<'_>>> =
-                    recycle::emptied(mem::take(&mut kept_gains));
+                let mut gains: Vec<Option<GainRows<'_>>> = kept_gains.take();
                 gains.extend(self.frames.iter().map(|frame| {
                     frame
                         .flat_gain
@@ -406,7 +404,7 @@ impl FrameCache {
                 }));
                 // One row bundle per output row, so an unrequested plane simply has no slice
                 // to write instead of needing its own copy of the gather loop below.
-                let mut rows: Vec<QualityRows<'_>> = recycle::emptied(mem::take(&mut kept_rows));
+                let mut rows: Vec<QualityRows<'_>> = kept_rows.take();
                 rows.extend(output_slice.chunks_mut(width).map(|value| QualityRows {
                     value,
                     coverage: None,
@@ -417,45 +415,32 @@ impl FrameCache {
                 }));
                 // A coverage plane shared by the channels is their one gate, so the first channel's
                 // gather writes it; one per channel is written by its own.
+                let chunk = pixel_offset..pixel_offset + chunk_pixels;
                 if let Some(pixels) = output_coverage
                     .as_mut()
                     .filter(|pixels| pixels.layout() == ChannelLayout::Rgb || channel == 0)
                 {
                     let plane = channel.min(pixels.channel_count() - 1);
-                    let slice = &mut pixels.channel_mut(plane).pixels_mut()
-                        [pixel_offset..pixel_offset + chunk_pixels];
-                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.coverage = Some(chunk);
-                    }
+                    let plane = &mut pixels.channel_mut(plane).pixels_mut()[chunk.clone()];
+                    attach_rows(&mut rows, plane, width, |row| &mut row.coverage);
                 }
-                if let Some(plane) = output_weight.as_mut() {
-                    let slice = &mut plane.channel_mut(channel).pixels_mut()
-                        [pixel_offset..pixel_offset + chunk_pixels];
-                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.weight = Some(chunk);
-                    }
+                if let Some(pixels) = output_weight.as_mut() {
+                    let plane = &mut pixels.channel_mut(channel).pixels_mut()[chunk.clone()];
+                    attach_rows(&mut rows, plane, width, |row| &mut row.weight);
                 }
-                if let Some(plane) = output_inverse_variance.as_mut() {
-                    let slice = &mut plane.channel_mut(channel).pixels_mut()
-                        [pixel_offset..pixel_offset + chunk_pixels];
-                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.inverse_variance = Some(chunk);
-                    }
+                if let Some(pixels) = output_inverse_variance.as_mut() {
+                    let plane = &mut pixels.channel_mut(channel).pixels_mut()[chunk.clone()];
+                    attach_rows(&mut rows, plane, width, |row| &mut row.inverse_variance);
                 }
-                if let Some(plane) = output_dispersion.as_mut() {
-                    let slice = &mut plane.channel_mut(channel).pixels_mut()
-                        [pixel_offset..pixel_offset + chunk_pixels];
-                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.dispersion = Some(chunk);
-                    }
+                if let Some(pixels) = output_dispersion.as_mut() {
+                    let plane = &mut pixels.channel_mut(channel).pixels_mut()[chunk.clone()];
+                    attach_rows(&mut rows, plane, width, |row| &mut row.dispersion);
                 }
                 // One plane for every channel, each pass ORing into it: a pixel is flagged when any
                 // of its channels is.
                 if let Some(plane) = output_flags.as_mut() {
-                    let slice = &mut plane.pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
-                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.flags = Some(chunk);
-                    }
+                    let plane = &mut plane.pixels_mut()[chunk];
+                    attach_rows(&mut rows, plane, width, |row| &mut row.flags);
                 }
                 rows.par_drain(..).enumerate().for_each_init(
                     || scratch_pool.acquire(),
@@ -595,10 +580,10 @@ impl FrameCache {
                         fallback_pixels.fetch_add(row_fallbacks, Ordering::Relaxed);
                     },
                 );
-                kept_rows = recycle::emptied(rows);
-                kept_gains = recycle::emptied(gains);
-                kept_flags = recycle::emptied(flags);
-                kept_gates = recycle::emptied(gates);
+                kept_rows.put(rows);
+                kept_gains.put(gains);
+                kept_flags.put(flags);
+                kept_gates.put(gates);
             });
         CombineOutput {
             pixels,
@@ -661,6 +646,10 @@ impl FrameCache {
                 .iter()
                 .map(|frame| StoredLayout::of(frame).pixel_bytes())
                 .sum(),
+            frame_count: self.frames.len(),
+            // The pool the combine leases from holds one scratch for each worker of the pool it
+            // runs on.
+            workers: rayon::current_num_threads(),
         }
         .stage(0)
     }
@@ -717,6 +706,19 @@ impl FrameCache {
         // the facts a later frame states first are compared here, in order.
         SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
         Self::measured(frames, core, normalization)
+    }
+}
+
+/// Hand each of `rows` its row of `plane`, a chunk of rows `width` wide, through the slot `field`
+/// names.
+fn attach_rows<'a, T>(
+    rows: &mut [QualityRows<'a>],
+    plane: &'a mut [T],
+    width: usize,
+    field: impl for<'r> Fn(&'r mut QualityRows<'a>) -> &'r mut Option<&'a mut [T]>,
+) {
+    for (row, chunk) in rows.iter_mut().zip(plane.chunks_mut(width)) {
+        *field(row) = Some(chunk);
     }
 }
 

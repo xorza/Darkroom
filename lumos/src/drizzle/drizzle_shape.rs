@@ -5,13 +5,14 @@ use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
-use crate::frame::frame_stats::FrameStats;
+use crate::frame::frame_peek::FramePeek;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::error::OverBudget;
+use crate::io::frame_info::DecoderBytes;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
@@ -21,8 +22,13 @@ use crate::memory::stage::{Stage, Units};
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FrameOrigin {
     /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache, beside
-    /// the `gains` bytes of the source gains they share, which the run holds from their decode on.
-    Files { uncached: usize, gains: usize },
+    /// the `gains` bytes of the source gains they share, which the run holds from their decode on,
+    /// each decode holding `decoder` on its way.
+    Files {
+        uncached: usize,
+        gains: usize,
+        decoder: DecoderBytes,
+    },
     /// Handed over decoded, every one resident from the start and freed once drizzled.
     Memory,
 }
@@ -131,13 +137,20 @@ impl DrizzleShape {
         let drizzled = self.drizzled();
         let drizzled_bytes = drizzled.heap_bytes(output);
         let input_bytes = input.decoded_bytes();
-        let mosaic = deposit.mosaic();
-        let way = Footprint::kept(input_bytes)
-            .beside(FrameStats::heap_bytes(input, mosaic, workers))
-            .then(Footprint {
-                kept: drizzled_bytes,
-                peak: drizzled_bytes + input_bytes,
-            });
+        let decoder = match origin {
+            FrameOrigin::Files { decoder, .. } => decoder,
+            FrameOrigin::Memory => DecoderBytes::default(),
+        };
+        let way = FramePeek {
+            dimensions: input,
+            decoder,
+            mosaic: deposit.mosaic(),
+        }
+        .footprint(workers)
+        .then(Footprint {
+            kept: drizzled_bytes,
+            peak: drizzled_bytes + input_bytes,
+        });
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
         // frees at most its own size.
         let kept = match origin {
@@ -187,6 +200,7 @@ mod tests {
     use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
+    use crate::io::frame_info::DecoderBytes;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -195,14 +209,18 @@ mod tests {
     ///
     /// A drizzled frame is its channel, a drop weight and a Kish size, 3 planes of 16 pixels, 16
     /// flag bytes, and its flat gain warped onto the output, a node at pixels 0 and 4 of each axis,
-    /// 2 × 2 nodes of 4 B: 224 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B,
-    /// measured by MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of
-    /// transform a pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 184
-    /// past the frame it keeps. The depth of the one weight plane, 64 B, is held through every
-    /// stage. The combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth,
-    /// and a row copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies,
-    /// 312 B; the gain is read where it lies. The source gain the frames share, 2 × 2 nodes of
-    /// 4 B, 16 B, is held beside the depth.
+    /// 2 × 2 nodes of 4 B: 224 B. Its input is 4 pixels of 4 bytes and 4 flag bytes, 20 B, measured
+    /// by MRS over one tile that is the frame: 4 coefficients of 33 bytes, 28 bytes of transform a
+    /// pixel, a row of 8 B and 136 of bookkeeping, 388 B, the way's peak at 408 B, 184 past the
+    /// frame it keeps. The depth of the one weight plane, 64 B, is held through every stage. The
+    /// combine holds the image and its flag byte, 5 B a pixel, 80 B, beside the depth, and a row
+    /// copies three frames of 13 B a pixel over 4 pixels into each of two chunk copies, 312 B; the
+    /// gain is read where it lies. The source gain the frames share, 2 × 2 nodes of 4 B, 16 B, is
+    /// held beside the depth. A combine scratch for three frames on its one worker is 266 B: a
+    /// value, a weight, three noise columns and a flag byte a frame, 21 B, the sorted keys, values,
+    /// positions and kept marks, 17 B, the weights and the clamped copy, 8 B, four GESD critical
+    /// values of 8 B, and the normal scores, a row of three for each of the three counts and their
+    /// counts, 72 + 24 B: 3 × 46 + 32 + 96.
     #[test]
     fn the_depth_and_the_shared_gains_are_held_through_every_stage() {
         let stack = StackConfig {
@@ -216,7 +234,11 @@ mod tests {
                 output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
                 deposit: Deposit::Channels(ChannelLayout::Mono),
                 frame_count: 3,
-                origin: FrameOrigin::Files { uncached: 0, gains },
+                origin: FrameOrigin::Files {
+                    uncached: 0,
+                    gains,
+                    decoder: DecoderBytes::default(),
+                },
             };
             assert_eq!(
                 shape.stages(&stack, 1),
@@ -235,7 +257,7 @@ mod tests {
                     },
                     Stage {
                         kept: 224,
-                        held: 144 + gains,
+                        held: 144 + 266 + gains,
                         in_flight: 312,
                         units: Units::Rows(4),
                     },
@@ -243,5 +265,22 @@ mod tests {
                 "{gains}"
             );
         }
+        // A decoder that holds 1000 B beside the frame it makes peaks the way at 20 + 1000 B,
+        // past the statistics' 408: 1020 − 224 = 796 past the drizzled frame.
+        let decoding = DrizzleShape {
+            input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
+            output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+            deposit: Deposit::Channels(ChannelLayout::Mono),
+            frame_count: 3,
+            origin: FrameOrigin::Files {
+                uncached: 0,
+                gains: 0,
+                decoder: DecoderBytes {
+                    source: 0,
+                    beside: 1000,
+                },
+            },
+        };
+        assert_eq!(decoding.stages(&stack, 1)[0].in_flight, 796);
     }
 }

@@ -146,7 +146,8 @@ impl WrittenFrame {
     }
 }
 
-/// Each slot's [`StratifiedSamples`] of `image`, written to `sink`.
+/// Each slot's [`StratifiedSamples`] of `image`, written to `sink` from one buffer the slots take
+/// in turn.
 fn store_samples(
     image: &impl StackableImage,
     mut sink: impl PlaneSink,
@@ -157,10 +158,11 @@ fn store_samples(
         || image.dimensions().channels(),
         |mosaic| mosaic.color_count(),
     );
+    let mut samples = Vec::new();
     (0..slots)
         .map(|slot| {
             let plane = image.channel(if mosaic.is_some() { 0 } else { slot });
-            let samples = StratifiedSamples::new(size, mosaic, slot).gather(plane);
+            StratifiedSamples::new(size, mosaic, slot).gather(plane, &mut samples);
             sink.write(PlaneRole::Samples(slot), &samples)
         })
         .collect()

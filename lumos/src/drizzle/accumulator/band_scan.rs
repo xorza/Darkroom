@@ -13,18 +13,35 @@ use crate::math::vec2us::Vec2us;
 /// column more, while a pixel centred exactly on a vertex is not lost to that rounding.
 const STRIP_GUARD: f64 = 1e-6;
 
-/// A band's widened output rectangle taken back onto the input as a closed outline, and how far
-/// from it, in input pixels, a pixel whose drop reaches inside can lie.
-#[derive(Debug, Clone)]
-pub(super) struct Outline {
-    pub(super) vertices: Vec<DVec2>,
+/// A band's widened output rectangle taken back onto the input.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Outline {
+    /// A closed-form map's image, whose columns bound a scan.
+    Corners(Corners),
+    /// A sampled SIP image, of which only the rows bound a scan, as `FrameSource::band_scan`
+    /// states: the least and the greatest input row it spans, widened by its reach.
+    Rows([f64; 2]),
+}
+
+/// A closed-form map's image of a band's output rectangle: its four corners, and how far from the
+/// outline they close, in input pixels, a pixel whose drop reaches inside can lie.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Corners {
+    pub(super) vertices: [DVec2; 4],
     pub(super) reach: f64,
-    /// Whether its columns bound a scan: a closed-form outline's do, and a SIP map's sampled one
-    /// does not, as `FrameSource::band_scan` states.
-    pub(super) bounds_cols: bool,
 }
 
 impl Outline {
+    /// The least and greatest input row the outline spans, widened by its reach.
+    fn rows(&self) -> [f64; 2] {
+        match self {
+            Self::Corners(corners) => corners.rows(),
+            Self::Rows(rows) => *rows,
+        }
+    }
+}
+
+impl Corners {
     /// The least and greatest input row the outline spans, widened by its reach.
     fn rows(&self) -> [f64; 2] {
         let [first, last] = self.vertices.iter().fold(
@@ -80,8 +97,8 @@ impl Outline {
 #[derive(Debug, Clone)]
 pub(super) struct BandScan {
     rows: Range<usize>,
-    /// `None` when nothing bounds the band's input, and every column of a row is scanned.
-    outline: Option<Outline>,
+    /// `None` when nothing bounds the band's columns, and every column of a row is scanned.
+    outline: Option<Corners>,
     width: usize,
 }
 
@@ -109,7 +126,10 @@ impl BandScan {
         let end = (last.ceil() + 1.0).max(0.0) as usize;
         Self {
             rows: start..end.min(height).max(start),
-            outline: outline.bounds_cols.then_some(outline),
+            outline: match outline {
+                Outline::Corners(corners) => Some(corners),
+                Outline::Rows(_) => None,
+            },
             width,
         }
     }

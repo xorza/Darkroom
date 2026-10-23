@@ -8,6 +8,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
@@ -236,23 +237,55 @@ impl CfaImage {
     /// it is. Calibration owns the repair and runs it once its arithmetic is done, so a pixel a
     /// master left without a measurement holds a fill, not a difference against a bound.
     pub(crate) fn repair_nulls(&mut self) {
-        let Some(flags) = self
-            .flags()
-            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
-        else {
+        let Some(nulls) = self.unrepaired_nulls() else {
             return;
         };
+        let unmeasured = self.unmeasured_mask().expect("a null is flagged");
+        self.repair_nulls_at(&nulls, &unmeasured);
+    }
+
+    /// [`Self::repair_nulls`] where `unmeasured` already covers every pixel no repair may read:
+    /// the [`Self::unmeasured_mask`] calibration built, and grew by the defects it repaired.
+    pub(crate) fn repair_nulls_within(&mut self, unmeasured: &BitBuffer2) {
+        if let Some(nulls) = self.unrepaired_nulls() {
+            self.repair_nulls_at(&nulls, unmeasured);
+        }
+    }
+
+    /// The pixels no repair may read: every null and every pixel a repair made; `None` for a frame
+    /// that holds neither.
+    pub(crate) fn unmeasured_mask(&self) -> Option<BitBuffer2> {
+        let unmeasured = QualityFlags::NO_DATA.union(QualityFlags::REPAIRED);
+        self.flags()
+            .filter(|flags| flags.contains(unmeasured))
+            .map(|flags| flags.mask_of(unmeasured))
+    }
+
+    /// The nulls no repair has filled yet; `None` for a frame that holds none.
+    fn unrepaired_nulls(&self) -> Option<BitBuffer2> {
+        let bytes = self
+            .flags()
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))?
+            .bytes();
+        let mut nulls = BitBuffer2::new_default(self.size());
+        nulls.fill_from_predicate(|idx| {
+            let flags = QualityFlags::from_byte(bytes[idx]);
+            flags.intersects(QualityFlags::NO_DATA) && !flags.intersects(QualityFlags::REPAIRED)
+        });
+        (nulls.count_ones() > 0).then_some(nulls)
+    }
+
+    /// Fill each of `nulls` from its same-color neighbours outside `unmeasured`, and flag it
+    /// [`QualityFlags::REPAIRED`]. The mask keeps every null out of every repair, so the order of
+    /// the repairs is free.
+    fn repair_nulls_at(&mut self, nulls: &BitBuffer2, unmeasured: &BitBuffer2) {
         let lattice = CfaLattice::new(&self.cfa_type);
         let size = self.size();
-        let mut nulls = flags.mask_of(QualityFlags::NO_DATA);
-        nulls.and_not(&flags.mask_of(QualityFlags::REPAIRED));
-        let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
         let mut scratch = Gathered::default();
-        // The mask keeps every null out of every repair, so the order of the repairs is free.
         nulls.for_each_set(|pos| {
             let plane = MaskedPlane {
                 pixels: &self.data,
-                mask: Some(&mask),
+                mask: Some(unmeasured),
             };
             let repaired = lattice.median(plane, pos, &mut scratch);
             self.data[size.idx_of(pos)] = repaired;

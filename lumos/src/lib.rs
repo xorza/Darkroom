@@ -57,7 +57,7 @@ mod memory;
 mod noise;
 mod pipeline;
 mod progress;
-mod recycle;
+mod recycled;
 mod registration;
 mod scratch_pool;
 mod simd;

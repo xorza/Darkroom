@@ -4,6 +4,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::image_dimensions::ImageDimensions;
+use crate::image::pixel_flags::DilationScratch;
 use crate::image::stackable_image::StackableImage;
 use crate::io::error::OverBudget;
 use crate::io::load_ctx::LoadCtx;
@@ -67,20 +68,27 @@ impl FrameInfo {
     }
 
     /// `way`, which ends on the frame's decoded mosaic, then the demosaic on `workers`, an X-Trans
-    /// one in `passes`: the noise the demosaic measures on the mosaic beside it, then the demosaic,
-    /// which carries the flags to the frame it makes.
+    /// one in `passes`: the noise the demosaic measures on the mosaic beside it, the block ORs its
+    /// flags grow by to the demosaic's support, then the demosaic, which carries the flags to the
+    /// frame it makes.
     pub(crate) fn demosaiced(
         self,
         way: Footprint,
         passes: MarkesteijnPasses,
         workers: usize,
     ) -> Footprint {
-        let noise = self.cfa_type.mosaic().map_or(0, |mosaic| {
-            MosaicNoiseMeasure::heap_bytes(self.dimensions.size(), mosaic)
-        });
+        let size = self.dimensions.size();
+        let noise = self
+            .cfa_type
+            .mosaic()
+            .map_or(0, |mosaic| MosaicNoiseMeasure::heap_bytes(size, mosaic));
+        let dilation = self
+            .cfa_type
+            .mosaic()
+            .map_or(0, |_| DilationScratch::heap_bytes(size, workers));
         let flags = self.dimensions.flag_plane_bytes();
         let demosaic = Demosaic::of(self.cfa_type, passes).footprint(self.dimensions, workers);
-        way.beside(noise).then(Footprint {
+        way.beside(noise).beside(dilation).then(Footprint {
             kept: demosaic.kept + flags,
             peak: demosaic.peak + flags,
         })

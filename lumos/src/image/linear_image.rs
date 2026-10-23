@@ -1,4 +1,4 @@
-use std::slice;
+use std::{array, slice};
 
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
@@ -8,6 +8,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
+use crate::image::intensity::Intensity;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::rgb::Rgb;
@@ -228,36 +229,23 @@ impl LinearImage {
             });
     }
 
-    /// Per-pixel combined intensity as a plane: the channel itself for L, `(r+g+b)/3` for RGB.
-    pub(crate) fn intensity_plane(&self) -> Buffer2<f32> {
-        if !self.is_rgb() {
-            return self.channel(0).clone();
+    /// The per-pixel combined intensity, read from the channels where it is needed: the channel
+    /// itself for L, `(r+g+b)/3` for RGB.
+    pub(crate) fn intensity(&self) -> Intensity<'_> {
+        let size = self.dimensions().size();
+        if self.is_rgb() {
+            Intensity::rgb(size, array::from_fn(|c| self.channel(c).pixels()))
+        } else {
+            Intensity::mono(size, self.channel(0).pixels())
         }
-        let (r, g, b) = (
-            self.channel(0).pixels(),
-            self.channel(1).pixels(),
-            self.channel(2).pixels(),
-        );
-        let mut intensity = vec![0.0f32; self.pixel_count()];
-        intensity
-            .par_chunks_mut(SAMPLES_PER_BLOCK)
-            .zip(r.par_chunks(SAMPLES_PER_BLOCK))
-            .zip(g.par_chunks(SAMPLES_PER_BLOCK))
-            .zip(b.par_chunks(SAMPLES_PER_BLOCK))
-            .for_each(|(((out, r), g), b)| {
-                for (((out, &r), &g), &b) in out.iter_mut().zip(r).zip(g).zip(b) {
-                    *out = Rgb { r, g, b }.intensity();
-                }
-            });
-        Buffer2::new(self.width(), self.height(), intensity)
     }
 
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
     /// `map`, then move every pixel to its new intensity with its hue kept
     /// ([`Rgb::with_intensity`]); L takes the new intensity clamped to `[0, 1]`. The shape shared
     /// by the display enhancers (`image_ops::hdr`, `image_ops::local_contrast`).
-    pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
-        let mapped = map(&self.intensity_plane());
+    pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(Intensity<'_>) -> Buffer2<f32>) {
+        let mapped = map(self.intensity());
         if !self.is_rgb() {
             self.channel_mut(0)
                 .pixels_mut()
@@ -396,6 +384,28 @@ pub(crate) const fn f32_target_format(image: &Image) -> ColorFormat {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::image::linear_image::LinearImage;
+
+    impl LinearImage {
+        /// The combined intensity as a plane, for a test to measure.
+        pub(crate) fn intensity_plane(&self) -> Buffer2<f32> {
+            let intensity = self.intensity();
+            let size = intensity.size();
+            Buffer2::new(
+                size.width,
+                size.height,
+                (0..size.pixel_count())
+                    .map(|idx| intensity.at(idx))
+                    .collect(),
+            )
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use imaginarium::Buffer2;
 
@@ -444,9 +454,7 @@ mod tests {
     #[test]
     fn remap_intensity_moves_pixels_with_their_hue() {
         let mut image = rgb_image(Size2us::new(1, 1), [vec![0.2], vec![0.1], vec![0.1]]);
-        image.remap_intensity(|intensity| {
-            Buffer2::new(1, 1, intensity.pixels().iter().map(|&i| 2.0 * i).collect())
-        });
+        image.remap_intensity(|intensity| Buffer2::new(1, 1, vec![2.0 * intensity.at(0)]));
         assert_eq!(image.channel(0).pixels(), &[0.4]);
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);

@@ -30,8 +30,9 @@
   allocators and buffer reuse pay where the allocation is a large share of the work. Source:
   `research/2026-10-16-cosmic-ray-page-faults.md`.
 - **A price sits beside what it prices, and one price serves the plan and the run.** The combine
-  is priced by `CombineCost` for the plan and the frame cache alike, two chunk copies included, and
-  a chunk is priced by what `ChunkCopy` copies, not the flat gain it reads where it is mapped.
+  is priced by `CombineCost` for the plan and the frame cache alike, two chunk copies and a pooled
+  `CombineScratch` for each worker included, and a chunk is priced by what `ChunkCopy` copies, not
+  the flat gain it reads where it is mapped.
   Refused: a formula per caller, which drifted (the drizzle's frames left out their flat gain).
 - **A run reports the peak its plan expects, and the budget test holds a resident run to it.**
   `RunReport::planned_peak_bytes`, written as `LUMPLNB`, is what `tests/memory_budget` measures a
@@ -94,7 +95,22 @@
 - **A tier hands back the buffers it writes.** `StorageTier::store` takes a frame's buffers by
   value and returns them on the spilled tier, so a warp worker refills the set in its slot; the
   resident tier moves them into the frame. Refused: a pool of warp sets left through an unsafe
-  `into_inner` on the resident tier.
+  `into_inner` on the resident tier; the drizzler keeping a frame's returned output sums for the
+  next frame, which holds C + 2W output planes through the next frame's decode and statistics,
+  past what the plan charges, to save their page faults, a small share of a frame's scatter (the
+  trade the cosmic-ray detector refuses).
+- **A demosaic grows its flags in block ORs it makes for the frame, and its price says so.**
+  `FrameInfo::demosaiced` charges the dilation's scratch beside the mosaic. Refused: the scratch
+  kept on `LoadCtx` for the next frame, which would put a private field in a public struct that
+  callers build with `..Default::default()`, to save a few megabytes of page faults beside a
+  demosaic of the whole frame.
+- **A parallel job's scratch comes from `map_init`, made whole or grown exactly.** The MRS tiles
+  and the normalization fits take one set for each split rayon makes, and the split's jobs refill
+  it. An MRS set has room for the largest region from the start, and a fit's buffers reserve
+  exactly, so no set holds more than the price charges a worker's: amortized growth from a smaller
+  job keeps up to twice it.
+  Refused: a pool owner for the MRS tile scratch across calls, as no type spans the calls of one
+  light without a pool threaded through `FrameStats` and the detector.
 - **A light the decode cache keeps parks where it lies.** On the spilled tier, a linear light's
   decode returns the cache's maps beside its image, and parking takes them, the reference's
   too, rather than write the same bytes to the scratch. A mosaic changes in its preparation, and
@@ -118,3 +134,34 @@
   keeps one file for each key, written once a run. The plan charges a gain for each frame the
   cache does not hold, the most there can be before they decode. Refused: a header read of every
   file before the plan, which reads each file twice.
+- **An ML run blends its tiles in a band of 512 rows.** Tiles run a row of them at a time, so the
+  rows above the next tile row are final once a row ends, and each is written then: the four
+  accumulators hold a band, not a frame, with the same sums in the same order, and `split` reads
+  the input into new starless planes rather than a copy. Refused: a separable product weight, or
+  one mono accumulator, which change the rounding.
+- **An image's intensity is read from its channels where it is needed.** `Intensity` borrows a
+  grayscale channel and computes `Rgb::intensity` of the three at a pixel, bit for bit the plane
+  it replaces. Refused: an intensity plane for each enhancement, a copy of a mono channel or a
+  new RGB plane of the frame.
+- **A spilled chunk is copied into one sample buffer and one flag buffer.** Every frame's planes
+  of a chunk take consecutive slots of `stride` pixels, so a `ChunkCopy` is two allocations, not
+  up to ten a frame, and the readers split them into the runs their frames own. The spilled
+  light combine measured 5 % faster. Refused: a `Vec` per plane.
+- **A buffer of borrows outlives what it borrows through `Recycled`.** `take` lends its
+  allocation for the elements of one chunk or frame, and `put` keeps it emptied, so a loop over
+  chunks allocates it once. Refused: `recycled::emptied(mem::take(..))` written out at each site.
+- **One mask of the unmeasured pixels serves a light's two repairs.** `CfaImage::unmeasured_mask`
+  holds every null and every pixel a repair made; the defect repair reads around it and adds its
+  defects, which is then the mask the null repair needs, and the nulls to fill are the flag bytes
+  that hold `NO_DATA` without `REPAIRED`. So no repair reads another repair's value. Refused: a mask
+  of `NO_DATA` for the defects and three more for the nulls, built again by the demosaic.
+- **One builder makes the flags a pass imposes from its masters.** `imposed_flags::of` sets
+  `NO_DATA` where a master holds no measurement and `FLAT_FLOOR` where the flat floored, for a
+  light's calibration and a master's subtraction alike. Refused: a builder for each.
+- **A commit serializes what it borrows.** A kept frame's commit holds its metadata, statistics
+  and facts as `Cow`s, which serialize as the values themselves, so the record is the same bytes
+  without a copy of each. Refused: an owned record built for each commit.
+- **The à trous pass keeps its own kernel.** Its five taps a hole apart are multiplied and added in
+  one unfused order on every vector tier, so a transform is the same bits everywhere; the
+  detection convolution's contiguous kernels keep their own contract. Refused: one separable
+  kernel for both, which changes the bits of one.

@@ -34,6 +34,16 @@ pub(crate) struct CombineScratch {
     pub(super) buffers: ScratchBuffers,
 }
 
+impl CombineScratch {
+    /// The bytes one scratch holds at most for `frame_count` frames: a value, weight and flag
+    /// byte and three noise columns a frame, and the rejection methods' buffers.
+    pub(crate) const fn heap_bytes(frame_count: usize) -> usize {
+        frame_count
+            .saturating_mul(5 * size_of::<f32>() + size_of::<u8>())
+            .saturating_add(ScratchBuffers::heap_bytes(frame_count))
+    }
+}
+
 impl Scratch for CombineScratch {
     /// The frame count.
     type Shape = usize;
@@ -45,12 +55,12 @@ impl Scratch for CombineScratch {
     }
 
     fn fit(&mut self, frame_count: usize) {
-        self.values.resize(frame_count, 0.0);
-        self.eff_weights.resize(frame_count, 0.0);
-        self.sample_flags.resize(frame_count, 0);
-        self.noise_bg.resize(frame_count, 0.0);
-        self.noise_sky.resize(frame_count, 0.0);
-        self.noise_per_unit.resize(frame_count, 0.0);
+        fit_column(&mut self.values, frame_count);
+        fit_column(&mut self.eff_weights, frame_count);
+        fit_column(&mut self.sample_flags, frame_count);
+        fit_column(&mut self.noise_bg, frame_count);
+        fit_column(&mut self.noise_sky, frame_count);
+        fit_column(&mut self.noise_per_unit, frame_count);
         self.buffers.reserve(frame_count);
     }
 
@@ -64,6 +74,13 @@ impl Scratch for CombineScratch {
             self.noise_per_unit.len(),
         ] == [frame_count; 6]
     }
+}
+
+/// `column` at `len` samples, its allocation exactly that when it grows, as
+/// [`CombineScratch::heap_bytes`] counts it: `resize` would round a small count up.
+fn fit_column<T: Clone + Default>(column: &mut Vec<T>, len: usize) {
+    column.reserve_exact(len.saturating_sub(column.len()));
+    column.resize(len, T::default());
 }
 
 /// The flagged samples a combine left out, and those it had to keep.
