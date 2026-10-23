@@ -4,14 +4,12 @@ pub(crate) mod image_desc;
 pub(crate) mod image_pixels;
 mod io;
 
-use std::convert::Infallible;
 use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
 use std::path::Path;
-use std::result;
 
 use crate::common::buffer2::Buffer2;
 use crate::common::color_format::ColorFormat;
-use crate::common::error::{AdmittedDecodeError, Error, Result};
+use crate::common::error::{Error, Result};
 use crate::common::sample::Sample;
 use crate::image::conversion::convert_image;
 use crate::image::file_format::FileFormat;
@@ -98,41 +96,9 @@ impl Image {
     }
 
     /// The image `input` holds, in `format`, decoded as it is read: a file whoever owns the
-    /// reading opened, or bytes in a [`Cursor`](std::io::Cursor). It allocates what the header
-    /// states; a caller reading files it did not write bounds that through
-    /// [`Self::decode_admitted`].
-    pub fn decode(input: impl BufRead + Seek, format: FileFormat) -> Result<Self> {
-        Self::decode_admitted(input, format, |_| Ok::<(), Infallible>(())).map_err(|error| {
-            match error {
-                AdmittedDecodeError::Refused(never) => match never {},
-                AdmittedDecodeError::Decode(error) => error,
-            }
-        })
-    }
-
-    /// [`Self::decode`] once `admit` accepts the image the header describes, its dimensions and
-    /// the format it decodes to: called before any pixel is allocated, and before any is read but
-    /// for a format that [reads its whole input](FileFormat::reads_whole_input) first, on the
-    /// decoder that then reads them, so the input is read once. Its refusal ends the decode as
-    /// [`AdmittedDecodeError::Refused`].
-    pub fn decode_admitted<E>(
-        mut input: impl BufRead + Seek,
-        format: FileFormat,
-        admit: impl FnOnce(&ImageDesc) -> result::Result<(), E>,
-    ) -> result::Result<Self, AdmittedDecodeError<E>> {
-        let mut admit = Some(admit);
-        let mut refusal = None;
-        let decoded = io::load(&mut input, format, &mut |desc| {
-            let admit = admit.take().expect("a header is admitted once");
-            if let Err(error) = admit(desc) {
-                refusal = Some(error);
-                return false;
-            }
-            true
-        })?;
-        decoded.ok_or_else(|| {
-            AdmittedDecodeError::Refused(refusal.expect("only a refusal stops a decode"))
-        })
+    /// reading opened, or bytes in a [`Cursor`](std::io::Cursor).
+    pub fn decode(mut input: impl BufRead + Seek, format: FileFormat) -> Result<Self> {
+        io::load(&mut input, format)
     }
 
     /// This image written to `filename`, in the format its extension names.
