@@ -82,7 +82,7 @@ pub struct StackProduct {
     ///
     /// Absent for median output, and unless asked for.
     pub dispersion: Option<QualityMap>,
-    /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
+    /// The sensor pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
     /// What the combine decided on its own: the samples it left out for their flags, and the
@@ -195,6 +195,7 @@ mod tests {
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
+    use crate::image::cfa::mosaic::Mosaic;
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
@@ -229,7 +230,7 @@ mod tests {
     /// quantization σ all carry over.
     #[test]
     fn a_mosaic_stack_becomes_its_master() {
-        let pattern = CfaType::Bayer(CfaPattern::Rggb);
+        let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
         let master = product(1, Some(pattern)).into_cfa_master();
         assert_eq!(master.data().pixels(), &[0.0, 1.0]);
         assert_eq!(master.cfa_type(), pattern);
@@ -272,15 +273,17 @@ mod tests {
 
         assert_eq!(filled.image.channel(0).pixels(), &[-1.0, -1.0]);
         assert_eq!(filled.image.channel(1).pixels(), &[1.0, -1.0]);
-        let plane = |map: &Option<QualityMap>, channel| {
-            map.as_ref().unwrap().channel(channel).pixels().to_vec()
-        };
+        let plane =
+            |map: Option<&QualityMap>, channel| map.unwrap().channel(channel).pixels().to_vec();
         for channel in 0..3 {
             let kept = if channel == 0 { None } else { Some(5.0) };
             let expect = |empty: f32| [kept.unwrap_or(empty), empty];
-            assert_eq!(plane(&filled.weight, channel), expect(0.0));
-            assert_eq!(plane(&filled.inverse_variance, channel), expect(0.0));
-            let dispersion = plane(&filled.dispersion, channel);
+            assert_eq!(plane(filled.weight.as_ref(), channel), expect(0.0));
+            assert_eq!(
+                plane(filled.inverse_variance.as_ref(), channel),
+                expect(0.0)
+            );
+            let dispersion = plane(filled.dispersion.as_ref(), channel);
             assert_eq!(dispersion[0].is_nan(), channel == 0, "channel {channel}");
             assert!(dispersion[1].is_nan(), "channel {channel}");
         }

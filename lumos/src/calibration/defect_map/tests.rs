@@ -8,6 +8,7 @@ use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;
@@ -20,17 +21,17 @@ fn median_mad(mut samples: Vec<f32>) -> MedianMad {
 #[test]
 fn capped_color_sampling_spans_sensor_and_cfa_phases() {
     let cases = [
-        (1000, 800, CfaType::Bayer(CfaPattern::Rggb)),
-        (1001, 799, CfaType::Bayer(CfaPattern::Bggr)),
-        (1003, 797, CfaType::XTrans(XTRANS_PATTERN)),
+        (1000, 800, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))),
+        (1001, 799, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))),
+        (1003, 797, CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
         (1009, 397, CfaType::Mono),
     ];
 
     for (width, height, cfa_type) in cases {
         let period = match &cfa_type {
             CfaType::Mono => 1,
-            CfaType::Bayer(_) => 2,
-            CfaType::XTrans(_) => 6,
+            CfaType::Mosaic(Mosaic::Bayer(_)) => 2,
+            CfaType::Mosaic(Mosaic::XTrans(_)) => 6,
         };
 
         for target_color in 0..cfa_type.color_count() {
@@ -90,7 +91,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
 
 #[test]
 fn capped_color_sampling_matches_exact_row_and_column_statistics() {
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     for (width, height) in [(800, 800), (1000, 800), (800, 1000)] {
         for row_pattern in [true, false] {
             let data = Buffer2::from_fn(width, height, |x, y| {
@@ -249,7 +250,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
     // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
     // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let size = Size2us::new(16usize, 16usize);
     // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.
     let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
@@ -287,7 +288,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
 #[test]
 fn xtrans_hot_pixel_correction_uses_same_color() {
     // X-Trans hot pixels must be repaired from SAME-COLOR neighbours, not the global mean.
-    let cfa = CfaType::XTrans(XTRANS_PATTERN);
+    let cfa = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     let size = Size2us::new(12usize, 12usize);
     // Distinct per-color baselines so a wrong-color repair is detectable.
     let color_val = |c: usize| match c {
@@ -344,7 +345,11 @@ fn cfa_hot_pixel_detection() {
     pixels[14] = 10000.0; // hot at (2,2)
     pixels[35] = 10000.0; // hot at (5,5)
 
-    let dark = make_cfa(Size2us::new(6, 6), pixels, CfaType::Bayer(CfaPattern::Rggb));
+    let dark = make_cfa(
+        Size2us::new(6, 6),
+        pixels,
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+    );
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(
             &dark,
@@ -360,7 +365,7 @@ fn cfa_hot_pixel_detection() {
 /// at (2, 2) comes back as exactly 100 — any green or blue neighbour in its median would move it.
 #[test]
 fn cfa_hot_pixel_correction_bayer() {
-    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let size = Size2us::new(6, 6);
     let baseline = [100.0f32, 200.0, 50.0];
     let mut pixels: Vec<f32> = (0..size.pixel_count())
@@ -403,7 +408,7 @@ fn cfa_hot_pixel_detection_large() {
     let dark = make_cfa(
         Size2us::new(size, size),
         pixels,
-        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
     );
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(
@@ -424,7 +429,7 @@ fn per_channel_detection_bayer() {
     // Blue pixels (at odd x, odd y) have value 50.0
     // One red pixel is hot at 500.0 — should be detected by per-channel stats
     // even though 500 might not exceed a global threshold dominated by green=200.
-    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mut pixels = vec![0.0f32; 64];
     for y in 0..8 {
         for x in 0..8 {
@@ -477,7 +482,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
 #[test]
 fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters() {
     let size = Size2us::new(384usize, 256usize);
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let isolated = [(17usize, 23usize), (201, 48), (312, 190)];
     let mut cluster = Vec::new();
     for y in (124..=132).step_by(2) {
@@ -724,7 +729,7 @@ fn a_hot_pixel_keeps_the_residual_its_detection_tested() {
 /// only one flagged; a normal pixel (value == its neighbourhood median) is not.
 #[test]
 fn xtrans_cold_pixel_detected() {
-    let pattern = CfaType::XTrans(XTRANS_PATTERN);
+    let pattern = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     let size = Size2us::new(24usize, 24usize);
     let color_val = |c: usize| 0.1 * (c + 1) as f32;
     let mut px: Vec<f32> = (0..size.pixel_count())
@@ -768,7 +773,7 @@ fn correct_cfa_dimension_mismatch() {
 fn a_pixel_hot_and_dead_counts_once() {
     let size = Size2us::new(4, 4);
     let map = DefectMap::from_lists(size, hot(vec![1, 2]), vec![2, 3]).unwrap();
-    let summary = map.summary(&CfaType::Bayer(CfaPattern::Rggb));
+    let summary = map.summary(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
     let color = |hot, cold, defective, photosites| ColorDefects {
         hot,
         cold,
@@ -856,7 +861,7 @@ fn the_ring_plane_reads_the_level_at_the_pixel() {
     let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|idx| level(idx % size.width, idx / size.width))
         .collect();
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mut ring = RingReference::default();
     for point in [Vec2us::new(20, 20), Vec2us::new(0, 0), Vec2us::new(39, 38)] {
         let plain = make_cfa(size, pixels.clone(), cfa);

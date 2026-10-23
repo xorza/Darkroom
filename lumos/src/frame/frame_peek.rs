@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use crate::frame::frame_stats::FrameStats;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::memory::footprint::Footprint;
@@ -17,7 +17,7 @@ pub(crate) struct FramePeek {
     pub(crate) decoder: DecoderBytes,
     /// The pattern of a mosaic frame, whose statistics measure its noise per color; `None` for
     /// any other frame.
-    pub(crate) mosaic: Option<CfaType>,
+    pub(crate) mosaic: Option<Mosaic>,
 }
 
 impl FramePeek {
@@ -37,7 +37,7 @@ impl FramePeek {
         }
         .beside(FrameStats::heap_bytes(
             self.dimensions,
-            self.mosaic.as_ref(),
+            self.mosaic,
             workers,
         ))
     }
@@ -50,7 +50,7 @@ impl From<FrameInfo> for FramePeek {
         Self {
             dimensions: info.dimensions,
             decoder: info.decoder,
-            mosaic: Some(info.cfa_type).filter(CfaType::is_mosaic),
+            mosaic: info.cfa_type.mosaic(),
         }
     }
 }
@@ -74,7 +74,7 @@ mod tests {
     /// worker, and 2800 B more on eight.
     #[test]
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
-        let rggb = Some(CfaType::Bayer(CfaPattern::Rggb));
+        let rggb = Some(Mosaic::Bayer(CfaPattern::Rggb));
         let peek = |mosaic, decoder| FramePeek {
             dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
             decoder,

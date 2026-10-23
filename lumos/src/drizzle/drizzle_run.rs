@@ -39,7 +39,7 @@ use crate::frame_store::file_set::FileSet;
 use crate::frame_store::frame_buffers::NewFrame;
 use crate::frame_store::run_storage::RunStorage;
 use crate::frame_store::stored_frame::SetKind;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
@@ -94,7 +94,7 @@ impl DrizzleRun<'_> {
             .iter()
             .map(|frame| frame.source.as_ref().to_path_buf())
             .collect();
-        let files = FileSet::<_, D>::new(&sources, RunStorage::decoding(run)?, &ctx);
+        let files = FileSet::<_, D>::new(&sources, run)?;
         let origin = FrameOrigin::Files {
             uncached: files.uncached(),
             gains: files.peek(&ctx)?.gains,
@@ -116,7 +116,7 @@ impl DrizzleRun<'_> {
         self.accumulate(
             frames.into_iter().map(Ok),
             FrameOrigin::Memory,
-            &RunStorage::holding(&self.ingest),
+            RunStorage::holding(&self.ingest),
         )
     }
 
@@ -143,7 +143,7 @@ impl DrizzleRun<'_> {
         &self,
         mut frames: impl ExactSizeIterator<Item = Result<DrizzleFrame<I>, DrizzleError>>,
         origin: FrameOrigin,
-        storage: &RunStorage,
+        storage: RunStorage<'_>,
     ) -> Result<StackProduct, DrizzleError> {
         let frame_count = frames.len();
         debug_assert!(frame_count > 0, "each entry refuses an empty set");
@@ -232,8 +232,8 @@ impl DrizzleRun<'_> {
                     output.size(),
                 )))
             });
-            if let Deposit::Mosaic(cfa_type) = deposit {
-                color_planes(&mut frame_metadata, cfa_type);
+            if let Deposit::Mosaic(mosaic) = deposit {
+                color_planes(&mut frame_metadata, mosaic);
             }
             drop(frame);
             for (depth, drops) in depth.iter_mut().zip(&drops) {
@@ -299,9 +299,9 @@ impl DrizzleRun<'_> {
 
 /// `metadata`, of a `cfa_type` mosaic, as the metadata of the color planes its drizzle makes:
 /// sensor color with nothing interpolated.
-const fn color_planes(metadata: &mut ImageMetadata, cfa_type: CfaType) {
+const fn color_planes(metadata: &mut ImageMetadata, mosaic: Mosaic) {
     if let Some(provenance) = metadata.derived.provenance_mut() {
-        provenance.color = cfa_type.planes_color();
+        provenance.color = mosaic.planes_color();
         provenance.demosaic = DemosaicProvenance::CfaDrizzle;
     }
 }

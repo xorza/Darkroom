@@ -4,7 +4,7 @@
 use common::CancelToken;
 use imaginarium::Buffer2;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, CfaPattern, CfaType, ImageMetadata,
+    CalibrationMasters, CalibrationSet, CfaImage, CfaPattern, CfaType, ImageMetadata, Mosaic,
     SigmaThreshold,
 };
 
@@ -24,7 +24,7 @@ pub(crate) fn masters(side: usize) -> CalibrationMasters {
     let mosaic = |plane| {
         CfaImage::from_plane(
             plane,
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             ImageMetadata::default(),
         )
     };

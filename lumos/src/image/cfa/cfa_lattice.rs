@@ -2,6 +2,7 @@
 //! filter.
 
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
@@ -54,8 +55,8 @@ impl CfaLattice {
     pub(crate) fn new(cfa: &CfaType) -> Self {
         let period = cfa.period();
         let count = match cfa {
-            CfaType::Mono | CfaType::Bayer(_) => 8,
-            CfaType::XTrans(_) => 24,
+            CfaType::Mono | CfaType::Mosaic(Mosaic::Bayer(_)) => 8,
+            CfaType::Mosaic(Mosaic::XTrans(_)) => 24,
         };
         let radius = SEARCH_RADIUS;
         // The pattern is periodic, so a neighbour's color is its phase's: shifting by whole
@@ -78,8 +79,10 @@ impl CfaLattice {
                         (origin.y + shift).wrapping_add_signed(dy as isize),
                     );
                     let same_filter = match cfa {
-                        CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
-                        CfaType::Mono | CfaType::XTrans(_) => cfa.slot_at(pos) == color,
+                        CfaType::Mosaic(Mosaic::Bayer(_)) => dx % 2 == 0 && dy % 2 == 0,
+                        CfaType::Mono | CfaType::Mosaic(Mosaic::XTrans(_)) => {
+                            cfa.slot_at(pos) == color
+                        }
                     };
                     let distance2 = dx * dx + dy * dy;
                     // Within the inscribed disc, every offset of a shell lies in the square.
@@ -203,7 +206,7 @@ mod tests {
         };
         let mono = CfaLattice::new(&CfaType::Mono);
         assert_eq!(sorted(offsets(&mono, Vec2us::new(3, 3), 8)), ring(1, 1));
-        let bayer = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
+        let bayer = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 0), 8)), ring(2, 2));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(1, 0), 8)), ring(2, 2));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
@@ -218,8 +221,8 @@ mod tests {
     fn every_stencil_is_whole_shells_with_headroom() {
         for cfa in [
             CfaType::Mono,
-            CfaType::Bayer(CfaPattern::Grbg),
-            CfaType::XTrans(XTRANS_PATTERN),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Grbg)),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
         ] {
             let lattice = CfaLattice::new(&cfa);
             let period = lattice.period;
@@ -236,7 +239,7 @@ mod tests {
                             (60 + origin.y).strict_add_signed(dy as isize),
                         );
                         let same = match cfa {
-                            CfaType::Bayer(_) => dx % 2 == 0 && dy % 2 == 0,
+                            CfaType::Mosaic(Mosaic::Bayer(_)) => dx % 2 == 0 && dy % 2 == 0,
                             _ => cfa.slot_at(at) == cfa.slot_at(origin),
                         };
                         if same && (dx, dy) != (0, 0) && dx * dx + dy * dy <= farthest {
@@ -256,13 +259,15 @@ mod tests {
     #[test]
     fn the_median_reads_only_its_own_filter() {
         for cfa in [
-            CfaType::XTrans(XTRANS_PATTERN),
-            CfaType::Bayer(CfaPattern::Gbrg),
+            CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg)),
         ] {
             let lattice = CfaLattice::new(&cfa);
             let size = Size2us::new(25, 19);
             let level = |pos: Vec2us| match cfa {
-                CfaType::Bayer(_) => 0.125 * (1 + pos.x % 2 + 2 * (pos.y % 2)) as f32,
+                CfaType::Mosaic(Mosaic::Bayer(_)) => {
+                    0.125 * (1 + pos.x % 2 + 2 * (pos.y % 2)) as f32
+                }
                 _ => 0.125 * (cfa.slot_at(pos) + 1) as f32,
             };
             let pixels = Buffer2::from_fn(size.width, size.height, |x, y| level(Vec2us::new(x, y)));
@@ -337,7 +342,7 @@ mod tests {
     /// its diagonal Gb neighbours (0, 1) and (2, 1), at 1000, would make it 40.
     #[test]
     fn the_median_clips_at_the_border() {
-        let lattice = CfaLattice::new(&CfaType::Bayer(CfaPattern::Rggb));
+        let lattice = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
         let mut pixels = Buffer2::new_filled(4, 4, 10.0);
         pixels[(0, 0)] = 999.0;
         pixels[(2, 0)] = 50.0;

@@ -9,7 +9,7 @@ use fits_well::header::Header;
 use fits_well::image::Image as FitsImage;
 use imaginarium::Buffer2;
 use lumos::ChannelLayout;
-use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage};
+use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage, Mosaic};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -84,7 +84,7 @@ impl StarField {
     pub(crate) fn mosaic(&self, idx: usize) -> CfaImage {
         CfaImage::from_plane(
             Buffer2::new(self.side, self.side, self.render(idx)),
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             ImageMetadata::default(),
         )
     }

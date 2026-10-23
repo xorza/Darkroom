@@ -27,6 +27,7 @@ use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::error::DrizzleError;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_dimensions::ImageDimensions;
@@ -454,7 +455,11 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     let mosaic = |name: &str, pattern: CfaPattern| {
         let path = dir.join(format!("{name}.fits"));
         writer::cfa_fits(
-            &make_cfa(Size2us::new(4, 2), vec![0.5; 8], CfaType::Bayer(pattern)),
+            &make_cfa(
+                Size2us::new(4, 2),
+                vec![0.5; 8],
+                CfaType::Mosaic(Mosaic::Bayer(pattern)),
+            ),
             &path,
         )
         .unwrap();
@@ -536,8 +541,8 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 Err(StackError::Admission(AdmissionError::CfaPatternMismatch {
                     idx: 1,
                     reference_idx: 0,
-                    actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
-                    expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
+                    actual: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))),
+                    expected: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))),
                 }))
             ),
             "{tier}"
@@ -828,7 +833,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
 #[test]
 fn mosaic_fits_uses_the_cfa_calibration_route() {
     let size = Size2us::new(32usize, 32usize);
-    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let target = [0.8f32, 0.5, 0.2];
     let dark_value = 0.1f32;
     let pixels: Vec<f32> = (0..size.height)
@@ -1013,7 +1018,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
 fn demosaic_uniform_bayer_recovers_color() {
     let size = Size2us::new(32usize, 32usize);
     let rgb = [0.8f32, 0.5, 0.2]; // R, G, B
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
 
     // Sample each Bayer site from the (uniform) true color.
     let mut mosaic = vec![0.0f32; size.pixel_count()];
@@ -1064,8 +1069,8 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
     let size = Size2us::new(48usize, 48usize);
 
     for cfa in [
-        CfaType::Bayer(CfaPattern::Rggb),
-        CfaType::XTrans(XTRANS_PATTERN),
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     ] {
         for expected in [-0.25f32, 1.25] {
             let image = make_cfa(size, vec![expected; size.pixel_count()], cfa)

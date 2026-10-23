@@ -20,7 +20,7 @@ pub(crate) struct FrameFacts {
     pub(crate) domain: Option<SampleDomain>,
     /// Which end of the image the first stored row belongs to — see [`RowOrder`].
     pub(crate) row_order: Option<RowOrder>,
-    /// The mosaic pattern of an undemosaiced sensor frame.
+    /// The sensor pattern of an undemosaiced sensor frame.
     pub(crate) cfa_type: Option<CfaType>,
     /// Whether the frame's decoder flagged every saturated pixel — see
     /// [`DerivedFacts::saturation_flagged`](crate::DerivedFacts::saturation_flagged).

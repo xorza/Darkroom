@@ -2,6 +2,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
@@ -25,7 +26,7 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
         },
         gain_bytes: 0,
     };
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     assert_eq!(
         info(rggb).decoded(),
         Footprint {
@@ -49,7 +50,7 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
             "source of {source} B"
         );
     }
-    let noise = MosaicNoiseMeasure::heap_bytes(dimensions.size(), &rggb);
+    let noise = MosaicNoiseMeasure::heap_bytes(dimensions.size(), rggb.mosaic().unwrap());
     let demosaic_peak = 4 * 320 + rcd::internals::workspace_bytes(4) + 80;
     assert_eq!(
         info(rggb).demosaiced(info(rggb).decoded(), MarkesteijnPasses::One, 4),

@@ -7,6 +7,7 @@ use imaginarium::Buffer2;
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::FlatGain;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
@@ -14,13 +15,13 @@ use crate::math::vec2us::Vec2us;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::BinnedSamples;
 
-/// The photosites of a `size` mosaic of `cfa_type` a statistic samples: those of the rows
+/// The photosites of a `size` frame of `mosaic` a statistic samples: those of the rows
 /// [`CfaType::sampled_rows`] takes for about `per_color` samples a color, less the pixels
 /// `excluded` names.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct MosaicSampling<'a, E> {
+pub(crate) struct MosaicSampling<E> {
     pub(crate) size: Size2us,
-    pub(crate) cfa_type: &'a CfaType,
+    pub(crate) mosaic: Mosaic,
     pub(crate) excluded: E,
     pub(crate) per_color: usize,
 }
@@ -51,15 +52,15 @@ impl Pair {
     }
 }
 
-impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
+impl<E: Fn(usize) -> bool> MosaicSampling<E> {
     /// The index and color of every sampled photosite.
     pub(super) fn for_each_photosite(&self, mut visit: impl FnMut(usize, usize)) {
         let Size2us { width, .. } = self.size;
-        for y in self.cfa_type.sampled_rows(self.size, self.per_color) {
+        for y in CfaType::from(self.mosaic).sampled_rows(self.size, self.per_color) {
             for x in 0..width {
                 let idx = y * width + x;
                 if !(self.excluded)(idx) {
-                    visit(idx, self.cfa_type.slot_at(Vec2us::new(x, y)));
+                    visit(idx, self.mosaic.slot_at(Vec2us::new(x, y)));
                 }
             }
         }
@@ -76,12 +77,12 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
     /// row; a pair touching an excluded pixel is skipped.
     pub(super) fn for_each_pair(&self, mut visit: impl FnMut(Pair)) {
         let Size2us { width, .. } = self.size;
-        for y in self.cfa_type.sampled_rows(self.size, self.per_color) {
+        for y in CfaType::from(self.mosaic).sampled_rows(self.size, self.per_color) {
             for x in 0..width {
-                let color = self.cfa_type.slot_at(Vec2us::new(x, y));
+                let color = self.mosaic.slot_at(Vec2us::new(x, y));
                 // Every color recurs within a period on every row of its own.
                 let Some(neighbour) = (x + 1..(x + 1 + CfaType::MAX_PERIOD).min(width))
-                    .find(|&nx| self.cfa_type.slot_at(Vec2us::new(nx, y)) == color)
+                    .find(|&nx| self.mosaic.slot_at(Vec2us::new(nx, y)) == color)
                 else {
                     continue;
                 };
@@ -100,7 +101,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<'_, E> {
 
     /// How many pairs of each color [`Self::for_each_pair`] visits.
     pub(super) fn pair_counts(&self) -> ArrayVec<usize, 3> {
-        let mut counts: ArrayVec<usize, 3> = (0..self.cfa_type.color_count()).map(|_| 0).collect();
+        let mut counts: ArrayVec<usize, 3> = (0..self.mosaic.color_count()).map(|_| 0).collect();
         self.for_each_pair(|pair| counts[pair.color] += 1);
         counts
     }
@@ -189,7 +190,7 @@ mod tests {
     use imaginarium::Buffer2;
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
-    use crate::image::cfa::cfa_type::CfaType;
+    use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::test_rng::TestRng;
     use crate::math::size2us::Size2us;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
@@ -205,17 +206,17 @@ mod tests {
     #[test]
     fn each_bayer_color_reads_its_own_noise() {
         let size = Size2us::new(512, 512);
-        let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+        let rggb = Mosaic::Bayer(CfaPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
         let mosaic = Buffer2::from_fn(512, 512, |x, y| {
-            let color = cfa_type.slot_at(Vec2us::new(x, y));
+            let color = rggb.slot_at(Vec2us::new(x, y));
             0.2 + 0.3 * (x as f32 / 512.0) + sigmas[color] * rng.next_gaussian_f32()
         });
         for per_color in [MAX_STATISTIC_SAMPLES, 43_690] {
             let sampling = MosaicSampling {
                 size,
-                cfa_type: &cfa_type,
+                mosaic: rggb,
                 excluded: |_| false,
                 per_color,
             };

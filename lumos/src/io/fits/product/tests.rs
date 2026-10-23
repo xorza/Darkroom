@@ -6,6 +6,7 @@ use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::image_metadata::ImageMetadata;
@@ -259,7 +260,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
 fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let dir = TempDir::new("product-mosaic");
     let path = dir.join("product.fits");
-    let cfa_type = CfaType::Bayer(CfaPattern::Gbrg);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg));
     let written = StackProduct {
         image: image(LinearPixels::L(plane(0.0)), None),
         coverage: Some(Coverage::Uniform {

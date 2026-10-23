@@ -17,12 +17,14 @@ use crate::ingest::error::AdmissionError;
 /// [`SampleDomain::units_agree`] is blind across that gap, so it is not transitive. Comparing
 /// everything with frame 0 alone would let a `Jy/beam` frame and a `count/s` frame through
 /// whenever frame 0 stated no unit; here the first frame to state a unit owns that half.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct SetFacts {
     scale: Option<Stated<SampleDomain>>,
     unit: Option<Stated<SampleDomain>>,
     row_order: Option<Stated<RowOrder>>,
-    cfa_type: Option<Stated<Option<CfaType>>>,
+    /// The sensor pattern every frame states, `None` for frames no sensor pattern is under: the
+    /// first frame's.
+    cfa_type: Stated<Option<CfaType>>,
 }
 
 /// A fact and the frame that stated it first.
@@ -33,25 +35,48 @@ struct Stated<T> {
 }
 
 impl SetFacts {
-    /// The facts frame 0 states, for a frame decoding beside the others to check against before
-    /// the set is complete, so a mismatched set stops before the rest decodes.
+    /// The facts frame 0 states, which every later frame is held to: a set has facts once it
+    /// has a frame.
     pub(super) fn of_first(facts: &FrameFacts) -> Self {
-        let mut set = Self::default();
+        let mut set = Self {
+            scale: None,
+            unit: None,
+            row_order: None,
+            cfa_type: Stated {
+                idx: 0,
+                value: facts.cfa_type,
+            },
+        };
         set.record(0, facts);
         set
+    }
+
+    /// Check a whole set's facts, frame by frame in index order, each against the facts the
+    /// frames before it stated: the frames agree, or the first that does not is named.
+    ///
+    /// # Panics
+    ///
+    /// When the set is empty.
+    pub(crate) fn check_set<'f>(
+        facts: impl IntoIterator<Item = &'f FrameFacts>,
+    ) -> Result<(), AdmissionError> {
+        let mut facts = facts.into_iter().enumerate();
+        let (_, first) = facts.next().expect("a set has a frame");
+        let mut set = Self::of_first(first);
+        facts.try_for_each(|(idx, facts)| set.admit(idx, facts))
     }
 
     /// Check frame `idx` against the facts stated before it, then record the ones it states
     /// first. The caller admits frames in index order, so the frame each fact is held to is the
     /// lowest index that states it.
-    pub(crate) fn admit(&mut self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
+    fn admit(&mut self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
         self.check(idx, facts)?;
         self.record(idx, facts);
         Ok(())
     }
 
     /// Check frame `idx` against the facts recorded so far, without recording its own.
-    pub(crate) fn check(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
+    pub(super) fn check(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {
         if let Some(domain) = &facts.domain {
             let mismatch =
                 |reference: &Stated<SampleDomain>| AdmissionError::SampleDomainMismatch {
@@ -82,14 +107,12 @@ impl SetFacts {
                 expected: reference.value,
             });
         }
-        if let Some(reference) = &self.cfa_type
-            && facts.cfa_type != reference.value
-        {
+        if facts.cfa_type != self.cfa_type.value {
             return Err(AdmissionError::CfaPatternMismatch {
                 idx,
                 actual: facts.cfa_type,
-                reference_idx: reference.idx,
-                expected: reference.value,
+                reference_idx: self.cfa_type.idx,
+                expected: self.cfa_type.value,
             });
         }
         Ok(())
@@ -114,9 +137,5 @@ impl SetFacts {
                 value: row_order,
             });
         }
-        self.cfa_type.get_or_insert(Stated {
-            idx,
-            value: facts.cfa_type,
-        });
     }
 }

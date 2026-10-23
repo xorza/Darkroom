@@ -58,7 +58,7 @@ impl ColorMesh {
         let mut x = Vec::new();
         let mut y = Vec::new();
         for color in 0..cfa.color_count() {
-            let mosaic = (*cfa != CfaType::Mono).then_some(ColorSites { cfa, color });
+            let mosaic = cfa.mosaic().map(|mosaic| ColorSites { mosaic, color });
             let grid = workspace.measure(pixels, excluded, mosaic, params);
             colors.push(grid.stats.clone());
             // Every color's grid has the one layout of the frame.

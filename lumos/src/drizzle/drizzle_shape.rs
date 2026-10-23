@@ -45,7 +45,7 @@ impl DrizzleShape {
         &self,
         stack: &StackConfig,
         run: &IngestRun,
-        storage: &RunStorage,
+        storage: RunStorage<'_>,
     ) -> Result<StorageTier, DrizzleError> {
         OverBudget::check(
             u64::try_from(self.frame_bytes()).expect("a byte count fits u64"),
@@ -133,7 +133,7 @@ impl DrizzleShape {
         let input_bytes = input.decoded_bytes();
         let mosaic = deposit.mosaic();
         let way = Footprint::kept(input_bytes)
-            .beside(FrameStats::heap_bytes(input, mosaic.as_ref(), workers))
+            .beside(FrameStats::heap_bytes(input, mosaic, workers))
             .then(Footprint {
                 kept: drizzled_bytes,
                 peak: drizzled_bytes + input_bytes,

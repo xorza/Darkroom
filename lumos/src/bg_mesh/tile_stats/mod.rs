@@ -5,7 +5,7 @@
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
@@ -33,20 +33,20 @@ const PLANE_FITS: usize = 2;
 pub(super) struct TileInput<'a> {
     pub(super) pixels: &'a Buffer2<f32>,
     pub(super) mask: Option<&'a BitBuffer2>,
-    pub(super) color: Option<ColorSites<'a>>,
+    pub(super) color: Option<ColorSites>,
     pub(super) sigma_clip_max_iterations: usize,
 }
 
-/// One color of a mosaic: the photosites under `cfa` of color `color`.
+/// One color of a mosaic: the photosites of `mosaic` of color `color`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ColorSites<'a> {
-    pub(crate) cfa: &'a CfaType,
+pub(crate) struct ColorSites {
+    pub(crate) mosaic: Mosaic,
     pub(crate) color: usize,
 }
 
-impl ColorSites<'_> {
+impl ColorSites {
     const fn takes(self, pos: Vec2us) -> bool {
-        self.cfa.slot_at(pos) == self.color
+        self.mosaic.slot_at(pos) == self.color
     }
 }
 
@@ -420,7 +420,7 @@ impl TileSamples {
 #[derive(Debug)]
 struct ColorTile<'a> {
     mask: Option<&'a BitBuffer2>,
-    color: ColorSites<'a>,
+    color: ColorSites,
     tile: URect,
 }
 

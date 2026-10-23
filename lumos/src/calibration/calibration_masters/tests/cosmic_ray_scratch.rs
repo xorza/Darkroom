@@ -14,6 +14,7 @@ use crate::calibration::cosmic_ray::mono::MONO_SCRATCH_PLANES;
 use crate::calibration::cosmic_ray::mono::internals::mono_scratch_floats;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::cfa_from_plane;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -98,7 +99,7 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
 /// and the pass's two: 2 rows of 16 B each at 2×2, 4 at 4×4.
 #[test]
 fn cosmic_ray_heap_bytes_count_planes_and_masks() {
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     for (cfa, side, expected) in [
         (CfaType::Mono, 64, 81_920 + 3_072 + 2_048),
         (bayer, 64, 4_096 + 20_480 + 1_536 + 1_024 + 1_024 + 2_048),

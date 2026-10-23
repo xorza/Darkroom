@@ -18,6 +18,7 @@ use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
@@ -67,7 +68,7 @@ fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
             unit: Some("ADU".to_owned()),
         }),
         row_order: Some(RowOrder::BottomUp),
-        cfa_type: Some(CfaType::Bayer(CfaPattern::Gbrg)),
+        cfa_type: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg))),
         saturation_flagged: true,
         conditions: CaptureConditions {
             exposure_time: Some(300.0),

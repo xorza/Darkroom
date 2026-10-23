@@ -14,7 +14,7 @@ use crate::drizzle::accumulator::kernel_plan::DropReach;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::output_grid::OutputGrid;
-use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
@@ -91,7 +91,7 @@ pub(super) struct FrameSource<'a> {
     /// a release assert, which a per-deposit read would pay for every output pixel a drop touches.
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
     /// The mosaic whose photosites each reach the channel of their color alone.
-    mosaic: Option<CfaType>,
+    mosaic: Option<Mosaic>,
     size: Size2us,
     map: InputMap,
     pixel_weights: Option<&'a [f32]>,
@@ -131,7 +131,7 @@ impl<'a> FrameSource<'a> {
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
         Fluxes {
             values: self.planes.iter().map(|plane| plane[pixel.idx]).collect(),
-            color: self.mosaic.map(|cfa_type| cfa_type.slot_at(pixel.pos)),
+            color: self.mosaic.map(|mosaic| mosaic.slot_at(pixel.pos)),
             carried: self.flags.map_or(0, |flags| {
                 flags.at(pixel.idx).byte() & QualityFlags::RESAMPLE_CARRIED.byte()
             }),

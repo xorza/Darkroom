@@ -211,7 +211,7 @@ impl<'a> InlineRename<'a> {
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .text_align(text_align)
                 .show(ui);
-            if !edit.committed && !edit.canceled {
+            if !edit.committed && edit.ended != Some(EditEnd::Canceled) {
                 return RenameEvent {
                     clicked: false,
                     committed: None,

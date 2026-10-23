@@ -257,11 +257,15 @@ mod tests {
         Auto,
     }
 
-    impl FromStr for Pick {
-        type Err = ();
+    /// A name that is no [`Pick`].
+    #[derive(Debug)]
+    struct UnknownPick;
 
-        fn from_str(name: &str) -> Result<Self, ()> {
-            (name == "auto").then_some(Self::Auto).ok_or(())
+    impl FromStr for Pick {
+        type Err = UnknownPick;
+
+        fn from_str(name: &str) -> Result<Self, UnknownPick> {
+            (name == "auto").then_some(Self::Auto).ok_or(UnknownPick)
         }
     }
 

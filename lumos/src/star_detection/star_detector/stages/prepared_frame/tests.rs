@@ -259,14 +259,19 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
+    use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::cfa::make_cfa;
 
     let mut rng = TestRng::new(seed);
     let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|_| 0.1 + 0.01 * rng.next_gaussian_f32())
         .collect();
-    let mut image = make_cfa(size, pixels, CfaType::Bayer(CfaPattern::Rggb))
-        .demosaic_measured(MarkesteijnPasses::One);
+    let mut image = make_cfa(
+        size,
+        pixels,
+        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+    )
+    .demosaic_measured(MarkesteijnPasses::One);
     image.metadata.derived.set_provenance(Some(ImageProvenance {
         source: SourceProvenance::CameraRaw,
         color: ColorProvenance::SensorRgb,

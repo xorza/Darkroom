@@ -12,10 +12,11 @@ use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mut group = Kind::Atomic.group(c, "frame/frame_stats/frame", Scale::Frame);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("measure/mono", field.name()), |b| {

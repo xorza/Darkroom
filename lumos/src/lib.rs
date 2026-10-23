@@ -77,6 +77,7 @@ pub use image::cfa::cfa_image::CfaImage;
 pub use image::cfa::cfa_pattern::CfaPattern;
 pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+pub use image::cfa::mosaic::Mosaic;
 pub use image::cfa::xtrans_pattern::XTransPattern;
 pub use image::channel_layout::ChannelLayout;
 pub use image::dark_comparison::DarkComparison;

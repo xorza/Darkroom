@@ -75,11 +75,9 @@ impl FrameInfo {
         passes: MarkesteijnPasses,
         workers: usize,
     ) -> Footprint {
-        let noise = if self.cfa_type.is_mosaic() {
-            MosaicNoiseMeasure::heap_bytes(self.dimensions.size(), &self.cfa_type)
-        } else {
-            0
-        };
+        let noise = self.cfa_type.mosaic().map_or(0, |mosaic| {
+            MosaicNoiseMeasure::heap_bytes(self.dimensions.size(), mosaic)
+        });
         let flags = self.dimensions.flag_plane_bytes();
         let demosaic = Demosaic::of(self.cfa_type, passes).footprint(self.dimensions, workers);
         way.beside(noise).then(Footprint {

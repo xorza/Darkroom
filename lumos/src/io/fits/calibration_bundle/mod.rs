@@ -110,17 +110,22 @@ pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, Bun
     if idxs.defects.is_some() && idxs.masters.dark.is_none() && idxs.masters.flat.is_none() {
         return Err(BundleError::DefectsWithoutMaster);
     }
+    let mut master = |role| {
+        (*idxs.masters.get(role))
+            .map(|idx| bundle.master(idx, role))
+            .transpose()
+    };
+    let bias = master(MasterRole::Bias)?;
+    let dark = master(MasterRole::Dark)?;
+    let flat = master(MasterRole::Flat)?;
+    let defects = idxs.defects.map(|idx| bundle.defect_map(idx)).transpose()?;
     // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
     // trustworthy as one just built — and neither can exist in a state the other would reject.
     let masters = CalibrationMasters::builder()
-        .bias(bundle.master(idxs.masters.bias, MasterRole::Bias)?)
-        .dark(bundle.master(idxs.masters.dark, MasterRole::Dark)?)
-        .flat(
-            bundle
-                .master(idxs.masters.flat, MasterRole::Flat)?
-                .map(PreparedFlat::from_divisor),
-        )
-        .defect_map(bundle.defect_map(idxs.defects)?)
+        .bias(bias)
+        .dark(dark)
+        .flat(flat.map(PreparedFlat::from_divisor))
+        .defect_map(defects)
         .build()?;
     Ok(masters)
 }
@@ -208,15 +213,8 @@ impl BundleReader<'_> {
         Ok(idxs)
     }
 
-    /// The `role` master at HDU `idx`, when the bundle holds one.
-    fn master(
-        &mut self,
-        idx: Option<usize>,
-        role: MasterRole,
-    ) -> Result<Option<CfaImage>, BundleError> {
-        let Some(idx) = idx else {
-            return Ok(None);
-        };
+    /// The `role` master at HDU `idx`.
+    fn master(&mut self, idx: usize, role: MasterRole) -> Result<CfaImage, BundleError> {
         let hdu = &self.reader.hdus()[idx];
         if hdu.kind != HduKind::Image || hdu.header.bitpix()? != Bitpix::F32 {
             return Err(BundleError::MasterEncoding { role });
@@ -238,7 +236,7 @@ impl BundleReader<'_> {
                 .read(ctx, Checksum::Verified(checksum), &SharedGains::default())?
                 .into_cfa(cfa_type)
         };
-        master().map(Some).map_err(|source| match source {
+        master().map_err(|source| match source {
             FitsLoadError::Cancelled => BundleError::Cancelled,
             source => BundleError::Master {
                 role,
@@ -247,11 +245,8 @@ impl BundleReader<'_> {
         })
     }
 
-    /// The defect map at HDU `idx`, when the bundle holds one.
-    fn defect_map(&mut self, idx: Option<usize>) -> Result<Option<DefectMap>, BundleError> {
-        let Some(idx) = idx else {
-            return Ok(None);
-        };
+    /// The defect map at HDU `idx`.
+    fn defect_map(&mut self, idx: usize) -> Result<DefectMap, BundleError> {
         let header = &self.reader.hdus()[idx].header;
         if self.reader.hdus()[idx].kind != HduKind::BinTable
             || header.get_text(FORMAT_KEYWORD)? != Some(DEFECT_FORMAT)
@@ -301,9 +296,7 @@ impl BundleReader<'_> {
                 kind => return Err(DefectTableError::Kind { row, kind }.into()),
             }
         }
-        Ok(Some(
-            DefectMap::from_lists(dimensions, hot, cold).expect("every index lies on the sensor"),
-        ))
+        Ok(DefectMap::from_lists(dimensions, hot, cold).expect("every index lies on the sensor"))
     }
 }
 

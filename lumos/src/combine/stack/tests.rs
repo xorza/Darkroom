@@ -27,6 +27,7 @@ use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::flat_gain::FlatGain;
@@ -195,7 +196,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     let cfa = if channels == 1 {
                         CfaType::Mono
                     } else {
-                        CfaType::Bayer(CfaPattern::Rggb)
+                        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))
                     };
                     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
                         &divisor,
@@ -2495,8 +2496,8 @@ fn a_pixel_too_few_frames_reached_combines_by_its_median() {
     };
     let product = combine(frames, &config).unwrap();
     assert_eq!(product.image.channel(0).pixels(), &[1.0, 3.0]);
-    let plane = |map: &Option<QualityMap>| map.as_ref().unwrap().channel(0).pixels().to_vec();
-    assert_eq!(plane(&product.inverse_variance)[1], 0.0);
-    assert!(plane(&product.dispersion)[1].is_nan());
+    let plane = |map: Option<&QualityMap>| map.unwrap().channel(0).pixels().to_vec();
+    assert_eq!(plane(product.inverse_variance.as_ref())[1], 0.0);
+    assert!(plane(product.dispersion.as_ref())[1].is_nan());
     assert_eq!(product.report.small_n_fallback_pixels, 1);
 }

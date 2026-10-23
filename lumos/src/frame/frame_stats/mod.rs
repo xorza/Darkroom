@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
@@ -67,12 +68,12 @@ impl FrameStats {
     /// most: a mosaic's colors at once, which share its one plane, or a channel at a time.
     pub(crate) fn heap_bytes(
         dimensions: ImageDimensions,
-        mosaic: Option<&CfaType>,
+        mosaic: Option<Mosaic>,
         threads: usize,
     ) -> usize {
         let size = dimensions.size();
         let noise = match mosaic {
-            Some(cfa_type) => MosaicNoiseMeasure::heap_bytes(size, cfa_type),
+            Some(mosaic) => MosaicNoiseMeasure::heap_bytes(size, mosaic),
             None => mrs_noise::heap_bytes(size, threads),
         };
         noise.max(dimensions.pixel_count() * size_of::<f32>())
@@ -85,12 +86,12 @@ impl FrameStats {
         let metadata = image.metadata();
         let flags = image.flags();
         let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
-        let mosaic = image.cfa_type().filter(CfaType::is_mosaic);
+        let mosaic = image.cfa_type().and_then(CfaType::mosaic);
         let mosaic_noise = match mosaic {
-            Some(cfa_type) => Some(
+            Some(mosaic) => Some(
                 MosaicNoiseMeasure {
                     plane: image.channel(0),
-                    cfa_type,
+                    mosaic,
                     flags,
                     flat_gain: image.flat_gain().map(|gain| &**gain),
                     quantization_sigma: metadata.derived.quantization_sigma(),
@@ -133,11 +134,11 @@ impl FrameStats {
         let measured =
             |idx: usize| nulls.is_none_or(|nulls| !nulls.at(idx).intersects(QualityFlags::NO_DATA));
         let levels: Vec<SlotLevel> = match mosaic {
-            Some(cfa_type) => (0..cfa_type.color_count())
+            Some(mosaic) => (0..mosaic.color_count())
                 .into_par_iter()
                 .map(|color| {
                     SlotLevel::of(image.channel(0), spreads, |idx, pos| {
-                        measured(idx) && cfa_type.slot_at(pos) == color
+                        measured(idx) && mosaic.slot_at(pos) == color
                     })
                 })
                 .collect(),

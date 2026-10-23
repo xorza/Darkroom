@@ -58,9 +58,7 @@ impl PlannedNormalization {
             threads,
         } = self;
         let samples: ArrayVec<usize, 3> = (0..slots.count())
-            .map(|slot| {
-                StratifiedSamples::new(dimensions.size(), slots.mosaic().as_ref(), slot).len()
-            })
+            .map(|slot| StratifiedSamples::new(dimensions.size(), slots.mosaic(), slot).len())
             .collect();
         let most = samples.iter().copied().max().unwrap_or(0);
         let shared: usize = samples

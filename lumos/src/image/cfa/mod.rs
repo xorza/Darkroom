@@ -9,6 +9,7 @@ pub(crate) mod cfa_pattern;
 pub(crate) mod cfa_type;
 pub(crate) mod color_raster;
 pub(crate) mod demosaic;
+pub(crate) mod mosaic;
 pub(crate) mod xtrans_pattern;
 
 #[cfg(test)]

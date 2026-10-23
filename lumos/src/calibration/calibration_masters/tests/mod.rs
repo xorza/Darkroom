@@ -41,6 +41,7 @@ use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
@@ -110,7 +111,7 @@ fn a_flat_with_no_positive_mean_is_refused() {
         (CfaType::Mono, 0.0f32, None, None),
         (CfaType::Mono, 0.25, Some(0.5f32), None),
         (
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             0.25,
             Some(0.5),
             Some(CfaColor::Red),
@@ -138,12 +139,12 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         flat: Some(constant_cfa(
             Size2us::new(2, 2),
             0.5,
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
         )),
         flat_dark: Some(constant_cfa(
             Size2us::new(2, 2),
             0.1,
-            CfaType::Bayer(CfaPattern::Bggr),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
         )),
         ..CalibrationSet::default()
     };
@@ -151,8 +152,8 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         CalibrationMasters::from_images(images, SigmaThreshold::DEFAULT, &CancelToken::never()),
         Err(CalibrationError::CfaPatternMismatch {
             component: MasterRole::FlatDark,
-            expected: CfaType::Bayer(CfaPattern::Rggb),
-            master: CfaType::Bayer(CfaPattern::Bggr),
+            expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
         })
     ));
 }
@@ -183,38 +184,38 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     }
 
     // The same layout one row down is a different X-Trans phase.
-    let xtrans_a = CfaType::XTrans(XTRANS_PATTERN);
+    let xtrans_a = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     let mut shifted = XTRANS_PATTERN.rows();
     shifted.rotate_left(1);
-    let xtrans_b = CfaType::XTrans(XTransPattern::new(shifted).unwrap());
+    let xtrans_b = CfaType::Mosaic(Mosaic::XTrans(XTransPattern::new(shifted).unwrap()));
     let cases = [
         Case {
             role: MasterRole::Dark,
             light: CfaType::Mono,
-            master: CfaType::Bayer(CfaPattern::Rggb),
+            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Dark,
                 expected: CfaType::Mono,
-                master: CfaType::Bayer(CfaPattern::Rggb),
+                master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             },
         },
         Case {
             role: MasterRole::Flat,
-            light: CfaType::Bayer(CfaPattern::Rggb),
-            master: CfaType::Bayer(CfaPattern::Bggr),
+            light: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Flat,
-                expected: CfaType::Bayer(CfaPattern::Rggb),
-                master: CfaType::Bayer(CfaPattern::Bggr),
+                expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
             },
         },
         Case {
             role: MasterRole::Bias,
-            light: CfaType::Bayer(CfaPattern::Rggb),
+            light: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             master: xtrans_a,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Bias,
-                expected: CfaType::Bayer(CfaPattern::Rggb),
+                expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
                 master: xtrans_a,
             },
         },
@@ -1071,7 +1072,7 @@ fn defect_detection_zero_median_no_false_positives() {
 #[test]
 fn calibrate_hot_pixel_correction() {
     let (w, h) = (6, 6);
-    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let mut dark_pixels = Buffer2::new_filled(w, h, 0.0625_f32);
     dark_pixels[(2, 2)] = 0.9;
     let masters = bundle(CalibrationSet {
@@ -1134,7 +1135,7 @@ fn calibrate_hot_pixel_correction() {
 
 #[test]
 fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
-    let cfa_type = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let flat = CfaImage::from_plane(
         Buffer2::new(
             4,

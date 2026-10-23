@@ -1,6 +1,6 @@
 //! [`RunStorage`]: where one run reads its frames from and writes them to.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::FrameStoreError;
@@ -10,11 +10,12 @@ use crate::memory::run_plan::RunPlan;
 
 /// Where one run reads its frames from and writes them to: the decode cache, when the run keeps
 /// one and decodes files, and the scratch its tier spills to. Both live under the run's cache
-/// directory, so one disk holds everything the run writes, and one check covers it.
-#[derive(Debug)]
-pub(crate) struct RunStorage {
-    cache_dir: PathBuf,
-    kept: Option<DecodeCache>,
+/// directory, so one disk holds everything the run writes, and one check covers it. A view: the
+/// decode cache is its file set's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RunStorage<'a> {
+    cache_dir: &'a Path,
+    kept: Option<&'a DecodeCache>,
 }
 
 /// The bytes a run writes to its disk: `kept`, the frames the decode cache does not hold yet;
@@ -25,34 +26,22 @@ pub(crate) struct RunWrites {
     pub(crate) spilled: u64,
 }
 
-impl RunStorage {
-    /// The storage of a run that decodes files: their decode cache opened when `run` keeps one.
-    ///
-    /// # Errors
-    ///
-    /// The decode cache cannot be opened.
-    pub(crate) fn decoding(run: &IngestRun) -> Result<Self, FrameStoreError> {
-        Ok(Self {
-            cache_dir: run.cache_dir.clone(),
-            kept: run
-                .keep_cache
-                .then(|| DecodeCache::open(&run.cache_dir))
-                .transpose()?,
-        })
+impl<'a> RunStorage<'a> {
+    /// The storage under `cache_dir` of a run that reads its frames through `kept`, when it keeps
+    /// a decode cache.
+    pub(crate) const fn new(cache_dir: &'a Path, kept: Option<&'a DecodeCache>) -> Self {
+        Self { cache_dir, kept }
     }
 
     /// The storage of a run whose frames the caller holds: it decodes nothing, so it keeps no
     /// decode cache.
-    pub(crate) fn holding(run: &IngestRun) -> Self {
-        Self {
-            cache_dir: run.cache_dir.clone(),
-            kept: None,
-        }
+    pub(crate) fn holding(run: &'a IngestRun) -> Self {
+        Self::new(&run.cache_dir, None)
     }
 
     /// The decode cache, when the run keeps one.
-    pub(crate) const fn kept(&self) -> Option<&DecodeCache> {
-        self.kept.as_ref()
+    pub(crate) const fn kept(self) -> Option<&'a DecodeCache> {
+        self.kept
     }
 
     /// The tier `plan` keeps the run's frames in, once the disk is known to hold what the run
@@ -62,12 +51,12 @@ impl RunStorage {
     ///
     /// The scratch cannot be made, or [`FrameStoreError::InsufficientSpace`].
     pub(crate) fn tier(
-        &self,
+        self,
         plan: &RunPlan,
         writes: RunWrites,
     ) -> Result<StorageTier, FrameStoreError> {
-        let tier = StorageTier::for_plan(plan, &self.cache_dir)?;
-        match (tier.scratch(), &self.kept) {
+        let tier = StorageTier::for_plan(plan, self.cache_dir)?;
+        match (tier.scratch(), self.kept) {
             (Some(scratch), _) => scratch.ensure_space(writes.kept.saturating_add(writes.spilled)),
             (None, Some(kept)) => kept.ensure_space(writes.kept),
             (None, None) => {
@@ -83,6 +72,7 @@ impl RunStorage {
 mod tests {
     use common::{FileSystem, TempDir};
 
+    use crate::frame_store::decode_cache::DecodeCache;
     use crate::frame_store::error::FrameStoreError;
     use crate::frame_store::run_storage::{RunStorage, RunWrites};
     use crate::ingest::ingest_config::IngestConfig;
@@ -104,9 +94,9 @@ mod tests {
             keep_cache: true,
             ..IngestConfig::with_cache_dir(dir.path().to_path_buf())
         };
-        let storage =
-            RunStorage::decoding(&IngestRun::planned(RunMemory::new(1 << 30, None), &ingest))
-                .unwrap();
+        let run = IngestRun::planned(RunMemory::new(1 << 30, None), &ingest);
+        let cache = DecodeCache::open(&run.cache_dir).unwrap();
+        let storage = RunStorage::new(&run.cache_dir, Some(&cache));
         let free = FileSystem::free_space(dir.path()).expect("the test's disk is read");
         let share = free / 10 * 6;
         let frame = [Stage {

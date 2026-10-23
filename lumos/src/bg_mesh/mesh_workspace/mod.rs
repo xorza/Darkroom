@@ -45,7 +45,7 @@ impl MeshWorkspace {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
-        color: Option<ColorSites<'_>>,
+        color: Option<ColorSites>,
         params: MeshParams,
     ) -> &BgMesh {
         let input = TileInput {

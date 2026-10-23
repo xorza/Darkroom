@@ -28,7 +28,14 @@ const TILE_PX: u32 = 64;
 #[derive(Default, Debug)]
 pub(super) struct CanvasBg {
     // Reuse the tile until its inputs change; constructing its pixels allocates.
-    tile: Option<(DotKey, ImageHandle)>,
+    tile: Option<DotTile>,
+}
+
+/// The registered dot tile and the theme inputs it was drawn from.
+#[derive(Debug)]
+struct DotTile {
+    key: DotKey,
+    handle: ImageHandle,
 }
 
 // Float bits preserve exact equality for cache invalidation.
@@ -83,15 +90,18 @@ impl CanvasBg {
 
     fn tile_handle(&mut self, ui: &Ui, theme: &Theme) -> ImageHandle {
         let key = DotKey::from_theme(theme);
-        if let Some((cached, handle)) = &self.tile
-            && *cached == key
+        if let Some(tile) = &self.tile
+            && tile.key == key
         {
-            return handle.clone();
+            return tile.handle.clone();
         }
         let handle = ui
             .load_image(&build_tile(theme))
             .expect("canvas tile fits every supported GPU");
-        self.tile = Some((key, handle.clone()));
+        self.tile = Some(DotTile {
+            key,
+            handle: handle.clone(),
+        });
         handle
     }
 }

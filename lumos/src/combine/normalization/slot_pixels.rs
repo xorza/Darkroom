@@ -33,18 +33,18 @@ impl<'a> SlotPixels<'a> {
         let size = planes.dimensions.size();
         let mosaic = planes.slots.mosaic();
         (0..planes.slots.count())
-            .map(|slot| match (domain, &mosaic) {
+            .map(|slot| match (domain, mosaic) {
                 (None, mosaic) => {
-                    let samples = StratifiedSamples::new(size, mosaic.as_ref(), slot);
+                    let samples = StratifiedSamples::new(size, mosaic, slot);
                     if samples.len() == 0 {
                         return Err(StackError::NoCommonCoverage);
                     }
                     Ok(Self::Everywhere(samples))
                 }
                 (Some(domain), None) => Ok(Self::Common(domain)),
-                (Some(domain), Some(cfa_type)) => Ok(Self::CommonColor(domain.restricted(
+                (Some(domain), Some(mosaic)) => Ok(Self::CommonColor(domain.restricted(
                     size,
-                    |pos| cfa_type.slot_at(pos) == slot,
+                    |pos| mosaic.slot_at(pos) == slot,
                     planes.cancel,
                 )?)),
             })

@@ -6,6 +6,7 @@ use crate::frame::frame_stats::FrameStats;
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
@@ -29,7 +30,7 @@ const SEED: u64 = 7;
 #[test]
 fn a_mosaic_has_a_sky_per_color() {
     let size = Size2us::new(8, 8);
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let pixels = (0..size.pixel_count())
         .map(|idx| match cfa.slot_at(Vec2us::new(idx % 8, idx / 8)) {
             0 => 0.125,
@@ -90,7 +91,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
         let divisor = Buffer2::from_fn(size.width, size.height, |x, _| (1.0 / gain(x)) as f32);
         (pixels, divisor)
     };
-    let cfa = CfaType::Bayer(CfaPattern::Rggb);
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     for (read, sky) in [(1e-4f64, 1e-4f64), (2e-4, 0.0), (0.0, 2e-4)] {
         let expected_share = (read / (read + sky)) as f32;
         let check = |stats: FrameStats, variance_tolerance: f32, share_tolerance: f32| {

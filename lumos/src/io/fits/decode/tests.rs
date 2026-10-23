@@ -5,6 +5,7 @@ use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus, HduKind};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::fits_checksum_provenance::FitsChecksumState;
 use crate::image::fits_transfer_provenance::FitsTransferProvenance;
@@ -403,7 +404,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         &make_cfa(
             Size2us::new(2, 2),
             vec![0.25; 4],
-            CfaType::Bayer(CfaPattern::Rggb),
+            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
         ),
     )
     .unwrap();

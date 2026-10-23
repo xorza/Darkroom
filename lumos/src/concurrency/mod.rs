@@ -41,8 +41,15 @@ pub(crate) fn zeroed_in_parallel(len: usize) -> Vec<f32> {
 /// failure that stopped it, if one did.
 #[derive(Debug)]
 struct SlotOutcome<R, E> {
-    values: Vec<(usize, R)>,
+    values: Vec<Indexed<R>>,
     failure: Option<Failure<E>>,
+}
+
+/// A job's value and the index it ran for.
+#[derive(Debug)]
+struct Indexed<R> {
+    idx: usize,
+    value: R,
 }
 
 /// A job's failure and the index it failed at.
@@ -100,7 +107,7 @@ where
                         break;
                     }
                     match job(slot, idx) {
-                        Ok(value) => outcome.values.push((idx, value)),
+                        Ok(value) => outcome.values.push(Indexed { idx, value }),
                         Err(error) => {
                             lowest_failure.fetch_min(idx, Ordering::AcqRel);
                             outcome.failure = Some(Failure { idx, error });
@@ -115,7 +122,7 @@ where
     let mut ordered: Vec<Option<R>> = (0..len).map(|_| None).collect();
     let mut first_failure: Option<Failure<E>> = None;
     for outcome in outcomes {
-        for (idx, value) in outcome.values {
+        for Indexed { idx, value } in outcome.values {
             ordered[idx] = Some(value);
         }
         if let Some(failure) = outcome.failure

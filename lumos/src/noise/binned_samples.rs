@@ -16,7 +16,7 @@ const MIN_BIN_SAMPLES: usize = 256;
 const BIN_SHARE: usize = 1 << 14;
 
 /// The noise measured over the samples of one bin of flat gain.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GainBin {
     /// The bin's mean gain.
     pub(crate) gain: f64,
@@ -227,7 +227,7 @@ impl<S: Samples> BinnedSamples<S> {
 #[cfg(test)]
 mod tests {
     use crate::image::flat_gain::gain_bins::GainBins;
-    use crate::noise::binned_samples::BinnedSamples;
+    use crate::noise::binned_samples::{BinnedSamples, GainBin};
 
     /// Bins under 256 samples merge with their neighbours up in gain: over bounds 3, 5, …, 15, 300
     /// samples at gain 1 fill bin 0 alone; 100 each at gains 3, 5 and 7 fill bins 1 to 3 only together,
@@ -254,11 +254,21 @@ mod tests {
             }
         }
         let measured = binned.measure(|samples| samples.iter().map(|&gain| f64::from(gain)).sum());
-        let runs: Vec<(usize, f64, f64)> = measured
-            .iter()
-            .map(|bin| (bin.samples, bin.gain, bin.variance))
-            .collect();
-        assert_eq!(runs, [(300, 1.0, 300.0), (350, 2250.0 / 350.0, 2250.0)]);
+        assert_eq!(
+            measured.as_slice(),
+            [
+                GainBin {
+                    gain: 1.0,
+                    variance: 300.0,
+                    samples: 300,
+                },
+                GainBin {
+                    gain: 2250.0 / 350.0,
+                    variance: 2250.0,
+                    samples: 350,
+                },
+            ]
+        );
 
         let mut few = BinnedSamples::with_capacity(100);
         for _ in 0..100 {

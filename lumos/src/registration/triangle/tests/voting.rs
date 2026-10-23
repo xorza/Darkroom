@@ -9,76 +9,107 @@ fn vote_matrices_count_each_pair_in_order() {
         let mut matrix = Votes::default();
         assert!(matrix.nonzero_entries().is_empty());
         let entries = [
-            (n_ref - 1, n_target - 1, 4),
-            (0, n_target - 1, 2),
-            (n_ref / 2, n_target / 3, 5),
-            (n_ref - 1, 0, 3),
-            (0, 0, 1),
+            tally(n_ref - 1, n_target - 1, 4),
+            tally(0, n_target - 1, 2),
+            tally(n_ref / 2, n_target / 3, 5),
+            tally(n_ref - 1, 0, 3),
+            tally(0, 0, 1),
         ];
-        for &(r, t, votes) in &entries {
+        for &PairVotes { pair, votes } in &entries {
             for _ in 0..votes {
-                matrix.increment(r, t);
+                matrix.increment(pair.reference, pair.target);
             }
         }
         let mut expected = entries.to_vec();
-        expected.sort_unstable();
+        expected.sort_unstable_by_key(|entry| (entry.pair.reference, entry.pair.target));
         assert_eq!(matrix.nonzero_entries(), expected, "{n_ref}×{n_target}");
     }
     let mut matrix = Votes::default();
     for _ in 0..70_000 {
         matrix.increment(599, 3);
     }
-    assert_eq!(matrix.nonzero_entries(), [(599, 3, 70_000)]);
+    assert_eq!(matrix.nonzero_entries(), [tally(599, 3, 70_000)]);
+}
+
+/// One case of [`resolve_claims_each_star_once_by_votes`].
+#[derive(Debug)]
+struct ResolveCase<'a> {
+    entries: &'a [PairVotes],
+    min_votes: usize,
+    /// The resolved matches, in output order.
+    expected: &'a [PointMatch],
+}
+
+/// `reference` paired with `target` at `confidence`.
+const fn resolved(reference: usize, target: usize, confidence: f64) -> PointMatch {
+    PointMatch {
+        idxs: MatchIdxs { reference, target },
+        confidence,
+    }
 }
 
 /// Greedy resolution, case by case: the pairs that survive `min_votes` are taken in descending vote
 /// order, each star at most once, and each kept pair's confidence is its votes over the most any
 /// kept pair drew. Every confidence below is a correctly rounded quotient, so equality is exact.
-/// Vote entries, `min_votes`, and the resolved `(reference, target, confidence)` in output order.
-type ResolveCase = (
-    &'static [(usize, usize, usize)],
-    usize,
-    &'static [(usize, usize, f64)],
-);
-
 #[test]
 fn resolve_claims_each_star_once_by_votes() {
-    let cases: [ResolveCase; 7] = [
+    let cases: [ResolveCase<'_>; 7] = [
         // No conflicts: all three, 10/10, 8/10, 6/10.
-        (
-            &[(0, 0, 10), (1, 1, 8), (2, 2, 6)],
-            1,
-            &[(0, 0, 1.0), (1, 1, 0.8), (2, 2, 0.6)],
-        ),
+        ResolveCase {
+            entries: &[tally(0, 0, 10), tally(1, 1, 8), tally(2, 2, 6)],
+            min_votes: 1,
+            expected: &[
+                resolved(0, 0, 1.0),
+                resolved(1, 1, 0.8),
+                resolved(2, 2, 0.6),
+            ],
+        },
         // Ref 0 takes target 0 first, so ref 1 falls back to target 1 with 3 votes.
-        (
-            &[(0, 0, 10), (1, 0, 5), (1, 1, 3)],
-            1,
-            &[(0, 0, 1.0), (1, 1, 0.3)],
-        ),
+        ResolveCase {
+            entries: &[tally(0, 0, 10), tally(1, 0, 5), tally(1, 1, 3)],
+            min_votes: 1,
+            expected: &[resolved(0, 0, 1.0), resolved(1, 1, 0.3)],
+        },
         // Ref 0 is taken by its 10-vote pair, so its 5-vote pair is dropped.
-        (
-            &[(0, 0, 10), (0, 1, 5), (1, 1, 3)],
-            1,
-            &[(0, 0, 1.0), (1, 1, 0.3)],
-        ),
+        ResolveCase {
+            entries: &[tally(0, 0, 10), tally(0, 1, 5), tally(1, 1, 3)],
+            min_votes: 1,
+            expected: &[resolved(0, 0, 1.0), resolved(1, 1, 0.3)],
+        },
         // Only the 10-vote pair clears `min_votes = 3`.
-        (&[(0, 0, 10), (1, 1, 2), (2, 2, 1)], 3, &[(0, 0, 1.0)]),
-        (
-            &[(0, 0, 20), (1, 1, 10), (2, 2, 5)],
-            1,
-            &[(0, 0, 1.0), (1, 1, 0.5), (2, 2, 0.25)],
-        ),
-        (&[(0, 0, 10)], 1, &[(0, 0, 1.0)]),
-        (&[], 1, &[]),
+        ResolveCase {
+            entries: &[tally(0, 0, 10), tally(1, 1, 2), tally(2, 2, 1)],
+            min_votes: 3,
+            expected: &[resolved(0, 0, 1.0)],
+        },
+        ResolveCase {
+            entries: &[tally(0, 0, 20), tally(1, 1, 10), tally(2, 2, 5)],
+            min_votes: 1,
+            expected: &[
+                resolved(0, 0, 1.0),
+                resolved(1, 1, 0.5),
+                resolved(2, 2, 0.25),
+            ],
+        },
+        ResolveCase {
+            entries: &[tally(0, 0, 10)],
+            min_votes: 1,
+            expected: &[resolved(0, 0, 1.0)],
+        },
+        ResolveCase {
+            entries: &[],
+            min_votes: 1,
+            expected: &[],
+        },
     ];
-    for (entries, min_votes, expected) in cases {
+    for ResolveCase {
+        entries,
+        min_votes,
+        expected,
+    } in cases
+    {
         let matches = votes_from_entries(entries).resolve(5, 5, min_votes);
-        let resolved: Vec<(usize, usize, f64)> = matches
-            .iter()
-            .map(|m| (m.idxs.reference, m.idxs.target, m.confidence))
-            .collect();
-        assert_eq!(resolved, expected, "{entries:?} with min_votes {min_votes}");
+        assert_eq!(matches, expected, "{entries:?} with min_votes {min_votes}");
     }
 }
 
@@ -91,7 +122,7 @@ fn resolve_claims_each_star_once_by_votes() {
 fn similar_triangles_vote_for_their_vertices() {
     let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
     let reference = triangles_of(&IRREGULAR, 4);
-    let diagonal: Vec<(usize, usize, usize)> = (0..5).map(|i| (i, i, 6)).collect();
+    let diagonal: Vec<PairVotes> = (0..5).map(|i| tally(i, i, 6)).collect();
     for (target, check_orientation, expected) in [
         (IRREGULAR, true, diagonal.clone()),
         (mirrored, false, diagonal),
@@ -126,7 +157,7 @@ fn a_near_isosceles_triangle_votes_in_both_orders() {
     let mut votes = cast_votes(&target, reference, &TriangleConfig::default());
     assert_eq!(
         votes.nonzero_entries(),
-        vec![(0, 0, 1), (1, 1, 1), (2, 2, 1)]
+        [tally(0, 0, 1), tally(1, 1, 1), tally(2, 2, 1)]
     );
 }
 

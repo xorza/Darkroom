@@ -17,6 +17,7 @@ use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
@@ -69,7 +70,7 @@ impl SetFrame<'_> {
             combine: CombineBudget::new(RunMemory::new(1 << 30, None).budget(1)),
         };
         let paths = vec![source; idx + 1];
-        let files = FileSet::<_, D>::new(&paths, RunStorage::decoding(&run).unwrap(), &run.ctx);
+        let files = FileSet::<_, D>::new(&paths, &run).unwrap();
         FrameStore {
             files: &files,
             kept: files.storage().kept(),
@@ -459,7 +460,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
         idx: 0,
         info: FrameInfo {
             dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
-            cfa_type: CfaType::Bayer(CfaPattern::Rggb),
+            cfa_type: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             decoder: DecoderBytes::default(),
             gain_bytes: 8112,
         },
