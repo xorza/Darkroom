@@ -147,3 +147,18 @@
 - **A buffer of borrows outlives what it borrows through `Recycled`.** `take` lends its
   allocation for the elements of one chunk or frame, and `put` keeps it emptied, so a loop over
   chunks allocates it once. Refused: `recycle::emptied(mem::take(..))` written out at each site.
+- **One mask of the unmeasured pixels serves a light's two repairs.** `CfaImage::unmeasured_mask`
+  holds every null and every pixel a repair made; the defect repair reads around it and adds its
+  defects, which is then the mask the null repair needs, and the nulls to fill are the flag bytes
+  that hold `NO_DATA` without `REPAIRED`. So no repair reads another repair's value. Refused: a mask
+  of `NO_DATA` for the defects and three more for the nulls, built again by the demosaic.
+- **One builder makes the flags a pass imposes from its masters.** `imposed_flags::of` sets
+  `NO_DATA` where a master holds no measurement and `FLAT_FLOOR` where the flat floored, for a
+  light's calibration and a master's subtraction alike. Refused: a builder for each.
+- **A commit serializes what it borrows.** A kept frame's commit holds its metadata, statistics
+  and facts as `Cow`s, which serialize as the values themselves, so the record is the same bytes
+  without a copy of each. Refused: an owned record built for each commit.
+- **The à trous pass keeps its own kernel.** Its five taps a hole apart are multiplied and added in
+  one unfused order on every vector tier, so a transform is the same bits everywhere; the
+  detection convolution's contiguous kernels keep their own contract. Refused: one separable
+  kernel for both, which changes the bits of one.

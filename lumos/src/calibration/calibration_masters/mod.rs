@@ -15,6 +15,7 @@ use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::defect_summary::DefectSummary;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::error::{CalibrationError, MasterBuildError};
+use crate::calibration::imposed_flags;
 use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs, SubtractedFrames};
 use crate::calibration::master_recipe::MasterRecipe;
 use crate::calibration::master_role::MasterRole;
@@ -26,7 +27,6 @@ use crate::calibration::subtractor::Subtractor;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::Pedestal;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -251,34 +251,16 @@ impl CalibrationMasters {
 
     /// See [`Self::imposed`](CalibrationMasters#structfield.imposed); `None` when they impose none.
     fn imposed_flags(&self) -> Option<PixelFlags> {
-        let unmeasured: Vec<&PixelFlags> = [
-            self.used_bias(),
-            self.dark.as_ref(),
-            self.flat.as_ref().map(PreparedFlat::divisor),
-        ]
-        .into_iter()
-        .flatten()
-        .filter_map(|master| master.flags())
-        .filter(|flags| flags.contains(QualityFlags::UNMEASURED))
-        .collect();
-        let floored = self.flat.as_ref().filter(|flat| flat.floored() > 0);
-        if unmeasured.is_empty() && floored.is_none() {
-            return None;
-        }
-        let (_, first) = self.masters().next()?;
-        PixelFlags::from_fn(first.size(), |idx| {
-            let mut flags = QualityFlags::default();
-            if unmeasured
-                .iter()
-                .any(|master| master.at(idx).intersects(QualityFlags::UNMEASURED))
-            {
-                flags = flags.union(QualityFlags::NO_DATA);
-            }
-            if floored.is_some_and(|flat| flat.is_floored(idx)) {
-                flags = flags.union(QualityFlags::FLAT_FLOOR);
-            }
-            flags
-        })
+        imposed_flags::of(
+            [
+                self.used_bias(),
+                self.dark.as_ref(),
+                self.flat.as_ref().map(PreparedFlat::divisor),
+            ]
+            .into_iter()
+            .flatten(),
+            self.flat.as_ref(),
+        )
     }
 
     /// Create `CalibrationMasters` from pre-built CFA images.
@@ -522,10 +504,15 @@ impl CalibrationMasters {
         if let Some(flat) = &self.flat {
             flat.record(image);
         }
+        // One mask of the pixels no repair may read serves both repairs: the defects join it as
+        // they are repaired.
+        let mut unmeasured = image.unmeasured_mask();
         if let Some(defect_map) = &self.defect_map {
-            defect_map.correct(image);
+            defect_map.correct(image, unmeasured.as_mut());
         }
-        image.repair_nulls();
+        if let Some(unmeasured) = &unmeasured {
+            image.repair_nulls_within(unmeasured);
+        }
         Ok(outcome)
     }
 

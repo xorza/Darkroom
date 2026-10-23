@@ -91,6 +91,11 @@ root causes.
   flat buffer trades that for `split_at_mut` chains in a vector kernel, to save about 33
   allocations a worker beside a demosaic of the whole frame. The X-Trans tile is priced by its
   passes' directions instead of the most.
+- **A row scratch for the à trous pass from a pool its owner keeps.** No type spans the calls;
+  one row a worker for each call is what it allocates now.
+- **Moving or borrowing the `ImageMetadata` the stored image, the kept frame's reuse, the loader
+  and the drizzle clone.** Each has two owners or runs once a run; only the commit's copy is
+  per frame, and it borrows now.
 - **Pricing the one-pass warp scratch beside `prepared.kept` only.** The worker keeps its
   `FlagScratch` from one light to the next, so the scratch is also held during the next decode.
   The current sum is correct.
@@ -117,7 +122,8 @@ check in `lumos/AGENTS.md`. When a batch lands, its lasting decision goes into
 
 Batches 1, prices that match the allocations, 2, streaming FITS output, 3, the detection working
 set, 4, the warp working set, 5, each input read once, 6, one stored-frame writer, and 11, shared
-source gains, landed, and 7, reuse across frames and jobs. The other batches are independent.
+source gains, landed, and 7, reuse across frames and jobs, 9 but one item, and 10,
+consolidation. The other batches are independent.
 
 ### 8. Raster decode bound
 
@@ -143,27 +149,3 @@ Once for each master, but each holds hundreds of MB. Files: `io/raster.rs`,
 - [ ] `io/raster.rs:107` — `LinearImage::from(&decoded)` copies even an `L_F32` image. Target:
   `From<Image>` by value, so a mono f32 plane moves. Waiting on the imaginarium decision in
   `review-lumos-memory_QUESTIONS.md`.
-
-### 10. Consolidation
-
-Small items, each local. Files as named.
-
-- [ ] `calibration/defect_map/mod.rs:276` with `image/cfa/cfa_image.rs:246-248` — the
-  `NO_DATA` mask is built four times for each light. Target: one predicate
-  (`NO_DATA && !REPAIRED`) for `nulls`, and one mask that `calibrate` builds and shares.
-- [ ] `calibration/calibration_masters/mod.rs:255-282` and `calibration/subtraction/mod.rs:143-160`
-  — two builders of the `NO_DATA`-where-unmeasured plane. Target: one builder.
-- [ ] `StoredImage::write`, `KeptFrame::reuse_image`, `FrameSpill::commit`, the loader's
-  `FrameStore::frame`, `kept_frame` and `reused`, and `drizzle/drizzle_run.rs:208` —
-  `ImageMetadata` is cloned where the owner can move it or the commit can serialize a borrow.
-  In the drizzle it is built for each frame and kept only for frame 0.
-- [ ] `AlignStackRun::stack_in_one_pass` — the one-pass route maps `others: Vec<usize>`
-  through `map_owned`, with a `Mutex` cell for each index, then inserts the reference. Target:
-  `map` over an index range.
-- [ ] `math/wavelet/mod.rs:33` — `atrous_smooth` is a third separable-filter design beside the
-  convolution kernels and the band filter, with `for_each_init(|| vec![0.0; width])` on each call
-  (scales × channels for each op, and once for each MRS tile). Target: one row scratch from a
-  pool its owner keeps, and the à trous pass on the convolution's row and column kernels with the
-  dilation step, if a bench shows no loss.
-- [ ] `drizzle/drizzle_shape.rs:104-105` — the input footprint is built by hand. Target:
-  `FramePeek::footprint(workers)`, as every other entry uses.
