@@ -86,7 +86,7 @@ impl ExtensionClaims {
     /// extension that describes another image is. A header-only image extension (`NAXIS = 0`) is
     /// none; one with a zero-length axis is, and is refused for that when it is read.
     pub(super) fn holds_image(hdu: &Hdu) -> Result<bool, FitsLoadError> {
-        Ok(hdu.is_image() && hdu.header.naxis()? > 0 && !Self::describes_another(hdu)?)
+        Ok(hdu.is_image() && !Self::describes_another(hdu)?)
     }
 
     /// Whether `hdu` is an extension that describes another image rather than being one.
