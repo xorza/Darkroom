@@ -1,7 +1,7 @@
 use common::{CancelToken, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Compression, CompressionConfig, Image};
+use fits_well::image::{Bitpix, Compression, CompressionConfig, Image, Scaling};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus, HduKind};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -86,7 +86,9 @@ fn write_named_multi_image(path: &Path) {
     first_header.set("EXTVER", 1).unwrap();
     writer
         .write_image(
-            Image::new([2, 1], vec![1.0f32, 2.0]).unwrap().view(),
+            Image::new([2, 1], vec![1.0f32, 2.0], Scaling::IDENTITY)
+                .unwrap()
+                .view(),
             Some(&first_header),
         )
         .unwrap();
@@ -96,9 +98,13 @@ fn write_named_multi_image(path: &Path) {
     second_header.set("EXTVER", 2).unwrap();
     writer
         .write_image(
-            Image::new([2, 1, 3], vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0])
-                .unwrap()
-                .view(),
+            Image::new(
+                [2, 1, 3],
+                vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0],
+                Scaling::IDENTITY,
+            )
+            .unwrap()
+            .view(),
             Some(&second_header),
         )
         .unwrap();
@@ -253,7 +259,7 @@ fn preflight_sizes_the_source_the_output_and_the_peak() {
 fn truncated_data_is_an_error() {
     let dir = TempDir::new("fits_preflight");
     let path = dir.join("truncated.fits");
-    let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
+    let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0], Scaling::IDENTITY).unwrap();
     write_fits(&path, image.view(), None);
     let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(BLOCK_SIZE);
@@ -271,7 +277,9 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let zero_path = dir.join("zero.fits");
     write_fits(
         &zero_path,
-        Image::new([0, 2], Vec::<f32>::new()).unwrap().view(),
+        Image::new([0, 2], Vec::<f32>::new(), Scaling::IDENTITY)
+            .unwrap()
+            .view(),
         None,
     );
     let zero_axis = FitsRefusal::ZeroAxis { shape: vec![0, 2] };
@@ -286,7 +294,9 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     ];
     write_fits(
         &rgb_path,
-        Image::new([2, 2, 3], planar).unwrap().view(),
+        Image::new([2, 2, 3], planar, Scaling::IDENTITY)
+            .unwrap()
+            .view(),
         None,
     );
     let loaded = load_linear(&rgb_path, &rgb_load_ctx()).unwrap();
@@ -339,11 +349,11 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
-    let image = Image::new([2, 2, 3], planar).unwrap();
+    let image = Image::new([2, 2, 3], planar, Scaling::IDENTITY).unwrap();
     FitsWriter::new(fs::create(&path).unwrap())
         .write_compressed_image(
             image.view(),
-            &CompressionConfig::new(Compression::GZIP).tiled([2, 2, 1]),
+            &CompressionConfig::new(Compression::GZIP).with_tiles([2, 2, 1]),
             None,
         )
         .unwrap();
@@ -445,7 +455,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
 fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity() {
     let dir = TempDir::new("fits_checksum_policy");
     let absent_path = dir.join("absent.fits");
-    let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
+    let image = Image::new([2, 1], vec![1.0f32, 2.0], Scaling::IDENTITY).unwrap();
     write_fits(&absent_path, image.view(), None);
 
     let verified_absent = load_linear(&absent_path, &load_ctx()).unwrap();
@@ -516,7 +526,9 @@ fn cancellation_prevents_fits_selection() {
     let path = dir.join("frame.fits");
     write_fits(
         &path,
-        Image::new([2, 1], vec![1.0f32, 2.0]).unwrap().view(),
+        Image::new([2, 1], vec![1.0f32, 2.0], Scaling::IDENTITY)
+            .unwrap()
+            .view(),
         None,
     );
     let cancel = CancelToken::new();
@@ -535,7 +547,7 @@ fn cancellation_prevents_fits_selection() {
 fn a_zero_datamax_is_no_saturation_level() {
     let dir = TempDir::new("fits_datamax");
     let path = dir.join("zero.fits");
-    let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
+    let image = Image::new([2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
     let mut header = Header::new();
     header.set("DATAMAX", 0.0).unwrap();
     write_fits(&path, image.view(), Some(&header));
@@ -553,7 +565,7 @@ fn a_header_only_image_extension_is_no_second_image() {
     let dir = TempDir::new("fits_header_only");
     let path = dir.join("one_image.fits");
     let mut writer = FitsWriter::new(fs::create(&path).unwrap());
-    let image = Image::new([2, 1], vec![0.25f32, 0.75]).unwrap();
+    let image = Image::new([2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
     writer.write_image(image.view(), None).unwrap();
     let mut empty = Header::new();
     empty.set("XTENSION", "IMAGE").unwrap();

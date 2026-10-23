@@ -308,7 +308,7 @@ fn read_extension_in_chunks<T: ExtensionSample>(
     debug_assert!(shape.len() >= 2, "an extension is a plane at least");
     let (width, height) = (shape[0], shape[1]);
     let rows_per_chunk = (chunk_bytes / (width * size_of::<T>()).max(1)).max(1);
-    let mut image = reader.image(idx)?.with_checksum();
+    let mut image = reader.image(idx)?.with_checksums();
     let mut words = Vec::new();
     let mut planes = ArrayVec::new();
     for slice in 0..shape.get(2).copied().unwrap_or(1) {
@@ -334,7 +334,7 @@ fn read_extension_in_chunks<T: ExtensionSample>(
 mod tests {
     use common::{CancelToken, TempDir, fs};
     use fits_well::FitsWriter;
-    use fits_well::image::Image;
+    use fits_well::image::{Image, Scaling};
     use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus};
 
     use crate::internals::fits::fits_refusal;
@@ -356,10 +356,20 @@ mod tests {
         let path = dir.join("extension.fits");
         let mut writer = FitsWriter::new(fs::create(&path).unwrap()).with_checksums();
         writer
-            .write_image(Image::new([3, 5, 3], samples.clone()).unwrap().view(), None)
+            .write_image(
+                Image::new([3, 5, 3], samples.clone(), Scaling::IDENTITY)
+                    .unwrap()
+                    .view(),
+                None,
+            )
             .unwrap();
         writer
-            .write_image(Image::new([3, 5], bytes.clone()).unwrap().view(), None)
+            .write_image(
+                Image::new([3, 5], bytes.clone(), Scaling::IDENTITY)
+                    .unwrap()
+                    .view(),
+                None,
+            )
             .unwrap();
         drop(writer);
 

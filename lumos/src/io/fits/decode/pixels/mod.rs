@@ -58,7 +58,7 @@ impl HduDecode<'_> {
         if policy == FitsChecksumPolicy::Ignore {
             return self.read(image, |_| Ok(FitsChecksumProvenance::NOT_CHECKED));
         }
-        self.read(image.with_checksum(), |image| {
+        self.read(image.with_checksums(), |image| {
             Cancelled::check(&ctx.cancel)?;
             let report = image.finish()?;
             policy.judge(report, idx)

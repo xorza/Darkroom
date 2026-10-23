@@ -139,6 +139,7 @@ fn fits_float32_round_trips_pixels_and_order() {
     let image = Image::new(
         vec![size.width, size.height], // fits-well is NAXIS1-first: [width, height]
         pixels.clone(),
+        Scaling::IDENTITY,
     )
     .unwrap();
 
@@ -156,7 +157,12 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     // is applied without an offset, so a signed frame keeps its own zero.
 
     // BITPIX = 16, BSCALE = 1: divisor 65535, physical -32768..=32767 → about [-0.5, 0.5].
-    let signed = Image::new(vec![4, 1], vec![-32_768i16, -3, 0, 32_767]).unwrap();
+    let signed = Image::new(
+        vec![4, 1],
+        vec![-32_768i16, -3, 0, 32_767],
+        Scaling::IDENTITY,
+    )
+    .unwrap();
     let signed_loaded = write_and_load("int16", &signed).unwrap();
     let pixels = signed_loaded.channel(0).pixels();
     assert_close!(pixels[0], -0.500_007_6, 1e-7, "{pixels:?}");
@@ -167,7 +173,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     // BSCALE = -2.5 widens the declared span to 2.5 × 65535 = 163837.5, and the physical values
     // 17.5, 10, 0 divide by it. A negative BSCALE scales by its magnitude: the sign already lives
     // in the physical value fits-well produced.
-    let scaled = Image::new_scaled(
+    let scaled = Image::new(
         vec![3, 1],
         vec![-3i16, 0, 4],
         Scaling {
@@ -211,7 +217,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 #[test]
 fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let pixels = vec![0.0f32, 16_384.0, 32_768.0, 65_535.0];
-    let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
+    let image = Image::new(vec![4, 1], pixels.clone(), Scaling::IDENTITY).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(
         dir.join("float32_declared_scale.fits"),
@@ -328,7 +334,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // divisor and break the commensurability the division exists to establish. These three files
     // hold *identical* samples and differ only in their header.
     let pixels = vec![-5.0f32, 0.0, 0.5, 65_535.0];
-    let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
+    let image = Image::new(vec![4, 1], pixels.clone(), Scaling::IDENTITY).unwrap();
 
     // No DATAMAX: taken as already normalized, which these samples are not. The decode scans them,
     // and a maximum of 65535 past Siril's threshold of 10 is refused rather than loaded with its
@@ -363,7 +369,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         decode::load_linear(&contradicted, &LoadCtx::default(), &SharedGains::default()).is_err()
     );
     let unit_pixels = vec![-0.25f32, 0.0, 0.5, 1.0];
-    let unit_image = Image::new(vec![4, 1], unit_pixels.clone()).unwrap();
+    let unit_image = Image::new(vec![4, 1], unit_pixels.clone(), Scaling::IDENTITY).unwrap();
     let normalized_path = write_with_header(
         dir.join("float32_datamax_1.fits"),
         &unit_image,
@@ -442,7 +448,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::ingest::ingest_config::IngestConfig;
 
     let dir = TempDir::new("lumos-frame-set");
-    let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0]).unwrap();
+    let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0], Scaling::IDENTITY).unwrap();
     let linear = |name: &str, keywords: &[(&str, &str)], datamax: f64| {
         let mut header = Header::new();
         header.set("DATAMAX", datamax).unwrap();
@@ -565,7 +571,7 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     // quantity BUNIT says those samples measure. Nothing else in the pipeline can tell them apart:
     // both are `FitsNormalized` at scale 1, so without the unit they would stack as if a surface
     // brightness and a count rate were the same measurement.
-    let image = Image::new(vec![2, 1], vec![0.25f32, 0.5]).unwrap();
+    let image = Image::new(vec![2, 1], vec![0.25f32, 0.5], Scaling::IDENTITY).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let load = |name: &str, bunit: &str| {
         let mut header = Header::new();
@@ -615,7 +621,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     // The same logical image either way: finite samples 1, 2, 4, 8, 16 ADU with the third pixel
     // undefined. Written once as float and once as uint16, they must produce the same mask.
     let float_pixels = vec![1.0f32, 2.0, f32::NAN, 4.0, 8.0, 16.0];
-    let float_image = Image::new(vec![3, 2], float_pixels).unwrap();
+    let float_image = Image::new(vec![3, 2], float_pixels, Scaling::IDENTITY).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let float_path = write_with_header(dir.join("float32_null.fits"), &float_image, &Header::new());
     // ADU with no declared scale, which `Auto` refuses; the caller says how to read them.
@@ -630,7 +636,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
     // stored value to NaN, which is the same thing the float file handed over.
-    let integer_image = Image::new_scaled(
+    let integer_image = Image::new(
         vec![3, 2],
         vec![1i16, 2, -32_768, 4, 8, 16],
         Scaling {
@@ -747,7 +753,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
 fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     // The degenerate end of the same rule: no finite sample to take a level from. The frame still
     // opens, and the mask — not the samples — is what says none of it is data.
-    let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
+    let image = Image::new(vec![2, 2], vec![f32::NAN; 4], Scaling::IDENTITY).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(dir.join("float32_all_null.fits"), &image, &Header::new());
     let loaded = decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
@@ -763,7 +769,7 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     // DATAMAX is a saturation level in the file's sample units, so it is divided by the same span
     // the samples were: it stays a threshold the decoded samples can be compared against, and it
     // still does not influence what those samples decode to.
-    let image = Image::new(vec![4, 1], vec![-7i16, 0, 41, 300]).unwrap();
+    let image = Image::new(vec![4, 1], vec![-7i16, 0, 41, 300], Scaling::IDENTITY).unwrap();
     let mut low_header = Header::new();
     low_header.set("DATAMAX", 100.0).unwrap();
     let mut high_header = Header::new();
@@ -799,7 +805,12 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let mut mono_header = Header::new();
     mono_header.set("CFATYPE", "MONO").unwrap();
-    let mono = Image::new(vec![2, 2], vec![0.125f32, 0.25, 0.375, 0.5]).unwrap();
+    let mono = Image::new(
+        vec![2, 2],
+        vec![0.125f32, 0.25, 0.375, 0.5],
+        Scaling::IDENTITY,
+    )
+    .unwrap();
     let path = write_with_header(dir.join("mono_sensor.fits"), &mono, &mono_header);
     let loaded = LoadCtx::default().linear(&path).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.125, 0.25, 0.375, 0.5]);
@@ -811,7 +822,7 @@ fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
     let mut stale = Header::new();
     stale.set("BAYERPAT", "RGGB").unwrap();
     let samples: Vec<f32> = (0..12).map(|i| i as f32 / 16.0).collect();
-    let cube = Image::new(vec![2, 2, 3], samples.clone()).unwrap();
+    let cube = Image::new(vec![2, 2, 3], samples.clone(), Scaling::IDENTITY).unwrap();
     let path = write_with_header(dir.join("stale_cube.fits"), &cube, &stale);
     let ctx = LoadCtx {
         fits: FitsLoadConfig {
@@ -840,7 +851,12 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             (0..size.width).map(move |x| target[pattern.slot_at(Vec2us::new(x, y))] + dark_value)
         })
         .collect();
-    let image = Image::new(vec![size.width, size.height], pixels.clone()).unwrap();
+    let image = Image::new(
+        vec![size.width, size.height],
+        pixels.clone(),
+        Scaling::IDENTITY,
+    )
+    .unwrap();
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
@@ -969,7 +985,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     pixels[0] = f32::NAN;
     pixels[5] = f32::INFINITY;
     pixels[10] = f32::NEG_INFINITY;
-    let image = Image::new(vec![size.width, size.height], pixels).unwrap();
+    let image = Image::new(vec![size.width, size.height], pixels, Scaling::IDENTITY).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = write_with_header(dir.join("nan_inf.fits"), &image, &Header::new());
 

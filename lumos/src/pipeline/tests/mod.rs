@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use common::{CancelToken, TempDir, fs};
-use fits_well::image::Image as FitsImage;
+use fits_well::image::{Image as FitsImage, Scaling};
 use glam::DVec2;
 
 use crate::calibration::calibration_masters::CalibrationMasters;
@@ -808,7 +808,9 @@ impl LinearLights {
                     .collect();
                 write_fits(
                     &path,
-                    FitsImage::new([width, height, 3], planar).unwrap().view(),
+                    FitsImage::new([width, height, 3], planar, Scaling::IDENTITY)
+                        .unwrap()
+                        .view(),
                     None,
                 );
                 path

@@ -236,7 +236,7 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
         (Bitpix::U8, vec![4, 3, 3])
     );
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
-    let mask = reader.read_data_raw(2).unwrap().into_data();
+    let mask = reader.read_data_unit(2).unwrap().into_data();
     let pixel_count = SIZE.pixel_count();
     let set: Vec<_> = (0..mask.len()).filter(|&idx| mask[idx] == 1).collect();
     assert_eq!(
