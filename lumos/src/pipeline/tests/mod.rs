@@ -821,7 +821,7 @@ impl LinearLights {
         ingest.fits.float_scale = FitsFloatScale::Normalized;
         let ctx = LoadCtx {
             fits: ingest.fits.clone(),
-            ..LoadCtx::new(CancelToken::never(), u64::MAX)
+            ..LoadCtx::new(CancelToken::never())
         };
         Self {
             base,

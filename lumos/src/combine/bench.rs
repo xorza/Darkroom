@@ -26,7 +26,7 @@ use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
-use crate::memory::run_memory::RunMemory;
+use crate::memory::budget::Budget;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::stack_product::StackProduct;
 
@@ -153,8 +153,7 @@ impl Lights {
                 .into_frame(stats.clone())
             })
             .collect();
-        let budget =
-            RunMemory::new(SPILLED_MACHINE_BYTES, None).budget(rayon::current_num_threads());
+        let budget = Budget::of_memory(SPILLED_MACHINE_BYTES, rayon::current_num_threads());
         let tier = StorageTier::Spilled {
             scratch,
             combine: CombineBudget::new(budget),

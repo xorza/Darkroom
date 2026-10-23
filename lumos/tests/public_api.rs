@@ -26,7 +26,6 @@ use lumos::{
 fn file_loading_policy_is_available_from_the_crate_root() {
     let _: LoadCtx = LoadCtx {
         cancel: CancelToken::never(),
-        memory_limit_bytes: 64 * 1024 * 1024,
         fits: FitsLoadConfig {
             hdu: FitsHduSelector::Name {
                 extname: "SCI".to_owned(),

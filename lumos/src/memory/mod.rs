@@ -1,16 +1,14 @@
 //! How much of the machine the pipeline is willing to use, and what that buys.
 //!
-//! One [`Budget`](budget::Budget), read once at a run's entry from its
-//! [`RunMemory`](run_memory::RunMemory), and one rule over it: a run is a list of
-//! [`Stage`](stage::Stage)s, each priced in what it keeps of a frame, holds beside the frames and
-//! adds per unit of work in flight, and [`RunPlan`](run_plan::RunPlan) decides from them whether
-//! the frames stay resident and how wide each stage runs. A frame's way through a stage is priced
+//! One [`Budget`](budget::Budget), read once at a run's entry, and one rule over it: a run is a
+//! list of [`Stage`](stage::Stage)s, each priced in what it keeps of a frame, holds beside the
+//! frames and adds per unit of work in flight, and [`RunPlan`](run_plan::RunPlan) decides from
+//! them whether the frames stay resident and how wide each stage runs. A frame's way through a stage is priced
 //! as a chain of [`Footprint`](footprint::Footprint)s, each step's from the component that takes
 //! it.
 
 pub(crate) mod budget;
 pub(crate) mod footprint;
-pub(crate) mod run_memory;
 pub(crate) mod run_plan;
 pub(crate) mod stage;
 

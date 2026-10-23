@@ -116,7 +116,7 @@ impl FrameParking {
 #[cfg(test)]
 mod tests {
     use crate::frame_store::storage_tier::CombineBudget;
-    use crate::memory::run_memory::RunMemory;
+    use crate::memory::budget::Budget;
     use common::TempDir;
 
     use crate::combine::frame_read::frame_gate::FrameGate;
@@ -155,7 +155,7 @@ mod tests {
         let spill = || {
             FrameParking::new(StorageTier::Spilled {
                 scratch: RunScratch::create(dir.path()).unwrap(),
-                combine: CombineBudget::new(RunMemory::new(1 << 20, None).budget(1)),
+                combine: CombineBudget::new(Budget::of_memory(1 << 20, 1)),
             })
         };
         let dims = ImageDimensions::new((4, 1), ChannelLayout::Mono);

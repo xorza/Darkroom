@@ -2,8 +2,6 @@
 mod real_data;
 mod synthetic;
 
-use std::path::Path;
-
 use common::{TempDir, fs};
 use fits_well::image::SampleType;
 use imaginarium::Buffer2;
@@ -20,7 +18,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::error::{ImageError, OverBudget, ScientificRefusal, WriteError};
+use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::raster;
@@ -305,56 +303,6 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
             ..
         })
     ));
-
-    // Each raster decode is admitted from its header on its whole peak. The 2 × 2 grey f32 TIFF
-    // moves into its plane, then holds its flag plane beside it: 16 + 4 = 20 B. A 2 × 1 RGB f32
-    // TIFF holds its 24 B beside the three planes it splits into: 48 B, past its 24 + 2 B after.
-    // The 2 × 2 grey u8 PNG previews beside its f32 copy: 4 + 16 = 20 B. A limit one byte short
-    // refuses each with that peak, and the peak itself admits it. The 2 × 2 grey u8 JPEG decoder
-    // reads its whole file first, refused past the limit before it is read, then holds it beside
-    // the 4 B image, a file longer than the 16 B copy.
-    let rgb_path = dir.join("rgb_float.tiff");
-    let rgb_pixels = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6];
-    raster::write_image(
-        &rgb_path,
-        &Image::new_with_data(
-            ImageDesc::new(2, 1, ColorFormat::RGB_F32),
-            bytemuck::cast_slice(&rgb_pixels).to_vec(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let within = |memory_limit_bytes| LoadCtx {
-        memory_limit_bytes,
-        ..LoadCtx::default()
-    };
-    let assert_refused = |path: &Path, peak: u64, refused: ImageError| {
-        assert!(
-            matches!(
-                refused,
-                ImageError::ImageOverBudget {
-                    budget: OverBudget { required, limit },
-                    ..
-                } if required == peak && limit == peak - 1
-            ),
-            "{path:?}: {refused:?}"
-        );
-    };
-    for (path, peak) in [(&float_path, 20), (&rgb_path, 48)] {
-        assert_refused(path, peak, within(peak - 1).linear(path).unwrap_err());
-        within(peak).linear(path).unwrap();
-    }
-    assert_refused(&png, 20, within(19).preview(&png).unwrap_err());
-    within(20).preview(&png).unwrap();
-    let held = fs::metadata(&jpeg).unwrap().len();
-    assert!(held > 16, "premise: the file is longer than the copy");
-    assert_refused(&jpeg, held, within(held - 1).preview(&jpeg).unwrap_err());
-    assert_refused(
-        &jpeg,
-        held + 4,
-        within(held + 3).preview(&jpeg).unwrap_err(),
-    );
-    within(held + 4).preview(&jpeg).unwrap();
 
     let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(

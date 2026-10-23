@@ -1,4 +1,4 @@
-use common::{CancelToken, TempDir, fs};
+use common::{CancelToken, TempDir};
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -34,7 +34,7 @@ fn load_invalid_path() {
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let cancelled = LoadCtx::new(cancel, u64::MAX);
+    let cancelled = LoadCtx::new(cancel);
     assert!(matches!(
         load_preview(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
@@ -220,7 +220,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
     for path in raw_frames("raw_samples") {
         let ctx = LoadCtx::default();
         let file = read(&path, &ctx).unwrap();
-        let mut raw = open_raw(file, &path, &ctx, |_| Ok(RawPath::Processed)).unwrap();
+        let mut raw = open_raw(file, &path, &ctx).unwrap();
         let visible = raw.layout.active;
         assert_ne!(
             visible.width, visible.height,
@@ -376,67 +376,6 @@ fn the_raw_values_settle_no_data_and_saturation() {
     let measured = dump(0).into_cfa_image().unwrap();
     assert!(at(&measured, 4, 6) < 0.0, "{}", at(&measured, 4, 6));
     assert_eq!(at(&measured, 3, 3).to_bits(), at(&masked, 3, 3).to_bits());
-}
-
-/// A decode is admitted from the header, before `unpack`, against the context's memory limit.
-/// The 24 × 24 dump is 1152 file bytes and unpacks into a 1152-byte raw buffer (576 photosites
-/// of 2 bytes). Its 22 × 22 = 484 visible pixels then hold 4 bytes of sample and a flag byte each
-/// on the mosaic path, 2420 bytes, made once the file is gone: 1152 + 2420 = 3572 at the peak.
-/// LibRaw's processing reads the file to the end and holds 8 + 6 + 12 = 26 bytes a pixel, 12584
-/// bytes, for a sum of 14888. The preview of a Bayer frame takes the mosaic path.
-#[test]
-fn a_decode_past_the_memory_limit_is_refused_before_unpack() {
-    let samples = Buffer2::new_filled(24, 24, 2000u16);
-    let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
-    let refused = |route, limit| match admit(&libraw, route, limit) {
-        Err(RawError::OverBudget(budget)) => Some(budget),
-        Ok(()) => None,
-        Err(error) => panic!("{error:?}"),
-    };
-    let over = |required, limit| Some(OverBudget { required, limit });
-    assert_eq!(refused(RawPath::Mosaic, 3572), None);
-    assert_eq!(refused(RawPath::Mosaic, 3571), over(3572, 3571));
-    assert_eq!(refused(RawPath::Processed, 14888), None);
-    assert_eq!(refused(RawPath::Processed, 14887), over(14888, 14887));
-    assert_eq!(RawPath::preview(&libraw).unwrap(), RawPath::Mosaic);
-    // The preview demosaics the mosaic too, which holds four of its planes at once — past the
-    // 3572 bytes its decode alone is admitted under — and is refused one byte short of its way.
-    let info = frame_info(&libraw).unwrap();
-    let way = u64::try_from(
-        info.demosaiced(
-            info.decoded(),
-            MarkesteijnPasses::default(),
-            rayon::current_num_threads(),
-        )
-        .peak,
-    )
-    .unwrap();
-    assert!(way >= 4 * 1936, "{way}");
-    let ctx = |limit| LoadCtx::new(CancelToken::never(), limit);
-    assert_eq!(preview_route(&libraw, &ctx(way)).unwrap(), RawPath::Mosaic);
-    assert!(matches!(
-        preview_route(&libraw, &ctx(way - 1)),
-        Err(RawError::OverBudget(budget)) if budget == OverBudget { required: way, limit: way - 1 }
-    ));
-
-    // A file longer than the limit is refused before it is read: these 3 bytes past a limit of 2.
-    let dir = TempDir::new("raw-over-budget");
-    let path = dir.join("long.raf");
-    fs::write(&path, [0u8; 3]).unwrap();
-    let error = load_cfa(&path, &LoadCtx::new(CancelToken::never(), 2)).unwrap_err();
-    assert!(
-        matches!(
-            error,
-            ImageError::Raw {
-                source: RawError::OverBudget(OverBudget {
-                    required: 3,
-                    limit: 2
-                }),
-                ..
-            }
-        ),
-        "{error:?}"
-    );
 }
 
 /// LibRaw measures a camera's black on its masked pixels and keeps each channel's mean truncated,

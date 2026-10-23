@@ -55,7 +55,7 @@ use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::memory::run_memory::RunMemory;
+use crate::memory::budget::Budget;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
@@ -248,7 +248,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                         CacheCore {
                             tier: StorageTier::Spilled {
                                 scratch: RunScratch::create(&scratch.join("cache")).unwrap(),
-                                combine: CombineBudget::new(RunMemory::new(memory, None).budget(1)),
+                                combine: CombineBudget::new(Budget::of_memory(memory, 1)),
                             },
                             dimensions: dims,
                             metadata,

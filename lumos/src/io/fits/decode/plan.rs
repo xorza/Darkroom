@@ -6,7 +6,6 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::sample_domain::ScaleOrigin;
-use crate::io::error::OverBudget;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
@@ -45,13 +44,12 @@ impl<'a> FitsHduDescription<'a> {
         })
     }
 
-    /// How the image decodes under `cube` and `float_scale`, within `limit`: its shape, its
-    /// scale, and the memory each step holds, refused when any would exceed the limit.
+    /// How the image decodes under `cube` and `float_scale`: its shape, its scale, and the memory
+    /// each step holds, refused when a size overflows.
     pub(super) fn plan(
         self,
         cube: FitsCubeInterpretation,
         float_scale: FitsFloatScale,
-        limit: u64,
     ) -> Result<FitsDecodePlan, FitsLoadError> {
         let dimensions = dimensions_from_shape(self.image.shape, cube)?;
         let stored_bitpix = self.image.bitpix;
@@ -106,10 +104,6 @@ impl<'a> FitsHduDescription<'a> {
                 }
             })
             .ok_or_else(|| overflow(FitsAllocation::PeakMemory))?;
-
-        admit(limit, FitsAllocation::StoredDataUnit, self.source_bytes)?;
-        admit(limit, FitsAllocation::DecodedOutput, decoded_bytes)?;
-        admit(limit, FitsAllocation::PeakMemory, peak_bytes)?;
 
         Ok(FitsDecodePlan {
             shape: self.image.shape.to_vec(),
@@ -278,22 +272,6 @@ impl FitsDecodePlan {
             },
         )
     }
-
-    /// Refuse a flags extension the memory limit cannot hold beside the decoded image: its bytes
-    /// as read, and the flag plane the decode may hold until the two are joined.
-    pub(super) fn admit_flags_extension(&self, limit: u64) -> Result<(), FitsLoadError> {
-        let extension_bytes = checked_bytes(
-            self.dimensions.pixel_count(),
-            1,
-            FitsAllocation::FlagsExtension,
-        )?;
-        let required = self
-            .decoded_bytes
-            .checked_add(extension_bytes)
-            .and_then(|bytes| bytes.checked_add(self.flag_plane_bytes))
-            .ok_or_else(|| overflow(FitsAllocation::DecodedOutputWithFlags))?;
-        admit(limit, FitsAllocation::DecodedOutputWithFlags, required)
-    }
 }
 
 /// Whether a decode of samples stored as `sample_type` under `scaling` could produce pixels with no
@@ -344,13 +322,6 @@ fn checked_bytes(
         .checked_mul(element_bytes)
         .and_then(|bytes| u64::try_from(bytes).ok())
         .ok_or_else(|| overflow(allocation))
-}
-
-/// `required` bytes of `allocation`, refused when they exceed `limit`, the bytes a decode may
-/// hold.
-fn admit(limit: u64, allocation: FitsAllocation, required: u64) -> Result<(), FitsLoadError> {
-    OverBudget::check(required, limit)
-        .map_err(|budget| FitsLoadError::from(FitsRefusal::OverBudget { allocation, budget }))
 }
 
 fn padded_data_bytes(bytes: u64) -> Result<u64, FitsLoadError> {

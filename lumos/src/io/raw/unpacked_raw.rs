@@ -9,9 +9,7 @@ use rayon::prelude::*;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
@@ -29,7 +27,6 @@ use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::{null_policy, raw};
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -78,42 +75,12 @@ pub(super) struct UnpackedRaw {
 
 /// The two ways a RAW frame leaves LibRaw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RawPath {
+enum RawPath {
     /// The sensor's mosaic as it was read, normalized and not clipped.
     Mosaic,
     /// LibRaw's demosaiced output: its 16-bit samples divided by their integer maximum, which
     /// clipped them.
     Processed,
-}
-
-impl RawPath {
-    /// The path [`UnpackedRaw::into_linear_image`] takes for the open `libraw`, read before
-    /// `unpack`: a decoder that settles the mosaic only as it decodes counts as LibRaw's
-    /// processing, the path that holds more.
-    pub(super) fn preview(libraw: &Libraw) -> Result<Self, RawError> {
-        let mosaic = raw::identified(libraw)? != RawDecoder::FiltersAtDecode
-            && raw::sensor_cfa_type(libraw.data())?.is_some();
-        Ok(if mosaic {
-            Self::Mosaic
-        } else {
-            Self::Processed
-        })
-    }
-
-    /// The bytes this path holds beside the decoder's own for a visible area of `active`: the
-    /// mosaic as it decodes, its normalized samples and its flags, which
-    /// [`FrameInfo::decoded`](crate::io::frame_info::FrameInfo::decoded) prices alike; or, a
-    /// pixel at a time, LibRaw's four 16-bit channels, the 16-bit RGB bitmap it processes them
-    /// into, and the three planes read out of that.
-    pub(super) fn frame_bytes(self, active: Size2us) -> usize {
-        match self {
-            Self::Mosaic => ImageDimensions::new(active, ChannelLayout::Mono).decoded_bytes(),
-            Self::Processed => {
-                active.pixel_count()
-                    * (4 * size_of::<u16>() + 3 * size_of::<u16>() + 3 * size_of::<f32>())
-            }
-        }
-    }
 }
 
 impl UnpackedRaw {

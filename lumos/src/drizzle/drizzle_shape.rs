@@ -11,7 +11,6 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::error::OverBudget;
 use crate::io::frame_info::DecoderBytes;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
@@ -53,11 +52,6 @@ impl DrizzleShape {
         run: &IngestRun,
         storage: RunStorage<'_>,
     ) -> Result<StorageTier, DrizzleError> {
-        OverBudget::check(
-            u64::try_from(self.frame_bytes()).expect("a byte count fits u64"),
-            run.ctx.memory_limit_bytes,
-        )
-        .map_err(DrizzleError::OutputOverBudget)?;
         let budget = run.budget;
         let plan = RunPlan::of(
             self.frame_count,
@@ -110,14 +104,6 @@ impl DrizzleShape {
     /// What the run holds beside every stage: the depth and the source gains.
     const fn held_bytes(&self) -> usize {
         self.depth_bytes().saturating_add(self.gain_bytes())
-    }
-
-    /// The least a run of this shape holds: one drizzled frame and what the run holds beside every
-    /// stage, refused past the run's memory before any price is summed over the frames.
-    const fn frame_bytes(&self) -> usize {
-        self.drizzled()
-            .heap_bytes(self.output)
-            .saturating_add(self.held_bytes())
     }
 
     /// The stages of a run of this shape combined under `stack` on `workers`: the drizzle, a frame

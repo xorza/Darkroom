@@ -103,7 +103,7 @@ pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use image::temperature_difference::TemperatureDifference;
 pub use image::temperature_source::TemperatureSource;
 pub use image::unverified_conditions::UnverifiedConditions;
-pub use io::error::{ImageError, OverBudget, ScientificRefusal, WriteError};
+pub use io::error::{ImageError, ScientificRefusal, WriteError};
 pub use io::fits::calibration_bundle::error::{BundleError, DefectTableError};
 pub use io::fits::error::{FitsAllocation, FitsRefusal};
 pub use io::fits::fits_load_config::{

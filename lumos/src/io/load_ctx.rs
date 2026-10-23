@@ -19,7 +19,6 @@ use crate::io::input_format::InputFormat;
 use crate::io::null_policy::NullPolicy;
 use crate::io::raw::raw_file::RawFile;
 use crate::io::{raster, raw};
-use crate::memory::run_memory::RunMemory;
 use crate::stack_product::StackProduct;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
@@ -27,8 +26,6 @@ use crate::stack_product::StackProduct;
 pub struct LoadCtx {
     /// Cooperative cancellation token polled between bounded decode stages.
     pub cancel: CancelToken,
-    /// FITS source, output, and estimated peak byte ceiling.
-    pub memory_limit_bytes: u64,
     /// FITS-specific policy; ignored by non-FITS decoders.
     pub fits: FitsLoadConfig,
     /// What a null sample does to a linear decode: a FITS null, or a floating-point raster's NaN
@@ -44,11 +41,10 @@ pub struct LoadCtx {
 }
 
 impl LoadCtx {
-    /// Creates a context with strict FITS defaults and the supplied resource controls.
-    pub fn new(cancel: CancelToken, memory_limit_bytes: u64) -> Self {
+    /// A context polling `cancel`, with strict FITS defaults.
+    pub fn new(cancel: CancelToken) -> Self {
         Self {
             cancel,
-            memory_limit_bytes,
             fits: FitsLoadConfig::default(),
             nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
@@ -134,9 +130,8 @@ impl LoadCtx {
 
     /// Load a calibration bundle that
     /// [`writer::calibration_bundle`](crate::writer::calibration_bundle) wrote, without rebuilding
-    /// its prepared flat or defect map: cancellation reads as [`BundleError::Cancelled`], and the
-    /// memory limit applies to each master's decode. The file is streamed, never read into RAM
-    /// whole.
+    /// its prepared flat or defect map: cancellation reads as [`BundleError::Cancelled`]. The file
+    /// is streamed, never read into RAM whole.
     ///
     /// # Errors
     ///
@@ -188,10 +183,9 @@ const fn threads_per_decode(cores: usize, slots: usize) -> usize {
 }
 
 impl Default for LoadCtx {
-    /// The system's memory read once, its decode ceiling the limit: a load of one file outside
-    /// any run.
+    /// A load of one file outside any run, which nothing cancels.
     fn default() -> Self {
-        Self::new(CancelToken::never(), RunMemory::read(None).decode_ceiling())
+        Self::new(CancelToken::never())
     }
 }
 

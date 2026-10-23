@@ -42,9 +42,9 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::{fits_refusal, write_fits};
 use crate::io::decoder::Decoder;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
-use crate::io::error::{ImageError, OverBudget, ScientificRefusal};
+use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode;
-use crate::io::fits::error::{FitsAllocation, FitsRefusal};
+use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale, FitsLoadConfig};
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
@@ -52,7 +52,6 @@ use crate::io::null_policy::NullPolicy;
 use crate::io::writer;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::memory::run_memory::RunMemory;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
@@ -480,7 +479,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             weighting: Weighting::Equal,
             ..StackConfig::light()
         };
-        let memory = RunMemory::new(1 << 30, Some(available_memory));
+        let memory = available_memory;
         let linear_set = |second: &Path| {
             single_thread.install(|| {
                 FrameCache::from_paths(
@@ -893,31 +892,6 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             PreviewPixels::Planes(_)
         ),
         "a demosaiced decode hands back its planes"
-    );
-    // The preview is admitted with its demosaic, from the header: refused one byte short of the
-    // way's peak, past what the decode alone holds.
-    let info = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap().info;
-    let way = u64::try_from(
-        info.demosaiced(
-            info.decoded(),
-            MarkesteijnPasses::default(),
-            rayon::current_num_threads(),
-        )
-        .peak,
-    )
-    .unwrap();
-    assert!(way > u64::try_from(info.decoded().peak).unwrap(), "{way}");
-    let limited = |limit| LoadCtx::new(CancelToken::never(), limit);
-    limited(way).preview(&path).unwrap();
-    assert_eq!(
-        fits_refusal(limited(way - 1).preview(&path).unwrap_err()),
-        FitsRefusal::OverBudget {
-            allocation: FitsAllocation::Demosaic,
-            budget: OverBudget {
-                required: way,
-                limit: way - 1,
-            },
-        }
     );
     let preview: imaginarium::Image = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);

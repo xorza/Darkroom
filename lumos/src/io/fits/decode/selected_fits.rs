@@ -36,8 +36,7 @@ use crate::io::load_ctx::LoadCtx;
 ///
 /// Every decode starts here, a file's and a calibration bundle's master alike, so each refuses the
 /// same things in the same order: an HDU the options do not select, a Lumos CFA image of another
-/// version, a header that declares no pattern lumos reads, then a decode the memory limit cannot
-/// hold.
+/// version, a header that declares no pattern lumos reads, then a size that overflows.
 #[derive(Debug)]
 pub(crate) struct SelectedFits<'r> {
     reader: &'r mut StreamReader<File>,
@@ -127,12 +126,8 @@ impl<'r> SelectedFits<'r> {
         } else {
             cube
         };
-        let limit = ctx.memory_limit_bytes;
-        let plan = FitsHduDescription::from_hdu(hdu, selected.idx)?.plan(
-            cube,
-            ctx.fits.float_scale,
-            limit,
-        )?;
+        let plan =
+            FitsHduDescription::from_hdu(hdu, selected.idx)?.plan(cube, ctx.fits.float_scale)?;
         let cfa_type = if plan.dimensions.is_grayscale() {
             metadata::read_cfa(
                 &hdu.header,
@@ -150,9 +145,6 @@ impl<'r> SelectedFits<'r> {
             weight_kind: None,
         };
         let flags_hdu = flags_extension::locate(reader.hdus(), selected.idx, &described)?;
-        if flags_hdu.is_some() {
-            plan.admit_flags_extension(limit)?;
-        }
         let gain = gain_extension::locate(reader.hdus(), selected.idx, &described)?;
         let mut extension_bytes = ArrayVec::new();
         if flags_hdu.is_some() {
@@ -370,7 +362,7 @@ mod tests {
     #[test]
     fn an_extension_reads_in_chunks_into_a_plane_per_slice() {
         let dir = TempDir::new("read_extension_chunks");
-        let ctx = LoadCtx::new(CancelToken::never(), u64::MAX);
+        let ctx = LoadCtx::new(CancelToken::never());
         let samples: Vec<f32> = (0..45).map(|idx| idx as f32).collect();
         let bytes: Vec<u8> = (0..15).collect();
         let path = dir.join("extension.fits");

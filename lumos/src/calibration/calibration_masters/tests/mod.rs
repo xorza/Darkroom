@@ -1266,7 +1266,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cancel = CancelToken::new();
     cancel.cancel();
     assert!(matches!(
-        LoadCtx::new(cancel, u64::MAX).calibration_masters(&path),
+        LoadCtx::new(cancel).calibration_masters(&path),
         Err(BundleError::Cancelled)
     ));
 
