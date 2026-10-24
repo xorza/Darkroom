@@ -21,9 +21,9 @@ const FRAMES: usize = 6;
 ///
 /// The spilled budget, 1 572 864 B, is less than one frame takes to measure: its 102 400 B of
 /// samples and 25 600 of flags, and the MRS estimate of its noise over one tile that is the frame,
-/// 25 600 coefficients of 33 bytes, 28 bytes of transform a pixel, a row of 160 pixels for each of
-/// the 2 workers and 136 of bookkeeping, 1 563 016 B. The run reports the 118 152 B those
-/// 1 691 016 B are past it.
+/// 25 600 coefficients of 33 bytes, 28 bytes of transform a pixel, a row of 160 pixels for the one
+/// worker that takes the tile and 136 of bookkeeping, 1 562 376 B. The run reports the 117 512 B
+/// those 1 690 376 B are past it.
 ///
 /// The resident stack's product then saves streamed: each HDU through one chunk of samples and
 /// fits-well's encoding of it, a 102 400-byte plane each at this size, where a whole copy of every
@@ -35,7 +35,7 @@ fn a_stack_stays_within_its_budget() {
         let paths =
             StarField::new(SIDE, 30, 0x57AC).expose(session.scratch(), FRAMES, Layout::Mono);
         for (label, budget, spilled, overcommit) in [
-            ("spilled", Budget::mib(2), FRAMES as u64, 118_152),
+            ("spilled", Budget::mib(2), FRAMES as u64, 117_512),
             ("resident", Budget::mib(16), 0, 0),
         ] {
             let ingest = session.ingest(budget);

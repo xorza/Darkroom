@@ -134,10 +134,10 @@ fn a_frame_the_support_covers_whole_reads_its_noise() {
 /// 34 603 008. The tiles start at 0, 256, 512 and 768 on each axis and reach 32 past their core,
 /// clipped to the frame: regions 288, 320, 320 and 288 wide. A worker's tile scratch has room for
 /// the largest region, 320² pixels at 28 bytes, 2 867 200: 16 × 2 867 200 = 45 875 200 on 16
-/// threads, 4 × 2 867 200 = 11 468 800 on 4. Each worker smooths through a row of the widest
-/// region, 320 × 4 bytes: 20 480 on 16, 5120 on 4. Each tile's place in the list, its share of the
-/// four columns and its count are 64 + 64 + 8 bytes, 2176 for sixteen. A 192² frame is one tile,
-/// its region the frame: 36 864 × 33 + 36 864 × 28 + 16 × 192 × 4 + 136.
+/// threads, 4 × 2 867 200 = 11 468 800 on 4. Each scratch holds a row of the widest region,
+/// 320 × 4 bytes: 20 480 on 16, 5120 on 4. Each tile's place in the list, its share of the four
+/// columns and its count are 64 + 64 + 8 bytes, 2176 for sixteen. A 192² frame is one tile, its
+/// region the frame, which one worker of the 16 takes: 36 864 × 33 + 36 864 × 28 + 192 × 4 + 136.
 #[test]
 fn working_sets_are_what_the_buffers_hold() {
     let wide = Size2us::new(1024, 1024);
@@ -151,7 +151,7 @@ fn working_sets_are_what_the_buffers_hold() {
     );
     assert_eq!(
         mrs_noise::heap_bytes(Size2us::new(192, 192), 16),
-        36_864 * 33 + 36_864 * 28 + 16 * 192 * 4 + 136
+        36_864 * 33 + 36_864 * 28 + 192 * 4 + 136
     );
 }
 

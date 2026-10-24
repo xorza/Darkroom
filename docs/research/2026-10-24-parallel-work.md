@@ -101,3 +101,21 @@ fits-well at `995766f`:
 
 lumos's plan adds `2 × padded_data_bytes` for a `CompressedImage`
 (`decode/plan.rs`), a figure none of the above derives.
+
+## Taking the nesting out of MRS
+
+`cargo drive bench mrs_estimate`, 16 threads, the medians of criterion's runs:
+the tree before, then with the tile body's smoothing serial and the gain bins
+measured one after another (each bin's σ parallel), then, for the bins alone, the
+other way round (bins in parallel, each σ serial).
+
+| Case | Nested | Serial tile, serial bins | Parallel bins, serial σ |
+| --- | ---: | ---: | ---: |
+| `mrs_estimate/1024` | 14.83 ms | 14.80 ms | |
+| `mrs_estimate/4096` | 18.45 ms | 18.70 ms | |
+| `mrs_estimate_split/1024` | 24.96 ms | 27.30 ms | 60.42 ms |
+| `mrs_estimate_split/4096` | 23.74 ms | 24.83 ms | 60.04 ms |
+
+Eight bins hold a 1024² frame's coefficients; serial within a bin, the support
+iteration's passes leave half of 16 threads idle and lose the share-level
+parallelism each pass had.

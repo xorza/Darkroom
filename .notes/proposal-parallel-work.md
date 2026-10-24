@@ -120,14 +120,18 @@ its proof.
 
 ### 3. The two nestings
 
-- [ ] `wavelet::atrous_smooth` gets a serial form for the tile body; the
-  parallel form takes `&Par`. `NoisePlane::coefficients` keeps its
-  `TileScratch`es in a `PerWorker`. Test: the serial and parallel forms agree
-  bit for bit; `mrs_noise::heap_bytes` equals the bytes the run holds, measured
-  by the counting allocator, for 1, 4 and 16 threads.
-- [ ] `NoisePlane::bg` measures its bins with the serial `sigma` inside a
-  parallel map over bins, or bins serially with a parallel `sigma`, whichever
-  the bench shows faster at 1, 3 and 9 bins. Delete the MRS issue.
+- [x] `wavelet::atrous_smooth_serial` beside the parallel form, one row kernel
+  for both; the tile body smooths serially through a row its `TileScratch`
+  keeps, so `heap_bytes` counts a row per scratch, not per thread. Test: the
+  serial and parallel forms agree bit for bit.
+- [x] `BinnedSamples::measure_in_turn` measures the bins one after another for
+  MRS, whose σ is parallel; `measure` keeps the bins parallel for the mosaic's
+  serial MAD. MRS's split is 4–9 % slower than the nesting it replaces,
+  and the bins in parallel with a serial σ 2.2–2.4× slower than that
+  (research: "Taking the nesting out of MRS"). The MRS issue is deleted.
+
+The tile scratch moves into a `PerWorker`, and `heap_bytes` is held to the
+counting allocator, in batch 4, once `coefficients` has a `Par`.
 
 ### 4. lumos onto `Par`
 

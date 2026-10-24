@@ -17,43 +17,62 @@ use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
 
 /// One starlet smoothing step: separable B3-spline à trous convolution with hole spacing `step`,
-/// `src → dst`.
+/// `src → dst`, its rows in parallel.
 ///
 /// Each output row is its five source rows convolved down the columns into a row of scratch, then
 /// convolved along that row. Consecutive rows share their source rows, which so come from cache:
 /// the frame is read once and written once, with no plane between the passes.
 pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
-    let (width, height) = (src.width(), src.height());
-    debug_assert_eq!((dst.width(), dst.height()), (width, height));
-    let rows = height as isize;
-    let s = step as isize;
+    let width = src.width();
+    debug_assert_eq!((dst.width(), dst.height()), (width, src.height()));
     dst.pixels_mut()
         .par_chunks_mut(width)
         .enumerate()
         .for_each_init(
             || vec![0.0f32; width],
-            |col, (y, out)| {
-                let taps = if y >= 2 * step && y + 2 * step < height {
-                    [y - 2 * step, y - step, y, y + step, y + 2 * step]
-                } else {
-                    let yi = y as isize;
-                    [
-                        reflect(yi - 2 * s, rows),
-                        reflect(yi - s, rows),
-                        y,
-                        reflect(yi + s, rows),
-                        reflect(yi + 2 * s, rows),
-                    ]
-                };
-                SmoothRow {
-                    rows: taps.map(|row| src.row(row)),
-                    col,
-                    out,
-                    step,
-                }
-                .dispatch();
-            },
+            |col, (y, out)| smooth_row(src, step, y, col, out),
         );
+}
+
+/// [`atrous_smooth`] on the calling thread, for a caller that is itself a parallel loop's body:
+/// the same rows, so the same bits, through `col`, a row of scratch the caller keeps.
+pub(crate) fn atrous_smooth_serial(
+    src: &Buffer2<f32>,
+    dst: &mut Buffer2<f32>,
+    step: usize,
+    col: &mut Vec<f32>,
+) {
+    let width = src.width();
+    debug_assert_eq!((dst.width(), dst.height()), (width, src.height()));
+    col.clear();
+    col.resize(width, 0.0);
+    for (y, out) in dst.pixels_mut().chunks_mut(width).enumerate() {
+        smooth_row(src, step, y, col, out);
+    }
+}
+
+/// Output row `y` of a smoothing step at `step` into `out`, through `col`.
+fn smooth_row(src: &Buffer2<f32>, step: usize, y: usize, col: &mut [f32], out: &mut [f32]) {
+    let height = src.height();
+    let taps = if y >= 2 * step && y + 2 * step < height {
+        [y - 2 * step, y - step, y, y + step, y + 2 * step]
+    } else {
+        let (yi, s, rows) = (y as isize, step as isize, height as isize);
+        [
+            reflect(yi - 2 * s, rows),
+            reflect(yi - s, rows),
+            y,
+            reflect(yi + s, rows),
+            reflect(yi + 2 * s, rows),
+        ]
+    };
+    SmoothRow {
+        rows: taps.map(|row| src.row(row)),
+        col,
+        out,
+        step,
+    }
+    .dispatch();
 }
 
 /// One output row of [`atrous_smooth`]: its five source `rows` convolved down the columns into

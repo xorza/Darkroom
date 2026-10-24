@@ -57,8 +57,8 @@ const MARGIN: usize = 32;
 const TILE_BYTES_PER_PIXEL: usize = 3 * size_of::<f32>() + 2 * size_of::<f64>();
 
 /// The planes one tile's transform works in, kept by a worker from one tile to the next: the
-/// image, the smooth and the next smooth, the first layer and the significance. Each tile refills
-/// them at its own region's size.
+/// image, the smooth and the next smooth, the first layer and the significance, and the row each
+/// smoothing step convolves its columns into. Each tile refills them at its own region's size.
 #[derive(Debug)]
 struct TileScratch {
     image: Buffer2<f32>,
@@ -66,12 +66,14 @@ struct TileScratch {
     next: Buffer2<f32>,
     first_layer: Vec<f64>,
     significance: Vec<f64>,
+    row: Vec<f32>,
 }
 
 impl TileScratch {
-    /// Empty planes with room for regions of up to `pixels`, made whole at once: a plane that grew
-    /// from a smaller region to a larger one would keep twice the smaller, past its price.
-    fn with_room(pixels: usize) -> Self {
+    /// Empty planes with room for regions of up to `pixels` and rows of up to `width`, made whole
+    /// at once: a plane that grew from a smaller region to a larger one would keep twice the
+    /// smaller, past its price.
+    fn with_room(pixels: usize, width: usize) -> Self {
         let plane = || Buffer2::new(0, 0, Vec::with_capacity(pixels));
         Self {
             image: plane(),
@@ -79,6 +81,7 @@ impl TileScratch {
             next: plane(),
             first_layer: Vec::with_capacity(pixels),
             significance: Vec::with_capacity(pixels),
+            row: Vec::with_capacity(width),
         }
     }
 }
@@ -204,21 +207,16 @@ impl Samples for Coefficients {
 
 /// The most bytes an estimate over a `size` image holds at once, with `threads` workers to share
 /// its tiles: a split's coefficients, each with its gain bin, a [`TileScratch`] for each worker
-/// that takes a tile, with room for the largest region, the row each worker smooths through, as
-/// wide as the widest region, and the tile list beside them. An estimate of σ holds no bins and so
-/// a byte a coefficient less.
+/// that takes a tile, with room for the largest region's planes and the widest region's row, and
+/// the tile list beside them. A tile's transform starts no parallel work, so a worker holds one
+/// scratch at a time. An estimate of σ holds no bins and so a byte a coefficient less.
 pub(crate) fn heap_bytes(size: Size2us, threads: usize) -> usize {
     let tiles = tiles(size);
     let analysed: usize = tiles.iter().map(|tile| tile.core.area()).sum();
-    let in_work = threads.max(1).min(tiles.len()) * largest_region(&tiles);
-    let widest = tiles
-        .iter()
-        .map(|tile| tile.region.width())
-        .max()
-        .unwrap_or(0);
+    let workers = threads.max(1).min(tiles.len());
     BinnedSamples::<Coefficients>::heap_bytes(analysed)
-        + in_work * TILE_BYTES_PER_PIXEL
-        + threads.max(1) * widest * size_of::<f32>()
+        + workers * largest_region(&tiles) * TILE_BYTES_PER_PIXEL
+        + workers * widest_region(&tiles) * size_of::<f32>()
         + tiles.len() * (size_of::<Tile>() + size_of::<CoefficientShare<'_>>() + size_of::<usize>())
 }
 
@@ -278,7 +276,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
             gain(coefficients.idx[pos])
         });
-        bg_split::fit(&binned.measure(|run| sigma(run, size).powi(2)))
+        bg_split::fit(&binned.measure_in_turn(|run| sigma(run, size).powi(2)))
     }
 
     /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
@@ -292,12 +290,12 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
             Coefficients::zeroed(tiles.iter().map(|tile| tile.core.area()).sum());
         let shares = coefficients.shares(&tiles);
         let mut kept = Vec::with_capacity(tiles.len());
-        let largest = largest_region(&tiles);
+        let (largest, widest) = (largest_region(&tiles), widest_region(&tiles));
         tiles
             .par_iter()
             .zip(shares)
             .map_init(
-                || TileScratch::with_room(largest),
+                || TileScratch::with_room(largest, widest),
                 |scratch, (&tile, mut share)| {
                     self.tile_coefficients(tile, scales, &mut share, scratch)
                 },
@@ -333,6 +331,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
             next,
             first_layer,
             significance,
+            row: smoothing_row,
         } = scratch;
         let size = Size2us::from(*plane);
         debug_assert_eq!(share.idx.len(), tile.core.area());
@@ -352,7 +351,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         next.reshape(width, height, 0.0);
         // The first layer is built as it is first smoothed, so neither it nor the significance is
         // cleared first: the largest significance of one layer is that layer's.
-        wavelet::atrous_smooth(image, smooth, 1);
+        wavelet::atrous_smooth_serial(image, smooth, 1, smoothing_row);
         first_layer.clear();
         first_layer.extend(
             smooth
@@ -368,7 +367,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
                 .map(|detail| detail.abs() / LAYER_SIGMA[0]),
         );
         for (scale, &layer_sigma) in LAYER_SIGMA.iter().enumerate().take(scales).skip(1) {
-            wavelet::atrous_smooth(smooth, next, 1 << scale);
+            wavelet::atrous_smooth_serial(smooth, next, 1 << scale, smoothing_row);
             for ((significance, &coarse), &fine) in significance
                 .iter_mut()
                 .zip(next.pixels())
@@ -475,6 +474,15 @@ fn largest_region(tiles: &[Tile]) -> usize {
     tiles
         .iter()
         .map(|tile| tile.region.area())
+        .max()
+        .unwrap_or(0)
+}
+
+/// The width of the widest of `tiles`' regions; none for no tile.
+fn widest_region(tiles: &[Tile]) -> usize {
+    tiles
+        .iter()
+        .map(|tile| tile.region.width())
         .max()
         .unwrap_or(0)
 }

@@ -24,6 +24,31 @@ pub(crate) struct GainBin {
     pub(crate) samples: usize,
 }
 
+/// A run of bins [`BinnedSamples::measure`] measures as one: its samples' places, and the sum of
+/// their gains.
+#[derive(Debug)]
+struct GainRun {
+    range: Range<usize>,
+    gain_sum: f64,
+}
+
+impl GainRun {
+    /// Each of `runs` with its variance, from `variances` in the same order.
+    fn bins(
+        runs: ArrayVec<Self, GAIN_BINS>,
+        variances: impl IntoIterator<Item = f64>,
+    ) -> ArrayVec<GainBin, GAIN_BINS> {
+        runs.into_iter()
+            .zip(variances)
+            .map(|(run, variance)| GainBin {
+                gain: run.gain_sum / run.range.len() as f64,
+                samples: run.range.len(),
+                variance,
+            })
+            .collect()
+    }
+}
+
 /// Samples [`BinnedSamples`] holds and groups by bin in place: one buffer, or columns that are
 /// permuted together.
 pub(crate) trait Samples {
@@ -152,51 +177,78 @@ impl<S: Samples> BinnedSamples<S> {
     /// [`MIN_BIN_SAMPLES`], a short last run into the one before it; one run of every sample when
     /// all of them are fewer. A frame too small to fill the bins still has its noise measured,
     /// over coarser runs of gain. Within a run the samples come in no particular order. The runs
-    /// are measured in parallel, each on its own.
+    /// are measured in parallel, each on its own; a `variance` that runs parallel work over its
+    /// run goes through [`Self::measure_in_turn`], as a loop's body starts none.
     pub(crate) fn measure(
-        mut self,
+        self,
         variance: impl Fn(S::Run<'_>) -> f64 + Sync,
     ) -> ArrayVec<GainBin, GAIN_BINS> {
+        self.measure_runs(|runs| {
+            let mut variances = Vec::with_capacity(runs.len());
+            runs.into_par_iter()
+                .map(&variance)
+                .collect_into_vec(&mut variances);
+            variances
+        })
+    }
+
+    /// [`Self::measure`], the runs one after another, for a `variance` that runs parallel work
+    /// over its run.
+    pub(crate) fn measure_in_turn(
+        self,
+        variance: impl Fn(S::Run<'_>) -> f64,
+    ) -> ArrayVec<GainBin, GAIN_BINS> {
+        self.measure_runs(|runs| {
+            runs.into_iter()
+                .map(&variance)
+                .collect::<ArrayVec<f64, GAIN_BINS>>()
+        })
+    }
+
+    /// The bins whose variances `variances` gives, in order, from the runs it is handed.
+    fn measure_runs<V: IntoIterator<Item = f64>>(
+        mut self,
+        variances: impl for<'a> FnOnce(Vec<S::Run<'a>>) -> V,
+    ) -> ArrayVec<GainBin, GAIN_BINS> {
+        let runs = self.gain_runs();
+        let ranges: ArrayVec<Range<usize>, GAIN_BINS> =
+            runs.iter().map(|run| run.range.clone()).collect();
+        GainRun::bins(runs, variances(self.samples.runs(&ranges)))
+    }
+
+    /// The runs of bins [`Self::measure`] measures, with the samples put in bin order.
+    fn gain_runs(&mut self) -> ArrayVec<GainRun, GAIN_BINS> {
         let mut counts = [0usize; GAIN_BINS];
         for &bin in &self.bins {
             counts[usize::from(bin)] += 1;
         }
         self.group(&counts);
-        let mut runs: ArrayVec<(Range<usize>, f64), GAIN_BINS> = ArrayVec::new();
+        let mut runs: ArrayVec<GainRun, GAIN_BINS> = ArrayVec::new();
         let (mut start, mut end, mut sum) = (0, 0, 0.0);
         for (count, gain_sum) in counts.into_iter().zip(self.gain_sums) {
             end += count;
             sum += gain_sum;
             if end - start >= MIN_BIN_SAMPLES {
-                runs.push((start..end, sum));
+                runs.push(GainRun {
+                    range: start..end,
+                    gain_sum: sum,
+                });
                 (start, sum) = (end, 0.0);
             }
         }
         if end > start {
             match runs.last_mut() {
-                Some((last, last_sum)) => {
-                    last.end = end;
-                    *last_sum += sum;
+                Some(last) => {
+                    last.range.end = end;
+                    last.gain_sum += sum;
                 }
-                None => runs.push((start..end, sum)),
+                None => runs.push(GainRun {
+                    range: start..end,
+                    gain_sum: sum,
+                }),
             }
         }
-        let ranges: ArrayVec<Range<usize>, GAIN_BINS> =
-            runs.iter().map(|(range, _)| range.clone()).collect();
-        let mut variances = Vec::with_capacity(ranges.len());
-        self.samples
-            .runs(&ranges)
-            .into_par_iter()
-            .map(&variance)
-            .collect_into_vec(&mut variances);
-        runs.into_iter()
-            .zip(variances)
-            .map(|((range, gain_sum), variance)| GainBin {
-                gain: gain_sum / range.len() as f64,
-                samples: range.len(),
-                variance,
-            })
-            .collect()
+        runs
     }
 
     /// Put the samples in bin order, in place: each bin's `counts` share, in turn, swaps every
@@ -239,21 +291,26 @@ mod tests {
     fn short_bins_merge_up_in_gain() {
         let mut gains: Vec<f32> = (1..=16).map(|gain| gain as f32).collect();
         let bins = GainBins::of(&mut gains);
-        let mut binned = BinnedSamples::with_capacity(650);
-        let mut left = [
-            (1.0f32, 300),
-            (3.0, 100),
-            (5.0, 100),
-            (7.0, 100),
-            (15.0, 50),
-        ];
-        while left.iter().any(|&(_, count)| count > 0) {
-            for (gain, count) in left.iter_mut().rev().filter(|(_, count)| *count > 0) {
-                binned.push(&bins, *gain, *gain);
-                *count -= 1;
+        let binned = || {
+            let mut binned = BinnedSamples::with_capacity(650);
+            let mut left = [
+                (1.0f32, 300),
+                (3.0, 100),
+                (5.0, 100),
+                (7.0, 100),
+                (15.0, 50),
+            ];
+            while left.iter().any(|&(_, count)| count > 0) {
+                for (gain, count) in left.iter_mut().rev().filter(|(_, count)| *count > 0) {
+                    binned.push(&bins, *gain, *gain);
+                    *count -= 1;
+                }
             }
-        }
-        let measured = binned.measure(|samples| samples.iter().map(|&gain| f64::from(gain)).sum());
+            binned
+        };
+        let sum = |samples: &mut [f32]| samples.iter().map(|&gain| f64::from(gain)).sum();
+        let measured = binned().measure(sum);
+        assert_eq!(binned().measure_in_turn(sum), measured);
         assert_eq!(
             measured.as_slice(),
             [
