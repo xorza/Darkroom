@@ -4,7 +4,7 @@
 use std::mem;
 use std::ops::Range;
 
-use common::par;
+use common::{PerWorker, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -292,14 +292,17 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let shares = coefficients.shares(&tiles);
         let mut kept = Vec::with_capacity(tiles.len());
         let (largest, widest) = (largest_region(&tiles), widest_region(&tiles));
+        // A scratch is made where it is first used: a loop that splits runs on the workers alone
+        // and one of a single tile on its caller alone, so the scratches made are
+        // `threads.min(tiles)` at most, as `heap_bytes` charges.
+        let scratches = PerWorker::new(|| None);
         par::iter(&tiles)
             .zip(shares)
-            .map_init(
-                || TileScratch::with_room(largest, widest),
-                |scratch, (&tile, mut share)| {
-                    self.tile_coefficients(tile, scales, &mut share, scratch)
-                },
-            )
+            .map(|(&tile, mut share)| {
+                let mut slot = scratches.get();
+                let scratch = slot.get_or_insert_with(|| TileScratch::with_room(largest, widest));
+                self.tile_coefficients(tile, scales, &mut share, scratch)
+            })
             .collect_into_vec(&mut kept);
         let (mut start, mut end) = (0, 0);
         for (tile, kept) in tiles.iter().zip(kept) {

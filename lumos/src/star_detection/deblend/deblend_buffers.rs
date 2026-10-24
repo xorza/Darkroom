@@ -1,14 +1,13 @@
 //! [`DeblendBuffers`]: the scratch one deblending job reuses from component to component.
 
-use crate::scratch_pool::Shapeless;
 use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::multi_threshold::TreeBuffers;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
 
-/// The scratch one deblending job reuses across the components it handles, leased from the
-/// detector's pool so a frame after the first allocates nothing here.
+/// The scratch one worker reuses across the components it deblends, kept by the detector so a
+/// frame after the first allocates nothing here.
 #[derive(Debug, Default)]
 pub(crate) struct DeblendBuffers {
     /// The pixels of the component being deblended.
@@ -23,11 +22,11 @@ pub(crate) struct DeblendBuffers {
     pub(crate) assignment: Assignment,
     /// The multi-threshold deblender's working sets.
     pub(crate) tree: TreeBuffers,
-    /// The regions this job's components split into, gathered across them.
+    /// The regions this worker's components split into, gathered across them.
     pub(crate) regions: Vec<Region>,
+    /// Each region's component, by its place among the frame's components.
+    pub(crate) components: Vec<usize>,
 }
-
-impl Shapeless for DeblendBuffers {}
 
 /// The bytes a set holds for each pixel of the component it splits at most: the pixel, 12 B; its
 /// links to the rows above and below, 8 B; whether it holds a kept maximum, 1 B; and the tree's

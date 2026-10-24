@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir, par};
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
@@ -270,7 +270,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
             let starved = spilled(0);
             assert_eq!(
                 starved.report.overcommit_bytes,
-                190_656 * channels as u64 + 165_456 + rayon::current_num_threads() as u64 * 1904,
+                190_656 * channels as u64 + 165_456 + par::threads() as u64 * 1904,
                 "{label}"
             );
             for channel in 0..channels {

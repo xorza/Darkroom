@@ -9,7 +9,7 @@
 
 use std::ops::Range;
 
-use common::{CancelToken, par};
+use common::{CancelToken, PerWorker, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -112,7 +112,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// # Errors
     ///
     /// [`Cancelled`] when `cancel` is set, between tiles and before the border.
-    pub(crate) fn demosaic<T>(
+    pub(crate) fn demosaic<T: Send>(
         &self,
         kernel: TileKernel<
             impl Fn() -> T + Sync + Send,
@@ -133,7 +133,13 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
         ];
         let places = tiling.places(self.size);
         let out = OutputPlanes::new(&mut planes, self.gains);
-        par::iter(&places).try_for_each_init(new_tile, |tile, &place| {
+        // A tile is made where it is first used: a loop that splits runs on the workers alone and
+        // one that does not on its caller alone, so the tiles made are the workers' count at most,
+        // which the demosaic's footprint charges.
+        let tiles = PerWorker::new(|| None);
+        par::iter(&places).try_for_each(|&place| {
+            let mut slot = tiles.get();
+            let tile = slot.get_or_insert_with(&new_tile);
             Cancelled::check(cancel)?;
             run(tile, place, out);
             Ok(())

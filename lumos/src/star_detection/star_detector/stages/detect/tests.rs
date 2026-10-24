@@ -33,7 +33,7 @@ struct Extracted {
 fn extracted(labelled: LabelledPlane<'_>, config: &ExtractionConfig) -> Extracted {
     let mut regions = Vec::new();
     let deblended_components =
-        extract_candidates(labelled, config, &ScratchPool::default(), &mut regions);
+        extract_candidates(labelled, config, &mut Deblenders::default(), &mut regions);
     Extracted {
         regions,
         deblended_components,

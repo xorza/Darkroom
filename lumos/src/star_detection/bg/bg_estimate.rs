@@ -53,14 +53,12 @@ impl BgEstimate {
         let width = pixels.width();
         par::chunks_mut(pixels.pixels_mut(), width)
             .enumerate()
-            .for_each_init(
-                || self.bg.reader(),
-                |bg, (y, values)| {
-                    for (value, &sky) in values.iter_mut().zip(bg.row(y)) {
-                        *value -= sky;
-                    }
-                },
-            );
+            .for_each(|(y, values)| {
+                let bg = &mut self.bg.reader();
+                for (value, &sky) in values.iter_mut().zip(bg.row(y)) {
+                    *value -= sky;
+                }
+            });
         self.sky
     }
 }

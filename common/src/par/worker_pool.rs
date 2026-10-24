@@ -44,11 +44,18 @@ impl WorkerPool {
             rayon::current_thread_index().is_none(),
             "a worker pool runs from outside every pool, never from a parallel loop's body"
         );
-        self.pool.install(|| {
-            let outer = TOP_LEVEL.replace(true);
-            let _restore = Restore(outer);
-            body()
-        })
+        self.pool.install(|| Self::top_level(body))
+    }
+
+    /// `body` as top-level code on the calling thread, though it may be a pool worker: a harness
+    /// that measures one thread's work builds the global pool on its own thread, so that thread's
+    /// parallel calls take its own queue rather than rayon's injector, whose blocks would land in
+    /// the measurement. Its own loops' bodies pass the check while it waits in them, as a
+    /// [`run`](Self::run) body's worker's do.
+    pub fn top_level<R>(body: impl FnOnce() -> R) -> R {
+        let outer = TOP_LEVEL.replace(true);
+        let _restore = Restore(outer);
+        body()
     }
 
     pub(super) fn is_top_level() -> bool {
@@ -56,7 +63,7 @@ impl WorkerPool {
     }
 }
 
-/// Puts back the worker's mark when a [`WorkerPool::run`] body returns or unwinds.
+/// Puts back the thread's mark when a [`WorkerPool::top_level`] body returns or unwinds.
 #[derive(Debug)]
 struct Restore(bool);
 

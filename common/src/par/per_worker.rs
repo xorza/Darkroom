@@ -26,6 +26,13 @@ pub struct PerWorker<S> {
 #[repr(align(128))]
 struct Slot<S>(Mutex<S>);
 
+impl<S: Default> Default for PerWorker<S> {
+    /// [`Self::new`] with each slot `S::default()`.
+    fn default() -> Self {
+        Self::new(S::default)
+    }
+}
+
 impl<S> PerWorker<S> {
     /// A slot for each worker [`par::threads`] counts and one for the threads outside the pool,
     /// each made by `init`.

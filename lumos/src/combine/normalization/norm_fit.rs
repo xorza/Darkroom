@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 
 use arrayvec::ArrayVec;
-use common::par;
+use common::{PerWorker, par};
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -142,8 +142,11 @@ impl NormFit<'_> {
         let cancel = planes.cancel;
         let reference = self.reference;
         let slot_count = planes.slots.count();
+        let scratches = PerWorker::new(FitScratch::default);
         let fitted = par::into_iter(0..frames.len() * slot_count)
-            .map_init(FitScratch::default, |scratch, pair_idx| {
+            .map(|pair_idx| {
+                let mut slot = scratches.get();
+                let scratch = &mut *slot;
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;
                 if frame_idx == reference {
@@ -384,8 +387,11 @@ impl NormFit<'_> {
             })
             .collect::<Result<Vec<_>, StackError>>()?;
 
+        let scratches = PerWorker::new(FitScratch::default);
         let fitted = par::into_iter(0..frames.len() * slot_count)
-            .map_init(FitScratch::default, |scratch, pair_idx| {
+            .map(|pair_idx| {
+                let mut slot = scratches.get();
+                let scratch = &mut *slot;
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;
                 if frame_idx == reference {

@@ -5,11 +5,11 @@
 //! ([`Pooled`]) owns its value and its share of the pool, so a stage can keep several in a struct
 //! across later stages, and rayon workers can lease from one pool concurrently through `&self`.
 //!
-//! A rayon `for_each_init` init closure is the right home for scratch when the call *is* the
-//! operation, as the X-Trans demosaic's tiles are: rayon drops what the init made when the call
-//! ends. A pool is for a loop that runs many times over — once per chunk per channel in the
-//! combine, once per pass in the cosmic-ray detector — where the init becomes `|| pool.acquire()`
-//! and the next call finds its scratch warm.
+//! A pool is for a loop that runs many times over — once per chunk per channel in the combine —
+//! whose body leases its scratch for each item and finds it warm. A loop's body starts no parallel
+//! work (`common::par`), so a worker holds one lease of a loop at a time, and the leases out at
+//! once are at most the bodies running. Scratch that lives for one call only, as the demosaic's
+//! tiles do, is a `common::PerWorker` made for the call instead.
 
 use std::fmt::Debug;
 use std::mem;

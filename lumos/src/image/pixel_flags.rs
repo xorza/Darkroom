@@ -258,22 +258,20 @@ fn dilate_bytes(
     }
     let width = size.width;
     let soft = !fixed.byte();
-    par::chunks_mut(bits, width).for_each_init(
-        || scratch.ors.acquire(),
-        |ors, row| ors.or_row(row, soft, reach),
-    );
+    par::chunks_mut(bits, width).for_each(|row| {
+        let ors = &mut scratch.ors.acquire();
+        ors.or_row(row, soft, reach);
+    });
     let plane = UnsafeSendPtr::new(bits.as_mut_ptr());
-    par::into_iter(0..width.div_ceil(strip)).for_each_init(
-        || scratch.ors.acquire(),
-        |ors, idx| {
-            let strip = Strip {
-                plane,
-                size,
-                columns: idx * strip..((idx + 1) * strip).min(width),
-            };
-            ors.or_columns(&strip, soft, reach);
-        },
-    );
+    par::into_iter(0..width.div_ceil(strip)).for_each(|idx| {
+        let ors = &mut scratch.ors.acquire();
+        let strip = Strip {
+            plane,
+            size,
+            columns: idx * strip..((idx + 1) * strip).min(width),
+        };
+        ors.or_columns(&strip, soft, reach);
+    });
 }
 
 /// A strip of a plane's columns, its rows reached through the plane's pointer. Each task of
@@ -514,6 +512,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use common::par;
     use imaginarium::Buffer2;
 
     use crate::image::pixel_flags::{
@@ -626,7 +625,7 @@ mod tests {
                     .all_free(|ors| ors.prefix.capacity() + ors.suffix.capacity() <= share),
                 "{width}x{height}"
             );
-            assert!(scratch.ors.pooled() <= rayon::current_num_threads());
+            assert!(scratch.ors.pooled() <= par::threads());
         }
     }
 

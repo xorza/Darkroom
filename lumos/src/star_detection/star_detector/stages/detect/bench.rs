@@ -9,9 +9,9 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
-use crate::scratch_pool::ScratchPool;
 use crate::star_detection::bench;
 use crate::star_detection::bench::Stages;
+use crate::star_detection::deblend::deblenders::Deblenders;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
@@ -41,7 +41,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     labels: labeler.into_map(),
                 }
             });
-            let buffers = ScratchPool::default();
+            let mut deblenders = Deblenders::default();
             let mut regions = Vec::new();
             b.iter(|| {
                 regions.clear();
@@ -51,7 +51,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         labels,
                     },
                     &config,
-                    &buffers,
+                    &mut deblenders,
                     &mut regions,
                 )
             });

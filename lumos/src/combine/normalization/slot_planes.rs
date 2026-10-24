@@ -2,8 +2,8 @@
 //! measured.
 
 use arrayvec::ArrayVec;
-use common::CancelToken;
 use common::par;
+use common::{CancelToken, PerWorker};
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -38,8 +38,11 @@ impl<'a> SlotPlanes<'a> {
         pixels: &[SlotPixels<'_>],
     ) -> Result<Vec<ArrayVec<f32, 3>>, StackError> {
         let slot_count = pixels.len();
+        let radix = PerWorker::new(RadixMedian::default);
         let medians = par::into_iter(0..self.frames.len() * slot_count)
-            .map_init(RadixMedian::default, |median, pair_idx| {
+            .map(|pair_idx| {
+                let mut slot = radix.get();
+                let median = &mut *slot;
                 let slot = pair_idx % slot_count;
                 let sampling = PlaneSampling {
                     domain: pixels[slot].shared(),

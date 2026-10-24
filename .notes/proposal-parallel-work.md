@@ -47,15 +47,19 @@ governs, and this file is deleted.
   `common::thread`, so a job's loops start off the pool and nothing nests on a
   worker's stack, frames included (rayon #1054 goes with it). Its cost: a slot's
   serial steps run beside the workers rather than as one of them.
-- **Scratch is per worker, owned by the caller.** `PerWorker<S>` holds one slot
-  for each pool thread and one for bodies run outside the pool, kept by the owner
-  from call to call; a worker's body takes its slot through a checked borrow that
-  panics on a second borrow. The no-nesting rule makes each slot single-user, so
-  a working set is exactly `(par::threads() + 1) × scratch` and a call allocates
-  nothing. Refused: an
-  `UnsafeCell` slot, unsound the day a submodule's hidden parallel call nests;
-  a scratch pool that grows on demand, whose peak is not a function of the thread
-  count.
+- **Scratch is per worker or leased per item, never per split.** A `fold`'s
+  accumulators live until its `reduce`, so a value per split counts the splits,
+  which follow the schedule: the deblender's leased sets grew a detector's heap
+  frame by frame. The init adapters (`map_init`, `for_each_init` and kin) and the
+  folds are banned with the entry points. A body leases from a pool (`acquire`,
+  a surface `reader`), which allocates nothing warm and holds one lease a running
+  body; or takes its worker's slot of a `PerWorker`, kept on an owner across calls
+  where one exists (the deblenders, the cosmic-ray windows) and made for the call
+  otherwise. A slot whose value the figures charge per worker (the MRS tiles, the
+  demosaic tiles) starts empty and is made on first use: a split loop runs on the
+  workers alone and an unsplit one on its caller alone, so no more are made than
+  the workers. Refused: an `UnsafeCell` slot, unsound the day a submodule's hidden
+  parallel call nests.
 - **Thread counts come from `par`.** `par::threads()` replaces
   `rayon::current_num_threads()`, so a memory figure and the pool that spends it
   cannot disagree.
@@ -127,20 +131,18 @@ counting allocator, in batch 4.
 
 ### 4. lumos onto `common::par`
 
-Module group by module group, each a commit that builds:
-
-- [ ] `concurrency` (`zeroed_in_parallel`, `slots`) and `math`.
-- [ ] `image` (flags, flat gain, CFA, demosaic, linear image).
-- [ ] `io` (FITS decode and write, RAW, flags and gain extensions) and `ingest`.
-- [ ] `calibration`, `noise`, `frame`, `bg_mesh`.
-- [ ] `star_detection`, `registration`, `drizzle`.
-- [ ] `combine`, `pipeline`, `image_ops`.
-- [ ] Every `map_init`/`for_each_init`/`try_for_each_init` becomes a
-  `PerWorker` its owner keeps; every `current_num_threads()` becomes
-  `par::threads()`. Tests: the memory-budget suite, and each changed
-  `heap_bytes` against the counting allocator.
-- [ ] The `clippy.toml` bans, each with its reason; `concurrency`'s bounded maps
-  become `par::slots`.
+- [x] Every rayon entry point in lumos through `par`; `concurrency` dissolved —
+  `slots_owned` into `common::par`, the rest beside its users, its huge-page
+  prefault kept, in safe code, as a 50 % decode slowdown without it showed.
+- [x] The deblender's per-split `fold` becomes `Deblenders`: a set a worker and its
+  regions gathered back into the components' order; the memory figures count the
+  set outside the pool.
+- [x] Every init adapter becomes a lease per item or a `PerWorker`; every
+  `current_num_threads()` becomes `par::threads()`.
+- [x] The `clippy.toml` bans: the entry points, the init adapters and the folds.
+- [x] The memory harness runs the test's body as marked top-level code on worker
+  0, so its jobs take that worker's queue, not rayon's injector, whose blocks
+  landed in whichever measurement filled one.
 
 ### 5. Submodule calls, lens and darkroom
 

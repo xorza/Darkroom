@@ -240,20 +240,18 @@ impl WarpResult {
                 [mono] => par::chunks_mut(mono.pixels_mut(), width)
                     .zip(quality_rows)
                     .enumerate()
-                    .for_each_init(
-                        || scratch.rows.acquire(),
-                        |scratch, (y, (channel, (coverage_row, confidence_row)))| {
-                            warp_row(scratch, y, &mut [channel], coverage_row, confidence_row);
-                        },
-                    ),
+                    .for_each(|(y, (channel, (coverage_row, confidence_row)))| {
+                        let scratch = &mut scratch.rows.acquire();
+                        warp_row(scratch, y, &mut [channel], coverage_row, confidence_row);
+                    }),
                 [red, green, blue] => par::chunks_mut(red.pixels_mut(), width)
                     .zip(par::chunks_mut(green.pixels_mut(), width))
                     .zip(par::chunks_mut(blue.pixels_mut(), width))
                     .zip(quality_rows)
                     .enumerate()
-                    .for_each_init(
-                        || scratch.rows.acquire(),
-                        |scratch, (y, (((red, green), blue), (coverage_row, confidence_row)))| {
+                    .for_each(
+                        |(y, (((red, green), blue), (coverage_row, confidence_row)))| {
+                            let scratch = &mut scratch.rows.acquire();
                             warp_row(
                                 scratch,
                                 y,

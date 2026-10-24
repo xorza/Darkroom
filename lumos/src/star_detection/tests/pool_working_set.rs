@@ -46,7 +46,8 @@ const NO_DATA_MASK: usize = 1;
 /// 64 rows of 128 bits, 1 KiB each, two surfaces over 16-px tiles, 4 × 4 of them, each 2 · 16
 /// tile values, 4 + 4 centres and a reader's 3 · 4 + 64 samples, 116 f32s, the worker's band of the
 /// widest filter, radius 26: 53 ring rows, 3 residual rows and a median row of 64 samples, and the
-/// worker's deblend set, room for the frame's 4096 pixels at 41 B each.
+/// deblend sets of the worker and of the threads outside the pool, room for the frame's 4096 pixels
+/// at 41 B each.
 #[test]
 fn pinned_working_set_matches_what_the_memory_planner_charges() {
     let BufferCounts {
@@ -63,7 +64,7 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
     assert_eq!(BandScratch::heap_bytes(64, 26), (53 + 3 + 1) * 64 * 4);
     assert_eq!(
         DetectionResources::heap_bytes(size, 1),
-        3 * 16_384 + 4 * 1024 + 2 * 116 * 4 + 57 * 64 * 4 + 4096 * 41
+        3 * 16_384 + 4 * 1024 + 2 * 116 * 4 + 57 * 64 * 4 + 2 * 4096 * 41
     );
 }
 

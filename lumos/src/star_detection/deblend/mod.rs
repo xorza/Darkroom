@@ -17,6 +17,7 @@ pub(super) mod assignment;
 pub(super) mod component;
 pub(super) mod component_pixels;
 pub(super) mod deblend_buffers;
+pub(super) mod deblenders;
 pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
 pub(super) mod pixel;
