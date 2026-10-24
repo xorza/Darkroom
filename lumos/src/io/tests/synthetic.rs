@@ -494,7 +494,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         };
         let memory = available_memory;
         let linear_set = |second: &Path| {
-            single_thread.run(|_| {
+            single_thread.run(|| {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
                     PlannedCombine {
@@ -534,7 +534,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             ),
             "{tier}"
         );
-        let cfa_set = single_thread.run(|_| {
+        let cfa_set = single_thread.run(|| {
             FrameCache::from_cfa_paths(
                 SteppedPaths {
                     paths: &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],

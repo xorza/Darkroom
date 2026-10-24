@@ -2,16 +2,17 @@
 
 use std::sync::{Mutex, MutexGuard, TryLockError};
 
-use crate::par::Par;
+use crate::par;
 
-/// One `S` for each worker of a pool, kept by its owner from one run to the next, so a loop's
-/// working set is exactly `workers × S` and a run allocates none of it. Rayon's own `map_init`
+/// One `S` for each worker of a pool and one for bodies run outside it, kept by its owner from one
+/// run to the next, so a loop's working set is exactly `(workers + 1) × S` and a run allocates
+/// none of it. Rayon's own `map_init`
 /// and its kin make a value for each split instead, a count no thread count bounds.
 ///
 /// A body takes its worker's slot with [`get`](Self::get). A slot has one user at a time because
 /// a body never starts parallel work, which is all that could put a second body on its worker's
-/// stack; the borrow is checked anyway, so a guard held across a parallel call panics rather than
-/// aliases.
+/// stack, and [`par`](crate::par) refuses that; the borrow is checked anyway, so a guard held across
+/// a parallel call, or a submodule's own parallel call, panics rather than aliases.
 #[derive(Debug)]
 pub struct PerWorker<S> {
     slots: Box<[Slot<S>]>,
@@ -26,31 +27,41 @@ pub struct PerWorker<S> {
 struct Slot<S>(Mutex<S>);
 
 impl<S> PerWorker<S> {
-    /// A slot for each worker `par` runs on, each made by `init`.
-    pub fn new(par: &Par<'_>, mut init: impl FnMut() -> S) -> Self {
+    /// A slot for each worker [`par::threads`] counts and one for the threads outside the pool,
+    /// each made by `init`.
+    pub fn new(mut init: impl FnMut() -> S) -> Self {
         Self {
-            slots: (0..par.threads())
+            slots: (0..=par::threads())
                 .map(|_| Slot(Mutex::new(init())))
                 .collect(),
         }
     }
 
-    /// The workers this holds a slot for.
-    pub fn workers(&self) -> usize {
+    /// The slots this holds, the count a memory figure multiplies: one for each worker and one for
+    /// the threads outside the pool.
+    pub fn slot_count(&self) -> usize {
         self.slots.len()
     }
 
-    /// The calling worker's slot.
+    /// The calling worker's slot, or, for a body rayon runs on its caller's own thread, as it runs
+    /// a loop it does not split, the slot outside the pool. Callers outside the pool share that
+    /// one and wait for it in turn, so one that takes it again while it holds it waits forever,
+    /// where a worker would panic: frame slots on plain threads may share an owner's slots.
     ///
     /// # Panics
-    /// Off a pool's worker, on a worker past [`workers`](Self::workers), as on a larger pool than
-    /// the one it was made for, or while the slot is already taken.
+    /// On a worker past the pool it was made for, or while a worker's slot is already taken.
     pub fn get(&self) -> MutexGuard<'_, S> {
-        let idx = rayon::current_thread_index().expect("a worker's slot is taken on a worker");
-        let slot = self.slots.get(idx).unwrap_or_else(|| {
+        let (outside, workers) = self.slots.split_last().expect("one slot outside the pool");
+        let Some(idx) = rayon::current_thread_index() else {
+            return outside
+                .0
+                .lock()
+                .expect("no body that held the slot outside the pool panicked");
+        };
+        let slot = workers.get(idx).unwrap_or_else(|| {
             panic!(
                 "worker {idx} has no slot of {}: made for a smaller pool",
-                self.workers()
+                workers.len()
             )
         });
         match slot.0.try_lock() {

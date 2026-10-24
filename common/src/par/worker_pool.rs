@@ -1,21 +1,28 @@
-//! [`WorkerPool`]: the threads parallel work runs on, and the one source of a [`Par`].
+//! [`WorkerPool`]: a pool of a set size, for a test or a bench that compares thread counts.
 
-use std::sync::Arc;
+use std::cell::Cell;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
-use crate::par::Par;
+thread_local! {
+    /// Whether this thread runs a [`WorkerPool::run`] body: top-level code, on a worker.
+    static TOP_LEVEL: Cell<bool> = const { Cell::new(false) };
+}
 
-/// A rayon pool of named threads, shared by clones. Its owner decides how many workers the
-/// program's parallel work spreads over; [`run`](Self::run) is how that work starts.
-#[derive(Debug, Clone)]
+/// A rayon pool of `threads` named threads, which runs a body as top-level code.
+///
+/// Shipped code runs on the global pool, whose workers only ever run loop bodies. A body
+/// [`run`](Self::run) installs runs on one of this pool's workers instead, so it marks that
+/// worker's thread as top-level for the [`par`](crate::par) check. The worker also runs bodies of
+/// its own loops while it waits in them, and those pass the check too: nesting is caught on the
+/// pool's other workers only.
+#[derive(Debug)]
 pub struct WorkerPool {
-    pool: Arc<ThreadPool>,
+    pool: ThreadPool,
 }
 
 impl WorkerPool {
-    /// A pool of `threads` threads named `{name}-{idx}`. The OS failing to start one is no case a
-    /// caller handles: it panics, naming the pool, as `std::thread::spawn` does.
+    /// A pool of `threads` threads named `{name}-{idx}`.
     pub fn new(name: impl Into<String>, threads: usize) -> Self {
         let name = name.into();
         let prefix = name.clone();
@@ -24,28 +31,37 @@ impl WorkerPool {
             .thread_name(move |idx| format!("{prefix}-{idx}"))
             .build()
             .unwrap_or_else(|error| panic!("the OS starts the {name} pool: {error}"));
-        Self {
-            pool: Arc::new(pool),
-        }
+        Self { pool }
     }
 
-    /// The workers [`run`](Self::run) spreads over.
-    pub fn threads(&self) -> usize {
-        self.pool.current_num_threads()
-    }
-
-    /// `body` on this pool, with the [`Par`] its parallel work starts from; the caller blocks
-    /// until it returns.
+    /// `body` on this pool, as top-level code; the caller blocks until it returns.
     ///
     /// # Panics
-    /// On a worker of any rayon pool. A worker that waits on another pool keeps running its own
-    /// pool's jobs, so a body that reached a pool would nest work the types otherwise refuse; this
-    /// is the one path they leave open, and a cold one, so it is checked at run time.
-    pub fn run<R: Send>(&self, body: impl FnOnce(&Par<'_>) -> R + Send) -> R {
+    /// On a worker of any rayon pool: a worker that waits on another pool keeps running its own
+    /// pool's jobs.
+    pub fn run<R: Send>(&self, body: impl FnOnce() -> R + Send) -> R {
         assert!(
             rayon::current_thread_index().is_none(),
             "a worker pool runs from outside every pool, never from a parallel loop's body"
         );
-        self.pool.install(|| body(&Par::new(&self.pool)))
+        self.pool.install(|| {
+            let outer = TOP_LEVEL.replace(true);
+            let _restore = Restore(outer);
+            body()
+        })
+    }
+
+    pub(super) fn is_top_level() -> bool {
+        TOP_LEVEL.get()
+    }
+}
+
+/// Puts back the worker's mark when a [`WorkerPool::run`] body returns or unwinds.
+#[derive(Debug)]
+struct Restore(bool);
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        TOP_LEVEL.set(self.0);
     }
 }

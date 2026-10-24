@@ -174,7 +174,7 @@ fn preparation_does_not_depend_on_the_thread_count() {
         let run = |threads: usize| {
             let pool = WorkerPool::new("lumos-test", threads);
             let flat = make_cfa(size, pixels.clone(), cfa_type);
-            bits(pool.run(|_| prepare(flat, None)).divisor().data().pixels())
+            bits(pool.run(|| prepare(flat, None)).divisor().data().pixels())
         };
         assert_eq!(run(1), run(7), "{cfa_type:?}");
     }
