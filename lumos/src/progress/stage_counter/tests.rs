@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use common::thread;
+use common::{par, thread};
 use rayon::prelude::*;
 
 use crate::progress::progress_callback::ProgressCallback;
@@ -19,7 +19,7 @@ fn parallel_completions_report_in_order() {
         }
     });
     let counter = StageCounter::new(&callback, StackingStage::Loading, 64);
-    (0..64).into_par_iter().for_each(|_| {
+    par::into_iter(0..64).for_each(|_| {
         counter.complete_one();
     });
     let expected: Vec<_> = (1..=64).map(|cur| (cur, 64)).collect();
@@ -37,6 +37,11 @@ fn a_callback_that_uses_rayon_completes() {
         let reports = Arc::new(Mutex::new(Vec::new()));
         let callback = ProgressCallback::new({
             let reports = Arc::clone(&reports);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a callback from outside the workspace may run rayon itself, nested in \
+                          the loop that reports; the counter must survive it"
+            )]
             move |progress| {
                 (0..8).into_par_iter().for_each(|_| {
                     std::thread::sleep(Duration::from_micros(20));
@@ -45,7 +50,7 @@ fn a_callback_that_uses_rayon_completes() {
             }
         });
         let counter = StageCounter::new(&callback, StackingStage::Loading, 256);
-        (0..256).into_par_iter().for_each(|_| {
+        par::into_iter(0..256).for_each(|_| {
             counter.complete_one();
         });
         sender.send(reports.lock().unwrap().clone()).unwrap();

@@ -3,16 +3,17 @@
 //! Thresholds the detection plane, labels its connected components and deblends them into the
 //! regions measurement reads.
 
-use std::mem;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{iter, mem};
 
 use common::par;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::scratch_pool::ScratchPool;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::deblend::deblenders::Deblenders;
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
 use crate::star_detection::deblend::region::Region;
@@ -78,7 +79,7 @@ impl Candidates {
             labels: label_map,
         };
         let deblended_components =
-            extract_candidates(labelled, config, &resources.deblend, &mut regions);
+            extract_candidates(labelled, config, &mut resources.deblend, &mut regions);
 
         Self {
             regions,
@@ -94,13 +95,17 @@ impl Candidates {
     }
 }
 
+/// The components one task deblends in turn: enough that its noise reader's last solved row serves
+/// the next component, few enough that the tasks spread over the workers.
+const COMPONENTS_PER_TASK: usize = 64;
+
 /// Deblend every labelled component on `plane` into `regions`, then keep the regions within the
 /// configured area and clear of the edge margin; the count of components split into more than
 /// one.
 fn extract_candidates(
     labelled: LabelledPlane<'_>,
     config: &ExtractionConfig,
-    deblend_buffers: &ScratchPool<DeblendBuffers>,
+    deblenders: &mut Deblenders,
     regions: &mut Vec<Region>,
 ) -> usize {
     let LabelledPlane {
@@ -135,19 +140,22 @@ fn extract_candidates(
         "Processing components for candidate extraction"
     );
 
-    // One deblend buffer set per fold split, leased from the detector's pool so a frame after the
-    // first reuses the last one's, each split's regions gathered in its set: the reduce appends a
-    // later set's to an earlier one's, which keeps the components' order.
-    let (deblended_components, mut gathered, _) = par::iter(label_map.components())
-        // A component smaller than `min_area` holds no region that large. One larger than
-        // `max_area` is still deblended: a crowded group splits into regions within it.
-        .filter(|data| data.area >= config.min_area)
-        .fold(
-            || (0, deblend_buffers.acquire(), plane.noise.noise.reader()),
-            |(mut deblended, mut buffers, mut noise), data| {
+    // Each task deblends its components into its worker's set, which keeps each region's
+    // component, through one noise reader that keeps the row it last solved; the sets' regions
+    // are then gathered back into the components' order.
+    let deblended_components = AtomicUsize::new(0);
+    par::chunks(label_map.components(), COMPONENTS_PER_TASK)
+        .enumerate()
+        .for_each(|(task, components)| {
+            let mut buffers = deblenders.set();
+            let mut noise = plane.noise.noise.reader();
+            let first = task * COMPONENTS_PER_TASK;
+            // A component smaller than `min_area` holds no region that large. One larger than
+            // `max_area` is still deblended: a crowded group splits into regions within it.
+            let large = components.iter().enumerate();
+            for (offset, data) in large.filter(|(_, data)| data.area >= config.min_area) {
                 let component = Component::new(data, values, label_map);
-                let DeblendBuffers { regions: found, .. } = &mut *buffers;
-                let mut split = mem::take(found);
+                let mut split = mem::take(&mut buffers.regions);
                 let pushed = match config.deblend {
                     Deblend::MultiThreshold {
                         threshold_count,
@@ -175,21 +183,19 @@ fn extract_candidates(
                     .deblend(&component, &mut buffers, &mut split),
                 };
                 buffers.regions = split;
+                buffers
+                    .components
+                    .extend(iter::repeat_n(first + offset, pushed));
                 if data.area > DeblendBuffers::KEPT_PIXELS {
                     buffers.release();
                 }
-                deblended += usize::from(pushed > 1);
-                (deblended, buffers, noise)
-            },
-        )
-        .reduce(
-            || (0, deblend_buffers.acquire(), plane.noise.noise.reader()),
-            |(a, mut first, noise), (b, mut second, _)| {
-                first.regions.append(&mut second.regions);
-                (a + b, first, noise)
-            },
-        );
-    regions.append(&mut gathered.regions);
+                if pushed > 1 {
+                    deblended_components.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        });
+    deblenders.gather_into(regions);
+    let deblended_components = deblended_components.into_inner();
 
     tracing::debug!(
         regions = regions.len(),

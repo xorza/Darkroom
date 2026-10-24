@@ -115,14 +115,12 @@ impl BgMesh {
         par::iter_mut(self.stats.pixels_mut())
             .zip(par::iter_mut(&mut self.measured))
             .enumerate()
-            .for_each_init(
-                || tile_scratch.acquire(),
-                |scratch, (idx, (out, measured))| {
-                    let stats = TileStats::compute(input, tile_at(idx), scratch);
-                    *measured = stats.is_some();
-                    *out = stats.unwrap_or_default();
-                },
-            );
+            .for_each(|(idx, (out, measured))| {
+                let scratch = &mut tile_scratch.acquire();
+                let stats = TileStats::compute(input, tile_at(idx), scratch);
+                *measured = stats.is_some();
+                *out = stats.unwrap_or_default();
+            });
         if self.measured.iter().all(|&measured| measured) {
             return;
         }
@@ -133,15 +131,12 @@ impl BgMesh {
             };
             par::iter_mut(self.stats.pixels_mut())
                 .enumerate()
-                .for_each_init(
-                    || tile_scratch.acquire(),
-                    |scratch, (idx, out)| {
-                        // An eligibility test that takes no pixel of a tile leaves it nothing to
-                        // measure, mask or not.
-                        *out = TileStats::compute(&unmasked, tile_at(idx), scratch)
-                            .unwrap_or_default();
-                    },
-                );
+                .for_each(|(idx, out)| {
+                    let scratch = &mut tile_scratch.acquire();
+                    // An eligibility test that takes no pixel of a tile leaves it nothing to
+                    // measure, mask or not.
+                    *out = TileStats::compute(&unmasked, tile_at(idx), scratch).unwrap_or_default();
+                });
             return;
         }
         self.fill_bad_tiles();

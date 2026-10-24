@@ -98,7 +98,7 @@ impl DetectionFilter<'_> {
         let height = source.pixels().height();
         let radius = self.matched.map_or(0, MatchedKernel::radius);
         let band = height
-            .div_ceil(BANDS_PER_WORKER * rayon::current_num_threads())
+            .div_ceil(BANDS_PER_WORKER * par::threads())
             .max(ROWS_PER_HALO_ROW * 2 * radius)
             .clamp(1, height);
         self.run_in_bands(source, output, scratch, band);
@@ -117,26 +117,24 @@ impl DetectionFilter<'_> {
         debug_assert_eq!((output.width(), output.height()), (width, height));
         par::chunks_mut(output.pixels_mut(), band * width)
             .enumerate()
-            .for_each_init(
-                || (scratch.acquire(), source.sky_reader()),
-                |(scratch, sky), (idx, rows)| {
-                    let start = idx * band;
-                    let BandScratch {
-                        ring,
-                        residual,
-                        median,
-                    } = &mut **scratch;
-                    let mut inputs = InputRows {
-                        source,
-                        sky: sky.as_mut(),
-                        median: self.prefilter == Prefilter::Median3x3 && width >= 3 && height >= 3,
-                        residual,
-                        held: 0..0,
-                        median_row: median,
-                    };
-                    self.band(&mut inputs, start..start + rows.len() / width, rows, ring);
-                },
-            );
+            .for_each(|(idx, rows)| {
+                let (scratch, sky) = &mut (scratch.acquire(), source.sky_reader());
+                let start = idx * band;
+                let BandScratch {
+                    ring,
+                    residual,
+                    median,
+                } = &mut **scratch;
+                let mut inputs = InputRows {
+                    source,
+                    sky: sky.as_mut(),
+                    median: self.prefilter == Prefilter::Median3x3 && width >= 3 && height >= 3,
+                    residual,
+                    held: 0..0,
+                    median_row: median,
+                };
+                self.band(&mut inputs, start..start + rows.len() / width, rows, ring);
+            });
     }
 
     /// Output rows `rows` into `output`, from `inputs`, the matched filter's taps from `ring`.

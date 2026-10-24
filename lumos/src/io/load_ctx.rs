@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use common::CancelToken;
+use common::{CancelToken, par};
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::image::cfa::cfa_image::CfaImage;
@@ -48,7 +48,7 @@ impl LoadCtx {
             fits: FitsLoadConfig::default(),
             nulls: NullPolicy::default(),
             xtrans_passes: MarkesteijnPasses::default(),
-            decode_threads: rayon::current_num_threads(),
+            decode_threads: par::threads(),
         }
     }
 

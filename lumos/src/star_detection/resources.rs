@@ -12,6 +12,7 @@ use crate::star_detection::bg::workspace::BgWorkspace;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::star_detection::deblend::deblenders::Deblenders;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detection_filter::BandScratch;
 use crate::star_detection::duplicates::Duplicates;
@@ -37,8 +38,8 @@ pub(crate) struct DetectionResources {
     pub(crate) bands: ScratchPool<BandScratch>,
     pub(crate) labeler: Labeler,
     pub(crate) bg: BgWorkspace,
-    /// The deblenders' working sets, one per rayon fold split.
-    pub(crate) deblend: ScratchPool<DeblendBuffers>,
+    /// The deblenders' working sets, one for each worker.
+    pub(crate) deblend: Deblenders,
     /// The per-tile and per-star values a detection's medians sort, refilled for each.
     pub(crate) values: Vec<f32>,
     /// Their absolute deviations from the median, for a MAD that keeps the values.
@@ -77,7 +78,8 @@ const LABEL_RUNS_PLANES: usize = 1;
 impl DetectionResources {
     /// The bytes a detector's pool holds for frames of `size` between frames on `workers`: its f32
     /// planes and the labeling's runs, a plane each, its bitmasks, a bit a pixel each, its surfaces
-    /// over the finest mesh, and each worker's band of the widest matched filter and deblend set.
+    /// over the finest mesh, each worker's band of the widest matched filter, and the deblend set
+    /// of each worker and of the threads outside the pool, which deblend a frame of one component.
     /// A component past [`DeblendBuffers::KEPT_PIXELS`] holds its set past that while it splits,
     /// in proportion to its pixels.
     pub(crate) fn heap_bytes(size: Size2us, workers: usize) -> usize {
@@ -85,7 +87,7 @@ impl DetectionResources {
             + PEAK_BITMASKS * BitBuffer2::heap_bytes(size)
             + PEAK_SURFACES * MeshSurface::heap_bytes(size, MIN_TILE_SIZE, workers)
             + workers * BandScratch::heap_bytes(size.width, convolution::max_kernel_radius())
-            + workers * DeblendBuffers::kept_bytes(size.pixel_count())
+            + (workers + 1) * DeblendBuffers::kept_bytes(size.pixel_count())
     }
 
     /// The dimensions every plane is leased at.
@@ -115,7 +117,7 @@ impl DetectionResources {
         self.bg.clear();
         self.surfaces.clear();
         self.bands.clear();
-        self.deblend.clear();
+        self.deblend = Deblenders::default();
     }
 }
 

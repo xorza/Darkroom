@@ -2,7 +2,7 @@
 
 use std::thread;
 
-use common::{env, process};
+use common::{WorkerPool, env, process};
 
 /// Set in the child [`alone`] starts, so the body runs there rather than starting another.
 const CHILD: &str = "LUMOS_MEMORY_BUDGET_ALONE";
@@ -16,7 +16,9 @@ const CHILD: &str = "LUMOS_MEMORY_BUDGET_ALONE";
 /// threads allocates it.
 pub(crate) fn alone(body: impl FnOnce()) {
     if in_child() {
-        body();
+        // The session's pool makes this thread its first worker; the body is the test's top-level
+        // code all the same.
+        WorkerPool::top_level(body);
         return;
     }
     let name = thread::current()

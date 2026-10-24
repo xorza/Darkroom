@@ -201,8 +201,8 @@ mod tests {
     /// pixel, a row of 16 B and 136 of bookkeeping, 1128 B. Its detector holds 3 planes, 192 B,
     /// 4 bitmasks of 4 rows padded to 128 bits, 256 B, 2 surfaces of one tile, its value and second
     /// derivative, 2 centres and a reader's 3 + 4 samples, 44 B each, its worker's band of the
-    /// widest filter, 57 rows of 4 samples, 912 B, and its worker's deblend set, room for the
-    /// frame's 16 pixels at 41 B, 656 B: 2104 B.
+    /// widest filter, 57 rows of 4 samples, 912 B, and the deblend sets of its worker and of the
+    /// threads outside the pool, room for the frame's 16 pixels at 41 B each, 1312 B: 2760 B.
     /// Warped it holds 3 planes, 192 B, its flags and a 2 × 2 gain grid, 16 B each: 224 B, and a
     /// row copies 12 + 1 B a pixel of three over 4 pixels into each of two chunk copies, 312 B;
     /// the gain is read where it lies. The combine holds the image and its flag byte, 80 B, and its
@@ -211,9 +211,9 @@ mod tests {
     /// worker's block ORs of the growth, two of a strip of the 4 columns down the 4 rows, 32 B:
     /// 64 B.
     ///
-    /// Found, a light in work holds its statistics and its detector, 3232 B, and a warp its 80 B
+    /// Found, a light in work holds its statistics and its detector, 3888 B, and a warp its 80 B
     /// source and its planes, 144 B. The source gains the lights share stay beside every stage. Named, a worker holds the light at its peak, 1208 B, the
-    /// detector and the warp's planes, 3376 B. Held by the caller, a light keeps nothing until it
+    /// detector and the warp's planes, 4032 B. Held by the caller, a light keeps nothing until it
     /// is warped, then 224 − 80 = 144 B.
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(
             decoded.found_reference(&config, 1),
             [
-                stage(80, 0, 3232, Units::Frames),
+                stage(80, 0, 3888, Units::Frames),
                 stage(224, 0, 144, Units::Frames),
                 normalize,
                 combine,
@@ -255,7 +255,7 @@ mod tests {
         );
         assert_eq!(
             decoded.named_reference(&config, 1),
-            [stage(224, 0, 3376, Units::Frames), normalize, combine]
+            [stage(224, 0, 4032, Units::Frames), normalize, combine]
         );
         // A file the plan's read left for a light's preparation stays beside the preparing,
         // until the light is taken: on each route's first stage.
@@ -265,11 +265,11 @@ mod tests {
         };
         assert_eq!(
             peeked.found_reference(&config, 1)[0],
-            stage(80, 30, 3232, Units::Frames)
+            stage(80, 30, 3888, Units::Frames)
         );
         assert_eq!(
             peeked.named_reference(&config, 1)[0],
-            stage(224, 30, 3376, Units::Frames)
+            stage(224, 30, 4032, Units::Frames)
         );
         // The source gains the lights share, 16 B, stay beside every stage of either route.
         let gained = LightShape {
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(
             gained.found_reference(&config, 1),
             [
-                stage(80, 16, 3232, Units::Frames),
+                stage(80, 16, 3888, Units::Frames),
                 stage(224, 16, 144, Units::Frames),
                 beside(normalize),
                 beside(combine),
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(
             gained.named_reference(&config, 1),
             [
-                stage(224, 16, 3376, Units::Frames),
+                stage(224, 16, 4032, Units::Frames),
                 beside(normalize),
                 beside(combine),
             ]
@@ -302,7 +302,7 @@ mod tests {
         assert_eq!(
             LightShape::held(peek, 3, 1).found_reference(&config, 1),
             [
-                stage(0, 0, 3232, Units::Frames),
+                stage(0, 0, 3888, Units::Frames),
                 stage(144, 0, 144, Units::Frames),
                 normalize,
                 combine,

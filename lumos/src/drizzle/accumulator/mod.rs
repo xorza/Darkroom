@@ -299,7 +299,7 @@ impl Drizzler {
     /// margin — over-scanning at a band boundary is nearly free (see `FrameSource::band_scan`), so
     /// there is nothing to trade off against balance.
     fn balanced_band_rows(output_height: usize) -> usize {
-        let target = rayon::current_num_threads() * BANDS_PER_WORKER;
+        let target = par::threads() * BANDS_PER_WORKER;
         output_height.div_ceil(target.max(1)).max(1)
     }
 }

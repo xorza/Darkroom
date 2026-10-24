@@ -55,8 +55,8 @@ pub(crate) mod sampling;
 pub(crate) mod sigma_threshold;
 
 use arrayvec::ArrayVec;
-use common::CancelToken;
 use common::par;
+use common::{CancelToken, PerWorker};
 use rayon::prelude::*;
 
 use crate::bg_mesh::color_mesh::ColorMesh;
@@ -327,7 +327,6 @@ fn detect_hot_pixels(
 
     let data = image.data();
     let size = Size2us::from(data);
-    let total = size.pixel_count();
     let cfa_type = image.cfa_type();
     let bg = ColorMesh::measure(MaskedPlane::from(data), &cfa_type, DARK_BG_TILE_SIZE);
     if cancel.is_cancelled() {
@@ -344,30 +343,34 @@ fn detect_hot_pixels(
     // The broad model reads each color's tile skies rather than same-color neighbour medians, so a
     // compact same-color cluster remains an outlier instead of becoming its own local reference.
     // What it calls hot must stand as far above the ring's plane, which follows the structure the
-    // tiles cannot.
-    let (idxs, excess) = par::into_iter(0..total)
-        .map_init(RingReference::default, |ring, i| {
-            if cancel.is_cancelled() {
-                return None;
-            }
-            let point = size.point_of(i);
-            let color = cfa_type.slot_at(point);
-            let ColorStats { median, sigma } = stats[color];
-            let local = bg.at(color, point);
-            let cut = sigma_threshold * sigma.max(local.noise);
-            let residual = data[i] - local.sky;
-            if residual <= median + cut {
-                return None;
-            }
-            match ring.at(RingFrame::of(data), &cfa_type, point) {
-                Some(level) => {
-                    let excess = data[i] - level;
-                    (excess > cut).then_some((i, excess))
+    // tiles cannot. A row a task, its worker's ring taken once for the row's pixels.
+    let rings = PerWorker::new(RingReference::default);
+    let (idxs, excess) = par::into_iter(0..size.height)
+        .flat_map_iter(|y| {
+            let mut ring = rings.get();
+            let (stats, cfa_type, bg) = (&stats, &cfa_type, &bg);
+            (y * size.width..(y + 1) * size.width).filter_map(move |i| {
+                if cancel.is_cancelled() {
+                    return None;
                 }
-                None => Some((i, residual - median)),
-            }
+                let point = size.point_of(i);
+                let color = cfa_type.slot_at(point);
+                let ColorStats { median, sigma } = stats[color];
+                let local = bg.at(color, point);
+                let cut = sigma_threshold * sigma.max(local.noise);
+                let residual = data[i] - local.sky;
+                if residual <= median + cut {
+                    return None;
+                }
+                match ring.at(RingFrame::of(data), cfa_type, point) {
+                    Some(level) => {
+                        let excess = data[i] - level;
+                        (excess > cut).then_some((i, excess))
+                    }
+                    None => Some((i, residual - median)),
+                }
+            })
         })
-        .flatten()
         .unzip();
 
     if cancel.is_cancelled() {
@@ -408,19 +411,23 @@ fn detect_cold_pixels(
 
     let data = image.data();
     let size = Size2us::from(data);
-    let total = size.pixel_count();
     let lattice = CfaLattice::new(&image.cfa_type());
 
-    let idxs = par::into_iter(0..total)
-        .map_init(Gathered::default, |scratch, i| {
-            if cancel.is_cancelled() {
-                return None;
-            }
-            let plane = MaskedPlane::from(data);
-            let local = lattice.median(plane, size.point_of(i), scratch);
-            (data[i] < dead_fraction * local).then_some(i)
+    let gathered = PerWorker::new(Gathered::default);
+    // A row a task, its worker's scratch taken once for the row's pixels.
+    let idxs = par::into_iter(0..size.height)
+        .flat_map_iter(|y| {
+            let mut scratch = gathered.get();
+            let lattice = &lattice;
+            (y * size.width..(y + 1) * size.width).filter(move |&i| {
+                if cancel.is_cancelled() {
+                    return false;
+                }
+                let plane = MaskedPlane::from(data);
+                let local = lattice.median(plane, size.point_of(i), &mut scratch);
+                data[i] < dead_fraction * local
+            })
         })
-        .flatten()
         .collect();
 
     if cancel.is_cancelled() {

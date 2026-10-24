@@ -18,8 +18,8 @@ const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
 /// rejection methods' own working buffers.
 ///
 /// Leased from a [`ScratchPool`](crate::scratch_pool::ScratchPool) shaped by the frame count,
-/// rather than built in a `for_each_init` init closure, because the row loop runs once per chunk
-/// per channel — a fresh init would rebuild every vector on each of those. The gather buffers are
+/// rather than built for each loop, because the row loop runs once per chunk per channel — a
+/// fresh set would rebuild every vector on each of those. The gather buffers are
 /// indexed directly, so they hold the frame count as their length, not just as capacity.
 #[derive(Debug, Default)]
 pub(crate) struct CombineScratch {

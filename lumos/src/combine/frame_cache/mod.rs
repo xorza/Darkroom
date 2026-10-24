@@ -357,7 +357,7 @@ impl FrameCache {
         let kept_flagged = AtomicFlagCounts::default();
         let fallback_pixels = AtomicU64::new(0);
         // One pool for the whole combine. `process_chunks` invokes the row loop below once per
-        // chunk per channel, so the leases have to outlive any single `for_each_init`.
+        // chunk per channel, so the scratch has to outlive any single loop.
         let scratch_pool = ScratchPool::<CombineScratch>::new(self.frames.len());
         // What each chunk borrows its planes through, kept empty between chunks so the combine
         // allocates each once.
@@ -442,9 +442,10 @@ impl FrameCache {
                     let plane = &mut plane.pixels_mut()[chunk];
                     attach_rows(&mut rows, plane, width, |row| &mut row.flags);
                 }
-                par::drain(&mut rows, ..).enumerate().for_each_init(
-                    || scratch_pool.acquire(),
-                    |scratch, (row_in_chunk, mut row)| {
+                par::drain(&mut rows, ..)
+                    .enumerate()
+                    .for_each(|(row_in_chunk, mut row)| {
+                        let scratch = &mut scratch_pool.acquire();
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
                         if cancel.is_cancelled() {
@@ -578,8 +579,7 @@ impl FrameCache {
                         excluded.add(&row_tallies.excluded);
                         kept_flagged.add(&row_tallies.kept);
                         fallback_pixels.fetch_add(row_fallbacks, Ordering::Relaxed);
-                    },
-                );
+                    });
                 kept_rows.put(rows);
                 kept_gains.put(gains);
                 kept_flags.put(flags);
@@ -649,7 +649,7 @@ impl FrameCache {
             frame_count: self.frames.len(),
             // The pool the combine leases from holds one scratch for each worker of the pool it
             // runs on.
-            workers: rayon::current_num_threads(),
+            workers: par::threads(),
         }
         .stage(0)
     }

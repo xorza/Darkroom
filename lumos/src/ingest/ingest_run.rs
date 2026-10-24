@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use common::SystemMemory;
+use common::{SystemMemory, par};
 
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
@@ -34,11 +34,7 @@ impl IngestRun {
         let memory = config
             .memory_override
             .unwrap_or_else(SystemMemory::available);
-        Self::of(
-            Budget::of_memory(memory, rayon::current_num_threads()),
-            config,
-            monitor,
-        )
+        Self::of(Budget::of_memory(memory, par::threads()), config, monitor)
     }
 
     fn of(budget: Budget, config: &IngestConfig, monitor: ProgressMonitor) -> Self {
@@ -72,6 +68,8 @@ impl IngestRun {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use common::par;
+
     use crate::ingest::ingest_config::IngestConfig;
     use crate::ingest::ingest_run::IngestRun;
     use crate::memory::budget::Budget;
@@ -81,7 +79,7 @@ pub(crate) mod internals {
         /// A run planned against `memory` rather than the system's reading, under `config`.
         pub(crate) fn planned(memory: u64, config: &IngestConfig) -> Self {
             Self::of(
-                Budget::of_memory(memory, rayon::current_num_threads()),
+                Budget::of_memory(memory, par::threads()),
                 config,
                 ProgressMonitor::unattended(),
             )

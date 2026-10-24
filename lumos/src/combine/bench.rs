@@ -7,7 +7,7 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
-use common::{MappedFile, TempDir};
+use common::{MappedFile, TempDir, par};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::fixture::{Kind, Scale};
@@ -153,7 +153,7 @@ impl Lights {
                 .into_frame(stats.clone())
             })
             .collect();
-        let budget = Budget::of_memory(SPILLED_MACHINE_BYTES, rayon::current_num_threads());
+        let budget = Budget::of_memory(SPILLED_MACHINE_BYTES, par::threads());
         let tier = StorageTier::Spilled {
             scratch,
             combine: CombineBudget::new(budget),

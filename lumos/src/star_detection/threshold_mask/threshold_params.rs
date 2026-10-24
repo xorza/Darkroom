@@ -45,8 +45,8 @@ impl ThresholdParams {
         self.fill_mask_from(residual, mask, || noise.reader());
     }
 
-    /// [`Self::fill_mask`] with the noise of each row from a reader `reader` makes for each worker.
-    fn fill_mask_from<R: NoiseRows + Send>(
+    /// [`Self::fill_mask`] with the noise of each row from a reader `reader` makes for it.
+    fn fill_mask_from<R: NoiseRows>(
         self,
         residual: &Buffer2<f32>,
         mask: &mut BitBuffer2,
@@ -55,17 +55,16 @@ impl ThresholdParams {
         let width = mask.size.width;
         debug_assert_eq!(width, residual.width());
         debug_assert_eq!(mask.size.height, residual.height());
-        mask.par_rows_mut()
-            .enumerate()
-            .for_each_init(reader, |noise, (y, row_words)| {
-                ProcessWords {
-                    pixels: residual.row(y),
-                    noise: noise.row(y),
-                    threshold: self,
-                    words: row_words,
-                }
-                .dispatch();
-            });
+        mask.par_rows_mut().enumerate().for_each(|(y, row_words)| {
+            let mut noise = reader();
+            ProcessWords {
+                pixels: residual.row(y),
+                noise: noise.row(y),
+                threshold: self,
+                words: row_words,
+            }
+            .dispatch();
+        });
     }
 }
 

@@ -56,7 +56,7 @@ impl Labeler {
     /// nothing to do — small inputs take the same path as large ones.
     pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> &LabelMap {
         let height = mask.size.height;
-        let strip_count = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
+        let strip_count = (height / MIN_ROWS_PER_STRIP).clamp(1, par::threads());
         self.label_in_strips(mask, connectivity, strip_count)
     }
 
