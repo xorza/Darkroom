@@ -26,7 +26,7 @@ drive bench` fails before any case runs.
 
 - **lumos does not compile against fits-well 0.4.0.** The submodule moved to
   `995766f` ("Bump version to 0.4.0") in `0baa4b91c`, and `cargo drive check`
-  stops on 9 errors in lumos: `Schema::row_count` is now a method
+  stops on 4 errors in lumos: `Schema::row_count` is now a method
   (`lumos/src/io/fits/calibration_bundle/mod.rs:262`), `FitsError::NotAnImage`
   is gone (`lumos/src/io/fits/decode/plan.rs:36`), `Vec<u8>` has no
   `into_data` (`lumos/src/internals/fits.rs:36`), and `RecordName` has no
