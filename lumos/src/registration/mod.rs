@@ -6,7 +6,7 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::{LinearImage, RegistrationConfig, Star, WarpParams};
+//! use lumos::{LinearImage, RegistrationConfig, Star, WarpConfig};
 //!
 //! # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
 //! # -> Result<(), Box<dyn std::error::Error>> {
@@ -16,12 +16,12 @@
 //! let result = config.registrar()?.register(ref_stars, target_stars)?;
 //! println!(
 //!     "Matched {} stars, RMS = {:.2}px",
-//!     result.num_inliers(),
+//!     result.inlier_count(),
 //!     result.rms_error()
 //! );
 //!
 //! // Reproject the target onto the reference's grid, into a new image
-//! let aligned = WarpParams::default().warp(target_image, result.warp_transform());
+//! let aligned = WarpConfig::default().warp(target_image, result.warp_transform());
 //! # Ok(())
 //! # }
 //! ```

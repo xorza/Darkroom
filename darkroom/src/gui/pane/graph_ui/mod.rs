@@ -3,7 +3,7 @@
 //!
 //! Split by what each part does with a frame rather than by what it draws:
 //! [`frame`] is what a pass reads, [`gesture`] is what turns input into
-//! intents, [`paint`] is what the record pass draws between the node bodies,
+//! intents, [`draw`] is what the record pass draws between the node bodies,
 //! and [`node_ui`] is the body itself. [`canvas`] holds the two nested canvases'
 //! ids and the coordinate space between them — the one thing every one of
 //! those needs.

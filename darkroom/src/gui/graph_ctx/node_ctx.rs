@@ -71,7 +71,7 @@ pub(crate) struct NodeCtx<'a> {
     /// caller that holds a `Ui` sets it through [`Self::with_hover`].
     ///
     /// Two things hang off it, the const editors' hover-revealed chips
-    /// ([`Self::sve`]) and whether the port rows build tooltips at all
+    /// ([`Self::const_editor_theme`]) and whether the port rows build tooltips at all
     /// ([`Self::tooltips`]). One field rather than a `&ConstEditorTheme` and a
     /// flag threaded down beside each other, where no signature would say the
     /// two are the same fact.

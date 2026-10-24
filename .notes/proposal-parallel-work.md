@@ -23,9 +23,10 @@ governs, and this file is deleted.
   `spawn`, `broadcast`, `ThreadPool::install`, `current_num_threads`,
   `current_thread_index`) and the per-split adapters (`map_init`, `map_with`,
   `for_each_init`, `for_each_with`, `try_for_each_init`, `try_for_each_with`);
-  `common/clippy.toml` has none of them, as for I/O and threads today. Adapters
-  that start nothing (`map`, `zip`, `enumerate`, `collect`, `par_extend`) stay
-  rayon's own.
+  `common/clippy.toml` has none of them, as for I/O and threads today. `par_extend`
+  is banned too, as it takes any `IntoParallelIterator`, a plain `Vec` among them;
+  adapters that start nothing (`map`, `zip`, `enumerate`, `collect`) stay rayon's
+  own. The bans land with the lumos move (batch 4), which they would fail before.
 - **A token proves the caller is not a loop body.** Every entry point is a method
   of `Par<'p>`, which is `!Send + !Sync`; rayon requires each body to be
   `Send + Sync`, so a body cannot hold the token and a nested loop does not
@@ -33,12 +34,18 @@ governs, and this file is deleted.
   run-time flag in the wrappers, which needs a `thread_local!` and catches only
   what tests run; tokens kept in existing context structs, which would make those
   structs `!Sync` for every body that reads their other fields.
-- **Only a pool hands out a token.** `common::thread::pool` returns a `Pool`
-  (`Clone + Send + Sync`); `Pool::run(|par| …)` installs the work and passes the
-  first `Par`. `run` asserts, in release, that it is not on a rayon worker: a body
-  that captured a `Pool` is the one path the types leave open, and the check costs
-  one read per run. `Par` has no public constructor; tests and benches take one
-  from an `internals`-gated `Pool` constructor.
+- **A static assertion proves the token stays out.** `assert_not_impl_any!(Par:
+  Send, Sync)` in `common`'s tests, which with rayon's bounds is the whole
+  property. Refused: `compile_fail` doc tests, which need rustdoc and the doc tests
+  in every gate; `trybuild`, a new dependency whose saved compiler output breaks
+  with each rustc.
+- **Only a pool hands out a token.** `WorkerPool::new` replaces
+  `common::thread::pool`; the pool is `Clone + Send + Sync`, and
+  `WorkerPool::run(|par| …)` installs the work and passes the first `Par`. `run`
+  asserts, in release, that it is not on a rayon worker: a body that captured a
+  pool is the one path the types leave open, and the check costs one read per run.
+  `Par` has no public constructor; tests and benches make a `WorkerPool` of their
+  own. Named for its workers, as darkroom already has a `Pool` of its own.
 - **darkroom owns the one compute pool.** `RuntimeLibrary` makes it and hands a
   clone to `astro_library` and `image_library`; a lens node calls `pool.run`
   inside its `spawn_blocking`. The global rayon pool is no longer used. Refused:
@@ -49,7 +56,7 @@ governs, and this file is deleted.
   each slot owns its frame's memory, so a slot job on another's stack stays within
   the slot count. Its cost, a frame finishing only when the jobs above it on the
   stack do, is accepted and documented. Research: rayon #1054.
-- **Scratch is per thread, owned by the caller.** `PerThread<S>` holds one slot
+- **Scratch is per worker, owned by the caller.** `PerWorker<S>` holds one slot
   for each pool thread, kept by the owner from call to call; a body takes its
   thread's slot through a checked borrow that panics on a second borrow. The
   no-nesting rule makes each slot single-user, so a working set is exactly
@@ -101,22 +108,21 @@ its proof.
 
 ### 2. `common::par`
 
-- [ ] `Pool`, `Par<'p>`, `PerThread<S>` in `common/src/par/`, one file each;
-  `thread::pool` returns `Pool`. `Par` methods: `iter`, `iter_mut`, `into_iter`,
-  `chunks`, `chunks_mut`, `chunks_exact_mut`, `drain`, `slots`, `threads`.
-- [ ] Tests: a `compile_fail` doctest for each way a body could reach a token
-  (capture `&Par`, move it in, capture it in a `slots` job), with `docs = true`
-  in the workspace drive table so the gate runs them; `run` panics on a
-  worker; `PerThread` hands each thread its own slot, holds exactly
-  `threads` slots after a run over more items than threads, and panics on a
-  second borrow; `slots` keeps today's ordering and lowest-failure tests.
-- [ ] The `clippy.toml` bans, each with its reason.
+- [x] `WorkerPool`, `Par<'p>`, `PerWorker<S>` in `common/src/par/`, one file
+  each; `WorkerPool::new` replaces `thread::pool`. `Par` methods: `iter`,
+  `iter_mut`, `into_iter`, `chunks`, `chunks_exact`, `chunks_mut`,
+  `chunks_exact_mut`, `drain`, `extend`, `slots`, `threads`.
+- [x] Tests: `Par` is neither `Send` nor `Sync`; `run` panics on a worker;
+  `PerWorker` makes one slot per worker, kept across runs, each body taking its
+  own, and panics on a second borrow, off a worker and past its workers; `slots`
+  keeps the ordering, cap, carried-slot and lowest-failure tests, and a job's own
+  `Par` runs loops.
 
 ### 3. The two nestings
 
 - [ ] `wavelet::atrous_smooth` gets a serial form for the tile body; the
   parallel form takes `&Par`. `NoisePlane::coefficients` keeps its
-  `TileScratch`es in a `PerThread`. Test: the serial and parallel forms agree
+  `TileScratch`es in a `PerWorker`. Test: the serial and parallel forms agree
   bit for bit; `mrs_noise::heap_bytes` equals the bytes the run holds, measured
   by the counting allocator, for 1, 4 and 16 threads.
 - [ ] `NoisePlane::bg` measures its bins with the serial `sigma` inside a
@@ -134,11 +140,13 @@ Module group by module group, each a commit that builds:
 - [ ] `star_detection`, `registration`, `drizzle`.
 - [ ] `combine`, `pipeline`, `image_ops`.
 - [ ] Every `map_init`/`for_each_init`/`try_for_each_init` becomes a
-  `PerThread` its owner keeps; every `current_num_threads()` becomes
+  `PerWorker` its owner keeps; every `current_num_threads()` becomes
   `par.threads()`; every `heap_bytes` takes its thread count from the same
   `Par` the run uses. Tests: the memory-budget suite, and each changed
   `heap_bytes` against the counting allocator.
 - [ ] lumos's public functions that run parallel work take `&Par`.
+- [ ] The `clippy.toml` bans, each with its reason; `concurrency`'s bounded maps
+  become `Par::slots`.
 
 ### 5. Submodule calls, lens and darkroom
 

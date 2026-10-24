@@ -21,11 +21,11 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
+//! use lumos::{LoadCtx, StarDetectionConfig, StarDetector};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load an astronomical image
-//! let image = LoadContext::default().linear("linear_light_001.fits")?;
+//! let image = LoadCtx::default().linear("linear_light_001.fits")?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();

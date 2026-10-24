@@ -3,20 +3,20 @@ use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
-use common::thread;
+use common::WorkerPool;
 
 use crate::concurrency;
 use crate::concurrency::{try_par_map_at_most, try_par_map_bounded_owned};
 
 #[test]
 fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
-    let pool = thread::pool("lumos-test", 4);
+    let pool = WorkerPool::new("lumos-test", 4);
     let barrier = Arc::new(Barrier::new(3));
     let in_flight = AtomicUsize::new(0);
     let max_observed = AtomicUsize::new(0);
     let items: Vec<usize> = (0..6).collect();
 
-    let result = pool.install(|| {
+    let result = pool.run(|_| {
         try_par_map_at_most(items.len(), 3, |idx| {
             let value = &items[idx];
             let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;

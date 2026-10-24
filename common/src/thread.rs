@@ -5,20 +5,6 @@
 
 use std::thread::{self, Builder, JoinHandle, ScopedJoinHandle};
 
-use rayon::{ThreadPool, ThreadPoolBuilder};
-
-/// A rayon pool of `threads` threads named `{name}-{idx}`, for work that must run on a set count of
-/// threads rather than on the global pool.
-pub fn pool(name: impl Into<String>, threads: usize) -> ThreadPool {
-    let name = name.into();
-    let prefix = name.clone();
-    ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(move |idx| format!("{prefix}-{idx}"))
-        .build()
-        .unwrap_or_else(|error| panic!("the OS starts the {name} pool: {error}"))
-}
-
 pub fn spawn<T: Send + 'static>(
     name: impl Into<String>,
     body: impl FnOnce() -> T + Send + 'static,

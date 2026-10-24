@@ -22,11 +22,13 @@
 //!   exported for generated code to name rather than for hand-written `use`s.
 //! - The one route outside `common` to what the program does beyond its own memory:
 //!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and,
-//!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`] for the environment;
-//!   [`process`] for other processes; [`thread`], [`task`] and [`BgRuntime`] for
-//!   a new thread, pool or runtime; [`SystemMemory`], [`ResidentMemory`],
+//!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`](mod@env) for the environment;
+//!   [`process`] for other processes; [`thread`], [`task`], [`WorkerPool`] and
+//!   [`BgRuntime`] for a new thread, pool or runtime; [`SystemMemory`], [`ResidentMemory`],
 //!   [`FileSystem`] and [`UserCache`] for what the system states. The workspace's `clippy.toml`
 //!   refuses the direct calls everywhere else.
+//! - Parallel work: a [`WorkerPool`] hands out the first [`Par`], a parallel loop started from
+//!   one cannot start another in its body, and [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
@@ -51,6 +53,7 @@ mod cancel_token;
 mod float_ext;
 mod id;
 mod introspect;
+mod par;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
 mod serde;
@@ -76,6 +79,9 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
+pub use par::Par;
+pub use par::per_worker::PerWorker;
+pub use par::worker_pool::WorkerPool;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};
 

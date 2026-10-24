@@ -1,6 +1,6 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
-use common::{CancelToken, thread};
+use common::{CancelToken, WorkerPool};
 use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -111,8 +111,8 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
     let bayer = MosaicView::new(&data, CfaPattern::Rggb);
 
     let run = |threads| {
-        thread::pool("lumos-test", threads)
-            .install(|| rcd::demosaic(&bayer, &CancelToken::never()).unwrap())
+        WorkerPool::new("lumos-test", threads)
+            .run(|_| rcd::demosaic(&bayer, &CancelToken::never()).unwrap())
     };
 
     let parallel_threads = if cfg!(miri) { 2 } else { 4 };

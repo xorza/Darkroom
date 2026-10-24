@@ -9,7 +9,7 @@
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 
-use common::{CancelToken, TempDir, fs, thread};
+use common::{CancelToken, TempDir, WorkerPool, fs};
 use fits_well::error::ValueKind;
 use fits_well::header::{Header, RecordName, keywords};
 use fits_well::image::{Image, Scaling};
@@ -484,7 +484,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     let bggr = mosaic("bggr", CfaPattern::Bggr);
     let never_decoded = dir.join("never_decoded.fits");
 
-    let single_thread = thread::pool("lumos-test", 1);
+    let single_thread = WorkerPool::new("lumos-test", 1);
     for available_memory in [1 << 30, 1] {
         let ingest = IngestConfig::with_cache_dir(dir.join("cache"));
         let config = StackConfig {
@@ -494,7 +494,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         };
         let memory = available_memory;
         let linear_set = |second: &Path| {
-            single_thread.install(|| {
+            single_thread.run(|_| {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
                     PlannedCombine {
@@ -534,7 +534,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             ),
             "{tier}"
         );
-        let cfa_set = single_thread.install(|| {
+        let cfa_set = single_thread.run(|_| {
             FrameCache::from_cfa_paths(
                 SteppedPaths {
                     paths: &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],

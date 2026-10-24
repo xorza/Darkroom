@@ -111,12 +111,12 @@ impl WarpConfig {
     /// # Example
     ///
     /// ```no_run
-    /// use lumos::{LinearImage, RegistrationConfig, Star, WarpParams};
+    /// use lumos::{LinearImage, RegistrationConfig, Star, WarpConfig};
     ///
     /// # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
     /// # -> Result<(), Box<dyn std::error::Error>> {
     /// let result = RegistrationConfig::default().registrar()?.register(ref_stars, target_stars)?;
-    /// let aligned = WarpParams::default()
+    /// let aligned = WarpConfig::default()
     ///     .warp(target_image, result.warp_transform())
     ///     .image;
     /// # Ok(())

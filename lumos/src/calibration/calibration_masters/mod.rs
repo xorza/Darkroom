@@ -46,9 +46,9 @@ pub struct CalibrationMasters {
     flat: Option<PreparedFlat>,
     defect_map: Option<DefectMap>,
     /// What calibrating a light by these masters leaves it flagged, gathered once:
-    /// [`QualityFlags::NO_DATA`] where a master the light is calibrated by holds no measurement — a
+    /// [`QualityFlags::NO_DATA`](crate::QualityFlags::NO_DATA) where a master the light is calibrated by holds no measurement — a
     /// fill or a saturated bound leave none in the difference or the quotient — and
-    /// [`QualityFlags::FLAT_FLOOR`] where the divisor sits at its floor, so the light is corrected
+    /// [`QualityFlags::FLAT_FLOOR`](crate::QualityFlags::FLAT_FLOOR) where the divisor sits at its floor, so the light is corrected
     /// by less than its vignetting asks.
     imposed: Option<PixelFlags>,
 }
