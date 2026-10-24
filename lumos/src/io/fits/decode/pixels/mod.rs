@@ -3,7 +3,7 @@ use std::mem;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
-use common::CancelToken;
+use common::{CancelToken, par};
 use fits_well::ImageReader;
 use fits_well::header::{Header, keywords};
 use fits_well::image::{Scaling, View as FitsView};
@@ -524,8 +524,8 @@ impl Conversion<'_> {
         let cancel = self.cancel;
         Cancelled::check(cancel)?;
         debug_assert_eq!(stored.len(), out.len());
-        out.par_chunks_mut(CHUNK_SAMPLES)
-            .zip(stored.par_chunks(CHUNK_SAMPLES))
+        par::chunks_mut(out, CHUNK_SAMPLES)
+            .zip(par::chunks(stored, CHUNK_SAMPLES))
             .enumerate()
             .map(|(chunk_idx, (out, stored))| {
                 Cancelled::check(cancel)?;

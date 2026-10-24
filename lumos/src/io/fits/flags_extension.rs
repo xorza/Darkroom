@@ -8,6 +8,7 @@
 //! NaN there, not the repair, and a reader fills it again. An image whose flags hold nothing but
 //! `NO_DATA` needs no extension: its NaNs carry all of it.
 
+use common::par;
 use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 use fits_well::io::Hdu;
@@ -39,9 +40,7 @@ pub(crate) fn encode<'a>(
     let Some(flags) = flags.filter(|flags| flags.contains_other_than(QualityFlags::NO_DATA)) else {
         return Ok(None);
     };
-    if flags
-        .bytes()
-        .par_iter()
+    if par::iter(flags.bytes())
         .all(|&byte| FlagBytes::stored(byte) & !QualityFlags::NO_DATA.byte() == 0)
     {
         return Ok(None);
@@ -99,7 +98,7 @@ pub(crate) fn join(
     let mut bytes = stored;
     let unknown = !QualityFlags::KNOWN.byte();
     let no_data = QualityFlags::NO_DATA.byte();
-    let disagreement = bytes.par_iter().enumerate().find_first(|&(idx, &byte)| {
+    let disagreement = par::iter(&bytes).enumerate().find_first(|&(idx, &byte)| {
         let decoded_no_data =
             decoded.is_some_and(|flags| flags.at(idx).intersects(QualityFlags::NO_DATA));
         byte & unknown != 0 || (byte & no_data != 0) != decoded_no_data
@@ -114,8 +113,7 @@ pub(crate) fn join(
         return Err(FitsLoadError::from(reason));
     }
     if let Some(decoded) = decoded {
-        bytes
-            .par_iter_mut()
+        par::iter_mut(&mut bytes)
             .zip(decoded.bytes())
             .for_each(|(byte, &found)| *byte |= found);
     }

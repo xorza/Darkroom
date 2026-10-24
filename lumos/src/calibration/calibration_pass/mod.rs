@@ -1,6 +1,7 @@
 //! [`CalibrationPass`]: the masters a frame is calibrated by, applied in one pass.
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -85,10 +86,10 @@ impl CalibrationPass<'_> {
                 .then(|| Buffer2::new_default(size.width, size.height)),
         };
         let width = size.width.max(1);
-        let rows = image.data_mut().pixels_mut().par_chunks_mut(width);
+        let rows = par::chunks_mut(image.data_mut().pixels_mut(), width);
         let flags = if let Some(mut flags) = flags {
             let counts = rows
-                .zip(flags.pixels_mut().par_chunks_mut(width))
+                .zip(par::chunks_mut(flags.pixels_mut(), width))
                 .enumerate()
                 .map(|(y, (row, row_flags))| {
                     let mut counts = FlagCounts::default();

@@ -40,6 +40,7 @@
 
 use arrayvec::ArrayVec;
 use common::IntrospectEnum;
+use common::par;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
@@ -286,8 +287,7 @@ fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     let sample = Subsample::new(intensity.size().pixel_count(), MAX_STATISTIC_SAMPLES);
     // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
     // pixel; running it in parallel hides that latency — the work is a pure map over indices.
-    (0..sample.count())
-        .into_par_iter()
+    par::into_iter(0..sample.count())
         .map(|k| intensity.at(sample.idx(k)))
         .collect()
 }
@@ -686,9 +686,7 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
 }
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], black: BlackPoint, curve: C) {
-    plane
-        .par_chunks_mut(SAMPLES_PER_BLOCK)
-        .for_each(|block| curve.eval_block(black, block));
+    par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| curve.eval_block(black, block));
 }
 
 /// Map one pixel under color-preserving stretch: every channel after the black point, `curve` on
@@ -729,9 +727,9 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: A
     debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
     let [r, g, b] = image.rgb_planes_mut();
     // The three planes split in lockstep so each task sees one band's worth of every channel.
-    r.par_chunks_mut(SAMPLES_PER_BLOCK)
-        .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
-        .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
+    par::chunks_mut(r, SAMPLES_PER_BLOCK)
+        .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
+        .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
         .for_each(|((red, green), blue)| {
             AsinhColorPreserve {
                 red,

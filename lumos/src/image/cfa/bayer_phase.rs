@@ -1,5 +1,6 @@
 //! [`BayerPhase`]: one of a 2×2 pattern's four phases, and its photosites as a dense plane.
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -56,8 +57,7 @@ impl BayerPhase {
         let plane_size = self.size(Size2us::from(mosaic));
         let Vec2us { x: a, y: b } = self.origin;
         plane.reshape(plane_size.width, plane_size.height, 0.0);
-        plane
-            .par_chunks_mut(plane_size.width.max(1))
+        par::chunks_mut(plane, plane_size.width.max(1))
             .enumerate()
             .for_each(|(y, row)| {
                 let source = mosaic.row(2 * y + b);
@@ -93,8 +93,7 @@ impl BayerPhase {
             "the plane is the phase's"
         );
         let Vec2us { x: a, y: b } = self.origin;
-        mosaic
-            .par_chunks_mut(size.width)
+        par::chunks_mut(mosaic, size.width)
             .enumerate()
             .filter(|(y, _)| y % 2 == b)
             .for_each(|(y, row)| {

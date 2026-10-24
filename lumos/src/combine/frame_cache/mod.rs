@@ -12,7 +12,7 @@ use std::convert::Infallible;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use common::CancelToken;
+use common::{CancelToken, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -442,7 +442,7 @@ impl FrameCache {
                     let plane = &mut plane.pixels_mut()[chunk];
                     attach_rows(&mut rows, plane, width, |row| &mut row.flags);
                 }
-                rows.par_drain(..).enumerate().for_each_init(
+                par::drain(&mut rows, ..).enumerate().for_each_init(
                     || scratch_pool.acquire(),
                     |scratch, (row_in_chunk, mut row)| {
                         // Cancelled: skip the row's work (output stays zero; the

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::calibration::error::CalibrationError;
@@ -46,9 +47,7 @@ impl PreparedFlat {
 
     /// A divisor prepared before, as a saved bundle holds it.
     pub(crate) fn from_divisor(divisor: CfaImage) -> Self {
-        let floored = divisor
-            .data()
-            .par_iter()
+        let floored = par::iter(divisor.data())
             .filter(|&&value| value <= MIN_NORMALIZED_FLAT)
             .count();
         let flags = divisor.flags();
@@ -119,8 +118,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
     // work stealing built, and the means would move with the thread count.
     let rows: Vec<ColorSums> = {
         let flags = flat.flags();
-        flat.data()
-            .par_chunks(width)
+        par::chunks(flat.data(), width)
             .enumerate()
             .map(|(y, row)| {
                 let mut sums = ColorSums::default();
@@ -163,8 +161,7 @@ fn normalize(flat: &mut CfaImage) -> Result<(), CalibrationError> {
         means[color] = mean;
     }
 
-    flat.data_mut()
-        .par_chunks_mut(width)
+    par::chunks_mut(flat.data_mut(), width)
         .enumerate()
         .for_each(|(y, row)| {
             for (x, value) in row.iter_mut().enumerate() {

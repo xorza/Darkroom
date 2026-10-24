@@ -1,6 +1,7 @@
 //! [`PreparedFrame`]: a frame reduced to the planes detection and measurement read.
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -190,8 +191,7 @@ impl PreparedFrame {
             saturation: &self.saturation,
             no_data: self.no_data.as_deref(),
         };
-        regions
-            .par_iter()
+        par::iter(regions)
             .map(|region| planes.measure_star(region, config, &grid))
             .collect_into_vec(measured);
         out.clear();
@@ -221,9 +221,7 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
     let r = image.channel(0).pixels();
     let g = image.channel(1).pixels();
     let b = image.channel(2).pixels();
-    output
-        .pixels_mut()
-        .par_iter_mut()
+    par::iter_mut(output.pixels_mut())
         .enumerate()
         .for_each(|(i, o)| {
             *o = weights[0] * r[i] + weights[1] * g[i] + weights[2] * b[i];

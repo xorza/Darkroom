@@ -1,6 +1,7 @@
 //! Per-frame robust statistics, with the white noise measured before any interpolation.
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -134,8 +135,7 @@ impl FrameStats {
         let measured =
             |idx: usize| nulls.is_none_or(|nulls| !nulls.at(idx).intersects(QualityFlags::NO_DATA));
         let levels: Vec<SlotLevel> = match mosaic {
-            Some(mosaic) => (0..mosaic.color_count())
-                .into_par_iter()
+            Some(mosaic) => par::into_iter(0..mosaic.color_count())
                 .map(|color| {
                     SlotLevel::of(image.channel(0), spreads, |idx, pos| {
                         measured(idx) && mosaic.slot_at(pos) == color

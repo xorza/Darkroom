@@ -3,6 +3,7 @@
 use std::ops::Range;
 use std::slice;
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -34,8 +35,7 @@ impl PixelFlags {
         flags_at: impl Fn(usize) -> QualityFlags + Sync,
     ) -> Option<Self> {
         let mut bits = Buffer2::new_default(size.width, size.height);
-        bits.pixels_mut()
-            .par_iter_mut()
+        par::iter_mut(bits.pixels_mut())
             .enumerate()
             .for_each(|(idx, byte)| *byte = flags_at(idx).byte());
         Self::from_bytes(bits)
@@ -56,10 +56,7 @@ impl PixelFlags {
     /// bits it sets, row by row, rather than a recount of the plane.
     pub(super) fn or_where(&mut self, flags: QualityFlags, holds: impl Fn(usize) -> bool + Sync) {
         let width = self.size().width.max(1);
-        let added = self
-            .bits
-            .pixels_mut()
-            .par_chunks_mut(width)
+        let added = par::chunks_mut(self.bits.pixels_mut(), width)
             .enumerate()
             .map(|(y, row)| {
                 let mut added = FlagCounts::default();
@@ -261,12 +258,12 @@ fn dilate_bytes(
     }
     let width = size.width;
     let soft = !fixed.byte();
-    bits.par_chunks_mut(width).for_each_init(
+    par::chunks_mut(bits, width).for_each_init(
         || scratch.ors.acquire(),
         |ors, row| ors.or_row(row, soft, reach),
     );
     let plane = UnsafeSendPtr::new(bits.as_mut_ptr());
-    (0..width.div_ceil(strip)).into_par_iter().for_each_init(
+    par::into_iter(0..width.div_ceil(strip)).for_each_init(
         || scratch.ors.acquire(),
         |ors, idx| {
             let strip = Strip {

@@ -12,7 +12,7 @@
 
 use std::slice;
 
-use common::CancelToken;
+use common::{CancelToken, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -64,11 +64,12 @@ impl CommonDomain {
         cancel: &CancelToken,
     ) -> Result<Self, StackError> {
         let mut common_domain = Self::full_mask(coverage.pixel_count);
-        common_domain
-            .row_words_mut(0)
-            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
-            .enumerate()
-            .try_for_each(|(span, words)| coverage.intersect(span, words, cancel))?;
+        par::chunks_mut(
+            common_domain.row_words_mut(0),
+            CANCEL_POLL_CHUNK / WORD_BITS,
+        )
+        .enumerate()
+        .try_for_each(|(span, words)| coverage.intersect(span, words, cancel))?;
         Self::of_mask(common_domain)
     }
 
@@ -115,9 +116,7 @@ impl CommonDomain {
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();
         let mut valid = self.valid.clone();
-        valid
-            .row_words_mut(0)
-            .par_chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+        par::chunks_mut(valid.row_words_mut(0), CANCEL_POLL_CHUNK / WORD_BITS)
             .enumerate()
             .try_for_each(|(span, words)| {
                 Cancelled::check(cancel)?;

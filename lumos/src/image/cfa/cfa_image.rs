@@ -4,7 +4,7 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use arrayvec::ArrayVec;
-use common::CancelToken;
+use common::{CancelToken, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -373,7 +373,7 @@ impl CfaImage {
         let flags = self.flags.as_ref();
         let mut pixels = vec![0.0f32; size.pixel_count()];
         let mut proxy_flags = flags.map(|_| vec![0u8; size.pixel_count()]);
-        let rows = pixels.par_chunks_mut(size.width).enumerate();
+        let rows = par::chunks_mut(&mut pixels, size.width).enumerate();
         let fill_row = |y: usize, row: &mut [f32], mut row_flags: Option<&mut [u8]>| {
             for (x, sample) in row.iter_mut().enumerate() {
                 let idx = y * size.width + x;
@@ -424,7 +424,7 @@ impl CfaImage {
         };
         match proxy_flags.as_mut() {
             Some(proxy_flags) => rows
-                .zip(proxy_flags.par_chunks_mut(size.width))
+                .zip(par::chunks_mut(proxy_flags, size.width))
                 .for_each(|((y, row), row_flags)| fill_row(y, row, Some(row_flags))),
             None => rows.for_each(|(y, row)| fill_row(y, row, None)),
         }

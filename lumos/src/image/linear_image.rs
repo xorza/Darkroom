@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::{array, slice};
 
+use common::par;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
@@ -218,9 +219,9 @@ impl LinearImage {
             return;
         }
         let [r, g, b] = self.rgb_planes_mut();
-        r.par_chunks_mut(SAMPLES_PER_BLOCK)
-            .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
-            .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
+        par::chunks_mut(r, SAMPLES_PER_BLOCK)
+            .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
+            .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
             .for_each(|((r, g), b)| {
                 for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
                     let out = rgb(Rgb {
@@ -253,10 +254,8 @@ impl LinearImage {
     pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(Intensity<'_>) -> Buffer2<f32>) {
         let mapped = map(self.intensity());
         if !self.is_rgb() {
-            self.channel_mut(0)
-                .pixels_mut()
-                .par_chunks_mut(SAMPLES_PER_BLOCK)
-                .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            par::chunks_mut(self.channel_mut(0).pixels_mut(), SAMPLES_PER_BLOCK)
+                .zip(par::chunks(mapped.pixels(), SAMPLES_PER_BLOCK))
                 .for_each(|(out, mapped)| {
                     for (out, &m) in out.iter_mut().zip(mapped) {
                         *out = m.clamp(0.0, 1.0);
@@ -265,10 +264,10 @@ impl LinearImage {
             return;
         }
         let [r, g, b] = self.rgb_planes_mut();
-        r.par_chunks_mut(SAMPLES_PER_BLOCK)
-            .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
-            .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
-            .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+        par::chunks_mut(r, SAMPLES_PER_BLOCK)
+            .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
+            .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
+            .zip(par::chunks(mapped.pixels(), SAMPLES_PER_BLOCK))
             .for_each(|(((r, g), b), mapped)| {
                 for (((r, g), b), &m) in
                     r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).zip(mapped)

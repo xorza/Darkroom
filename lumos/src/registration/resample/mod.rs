@@ -3,6 +3,7 @@
 use std::slice;
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -232,15 +233,11 @@ impl WarpResult {
                 );
             };
 
-            let quality_rows = coverage
-                .pixels_mut()
-                .par_chunks_mut(width)
-                .zip(confidence.pixels_mut().par_chunks_mut(width));
+            let quality_rows = par::chunks_mut(coverage.pixels_mut(), width)
+                .zip(par::chunks_mut(confidence.pixels_mut(), width));
             let mut planes: ArrayVec<&mut Buffer2<f32>, 3> = warped.planes_mut().collect();
             match planes.as_mut_slice() {
-                [mono] => mono
-                    .pixels_mut()
-                    .par_chunks_mut(width)
+                [mono] => par::chunks_mut(mono.pixels_mut(), width)
                     .zip(quality_rows)
                     .enumerate()
                     .for_each_init(
@@ -249,11 +246,9 @@ impl WarpResult {
                             warp_row(scratch, y, &mut [channel], coverage_row, confidence_row);
                         },
                     ),
-                [red, green, blue] => red
-                    .pixels_mut()
-                    .par_chunks_mut(width)
-                    .zip(green.pixels_mut().par_chunks_mut(width))
-                    .zip(blue.pixels_mut().par_chunks_mut(width))
+                [red, green, blue] => par::chunks_mut(red.pixels_mut(), width)
+                    .zip(par::chunks_mut(green.pixels_mut(), width))
+                    .zip(par::chunks_mut(blue.pixels_mut(), width))
                     .zip(quality_rows)
                     .enumerate()
                     .for_each_init(

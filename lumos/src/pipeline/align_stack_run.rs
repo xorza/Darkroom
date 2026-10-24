@@ -4,9 +4,8 @@
 use std::mem;
 use std::path::Path;
 
-use common::CancelToken;
+use common::{CancelToken, par};
 
-use crate::concurrency;
 use crate::frame_store::file_set::Loaded;
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::image_dimensions::ImageDimensions;
@@ -256,14 +255,13 @@ impl AlignStackRun<'_> {
         // Taking each detected light by value frees its input image as soon as the warped output
         // exists, so this stage never holds the complete input and warped sets simultaneously.
         let mut warped: Vec<Option<WarpResult>> = (0..warp_width).map(|_| None).collect();
-        let parked =
-            concurrency::try_par_map_bounded_owned(frames, &mut warped, |warped, idx, frame| {
-                let parked = registrar.park(warped, idx, frame)?;
-                if idx != reference {
-                    registering.complete_one();
-                }
-                Ok::<_, AlignStackError>(parked)
-            })?;
+        let parked = par::slots_owned(frames, &mut warped, |warped, idx, frame| {
+            let parked = registrar.park(warped, idx, frame)?;
+            if idx != reference {
+                registering.complete_one();
+            }
+            Ok::<_, AlignStackError>(parked)
+        })?;
         // The workers' warp sets are a warped frame's worth each, and the registrar's scratch a
         // warp's flag planes: the combine sizes its chunks against the memory without them.
         drop(warped);

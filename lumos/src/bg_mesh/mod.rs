@@ -20,6 +20,7 @@ pub(crate) mod tile_stats;
 use std::mem;
 use std::ops::RangeInclusive;
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -111,10 +112,8 @@ impl BgMesh {
         };
 
         self.measured.resize(self.stats.pixels().len(), false);
-        self.stats
-            .pixels_mut()
-            .par_iter_mut()
-            .zip(self.measured.par_iter_mut())
+        par::iter_mut(self.stats.pixels_mut())
+            .zip(par::iter_mut(&mut self.measured))
             .enumerate()
             .for_each_init(
                 || tile_scratch.acquire(),
@@ -132,9 +131,7 @@ impl BgMesh {
                 mask: None,
                 ..*input
             };
-            self.stats
-                .pixels_mut()
-                .par_iter_mut()
+            par::iter_mut(self.stats.pixels_mut())
                 .enumerate()
                 .for_each_init(
                     || tile_scratch.acquire(),
@@ -213,7 +210,7 @@ impl BgMesh {
         let dst = scratch.pixels_mut();
         let last = Vec2us::new(tiles_x - 1, tiles_y - 1);
 
-        dst.par_iter_mut().enumerate().for_each(|(idx, out)| {
+        par::iter_mut(dst).enumerate().for_each(|(idx, out)| {
             let tile = Vec2us::new(idx % tiles_x, idx / tiles_x);
 
             let mut skies = [0.0f32; 9];

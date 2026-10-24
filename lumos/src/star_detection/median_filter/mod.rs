@@ -130,6 +130,7 @@ fn median6(v: &mut [f32]) -> f32 {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use common::par;
     use imaginarium::Buffer2;
     use rayon::prelude::*;
 
@@ -156,9 +157,7 @@ pub(crate) mod internals {
             output.copy_from_slice(pixels);
             return;
         }
-        output
-            .pixels_mut()
-            .par_chunks_mut(size.width)
+        par::chunks_mut(output.pixels_mut(), size.width)
             .enumerate()
             .for_each(|(y, row)| MedianRows::of(pixels, y).filter_into(row));
     }

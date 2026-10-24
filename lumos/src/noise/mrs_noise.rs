@@ -4,6 +4,7 @@
 use std::mem;
 use std::ops::Range;
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -291,8 +292,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let shares = coefficients.shares(&tiles);
         let mut kept = Vec::with_capacity(tiles.len());
         let (largest, widest) = (largest_region(&tiles), widest_region(&tiles));
-        tiles
-            .par_iter()
+        par::iter(&tiles)
             .zip(shares)
             .map_init(
                 || TileScratch::with_room(largest, widest),
@@ -622,9 +622,8 @@ impl<W: Fn(usize) -> bool + Sync> Kept<'_, W> {
     fn sums(&self, shift: f64) -> Sums {
         debug_assert_eq!(self.values.len(), self.gate.len());
         let mut shares = Vec::with_capacity(self.values.len().div_ceil(PASS_SHARE));
-        self.values
-            .par_chunks(PASS_SHARE)
-            .zip(self.gate.par_chunks(PASS_SHARE))
+        par::chunks(self.values, PASS_SHARE)
+            .zip(par::chunks(self.gate, PASS_SHARE))
             .enumerate()
             .map(|(share, (values, gate))| {
                 let start = share * PASS_SHARE;

@@ -3,6 +3,7 @@
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
+use common::par;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -38,8 +39,7 @@ impl<'a> SlotPlanes<'a> {
         pixels: &[SlotPixels<'_>],
     ) -> Result<Vec<ArrayVec<f32, 3>>, StackError> {
         let slot_count = pixels.len();
-        let medians = (0..self.frames.len() * slot_count)
-            .into_par_iter()
+        let medians = par::into_iter(0..self.frames.len() * slot_count)
             .map_init(RadixMedian::default, |median, pair_idx| {
                 let slot = pair_idx % slot_count;
                 let sampling = PlaneSampling {

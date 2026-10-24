@@ -9,6 +9,7 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use arrayvec::ArrayVec;
+use common::par;
 use glam::DVec2;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -129,9 +130,7 @@ impl FlatGain {
         let nodes = (0..cfa_type.color_count())
             .map(|color| {
                 let mut plane = Buffer2::new_default(cols, rows);
-                plane
-                    .pixels_mut()
-                    .par_chunks_mut(cols)
+                par::chunks_mut(plane.pixels_mut(), cols)
                     .enumerate()
                     .for_each(|(j, row)| {
                         for (i, node) in row.iter_mut().enumerate() {
@@ -209,7 +208,7 @@ impl FlatGain {
                 })
                 .collect()
         };
-        rows.into_par_iter().enumerate().for_each(|(j, mut row)| {
+        par::into_iter(rows).enumerate().for_each(|(j, mut row)| {
             for i in 0..grid.cols {
                 let source = to_source(DVec2::new((STEP * i) as f64, (STEP * j) as f64));
                 let point = source_grid.point(source.x as f32, source.y as f32);

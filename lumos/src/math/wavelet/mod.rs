@@ -7,6 +7,7 @@
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
 //! telescoping identity, so the layer pyramid is never materialized.
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -25,8 +26,7 @@ const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0
 pub(crate) fn atrous_smooth(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     debug_assert_eq!((dst.width(), dst.height()), (width, src.height()));
-    dst.pixels_mut()
-        .par_chunks_mut(width)
+    par::chunks_mut(dst.pixels_mut(), width)
         .enumerate()
         .for_each_init(
             || vec![0.0f32; width],

@@ -7,6 +7,7 @@
 use std::ops::Range;
 use std::{array, fmt};
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -263,13 +264,16 @@ impl<'a> MonoDetector<'a> {
             }
             .apply(data, staged, windows);
             changed.clear();
-            changed.par_extend(data.par_chunks(width).zip(staged.par_chunks(width)).map(
-                |(now, before)| {
-                    now.iter()
-                        .zip(before)
-                        .any(|(now, before)| now.to_bits() != before.to_bits())
-                },
-            ));
+            par::extend(
+                changed,
+                par::chunks(data, width)
+                    .zip(par::chunks(staged, width))
+                    .map(|(now, before)| {
+                        now.iter()
+                            .zip(before)
+                            .any(|(now, before)| now.to_bits() != before.to_bits())
+                    }),
+            );
             #[cfg(test)]
             if *recompute == Recompute::EveryRow {
                 changed.fill(true);
@@ -324,8 +328,7 @@ fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
     let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
 
     let OutputBand { first, pixels, .. } = out;
-    pixels
-        .par_chunks_mut(size.width)
+    par::chunks_mut(pixels, size.width)
         .enumerate()
         .for_each(|(row_in_band, row)| {
             let y = first + row_in_band;
@@ -375,45 +378,47 @@ impl WindowMedian {
         let (size, r) = (Size2us::from(data), self.radius);
         let side = 2 * r + 1;
         let OutputBand { first, pixels, .. } = out;
-        pixels.par_chunks_mut(size.width).enumerate().for_each_init(
-            || windows.acquire(),
-            |scratch, (row_in_band, row)| {
-                let y = first + row_in_band;
-                let width = size.width;
-                let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
-                let mut x = 0;
-                while x < width {
-                    if x >= r && x + LANES + r <= width {
-                        scratch.lanes.clear();
-                        for dy in 0..side {
-                            let start = rows(dy) * width + x - r;
-                            for dx in 0..side {
-                                let at = &data[start + dx..start + dx + LANES];
-                                scratch
-                                    .lanes
-                                    .push(array::from_fn(|lane| total_key(at[lane])));
+        par::chunks_mut(pixels, size.width)
+            .enumerate()
+            .for_each_init(
+                || windows.acquire(),
+                |scratch, (row_in_band, row)| {
+                    let y = first + row_in_band;
+                    let width = size.width;
+                    let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
+                    let mut x = 0;
+                    while x < width {
+                        if x >= r && x + LANES + r <= width {
+                            scratch.lanes.clear();
+                            for dy in 0..side {
+                                let start = rows(dy) * width + x - r;
+                                for dx in 0..side {
+                                    let at = &data[start + dx..start + dx + LANES];
+                                    scratch
+                                        .lanes
+                                        .push(array::from_fn(|lane| total_key(at[lane])));
+                                }
                             }
-                        }
-                        let medians = median_of_lanes(&mut scratch.lanes);
-                        for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
-                            *o = from_total_key(key);
-                        }
-                        x += LANES;
-                    } else {
-                        scratch.values.clear();
-                        for dy in 0..side {
-                            let yy = rows(dy);
-                            for dx in 0..side {
-                                let xx = (x + dx).saturating_sub(r).min(width - 1);
-                                scratch.values.push(data[size.idx_of(Vec2us::new(xx, yy))]);
+                            let medians = median_of_lanes(&mut scratch.lanes);
+                            for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
+                                *o = from_total_key(key);
                             }
+                            x += LANES;
+                        } else {
+                            scratch.values.clear();
+                            for dy in 0..side {
+                                let yy = rows(dy);
+                                for dx in 0..side {
+                                    let xx = (x + dx).saturating_sub(r).min(width - 1);
+                                    scratch.values.push(data[size.idx_of(Vec2us::new(xx, yy))]);
+                                }
+                            }
+                            row[x] = statistics::median_mut(&mut scratch.values);
+                            x += 1;
                         }
-                        row[x] = statistics::median_mut(&mut scratch.values);
-                        x += 1;
                     }
-                }
-            },
-        );
+                },
+            );
     }
 }
 
@@ -507,8 +512,7 @@ impl PixelNoise<'_> {
         let span = out.span();
         let first = span.start;
         let OutputBand { pixels, .. } = out;
-        pixels
-            .par_iter_mut()
+        par::iter_mut(pixels)
             .zip(&m5[span])
             .enumerate()
             .for_each(|(idx, (out, &signal))| {
@@ -585,7 +589,7 @@ impl PixelRepair<'_> {
         snapshot.reshape(size.width, size.height, 0.0);
         snapshot.copy_from_slice(data);
         let src: &[f32] = snapshot;
-        data.par_chunks_mut(size.width).enumerate().for_each_init(
+        par::chunks_mut(data, size.width).enumerate().for_each_init(
             || windows.acquire(),
             |scratch, (y, row)| {
                 let buf = &mut scratch.values;

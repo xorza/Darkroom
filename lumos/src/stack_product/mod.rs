@@ -6,6 +6,7 @@ pub(crate) mod quality_planes;
 pub(crate) mod run_report;
 pub(crate) mod weight_kind;
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
@@ -122,7 +123,7 @@ impl StackProduct {
     ) {
         let channels = self.image.channels();
         let fill = |plane: &mut [f32], channel: Option<usize>, value: f32| {
-            plane.par_iter_mut().enumerate().for_each(|(idx, sample)| {
+            par::iter_mut(plane).enumerate().for_each(|(idx, sample)| {
                 let filled = match channel {
                     Some(channel) => empty(channel, idx),
                     None => (0..channels).all(|channel| empty(channel, idx)),

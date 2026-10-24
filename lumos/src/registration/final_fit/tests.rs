@@ -1,3 +1,4 @@
+use common::par;
 use glam::DVec2;
 use rayon::prelude::*;
 
@@ -204,8 +205,7 @@ fn the_fit_reaches_the_cramer_rao_bound() {
         .try_inverse()
         .unwrap();
 
-    let fits: Vec<[f64; 4]> = (0..DRAWS)
-        .into_par_iter()
+    let fits: Vec<[f64; 4]> = par::into_iter(0..DRAWS)
         .map(|seed| {
             let mut rng = TestRng::new(1000 + seed);
             let mut noisy = |p: DVec2, sigma: f64| {

@@ -51,6 +51,7 @@ fn fill_gaussian_kernel_1d(sigma: f32, radius: usize, kernel: &mut Vec<f32>) {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use common::par;
     use imaginarium::Buffer2;
     use rayon::prelude::*;
 
@@ -72,9 +73,7 @@ pub(crate) mod internals {
 
     /// Every row of `input` convolved with `kernel`, into `output`.
     pub(crate) fn convolve_rows(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-        output
-            .pixels_mut()
-            .par_chunks_mut(input.width())
+        par::chunks_mut(output.pixels_mut(), input.width())
             .enumerate()
             .for_each(|(y, output)| {
                 ConvolveRow {
@@ -89,9 +88,7 @@ pub(crate) mod internals {
     /// Every column of `input` convolved with `kernel`, into `output`, mirrored at the top and
     /// bottom.
     pub(crate) fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-        output
-            .pixels_mut()
-            .par_chunks_mut(input.width())
+        par::chunks_mut(output.pixels_mut(), input.width())
             .enumerate()
             .for_each(|(y, out_row)| {
                 ConvolveColsRow {
@@ -110,9 +107,7 @@ pub(crate) mod internals {
         kernel: Kernel2d<'_>,
         output: &mut Buffer2<f32>,
     ) {
-        output
-            .pixels_mut()
-            .par_chunks_mut(pixels.width())
+        par::chunks_mut(output.pixels_mut(), pixels.width())
             .enumerate()
             .for_each(|(y, output_row)| {
                 Convolve2dRow {
@@ -192,13 +187,10 @@ pub(crate) mod internals {
         let kernel = kernels.matched(filter);
         let size = Size2us::from(&*values);
         let width = size.width;
-        temp.pixels_mut()
-            .par_chunks_mut(width)
-            .zip(values.pixels().par_chunks(width))
+        par::chunks_mut(temp.pixels_mut(), width)
+            .zip(par::chunks(values.pixels(), width))
             .for_each(|(ring_row, input)| kernel.ring_row(input, ring_row));
-        values
-            .pixels_mut()
-            .par_chunks_mut(width)
+        par::chunks_mut(values.pixels_mut(), width)
             .enumerate()
             .for_each(|(y, output)| kernel.output_row(temp.pixels(), size, y, output));
     }

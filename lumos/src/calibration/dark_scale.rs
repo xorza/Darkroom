@@ -1,6 +1,7 @@
 //! [`DarkScale`]: the factor a bias-removed dark is subtracted from a light with, fitted on the
 //! defect map's hot pixels where enough of them are clean.
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::calibration::calibration_pass::Subtracted;
@@ -114,8 +115,7 @@ impl FitLight<'_> {
         };
         let less_bias =
             |idx: usize| f64::from(samples[idx]) - self.bias.map_or(0.0, |bias| bias.at(idx));
-        hot.idxs
-            .par_iter()
+        par::iter(&hot.idxs)
             .zip(&hot.excess)
             .map_init(RingReference::default, |ring, (&idx, &excess)| {
                 if unmeasured(idx) {
