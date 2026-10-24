@@ -1,9 +1,9 @@
 //! The tiling both demosaics run on: where the tiles lie, the frame's output planes each tile
 //! writes its own part of, and the memory a run holds.
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
+use crate::unsafe_send_ptr::UnsafeSendPtr;
 
 /// How a kernel tiles a frame.
 #[derive(Debug, Clone, Copy)]

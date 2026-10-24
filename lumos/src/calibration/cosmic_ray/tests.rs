@@ -3,14 +3,15 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+use common::PerWorker;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::bg_mesh::color_mesh::LocalBg;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
-use crate::calibration::cosmic_ray::mono::PixelRepair;
 use crate::calibration::cosmic_ray::mono::internals::median_window;
+use crate::calibration::cosmic_ray::mono::{PixelRepair, WindowScratch};
 use crate::calibration::cosmic_ray::noise_model::PixelBg;
 use crate::calibration::cosmic_ray::*;
 use crate::image::pixel_flags::PixelFlags;
@@ -22,7 +23,6 @@ use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
-use crate::scratch_pool::ScratchPool;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -395,7 +395,11 @@ fn a_repair_matches_a_snapshot_reference() {
             unread: None,
             local: &local,
         }
-        .apply(&mut got, &mut Buffer2::default(), &ScratchPool::default());
+        .apply(
+            &mut got,
+            &mut Buffer2::default(),
+            &PerWorker::new(WindowScratch::default),
+        );
         got
     };
 

@@ -10,7 +10,6 @@ use crate::combine::error::StackError;
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::common_domain::CommonDomain;
 use crate::combine::normalization::slot_pixels::SlotPixels;
-use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::image_dimensions::ImageDimensions;
@@ -76,7 +75,7 @@ impl<'a> SlotPlanes<'a> {
         };
         let values = confidence.chunk(0..self.dimensions.pixel_count());
         let mut inverse_confidence = 0.0;
-        for chunk in idxs.chunks(CANCEL_POLL_CHUNK) {
+        for chunk in idxs.chunks(CancelToken::POLL_CHUNK) {
             Cancelled::check(self.cancel)?;
             for &idx in chunk {
                 let value = f64::from(values[idx]);
@@ -110,7 +109,7 @@ impl PlaneSampling<'_> {
         debug_assert!(self.idxs.is_sorted(), "the sample indices ascend");
         samples.clear();
         samples.reserve_exact(self.idxs.len());
-        for chunk in self.idxs.chunks(CANCEL_POLL_CHUNK) {
+        for chunk in self.idxs.chunks(CancelToken::POLL_CHUNK) {
             Cancelled::check(cancel)?;
             samples.extend(chunk.iter().map(|&idx| values[idx]));
         }

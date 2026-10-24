@@ -10,7 +10,6 @@ use fits_well::image::{Scaling, View as FitsView};
 use fits_well::io::StreamSource;
 use rayon::prelude::*;
 
-use crate::concurrency;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
@@ -272,7 +271,7 @@ impl HduDecode<'_> {
         let width = plan.dimensions.width();
         let height = plan.dimensions.height();
         let expected_pixels = plan.dimensions.pixel_count();
-        let mut output = concurrency::zeroed_in_parallel(expected_pixels);
+        let mut output = zeroed_plane(expected_pixels);
         let mut nulls: Option<NullSummary> = None;
         let mut scan = SampleScan::EMPTY;
         for row_start in (0..height).step_by(plan.rows_per_chunk) {
@@ -578,6 +577,19 @@ fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
         count,
         first_idx: first_idx.expect("only called for a chunk already known to hold a null"),
     }
+}
+
+/// The `f32` samples of a 2 MiB transparent huge page.
+const HUGE_PAGE_SAMPLES: usize = 2 * 1024 * 1024 / size_of::<f32>();
+
+/// `len` zeros, each 2 MiB page first written by one worker, for a plane the conversion then fills
+/// in chunks smaller than a page. A fresh plane's pages are zeroed by the kernel at the first write
+/// to each; when the chunks make those first writes, several workers fault on one huge page and
+/// wait on each other, which made a 24 MP decode 50 % slower.
+fn zeroed_plane(len: usize) -> Vec<f32> {
+    let mut plane = vec![0.0; len];
+    par::chunks_mut(&mut plane, HUGE_PAGE_SAMPLES).for_each(|block| block.fill(0.0));
+    plane
 }
 
 #[cfg(test)]

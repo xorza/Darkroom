@@ -16,9 +16,9 @@ use common::{Introspect, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::intensity::Intensity;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;

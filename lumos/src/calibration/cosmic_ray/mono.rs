@@ -7,7 +7,7 @@
 use std::ops::Range;
 use std::{array, fmt};
 
-use common::par;
+use common::{PerWorker, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -19,7 +19,6 @@ use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
 use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::vec2us::Vec2us;
-use crate::scratch_pool::{ScratchPool, Shapeless};
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
 pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
@@ -76,8 +75,8 @@ pub(super) struct MonoDetector<'a> {
     scratch: MonoScratch,
     /// The masks of the detection at hand, cleared for each plane.
     masks: CrMasks,
-    /// The window medians' per-job scratch, reused by every pass.
-    windows: ScratchPool<WindowScratch>,
+    /// The window medians' scratch, one for each worker, reused by every pass.
+    windows: PerWorker<WindowScratch>,
     /// One flag a row: whether the last repair changed it, every row before the first, which
     /// computes them all. A row no repair reached recomputes to the same bits, so only the rows a
     /// stage's reach takes from a changed one are worked again.
@@ -106,7 +105,7 @@ impl<'a> MonoDetector<'a> {
             noise,
             scratch: MonoScratch::default(),
             masks: CrMasks::empty(),
-            windows: ScratchPool::default(),
+            windows: PerWorker::new(WindowScratch::default),
             changed: Vec::new(),
             bands: Vec::new(),
             #[cfg(test)]
@@ -363,10 +362,10 @@ fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
 /// difference while `median₇` stayed replicated would corrupt the border in a way neither
 /// convention does alone. Replication is also the usual choice for astronomical median filtering.
 ///
-/// Eight pixels whose windows lie inside the row take their medians together by forgetful
-/// selection ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value
-/// `median_mut` picks, NaN and signed zero included; a pixel whose window crosses a side edge
-/// gathers its replicated window and takes `median_mut`.
+/// Eight pixels at a time take their medians together by forgetful selection
+/// ([`median_of_lanes`]) on `total_cmp`'s integer keys, so each is the value `median_mut` picks,
+/// NaN and signed zero included. A group at a side edge reads its windows from its window rows
+/// replicated past the edge, so it takes the same selection as any other.
 #[derive(Debug, Clone, Copy)]
 struct WindowMedian {
     radius: usize,
@@ -374,65 +373,70 @@ struct WindowMedian {
 
 impl WindowMedian {
     /// The window medians of `data` over the rows of `out`. Row-parallel.
-    fn rows(self, data: &Buffer2<f32>, out: OutputBand<'_>, windows: &ScratchPool<WindowScratch>) {
+    fn rows(self, data: &Buffer2<f32>, out: OutputBand<'_>, windows: &PerWorker<WindowScratch>) {
+        let OutputBand { first, pixels, .. } = out;
+        par::chunks_mut(pixels, data.width())
+            .enumerate()
+            .for_each(|(row_in_band, row)| {
+                self.row(data, first + row_in_band, row, &mut windows.get());
+            });
+    }
+
+    /// Row `y`'s window medians into `out`, eight pixels at a time; past the row's end, a group's
+    /// lanes read the replicated edge and are not written.
+    fn row(self, data: &Buffer2<f32>, y: usize, out: &mut [f32], scratch: &mut WindowScratch) {
         let (size, r) = (Size2us::from(data), self.radius);
         let side = 2 * r + 1;
-        let OutputBand { first, pixels, .. } = out;
-        par::chunks_mut(pixels, size.width)
-            .enumerate()
-            .for_each_init(
-                || windows.acquire(),
-                |scratch, (row_in_band, row)| {
-                    let y = first + row_in_band;
-                    let width = size.width;
-                    let rows = |dy: usize| (y + dy).saturating_sub(r).min(size.height - 1);
-                    let mut x = 0;
-                    while x < width {
-                        if x >= r && x + LANES + r <= width {
-                            scratch.lanes.clear();
-                            for dy in 0..side {
-                                let start = rows(dy) * width + x - r;
-                                for dx in 0..side {
-                                    let at = &data[start + dx..start + dx + LANES];
-                                    scratch
-                                        .lanes
-                                        .push(array::from_fn(|lane| total_key(at[lane])));
-                                }
-                            }
-                            let medians = median_of_lanes(&mut scratch.lanes);
-                            for (o, key) in row[x..x + LANES].iter_mut().zip(medians) {
-                                *o = from_total_key(key);
-                            }
-                            x += LANES;
-                        } else {
-                            scratch.values.clear();
-                            for dy in 0..side {
-                                let yy = rows(dy);
-                                for dx in 0..side {
-                                    let xx = (x + dx).saturating_sub(r).min(width - 1);
-                                    scratch.values.push(data[size.idx_of(Vec2us::new(xx, yy))]);
-                                }
-                            }
-                            row[x] = statistics::median_mut(&mut scratch.values);
-                            x += 1;
-                        }
+        let window_row = |dy: usize| data.row((y + dy).saturating_sub(r).min(size.height - 1));
+        // The source columns under eight pixels' windows: from `r` left of the first to `r` right
+        // of the last.
+        let span = LANES + 2 * r;
+        let WindowScratch { block, lanes, .. } = scratch;
+        for x in (0..size.width).step_by(LANES) {
+            lanes.clear();
+            if let Some(left) = x.checked_sub(r).filter(|&left| left + span <= size.width) {
+                for dy in 0..side {
+                    let row = &window_row(dy)[left..left + span];
+                    for dx in 0..side {
+                        let at = &row[dx..dx + LANES];
+                        lanes.push(array::from_fn(|lane| total_key(at[lane])));
                     }
-                },
-            );
+                }
+            } else {
+                // A group at a side edge: its window rows, replicated past the edge, once.
+                block.clear();
+                for dy in 0..side {
+                    let row = window_row(dy);
+                    let col = |at: usize| row[at.saturating_sub(r).min(size.width - 1)];
+                    block.extend((x..x + span).map(|at| total_key(col(at))));
+                }
+                for dy in 0..side {
+                    let row = &block[dy * span..(dy + 1) * span];
+                    for dx in 0..side {
+                        let at = &row[dx..dx + LANES];
+                        lanes.push(array::from_fn(|lane| at[lane]));
+                    }
+                }
+            }
+            let medians = median_of_lanes(lanes);
+            for (o, key) in out[x..].iter_mut().zip(medians) {
+                *o = from_total_key(key);
+            }
+        }
     }
 }
 
 /// The pixels one forgetful selection runs over at once: an AVX2 register of `i32`s.
 const LANES: usize = 8;
 
-/// One worker's windows: a pixel's values, and eight pixels' keys, value by value.
+/// One worker's windows: a repaired pixel's values, and eight pixels' window rows as keys and
+/// their keys value by value.
 #[derive(Debug, Default)]
 pub(super) struct WindowScratch {
     values: Vec<f32>,
+    block: Vec<i32>,
     lanes: Vec<[i32; LANES]>,
 }
-
-impl Shapeless for WindowScratch {}
 
 /// `total_cmp`'s key for `value`: an `i32` whose order is the total order of the f32s.
 #[inline(always)]
@@ -578,7 +582,7 @@ impl PixelRepair<'_> {
         self,
         data: &mut Buffer2<f32>,
         snapshot: &mut Buffer2<f32>,
-        windows: &ScratchPool<WindowScratch>,
+        windows: &PerWorker<WindowScratch>,
     ) {
         let Self {
             flagged: mask,
@@ -589,9 +593,10 @@ impl PixelRepair<'_> {
         snapshot.reshape(size.width, size.height, 0.0);
         snapshot.copy_from_slice(data);
         let src: &[f32] = snapshot;
-        par::chunks_mut(data, size.width).enumerate().for_each_init(
-            || windows.acquire(),
-            |scratch, (y, row)| {
+        par::chunks_mut(data, size.width)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let mut scratch = windows.get();
                 let buf = &mut scratch.values;
                 for (x, o) in row.iter_mut().enumerate() {
                     if !mask.get_at(Vec2us::new(x, y)) {
@@ -619,8 +624,7 @@ impl PixelRepair<'_> {
                         statistics::median_mut(buf)
                     };
                 }
-            },
-        );
+            });
     }
 }
 
@@ -644,17 +648,17 @@ fn ring(centre: Vec2us, reach: usize, size: Size2us) -> impl Iterator<Item = (us
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use common::PerWorker;
     use imaginarium::Buffer2;
 
     use crate::bg_mesh::color_mesh::LocalBg;
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
     use crate::calibration::cosmic_ray::mono::{
-        MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian,
+        MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian, WindowScratch,
     };
     use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
     use crate::image::image_metadata::ImageMetadata;
-    use crate::scratch_pool::ScratchPool;
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
     pub(crate) fn median_window(data: &Buffer2<f32>, r: usize) -> Buffer2<f32> {
@@ -663,7 +667,7 @@ pub(crate) mod internals {
         WindowMedian { radius: r }.rows(
             data,
             OutputBand::of(&mut out, rows),
-            &ScratchPool::default(),
+            &PerWorker::new(WindowScratch::default),
         );
         out
     }

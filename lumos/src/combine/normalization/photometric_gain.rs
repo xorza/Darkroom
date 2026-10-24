@@ -16,7 +16,6 @@
 use common::CancelToken;
 
 use crate::combine::error::StackError;
-use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::spread::Spread;
@@ -285,12 +284,12 @@ impl SamplePair<'_> {
         Ok(paired)
     }
 
-    /// The pairs in runs of [`CANCEL_POLL_CHUNK`], the frame's beside the reference's.
+    /// The pairs in runs of [`CancelToken::POLL_CHUNK`], the frame's beside the reference's.
     fn chunks(&self) -> impl Iterator<Item = (&[f32], &[f32])> {
         self.frame
             .samples
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(self.reference.samples.chunks(CANCEL_POLL_CHUNK))
+            .chunks(CancelToken::POLL_CHUNK)
+            .zip(self.reference.samples.chunks(CancelToken::POLL_CHUNK))
     }
 
     /// The median ratio `(y − m_y)/(x − m_x)` over the pairs bright on both sides, gathered in
