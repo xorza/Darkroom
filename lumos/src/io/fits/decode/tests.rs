@@ -1,7 +1,8 @@
 use common::{CancelToken, TempDir, fs};
 use fits_well::FitsWriter;
+use fits_well::compress::{Compression, CompressionConfig};
 use fits_well::header::Header;
-use fits_well::image::{Bitpix, Compression, CompressionConfig, Image, Scaling};
+use fits_well::image::{Bitpix, Image, Scaling};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus, HduKind};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;

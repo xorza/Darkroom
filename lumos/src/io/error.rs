@@ -217,6 +217,8 @@ impl Display for ScientificRefusal {
 mod tests {
     use std::io;
 
+    use fits_well::error::CompressionParameter;
+
     use crate::io::error::WriteError;
 
     /// fits-well's I/O failure lands in [`WriteError::Io`], beside lumos's own; any other
@@ -229,7 +231,7 @@ mod tests {
             WriteError::Io(error) if error.to_string() == "disk full"
         ));
         let refusal = fits_well::FitsError::InvalidCompressionParameter {
-            detail: "x".to_string(),
+            parameter: CompressionParameter::TableWithoutCodec,
         };
         let wrapped = WriteError::from(refusal);
         assert!(
