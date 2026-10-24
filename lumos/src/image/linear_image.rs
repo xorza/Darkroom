@@ -5,7 +5,7 @@ use common::par;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
-use crate::concurrency::SAMPLES_PER_BLOCK;
+use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;

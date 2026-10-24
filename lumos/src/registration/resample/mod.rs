@@ -7,7 +7,6 @@ use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::image::flat_gain::frame_gain::FrameGain;
@@ -26,6 +25,7 @@ use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::{ScratchPool, Shapeless};
+use crate::unsafe_send_ptr::UnsafeSendPtr;
 
 mod flagged_sources;
 mod frame_sampler;

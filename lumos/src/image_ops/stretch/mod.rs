@@ -43,9 +43,9 @@ use common::IntrospectEnum;
 use common::par;
 use rayon::prelude::*;
 
-use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
 use crate::image_ops::error::{AutoStretch, OpError};

@@ -41,7 +41,6 @@ mod bg_mesh;
 mod bit_buffer2;
 mod calibration;
 mod combine;
-mod concurrency;
 mod config_field;
 mod decode;
 mod drizzle;
@@ -63,6 +62,7 @@ mod scratch_pool;
 mod simd;
 mod stack_product;
 mod star_detection;
+mod unsafe_send_ptr;
 
 pub use calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration::cosmic_ray::error::CosmicRayError;

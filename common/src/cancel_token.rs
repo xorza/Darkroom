@@ -32,6 +32,11 @@ enum State {
 }
 
 impl CancelToken {
+    /// How many items a cancellable walk covers between polls of its token, rather than test it
+    /// per item. A granularity, not tuned to any one walk: small enough that a cancelled run stops
+    /// promptly and large enough that the poll is lost in the work.
+    pub const POLL_CHUNK: usize = 16_384;
+
     /// A fresh, live token that can be cancelled.
     pub fn new() -> Self {
         Self(State::Live(Arc::new(AtomicBool::new(false))))

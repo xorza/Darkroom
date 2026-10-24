@@ -7,7 +7,6 @@
 
 use common::CancelToken;
 
-use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
@@ -108,12 +107,12 @@ impl FrameCheck<'_> {
         );
         let idx = self.idx;
         for (chunk, (support, confidence)) in support
-            .chunks(CANCEL_POLL_CHUNK)
-            .zip(confidence.chunks(CANCEL_POLL_CHUNK))
+            .chunks(CancelToken::POLL_CHUNK)
+            .zip(confidence.chunks(CancelToken::POLL_CHUNK))
             .enumerate()
         {
             Cancelled::check(self.cancel)?;
-            let pixel = |offset| chunk * CANCEL_POLL_CHUNK + offset;
+            let pixel = |offset| chunk * CancelToken::POLL_CHUNK + offset;
             for (offset, (&support, &confidence)) in support.iter().zip(confidence).enumerate() {
                 for (kind, value) in [(kind, support), (FramePlane::Confidence, confidence)] {
                     if !kind.accepts(value) {
@@ -190,14 +189,14 @@ impl FrameCheck<'_> {
         channels: impl IntoIterator<Item = &'s [f32]>,
     ) -> Result<(), AdmissionError> {
         for (channel, samples) in channels.into_iter().enumerate() {
-            for (chunk, values) in samples.chunks(CANCEL_POLL_CHUNK).enumerate() {
+            for (chunk, values) in samples.chunks(CancelToken::POLL_CHUNK).enumerate() {
                 Cancelled::check(self.cancel)?;
                 for (offset, value) in values.iter().copied().enumerate() {
                     if !value.is_finite() {
                         return Err(AdmissionError::NonFiniteImageSample {
                             idx: self.idx,
                             channel,
-                            pixel: chunk * CANCEL_POLL_CHUNK + offset,
+                            pixel: chunk * CancelToken::POLL_CHUNK + offset,
                             value,
                         });
                     }

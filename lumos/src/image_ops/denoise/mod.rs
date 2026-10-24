@@ -21,9 +21,9 @@ use common::{Introspect, IntrospectEnum, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::concurrency::SAMPLES_PER_BLOCK;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::{LinearImage, PlanesWithFlags};
 use crate::image::quality_map::QualityMap;
 use crate::image_ops::error::OpError;

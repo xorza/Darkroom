@@ -18,7 +18,6 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::combine::error::StackError;
 use crate::combine::frame_read::frame_gate::FrameGate;
-use crate::concurrency::CANCEL_POLL_CHUNK;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stratified_samples::SAMPLE_LIMIT;
@@ -29,7 +28,7 @@ use crate::math::vec2us::Vec2us;
 const WORD_BITS: usize = u64::BITS as usize;
 
 const _: () = assert!(
-    CANCEL_POLL_CHUNK.is_multiple_of(WORD_BITS),
+    CancelToken::POLL_CHUNK.is_multiple_of(WORD_BITS),
     "a gather chunk starts on a mask word"
 );
 
@@ -66,7 +65,7 @@ impl CommonDomain {
         let mut common_domain = Self::full_mask(coverage.pixel_count);
         par::chunks_mut(
             common_domain.row_words_mut(0),
-            CANCEL_POLL_CHUNK / WORD_BITS,
+            CancelToken::POLL_CHUNK / WORD_BITS,
         )
         .enumerate()
         .try_for_each(|(span, words)| coverage.intersect(span, words, cancel))?;
@@ -83,7 +82,7 @@ impl CommonDomain {
         let mut common_domain = Self::full_mask(coverage.pixel_count);
         for (span, words) in common_domain
             .row_words_mut(0)
-            .chunks_mut(CANCEL_POLL_CHUNK / WORD_BITS)
+            .chunks_mut(CancelToken::POLL_CHUNK / WORD_BITS)
             .enumerate()
         {
             coverage.intersect(span, words, cancel)?;
@@ -116,11 +115,11 @@ impl CommonDomain {
     ) -> Result<Self, StackError> {
         let pixel_count = size.pixel_count();
         let mut valid = self.valid.clone();
-        par::chunks_mut(valid.row_words_mut(0), CANCEL_POLL_CHUNK / WORD_BITS)
+        par::chunks_mut(valid.row_words_mut(0), CancelToken::POLL_CHUNK / WORD_BITS)
             .enumerate()
             .try_for_each(|(span, words)| {
                 Cancelled::check(cancel)?;
-                let base = span * CANCEL_POLL_CHUNK;
+                let base = span * CancelToken::POLL_CHUNK;
                 if base < pixel_count {
                     let end = (base + words.len() * WORD_BITS).min(pixel_count);
                     intersect_span(words, end - base, |idx| {
@@ -141,9 +140,9 @@ impl CommonDomain {
         cancel: &CancelToken,
         mut visit: impl FnMut(&[f32]),
     ) -> Result<(), StackError> {
-        for (chunk, chunk_values) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
+        for (chunk, chunk_values) in values.chunks(CancelToken::POLL_CHUNK).enumerate() {
             Cancelled::check(cancel)?;
-            let base = chunk * CANCEL_POLL_CHUNK;
+            let base = chunk * CancelToken::POLL_CHUNK;
             let end = base + chunk_values.len();
             // The mask is one row, so word `w` covers pixels `64w..64w + 64`, and a chunk starts on
             // a word: its words are read once each instead of a bit lookup per pixel, and a full
@@ -181,12 +180,12 @@ impl CommonDomain {
         for (group, words) in self
             .valid
             .row_words(0)
-            .chunks(CANCEL_POLL_CHUNK / WORD_BITS)
+            .chunks(CancelToken::POLL_CHUNK / WORD_BITS)
             .enumerate()
         {
             Cancelled::check(cancel)?;
             for (offset, &word) in words.iter().enumerate() {
-                let base = (group * (CANCEL_POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
+                let base = (group * (CancelToken::POLL_CHUNK / WORD_BITS) + offset) * WORD_BITS;
                 let mut bits = word;
                 while bits != 0 && idxs.len() < retained {
                     let bit = bits.trailing_zeros() as usize;
@@ -221,7 +220,7 @@ impl ChannelCoverage<'_> {
         cancel: &CancelToken,
     ) -> Result<(), StackError> {
         Cancelled::check(cancel)?;
-        let base = span * CANCEL_POLL_CHUNK;
+        let base = span * CancelToken::POLL_CHUNK;
         if base < self.pixel_count {
             let end = (base + words.len() * WORD_BITS).min(self.pixel_count);
             for frame in self.frames {

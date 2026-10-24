@@ -7,7 +7,7 @@
 use common::par;
 use rayon::prelude::*;
 
-use crate::concurrency::SAMPLES_PER_BLOCK;
+use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image_ops::error::MlError;

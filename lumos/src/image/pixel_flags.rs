@@ -8,12 +8,12 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::{ScratchPool, Shapeless};
+use crate::unsafe_send_ptr::UnsafeSendPtr;
 
 /// Which pixels of an image carry which [`QualityFlags`].
 ///
