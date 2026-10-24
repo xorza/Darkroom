@@ -351,6 +351,10 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
     let image = Image::new([2, 2, 3], planar, Scaling::IDENTITY).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test's own write, outside every loop"
+    )]
     FitsWriter::new(fs::create(&path).unwrap())
         .write_compressed_image(
             image.view(),

@@ -25,6 +25,7 @@ use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretati
 use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension::{self, LocatedGain};
 use crate::io::fits::lumos_extension::DescribedImage;
+use crate::io::fits::tile_parallel;
 use crate::io::fits::{cfa, linear, metadata};
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
@@ -321,7 +322,9 @@ fn read_extension_in_chunks<T: ExtensionSample>(
             if shape.len() == 3 {
                 ranges.push(slice..slice + 1);
             }
-            plane.extend_from_slice(T::of(image.view(ranges.as_slice(), &mut words)?.samples()));
+            plane.extend_from_slice(T::of(
+                tile_parallel::view(&mut image, ranges.as_slice(), &mut words)?.samples(),
+            ));
         }
         planes.push(plane);
     }

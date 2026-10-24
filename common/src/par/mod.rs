@@ -202,8 +202,12 @@ where
     })
 }
 
-/// Panics on a pool worker, where only a parallel loop's body runs.
-fn enter() {
+/// The check every entry point here runs, for a wrapper around another crate's function that
+/// starts parallel work of its own and cannot call this module.
+///
+/// # Panics
+/// On a pool worker, where only a parallel loop's body runs.
+pub fn enter() {
     assert!(
         outside_body(),
         "a parallel loop's body starts no parallel work: a worker waiting on it would run other \
