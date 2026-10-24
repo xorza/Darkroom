@@ -70,8 +70,8 @@ mod tests {
     /// 50 000 is gone by then, and leaves it at 100 000 B. As a plain frame
     /// its noise is measured by MRS over one tile that is the frame, 10 000 coefficients of 33
     /// bytes and a region of 28 bytes a pixel, 610 000, the tile's 136 bytes of bookkeeping, and a
-    /// row of 100 pixels, 400 B, for each worker to smooth through: a peak of 660 536 B on one
-    /// worker, and 2800 B more on eight.
+    /// row of 100 pixels, 400 B, for the one worker that takes the tile: a peak of 660 536 B
+    /// however many workers there are.
     #[test]
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
         let rggb = Some(Mosaic::Bayer(CfaPattern::Rggb));
@@ -86,7 +86,7 @@ mod tests {
             (rggb, bytes(0, 50_000), [100_000; 2]),
             (rggb, bytes(120_000, 0), [120_000; 2]),
             (rggb, bytes(30_000, 50_000), [100_000; 2]),
-            (None, bytes(0, 0), [660_536, 663_336]),
+            (None, bytes(0, 0), [660_536; 2]),
         ] {
             for (workers, peak) in [1, 8].into_iter().zip(peaks) {
                 assert_eq!(

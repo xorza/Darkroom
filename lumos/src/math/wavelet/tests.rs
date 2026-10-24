@@ -1,7 +1,9 @@
 use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
-use crate::math::wavelet::{B3, SmoothRow, atrous_smooth, max_scales, reflect, white_noise_sigma};
+use crate::math::wavelet::{
+    B3, SmoothRow, atrous_smooth, atrous_smooth_serial, max_scales, reflect, white_noise_sigma,
+};
 use crate::simd::isa_tier::IsaTier;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
@@ -62,16 +64,28 @@ fn atrous_smooth_preserves_constant() {
 /// 4, 1)/16` on both axes, taps `step` apart, every out-of-frame tap mirrored without repeating the
 /// edge — at every pixel, for hole spacings that stay inside the frame and ones that reach past it
 /// on both sides (17 × 13 against a reach of 2·8). The f32 path rounds each of its two five-tap
-/// passes, a few ε of the largest value (0.8), held to 8ε of it.
+/// passes, a few ε of the largest value (0.8), held to 8ε of it. The serial form gives the
+/// parallel form's bits, through a row of scratch that starts the wrong length and dirty.
 #[test]
 fn atrous_smooth_is_the_b3_convolution() {
     let size = Size2us::new(17, 13);
     let src = pattern(size);
     let weights = [1.0f64, 4.0, 6.0, 4.0, 1.0].map(|w| w / 16.0);
     let mut dst = Buffer2::new_default(size.width, size.height);
+    let mut serial = Buffer2::new_default(size.width, size.height);
+    let mut col = vec![9.0; 3];
     let bound = 8.0 * f64::from(f32::EPSILON) * 0.8;
     for step in [1usize, 2, 4, 8] {
         atrous_smooth(&src, &mut dst, step);
+        atrous_smooth_serial(&src, &mut serial, step, &mut col);
+        assert!(
+            serial
+                .pixels()
+                .iter()
+                .zip(dst.pixels())
+                .all(|(a, b)| a.to_bits() == b.to_bits()),
+            "step {step}: the serial form differs"
+        );
         for y in 0..size.height {
             for x in 0..size.width {
                 let mut expected = 0.0f64;
