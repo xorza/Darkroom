@@ -1,8 +1,13 @@
-use fits_well::FitsError;
-use fits_well::error::ExpectedHdu;
+use std::fs::File;
+use std::ops::Range;
+
+use arrayvec::ArrayVec;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType, Scaling};
-use fits_well::io::{Hdu, HduKind};
+use fits_well::image::{
+    Bitpix as FitsBitpix, Metadata as FitsMetadata, Region, SampleType, Scaling,
+};
+use fits_well::io::StreamSource;
+use fits_well::{FitsError, ImageReader};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
@@ -25,35 +30,46 @@ const FLOAT_ADU_DIVISOR: f64 = 65_535.0;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
-    kind: HduKind,
     image: FitsMetadata<'a>,
     source_bytes: u64,
 }
 
+/// What fits-well's reader of `image` holds viewing `regions` in turn and finishing the
+/// checksum: its bound, saturated at `u64::MAX`, which the plan then refuses as an overflow.
+pub(super) fn reader_bytes(
+    image: &ImageReader<'_, StreamSource<File>>,
+    regions: &[ArrayVec<Range<usize>, 3>],
+) -> Result<u64, FitsError> {
+    let views = image.view_bytes(regions.iter().map(|ranges| Region::from(ranges.as_slice())))?;
+    Ok(views
+        .kept
+        .saturating_add(views.handle)
+        .saturating_add(image.finish_bytes()))
+}
+
 impl<'a> FitsHduDescription<'a> {
-    /// The image at HDU `idx`, `hdu`.
-    pub(super) fn from_hdu(hdu: &'a Hdu, idx: usize) -> Result<Self, FitsLoadError> {
-        let image = hdu.image_metadata().map_err(|source| match source {
-            FitsError::HduKindMismatch {
-                expected: ExpectedHdu::Image,
-                ..
-            } => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: idx }),
-            source => FitsLoadError::from(source),
-        })?;
-        Ok(Self {
-            header: &hdu.header,
-            kind: hdu.kind,
-            image,
-            source_bytes: hdu.padded_data_bytes(),
-        })
+    /// The image `image` opens, its data unit `source_bytes` as stored.
+    pub(super) const fn of_image(
+        image: &ImageReader<'a, StreamSource<File>>,
+        source_bytes: u64,
+    ) -> Self {
+        Self {
+            header: image.header(),
+            image: image.metadata(),
+            source_bytes,
+        }
     }
 
-    /// How the image decodes under `cube` and `float_scale`: its shape, its scale, and the memory
-    /// each step holds, refused when a size overflows.
+    /// How the image decodes under `cube` and `float_scale`: its shape, its scale, the rows a chunk
+    /// reads, and the memory each step holds, refused when a size overflows. A chunk spans every
+    /// plane, and an image tiled in `tiles` reads whole rows of its tiles, so each tile decodes
+    /// once; `reader` gives what fits-well's reader holds reading the chunks.
     pub(super) fn plan(
         self,
         cube: FitsCubeInterpretation,
         float_scale: FitsFloatScale,
+        tiles: Option<&[usize]>,
+        reader: impl FnOnce(&[ArrayVec<Range<usize>, 3>]) -> Result<u64, FitsError>,
     ) -> Result<FitsDecodePlan, FitsLoadError> {
         let dimensions = dimensions_from_shape(self.image.shape, cube)?;
         let stored_bitpix = self.image.bitpix;
@@ -66,21 +82,29 @@ impl<'a> FitsHduDescription<'a> {
             size_of::<f32>(),
             FitsAllocation::DecodedOutput,
         )?;
-        let row_samples = dimensions.width();
+        let row_samples = dimensions
+            .width()
+            .checked_mul(dimensions.channels())
+            .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
         let row_f32_bytes = row_samples
             .checked_mul(size_of::<f32>())
             .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
-        let rows_per_chunk = (CHUNK_BYTES / row_f32_bytes.max(1))
-            .max(1)
-            .min(dimensions.height());
+        let rows_per_chunk = chunk_rows(
+            CHUNK_BYTES / row_f32_bytes.max(1),
+            dimensions.height(),
+            tiles.map(|tiles| tiles[1]),
+        );
         let chunk_samples = row_samples
             .checked_mul(rows_per_chunk)
             .ok_or_else(|| overflow(FitsAllocation::DecodeChunk))?;
-        let native_chunk_bytes = checked_bytes(
+        // The words a chunk's samples land in, which the conversion writes straight into the
+        // planes and which are still held while the flag plane is built.
+        let words_bytes = checked_bytes(
             chunk_samples,
             stored_bitpix.elem_size(),
             FitsAllocation::NativeDecodeChunk,
-        )?;
+        )?
+        .next_multiple_of(size_of::<u64>() as u64);
         // A byte per pixel, which the decode builds beside the planes once it meets a null or a
         // saturation level to flag against.
         let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || data_max.is_some() {
@@ -88,25 +112,11 @@ impl<'a> FitsHduDescription<'a> {
         } else {
             0
         };
-        // The reader's copy of a chunk as stored, and the words it byte-swaps it into — none for
-        // bytes, which it hands over as read — which the conversion writes straight into the output
-        // and which are still held while the flag plane is built.
-        let swapped_chunk_bytes = if stored_bitpix == FitsBitpix::U8 {
-            0
-        } else {
-            native_chunk_bytes.next_multiple_of(size_of::<u64>() as u64)
-        };
-        let peak_bytes = decoded_bytes
-            .checked_add(native_chunk_bytes)
-            .and_then(|bytes| bytes.checked_add(swapped_chunk_bytes))
+        let regions: Vec<_> = chunk_regions(self.image.shape, rows_per_chunk).collect();
+        let peak_bytes = reader(&regions)?
+            .checked_add(decoded_bytes)
+            .and_then(|bytes| bytes.checked_add(words_bytes))
             .and_then(|bytes| bytes.checked_add(flag_plane_bytes))
-            .and_then(|bytes| {
-                if self.kind == HduKind::CompressedImage {
-                    bytes.checked_add(self.source_bytes.checked_mul(2)?)
-                } else {
-                    Some(bytes)
-                }
-            })
             .ok_or_else(|| overflow(FitsAllocation::PeakMemory))?;
 
         Ok(FitsDecodePlan {
@@ -120,7 +130,6 @@ impl<'a> FitsHduDescription<'a> {
             decoded_bytes,
             flag_plane_bytes,
             peak_bytes,
-            native_chunk_bytes,
             rows_per_chunk,
         })
     }
@@ -256,26 +265,53 @@ pub(super) struct FitsDecodePlan {
     /// The flag plane the decode builds when the header allows a null or declares a `DATAMAX`.
     flag_plane_bytes: u64,
     pub(super) peak_bytes: u64,
-    /// One chunk of the image as stored, which the reader's buffer holds.
-    native_chunk_bytes: u64,
     pub(super) rows_per_chunk: usize,
 }
 
 impl FitsDecodePlan {
-    /// What the decode holds beside the frame it makes, its pixels and its flags: the reader's
-    /// chunk buffers, and a compressed image's tiles, while it reads the image; then, while it
-    /// reads each extension of `extensions` bytes in turn, the reader's buffer — which it keeps,
-    /// grown to the largest read so far — and the extension's own copy.
+    /// What the decode holds beside the frame it makes, its pixels and its flags: a chunk's words
+    /// and what the reader holds while it reads the image, and the largest of `extensions`, the
+    /// reads of the extensions after it. The sum, not the larger, as what the reader keeps of the
+    /// image while it reads an extension is not tracked. The image's part, counted again, is a
+    /// chunk and the reader's buffers, small beside the frame, and it covers what the reader holds
+    /// for a plain extension, which [`ExtensionChunks::read_bytes`] leaves out.
+    ///
+    /// [`ExtensionChunks::read_bytes`]: crate::io::fits::decode::extension_chunks::ExtensionChunks::read_bytes
     pub(super) fn beside_frame_bytes(&self, extensions: &[u64]) -> u64 {
-        let mut buffer = self.native_chunk_bytes;
-        extensions.iter().fold(
-            self.peak_bytes - self.decoded_bytes - self.flag_plane_bytes,
-            |beside, &bytes| {
-                buffer = buffer.max(bytes);
-                beside.max(buffer + bytes)
-            },
-        )
+        let image = self.peak_bytes - self.decoded_bytes - self.flag_plane_bytes;
+        image.saturating_add(extensions.iter().copied().max().unwrap_or(0))
     }
+}
+
+/// The rows a chunk reads: `rows` of an image `height` rows high, or, for one whose tiles are
+/// `tile_rows` high, the whole rows of tiles they hold, one at least, so a chunk boundary never
+/// cuts a tile and each tile decodes once.
+fn chunk_rows(rows: usize, height: usize, tile_rows: Option<usize>) -> usize {
+    let rows = match tile_rows {
+        Some(tile_rows) => (rows / tile_rows).max(1) * tile_rows,
+        None => rows.max(1),
+    };
+    rows.min(height)
+}
+
+/// The regions of an image of `shape` that a read views in turn: its chunks of `rows_per_chunk`
+/// rows, each across every plane. A section is plane-major, so each plane's samples are one run
+/// of it.
+pub(super) fn chunk_regions(
+    shape: &[usize],
+    rows_per_chunk: usize,
+) -> impl Iterator<Item = ArrayVec<Range<usize>, 3>> + '_ {
+    let height = shape[1];
+    (0..height).step_by(rows_per_chunk).map(move |start| {
+        let mut ranges: ArrayVec<Range<usize>, 3> =
+            [0..shape[0], start..(start + rows_per_chunk).min(height)]
+                .into_iter()
+                .collect();
+        if let Some(&planes) = shape.get(2) {
+            ranges.push(0..planes);
+        }
+        ranges
+    })
 }
 
 /// Whether a decode of samples stored as `sample_type` under `scaling` could produce pixels with no
@@ -312,7 +348,7 @@ impl SampleScale {
     }
 }
 
-fn overflow(allocation: FitsAllocation) -> FitsLoadError {
+pub(super) fn overflow(allocation: FitsAllocation) -> FitsLoadError {
     FitsLoadError::from(FitsRefusal::SizeOverflow { allocation })
 }
 
@@ -377,16 +413,14 @@ pub(super) fn dimensions_from_shape(
 pub(super) mod internals {
     use fits_well::header::Header;
     use fits_well::image::{Bitpix, Metadata as FitsMetadata, Scaling};
-    use fits_well::io::HduKind;
 
     use crate::io::fits::decode::plan::FitsHduDescription;
 
-    /// An HDU of `kind` whose image is `shape` unscaled samples of `bitpix`, its data unit
-    /// `source_bytes` as stored.
+    /// An HDU whose image is `shape` unscaled samples of `bitpix`, its data unit `source_bytes` as
+    /// stored.
     #[derive(Debug, Clone, Copy)]
     pub(crate) struct HduSpec<'a> {
         pub(crate) header: &'a Header,
-        pub(crate) kind: HduKind,
         pub(crate) shape: &'a [usize],
         pub(crate) bitpix: Bitpix,
         pub(crate) source_bytes: u64,
@@ -396,7 +430,6 @@ pub(super) mod internals {
         pub(crate) fn description(self) -> FitsHduDescription<'a> {
             FitsHduDescription {
                 header: self.header,
-                kind: self.kind,
                 image: FitsMetadata {
                     shape: self.shape,
                     bitpix: self.bitpix,

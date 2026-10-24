@@ -11,13 +11,14 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::preview_image::PreviewImage;
 use crate::io::decoder::Peek;
+use crate::io::decoder::cfa_decoder::CfaRead;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::calibration_bundle::error::BundleError;
+use crate::io::fits::decode::fits_file::FitsFile;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::fits::{calibration_bundle, decode as fits_decode, product as fits_product};
 use crate::io::input_format::InputFormat;
 use crate::io::null_policy::NullPolicy;
-use crate::io::raw::raw_file::RawFile;
 use crate::io::{raster, raw};
 use crate::stack_product::StackProduct;
 
@@ -87,6 +88,17 @@ impl LoadCtx {
         }
     }
 
+    /// [`Self::linear_sharing`] of the FITS `file` a header read opened from `path`.
+    pub(crate) fn linear_read(
+        &self,
+        file: FitsFile,
+        path: &Path,
+        gains: &SharedGains,
+    ) -> Result<LinearImage, ImageError> {
+        self.check_cancelled(path)?;
+        fits_decode::load_linear_file(file, path, self, gains)
+    }
+
     /// Load an undemosaiced sensor image from camera RAW or mosaic FITS.
     pub fn cfa(&self, path: impl AsRef<Path>) -> Result<CfaImage, ImageError> {
         self.cfa_sharing(path.as_ref(), &SharedGains::default())
@@ -143,16 +155,15 @@ impl LoadCtx {
         calibration_bundle::load(path.as_ref(), self)
     }
 
-    /// What the CFA frame at `path` is, read from its header without decoding it, with the file
-    /// a camera RAW's header read leaves for [`Self::cfa_read`].
-    pub(crate) fn cfa_peek(&self, path: &Path) -> Result<Peek<RawFile>, ImageError> {
+    /// What the CFA frame at `path` is, read from its header without decoding it, with what the
+    /// header read leaves for [`Self::cfa_read`].
+    pub(crate) fn cfa_peek(&self, path: &Path) -> Result<Peek<CfaRead>, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => Ok(Peek {
-                info: fits_decode::cfa_frame_info(path, self)?,
-                read: None,
-            }),
-            InputFormat::CameraRaw => raw::cfa_peek(path, self),
+            InputFormat::Fits => {
+                Ok(fits_decode::cfa_peek(path, self)?.map(|file| CfaRead::Fits(Box::new(file))))
+            }
+            InputFormat::CameraRaw => Ok(raw::cfa_peek(path, self)?.map(CfaRead::Raw)),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
                 ScientificRefusal::RasterCfa,
@@ -160,10 +171,18 @@ impl LoadCtx {
         }
     }
 
-    /// [`Self::cfa`] of the camera RAW `file`, read from `path` by [`Self::cfa_peek`].
-    pub(crate) fn cfa_read(&self, file: RawFile, path: &Path) -> Result<CfaImage, ImageError> {
+    /// [`Self::cfa_sharing`] of what [`Self::cfa_peek`] read of `path`.
+    pub(crate) fn cfa_read(
+        &self,
+        read: CfaRead,
+        path: &Path,
+        gains: &SharedGains,
+    ) -> Result<CfaImage, ImageError> {
         self.check_cancelled(path)?;
-        raw::load_cfa_read(file, path, self)
+        match read {
+            CfaRead::Raw(file) => raw::load_cfa_read(file, path, self),
+            CfaRead::Fits(file) => fits_decode::load_cfa_file(*file, path, self, gains),
+        }
     }
 
     pub(super) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {

@@ -62,6 +62,16 @@ that starts one of their parallel functions. The `real-data` tests did not run.
 - lens runs each lumos call inside `common::task::spawn_blocking`, so lumos's
   parallel loops start on a blocking thread and run on rayon's global pool.
 
+### Rerun after the move to `common::par`
+
+The same probe at `2cdbead6b` with the fits-well wrappers uncommitted, over the
+`lumos` (`ml`, `internals`), `lens` and `darkroom` (`internals`) test targets:
+1804 tests passed, `memory_budget` among them. One nesting was recorded,
+`stage_counter::a_callback_that_uses_rayon_completes`, the test that calls
+rayon directly to prove a callback may. The production nestings of the table
+above are gone; the tests that prove a nested start panics stop at the check,
+before their inner loop starts.
+
 ## MRS tile scratch
 
 `NoisePlane::coefficients` makes a `TileScratch` in `map_init`, one for each

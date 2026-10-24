@@ -19,8 +19,8 @@ pub(crate) trait Decoder {
     type Image: StackableImage;
 
     /// What a header read leaves in hand that the load then takes rather than read again: a
-    /// camera RAW's file, read whole for LibRaw to parse its header. Uninhabited for a decoder
-    /// whose header read leaves nothing.
+    /// camera RAW's file, read whole for LibRaw to parse its header, or a FITS file's reader, with
+    /// the HDU list it scanned and a compressed image's tile index.
     type Read: Send + Debug;
 
     /// The decoder [`Self::load`] runs, which a kept cache records beside the planes it wrote.
@@ -33,7 +33,12 @@ pub(crate) trait Decoder {
     fn read_len(read: &Self::Read) -> usize;
 
     /// [`Self::load`] of what a [`Self::peek`] of `path` read.
-    fn load_read(read: Self::Read, path: &Path, ctx: &LoadCtx) -> Result<Self::Image, ImageError>;
+    fn load_read(
+        read: Self::Read,
+        path: &Path,
+        ctx: &LoadCtx,
+        gains: &SharedGains,
+    ) -> Result<Self::Image, ImageError>;
 
     /// What a header alone settles about a frame, for a format that can answer without decoding.
     /// `None` when it cannot, or the header does not read, which leaves the caller to decode the
@@ -45,5 +50,15 @@ pub(crate) trait Decoder {
 #[derive(Debug)]
 pub(crate) struct Peek<R> {
     pub(crate) info: FrameInfo,
-    pub(crate) read: Option<R>,
+    pub(crate) read: R,
+}
+
+impl<R> Peek<R> {
+    /// This peek, with what it read wrapped as `wrap` makes it.
+    pub(crate) fn map<S>(self, wrap: impl FnOnce(R) -> S) -> Peek<S> {
+        Peek {
+            info: self.info,
+            read: wrap(self.read),
+        }
+    }
 }

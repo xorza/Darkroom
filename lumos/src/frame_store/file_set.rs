@@ -84,17 +84,23 @@ struct First<D: Decoder> {
 /// What reading a frame for the plan left for its decode.
 #[derive(Debug)]
 enum Early<D: Decoder> {
-    /// What its header read read: a camera RAW's file.
+    /// What its header read read: a camera RAW's file, or a FITS file's reader.
     Read(D::Read),
     /// The frame decoded, for a format with no header that answers.
     Decoded(D::Image),
 }
 
 impl<D: Decoder> Early<D> {
-    /// The frame of `path`, decoded under `ctx` from what was read of it.
-    fn into_image(self, path: &Path, ctx: &LoadCtx) -> Result<D::Image, LoadError> {
+    /// The frame of `path`, decoded under `ctx` from what was read of it, its flat gain shared
+    /// through `gains`.
+    fn into_image(
+        self,
+        path: &Path,
+        ctx: &LoadCtx,
+        gains: &SharedGains,
+    ) -> Result<D::Image, LoadError> {
         Ok(match self {
-            Self::Read(read) => D::load_read(read, path, ctx)?,
+            Self::Read(read) => D::load_read(read, path, ctx, gains)?,
             Self::Decoded(image) => image,
         })
     }
@@ -219,15 +225,15 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
         };
         let path = self.path(idx);
         let (info, early) = if let Some(Peek { info, read }) = D::peek(path, ctx) {
-            (info, read.map(Early::Read))
+            (info, Early::Read(read))
         } else {
             let image = D::load(path, ctx, &self.gains)?;
-            (FrameInfo::of_decoded(&image), Some(Early::Decoded(image)))
+            (FrameInfo::of_decoded(&image), Early::Decoded(image))
         };
-        let held = early.as_ref().map_or(0, Early::held_bytes);
+        let held = early.held_bytes();
         let mut first = lock(&self.first);
         debug_assert!(first.is_none(), "a plan peeks its set once");
-        *first = early.map(|early| Box::new(First { idx, early }));
+        *first = Some(Box::new(First { idx, early }));
         Ok(SetPeek {
             idx,
             info,
@@ -331,7 +337,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
     ) -> Result<D::Image, LoadError> {
         let path = self.path(idx);
         match early {
-            Some(early) => early.into_image(path, ctx),
+            Some(early) => early.into_image(path, ctx, &self.gains),
             None => Ok(D::load(path, ctx, &self.gains)?),
         }
     }

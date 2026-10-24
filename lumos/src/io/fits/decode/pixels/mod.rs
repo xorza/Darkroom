@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::mem;
-use std::ops::Range;
 
 use arrayvec::ArrayVec;
 use common::{CancelToken, par};
@@ -22,7 +21,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::image::sample_domain::SampleDomain;
 use crate::io::fits::decode::DecodedFitsImage;
-use crate::io::fits::decode::plan::FitsDecodePlan;
+use crate::io::fits::decode::plan::{self, FitsDecodePlan};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::FitsChecksumPolicy;
 use crate::io::fits::metadata;
@@ -99,12 +98,7 @@ impl HduDecode<'_> {
         let unit = metadata::read_text(header, keywords::BUNIT)?
             .map(|unit| unit.trim().to_owned())
             .filter(|unit| !unit.is_empty());
-        let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
-        let mut planes = ArrayVec::<DecodedPlane, 3>::new();
-        let mut words = Vec::new();
-        for channel in 0..channel_count {
-            planes.push(self.read_plane(channel, &mut image, &mut words)?);
-        }
+        let mut planes = self.read_planes(&mut image)?;
         let checksum = checksum(image)?;
         let scan = planes
             .iter()
@@ -260,63 +254,68 @@ impl HduDecode<'_> {
         Ok(Some(flags))
     }
 
-    /// Decode plane `channel` from `image`, a chunk of rows at a time, each swapped into `words`.
-    fn read_plane(
+    /// Decode every plane from `image`, a chunk of rows of all of them at a time, each swapped
+    /// into one buffer of words. A section is plane-major, so each plane's samples are one run of
+    /// the chunk, and a tile that spans planes decodes once.
+    fn read_planes(
         &self,
-        channel: usize,
         image: &mut ImageReader<'_, StreamSource<File>>,
-        words: &mut Vec<u64>,
-    ) -> Result<DecodedPlane, FitsLoadError> {
+    ) -> Result<ArrayVec<DecodedPlane, 3>, FitsLoadError> {
         let plan = self.plan;
         let ctx = self.ctx;
         let width = plan.dimensions.width();
-        let height = plan.dimensions.height();
-        let expected_pixels = plan.dimensions.pixel_count();
-        let mut output = zeroed_plane(expected_pixels);
-        let mut nulls: Option<NullSummary> = None;
-        let mut scan = SampleScan::EMPTY;
-        for row_start in (0..height).step_by(plan.rows_per_chunk) {
+        let channels = plan.dimensions.channels();
+        let mut planes: ArrayVec<DecodedPlane, 3> = (0..channels)
+            .map(|_| DecodedPlane {
+                samples: zeroed_plane(plan.dimensions.pixel_count()),
+                nulls: None,
+                scan: SampleScan::EMPTY,
+            })
+            .collect();
+        let mut words = Vec::new();
+        for ranges in plan::chunk_regions(&plan.shape, plan.rows_per_chunk) {
             Cancelled::check(&ctx.cancel)?;
-            let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
-            let expected_chunk = (row_end - row_start) * width;
-            let ranges = channel_ranges(plan, channel, row_start..row_end);
-            let section = tile_parallel::view(image, ranges.as_slice(), words)?;
+            let rows = ranges[1].clone();
+            let plane_chunk = rows.len() * width;
+            let section = tile_parallel::view(image, ranges.as_slice(), &mut words)?;
             Cancelled::check(&ctx.cancel)?;
             let samples = section.samples();
-            if samples.len() != expected_chunk {
+            if samples.len() != plane_chunk * channels {
                 return Err(FitsLoadError::from(FitsRefusal::SectionLen {
-                    channel,
-                    rows: row_start..row_end,
+                    rows,
                     samples: samples.len(),
-                    expected: expected_chunk,
+                    expected: plane_chunk * channels,
                 }));
             }
-            let start = row_start * width;
-            let ChunkScan {
-                nulls: chunk_nulls,
-                scan: chunk_scan,
-            } = Conversion {
+            let start = rows.start * width;
+            let conversion = Conversion {
                 scaling: section.scaling(),
                 divisor: plan.sample_scale.divisor,
                 cancel: &ctx.cancel,
-            }
-            .scan(samples, &mut output[start..start + expected_chunk])?;
-            scan = scan.merge(chunk_scan);
-            // Each chunk locates its nulls in its own index space; the plane's is what a caller can
-            // act on, so the offset is applied here rather than threaded into the pass.
-            if let Some(chunk_nulls) = chunk_nulls {
-                let chunk_nulls = chunk_nulls.offset_by(start);
-                nulls = Some(match nulls {
-                    None => chunk_nulls,
-                    Some(nulls) => nulls.merge(chunk_nulls),
-                });
+            };
+            for (channel, plane) in planes.iter_mut().enumerate() {
+                let run = channel * plane_chunk..(channel + 1) * plane_chunk;
+                let ChunkScan {
+                    nulls: chunk_nulls,
+                    scan: chunk_scan,
+                } = conversion.scan(
+                    samples.slice(run),
+                    &mut plane.samples[start..start + plane_chunk],
+                )?;
+                plane.scan = plane.scan.merge(chunk_scan);
+                // Each chunk locates its nulls in its own index space; the plane's is what a
+                // caller can act on, so the offset is applied here rather than threaded into the
+                // pass.
+                if let Some(chunk_nulls) = chunk_nulls {
+                    let chunk_nulls = chunk_nulls.offset_by(start);
+                    plane.nulls = Some(match plane.nulls {
+                        None => chunk_nulls,
+                        Some(nulls) => nulls.merge(chunk_nulls),
+                    });
+                }
             }
         }
-        Ok(DecodedPlane {
-            samples: output,
-            nulls,
-            scan,
-        })
+        Ok(planes)
     }
 }
 
@@ -329,19 +328,6 @@ struct DecodedPlane {
     samples: Vec<f32>,
     nulls: Option<NullSummary>,
     scan: SampleScan,
-}
-
-fn channel_ranges(
-    plan: &FitsDecodePlan,
-    channel: usize,
-    rows: Range<usize>,
-) -> ArrayVec<Range<usize>, 3> {
-    let mut ranges: ArrayVec<Range<usize>, 3> =
-        [0..plan.dimensions.width(), rows].into_iter().collect();
-    if plan.shape.len() == 3 {
-        ranges.push(channel..channel + 1);
-    }
-    ranges
 }
 
 /// Samples per parallel work item in the per-chunk passes below.

@@ -235,7 +235,12 @@ impl BundleReader<'_> {
             let selected = SelectedFits::lumos_cfa(&mut self.reader, idx, ctx)?;
             let cfa_type = selected.require_cfa()?;
             selected
-                .read(ctx, Checksum::Verified(checksum), &SharedGains::default())?
+                .read(
+                    &mut self.reader,
+                    ctx,
+                    Checksum::Verified(checksum),
+                    &SharedGains::default(),
+                )?
                 .into_cfa(cfa_type)
         };
         master().map_err(|source| match source {

@@ -150,9 +150,9 @@ pub(crate) fn cfa_peek(path: &Path, ctx: &LoadCtx) -> Result<Peek<RawFile>, Imag
     let info = frame_info(&libraw).map_err(|source| ImageError::raw(path, source))?;
     Ok(Peek {
         info,
-        read: Some(RawFile {
+        read: RawFile {
             bytes: libraw.into_file(),
-        }),
+        },
     })
 }
 
