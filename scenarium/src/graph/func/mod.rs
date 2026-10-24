@@ -35,7 +35,7 @@ pub struct FuncEvent {
 }
 
 /// A validated func declaration: its ports, its behavior, its implementation,
-/// and the [`FuncRef`] a node of it is authored against — its id with the
+/// and the `FuncRef` a node of it is authored against — its id with the
 /// signature of its ports, computed once when [`FuncBuilder::build`] checked it.
 ///
 /// Read-only, so the signature always describes the ports beside it. To change

@@ -107,7 +107,7 @@ a change to bench code runs it.
 ## Conventions
 
 - **I/O and thread creation go through `common`** (`fs`, `env`, `process`,
-  `thread`, `task`, `BgRuntime`); `clippy.toml` refuses the direct calls
+  `thread`, `task`, `WorkerPool`, `BgRuntime`); `clippy.toml` refuses the direct calls
   elsewhere, tests included. Submodules get bytes or readers, never paths. A
   task on a running pool or runtime is not a thread and stays as it is.
 - **No backward compatibility.** Change serialized shapes and APIs freely: no

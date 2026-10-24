@@ -152,7 +152,7 @@ impl RegistrationConfig {
     /// };
     /// let result = config.registrar()?.register(ref_stars, target_stars)?;
     ///
-    /// println!("Matched {} stars", result.num_inliers());
+    /// println!("Matched {} stars", result.inlier_count());
     /// println!("RMS error: {:.2} pixels", result.rms_error());
     /// # Ok(())
     /// # }

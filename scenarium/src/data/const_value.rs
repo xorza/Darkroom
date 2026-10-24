@@ -66,7 +66,7 @@ impl ConstValue {
     }
 
     /// Scalar truthiness: **any** nonzero value reads as `true`, per the
-    /// coercion class on [`crate::DataType::compatible_with`].
+    /// coercion class on `DataType::compatible_with`.
     ///
     /// The float arm compares against zero exactly, deliberately. A
     /// tolerance here is not float hygiene — there is no subtraction

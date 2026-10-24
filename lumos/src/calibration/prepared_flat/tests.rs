@@ -1,4 +1,4 @@
-use common::thread;
+use common::WorkerPool;
 
 use crate::CfaType;
 use crate::calibration::calibration_masters::CalibrationMasters;
@@ -172,14 +172,9 @@ fn preparation_does_not_depend_on_the_thread_count() {
         standard_xtrans(),
     ] {
         let run = |threads: usize| {
-            let pool = thread::pool("lumos-test", threads);
+            let pool = WorkerPool::new("lumos-test", threads);
             let flat = make_cfa(size, pixels.clone(), cfa_type);
-            bits(
-                pool.install(|| prepare(flat, None))
-                    .divisor()
-                    .data()
-                    .pixels(),
-            )
+            bits(pool.run(|_| prepare(flat, None)).divisor().data().pixels())
         };
         assert_eq!(run(1), run(7), "{cfa_type:?}");
     }

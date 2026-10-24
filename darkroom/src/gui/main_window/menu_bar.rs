@@ -8,7 +8,7 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
-/// each opens a [`CtxMenu`] anchored at the trigger's bottom-left.
+/// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
 ///
 /// A pick goes onto `out` in whichever tier it belongs to: the file lifecycle
 /// and `Quit` as [`AppCommand`]s for `App` to run after the pass, Preferences
@@ -25,7 +25,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
 }
 
 /// One menu-bar dropdown: a flat trigger button labelled `label` that toggles
-/// a `CtxMenu` of [`MenuItem`] rows. Centralizes the trigger + anchor +
+/// a `ContextMenu` of [`MenuItem`] rows. Centralizes the trigger + anchor +
 /// open plumbing so each menu is just its label + rows.
 #[derive(Clone, Copy, Debug)]
 struct Dropdown {
