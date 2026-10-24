@@ -34,6 +34,7 @@ use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
 use crate::io::fits::flags_extension::{self, FLAGS_EXTNAME};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
+use crate::io::fits::tile_parallel;
 use crate::io::load_ctx::LoadCtx;
 use crate::math::size2us::Size2us;
 
@@ -258,7 +259,7 @@ impl BundleReader<'_> {
         let Some(dimensions) = read_defect_dimensions(header)? else {
             return Err(DefectTableError::Extent.into());
         };
-        let table = self.reader.read_table(idx)?;
+        let table = tile_parallel::read_table(&mut self.reader, idx)?;
         let row_count = table.schema().row_count();
         let kinds: Vec<u8> = defect_column(&table, "KIND")?;
         let idxs: Vec<i64> = defect_column(&table, "INDEX")?;

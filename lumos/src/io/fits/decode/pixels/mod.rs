@@ -27,6 +27,7 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::FitsChecksumPolicy;
 use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
+use crate::io::fits::tile_parallel;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::{self, NullPolicy, NullSamples};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
@@ -279,7 +280,7 @@ impl HduDecode<'_> {
             let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
             let expected_chunk = (row_end - row_start) * width;
             let ranges = channel_ranges(plan, channel, row_start..row_end);
-            let section = image.view(ranges.as_slice(), words)?;
+            let section = tile_parallel::view(image, ranges.as_slice(), words)?;
             Cancelled::check(&ctx.cancel)?;
             let samples = section.samples();
             if samples.len() != expected_chunk {

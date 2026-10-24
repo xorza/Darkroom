@@ -173,6 +173,18 @@ disallowed-methods = [
     { path = "rayon::iter::ParallelIterator::try_fold_with", reason = "keep scratch in a `common::PerWorker`, or lease it in the body: a value per split counts the splits" },
     { path = "rayon::iter::IndexedParallelIterator::fold_chunks", reason = "keep scratch in a `common::PerWorker`, or lease it in the body: a value per split counts the splits" },
     { path = "rayon::iter::IndexedParallelIterator::fold_chunks_with", reason = "keep scratch in a `common::PerWorker`, or lease it in the body: a value per split counts the splits" },
+    # fits-well runs its tile codecs on rayon's pool and cannot see `common::par`.
+    { path = "fits_well::ImageReader::read", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::ImageReader::view", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::ImageReader::physical_into", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_table", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_table_rows", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_table_columns", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_table_columns_into", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_table_cell", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsReader::read_wcs", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsWriter::write_compressed_image", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
+    { path = "fits_well::FitsWriter::write_compressed_table", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
     # A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
     # policy every case shares; `Scale::apply` alone calls these.
     { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `Scale`" },

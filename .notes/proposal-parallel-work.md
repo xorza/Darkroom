@@ -63,12 +63,21 @@ governs, and this file is deleted.
 - **Thread counts come from `par`.** `par::threads()` replaces
   `rayon::current_num_threads()`, so a memory figure and the pool that spends it
   cannot disagree.
-- **A submodule's parallel functions are entry points too.** `imaginarium`'s
-  `Buffer2::interleave`, `deinterleave`, `Image::convert`, `convert_to` and
-  `fits-well`'s compressed reads and writes join the `disallowed-methods` list,
-  and the workspace calls them through `par` wrappers that run the same check.
-  Refused: giving the submodules `common::par`, which would tie standalone crates
-  to `common`. Their own serial mode stays an open request in each one's issue log.
+- **A submodule's parallel functions are entry points too.** fits-well's
+  methods that decode or encode tiles in parallel are in `disallowed-methods`,
+  and lumos calls them through `io::fits::tile_parallel`, which runs
+  `par::enter` first, for a plain image too, so a test on a plain file refuses
+  what a compressed one would. Each is an inherent method, so the ban reaches
+  every call. Its cost: the list is kept by hand, so a parallel method fits-well
+  adds later needs its entry, and the nesting probe finds a miss. Refused: giving fits-well `common::par`, which would tie a
+  standalone library to `common`; a check inside fits-well, which cannot see the
+  test-only top-level mark, so the memory harness would panic.
+- **imaginarium moves into the workspace.** Three of its parallel paths are
+  `From`/`TryFrom` impls, which no ban can name: clippy resolves them to the
+  trait's method. As a member it calls `common::par` itself, so the check covers
+  every path, and a parallel function it adds later. No other crate depends on
+  it. Refused: bans and wrappers as for fits-well, which leave those three open
+  and need a list kept by hand.
 - **`cargo drive surface` prints every build's lines.** An item's block is the
   union of its builds' lines, each line that not every build has tagged with the
   features that bring it, as items are tagged today. Refused: printing one block
@@ -146,8 +155,12 @@ counting allocator, in batch 4.
 
 ### 5. Submodule calls, lens and darkroom
 
-- [ ] The `imaginarium` and `fits-well` parallel functions in
-  `disallowed-methods`, called through `par` wrappers that run the check.
+- [x] fits-well's parallel methods in `disallowed-methods`, called through
+  `tile_parallel`. Test: a loop's body that reads a plain image through it
+  panics, and the same read at top level returns the samples.
+- [ ] imaginarium a workspace member: its own `common` module renamed, its
+  file reads and writes through `common::fs`, its rayon calls through
+  `common::par`, its names and lints held to the workspace's.
 - [ ] Rerun the nesting probe (method in the research note) over the lumos,
   lens and darkroom tests; it records nothing.
 
