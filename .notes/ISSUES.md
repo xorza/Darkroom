@@ -23,3 +23,11 @@ drive bench` fails before any case runs.
   measurement backs. A section read holds the compressed rows and heap of the
   tiles it touches and one decoded tile for each decode thread, which the figure
   does not count.
+
+- **lumos does not compile against fits-well 0.4.0.** The submodule moved to
+  `995766f` ("Bump version to 0.4.0") in `0baa4b91c`, and `cargo drive check`
+  stops on 9 errors in lumos: `Schema::row_count` is now a method
+  (`lumos/src/io/fits/calibration_bundle/mod.rs:262`), `FitsError::NotAnImage`
+  is gone (`lumos/src/io/fits/decode/plan.rs:36`), `Vec<u8>` has no
+  `into_data` (`lumos/src/internals/fits.rs:36`), and `RecordName` has no
+  `From` for the keyword argument (`lumos/src/io/fits/metadata/mod.rs:624`).
