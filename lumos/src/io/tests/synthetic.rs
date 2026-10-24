@@ -41,8 +41,8 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::{fits_refusal, write_fits};
-use crate::io::decoder::Decoder;
-use crate::io::decoder::cfa_decoder::CfaDecoder;
+use crate::io::decoder::cfa_decoder::{CfaDecoder, CfaRead};
+use crate::io::decoder::{Decoder, Peek};
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode;
 use crate::io::fits::error::FitsRefusal;
@@ -883,22 +883,39 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         CfaDecoder::load(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
     assert_eq!(cache_loaded.data(), loaded.data());
     assert_eq!(cache_loaded.cfa_type(), loaded.cfa_type());
-    // The reader holds the whole frame as one chunk beside it: 1024 samples of 4 bytes as
-    // stored, and as many swapped into words. The header is streamed, so the peek keeps nothing.
-    let peek = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap();
-    assert!(peek.read.is_none());
+    // The decode reads the whole frame as one chunk beside it: 1024 samples of 4 bytes swapped
+    // into words, and the reader's section shape, 8 B for each of the two axes. The checksum's
+    // finish grows the reader's staging buffer from the header scan's 2 880 B block to the
+    // two-block data unit, 2 880 B more, and holds the old block while it moves.
+    let Peek { info, read } = CfaDecoder::peek(&path, &LoadCtx::default()).unwrap();
     assert_eq!(
-        Some(peek.info),
+        Some(info),
         Some(FrameInfo {
             dimensions: ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
             cfa_type: pattern,
             decoder: DecoderBytes {
                 source: 0,
-                beside: 8192,
+                beside: 4096 + 16 + 2 * 2880,
             },
             gain_bytes: 0,
         })
     );
+    // The peek keeps the open file, which holds no tile index for a plain image, and the load
+    // reads on from it: the path it is given is only what an error reports, so one that names no
+    // file still loads the frame.
+    let CfaRead::Fits(file) = read else {
+        panic!("a FITS peek keeps its file")
+    };
+    assert_eq!(file.held_bytes(), 0);
+    let from_peek = CfaDecoder::load_read(
+        CfaRead::Fits(file),
+        &dir.join("absent.fits"),
+        &LoadCtx::default(),
+        &SharedGains::default(),
+    )
+    .unwrap();
+    assert_eq!(from_peek.data(), loaded.data());
+    assert_eq!(from_peek.cfa_type(), pattern);
 
     let preview = LoadCtx::default().preview(&path).unwrap();
     assert!(matches!(

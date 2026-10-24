@@ -133,9 +133,8 @@ pub enum FitsRefusal {
     UndeclaredFloatScale {
         maximum: f32,
     },
-    /// A section of `rows` of `channel` read as `samples`, not the `expected` count.
+    /// A section of `rows` of every plane read as `samples`, not the `expected` count.
     SectionLen {
-        channel: usize,
         rows: Range<usize>,
         samples: usize,
         expected: usize,
@@ -381,13 +380,12 @@ impl Display for FitsRefusal {
                  FitsFloatScale::FullScale, or a DATAMAX"
             ),
             Self::SectionLen {
-                channel,
                 rows,
                 samples,
                 expected,
             } => write!(
                 f,
-                "channel {channel} rows {}..{} contain {samples} pixels; expected {expected}",
+                "rows {}..{} contain {samples} samples; expected {expected}",
                 rows.start, rows.end
             ),
             Self::CfaPlanes { .. } => {

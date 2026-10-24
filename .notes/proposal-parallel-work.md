@@ -82,19 +82,23 @@ governs, and this file is deleted.
   union of its builds' lines, each line that not every build has tagged with the
   features that bring it, as items are tagged today. Refused: printing one block
   per build, which repeats every shared line. The fix lives in xorza/drive.
-- **fits-well reports what a section read holds.** `ImageReader` gains the peak
-  bytes of reading a region: the touched tiles' table rows and heap cells, the
-  decode wave and its per-thread tile scratch. lumos's plan uses it in place of
-  `2 × padded_data_bytes`. To be exact, the reader reads the tile descriptors
-  once, when a compressed image is opened, and keeps them for the decode that
-  reads them anyway. Refused: lumos deriving fits-well's internals, which drift;
-  a header-only bound from `PCOUNT`, correct but loose by the tile count.
+- **fits-well bounds what a run of views holds.** `ImageReader::view_bytes` gives,
+  by owner, what the reader keeps and what the handle holds while it reads: the tile
+  index, the touched tiles' rows and heap cells, the decode's wave, and a tile set for
+  each worker that may take a run of the tiles, each set reserved to its codec's
+  buffers before its first tile. lumos's plan uses it in place of
+  `2 × padded_data_bytes`. The tile index is read once, when a compressed image opens,
+  and kept for the decode that reads it anyway. Refused: lumos deriving fits-well's
+  internals, which drift; a header-only bound from `PCOUNT`, correct but loose by the
+  tile count; an exact figure, which fixed the split of each wave across the workers
+  and gave up rayon's balancing, and buffers kept from one read to the next, which
+  needed that split — the bound serves a budget as well, at less machinery.
 - **A compressed image's chunks align to its tile rows.** lumos rounds
   `rows_per_chunk` to whole tile rows, at least one, so each tile decodes once;
-  today a chunk that cuts a tile row decodes those tiles again for the next chunk.
-- **fits-well's decode keeps its buffers.** The wave buffer, its lengths and the
-  per-thread tile scratch live on the reader's scratch and are reused by every
-  section, as `section_shape` and `tile_rows` already are.
+  before, a chunk that cut a tile row decoded those tiles again for the next chunk.
+- **A compressed image is read once.** A checksummed read sums the tile index from
+  memory and each section's heap cells as it fetches them, so the finish reads only
+  the block fill; before, it read the whole data unit again.
 
 ## Plan
 
@@ -161,18 +165,25 @@ counting allocator, in batch 4.
 - [ ] imaginarium a workspace member: its own `common` module renamed, its
   file reads and writes through `common::fs`, its rayon calls through
   `common::par`, its names and lints held to the workspace's.
-- [ ] Rerun the nesting probe (method in the research note) over the lumos,
-  lens and darkroom tests; it records nothing.
+- [x] Rerun the nesting probe (method in the research note) over the lumos,
+  lens and darkroom tests: it records the one test that nests on purpose
+  (research: "Rerun after the move to `common::par`"). Again after imaginarium
+  moves.
 
 ### 6. The compressed read (fits-well, then lumos)
 
-- [ ] fits-well: the decode wave, its lengths and the tile scratch on the
-  reader's scratch. Test: a second section read of the same image allocates
-  nothing.
-- [ ] fits-well: descriptors read once at open; `ImageReader` reports a region
-  read's peak bytes. Test: for row-tiled, square-tiled and single-tile images,
-  the figure equals the counting allocator's peak for that read.
-- [ ] lumos: `rows_per_chunk` aligned to tile rows; the plan's compressed term
-  from fits-well's figure. Test: a single-tile image decodes each tile once
-  (decode count through the reader), and the plan's peak equals the measured
-  peak. Delete the compressed-read issue.
+- [x] fits-well: the tile index read once at open; sections fetch only heap cells;
+  tile sets reserved to the per-codec buffers; gzip through one reused inflate
+  state. Tests: gzip framing and trailer cases; the fetched-byte counts.
+- [x] fits-well: `view_bytes`, a bound by owner. Tests: on four workers the peak is at
+  most the figure; on one, over a run that grows each buffer once, the figure is the
+  peak, for row, square and single tiles through every codec, from memory and from a
+  stream.
+- [x] fits-well: a checksummed compressed read reads its unit once. Test: sections in
+  tile order fetch the padded unit once; a whole read, the same.
+- [x] lumos: `rows_per_chunk` aligned to tile rows; the plan's compressed term from
+  fits-well's figure and its finish bound. Test: row tiles, tiles 100 rows high and
+  one tile give chunks of 256, 200 and 300 rows, and the peak is the decoded planes, a chunk's words, the
+  figure and the finish. Bench (research `2026-10-24-read-bytes.md` in fits-well):
+  a stream's RICE section reads faster than before; a resident source's sections
+  are summed at the finish, as summing between decodes cost 16 %.

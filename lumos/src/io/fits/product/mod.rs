@@ -176,7 +176,7 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
     let selected = SelectedFits::primary(&mut reader, ctx)?;
     let cfa_type = selected.cfa_type();
     let image = selected
-        .read(ctx, Checksum::Judged, &SharedGains::default())?
+        .read(&mut reader, ctx, Checksum::Judged, &SharedGains::default())?
         .into_linear()?;
 
     let mut found = Vec::with_capacity(PLANES.len());

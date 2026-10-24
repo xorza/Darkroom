@@ -35,8 +35,7 @@ fn raw_frame_info_matches_full_decode() {
     let ctx = LoadCtx::default();
     let peek = raw::cfa_peek(path, &ctx).expect("peek frame info");
     let loaded = raw::load_cfa(path, &ctx).expect("full decode");
-    let file = peek.read.expect("a RAW peek keeps the file it read");
-    let from_peek = raw::load_cfa_read(file, path, &ctx).expect("decode of the peek's file");
+    let from_peek = raw::load_cfa_read(peek.read, path, &ctx).expect("decode of the peek's file");
     assert_eq!(from_peek.data().pixels(), loaded.data().pixels());
     let peeked = peek.info;
     assert_eq!(
