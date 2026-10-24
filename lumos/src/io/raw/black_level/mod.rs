@@ -1,6 +1,7 @@
 //! [`BlackLevel`]: a RAW file's black level in ADU, folded as LibRaw folds it, without its
 //! roundings.
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -256,9 +257,8 @@ impl BlackLevel {
         let period = channel_period / gcd(channel_period, pattern_width) * pattern_width;
         let mut pixels = vec![0.0f32; active.pixel_count()];
         let mut flags = vec![0u8; active.pixel_count()];
-        let counts = pixels
-            .par_chunks_mut(width)
-            .zip(flags.par_chunks_mut(width))
+        let counts = par::chunks_mut(&mut pixels, width)
+            .zip(par::chunks_mut(&mut flags, width))
             .enumerate()
             .map_init(Vec::new, |phases, (y, (row, row_flags))| {
                 phases.clear();

@@ -1,4 +1,5 @@
 use std::hint;
+use std::mem;
 use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -89,6 +90,27 @@ fn a_slot_carries_its_state_between_the_indices_it_takes_and_each_job_runs_paral
     });
     assert_eq!(result.unwrap(), [0, 1, 3, 6, 10, 15]);
     assert_eq!(counts.iter().sum::<usize>(), 6);
+}
+
+/// A job gets the item at its own index, moved in, and the slot keeps what the job before it left
+/// there: with two slots over six items, at least four jobs find a predecessor's item waiting.
+#[test]
+fn owned_slots_hand_each_job_its_item_and_carry_the_slot_between_items() {
+    const SLOTS: usize = 2;
+    let items: Vec<String> = (0..6).map(|i| format!("f{i}")).collect();
+    let mut slots = vec![String::new(); SLOTS];
+    let result = par::slots_owned(items, &mut slots, |slot, idx, value| {
+        let carried = mem::replace(slot, value.clone());
+        Ok::<_, ()>(format!("{idx}:{value}:{carried}"))
+    })
+    .unwrap();
+    let heads: Vec<&str> = result.iter().map(|r| &r[..4]).collect();
+    assert_eq!(heads, ["0:f0", "1:f1", "2:f2", "3:f3", "4:f4", "5:f5"]);
+    let carried = result.iter().filter(|r| !r.ends_with(':')).count();
+    assert!(
+        carried >= 6 - SLOTS,
+        "slots carried {carried} of 6: {result:?}"
+    );
 }
 
 #[test]

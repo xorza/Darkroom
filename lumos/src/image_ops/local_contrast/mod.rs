@@ -6,6 +6,7 @@
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
 use common::Introspect;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -191,7 +192,7 @@ impl TileGrid {
         let width = intensity.size().width;
         let Self { cols, rows } = self;
         let mut luts = vec![[0.0f32; BIN_COUNT + 1]; cols.tiles() * rows.tiles()];
-        luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
+        par::iter_mut(&mut luts).enumerate().for_each(|(idx, lut)| {
             let (tx, ty) = (idx % cols.tiles(), idx / cols.tiles());
             let (x0, x1) = (cols.bounds[tx], cols.bounds[tx + 1]);
             let mut hist = [0u32; BIN_COUNT];
@@ -221,8 +222,7 @@ impl TileGrid {
         let size = intensity.size();
         let col_blends: Vec<Blend> = (0..size.width).map(|x| cols.blend(x)).collect();
         let mut out = Buffer2::new_default(size.width, size.height);
-        out.pixels_mut()
-            .par_chunks_mut(size.width)
+        par::chunks_mut(out.pixels_mut(), size.width)
             .enumerate()
             .for_each(|(y, orow)| {
                 let row = rows.blend(y);

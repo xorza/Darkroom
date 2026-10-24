@@ -19,6 +19,7 @@ pub(super) mod per_worker;
 pub(super) mod worker_pool;
 
 use std::ops::RangeBounds;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::iter::{
@@ -168,6 +169,37 @@ where
         .into_iter()
         .map(|value| value.expect("each index below len is claimed by exactly one slot"))
         .collect())
+}
+
+/// [`slots`] with each of `items` moved into its job, so a caller frees each input as soon as its
+/// output exists rather than holding every input and every output at once. What stays resident of
+/// an item once its job took it is one lock and an empty `Option`.
+///
+/// # Panics
+/// As [`slots`] does.
+pub fn slots_owned<T, S, R, E>(
+    items: Vec<T>,
+    slots: &mut [S],
+    job: impl Fn(&mut S, usize, T) -> Result<R, E> + Sync,
+) -> Result<Vec<R>, E>
+where
+    T: Send,
+    S: Send,
+    R: Send,
+    E: Send,
+{
+    let cells: Vec<Mutex<Option<T>>> = items
+        .into_iter()
+        .map(|item| Mutex::new(Some(item)))
+        .collect();
+    self::slots(cells.len(), slots, |slot, idx| {
+        let item = cells[idx]
+            .lock()
+            .expect("no holder of this lock panicked")
+            .take()
+            .expect("each index is claimed by exactly one slot");
+        job(slot, idx, item)
+    })
 }
 
 /// Panics on a pool worker, where only a parallel loop's body runs.

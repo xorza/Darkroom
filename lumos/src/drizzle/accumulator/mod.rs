@@ -10,6 +10,7 @@ mod output_band;
 use std::slice::ChunksMut;
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -228,8 +229,7 @@ impl Drizzler {
                 lattice,
             }
         }));
-        let unconverged = bands
-            .par_drain(..)
+        let unconverged = par::drain(&mut bands, ..)
             .map(|mut band| band.distribute(&source, plan))
             .sum::<usize>();
         kept_bands.put(bands);
@@ -277,9 +277,7 @@ impl Drizzler {
             }
             .into());
         }
-        if let Some((pixel, &value)) = pixel_weights
-            .pixels()
-            .par_iter()
+        if let Some((pixel, &value)) = par::iter(pixel_weights.pixels())
             .enumerate()
             .find_first(|(_, value)| !FramePlane::PixelWeight.accepts(**value))
         {
@@ -324,10 +322,8 @@ impl OutputSums {
                 // weight — a Lanczos lobe's — or whose size underflows holds nothing the combine
                 // could divide its noise by, so it is one no drop reached: the weight and the size
                 // are 0 together, which is the pairing `FrameQuality` documents.
-                weight
-                    .pixels_mut()
-                    .par_iter_mut()
-                    .zip(confidence.pixels_mut().par_iter_mut())
+                par::iter_mut(weight.pixels_mut())
+                    .zip(par::iter_mut(confidence.pixels_mut()))
                     .for_each(|(weight, confidence)| {
                         *confidence = if *weight > 0.0 && *confidence > 0.0 {
                             (f64::from(*weight).powi(2) / f64::from(*confidence)) as f32
@@ -343,10 +339,8 @@ impl OutputSums {
             .collect();
         for (channel, plane) in data.iter_mut().enumerate() {
             let weight = &drops[deposit.weight_plane(channel)].weight;
-            plane
-                .pixels_mut()
-                .par_iter_mut()
-                .zip(weight.pixels().par_iter())
+            par::iter_mut(plane.pixels_mut())
+                .zip(par::iter(weight.pixels()))
                 .for_each(|(value, &weight)| {
                     *value = if weight > 0.0 { *value / weight } else { 0.0 };
                 });

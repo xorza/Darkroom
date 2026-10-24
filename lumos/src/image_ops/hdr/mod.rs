@@ -12,7 +12,7 @@
 
 use std::mem;
 
-use common::Introspect;
+use common::{Introspect, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -86,8 +86,7 @@ impl Hdr {
         let mut c_cur = Buffer2::new(
             size.width,
             size.height,
-            (0..size.pixel_count())
-                .into_par_iter()
+            par::into_iter(0..size.pixel_count())
                 .map(|idx| intensity.at(idx).max(LOG_FLOOR).ln())
                 .collect(),
         );
@@ -101,9 +100,7 @@ impl Hdr {
         // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
         let mean = sum::mean_f32(residual.pixels());
         let amount = self.amount;
-        residual
-            .pixels_mut()
-            .par_chunks_mut(SAMPLES_PER_BLOCK)
+        par::chunks_mut(residual.pixels_mut(), SAMPLES_PER_BLOCK)
             .enumerate()
             .for_each(|(block, residual)| {
                 let start = block * SAMPLES_PER_BLOCK;

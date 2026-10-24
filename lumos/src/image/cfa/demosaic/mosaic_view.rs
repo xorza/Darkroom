@@ -9,7 +9,7 @@
 
 use std::ops::Range;
 
-use common::CancelToken;
+use common::{CancelToken, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -133,13 +133,11 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
         ];
         let places = tiling.places(self.size);
         let out = OutputPlanes::new(&mut planes, self.gains);
-        places
-            .par_iter()
-            .try_for_each_init(new_tile, |tile, &place| {
-                Cancelled::check(cancel)?;
-                run(tile, place, out);
-                Ok(())
-            })?;
+        par::iter(&places).try_for_each_init(new_tile, |tile, &place| {
+            Cancelled::check(cancel)?;
+            run(tile, place, out);
+            Ok(())
+        })?;
         Cancelled::check(cancel)?;
         let border = if places.is_empty() {
             self.size.width.max(self.size.height)
@@ -155,10 +153,9 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// whole of each row in the band at the top and bottom, and the ends of each row between.
     fn fill_border(&self, [out_r, out_g, out_b]: [&mut [f32]; 3], border: usize) {
         let Size2us { width, height } = self.size;
-        out_r
-            .par_chunks_mut(width)
-            .zip(out_g.par_chunks_mut(width))
-            .zip(out_b.par_chunks_mut(width))
+        par::chunks_mut(out_r, width)
+            .zip(par::chunks_mut(out_g, width))
+            .zip(par::chunks_mut(out_b, width))
             .enumerate()
             .for_each(|(y, ((row_r, row_g), row_b))| {
                 let mut fill_span = |span: Range<usize>| {

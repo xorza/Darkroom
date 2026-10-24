@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use arrayvec::ArrayVec;
+use common::par;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -141,8 +142,7 @@ impl NormFit<'_> {
         let cancel = planes.cancel;
         let reference = self.reference;
         let slot_count = planes.slots.count();
-        let fitted = (0..frames.len() * slot_count)
-            .into_par_iter()
+        let fitted = par::into_iter(0..frames.len() * slot_count)
             .map_init(FitScratch::default, |scratch, pair_idx| {
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;
@@ -359,8 +359,7 @@ impl NormFit<'_> {
             pixels,
             idxs: &idxs,
         };
-        let reference_slots = (0..slot_count)
-            .into_par_iter()
+        let reference_slots = par::into_iter(0..slot_count)
             .map(|slot| {
                 let mut scratch = FitScratch::default();
                 let median = sampled.median(reference, slot, &mut scratch.median)?;
@@ -385,8 +384,7 @@ impl NormFit<'_> {
             })
             .collect::<Result<Vec<_>, StackError>>()?;
 
-        let fitted = (0..frames.len() * slot_count)
-            .into_par_iter()
+        let fitted = par::into_iter(0..frames.len() * slot_count)
             .map_init(FitScratch::default, |scratch, pair_idx| {
                 let frame_idx = pair_idx / slot_count;
                 let slot = pair_idx % slot_count;

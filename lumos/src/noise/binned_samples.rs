@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::{array, mem};
 
 use arrayvec::ArrayVec;
+use common::par;
 use rayon::prelude::*;
 
 use crate::image::flat_gain::gain_bins::{GAIN_BINS, GainBins};
@@ -141,7 +142,7 @@ impl<S: Samples> BinnedSamples<S> {
     {
         let mut tags = vec![0u8; samples.len()];
         let mut shares = Vec::with_capacity(tags.len().div_ceil(BIN_SHARE));
-        tags.par_chunks_mut(BIN_SHARE)
+        par::chunks_mut(&mut tags, BIN_SHARE)
             .enumerate()
             .map(|(share, tags)| {
                 let start = share * BIN_SHARE;
@@ -185,7 +186,7 @@ impl<S: Samples> BinnedSamples<S> {
     ) -> ArrayVec<GainBin, GAIN_BINS> {
         self.measure_runs(|runs| {
             let mut variances = Vec::with_capacity(runs.len());
-            runs.into_par_iter()
+            par::into_iter(runs)
                 .map(&variance)
                 .collect_into_vec(&mut variances);
             variances

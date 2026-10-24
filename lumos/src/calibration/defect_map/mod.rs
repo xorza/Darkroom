@@ -56,6 +56,7 @@ pub(crate) mod sigma_threshold;
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
+use common::par;
 use rayon::prelude::*;
 
 use crate::bg_mesh::color_mesh::ColorMesh;
@@ -344,8 +345,7 @@ fn detect_hot_pixels(
     // compact same-color cluster remains an outlier instead of becoming its own local reference.
     // What it calls hot must stand as far above the ring's plane, which follows the structure the
     // tiles cannot.
-    let (idxs, excess) = (0..total)
-        .into_par_iter()
+    let (idxs, excess) = par::into_iter(0..total)
         .map_init(RingReference::default, |ring, i| {
             if cancel.is_cancelled() {
                 return None;
@@ -387,9 +387,7 @@ fn residual_sigma_floor(image: &CfaImage) -> f32 {
     }
     // One `f32` step at the frame's own magnitude — the smallest difference its samples can even
     // represent, so nothing below it is measurable whatever span the decoder divided by.
-    let magnitude = image
-        .data()
-        .par_iter()
+    let magnitude = par::iter(image.data())
         .map(|value| value.abs())
         .reduce(|| 0.0, f32::max);
     (magnitude * f32::EPSILON).max(f32::MIN_POSITIVE)
@@ -413,8 +411,7 @@ fn detect_cold_pixels(
     let total = size.pixel_count();
     let lattice = CfaLattice::new(&image.cfa_type());
 
-    let idxs = (0..total)
-        .into_par_iter()
+    let idxs = par::into_iter(0..total)
         .map_init(Gathered::default, |scratch, i| {
             if cancel.is_cancelled() {
                 return None;

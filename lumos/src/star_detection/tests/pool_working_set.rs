@@ -9,8 +9,6 @@
 //! [`StarDetector`]: crate::star_detection::star_detector::StarDetector
 //! [`DetectionResources`]: crate::star_detection::resources::DetectionResources
 
-use rayon::prelude::*;
-
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::math::size2us::Size2us;
@@ -86,8 +84,9 @@ fn warmed_pool_holds_the_pinned_working_set() {
         StarDetectionConfig::crowded_field(),
         StarDetectionConfig::precise_ground(),
     ];
+    // One preset after another: a detection's loops are parallel, which a loop's body may not be.
     let warmed: Vec<BufferCounts> = presets
-        .into_par_iter()
+        .into_iter()
         .map(|config| {
             let mut detector = StarDetector::from_config(config).unwrap();
             for frame in &frames {

@@ -3,6 +3,7 @@
 use std::time::Instant;
 use std::{array, ffi, mem};
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -338,10 +339,7 @@ impl UnpackedRaw {
         // preview clamps both, after the demosaic, so the interpolation sees the samples as
         // they are.
         for channel in 0..image.channels() {
-            image
-                .channel_mut(channel)
-                .pixels_mut()
-                .par_iter_mut()
+            par::iter_mut(image.channel_mut(channel).pixels_mut())
                 .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
         }
         if let Some(provenance) = image.metadata.derived.provenance_mut() {
@@ -455,8 +453,7 @@ pub(super) fn planes<'a>(samples: &'a ProcessedSamples<'_>) -> impl Iterator<Ite
     let colors = samples.dimensions.channels();
     let pixels = samples.dimensions.pixel_count();
     (0..colors).map(move |channel| {
-        (0..pixels)
-            .into_par_iter()
+        par::into_iter(0..pixels)
             .map(|pixel| f32::from(samples.samples[pixel * colors + channel]) / 65535.0)
             .collect()
     })

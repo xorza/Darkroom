@@ -5,6 +5,7 @@
 
 use std::mem;
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -137,9 +138,7 @@ fn extract_candidates(
     // One deblend buffer set per fold split, leased from the detector's pool so a frame after the
     // first reuses the last one's, each split's regions gathered in its set: the reduce appends a
     // later set's to an earlier one's, which keeps the components' order.
-    let (deblended_components, mut gathered, _) = label_map
-        .components()
-        .par_iter()
+    let (deblended_components, mut gathered, _) = par::iter(label_map.components())
         // A component smaller than `min_area` holds no region that large. One larger than
         // `max_area` is still deblended: a crowded group splits into regions within it.
         .filter(|data| data.area >= config.min_area)

@@ -1,5 +1,6 @@
 //! Per-pixel background and noise estimates.
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -50,9 +51,7 @@ impl BgEstimate {
     /// keep only its noise: the background surface goes back to the pool.
     pub(crate) fn subtract_from(self, pixels: &mut Buffer2<f32>) -> SkyNoise {
         let width = pixels.width();
-        pixels
-            .pixels_mut()
-            .par_chunks_mut(width)
+        par::chunks_mut(pixels.pixels_mut(), width)
             .enumerate()
             .for_each_init(
                 || self.bg.reader(),

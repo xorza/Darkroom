@@ -4,6 +4,7 @@
 //! 512² tiles, feather-blended) and recovers the stars layer by **unscreen**. A **display-domain**
 //! operation: StarNet expects stretched data in `[0, 1]`, so run it after the stretch.
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::concurrency::SAMPLES_PER_BLOCK;
@@ -85,10 +86,8 @@ impl RemoveStars {
 fn build_stars(image: &mut LinearImage, starless: &LinearImage) {
     for (channel, plane) in image.planes_mut().enumerate() {
         let sless = starless.channel(channel).pixels();
-        plane
-            .pixels_mut()
-            .par_chunks_mut(SAMPLES_PER_BLOCK)
-            .zip(sless.par_chunks(SAMPLES_PER_BLOCK))
+        par::chunks_mut(plane.pixels_mut(), SAMPLES_PER_BLOCK)
+            .zip(par::chunks(sless, SAMPLES_PER_BLOCK))
             .for_each(|(out, s)| {
                 for (out, &s) in out.iter_mut().zip(s) {
                     let o = *out;

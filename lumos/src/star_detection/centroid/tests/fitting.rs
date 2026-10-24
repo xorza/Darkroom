@@ -1,3 +1,4 @@
+use common::par;
 use rayon::prelude::*;
 
 use super::*;
@@ -19,7 +20,7 @@ fn every_method_on_a_sub_pixel_grid() {
         centroid_method: CentroidMethod::WeightedMoments,
         ..Default::default()
     };
-    (0..100).into_par_iter().for_each(|cell| {
+    par::into_iter(0..100).for_each(|cell| {
         let (dx, dy) = (cell / 10, cell % 10);
         // The star sits where its f32 centre rounds 16 + 0.1·k to.
         let truth = DVec2::new(16.0 + f64::from(dx) * 0.1, 16.0 + f64::from(dy) * 0.1)

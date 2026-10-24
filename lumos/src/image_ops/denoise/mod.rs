@@ -17,7 +17,7 @@
 
 use std::mem;
 
-use common::{Introspect, IntrospectEnum};
+use common::{Introspect, IntrospectEnum, par};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -207,10 +207,9 @@ impl Denoise {
             match noise {
                 PlaneNoise::White(sigma) => {
                     let t = per_sigma * sigma;
-                    plane
-                        .par_chunks_mut(SAMPLES_PER_BLOCK)
-                        .zip(c_cur.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                        .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                    par::chunks_mut(plane, SAMPLES_PER_BLOCK)
+                        .zip(par::chunks(c_cur.pixels(), SAMPLES_PER_BLOCK))
+                        .zip(par::chunks(c_next.pixels(), SAMPLES_PER_BLOCK))
                         .for_each(|((plane, cur), next)| {
                             for ((p, &cc), &cn) in plane.iter_mut().zip(cur).zip(next) {
                                 removed(p, cc, cn, t);
@@ -218,11 +217,10 @@ impl Denoise {
                         });
                 }
                 PlaneNoise::Variance(variance) => {
-                    plane
-                        .par_chunks_mut(SAMPLES_PER_BLOCK)
-                        .zip(c_cur.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                        .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
-                        .zip(variance.par_chunks(SAMPLES_PER_BLOCK))
+                    par::chunks_mut(plane, SAMPLES_PER_BLOCK)
+                        .zip(par::chunks(c_cur.pixels(), SAMPLES_PER_BLOCK))
+                        .zip(par::chunks(c_next.pixels(), SAMPLES_PER_BLOCK))
+                        .zip(par::chunks(variance, SAMPLES_PER_BLOCK))
                         .for_each(|(((plane, cur), next), variance)| {
                             for (((p, &cc), &cn), &v) in
                                 plane.iter_mut().zip(cur).zip(next).zip(variance)

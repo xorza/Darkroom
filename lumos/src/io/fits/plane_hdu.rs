@@ -4,6 +4,7 @@ use std::io::{Seek, Write};
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use common::par;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Metadata, Scaling, View};
@@ -92,15 +93,18 @@ impl PlaneSource for FloatPlanes<'_> {
             return samples;
         };
         scratch.clear();
-        scratch.par_extend(samples.par_iter().zip(&nulls.bytes()[pixels]).map(
-            |(&sample, &byte)| {
-                if QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA) {
-                    f32::NAN
-                } else {
-                    sample
-                }
-            },
-        ));
+        par::extend(
+            scratch,
+            par::iter(samples)
+                .zip(&nulls.bytes()[pixels])
+                .map(|(&sample, &byte)| {
+                    if QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA) {
+                        f32::NAN
+                    } else {
+                        sample
+                    }
+                }),
+        );
         scratch
     }
 }
@@ -126,10 +130,9 @@ impl PlaneSource for FlagBytes<'_> {
 
     fn samples<'a>(&'a self, _: usize, pixels: Range<usize>, scratch: &'a mut Vec<u8>) -> &'a [u8] {
         scratch.clear();
-        scratch.par_extend(
-            self.0.bytes()[pixels]
-                .par_iter()
-                .map(|&byte| Self::stored(byte)),
+        par::extend(
+            scratch,
+            par::iter(&self.0.bytes()[pixels]).map(|&byte| Self::stored(byte)),
         );
         scratch
     }
@@ -145,9 +148,12 @@ impl PlaneSource for NoDataMask<'_> {
 
     fn samples<'a>(&'a self, _: usize, pixels: Range<usize>, scratch: &'a mut Vec<u8>) -> &'a [u8] {
         scratch.clear();
-        scratch.par_extend(self.0.bytes()[pixels].par_iter().map(|&byte| {
-            u8::from(QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA))
-        }));
+        par::extend(
+            scratch,
+            par::iter(&self.0.bytes()[pixels]).map(|&byte| {
+                u8::from(QualityFlags::from_byte(byte).intersects(QualityFlags::NO_DATA))
+            }),
+        );
         scratch
     }
 }

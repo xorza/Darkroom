@@ -15,6 +15,7 @@ mod dilation;
 
 use std::ops::Index;
 
+use common::par;
 use rayon::prelude::*;
 use rayon::slice::ChunksExactMut;
 
@@ -163,7 +164,7 @@ impl BitBuffer2 {
     /// type).
     pub(crate) fn par_rows_mut(&mut self) -> ChunksExactMut<'_, u64> {
         let words_per_row = self.words_per_row().max(1);
-        self.words.par_chunks_exact_mut(words_per_row)
+        par::chunks_exact_mut(&mut self.words, words_per_row)
     }
 
     /// The bits of a row's last pixel word that hold pixels: all 64 when the width is a multiple

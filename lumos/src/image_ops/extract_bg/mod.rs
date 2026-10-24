@@ -13,6 +13,7 @@
 //! stretch.
 
 use arrayvec::ArrayVec;
+use common::par;
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
@@ -372,9 +373,7 @@ impl Surface {
     /// parallel over rows.
     fn remove(&self, plane: &mut Buffer2<f32>, remove: impl Fn(f32, f32) -> f32 + Sync) {
         let (w, degree) = (self.size.width, self.degree);
-        plane
-            .pixels_mut()
-            .par_chunks_mut(w)
+        par::chunks_mut(plane.pixels_mut(), w)
             .enumerate()
             .for_each(|(y, row)| {
                 let b = self.row_coeffs(y);

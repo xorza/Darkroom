@@ -3,7 +3,8 @@
 
 use std::ops::Range;
 
-use crate::concurrency;
+use common::par;
+
 use crate::error::Cancelled;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
@@ -103,7 +104,7 @@ impl<'a> FrameIntake<'a> {
         E: Send + From<Cancelled>,
     {
         let start = idxs.start;
-        concurrency::try_par_map_bounded(idxs.len(), slots, |slot, offset| {
+        par::slots(idxs.len(), slots, |slot, offset| {
             Cancelled::check(&self.ctx.cancel)?;
             job(slot, start + offset)
         })
@@ -122,7 +123,7 @@ impl<'a> FrameIntake<'a> {
         E: Send + From<Cancelled>,
     {
         let start = idxs.start;
-        concurrency::try_par_map_at_most(idxs.len(), width, |offset| {
+        par::slots(idxs.len(), &mut vec![(); width], |(), offset| {
             Cancelled::check(&self.ctx.cancel)?;
             job(start + offset)
         })
@@ -142,7 +143,7 @@ impl<'a> FrameIntake<'a> {
         R: Send,
         E: Send + From<Cancelled>,
     {
-        concurrency::try_par_map_bounded_owned(items, slots, |slot, idx, item| {
+        par::slots_owned(items, slots, |slot, idx, item| {
             Cancelled::check(&self.ctx.cancel)?;
             job(slot, idx, item)
         })

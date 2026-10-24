@@ -2,6 +2,7 @@
 //! scatter the noise propagates to it, so the error falls with the star's amplitude as derived.
 
 use super::*;
+use common::par;
 use rayon::prelude::*;
 
 /// One field of round Gaussians on a 0.1 sky with white noise σₙ = 0.01, its sky estimated at the
@@ -93,8 +94,7 @@ fn the_position_sigma_matches_the_scatter() {
     .stamp(Size2us::new(32, 32), 0.1);
     let grid = MeasureGrid::new(fwhm);
     // The draws are independent, so they run in parallel; the sums run in seed order.
-    let draws: Vec<Draw> = (0..DRAWS)
-        .into_par_iter()
+    let draws: Vec<Draw> = par::into_iter(0..DRAWS)
         .map(|seed| {
             let mut pixels = clean.clone();
             patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);

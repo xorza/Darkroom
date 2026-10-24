@@ -21,6 +21,7 @@ use std::iter;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -239,10 +240,8 @@ impl DrizzleRun<'_> {
             }
             drop(frame);
             for (depth, drops) in depth.iter_mut().zip(&drops) {
-                depth
-                    .pixels_mut()
-                    .par_iter_mut()
-                    .zip(drops.weight.pixels().par_iter())
+                par::iter_mut(depth.pixels_mut())
+                    .zip(par::iter(drops.weight.pixels()))
                     .for_each(|(depth, &weight)| *depth += weight);
             }
             metadata.get_or_insert_with(|| frame_metadata.clone());

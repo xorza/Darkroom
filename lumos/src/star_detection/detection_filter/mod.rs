@@ -10,6 +10,7 @@
 use std::mem;
 use std::ops::Range;
 
+use common::par;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -114,9 +115,7 @@ impl DetectionFilter<'_> {
         let pixels = source.pixels();
         let (width, height) = (pixels.width(), pixels.height());
         debug_assert_eq!((output.width(), output.height()), (width, height));
-        output
-            .pixels_mut()
-            .par_chunks_mut(band * width)
+        par::chunks_mut(output.pixels_mut(), band * width)
             .enumerate()
             .for_each_init(
                 || (scratch.acquire(), source.sky_reader()),

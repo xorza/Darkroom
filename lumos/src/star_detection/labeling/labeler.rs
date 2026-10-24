@@ -3,6 +3,7 @@
 use std::mem;
 use std::ops::Range;
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -110,8 +111,7 @@ impl Labeler {
             connectivity,
         };
 
-        strips
-            .par_iter_mut()
+        par::iter_mut(strips)
             .enumerate()
             .for_each(|(strip_idx, strip)| {
                 strip.label_rows(mask, strip_rows(strip_idx), join);

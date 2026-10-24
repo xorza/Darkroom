@@ -1,7 +1,7 @@
 //! The disk dilation [`BitBuffer2::dilate`] runs.
 
+use common::par;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use rayon::slice::ParallelSliceMut;
 
 use crate::bit_buffer2::BitBuffer2;
 
@@ -41,8 +41,7 @@ pub(super) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut Bi
 
     scratch.words.copy_from_slice(&mask.words);
     let source = &scratch.words;
-    mask.words
-        .par_chunks_mut(words_per_row)
+    par::chunks_mut(&mut mask.words, words_per_row)
         .enumerate()
         .for_each(|(y, out_row)| {
             out_row.fill(0);

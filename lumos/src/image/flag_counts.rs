@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use common::par;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -76,8 +77,7 @@ impl FlagCounts {
 
     /// The counts of `bytes`, each a pixel's flags, in parallel spans.
     pub(crate) fn of(bytes: &[u8]) -> Self {
-        bytes
-            .par_chunks(1 << 16)
+        par::chunks(bytes, 1 << 16)
             .map(|span| {
                 let mut counts = Self::default();
                 for &byte in span {
