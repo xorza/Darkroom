@@ -41,5 +41,4 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals", "introspect-derive"] }
-static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }

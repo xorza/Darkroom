@@ -23,18 +23,28 @@
 //! - The one route outside `common` to what the program does beyond its own memory:
 //!   [`fs`] for the file system, with atomic publication, [`FileIdentity`] and,
 //!   beside it, [`MappedFile`] and [`ScratchFile`]; [`env`](mod@env) for the environment;
-//!   [`process`] for other processes; [`thread`], [`task`], [`WorkerPool`] and
-//!   [`BgRuntime`] for a new thread, pool or runtime; [`SystemMemory`], [`ResidentMemory`],
+//!   [`process`] for other processes; [`thread`], [`task`] and [`BgRuntime`] for a new
+//!   thread or runtime; [`par`] for parallel work; [`SystemMemory`], [`ResidentMemory`],
 //!   [`FileSystem`] and [`UserCache`] for what the system states. The workspace's `clippy.toml`
 //!   refuses the direct calls everywhere else.
-//! - Parallel work: a [`WorkerPool`] hands out the first [`Par`], a parallel loop started from
-//!   one cannot start another in its body, and [`PerWorker`] is the scratch such a body takes.
+//! - Parallel work: [`par`] starts every parallel loop, and panics when a loop's body would start
+//!   another; [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build.
 
 #![deny(unsafe_code)]
+// The one `thread_local!` is test-only: `WorkerPool` marks the worker whose body is top-level code.
+// An item-position macro's lint level is read at the crate root.
+#![cfg_attr(
+    feature = "internals",
+    expect(
+        clippy::disallowed_types,
+        reason = "`WorkerPool` marks its top-level worker in a thread-local: rayon runs the body, \
+                  with no owner to carry the mark"
+    )
+)]
 
 // Type-holding modules are private; their public surface is defined by the
 // crate-root `pub use`s below (one canonical path per item). Modules that are
@@ -44,6 +54,7 @@ pub mod env;
 pub mod fs;
 #[cfg(feature = "internals")]
 pub mod internals;
+pub mod par;
 pub mod process;
 pub mod task;
 pub mod thread;
@@ -53,7 +64,6 @@ mod cancel_token;
 mod float_ext;
 mod id;
 mod introspect;
-mod par;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
 mod serde;
@@ -79,8 +89,8 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
-pub use par::Par;
 pub use par::per_worker::PerWorker;
+#[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};

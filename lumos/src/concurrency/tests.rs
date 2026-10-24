@@ -16,7 +16,7 @@ fn bounded_map_preserves_order_and_reaches_the_exact_cap() {
     let max_observed = AtomicUsize::new(0);
     let items: Vec<usize> = (0..6).collect();
 
-    let result = pool.run(|_| {
+    let result = pool.run(|| {
         try_par_map_at_most(items.len(), 3, |idx| {
             let value = &items[idx];
             let cur = in_flight.fetch_add(1, Ordering::SeqCst) + 1;

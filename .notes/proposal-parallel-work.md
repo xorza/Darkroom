@@ -27,52 +27,44 @@ governs, and this file is deleted.
   is banned too, as it takes any `IntoParallelIterator`, a plain `Vec` among them;
   adapters that start nothing (`map`, `zip`, `enumerate`, `collect`) stay rayon's
   own. The bans land with the lumos move (batch 4), which they would fail before.
-- **A token proves the caller is not a loop body.** Every entry point is a method
-  of `Par<'p>`, which is `!Send + !Sync`; rayon requires each body to be
-  `Send + Sync`, so a body cannot hold the token and a nested loop does not
-  compile. A function that runs parallel work takes `par: &Par<'_>`. Refused: a
-  run-time flag in the wrappers, which needs a `thread_local!` and catches only
-  what tests run; tokens kept in existing context structs, which would make those
-  structs `!Sync` for every body that reads their other fields.
-- **A static assertion proves the token stays out.** `assert_not_impl_any!(Par:
-  Send, Sync)` in `common`'s tests, which with rayon's bounds is the whole
-  property. Refused: `compile_fail` doc tests, which need rustdoc and the doc tests
-  in every gate; `trybuild`, a new dependency whose saved compiler output breaks
-  with each rustc.
-- **Only a pool hands out a token.** `WorkerPool::new` replaces
-  `common::thread::pool`; the pool is `Clone + Send + Sync`, and
-  `WorkerPool::run(|par| …)` installs the work and passes the first `Par`. `run`
-  asserts, in release, that it is not on a rayon worker: a body that captured a
-  pool is the one path the types leave open, and the check costs one read per run.
-  `Par` has no public constructor; tests and benches make a `WorkerPool` of their
-  own. Named for its workers, as darkroom already has a `Pool` of its own.
-- **darkroom owns the one compute pool.** `RuntimeLibrary` makes it and hands a
-  clone to `astro_library` and `image_library`; a lens node calls `pool.run`
-  inside its `spawn_blocking`. The global rayon pool is no longer used. Refused:
-  a pool per lumos call, which would oversubscribe the cores when nodes run side
-  by side.
-- **Frame slots are the one nesting allowed.** `Par::slots(len, &mut slots, job)`
-  — today's `concurrency::try_par_map_bounded` — gives each job its own `&Par`:
-  each slot owns its frame's memory, so a slot job on another's stack stays within
-  the slot count. Its cost, a frame finishing only when the jobs above it on the
-  stack do, is accepted and documented. Research: rayon #1054.
+- **A run-time check at each entry, not a token.** Each entry point is a free
+  function of `common::par` returning rayon's own iterator, and panics, in
+  release too, when the caller is a pool worker: top-level code never runs on
+  one, so a caller there is a loop's body. One read of rayon's thread-local a
+  loop. Refused: a `Par` token every function on a path to a loop takes, which
+  refuses nesting at compile time but threads a parameter through every
+  signature and the public API (the user refused it); a flag a wrapper sets in
+  each body, which `zip` and `chain` bypass as they consume a producer through
+  `into_iter`. Research: Polars' pool check.
+- **Rayon's global pool is the one pool.** An entry point returns an iterator
+  its caller drives, and rayon drives it on the global pool off a worker, so a
+  static API has no other pool to use. A one-item loop runs its body on its
+  caller's thread, where a nested loop waits without stealing. `WorkerPool` is
+  test-only: it runs a body as top-level code on a pool of a set size, marking
+  that worker in a test-only `thread_local!`.
+- **Frame slots run on plain threads.** `par::slots` — today's
+  `concurrency::try_par_map_bounded` — runs each slot on a scoped
+  `common::thread`, so a job's loops start off the pool and nothing nests on a
+  worker's stack, frames included (rayon #1054 goes with it). Its cost: a slot's
+  serial steps run beside the workers rather than as one of them.
 - **Scratch is per worker, owned by the caller.** `PerWorker<S>` holds one slot
-  for each pool thread, kept by the owner from call to call; a body takes its
-  thread's slot through a checked borrow that panics on a second borrow. The
-  no-nesting rule makes each slot single-user, so a working set is exactly
-  `par.threads() × scratch` and a call allocates nothing. Refused: an
+  for each pool thread and one for bodies run outside the pool, kept by the owner
+  from call to call; a worker's body takes its slot through a checked borrow that
+  panics on a second borrow. The no-nesting rule makes each slot single-user, so
+  a working set is exactly `(par::threads() + 1) × scratch` and a call allocates
+  nothing. Refused: an
   `UnsafeCell` slot, unsound the day a submodule's hidden parallel call nests;
   a scratch pool that grows on demand, whose peak is not a function of the thread
   count.
-- **Thread counts come from the token.** `par.threads()` replaces
+- **Thread counts come from `par`.** `par::threads()` replaces
   `rayon::current_num_threads()`, so a memory figure and the pool that spends it
   cannot disagree.
 - **A submodule's parallel functions are entry points too.** `imaginarium`'s
   `Buffer2::interleave`, `deinterleave`, `Image::convert`, `convert_to` and
   `fits-well`'s compressed reads and writes join the `disallowed-methods` list,
-  and the workspace calls them through functions that take `&Par`. Refused:
-  giving the submodules the token, which would tie standalone crates to
-  `common`. Their own serial mode stays an open request in each one's issue log.
+  and the workspace calls them through `par` wrappers that run the same check.
+  Refused: giving the submodules `common::par`, which would tie standalone crates
+  to `common`. Their own serial mode stays an open request in each one's issue log.
 - **`cargo drive surface` prints every build's lines.** An item's block is the
   union of its builds' lines, each line that not every build has tagged with the
   features that bring it, as items are tagged today. Refused: printing one block
@@ -108,15 +100,15 @@ its proof.
 
 ### 2. `common::par`
 
-- [x] `WorkerPool`, `Par<'p>`, `PerWorker<S>` in `common/src/par/`, one file
-  each; `WorkerPool::new` replaces `thread::pool`. `Par` methods: `iter`,
-  `iter_mut`, `into_iter`, `chunks`, `chunks_exact`, `chunks_mut`,
-  `chunks_exact_mut`, `drain`, `extend`, `slots`, `threads`.
-- [x] Tests: `Par` is neither `Send` nor `Sync`; `run` panics on a worker;
-  `PerWorker` makes one slot per worker, kept across runs, each body taking its
-  own, and panics on a second borrow, off a worker and past its workers; `slots`
-  keeps the ordering, cap, carried-slot and lowest-failure tests, and a job's own
-  `Par` runs loops.
+- [x] Free functions `iter`, `iter_mut`, `into_iter`, `chunks`, `chunks_exact`,
+  `chunks_mut`, `chunks_exact_mut`, `drain`, `extend`, `slots`, `threads`;
+  `PerWorker<S>`; a test-only `WorkerPool`, which replaces `thread::pool`.
+- [x] Tests: a loop started in a body panics, a zipped body's too, and `slots`
+  started in one; `run` panics on a worker; `PerWorker` makes one slot per worker
+  and one outside, kept across runs, each body taking its own, a one-item loop's
+  body the outside one, and panics on a second borrow and past its pool; `slots`
+  keeps the ordering, cap, carried-slot and lowest-failure tests, and a job runs
+  loops of its own.
 
 ### 3. The two nestings
 
@@ -131,9 +123,9 @@ its proof.
   (research: "Taking the nesting out of MRS"). The MRS issue is deleted.
 
 The tile scratch moves into a `PerWorker`, and `heap_bytes` is held to the
-counting allocator, in batch 4, once `coefficients` has a `Par`.
+counting allocator, in batch 4.
 
-### 4. lumos onto `Par`
+### 4. lumos onto `common::par`
 
 Module group by module group, each a commit that builds:
 
@@ -145,23 +137,17 @@ Module group by module group, each a commit that builds:
 - [ ] `combine`, `pipeline`, `image_ops`.
 - [ ] Every `map_init`/`for_each_init`/`try_for_each_init` becomes a
   `PerWorker` its owner keeps; every `current_num_threads()` becomes
-  `par.threads()`; every `heap_bytes` takes its thread count from the same
-  `Par` the run uses. Tests: the memory-budget suite, and each changed
+  `par::threads()`. Tests: the memory-budget suite, and each changed
   `heap_bytes` against the counting allocator.
-- [ ] lumos's public functions that run parallel work take `&Par`.
 - [ ] The `clippy.toml` bans, each with its reason; `concurrency`'s bounded maps
-  become `Par::slots`.
+  become `par::slots`.
 
 ### 5. Submodule calls, lens and darkroom
 
 - [ ] The `imaginarium` and `fits-well` parallel functions in
-  `disallowed-methods`, called through `&Par` functions.
-- [ ] `RuntimeLibrary` owns the `Pool`; `astro_library` and `image_library` take
-  it; `run_cancellable` and the other `spawn_blocking` sites run inside
-  `pool.run`. Test: a node graph test runs a lumos node and an image node side by
-  side on one pool.
+  `disallowed-methods`, called through `par` wrappers that run the check.
 - [ ] Rerun the nesting probe (method in the research note) over the lumos,
-  lens and darkroom tests; it records only `Par::slots` bodies.
+  lens and darkroom tests; it records nothing.
 
 ### 6. The compressed read (fits-well, then lumos)
 

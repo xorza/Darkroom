@@ -534,7 +534,6 @@ dependencies = [
  "rayon",
  "ron",
  "serde",
- "static_assertions",
  "sysinfo",
  "thiserror 2.0.21",
  "tokio",

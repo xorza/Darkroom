@@ -6,7 +6,7 @@ disallowed-types = [
     # I/O and thread creation go through `common`, which has its own `clippy.toml` without these.
     { path = "std::fs::OpenOptions", reason = "open through `common::fs`, the one route to the file system" },
     { path = "std::thread::Builder", reason = "spawn a named thread through `common::thread`" },
-    { path = "rayon::ThreadPoolBuilder", reason = "build a thread pool through `common::WorkerPool`" },
+    { path = "rayon::ThreadPoolBuilder", reason = "parallel work runs on rayon's global pool, through `common::par`" },
     { path = "std::process::Command", reason = "start a process through `common::process`" },
     { path = "tokio::fs::OpenOptions", reason = "open through `common::fs`, the one route to the file system" },
     { path = "std::fs::DirBuilder", reason = "go through `common::fs`, the one route to the file system" },
