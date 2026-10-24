@@ -259,7 +259,7 @@ impl BundleReader<'_> {
             return Err(DefectTableError::Extent.into());
         };
         let table = self.reader.read_table(idx)?;
-        let row_count = table.schema().row_count;
+        let row_count = table.schema().row_count();
         let kinds: Vec<u8> = defect_column(&table, "KIND")?;
         let idxs: Vec<i64> = defect_column(&table, "INDEX")?;
         let excess: Vec<f32> = defect_column(&table, "EXCESS")?;

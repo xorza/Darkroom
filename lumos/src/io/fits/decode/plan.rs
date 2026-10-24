@@ -1,4 +1,5 @@
 use fits_well::FitsError;
+use fits_well::error::ExpectedHdu;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix as FitsBitpix, Metadata as FitsMetadata, SampleType, Scaling};
 use fits_well::io::{Hdu, HduKind};
@@ -33,7 +34,10 @@ impl<'a> FitsHduDescription<'a> {
     /// The image at HDU `idx`, `hdu`.
     pub(super) fn from_hdu(hdu: &'a Hdu, idx: usize) -> Result<Self, FitsLoadError> {
         let image = hdu.image_metadata().map_err(|source| match source {
-            FitsError::NotAnImage => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: idx }),
+            FitsError::HduKindMismatch {
+                expected: ExpectedHdu::Image,
+                ..
+            } => FitsLoadError::from(FitsRefusal::NotAnImage { hdu: idx }),
             source => FitsLoadError::from(source),
         })?;
         Ok(Self {

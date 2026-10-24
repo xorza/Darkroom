@@ -10,7 +10,8 @@ use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 
 use common::{CancelToken, TempDir, fs, thread};
-use fits_well::header::Header;
+use fits_well::error::ValueKind;
+use fits_well::header::{Header, RecordName, keywords};
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
 use imaginarium::ColorFormat;
@@ -109,9 +110,12 @@ fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
     assert!(matches!(
         write_header_and_load("mistyped_float_scale", &mistyped_float_scale),
         Err(ImageError::Fits {
-            source: FitsError::TypeMismatch { name, .. },
+            source: FitsError::ValueTypeMismatch {
+                name,
+                expected: ValueKind::Real,
+            },
             ..
-        }) if name == "DATAMAX"
+        }) if name == RecordName::from(keywords::DATAMAX)
     ));
 
     let mut mistyped_row_order = one_pixel_header();
@@ -119,9 +123,12 @@ fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
     assert!(matches!(
         write_header_and_load("mistyped_row_order", &mistyped_row_order),
         Err(ImageError::Fits {
-            source: FitsError::TypeMismatch { name, .. },
+            source: FitsError::ValueTypeMismatch {
+                name,
+                expected: ValueKind::Text,
+            },
             ..
-        }) if name == "ROWORDER"
+        }) if name == RecordName::try_from("ROWORDER").unwrap()
     ));
 }
 

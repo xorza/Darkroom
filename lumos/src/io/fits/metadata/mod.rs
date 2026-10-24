@@ -3,7 +3,7 @@ pub(crate) mod domain_keywords;
 
 use std::fmt::Display;
 
-use fits_well::header::{Header, Keyword, keywords};
+use fits_well::header::{Header, Keyword, RecordName, keywords};
 use fits_well::image::SampleType;
 
 use crate::image::calibration_state::CalibrationState;
@@ -619,7 +619,7 @@ fn parse_sexagesimal(value: &str) -> Option<f64> {
 
 pub(super) fn read_text(
     header: &Header,
-    key: impl TryInto<Keyword, Error: Into<fits_well::FitsError>>,
+    key: impl TryInto<RecordName, Error: Into<fits_well::FitsError>>,
 ) -> Result<Option<String>, FitsLoadError> {
     Ok(header.get_text(key)?.map(str::to_owned))
 }
