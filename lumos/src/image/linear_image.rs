@@ -127,14 +127,29 @@ impl LinearImage {
         &mut self.pixels
     }
 
+    /// Resident RAM held by this image: its `f32` planes, its flag plane, and a flat gain it holds
+    /// alone. A shared gain's owner counts it. Metadata is negligible against a plane.
+    pub fn ram_bytes(&self) -> usize {
+        let own_gain = match &self.flat_gain {
+            Some(FrameGain::Own(gain)) => gain.ram_bytes(),
+            Some(FrameGain::Shared(_)) | None => 0,
+        };
+        self.sample_count() * size_of::<f32>()
+            + self.flags.as_ref().map_or(0, |flags| flags.bytes().len())
+            + own_gain
+    }
+
     /// The data-quality flags of the pixels; `None` when no pixel carries one.
     pub const fn flags(&self) -> Option<&PixelFlags> {
         self.flags.as_ref()
     }
 
     /// Replace the flags with `flags`, of these pixels.
-    pub(crate) fn set_flags(&mut self, flags: Option<PixelFlags>) {
-        debug_assert!(
+    ///
+    /// # Panics
+    /// When `flags` are of another size.
+    pub fn set_flags(&mut self, flags: Option<PixelFlags>) {
+        assert!(
             flags
                 .as_ref()
                 .is_none_or(|flags| flags.size() == self.dimensions().size()),
@@ -154,8 +169,11 @@ impl LinearImage {
     }
 
     /// Replace the flat gain with `gain`, which covers these pixels and channels.
-    pub(crate) fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
-        debug_assert!(
+    ///
+    /// # Panics
+    /// When `gain` covers another size or another channel count.
+    pub fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
+        assert!(
             gain.as_ref()
                 .is_none_or(|gain| gain.covers(self.dimensions().size(), self.channels())),
             "an image's flat gain covers another image's pixels"
@@ -421,10 +439,38 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use arrayvec::ArrayVec;
     use common::Buffer2;
 
+    use crate::image::flat_gain::FlatGain;
+    use crate::image::flat_gain::frame_gain::FrameGain;
+    use crate::image::pixel_flags::PixelFlags;
     use crate::internals::images::{gray_image, rgb_image};
     use crate::math::size2us::Size2us;
+
+    /// A 2×1 RGB image holds 6 `f32` samples, 24 bytes; its flag plane adds a byte a pixel, 2; a
+    /// gain it holds alone adds its grid, 2 nodes × 3 channels × 4 bytes = 24; a shared one adds
+    /// nothing, as its owner counts it.
+    #[test]
+    fn ram_bytes_counts_the_planes_the_flags_and_an_own_gain() {
+        let size = Size2us::new(2, 1);
+        let mut image = rgb_image(size, [vec![0.1, 0.4], vec![0.2, 0.5], vec![0.3, 0.6]]);
+        assert_eq!(image.ram_bytes(), 24);
+        image.set_flags(PixelFlags::from_bytes(Buffer2::new(2, 1, vec![1, 0])));
+        assert_eq!(image.ram_bytes(), 26);
+        let gain = FlatGain::from_nodes(
+            size,
+            (0..3)
+                .map(|_| Buffer2::new(2, 1, vec![1.5, 2.0]))
+                .collect::<ArrayVec<_, 3>>(),
+        );
+        image.set_flat_gain(Some(FrameGain::Own(Box::new(gain.clone()))));
+        assert_eq!(image.ram_bytes(), 50);
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::new(gain))));
+        assert_eq!(image.ram_bytes(), 26);
+    }
 
     #[test]
     fn map_rgb_maps_every_channel_of_a_pixel_and_skips_grayscale() {

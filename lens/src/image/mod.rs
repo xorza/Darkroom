@@ -12,7 +12,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use lumos::{ChannelLayout, ImageDimensions, LinearImage};
+use lumos::{ChannelLayout, ImageDimensions, ImageMetadata, LinearImage, PreviewImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -38,21 +38,16 @@ pub struct Image {
 }
 
 /// The layouts an [`Image`] can be in — one or the other, never both and never neither.
-///
-/// `PlanarCpu` is the far larger variant (a `LinearImage` carries its metadata and three plane
-/// handles inline), so every image pays its size. Boxing it to even the variants out would trade
-/// ~680 bytes of inline padding — once per graph value, beside megabytes of pixels — for a heap
-/// allocation and an indirection on the astro path, which is the wrong way round.
 #[derive(Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "boxing would trade inline padding for an indirection on the astro path"
-)]
 enum Pixels {
     /// One `f32` plane per channel: what the `lumos` astro ops read and write.
     PlanarCpu(LinearImage),
-    /// Interleaved samples: what the `imaginarium` ops take.
-    InterleavedCpu(imaginarium::Image),
+    /// Interleaved samples, what the `imaginarium` ops take, and what their decoder stated of them:
+    /// default for an op's output, which states nothing.
+    InterleavedCpu {
+        image: imaginarium::Image,
+        metadata: ImageMetadata,
+    },
 }
 
 impl Image {
@@ -99,20 +94,22 @@ impl Image {
         }
     }
 
-    /// Takes the interleaved form, repacking from planes if that is what this holds.
+    /// Takes the interleaved form, repacking from planes if that is what this holds. The metadata
+    /// stays behind: the `imaginarium` ops take samples alone.
     fn into_interleaved(self) -> imaginarium::Image {
         match self.pixels {
-            Pixels::InterleavedCpu(image) => image,
+            Pixels::InterleavedCpu { image, .. } => image,
             Pixels::PlanarCpu(planar) => imaginarium::Image::from(&planar),
         }
     }
 
-    /// Takes the planes, deinterleaving if that is what this holds. An image that is already planar
-    /// is returned untouched and uncopied — the case an all-astro chain hits at every node.
+    /// Takes the planes, deinterleaving if that is what this holds, with the metadata. An image
+    /// that is already planar is returned untouched and uncopied — the case an all-astro chain hits
+    /// at every node.
     fn into_planar(self) -> LinearImage {
         match self.pixels {
             Pixels::PlanarCpu(planar) => planar,
-            Pixels::InterleavedCpu(image) => LinearImage::from(image),
+            Pixels::InterleavedCpu { image, metadata } => planes_of(image, metadata),
         }
     }
 
@@ -122,7 +119,7 @@ impl Image {
     /// would be pure waste.
     pub fn interleaved(&self) -> Cow<'_, imaginarium::Image> {
         match &self.pixels {
-            Pixels::InterleavedCpu(image) => Cow::Borrowed(image),
+            Pixels::InterleavedCpu { image, .. } => Cow::Borrowed(image),
             Pixels::PlanarCpu(planar) => Cow::Owned(imaginarium::Image::from(planar)),
         }
     }
@@ -132,19 +129,28 @@ impl Image {
     pub(crate) fn planar(&self) -> Cow<'_, LinearImage> {
         match &self.pixels {
             Pixels::PlanarCpu(planar) => Cow::Borrowed(planar),
-            Pixels::InterleavedCpu(image) => Cow::Owned(LinearImage::from(image)),
+            Pixels::InterleavedCpu { image, metadata } => {
+                Cow::Owned(planes_of(image, metadata.clone()))
+            }
         }
     }
 
     /// Dimensions and format, without repacking either way.
     pub(crate) fn desc(&self) -> imaginarium::ImageDesc {
         match &self.pixels {
-            Pixels::InterleavedCpu(image) => image.desc(),
+            Pixels::InterleavedCpu { image, .. } => image.desc(),
             Pixels::PlanarCpu(planar) => {
                 imaginarium::ImageDesc::new(planar.width(), planar.height(), planar.color_format())
             }
         }
     }
+}
+
+/// The planes of `image`, carrying `metadata`.
+fn planes_of(image: impl Into<LinearImage>, metadata: ImageMetadata) -> LinearImage {
+    let mut planar = image.into();
+    planar.metadata = metadata;
+    planar
 }
 
 impl CustomValue for Image {
@@ -162,8 +168,8 @@ impl CustomValue for Image {
 
     fn ram_bytes(&self) -> RamUsage {
         let cpu = match &self.pixels {
-            Pixels::PlanarCpu(planar) => planar.sample_count() * size_of::<f32>(),
-            Pixels::InterleavedCpu(image) => image.bytes().len(),
+            Pixels::PlanarCpu(planar) => planar.ram_bytes(),
+            Pixels::InterleavedCpu { image, .. } => image.bytes().len(),
         };
         RamUsage { cpu, gpu: 0 }
     }
@@ -178,8 +184,24 @@ impl Display for Image {
 impl From<imaginarium::Image> for Image {
     fn from(image: imaginarium::Image) -> Self {
         Self {
-            pixels: Pixels::InterleavedCpu(image),
+            pixels: Pixels::InterleavedCpu {
+                image,
+                metadata: ImageMetadata::default(),
+            },
         }
+    }
+}
+
+/// A decode's image, in the layout it decoded to, with its metadata.
+impl From<PreviewImage> for Image {
+    fn from(preview: PreviewImage) -> Self {
+        let pixels = match preview {
+            PreviewImage::Planes(planar) => Pixels::PlanarCpu(planar),
+            PreviewImage::Interleaved { image, metadata } => {
+                Pixels::InterleavedCpu { image, metadata }
+            }
+        };
+        Self { pixels }
     }
 }
 

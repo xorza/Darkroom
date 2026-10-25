@@ -1,9 +1,13 @@
 //! The astro library's node shapes, its path types, and the builder
 //! nodes' invocation at the input boundary.
 
+use std::borrow::Cow;
+
+use common::TempDir;
 use lumos::{
-    Denoise, ExtractBg, Hdr, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
-    SigmaThreshold,
+    ChannelLayout, Denoise, ExtractBg, Hdr, ImageDimensions, LinearImage, LocalContrast,
+    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS, RasterFormat, SigmaThreshold, SourceProvenance,
+    writer,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
@@ -12,7 +16,7 @@ use crate::astro::masters::MASTERS_DATA_TYPE;
 use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
 use crate::astro::nodes::{MlModelPaths, astro_library};
 use crate::config_node::config_data_type;
-use crate::image::IMAGE_DATA_TYPE;
+use crate::image::{IMAGE_DATA_TYPE, Image};
 
 #[test]
 fn astro_image_path_filter_matches_preview_extensions() {
@@ -41,6 +45,62 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.outputs().len(), 1);
     assert_eq!(f.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
     assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
+}
+
+/// The node keeps what the decoder stated: a FITS's header and provenance through the planar
+/// path, a TIFF's provenance through the interleaved one, which states no header.
+#[tokio::test]
+async fn load_astro_image_keeps_the_decoded_metadata() {
+    let dir = TempDir::new("lens-load-astro-image");
+    let mut image = LinearImage::from_planar_channels(
+        ImageDimensions::new((2, 1), ChannelLayout::Mono),
+        [vec![0.25, 0.5]],
+    );
+    image.metadata.header.object = Some("M31".to_owned());
+    let (fits, tiff) = (dir.join("light.fits"), dir.join("light.tiff"));
+    writer::linear_fits(&image, &fits).unwrap();
+    writer::raster(&image, &tiff).unwrap();
+
+    let library = astro_library(&MlModelPaths::default());
+    let load = library.by_name("Load Astro Image").unwrap();
+    for (path, planar, object) in [(&fits, true, Some("M31")), (&tiff, false, None)] {
+        let outputs = FuncInvoker::default()
+            .call(
+                load,
+                [ConstValue::FsPath(path.display().to_string()).into()],
+            )
+            .await
+            .unwrap();
+        let loaded = outputs[0].as_custom::<Image>().unwrap();
+        assert_eq!(
+            matches!(loaded.interleaved(), Cow::Owned(_)),
+            planar,
+            "{path:?} stays in the layout it decoded to"
+        );
+        let metadata = &loaded.planar().metadata;
+        assert_eq!(metadata.header.object.as_deref(), object, "{path:?}");
+        let source = metadata
+            .derived
+            .provenance()
+            .map(|provenance| &provenance.source);
+        if planar {
+            assert!(
+                matches!(source, Some(SourceProvenance::Fits(_))),
+                "{source:?}"
+            );
+        } else {
+            assert!(
+                matches!(
+                    source,
+                    Some(SourceProvenance::Raster {
+                        format: RasterFormat::Tiff,
+                        ..
+                    })
+                ),
+                "{source:?}"
+            );
+        }
+    }
 }
 
 #[test]

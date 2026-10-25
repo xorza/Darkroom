@@ -13,7 +13,8 @@ pub enum FrameGain {
     /// A source gain: the masters' flat's, or one a file stored, held once for every frame equal
     /// to it.
     Shared(Arc<FlatGain>),
-    /// The frame's source gain read through its warp or its drizzle.
+    /// A grid this frame alone holds: its source gain read through its warp or its drizzle, or a
+    /// gain read back with the frame from a cache of its own.
     Own(Box<FlatGain>),
 }
 

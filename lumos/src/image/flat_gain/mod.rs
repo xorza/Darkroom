@@ -254,7 +254,7 @@ impl FlatGain {
 
     /// Whether the gain covers an image of `size` and `channels` channels, or of `channels`
     /// colors for a mosaic.
-    pub(crate) fn covers(&self, size: Size2us, channels: usize) -> bool {
+    pub fn covers(&self, size: Size2us, channels: usize) -> bool {
         self.size() == size && self.channels() == channels
     }
 }

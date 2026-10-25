@@ -135,7 +135,7 @@ impl PixelFlags {
 
     /// Flags from a plane of their bytes, as [`Self::bytes`] holds them; `None` when no pixel holds
     /// one.
-    pub(crate) fn from_bytes(bits: Buffer2<u8>) -> Option<Self> {
+    pub fn from_bytes(bits: Buffer2<u8>) -> Option<Self> {
         let counts = FlagCounts::of(bits.pixels());
         counts.any().then_some(Self { bits, counts })
     }

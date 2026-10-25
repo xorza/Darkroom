@@ -12,7 +12,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::linear_image::LinearImage;
-use crate::image::preview_image::PreviewPixels;
+use crate::image::preview_image::PreviewImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
@@ -231,7 +231,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
     let preview = LoadCtx::default().preview(&float_path).unwrap();
     assert!(
-        matches!(preview.into_pixels(), PreviewPixels::Interleaved(_)),
+        matches!(preview, PreviewImage::Interleaved { .. }),
         "a raster decode stays interleaved"
     );
     let preview: Image = LoadCtx::default().preview(&float_path).unwrap().into();
@@ -294,7 +294,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     ));
     let alpha_preview = LoadCtx::default().preview(&alpha_path).unwrap();
     assert!(matches!(
-        alpha_preview.metadata.derived.provenance(),
+        alpha_preview.metadata().derived.provenance(),
         Some(ImageProvenance {
             color: ColorProvenance::UnmanagedRaster {
                 alpha_dropped: true

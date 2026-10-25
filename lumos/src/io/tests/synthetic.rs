@@ -56,7 +56,7 @@ use crate::math::vec2us::Vec2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewPixels};
+use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewImage};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
@@ -919,7 +919,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 
     let preview = LoadCtx::default().preview(&path).unwrap();
     assert!(matches!(
-        &preview.metadata.derived.provenance(),
+        &preview.metadata().derived.provenance(),
         Some(crate::ImageProvenance {
             color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
@@ -928,8 +928,8 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     assert!(
         matches!(
-            LoadCtx::default().preview(&path).unwrap().into_pixels(),
-            PreviewPixels::Planes(_)
+            LoadCtx::default().preview(&path).unwrap(),
+            PreviewImage::Planes(_)
         ),
         "a demosaiced decode hands back its planes"
     );
