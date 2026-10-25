@@ -7,8 +7,7 @@ use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_provenance::ColorProvenance;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// The color filter over a sensor's photosites, anchored at the origin of the image data it
 /// accompanies. The one sensor-pattern type: a frame with no filter is [`CfaType::Mono`].

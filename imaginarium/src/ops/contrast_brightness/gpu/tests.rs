@@ -5,6 +5,7 @@ use crate::internals::gpu::test_gpu;
 use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
+use common::Size2us;
 
 /// Every format under the identity, a contrast and brightness that saturate part of the
 /// range, and a pure brightness shift, against the CPU reference — one pipeline for all.
@@ -15,7 +16,7 @@ fn gpu_matches_cpu() {
     };
     let pipeline = GpuContrastBrightnessPipeline::new(&gpu);
     for format in ALL_FORMATS {
-        let image = create_test_image(format, 13, 5, 7);
+        let image = create_test_image(format, Size2us::new(13, 5), 7);
         let input = GpuImage::from_image(&gpu, &image).unwrap();
         for params in [
             ContrastBrightness::new(1.0, 0.0),

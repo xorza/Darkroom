@@ -12,8 +12,7 @@ use common::Buffer2;
 use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 #[derive(Debug, Clone, Copy)]
 struct CfaSamplePhase {
@@ -37,7 +36,7 @@ impl ColorResiduals<'_> {
     /// The residuals of `target_color`'s stratified sample.
     pub(super) fn samples(self, target_color: usize) -> Vec<f32> {
         let Self { data, cfa_type, bg } = self;
-        let size = Size2us::from(data);
+        let size = data.size();
         color_sample_idxs(size, cfa_type, target_color)
             .into_iter()
             .map(|idx| data[idx] - bg.at(target_color, size.point_of(idx)).sky)
@@ -147,7 +146,6 @@ pub(crate) mod internals {
 
     use crate::calibration::defect_map::sampling;
     use crate::image::cfa::cfa_type::CfaType;
-    use crate::math::size2us::Size2us;
 
     /// The values of [`sampling::color_sample_idxs`]' stratified sample of one color.
     pub(crate) fn color_samples(
@@ -155,13 +153,9 @@ pub(crate) mod internals {
         cfa_type: CfaType,
         target_color: usize,
     ) -> Vec<f32> {
-        sampling::color_sample_idxs(
-            Size2us::new(data.width(), data.height()),
-            cfa_type,
-            target_color,
-        )
-        .into_iter()
-        .map(|idx| data[idx])
-        .collect()
+        sampling::color_sample_idxs(data.size(), cfa_type, target_color)
+            .into_iter()
+            .map(|idx| data[idx])
+            .collect()
     }
 }

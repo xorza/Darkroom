@@ -7,6 +7,7 @@ mod shared;
 
 use std::f32::consts::PI;
 
+use common::Size2us;
 use imaginarium::{FilterMode, Gpu, GpuImage, GpuTransformPipeline, ImageDesc, Transform, Vec2};
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
@@ -20,13 +21,13 @@ fn main() {
     let input = GpuImage::from_image(&ctx, &input_cpu).expect("upload");
 
     let center = Vec2::new(
-        input_cpu.desc().width as f32 / 2.0,
-        input_cpu.desc().height as f32 / 2.0,
+        input_cpu.desc().size.width as f32 / 2.0,
+        input_cpu.desc().size.height as f32 / 2.0,
     );
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new(256, 256, input_cpu.desc().color_format),
+        ImageDesc::new(Size2us::new(256, 256), input_cpu.desc().color_format),
     )
     .expect("allocate");
     Transform::new()
@@ -37,7 +38,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new(768, 768, input_cpu.desc().color_format),
+        ImageDesc::new(Size2us::new(768, 768), input_cpu.desc().color_format),
     )
     .expect("allocate");
     Transform::new()
@@ -68,7 +69,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new(800, 600, input_cpu.desc().color_format),
+        ImageDesc::new(Size2us::new(800, 600), input_cpu.desc().color_format),
     )
     .expect("allocate");
     Transform::new()
@@ -112,7 +113,7 @@ fn main() {
 
     let mut output_nearest = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new(1024, 1024, input_cpu.desc().color_format),
+        ImageDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format),
     )
     .expect("allocate");
     Transform::new()
@@ -124,7 +125,7 @@ fn main() {
 
     let mut output_bilinear = GpuImage::new_empty(
         &ctx,
-        ImageDesc::new(1024, 1024, input_cpu.desc().color_format),
+        ImageDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format),
     )
     .expect("allocate");
     Transform::new()

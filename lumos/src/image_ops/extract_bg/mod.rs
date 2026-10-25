@@ -25,8 +25,8 @@ use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::lstsq::Lstsq;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
+use common::Size2us;
 
 /// How the modeled background is removed from the image.
 ///
@@ -121,7 +121,7 @@ impl ExtractBg {
             });
         }
         let polynomial = self.fit_surface(&samples, &terms)?;
-        let surface = Surface::new(&polynomial, Size2us::from(plane));
+        let surface = Surface::new(&polynomial, plane.size());
         let mean = surface.mean();
         if self.mode == BgMode::Divide && mean <= 0.0 {
             return Err(OpError::NonPositiveBg { mean });
@@ -223,7 +223,7 @@ fn collect_samples(
     tile: usize,
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
-    let size = Size2us::from(channel);
+    let size = channel.size();
     let grid = workspace.measure(
         channel,
         None,

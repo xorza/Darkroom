@@ -55,8 +55,7 @@ pub(crate) mod sampling;
 pub(crate) mod sigma_threshold;
 
 use arrayvec::ArrayVec;
-use common::par;
-use common::{CancelToken, PerWorker};
+use common::{CancelToken, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::bg_mesh::color_mesh::ColorMesh;
@@ -71,8 +70,8 @@ use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
+use common::Size2us;
 
 /// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
 /// dark, and **cold/dead** pixels (abnormally low response) from a master flat.
@@ -326,7 +325,7 @@ fn detect_hot_pixels(
     }
 
     let data = image.data();
-    let size = Size2us::from(data);
+    let size = data.size();
     let cfa_type = image.cfa_type();
     let bg = ColorMesh::measure(MaskedPlane::from(data), &cfa_type, DARK_BG_TILE_SIZE);
     if cancel.is_cancelled() {
@@ -410,7 +409,7 @@ fn detect_cold_pixels(
     }
 
     let data = image.data();
-    let size = Size2us::from(data);
+    let size = data.size();
     let lattice = CfaLattice::new(&image.cfa_type());
 
     let gathered = PerWorker::new(Gathered::default);

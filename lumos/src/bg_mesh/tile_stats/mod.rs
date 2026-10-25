@@ -7,9 +7,8 @@ use common::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Shapeless;
+use common::{Rect2us, Vec2us};
 
 /// Maximum samples per tile for statistics computation.
 pub(super) const MAX_TILE_SAMPLES: usize = 1024;
@@ -184,7 +183,7 @@ impl TileStats {
     /// then of those photosites.
     pub(super) fn compute(
         input: &TileInput<'_>,
-        tile: URect,
+        tile: Rect2us,
         scratch: &mut TileScratch,
     ) -> Option<Self> {
         let TileScratch {
@@ -301,7 +300,7 @@ const fn sample_count(candidates: usize) -> usize {
 
 /// The offset of pixel `(x, y)` from the centre of `tile`, doubled: an integer on a tile of any
 /// parity, so the plane fit's position moments are exact.
-fn centred(tile: URect, x: usize, y: usize) -> [i32; 2] {
+fn centred(tile: Rect2us, x: usize, y: usize) -> [i32; 2] {
     let axis = |at: usize, min: usize, side: usize| {
         let doubled = i32::try_from(2 * (at - min)).expect("a tile side is below 2^30");
         doubled - i32::try_from(side - 1).expect("a tile side is below 2^30")
@@ -315,7 +314,7 @@ fn centred(tile: URect, x: usize, y: usize) -> [i32; 2] {
 impl TileSamples {
     /// Every pixel of `tile`, or [`MAX_TILE_SAMPLES`] of them picked by [`sample_ordinal`], each
     /// with its [`centred`] offset.
-    fn collect_tile(&mut self, pixels: &Buffer2<f32>, tile: URect) {
+    fn collect_tile(&mut self, pixels: &Buffer2<f32>, tile: Rect2us) {
         let width = pixels.width();
         let tile_width = tile.width();
         let candidates = tile.area();
@@ -340,7 +339,7 @@ impl TileSamples {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: &BitBuffer2,
-        tile: URect,
+        tile: Rect2us,
         unmasked_count: usize,
     ) {
         debug_assert_eq!(unmasked_count, count_unmasked_pixels(mask, tile));
@@ -421,7 +420,7 @@ impl TileSamples {
 struct ColorTile<'a> {
     mask: Option<&'a BitBuffer2>,
     color: ColorSites,
-    tile: URect,
+    tile: Rect2us,
 }
 
 /// A tile's photosites of the color, and how many of those the mask leaves.
@@ -459,7 +458,7 @@ impl ColorTile<'_> {
 }
 
 #[inline]
-fn count_unmasked_pixels(mask: &BitBuffer2, tile: URect) -> usize {
+fn count_unmasked_pixels(mask: &BitBuffer2, tile: Rect2us) -> usize {
     let mut count = 0;
 
     for y in tile.min.y..tile.max.y {

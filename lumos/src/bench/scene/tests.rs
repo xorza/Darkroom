@@ -8,7 +8,7 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::synthetic::camera::FlatField;
 use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// 600 × 400 is a hundredth of the frame: 3000 / 100 = 30 stars, 300 / 100 = 3 sparse ones,
 /// 20 000 / 100 = 200 in the cluster, 200 / 100 = 2 cosmic rays, and, rounded up,

@@ -6,7 +6,7 @@ use crate::star_detection::star_detector::stages::filter::FilterRejection;
 /// Overlapping round stars of `sigma`, each `(centre, amplitude)`, rendered untruncated on a 0.1
 /// sky.
 fn blended(size: Size2us, sigma: f32, stars: [(Vec2, f32); 2]) -> Buffer2<f32> {
-    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1);
+    let mut pixels = Buffer2::new_filled(size, 0.1);
     for (centre, amplitude) in stars {
         SyntheticStar::new(centre, amplitude, StarProfile::gaussian(sigma)).add_exact(&mut pixels);
     }
@@ -163,7 +163,7 @@ const fn ellipse(sigma_major: f32, sigma_minor: f32, angle: f32) -> StarProfile 
 
 /// `star` on a 0.1 sky.
 fn on_sky(size: Size2us, star: SyntheticStar) -> Buffer2<f32> {
-    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1f32);
+    let mut pixels = Buffer2::new_filled(size, 0.1f32);
     star.add_to(&mut pixels);
     pixels
 }
@@ -296,7 +296,7 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         ..Default::default()
     };
     let region = Region {
-        bbox: URect::new(Vec2us::new(24, 24), Vec2us::new(41, 41)),
+        bbox: Rect2us::new(Vec2us::new(24, 24), Vec2us::new(41, 41)),
         peak: Vec2us::new(32, 32),
         area: 200,
     };

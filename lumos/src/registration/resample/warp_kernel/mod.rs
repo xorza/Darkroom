@@ -7,12 +7,12 @@ use crate::image::pixel_flags::Reach;
 use crate::math::floor_i32::FloorI32;
 use crate::math::grid;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};
-use crate::math::size2us::Size2us;
 use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_config::InterpolationMethod;
 use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
+use common::Size2us;
 
 /// The spacing, in output pixels, of the grid a non-affine warp's local scale is read on.
 ///

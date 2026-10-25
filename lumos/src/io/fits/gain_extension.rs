@@ -19,7 +19,7 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FloatPlanes, PlaneHdu};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 pub(super) const GAIN_EXTNAME: &str = "LUMGAIN";
 pub(super) const GAIN_FORMAT: &str = "FLATGAIN";
@@ -119,7 +119,7 @@ pub(crate) fn decode(
     }
     let planes = nodes
         .into_iter()
-        .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
+        .map(|plane| Buffer2::new((grid.cols, grid.rows), plane))
         .collect();
     let gain = FlatGain::from_nodes(size, planes);
     if stated.is_some_and(|stated| stated != gain.key()) {

@@ -9,12 +9,10 @@ use rayon::prelude::*;
 
 use crate::image::bg_split::BgSplit;
 use crate::image::flat_gain::gain_bins::GainBins;
-use crate::math::size2us::Size2us;
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
+use common::{Rect2us, Size2us, Vec2us};
 
 /// Layers of the transform; PixInsight's default.
 const SCALES: usize = 4;
@@ -74,7 +72,7 @@ impl TileScratch {
     /// at once: a plane that grew from a smaller region to a larger one would keep twice the
     /// smaller, past its price.
     fn with_room(pixels: usize, width: usize) -> Self {
-        let plane = || Buffer2::new(0, 0, Vec::with_capacity(pixels));
+        let plane = || Buffer2::new((0, 0), Vec::with_capacity(pixels));
         Self {
             image: plane(),
             smooth: plane(),
@@ -259,7 +257,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
     /// The noise standard deviation over the pixels `excluded` does not name; `0` when no pixel
     /// remains or the image is constant.
     pub(crate) fn sigma(&self) -> f32 {
-        sigma(self.coefficients().all(), Size2us::from(self.samples)) as f32
+        sigma(self.coefficients().all(), self.samples.size()) as f32
     }
 
     /// The background under the flat `gains` names: the noise measured over each of its bins on
@@ -272,7 +270,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let Some(PixelGains { gain, bins }) = gains else {
             return BgSplit::of_sigma(self.sigma());
         };
-        let size = Size2us::from(self.samples);
+        let size = self.samples.size();
         let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
             gain(coefficients.idx[pos])
         });
@@ -283,7 +281,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
     /// and row-major within a tile: each tile writes its core into its own share of columns sized
     /// for every core pixel, and the shares close up over the pixels excluded.
     fn coefficients(&self) -> Coefficients {
-        let size = Size2us::from(self.samples);
+        let size = self.samples.size();
         let scales = SCALES.min(wavelet::max_scales(size));
         let tiles = tiles(size);
         let mut coefficients =
@@ -335,11 +333,11 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
             significance,
             row: smoothing_row,
         } = scratch;
-        let size = Size2us::from(*plane);
+        let size = plane.size();
         debug_assert_eq!(share.idx.len(), tile.core.area());
         let region = tile.region;
         let (width, height) = (region.width(), region.height());
-        image.reshape(width, height, 0.0);
+        image.reshape((width, height), 0.0);
         for (row, y) in image
             .pixels_mut()
             .chunks_exact_mut(width)
@@ -349,8 +347,8 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
                 &plane[y * size.width + region.min.x..y * size.width + region.max.x],
             );
         }
-        smooth.reshape(width, height, 0.0);
-        next.reshape(width, height, 0.0);
+        smooth.reshape((width, height), 0.0);
+        next.reshape((width, height), 0.0);
         // The first layer is built as it is first smoothed, so neither it nor the significance is
         // cleared first: the largest significance of one layer is that layer's.
         wavelet::atrous_smooth_serial(image, smooth, 1, smoothing_row);
@@ -467,8 +465,8 @@ fn support_sigma(coefficients: CoefficientRun<'_>) -> Option<f64> {
 /// reads.
 #[derive(Debug, Clone, Copy)]
 struct Tile {
-    core: URect,
-    region: URect,
+    core: Rect2us,
+    region: Rect2us,
 }
 
 /// The pixels of the largest of `tiles`' regions; none for no tile.
@@ -511,8 +509,8 @@ fn tiles(size: Size2us) -> Vec<Tile> {
     rows.iter()
         .flat_map(|&[y0, y1]| {
             cols.iter().map(move |&[x0, x1]| Tile {
-                core: URect::new(Vec2us::new(x0, y0), Vec2us::new(x1, y1)),
-                region: URect::new(
+                core: Rect2us::new(Vec2us::new(x0, y0), Vec2us::new(x1, y1)),
+                region: Rect2us::new(
                     Vec2us::new(x0.saturating_sub(MARGIN), y0.saturating_sub(MARGIN)),
                     Vec2us::new(
                         (x1 + MARGIN).min(size.width),

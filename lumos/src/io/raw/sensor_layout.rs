@@ -3,8 +3,7 @@
 use libraw_sys as sys;
 
 use crate::io::raw::error::RawError;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// The visible window inside a raw frame: where it starts, how big it is, and the
 /// stride of the buffer it sits in. The reader crops to the window as it normalizes, so nothing

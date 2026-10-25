@@ -10,8 +10,8 @@
 //!    tree-based algorithm that uses multiple threshold levels to separate
 //!    blended sources. More accurate for crowded fields but slower.
 
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::pixel::Pixel;
+use common::Vec2us;
 
 pub(super) mod assignment;
 pub(super) mod component;
@@ -51,9 +51,6 @@ pub(crate) mod internals {
     use common::Buffer2;
 
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-    use crate::math::size2us::Size2us;
-    use crate::math::urect::URect;
-    use crate::math::vec2us::Vec2us;
     use crate::star_detection::deblend::component::Component;
     use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
     use crate::star_detection::deblend::multi_threshold::MultiThresholdParams;
@@ -61,6 +58,7 @@ pub(crate) mod internals {
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+    use common::{Rect2us, Size2us, Vec2us};
     use glam::Vec2;
 
     /// Rendered stars and the one label covering every pixel they light above 0.001.
@@ -88,9 +86,9 @@ pub(crate) mod internals {
         reason = "synthetic fixtures are small images with non-negative coordinates"
     )]
     pub(crate) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
-        let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
-        let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-        let mut bbox = URect::empty();
+        let mut pixels = Buffer2::new_filled(size, 0.0f32);
+        let mut labels = Buffer2::new_filled(size, 0u32);
+        let mut bbox = Rect2us::empty();
         let mut area = 0;
 
         for &star in stars {

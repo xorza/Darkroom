@@ -7,7 +7,6 @@
 
 use crate::internals::init_tracing;
 use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
-use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detector::StarDetector;
@@ -40,7 +39,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
         .map(|ray| DVec2::new(ray.x as f64, ray.y as f64))
         .collect();
     let pixels = frame.image.channel(0);
-    let size = Size2us::new(pixels.width(), pixels.height());
+    let size = pixels.size();
     let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
     let saturation = frame.image.metadata.header.saturation_level();
     let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;

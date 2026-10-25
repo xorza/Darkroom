@@ -25,7 +25,7 @@ use crate::io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 use crate::io::frame_info::DecoderBytes;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// [`decode::load_linear`] of a run of its own, which shares its gain with no other frame.
 fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {

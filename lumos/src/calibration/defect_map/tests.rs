@@ -11,8 +11,8 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
+use common::Vec2us;
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)
@@ -94,7 +94,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     for (width, height) in [(800, 800), (1000, 800), (800, 1000)] {
         for row_pattern in [true, false] {
-            let data = Buffer2::from_fn(width, height, |x, y| {
+            let data = Buffer2::from_fn((width, height), |x, y| {
                 let coordinate = if row_pattern { y } else { x };
                 (coordinate / 2) as f32
             });
@@ -462,9 +462,7 @@ fn per_channel_detection_bayer() {
 #[test]
 fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
     let size = Size2us::new(192usize, 128usize);
-    let data = Buffer2::from_fn(size.width, size.height, |x, y| {
-        0.02 + 0.0001 * x as f32 + 0.0002 * y as f32
-    });
+    let data = Buffer2::from_fn(size, |x, y| 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32);
     let bg = ColorMesh::measure(MaskedPlane::from(&data), &CfaType::Mono, DARK_BG_TILE_SIZE);
 
     for y in 0..size.height {

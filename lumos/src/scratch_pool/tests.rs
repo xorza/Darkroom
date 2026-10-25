@@ -4,8 +4,8 @@ use std::panic::AssertUnwindSafe;
 use common::Buffer2;
 
 use crate::internals;
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
+use common::Size2us;
 
 const SMALL: Size2us = Size2us {
     width: 8,
@@ -106,7 +106,7 @@ fn reshape_drops_free_and_outstanding_values() {
 fn a_value_of_another_shape_is_never_shelved() {
     let pool: ScratchPool<Buffer2<f32>> = ScratchPool::new(SMALL);
     let mut lease = pool.acquire();
-    *lease = Buffer2::new_default(LARGE.width, LARGE.height);
+    *lease = Buffer2::new_default(LARGE);
     let payload = panic::catch_unwind(AssertUnwindSafe(|| drop(lease))).unwrap_err();
     assert_eq!(
         internals::panic_message(&*payload),
@@ -116,7 +116,7 @@ fn a_value_of_another_shape_is_never_shelved() {
 
     let payload = panic::catch_unwind(AssertUnwindSafe(|| {
         let mut lease = pool.acquire();
-        *lease = Buffer2::new_default(LARGE.width, LARGE.height);
+        *lease = Buffer2::new_default(LARGE);
         panic!("the holder's own failure");
     }))
     .unwrap_err();

@@ -2,7 +2,7 @@ use glam::DVec2;
 
 use super::*;
 use crate::image::channel_layout::ChannelLayout;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
 fn hash_unit(idx: usize) -> f32 {

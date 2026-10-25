@@ -6,7 +6,7 @@ use crate::image::derived_facts::DerivedFacts;
 use crate::image::masked_plane::MaskedPlane;
 use crate::image::observation_header::ObservationHeader;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// With a gain the source term is `(signal − sky)·g/electrons`: σ 0.5, sky 1, 4 electrons per
 /// unit, signal 3 gives √(0.25 + 2/4) = √0.75 where no flat amplified the pixel, and
@@ -41,14 +41,14 @@ fn a_pixel_reads_its_mesh_and_its_flat_gain() {
     let size = Size2us::new(16, 16);
     let mesh = ColorMesh::measure(
         MaskedPlane {
-            pixels: &Buffer2::new(16, 16, vec![0.5; size.pixel_count()]),
+            pixels: &Buffer2::new((16, 16), vec![0.5; size.pixel_count()]),
             mask: None,
         },
         &CfaType::Mono,
         8,
     );
     let gain = FlatGain::of_divisor(
-        &Buffer2::new(16, 16, vec![0.5; 256]),
+        &Buffer2::new((16, 16), vec![0.5; 256]),
         &CfaType::Mono,
         |_| false,
     );

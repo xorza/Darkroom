@@ -1,7 +1,7 @@
 use glam::DVec2;
 
-use crate::math::size2us::Size2us;
 use crate::registration::resample::source_pos::SourcePos;
+use common::Size2us;
 
 const SIZE: Size2us = Size2us::new(10, 6);
 

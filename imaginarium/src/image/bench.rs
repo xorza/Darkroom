@@ -6,11 +6,11 @@ use std::io::{BufReader, BufWriter, Cursor, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use common::{TempDir, fs};
+use common::{Size2us, TempDir, fs};
 use criterion::{BenchmarkId, Criterion};
 
 use crate::bench::fixture::{self, Backend, Kind, Scale};
-use crate::bench::scene::{self, HEIGHT, WIDTH};
+use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::error::Error;
 use crate::image::Image;
@@ -22,7 +22,7 @@ use crate::image::file_format::FileFormat;
 /// in the frame's uncompressed bytes.
 pub(crate) fn integration(c: &mut Criterion) {
     let dir = TempDir::new("imaginarium-bench-file");
-    let pixels = WIDTH * HEIGHT;
+    let pixels = FRAME.pixel_count();
 
     let mut group = Kind::Integration.group(c, "save_file", Scale::Frame);
     for (file, format) in cases() {
@@ -36,7 +36,7 @@ pub(crate) fn integration(c: &mut Criterion) {
                 fixture::format_id(format),
             ),
             |b| {
-                let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                 b.iter(|| save(black_box(&*frame), &path, file));
             },
         );
@@ -57,7 +57,7 @@ pub(crate) fn integration(c: &mut Criterion) {
                 let path = path.get_or_insert_with(|| {
                     let name = format!("read_{}.{}", fixture::format_id(format), extension(file));
                     let path = dir.join(name);
-                    save(&scene::sky(format, WIDTH, HEIGHT, 1), &path, file);
+                    save(&scene::sky(format, FRAME, 1), &path, file);
                     path
                 });
                 b.iter_with_large_drop(|| read(black_box(&*path), file));
@@ -86,7 +86,7 @@ fn cases() -> Vec<(FileFormat, ColorFormat)> {
         .flat_map(|file| ALL_FORMATS.map(|format| (file, format)));
     pairs
         .filter(|&(file, format)| {
-            match scene::sky(format, 1, 1, 0).encode(Cursor::new(Vec::new()), file) {
+            match scene::sky(format, Size2us::new(1, 1), 0).encode(Cursor::new(Vec::new()), file) {
                 Ok(()) => true,
                 Err(Error::UnsupportedFormat(_)) => false,
                 Err(error) => panic!("probing {file:?} for {format}: {error}"),

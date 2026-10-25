@@ -219,7 +219,7 @@ mod tests {
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// A spilled frame with quality planes leaves the page cache whole where the system evicts:
     /// its three channels and its coverage and confidence, 512² × 4 bytes = 1 MiB each, every page
@@ -234,7 +234,7 @@ mod tests {
             ImageDimensions::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
         );
-        let plane = |level| Buffer2::new_filled(size.width, size.height, level);
+        let plane = |level| Buffer2::new_filled(size, level);
         let quality = FrameQuality::Planes {
             coverage: plane(1.0),
             confidence: plane(0.5),

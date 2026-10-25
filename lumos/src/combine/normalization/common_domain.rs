@@ -21,8 +21,7 @@ use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stratified_samples::SAMPLE_LIMIT;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Pixels per word of the mask, which is one row: word `w` covers pixels `64w..64w + 64`.
 const WORD_BITS: usize = u64::BITS as usize;

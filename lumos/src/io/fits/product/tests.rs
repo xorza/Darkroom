@@ -22,11 +22,11 @@ use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
-use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
+use common::Size2us;
 
 /// An edit of one HDU of a file, by index: its header and data, `false` to drop it.
 type Edit = Box<dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool>;
@@ -40,9 +40,7 @@ const SCALE: f64 = 1_234.567_8;
 /// A plane of `SIZE` whose samples share no bit pattern with another plane's: `seed` and the
 /// index through a sevenths ramp, so each sample is a full-mantissa float.
 fn plane(seed: f32) -> Buffer2<f32> {
-    Buffer2::from_fn(SIZE.width, SIZE.height, |x, y| {
-        (seed + (y * SIZE.width + x) as f32) / 7.0
-    })
+    Buffer2::from_fn(SIZE, |x, y| (seed + (y * SIZE.width + x) as f32) / 7.0)
 }
 
 fn domain() -> SampleDomain {

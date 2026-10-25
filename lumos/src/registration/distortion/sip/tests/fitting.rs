@@ -5,9 +5,9 @@ const STEP_50: Grid = Grid {
     step: 50,
     ..Grid::DEFAULT
 };
-use crate::math::size2us::Size2us;
 use crate::registration::estimate::Pairs;
 use crate::registration::transform::TransformType;
+use common::Size2us;
 use std::f64::consts::PI;
 
 /// A fit needs three pairs per term against overfitting: orders 2 to 5 have 3, 7, 12 and 18 terms,

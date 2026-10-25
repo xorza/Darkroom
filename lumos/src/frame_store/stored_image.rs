@@ -91,11 +91,11 @@ impl StoredImage {
         let size = self.dimensions.size();
         let planes = self
             .planes()
-            .map(|plane| Buffer2::new(size.width, size.height, plane.to_vec()))
+            .map(|plane| Buffer2::new(size, plane.to_vec()))
             .collect();
         let flags = self.flags.and_then(|flags| {
             let bytes = flags.plane.chunk(0..size.pixel_count()).to_vec();
-            PixelFlags::from_counted(Buffer2::new(size.width, size.height, bytes), flags.counts)
+            PixelFlags::from_counted(Buffer2::new(size, bytes), flags.counts)
         });
         let parts = ImageParts {
             planes,
@@ -156,7 +156,7 @@ mod tests {
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// A parked image leaves the page cache whole where the system evicts, its flags with its
     /// channels, and loads back as it was spilled.
@@ -170,11 +170,7 @@ mod tests {
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
         );
         let bytes: Vec<u8> = (0..size.pixel_count()).map(|idx| (idx % 2) as u8).collect();
-        image.set_flags(PixelFlags::from_bytes(Buffer2::new(
-            size.width,
-            size.height,
-            bytes.clone(),
-        )));
+        image.set_flags(PixelFlags::from_bytes(Buffer2::new(size, bytes.clone())));
         let parked = StoredImage::write(&image, image.flags(), &scratch).unwrap();
         assert_eq!(parked.evict(), MappedFile::EVICTS);
         let loaded: LinearImage = parked.into_image(None);
@@ -197,7 +193,7 @@ mod tests {
         let dir = TempDir::new("stored_image_gain");
         let scratch = RunScratch::create(dir.path()).unwrap();
         let size = Size2us::new(9, 9);
-        let divisor = Buffer2::from_fn(9, 9, |x, y| 0.5 + 0.05 * (x + y) as f32);
+        let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.05 * (x + y) as f32);
         let gain = Arc::new(FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false));
         let mut image = LinearImage::from_planar_channels(
             ImageDimensions::new(size, ChannelLayout::Mono),
@@ -231,7 +227,7 @@ mod tests {
         assert_ne!(
             FlatGain::from_nodes(
                 size,
-                [Buffer2::new(3, 3, read.planes().next().unwrap().to_vec())]
+                [Buffer2::new((3, 3), read.planes().next().unwrap().to_vec())]
                     .into_iter()
                     .collect()
             )

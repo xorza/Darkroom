@@ -15,7 +15,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.
 pub(super) const MIN_NORMALIZED_FLAT: f32 = 0.1;

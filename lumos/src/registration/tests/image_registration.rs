@@ -8,13 +8,13 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, max_deviation};
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
+use common::Size2us;
 
 /// A scene of `stars` over `size`, its reference frame and the frame `truth` maps it to.
 #[derive(Debug)]

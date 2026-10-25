@@ -2,13 +2,13 @@
 
 use crate::math::fwhm;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
-use crate::math::size2us::Size2us;
 use crate::simd::Kernel;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
 };
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
+use common::Size2us;
 
 /// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.

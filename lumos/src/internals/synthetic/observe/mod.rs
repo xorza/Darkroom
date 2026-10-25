@@ -17,8 +17,8 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::noise::{DarkCurrent, ReadNoise, apply_shot_noise};
 use crate::internals::synthetic::scene::Scene;
 use crate::internals::test_rng::TestRng;
-use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
+use common::Vec2us;
 
 /// Geometry + exposure parameters for one frame.
 #[derive(Debug, Clone)]

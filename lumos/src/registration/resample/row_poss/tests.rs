@@ -1,12 +1,12 @@
 use glam::DVec2;
 
-use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::resample::row_poss::RowPoss;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
+use common::Size2us;
 
 /// Every row of an affine model or a homography is the bits `WarpTransform::apply` gives, split
 /// by `SourcePos::within`, and positions past the footprint are `None`. A SIP row sums its

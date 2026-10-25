@@ -291,8 +291,7 @@ pub(crate) mod internals {
         /// cares about.
         pub(crate) fn from_coverage(coverage: Buffer2<f32>) -> Self {
             let confidence = Buffer2::new(
-                coverage.width(),
-                coverage.height(),
+                coverage.size(),
                 coverage
                     .pixels()
                     .iter()

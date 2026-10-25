@@ -34,8 +34,8 @@ impl Filtered {
         let (width, height) = (pixels.width(), pixels.height());
         let residual = bg_map::estimate(&pixels, &BgConfig::default()).residual_of(&pixels);
 
-        let mut output = Buffer2::new_default(width, height);
-        let mut temp = Buffer2::new_default(width, height);
+        let mut output = Buffer2::new_default((width, height));
+        let mut temp = Buffer2::new_default((width, height));
         output.pixels_mut().copy_from_slice(residual.pixels());
         matched_filter_fresh(
             &mut output,

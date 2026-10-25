@@ -29,13 +29,13 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::images::gray_image;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::io::load_ctx::LoadCtx;
-use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
+use common::Size2us;
 
 /// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are
 /// 7×7.

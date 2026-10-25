@@ -10,7 +10,6 @@ use common::par;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::deblenders::Deblenders;
@@ -113,7 +112,7 @@ fn extract_candidates(
         labels: label_map,
     } = labelled;
     let values = &plane.values;
-    let size = Size2us::new(values.width(), values.height());
+    let size = values.size();
     // `ExtractionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know
     // the image size), so a margin that swallows the whole image is only catchable here: the retain
     // below needs `bbox.min >= edge_margin && bbox.max <= dim - edge_margin`, which no bbox can
@@ -216,7 +215,6 @@ fn extract_candidates(
 /// Test and bench helpers that reach into this stage.
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::math::size2us::Size2us;
     use crate::scratch_pool::Pooled;
     use crate::star_detection::bg::sky_noise::SkyNoise;
     use crate::star_detection::deblend::region::Region;
@@ -243,7 +241,7 @@ pub(crate) mod internals {
         sky: &SkyNoise,
         config: &ExtractionConfig,
     ) -> Candidates {
-        let size = Size2us::new(residual.width(), residual.height());
+        let size = residual.size();
         let mut resources = DetectionResources::new(size);
         let plane = DetectionPlane {
             values: Pooled::loose(residual.clone(), size),

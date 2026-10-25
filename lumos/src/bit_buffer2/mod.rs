@@ -19,9 +19,8 @@ use common::par;
 use rayon::prelude::*;
 use rayon::slice::ChunksExactMut;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::Scratch;
+use common::{Size2us, Vec2us};
 
 /// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
@@ -378,7 +377,6 @@ mod internals {
     use common::Buffer2;
 
     use crate::bit_buffer2::BitBuffer2;
-    use crate::math::size2us::Size2us;
 
     impl BitBuffer2 {
         /// Every bit in row-major order, padding skipped.
@@ -388,7 +386,7 @@ mod internals {
 
         /// The mask `data` holds, a bit a pixel.
         pub(crate) fn from_plane(data: &Buffer2<bool>) -> Self {
-            let mut buffer = Self::new_default(Size2us::from(data));
+            let mut buffer = Self::new_default(data.size());
             buffer.fill_from_predicate(|idx| data[idx]);
             buffer
         }

@@ -5,8 +5,7 @@ use std::ops::Range;
 
 use glam::DVec2;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Input rows of slack on the strip an outline is cut by: far above the rounding of an outline's
 /// vertices — coordinates of 10⁵ pixels carry 10⁻¹¹ — and far below a pixel, so it scans no

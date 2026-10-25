@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::AddAssign;
 
-use common::par;
+use common::{Size2us, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
@@ -13,8 +13,8 @@ use crate::ops::preview::Preview;
 /// Area-averages `input` to `params`' target size, fused with the conversion to
 /// `RGBA_U8`. See [`Preview`] for the algorithm.
 pub(super) fn generate(params: &Preview, input: &Image) -> Image {
-    let dst_w = params.width.max(1);
-    let dst_h = params.height.max(1);
+    let dst_w = params.size.width.max(1);
+    let dst_h = params.size.height.max(1);
     let format = input.desc().color_format;
     match (format.sample_type, format.channel_count) {
         (SampleType::U8, ChannelCount::L) => typed::<u8, 1>(input, dst_w, dst_h),
@@ -101,12 +101,17 @@ fn narrow(value: u64) -> u8 {
 }
 
 fn typed<T: PreviewSample, const N: usize>(input: &Image, dst_w: usize, dst_h: usize) -> Image {
-    let src_w = input.desc().width;
-    let src_h = input.desc().height;
+    let Size2us {
+        width: src_w,
+        height: src_h,
+    } = input.desc().size;
     let src: &[T] = bytemuck::cast_slice(input.bytes());
 
-    let mut out = Image::new_black(ImageDesc::new(dst_w, dst_h, ColorFormat::RGBA_U8))
-        .expect("RGBA_U8 preview dims are valid");
+    let mut out = Image::new_black(ImageDesc::new(
+        Size2us::new(dst_w, dst_h),
+        ColorFormat::RGBA_U8,
+    ))
+    .expect("RGBA_U8 preview dims are valid");
 
     par::chunks_mut(out.bytes_mut(), dst_w * 4)
         .enumerate()

@@ -32,7 +32,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 angle,
             };
             let residual: &Buffer2<f32> = &stages.frame.measure;
-            let mut output = Buffer2::new_default(FRAME.width, FRAME.height);
+            let mut output = Buffer2::new_default(FRAME);
             let mut kernels = FilterKernels::default();
             let bands = ScratchPool::default();
             b.iter(|| {

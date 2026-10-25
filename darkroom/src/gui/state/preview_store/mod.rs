@@ -8,6 +8,7 @@
 //!
 //! [`PreviewConverter`]: preview_converter::PreviewConverter
 
+use common::Size2us;
 pub(crate) mod error;
 pub(crate) mod preview_converter;
 
@@ -422,9 +423,11 @@ impl DrawablePreview {
 
 /// The texel size of an image `desc` describes, or why no texture holds it.
 fn native_size(desc: ImageDesc) -> Result<UVec2, DrawablePreviewError> {
-    let (width, height) = (desc.width, desc.height);
-    let (Ok(x), Ok(y)) = (u32::try_from(width), u32::try_from(height)) else {
-        return Err(DrawablePreviewError::EdgeTooLong { width, height });
+    let (Ok(x), Ok(y)) = (
+        u32::try_from(desc.size.width),
+        u32::try_from(desc.size.height),
+    ) else {
+        return Err(DrawablePreviewError::EdgeTooLong { size: desc.size });
     };
     if x == 0 || y == 0 {
         return Err(DrawablePreviewError::Empty);
@@ -435,11 +438,11 @@ fn native_size(desc: ImageDesc) -> Result<UVec2, DrawablePreviewError> {
 /// Downscale to `target` and convert to RGBA8 — the one place pixels are
 /// produced, and so the seam a test asserts exact output on.
 fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
-    let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(cpu);
+    let rgba = Preview::new(Size2us::new(target.x as usize, target.y as usize)).to_rgba8(cpu);
     let desc = rgba.desc();
     debug_assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
-    debug_assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
+    debug_assert_eq!(pixels.len(), desc.row_bytes() * desc.size.height);
     Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
 }
 
@@ -568,10 +571,10 @@ pub(crate) mod internals {
         }
     }
 
-    /// A black `width`×`height` image in `format`, as a node would publish it.
+    /// A black image of `size` in `format`, as a node would publish it.
     #[cfg(test)]
-    pub(crate) fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
-        let raw = RawImage::new_black(ImageDesc::new(width, height, format)).unwrap();
+    pub(crate) fn image_value(size: Size2us, format: ColorFormat) -> DynamicValue {
+        let raw = RawImage::new_black(ImageDesc::new(size, format)).unwrap();
         DynamicValue::from_custom(LensImage::from(raw))
     }
 
@@ -583,7 +586,7 @@ pub(crate) mod internals {
     /// viewer tab it opens, starts by publishing and settling this.
     #[cfg(test)]
     pub(crate) fn opaque_image_value() -> DynamicValue {
-        image_value(2, 1, ColorFormat::RGB_U8)
+        image_value(Size2us::new(2, 1), ColorFormat::RGB_U8)
     }
 }
 

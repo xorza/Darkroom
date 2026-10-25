@@ -2,19 +2,19 @@
 
 use std::array;
 
+use common::{Size2us, Vec2us};
 use glam::Vec2;
 
 use crate::color::sample::Sample;
 use crate::image::Image;
 
-/// The input image a transform samples: `width × height` pixels in row-major order, each its `N`
-/// channels of `T` side by side.
+/// The input image a transform samples: its pixels in row-major order, each its `N` channels of
+/// `T` side by side.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PackedSource<'a, T> {
     /// The samples, which a SIMD kernel loads a tap's channels from at [`Self::tap`].
     pub(super) pixels: &'a [T],
-    width: usize,
-    height: usize,
+    size: Size2us,
 }
 
 impl<'a, T: Sample> PackedSource<'a, T> {
@@ -22,16 +22,15 @@ impl<'a, T: Sample> PackedSource<'a, T> {
     pub(super) fn of(image: &'a Image) -> Self {
         Self {
             pixels: bytemuck::cast_slice(image.bytes()),
-            width: image.desc().width,
-            height: image.desc().height,
+            size: image.desc().size,
         }
     }
 
     /// The index of the first of pixel `(x, y)`'s `N` channels, or `None` outside the image.
     #[inline]
     pub(super) fn tap<const N: usize>(self, x: i32, y: i32) -> Option<usize> {
-        let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
-        (x < self.width && y < self.height).then_some((y * self.width + x) * N)
+        let pos = Vec2us::new(usize::try_from(x).ok()?, usize::try_from(y).ok()?);
+        self.size.contains(pos).then(|| self.size.idx_of(pos) * N)
     }
 
     /// The `N` channels of the pixel at integer `(x, y)` in the low lanes of an `[f32; 4]`

@@ -4,7 +4,6 @@
 use glam::Vec2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::internals::{
@@ -13,6 +12,7 @@ use crate::star_detection::deblend::internals::{
 use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
+use common::Size2us;
 
 /// [`deblend_local_maxima`] at the default config's separation and relative height, into a fresh
 /// list.

@@ -12,6 +12,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
+use common::Size2us;
 use lumos::{ChannelLayout, ImageDimensions, ImageMetadata, LinearImage, PreviewImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
@@ -58,14 +59,13 @@ impl Image {
     /// When `planes` holds neither one nor three planes, or a plane does not hold
     /// `width × height` samples.
     pub fn from_planes(
-        width: usize,
-        height: usize,
+        size: impl Into<Size2us>,
         planes: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
         let planes: Vec<Vec<f32>> = planes.into_iter().collect();
         let layout =
             ChannelLayout::try_from(planes.len()).expect("an image has one plane or three");
-        let dimensions = ImageDimensions::new((width, height), layout);
+        let dimensions = ImageDimensions::new(size, layout);
         Self::from(LinearImage::from_planar_channels(dimensions, planes))
     }
 
@@ -140,7 +140,7 @@ impl Image {
         match &self.pixels {
             Pixels::InterleavedCpu { image, .. } => image.desc(),
             Pixels::PlanarCpu(planar) => {
-                imaginarium::ImageDesc::new(planar.width(), planar.height(), planar.color_format())
+                imaginarium::ImageDesc::new(planar.dimensions().size(), planar.color_format())
             }
         }
     }

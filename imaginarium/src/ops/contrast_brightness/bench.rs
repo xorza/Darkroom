@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion};
 
+use common::Size2us;
+
 use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
-use crate::bench::scene::{self, HEIGHT, WIDTH};
+use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ALL_FORMATS;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
@@ -37,12 +39,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for format in ALL_FORMATS {
         let mut source = None;
         let affine = ChannelAffine::new(OP, format);
-        let bytes = WIDTH * format.byte_count();
-        group.throughput(fixture::throughput(WIDTH, format.byte_count()));
+        let bytes = FRAME.width * format.byte_count();
+        group.throughput(fixture::throughput(FRAME.width, format.byte_count()));
         for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
             let id = BenchmarkId::new(Backend::Cpu.case(variant.name), fixture::format_id(format));
             group.bench_function(id, |b| {
-                let row = source.get_or_insert_with(|| scene::sky(format, WIDTH, 1, 1));
+                let row = source
+                    .get_or_insert_with(|| scene::sky(format, Size2us::new(FRAME.width, 1), 1));
                 if let Some(kernel) = variant.kernel {
                     let count = cpu::kernel_count(row.desc());
                     b.iter_batched_ref(
@@ -72,8 +75,11 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut pipeline = None;
     for format in ALL_FORMATS {
         let mut source = None;
-        let bytes = WIDTH * HEIGHT * format.byte_count();
-        group.throughput(fixture::throughput(WIDTH * HEIGHT, format.byte_count()));
+        let bytes = FRAME.pixel_count() * format.byte_count();
+        group.throughput(fixture::throughput(
+            FRAME.pixel_count(),
+            format.byte_count(),
+        ));
         for backend in backends.all() {
             match backend {
                 Backend::Cpu => Scale::Frame,
@@ -85,7 +91,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
             .apply(&mut group);
             let id = BenchmarkId::new(backend.id(), fixture::format_id(format));
             group.bench_function(id, |b| {
-                let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                 match backend {
                     Backend::Cpu => b.iter_batched_ref(
                         || frame.clone(),

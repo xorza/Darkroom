@@ -30,8 +30,8 @@
 //! - Parallel work: [`par`] starts every parallel loop, and panics when a loop's body would start
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
-//! [`Id`], [`FloatExt`], [`is_debug`] and [`Buffer2`], the row-major 2D grid, stand on their
-//! own. `TempDir`,
+//! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
+//! grid, and its geometry: [`Size2us`], [`Vec2us`] and [`Rect2us`]. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build.
 
@@ -68,7 +68,10 @@ mod id;
 mod introspect;
 #[expect(unsafe_code, reason = "memory maps and the OS calls behind them")]
 mod platform;
+mod rect2us;
 mod serde;
+mod size2us;
+mod vec2us;
 
 pub use bg_runtime::BgRuntime;
 pub use buffer2::Buffer2;
@@ -95,8 +98,11 @@ pub use introspect::{
 pub use par::per_worker::PerWorker;
 #[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;
+pub use rect2us::Rect2us;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};
+pub use size2us::Size2us;
+pub use vec2us::Vec2us;
 
 /// Whether this build has debug assertions on — the one switch every
 /// debug-only self-check in the workspace is gated on, so those checks turn

@@ -26,9 +26,9 @@ use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::{LinearImage, PlanesWithFlags};
 use crate::image::quality_map::QualityMap;
 use crate::image_ops::error::OpError;
-use crate::math::size2us::Size2us;
 use crate::math::wavelet;
 use crate::noise::mrs_noise::NoisePlane;
+use common::Size2us;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
 ///
@@ -141,7 +141,7 @@ impl Denoise {
         if self.strength == 0.0 {
             return Ok(());
         }
-        let size = Size2us::new(image.width(), image.height());
+        let size = image.size();
         let scales = self.scales.min(wavelet::max_scales(size));
         let mut scratch = DenoiseScratch::new(size);
         let PlanesWithFlags { planes, flags } = image.planes_mut_with_flags();
@@ -150,11 +150,7 @@ impl Denoise {
             let noise = match noise {
                 ImageNoise::Variance(variance) => {
                     let plane = variance.channel(channel);
-                    assert_eq!(
-                        (plane.width(), plane.height()),
-                        (size.width, size.height),
-                        "the variance plane is the image's size"
-                    );
+                    assert_eq!(plane.size(), size, "the variance plane is the image's size");
                     PlaneNoise::Variance(plane.pixels())
                 }
                 ImageNoise::Measured => PlaneNoise::White(
@@ -281,8 +277,8 @@ struct DenoiseScratch {
 impl DenoiseScratch {
     fn new(size: Size2us) -> Self {
         Self {
-            c_cur: Buffer2::new_default(size.width, size.height),
-            c_next: Buffer2::new_default(size.width, size.height),
+            c_cur: Buffer2::new_default(size),
+            c_next: Buffer2::new_default(size),
         }
     }
 }

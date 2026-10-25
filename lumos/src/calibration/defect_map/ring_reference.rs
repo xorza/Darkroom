@@ -4,10 +4,9 @@
 use common::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// The ring's inner reach, in pixels: a same-color cluster of up to this many pixels across keeps
 /// most of itself out of its members' rings, and what it leaves in, the clip takes out.
@@ -49,7 +48,7 @@ impl RingFrame<()> {
     /// `data` as it holds its samples.
     pub(crate) fn of(data: &Buffer2<f32>) -> RingFrame<impl Fn(usize) -> f64 + Copy + '_> {
         RingFrame {
-            size: Size2us::from(data),
+            size: data.size(),
             value: |idx: usize| f64::from(data[idx]),
         }
     }

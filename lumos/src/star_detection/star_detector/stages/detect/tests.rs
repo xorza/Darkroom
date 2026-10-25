@@ -1,4 +1,4 @@
-use common::Buffer2;
+use common::{Buffer2, Size2us};
 use glam::Vec2;
 
 use crate::internals::synthetic::bg_map;
@@ -47,10 +47,10 @@ fn flat_sky(size: Size2us) -> SkyNoise {
 
 /// `values` as a detection plane under a flat noise of 0.01.
 fn flat_plane(values: &Buffer2<f32>) -> DetectionPlane {
-    let size = Size2us::new(values.width(), values.height());
+    let size = values.size();
     DetectionPlane {
         values: Pooled::loose(values.clone(), size),
-        noise: flat_sky(Size2us::new(values.width(), values.height())),
+        noise: flat_sky(values.size()),
     }
 }
 
@@ -178,8 +178,8 @@ struct Rectangles {
 }
 
 fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
-    let mut residual = Buffer2::new_filled(size.width, size.height, 0.0f32);
-    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
+    let mut residual = Buffer2::new_filled(size, 0.0f32);
+    let mut labels = Buffer2::new_filled(size, 0u32);
     for (idx, rect) in rects.iter().enumerate() {
         for y in rect.min.1..rect.max.1 {
             for x in rect.min.0..rect.max.0 {
@@ -306,7 +306,7 @@ fn region_filter_bounds() {
 #[test]
 fn detect_counts_pixels_components_and_splits() {
     let size = Size2us::new(64, 64);
-    let mut residual = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut residual = Buffer2::new_filled(size, 0.0f32);
     for (x0, y0) in [(15, 15), (40, 15)] {
         for y in y0..y0 + 3 {
             for x in x0..x0 + 3 {

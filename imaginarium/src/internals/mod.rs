@@ -4,7 +4,7 @@ pub(crate) mod image_diff;
 
 use std::io::BufReader;
 
-use common::fs;
+use common::{Size2us, fs};
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::image::Image;
@@ -13,13 +13,8 @@ use crate::image::image_desc::ImageDesc;
 
 /// A test image with a deterministic pattern based on seed: integer formats get a byte
 /// pattern that reaches every byte value, float formats values on `[0, 1)`.
-pub(crate) fn create_test_image(
-    format: ColorFormat,
-    width: usize,
-    height: usize,
-    seed: usize,
-) -> Image {
-    let mut img = Image::new_black(ImageDesc::new(width, height, format)).unwrap();
+pub(crate) fn create_test_image(format: ColorFormat, size: Size2us, seed: usize) -> Image {
+    let mut img = Image::new_black(ImageDesc::new(size, format)).unwrap();
     match format.sample_type {
         SampleType::F32 => {
             let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());

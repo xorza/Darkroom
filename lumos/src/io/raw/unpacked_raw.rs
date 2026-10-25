@@ -27,9 +27,9 @@ use crate::io::raw::libraw::{Libraw, ProcessedSamples};
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::{null_policy, raw};
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
+use common::Vec2us;
 
 /// A camera RAW file LibRaw unpacked, with what lumos reads of it, ready for sensor-specific
 /// processing.
@@ -309,11 +309,8 @@ impl UnpackedRaw {
             .quantization_sigma(self.quantization_sigma())
             .saturation_flagged(true)
             .build();
-        let mut image = CfaImage::from_plane(
-            Buffer2::new(self.layout.active.width, self.layout.active.height, pixels),
-            cfa_type,
-            metadata,
-        );
+        let mut image =
+            CfaImage::from_plane(Buffer2::new(self.layout.active, pixels), cfa_type, metadata);
         image.set_flags(flags);
         Ok(image)
     }

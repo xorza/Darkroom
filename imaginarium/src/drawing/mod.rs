@@ -6,6 +6,7 @@ pub(crate) mod color;
 
 use std::ops::RangeInclusive;
 
+use common::Size2us;
 use glam::Vec2;
 
 use crate::color::color_format::ColorFormat;
@@ -16,8 +17,7 @@ use crate::image::Image;
 #[derive(Debug)]
 struct Canvas<'a> {
     pixels: &'a mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     channels: usize,
 }
 
@@ -33,14 +33,13 @@ impl<'a> Canvas<'a> {
         );
         Self {
             pixels: bytemuck::cast_slice_mut(image.bytes_mut()),
-            width: desc.width,
-            height: desc.height,
+            size: desc.size,
             channels: desc.color_format.channel_count.count(),
         }
     }
 
     fn set(&mut self, x: usize, y: usize, color: Color) {
-        let pixel = &mut self.pixels[(y * self.width + x) * self.channels..][..self.channels];
+        let pixel = &mut self.pixels[(y * self.size.width + x) * self.channels..][..self.channels];
         match pixel {
             [grey] => *grey = color.luminance(),
             [r, g, b] => [*r, *g, *b] = [color.r, color.g, color.b],
@@ -52,8 +51,8 @@ impl<'a> Canvas<'a> {
     /// when the box misses the image — or is not a box at all, for a NaN bound.
     fn covered(&self, lo: Vec2, hi: Vec2) -> Option<[RangeInclusive<usize>; 2]> {
         Some([
-            span(lo.x, hi.x, self.width)?,
-            span(lo.y, hi.y, self.height)?,
+            span(lo.x, hi.x, self.size.width)?,
+            span(lo.y, hi.y, self.size.height)?,
         ])
     }
 }
@@ -144,6 +143,7 @@ fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Color, thic
 
 #[cfg(test)]
 mod tests {
+    use common::Size2us;
     use glam::Vec2;
 
     use crate::color::color_format::ColorFormat;
@@ -153,7 +153,7 @@ mod tests {
     use crate::image::image_desc::ImageDesc;
 
     fn canvas(format: ColorFormat, size: usize) -> Image {
-        Image::new_black(ImageDesc::new(size, size, format)).unwrap()
+        Image::new_black(ImageDesc::new(Size2us::new(size, size), format)).unwrap()
     }
 
     /// The `(x, y)` of every pixel whose first channel was drawn.
@@ -161,9 +161,9 @@ mod tests {
         let desc = image.desc();
         let channels = desc.color_format.channel_count.count();
         let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-        (0..desc.height)
-            .flat_map(|y| (0..desc.width).map(move |x| (x, y)))
-            .filter(|&(x, y)| pixels[(y * desc.width + x) * channels] != 0.0)
+        (0..desc.size.height)
+            .flat_map(|y| (0..desc.size.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixels[(y * desc.size.width + x) * channels] != 0.0)
             .collect()
     }
 

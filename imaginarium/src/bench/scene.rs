@@ -3,7 +3,7 @@
 
 use std::f32::consts::TAU;
 
-use common::par;
+use common::{Size2us, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -11,26 +11,25 @@ use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 
-/// The standard frame's width: 6000 × 4000, an APS-C camera's 24 MP, as the lumos benches use.
-pub(crate) const WIDTH: usize = 6000;
-/// The standard frame's height.
-pub(crate) const HEIGHT: usize = 4000;
+/// The standard frame: 6000 × 4000, an APS-C camera's 24 MP, as the lumos benches use.
+pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
 /// The side of the tile an atomic case hands a kernel that takes an image.
 pub(crate) const TILE: usize = 512;
 
-/// `width` × `height` pixels of sky in `format` from `seed`: in each color channel 0.1 with
+/// `size` pixels of sky in `format` from `seed`: in each color channel 0.1 with
 /// white noise of σ 0.01, one pixel in fifty a star up to 1 above it in every color channel, all
 /// clamped to `[0, 1]`; alpha opaque. Each pixel draws from its own `split_mix` stream, so rows
 /// fill in parallel and a 24 MP frame takes a fraction of a second.
-pub(crate) fn sky(format: ColorFormat, width: usize, height: usize, seed: u64) -> Image {
+pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> Image {
     match format.sample_type {
-        SampleType::U8 => typed_sky::<u8>(format, width, height, seed),
-        SampleType::U16 => typed_sky::<u16>(format, width, height, seed),
-        SampleType::F32 => typed_sky::<f32>(format, width, height, seed),
+        SampleType::U8 => typed_sky::<u8>(format, size, seed),
+        SampleType::U16 => typed_sky::<u16>(format, size, seed),
+        SampleType::F32 => typed_sky::<f32>(format, size, seed),
     }
 }
 
-fn typed_sky<T: Sample>(format: ColorFormat, width: usize, height: usize, seed: u64) -> Image {
+fn typed_sky<T: Sample>(format: ColorFormat, size: Size2us, seed: u64) -> Image {
+    let Size2us { width, height } = size;
     let channels = format.channel_count.count();
     let color = channels - usize::from(format.has_alpha());
     let mut samples = vec![T::FULL_SCALE; width * height * channels];
@@ -50,7 +49,7 @@ fn typed_sky<T: Sample>(format: ColorFormat, width: usize, height: usize, seed: 
                 }
             }
         });
-    Image::from_samples(ImageDesc::new(width, height, format), samples).unwrap()
+    Image::from_samples(ImageDesc::new(size, format), samples).unwrap()
 }
 
 /// Steele, Lea and Flood's SplitMix64: one 64-bit state, a fresh output per call.

@@ -29,7 +29,7 @@ fn noisy_stars_land_within_their_reported_sigma() {
         (DVec2::new(100.42, 200.37), 0.08),
         (DVec2::new(160.42, 200.37), 0.055),
     ];
-    let mut pixels = Buffer2::new_filled(256, 256, SKY);
+    let mut pixels = Buffer2::new_filled((256, 256), SKY);
     for &(centre, amplitude) in &stars {
         SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::gaussian(sigma))
             .add_exact(&mut pixels);

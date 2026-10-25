@@ -11,7 +11,7 @@ use common::Buffer2;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::test_rng::TestRng;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// `count` random cosmic-ray hits, each of an amplitude drawn uniformly from `amplitude`, placed
 /// by the generator `seed` starts.
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn cosmic_rays_count() {
-        let mut pixels = Buffer2::new_default(64, 64);
+        let mut pixels = Buffer2::new_default((64, 64));
 
         let poss = CosmicRays {
             count: 10,

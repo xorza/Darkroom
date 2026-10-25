@@ -23,7 +23,6 @@ use arrayvec::ArrayVec;
 
 use crate::image::pixel_flags::Reach;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::{FlaggedSources, Validity};
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::ringing_clamp::RingingClamp;
@@ -34,6 +33,7 @@ use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::{Isa, Kernel};
+use common::Size2us;
 
 /// How a frame's pixels are sampled.
 #[derive(Debug, Clone, Copy)]

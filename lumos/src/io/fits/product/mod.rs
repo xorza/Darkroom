@@ -32,10 +32,10 @@ use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
 use crate::io::load_ctx::LoadCtx;
-use crate::math::size2us::Size2us;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::weight_kind::WeightKind;
+use common::Size2us;
 
 /// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
 /// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
@@ -385,7 +385,7 @@ fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(),
 fn quality_map(stored: StoredPlanes<f32>, size: Size2us) -> QualityMap {
     let mut planes = stored
         .into_iter()
-        .map(|samples| Buffer2::new(size.width, size.height, samples));
+        .map(|samples| Buffer2::new(size, samples));
     match (planes.next(), planes.next(), planes.next()) {
         (Some(shared), None, None) => QualityMap::Shared(shared),
         (Some(red), Some(green), Some(blue)) => QualityMap::PerChannel([red, green, blue]),

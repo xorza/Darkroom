@@ -8,10 +8,9 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::simd::portable::Portable;
 use crate::simd::{F32_LANES, F32x8, Isa};
+use common::{Size2us, Vec2us};
 
 /// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
 fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
@@ -216,7 +215,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     ];
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
-            let data = Buffer2::from_fn(size.width, size.height, |x, y| {
+            let data = Buffer2::from_fn(size, |x, y| {
                 scene(pattern.color_at(Vec2us::new(x, y)).idx(), x, y)
             });
             let planes = demosaic(&MosaicView::new(&data, pattern), &CancelToken::never()).unwrap();
@@ -242,7 +241,7 @@ fn rcd_matches_librtprocess_bit_for_bit() {
 fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
     let size = Size2us::new(TILE + 40, TILE + 30);
     let mut rng = TestRng::new(11);
-    let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
+    let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
     for pattern in CfaPattern::ALL {
         for place in [
             TilePlace {
@@ -286,12 +285,11 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let size = Size2us::new(TILE + 40, TILE + 30);
     let gains = [2.13, 1.0, 1.71];
     let mut rng = TestRng::new(5);
-    let data = Buffer2::from_fn(size.width, size.height, |_, _| 0.1 + 0.8 * rng.next_f32());
+    let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
     for pattern in CfaPattern::ALL {
         let color = |idx: usize| pattern.color_at(size.point_of(idx)).idx();
         let balanced = Buffer2::new(
-            size.width,
-            size.height,
+            size,
             data.iter()
                 .enumerate()
                 .map(|(idx, &sample)| sample * gains[color(idx)])

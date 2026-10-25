@@ -219,7 +219,7 @@ impl TileGrid {
         let Self { cols, rows } = self;
         let size = intensity.size();
         let col_blends: Vec<Blend> = (0..size.width).map(|x| cols.blend(x)).collect();
-        let mut out = Buffer2::new_default(size.width, size.height);
+        let mut out = Buffer2::new_default(size);
         par::chunks_mut(out.pixels_mut(), size.width)
             .enumerate()
             .for_each(|(y, orow)| {

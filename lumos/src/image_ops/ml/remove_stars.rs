@@ -101,7 +101,7 @@ fn build_stars(image: &mut LinearImage, starless: &LinearImage) {
 mod tests {
     use crate::image_ops::ml::remove_stars::*;
     use crate::internals::images::{gray_image, rgb_image};
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     #[test]
     fn build_stars_unscreens_per_sample_in_place() {

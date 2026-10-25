@@ -7,14 +7,13 @@ use glam::Vec2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::urect::URect;
 use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::star_detection::deblend::local_maxima::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
+use common::{Rect2us, Size2us};
 
 /// The default config's separation.
 fn default_separation() -> usize {
@@ -315,7 +314,7 @@ fn is_local_maximum_cases() {
     // At least as high as all eight neighbours that exist, strictly above those before it in
     // raster order: a corner and an edge have fewer, a diagonal ring counts as much as an
     // orthogonal one, and of a plateau the first pixel in raster order qualifies, the next not.
-    let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+    let mut pixels = Buffer2::new_filled((10, 10), 0.0f32);
     pixels[(0, 0)] = 1.0;
     pixels[(1, 1)] = 0.5;
     pixels[(9, 9)] = 1.0;
@@ -354,8 +353,8 @@ fn is_local_maximum_cases() {
 
 #[test]
 fn plateau_has_its_first_pixel_as_maximum() {
-    let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+    let mut pixels = Buffer2::new_filled((10, 10), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((10, 10), 0u32);
 
     for y in 3..7 {
         for x in 3..7 {
@@ -366,7 +365,7 @@ fn plateau_has_its_first_pixel_as_maximum() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::new(3, 3), Vec2us::new(7, 7)),
+        bbox: Rect2us::new(Vec2us::new(3, 3), Vec2us::new(7, 7)),
         label: 1,
         area: 16,
     };
@@ -387,14 +386,14 @@ fn plateau_has_its_first_pixel_as_maximum() {
 
 #[test]
 fn single_pixel_is_local_max() {
-    let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+    let mut pixels = Buffer2::new_filled((10, 10), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((10, 10), 0u32);
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
+        bbox: Rect2us::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -412,8 +411,8 @@ fn voronoi_assignment_and_its_tie() {
     // A 61-pixel line x = 20..=80 with peaks at its ends. Pixel 50 is 30 from both, and the tie
     // goes to the first peak given: 31 pixels to x = 20, 30 to x = 80. Under two peaks there is
     // nothing to split: the component stays whole, peaked at its own brightest pixel.
-    let mut pixels = Buffer2::new_filled(100, 100, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(100, 100, 0u32);
+    let mut pixels = Buffer2::new_filled((100, 100), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((100, 100), 0u32);
     for x in 20..=80 {
         pixels[(x, 50)] = 0.5;
         labels_buf[(x, 50)] = 1;
@@ -423,7 +422,7 @@ fn voronoi_assignment_and_its_tie() {
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::new(20, 50), Vec2us::new(81, 51)),
+        bbox: Rect2us::new(Vec2us::new(20, 50), Vec2us::new(81, 51)),
         label: 1,
         area: 61,
     };
@@ -436,12 +435,12 @@ fn voronoi_assignment_and_its_tie() {
         regions
     };
     let regions = split(&[peak(20), peak(80)]);
-    let summary: Vec<(usize, URect)> = regions.iter().map(|r| (r.area, r.bbox)).collect();
+    let summary: Vec<(usize, Rect2us)> = regions.iter().map(|r| (r.area, r.bbox)).collect();
     assert_eq!(
         summary,
         [
-            (31, URect::new(Vec2us::new(20, 50), Vec2us::new(51, 51))),
-            (30, URect::new(Vec2us::new(51, 50), Vec2us::new(81, 51))),
+            (31, Rect2us::new(Vec2us::new(20, 50), Vec2us::new(51, 51))),
+            (30, Rect2us::new(Vec2us::new(51, 50), Vec2us::new(81, 51))),
         ]
     );
 
@@ -456,12 +455,10 @@ fn voronoi_assignment_and_its_tie() {
 /// and its label map: hundreds of local maxima, many equal in value and in distance.
 fn noise_component(size: Size2us, seed: u64) -> TestComponent {
     let mut rng = TestRng::new(seed);
-    let pixels = Buffer2::from_fn(size.width, size.height, |_, _| {
-        0.1 + (rng.next_f32() * 16.0).floor() / 16.0
-    });
-    let labels = LabelMap::from_raw(&Buffer2::new_filled(size.width, size.height, 1u32), 1);
+    let pixels = Buffer2::from_fn(size, |_, _| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0);
+    let labels = LabelMap::from_raw(&Buffer2::new_filled(size, 1u32), 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
+        bbox: Rect2us::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
         label: 1,
         area: size.pixel_count(),
     };
@@ -519,7 +516,7 @@ fn fast_paths_match_the_definitions() {
         let mut regions = Vec::new();
         component.split_at(&peaks, &mut Assignment::default(), &mut regions);
         let mut areas = vec![0usize; peaks.len()];
-        let mut boxes = vec![URect::empty(); peaks.len()];
+        let mut boxes = vec![Rect2us::empty(); peaks.len()];
         for pixel in component.pixels() {
             let nearest = (0..peaks.len())
                 .min_by_key(|&i| {
@@ -533,13 +530,13 @@ fn fast_paths_match_the_definitions() {
             areas[nearest] += 1;
             boxes[nearest].include(pixel.pos());
         }
-        let expected_regions: Vec<(Vec2us, usize, URect)> = peaks
+        let expected_regions: Vec<(Vec2us, usize, Rect2us)> = peaks
             .iter()
             .zip(areas.iter().zip(&boxes))
             .filter(|(_, (area, _))| **area > 0)
             .map(|(peak, (&area, &bbox))| (peak.pos(), area, bbox))
             .collect();
-        let got: Vec<(Vec2us, usize, URect)> = regions
+        let got: Vec<(Vec2us, usize, Rect2us)> = regions
             .iter()
             .map(|region| (region.peak, region.area, region.bbox))
             .collect();
@@ -561,8 +558,8 @@ fn fast_paths_match_the_definitions() {
 /// first pixel, (10, 10), is now a peak and its region holds the whole top.
 #[test]
 fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
-    let mut pixels = Buffer2::new_filled(24, 16, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(24, 16, 0u32);
+    let mut pixels = Buffer2::new_filled((24, 16), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((24, 16), 0u32);
     for y in 9..14 {
         for x in 2..22 {
             pixels[(x, y)] = 0.2;
@@ -578,7 +575,7 @@ fn a_flat_topped_source_keeps_its_region_between_fainter_peaks() {
     pixels[(18, 11)] = 0.8;
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::new(2, 9), Vec2us::new(22, 14)),
+        bbox: Rect2us::new(Vec2us::new(2, 9), Vec2us::new(22, 14)),
         label: 1,
         area: 100,
     };

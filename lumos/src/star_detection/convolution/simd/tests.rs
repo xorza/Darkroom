@@ -4,12 +4,12 @@ use common::Buffer2;
 
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::math::size2us::Size2us;
 use crate::simd::Kernel;
 use crate::star_detection::convolution::internals::convolve_cols;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing, mirror_idx,
 };
+use common::Size2us;
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
 fn asymmetric_kernel(radius: usize) -> Vec<f32> {
@@ -21,7 +21,7 @@ fn shape_image(shape: &DataShape, size: Size2us) -> Buffer2<f32> {
     let pixels = (0..size.height)
         .flat_map(|y| shape.row(size.width, y))
         .collect();
-    Buffer2::new(size.width, size.height, pixels)
+    Buffer2::new(size, pixels)
 }
 
 #[test]
@@ -202,10 +202,10 @@ fn convolve_cols_uniform_input() {
     // 10ε relative.
     let width = 32;
     let height = 32;
-    let input = Buffer2::new_filled(width, height, 42.0f32);
+    let input = Buffer2::new_filled((width, height), 42.0f32);
     let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
 
-    let mut output = Buffer2::new_default(width, height);
+    let mut output = Buffer2::new_default((width, height));
     convolve_cols(&input, &mut output, &kernel);
 
     for (i, &v) in output.pixels().iter().enumerate() {
@@ -222,12 +222,12 @@ fn convolve_cols_impulse_response() {
     // column, exactly, and nothing anywhere else. The kernel is asymmetric so the tap order shows.
     let width = 8;
     let height = 16;
-    let mut input = Buffer2::new_filled(width, height, 0.0f32);
+    let mut input = Buffer2::new_filled((width, height), 0.0f32);
     input[(4, 8)] = 1.0;
     let kernel = [0.1f32, 0.2, 0.4, 0.3, 0.05];
     let radius = kernel.len() / 2;
 
-    let mut output = Buffer2::new_default(width, height);
+    let mut output = Buffer2::new_default((width, height));
     convolve_cols(&input, &mut output, &kernel);
 
     for y in 0..height {
@@ -324,7 +324,7 @@ fn convolve_2d_row_uniform() {
     // 42 times 25 weights of 1/25: 25 products and 25 sums, 50ε relative.
     let width = 16;
     let height = 16;
-    let input = Buffer2::new_filled(width, height, 42.0f32);
+    let input = Buffer2::new_filled((width, height), 42.0f32);
     let weights = vec![1.0 / 25.0; 25];
     let kernel = Kernel2d::new(&weights, 5);
 
@@ -352,7 +352,7 @@ fn convolve_2d_row_impulse_response() {
     // kernel's row `1 − dy` reversed, exactly — both axes correlate, as `ConvolveRow` does.
     let width = 16;
     let height = 16;
-    let mut input = Buffer2::new_default(width, height);
+    let mut input = Buffer2::new_default((width, height));
     input[8 * width + 8] = 1.0;
     let weights: Vec<f32> = (1..=9).map(|w| w as f32 * 0.1).collect();
     let kernel = Kernel2d::new(&weights, 3);

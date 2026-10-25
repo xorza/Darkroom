@@ -11,8 +11,8 @@ use crate::frame::frame_stats::FrameStats;
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::math::vec2us::Vec2us;
 use crate::noise::ccd_noise::CcdNoise;
+use common::Vec2us;
 
 fn stats(noise: &[f32], quantization_sigma: Option<f32>, electrons: Option<f32>) -> FrameStats {
     FrameStats {

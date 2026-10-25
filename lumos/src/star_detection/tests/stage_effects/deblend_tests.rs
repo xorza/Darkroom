@@ -13,13 +13,13 @@ use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::fwhm;
-use crate::math::size2us::Size2us;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::star_detection_config::extraction_config::{Deblend, ExtractionConfig};
 use crate::star_detection::star_detector::stages::detect::internals::{
     detect_stars_test, detect_test,
 };
 use crate::star_detection::tests::stage_effects::{bg_estimate, matched_truths};
+use common::Size2us;
 
 /// The sky these stage tests detect against: bright enough to matter, quiet enough to detect on.
 const DETECTION_SKY: Sky = Sky {
@@ -222,7 +222,7 @@ fn a_crowded_group_splits_into_every_star() {
 fn deblending_does_not_depend_on_the_sky_level() {
     let size = Size2us::new(48, 48);
     let render = |pedestal: f32| {
-        let mut pixels = Buffer2::new_filled(size.width, size.height, pedestal);
+        let mut pixels = Buffer2::new_filled(size, pedestal);
         for (x, amplitude) in [(22.0, 0.2), (27.0, 0.05)] {
             SyntheticStar::new(Vec2::new(x, 24.0), amplitude, StarProfile::gaussian(1.5))
                 .add_to(&mut pixels);

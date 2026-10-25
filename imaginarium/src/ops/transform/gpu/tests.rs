@@ -1,3 +1,4 @@
+use common::Size2us;
 use glam::Vec2;
 
 use crate::color::color_format::ALL_FORMATS;
@@ -37,7 +38,7 @@ fn gpu_matches_cpu() {
         (Transform::new().scale(Vec2::new(0.5, 0.75)), [7, 7], false),
     ];
     for format in ALL_FORMATS {
-        let image = create_test_image(format, width, height, 3);
+        let image = create_test_image(format, Size2us::new(width, height), 3);
         let input = GpuImage::from_image(&gpu, &image).unwrap();
         for (transform, [out_w, out_h], exact) in cases {
             let filters: &[FilterMode] = if exact {
@@ -47,7 +48,7 @@ fn gpu_matches_cpu() {
             };
             for &filter in filters {
                 let transform = transform.filter(filter);
-                let desc = ImageDesc::new(out_w, out_h, format);
+                let desc = ImageDesc::new(Size2us::new(out_w, out_h), format);
                 let mut output = GpuImage::new_empty(&gpu, desc).unwrap();
                 transform.apply_gpu(&gpu, &pipeline, &input, &mut output);
 

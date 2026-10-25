@@ -66,15 +66,21 @@ fn capped_target_preserves_aspect_without_upscaling() {
 #[test]
 fn conversion_produces_opaque_rgba8_at_the_target_size() {
     let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
-    let rgba =
-        RawImage::new_with_data(ImageDesc::new(2, 1, ColorFormat::RGBA_U8), bytes.clone()).unwrap();
+    let rgba = RawImage::new_with_data(
+        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8),
+        bytes.clone(),
+    )
+    .unwrap();
     assert_eq!(
         rgba8_raster(&rgba, UVec2::new(2, 1)),
         Raster::from_srgba8(UVec2::new(2, 1), bytes).expect("2×1 RGBA8 is 8 bytes")
     );
 
-    let rgb =
-        RawImage::new_with_data(ImageDesc::new(1, 1, ColorFormat::RGB_F32), vec![0; 12]).unwrap();
+    let rgb = RawImage::new_with_data(
+        ImageDesc::new(Size2us::new(1, 1), ColorFormat::RGB_F32),
+        vec![0; 12],
+    )
+    .unwrap();
     assert_eq!(
         rgba8_raster(&rgb, UVec2::new(1, 1)),
         Raster::from_srgba8(UVec2::ONE, vec![0, 0, 0, 255]).expect("1×1 RGBA8 is 4 bytes")
@@ -86,14 +92,19 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
 /// that wide fits in memory.
 #[test]
 fn native_size_refuses_an_edge_no_texture_holds() {
-    let size = |width, height| native_size(ImageDesc::new(width, height, ColorFormat::RGB_U8));
+    let size = |width, height| {
+        native_size(ImageDesc::new(
+            Size2us::new(width, height),
+            ColorFormat::RGB_U8,
+        ))
+    };
     let max = usize::try_from(u32::MAX).unwrap();
     assert_eq!(size(max, 3).unwrap(), UVec2::new(u32::MAX, 3));
     for (width, height) in [(max + 1, 3), (3, max + 1)] {
         assert!(
             matches!(
                 size(width, height),
-                Err(DrawablePreviewError::EdgeTooLong { width: w, height: h }) if (w, h) == (width, height)
+                Err(DrawablePreviewError::EdgeTooLong { size }) if size == Size2us::new(width, height)
             ),
             "{width}×{height}",
         );
@@ -114,7 +125,7 @@ fn the_full_texture_converts_on_the_first_ask_and_is_reused_after() {
 
     store.publish(
         node,
-        internals::image_value(1024, 512, ColorFormat::RGB_F32),
+        internals::image_value(Size2us::new(1024, 512), ColorFormat::RGB_F32),
     );
     assert!(
         store.entries.is_empty(),

@@ -99,7 +99,7 @@ pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
 
 /// Convert an f32 grayscale plane to an imaginarium `RGB_F32` image under `tone`.
 pub(crate) fn gray_to_rgb(pixels: &Buffer2<f32>, tone: ToneMap) -> Image {
-    let desc = ImageDesc::new(pixels.width(), pixels.height(), ColorFormat::RGB_F32);
+    let desc = ImageDesc::new(pixels.size(), ColorFormat::RGB_F32);
     let rgb: Vec<f32> = tone
         .apply(pixels)
         .into_iter()
@@ -247,7 +247,7 @@ mod tests {
     /// Each mapping over the same plane, so the three rules are pinned against one another.
     #[test]
     fn tone_maps_differ_on_the_same_plane() {
-        let plane = |pixels: [f32; 4]| Buffer2::new(2, 2, pixels.to_vec());
+        let plane = |pixels: [f32; 4]| Buffer2::new((2, 2), pixels.to_vec());
 
         // Clamp: value x 255, truncated. 0.5 -> 127, 0.25 -> 63.
         let img = to_gray(&plane([0.0, 0.5, 1.0, 0.25]), ToneMap::Clamp);
@@ -275,7 +275,7 @@ mod tests {
     /// A flat plane has no range to stretch; the guarded span must not divide by zero.
     #[test]
     fn auto_range_survives_a_flat_plane() {
-        let img = to_gray(&Buffer2::new_filled(2, 2, 0.5), ToneMap::AutoRange);
+        let img = to_gray(&Buffer2::new_filled((2, 2), 0.5), ToneMap::AutoRange);
         assert_eq!(img.get_pixel(0, 0).0[0], 0);
     }
 }

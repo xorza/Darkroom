@@ -3,7 +3,7 @@ use common::Buffer2;
 use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::bg_mesh::tile_stats::MAX_TILE_SAMPLES;
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Tiles of `tile_size`, two σ-clip passes, and `median_filter`.
 const fn params(tile_size: usize, median_filter: MedianFilter) -> MeshParams {
@@ -16,7 +16,7 @@ const fn params(tile_size: usize, median_filter: MedianFilter) -> MeshParams {
 
 #[test]
 fn repeated_measures_reuse_mesh_allocations_and_preserve_results() {
-    let pixels = Buffer2::new_filled(256, 256, 0.5);
+    let pixels = Buffer2::new_filled((256, 256), 0.5);
     let mut workspace = MeshWorkspace::default();
     let expected = {
         let grid = workspace.measure(&pixels, None, None, params(64, MedianFilter::Apply));
@@ -50,7 +50,7 @@ fn repeated_measures_reuse_mesh_allocations_and_preserve_results() {
 
 #[test]
 fn clear_releases_all_mesh_allocations() {
-    let pixels = Buffer2::new_filled(128, 128, 0.5);
+    let pixels = Buffer2::new_filled((128, 128), 0.5);
     let mut workspace = MeshWorkspace::default();
     workspace.measure(&pixels, None, None, params(32, MedianFilter::Apply));
     assert!(workspace.grid.is_some());
@@ -66,8 +66,8 @@ fn clear_releases_all_mesh_allocations() {
 
 #[test]
 fn a_measure_rebuilds_the_grid_for_layout_changes() {
-    let first_pixels = Buffer2::new_filled(100, 70, 0.5);
-    let second_pixels = Buffer2::new_filled(64, 32, 0.25);
+    let first_pixels = Buffer2::new_filled((100, 70), 0.5);
+    let second_pixels = Buffer2::new_filled((64, 32), 0.25);
     let mut workspace = MeshWorkspace::default();
 
     // 100 × 70 in 32s: remainders of 4 and 6, under half a tile, join their neighbours.
@@ -90,7 +90,7 @@ fn a_measure_rebuilds_the_grid_for_layout_changes() {
 
 #[test]
 fn a_masked_measure_keeps_per_job_scratch_bounded() {
-    let pixels = Buffer2::new_filled(512, 512, 0.5);
+    let pixels = Buffer2::new_filled((512, 512), 0.5);
     let mask = BitBuffer2::new_filled(Size2us::new(512, 512), false);
     let mut workspace = MeshWorkspace::default();
 

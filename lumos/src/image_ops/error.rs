@@ -6,7 +6,7 @@ use crate::error::InvalidConfigField;
 #[cfg(feature = "ml")]
 use crate::image_ops::ml::backend::WINDOW;
 #[cfg(feature = "ml")]
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Why a display/processing op failed.
 #[derive(Debug, thiserror::Error)]

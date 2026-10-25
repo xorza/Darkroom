@@ -56,8 +56,6 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::memory::stage::Stage;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::recycled::Recycled;
@@ -67,6 +65,7 @@ use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_planes::QualityPlanes;
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
+use common::Vec2us;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
 /// ask for it.
@@ -170,7 +169,7 @@ impl FrameCache {
         for (idx, frame) in frames.iter().enumerate() {
             FrameDimensionMismatch::check(idx, dimensions, frame.image.dimensions())?;
             for (kind, plane) in frame.quality.present() {
-                let actual = Size2us::from(plane);
+                let actual = plane.size();
                 if actual != dimensions.size() {
                     return Err(StackError::PlaneDimensionMismatch {
                         idx,
@@ -351,7 +350,7 @@ impl FrameCache {
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags = self
             .flag_plane()
-            .then(|| Buffer2::<u8>::new_default(dimensions.width(), dimensions.height()));
+            .then(|| Buffer2::<u8>::new_default(dimensions.size()));
         let excluded = AtomicFlagCounts::default();
         let kept_flagged = AtomicFlagCounts::default();
         let fallback_pixels = AtomicU64::new(0);

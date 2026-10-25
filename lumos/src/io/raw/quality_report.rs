@@ -19,8 +19,7 @@ use crate::internals::real_data::raw_frames;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// Pixels this far from an edge are left out: both demosaics extrapolate there.
 const BORDER: usize = 6;
@@ -169,7 +168,7 @@ impl Compared<'_> {
 
     fn color_structure(self, transforms: &[ChannelCompareStats; 3]) -> ColorStructureStats {
         let Self { a, b, border } = self;
-        let size = Size2us::from(a.channel(0));
+        let size = a.channel(0).size();
         let mut sum = 0.0;
         let mut max = 0.0_f64;
         let mut count = 0usize;
@@ -203,8 +202,8 @@ impl Compared<'_> {
 
 /// Compare two channels using linear regression to remove scale/offset differences.
 fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> ChannelCompareStats {
-    let size = Size2us::from(a);
-    debug_assert_eq!(size, Size2us::from(b), "two channels of one size");
+    let size = a.size();
+    debug_assert_eq!(size, b.size(), "two channels of one size");
     // Linear regression: b ~ scale * a + offset
     let mut sum_a = 0.0f64;
     let mut sum_b = 0.0f64;
@@ -282,8 +281,8 @@ mod tests {
 
     #[test]
     fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
-        let source = Buffer2::new(3, 1, vec![0.0, 1.0, 2.0]);
-        let reference = Buffer2::new(3, 1, vec![1.0, 3.0, 5.0]);
+        let source = Buffer2::new((3, 1), vec![0.0, 1.0, 2.0]);
+        let reference = Buffer2::new((3, 1), vec![1.0, 3.0, 5.0]);
         let channel = compare_channels(&source, &reference, 0);
         assert!((channel.scale - 2.0).abs() < 1e-12);
         assert!((channel.offset - 1.0).abs() < 1e-12);

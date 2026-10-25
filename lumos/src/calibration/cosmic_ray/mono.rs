@@ -15,9 +15,8 @@ use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::masks::{CrMasks, DetectionPlanes};
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
 pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
@@ -141,7 +140,7 @@ impl<'a> MonoDetector<'a> {
         local: &(dyn Fn(usize) -> PixelBg + Sync),
         kept_out: Option<&KeptOut>,
     ) -> &BitBuffer2 {
-        let size = Size2us::from(&*data);
+        let size = data.size();
         let Self {
             config,
             noise: noise_model,
@@ -181,7 +180,7 @@ impl<'a> MonoDetector<'a> {
                 &mut *median,
                 &mut *staged,
             ] {
-                plane.reshape(size.width, size.height, 0.0);
+                plane.reshape(size, 0.0);
             }
             let pix = &*data;
 
@@ -320,7 +319,7 @@ impl<'a> OutputBand<'a> {
 /// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
 /// removed from every iteration; what remains is the result, written into the caller's buffer.
 fn laplacian_plus_rows(data: &Buffer2<f32>, out: OutputBand<'_>) {
-    let size = Size2us::from(data);
+    let size = data.size();
     let (w2, h2) = (size.width * 2, size.height * 2);
     // The ×2 sample at (x2, y2), which is the native pixel under it.
     let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
@@ -384,7 +383,7 @@ impl WindowMedian {
     /// Row `y`'s window medians into `out`, eight pixels at a time; past the row's end, a group's
     /// lanes read the replicated edge and are not written.
     fn row(self, data: &Buffer2<f32>, y: usize, out: &mut [f32], scratch: &mut WindowScratch) {
-        let (size, r) = (Size2us::from(data), self.radius);
+        let (size, r) = (data.size(), self.radius);
         let side = 2 * r + 1;
         let window_row = |dy: usize| data.row((y + dy).saturating_sub(r).min(size.height - 1));
         // The source columns under eight pixels' windows: from `r` left of the first to `r` right
@@ -588,8 +587,8 @@ impl PixelRepair<'_> {
             unread,
             local,
         } = self;
-        let size = Size2us::from(&*data);
-        snapshot.reshape(size.width, size.height, 0.0);
+        let size = data.size();
+        snapshot.reshape(size, 0.0);
         snapshot.copy_from_slice(data);
         let src: &[f32] = snapshot;
         par::chunks_mut(data, size.width)
@@ -660,7 +659,7 @@ pub(crate) mod internals {
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
     pub(crate) fn median_window(data: &Buffer2<f32>, r: usize) -> Buffer2<f32> {
-        let mut out = Buffer2::new_default(data.width(), data.height());
+        let mut out = Buffer2::new_default(data.size());
         let rows = 0..data.height();
         WindowMedian { radius: r }.rows(
             data,

@@ -3,9 +3,8 @@
 use glam::DVec2;
 
 use crate::math::grid;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::distortion::tps::ThinPlateSpline;
+use common::{Size2us, Vec2us};
 
 /// A spline's distortion at every node of a grid, with its largest and mean magnitude.
 #[derive(Debug, Clone)]

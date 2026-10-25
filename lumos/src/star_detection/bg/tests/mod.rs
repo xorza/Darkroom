@@ -9,7 +9,6 @@ use glam::Vec2;
 
 use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::bg_map;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::star_detection::bg::bg_estimate::BgEstimate;
 use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
@@ -18,6 +17,7 @@ use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::{
     BgConfig, BgRefinement, IterativeRefinement,
 };
+use common::Size2us;
 
 /// The background and noise maps of `pixels` at `tile_size`.
 fn estimate(pixels: &Buffer2<f32>, tile_size: usize) -> BgEstimate {
@@ -46,7 +46,7 @@ fn constant_skies_come_back_exactly() {
         (128, 128, 16, 0.5),
         (128, 128, 128, 0.5),
     ] {
-        let estimate = estimate(&Buffer2::new_filled(width, height, value), tile_size);
+        let estimate = estimate(&Buffer2::new_filled((width, height), value), tile_size);
         let (bg, noise) = (estimate.bg.plane(), estimate.sky.noise.plane());
         let case = format!("{width}×{height} at tile {tile_size}");
         assert_eq!(bg.width(), width, "{case}");
@@ -78,7 +78,7 @@ fn plane_skies_come_back_exactly() {
         (160, 160, 32, Vec2::new(2e-3, -1e-3)),
     ] {
         let plane = |x: usize, y: usize| 0.5 + gradient.x * x as f32 + gradient.y * y as f32;
-        let pixels = Buffer2::from_fn(width, height, plane);
+        let pixels = Buffer2::from_fn((width, height), plane);
         let bg = estimate(&pixels, tile_size).bg.plane();
         let largest = pixels.pixels().iter().fold(0.0f32, |m, &v| m.max(v.abs()));
         let bound = 8.0 * f32::EPSILON * largest;
@@ -175,7 +175,7 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
     let bound = 4.0 * f64::from(f32::EPSILON) * 0.75;
     for along_x in [true, false] {
         let (width, height) = if along_x { (160, 96) } else { (96, 160) };
-        let pixels = Buffer2::from_fn(width, height, |x, y| {
+        let pixels = Buffer2::from_fn((width, height), |x, y| {
             let tile = if along_x { x } else { y } / 32;
             let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
             SKY[tile] + sign * SPREAD[tile]
@@ -206,7 +206,7 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
 /// a 0.2 sky gives a MAD of 0, so the clip keeps only the 0.2s, whose median and mean are 0.2.
 #[test]
 fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
-    let mut pixels = Buffer2::new_filled(64, 64, 0.2f32);
+    let mut pixels = Buffer2::new_filled((64, 64), 0.2f32);
     for i in (0..64 * 64).step_by(10) {
         pixels[i] = 0.95;
     }
@@ -234,7 +234,7 @@ fn refine_masks_the_stars_and_their_halos_out() {
     const SKY: f32 = 0.25;
     const SPREAD: f32 = 1.0 / 64.0;
     let size = Size2us::new(128, 128);
-    let pixels = Buffer2::from_fn(size.width, size.height, |x, y| {
+    let pixels = Buffer2::from_fn(size, |x, y| {
         let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
         let lift = match (x % 32, y % 32) {
             (14..18, 14..18) => 8.0,
@@ -329,7 +329,7 @@ fn refine_masks_the_stars_and_their_halos_out() {
 
 #[test]
 fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
-    let pixels = Buffer2::from_fn(96, 64, |x, y| (3 * x + y) as f32 / 512.0);
+    let pixels = Buffer2::from_fn((96, 64), |x, y| (3 * x + y) as f32 / 512.0);
     let config = BgConfig {
         tile_size: 16,
         ..Default::default()
@@ -357,7 +357,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     drop(second);
 
     resources.reshape(Size2us::new(48, 32));
-    let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
+    let resized_pixels = Buffer2::new_filled((48, 32), 0.25);
     let resized = BgEstimate::estimate(
         MaskedPlane::from(&resized_pixels),
         &config,

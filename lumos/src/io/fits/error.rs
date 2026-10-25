@@ -19,8 +19,7 @@ use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::domain_keywords::{PEDESTAL, PEDESTAL_LEVEL, SCALE_ORIGIN};
 use crate::io::fits::product::{INVERSE_VARIANCE, PRODUCT_VERSION};
 use crate::io::null_policy::NullSamples;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Why a FITS load failed, before the entry point names the file.
 #[derive(Debug, Error)]

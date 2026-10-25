@@ -21,9 +21,9 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::{init_tracing, real_data};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
-use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::{CalibrationSet, CfaImage, MasterRole, StackConfig};
+use common::Size2us;
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
@@ -39,8 +39,8 @@ fn raw_frame_info_matches_full_decode() {
     assert_eq!(from_peek.data().pixels(), loaded.data().pixels());
     let peeked = peek.info;
     assert_eq!(
-        (peeked.dimensions.width(), peeked.dimensions.height()),
-        (loaded.data().width(), loaded.data().height()),
+        peeked.dimensions.size(),
+        loaded.data().size(),
         "peeked header dims must match the decoded frame"
     );
     assert_eq!(
@@ -75,7 +75,7 @@ fn builds_full_master_set() {
     let bias = masters.bias.as_ref().expect("master bias");
 
     // All masters share the single sensor geometry (one CFA plane each).
-    let size = Size2us::from(dark.data());
+    let size = dark.data().size();
     assert!(
         size.width > 0 && size.height > 0,
         "degenerate master dimensions {}x{}",
@@ -83,13 +83,13 @@ fn builds_full_master_set() {
         size.height
     );
     assert_eq!(
-        (flat.data().width(), flat.data().height()),
-        (size.width, size.height),
+        flat.data().size(),
+        size,
         "flat master dimensions differ from dark"
     );
     assert_eq!(
-        (bias.data().width(), bias.data().height()),
-        (size.width, size.height),
+        bias.data().size(),
+        size,
         "bias master dimensions differ from dark"
     );
 
@@ -233,7 +233,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         .run(ProgressMonitor::unattended())
         .expect("master-dark stack failed")
         .expect("master dark");
-        let size = Size2us::from(dark.data());
+        let size = dark.data().size();
         let map = DefectMap::new(dark.size())
             .detect_hot(&dark, SigmaThreshold::DEFAULT, &CancelToken::never())
             .expect("hot detection failed");

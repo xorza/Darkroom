@@ -3,7 +3,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::synthetic::camera::*;
 
 fn render_one(psf: PsfModel, size: usize, flux: f32) -> Vec<f32> {
-    let mut pixels = Buffer2::new_filled(size, size, 0.0f32);
+    let mut pixels = Buffer2::new_filled((size, size), 0.0f32);
     let c = size as f32 / 2.0;
     psf.render(&mut pixels, Vec2::splat(c), flux);
     pixels.pixels().to_vec()

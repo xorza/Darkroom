@@ -8,7 +8,7 @@ use crate::internals::images::gray_image;
 use crate::internals::images::rgb_image;
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
@@ -265,7 +265,7 @@ fn surface_evaluators_agree() {
         };
         let magnitude: f64 = polynomial.coeffs.iter().map(|c| c.abs()).sum();
         let surface = Surface::new(&polynomial, size);
-        let mut model = Buffer2::new_filled(size.width, size.height, 0.0f32);
+        let mut model = Buffer2::new_filled(size, 0.0f32);
         surface.remove(&mut model, |_, m| m);
 
         let mut total = 0.0;

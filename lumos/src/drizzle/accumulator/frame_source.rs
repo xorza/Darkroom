@@ -18,8 +18,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Area below which a square drop is discarded: the transform has collapsed the input pixel to
 /// nothing, so there is no output area to spread its flux over.

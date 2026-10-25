@@ -116,8 +116,6 @@ pub use io::null_policy::NullPolicy;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
 pub use io::writer;
-pub use math::size2us::Size2us;
-pub use math::vec2us::Vec2us;
 
 pub use calibration::calibration_component::CalibrationComponent;
 pub use calibration::calibration_masters::{CalibrationMasters, MasterBuild};

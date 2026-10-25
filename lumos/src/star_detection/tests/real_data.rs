@@ -17,13 +17,13 @@ use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
 use crate::io::raster;
-use crate::math::size2us::Size2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::measurement_config::CentroidMethod;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
+use common::Size2us;
 
 fn rho_opiuchi_path() -> PathBuf {
     dataset_path("rho-opiuchi.jpg")
@@ -36,7 +36,7 @@ pub(crate) fn rho_opiuchi() -> LinearImage {
         .convert(ColorFormat::L_F32);
     LinearImage::from_interleaved(
         ImageDimensions::new(
-            (image.desc().width, image.desc().height),
+            (image.desc().size.width, image.desc().size.height),
             ChannelLayout::Mono,
         ),
         bytemuck::cast_slice(image.bytes()).to_vec(),
@@ -186,7 +186,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     // 5. Label map, of the mask as it stands — the stage labels it undilated.
     let label_map = pool.labeler.label(&mask, config.extraction.connectivity);
     let label_count = label_map.label_count();
-    let labels_buf = Buffer2::new(width, height, label_map.labels());
+    let labels_buf = Buffer2::new((width, height), label_map.labels());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
     visual::save_rgb(&labels_rgb, &out("06_label_map"));
     println!("Saved: 06_label_map ({label_count} components)");

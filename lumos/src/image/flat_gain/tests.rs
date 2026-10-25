@@ -8,10 +8,9 @@ use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, FlatGainRecord};
 use crate::image::image_dimensions::ImageDimensions;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
+use common::{Size2us, Vec2us};
 
 /// A node is the mean gain of its color within half a step, its excluded photosites left out.
 /// - A mono 9×9 flat of 0.5 has a 3×3 grid of gain 2. One photosite at (4, 4) floored at 0.1 is
@@ -24,7 +23,7 @@ fn a_node_is_its_colors_mean_gain() {
     let size = Size2us::new(9, 9);
     let mut pixels = vec![0.5; size.pixel_count()];
     pixels[4 * 9 + 4] = 0.1;
-    let divisor = Buffer2::new(9, 9, pixels);
+    let divisor = Buffer2::new((9, 9), pixels);
     let flagged = FlatGain::of_divisor(&divisor, &CfaType::Mono, |idx| idx == 4 * 9 + 4);
     let unflagged = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     for (x, y) in [(0.0, 0.0), (4.0, 4.0), (8.0, 4.0)] {
@@ -34,7 +33,7 @@ fn a_node_is_its_colors_mean_gain() {
     assert_eq!(unflagged.at(0, 0.0, 0.0), 2.0);
 
     let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let divisor = Buffer2::from_fn(8, 8, |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
+    let divisor = Buffer2::from_fn((8, 8), |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
         0 => 0.5,
         1 => 1.0,
         _ => 0.25,
@@ -60,7 +59,7 @@ fn a_node_is_its_colors_mean_gain() {
 #[test]
 fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     let size = Size2us::new(9, 9);
-    let divisor = Buffer2::from_fn(9, 9, |x, _| 1.0 / (1.0 + x as f32 / 8.0));
+    let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
     let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     let close = |actual: f32, expected: f32, what: &str| {
         assert!(
@@ -91,7 +90,7 @@ fn the_gain_is_bilinear_between_nodes_and_moves_with_the_warp() {
     // every output node of every channel reads its own channel one node row lower, exactly, and
     // the last row, past the source, holds the source's last.
     let ramps = (1..=3)
-        .map(|channel| Buffer2::from_fn(3, 3, |i, j| (10 * channel + 3 * j + i) as f32))
+        .map(|channel| Buffer2::from_fn((3, 3), |i, j| (10 * channel + 3 * j + i) as f32))
         .collect();
     let gain = FlatGain::from_nodes(size, ramps);
     let down = WarpTransform::new(Transform::translation(DVec2::new(0.0, 4.0)));
@@ -141,7 +140,7 @@ fn a_record_of_no_image_size_is_refused() {
 /// reads back from its 64 hex digits.
 #[test]
 fn a_gain_is_known_by_its_little_endian_digest() {
-    let divisor = Buffer2::from_fn(9, 9, |x, y| 0.5 + 0.02 * (x * 9 + y) as f32);
+    let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.02 * (x * 9 + y) as f32);
     let gain = FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false);
     let mut bytes: Vec<u8> = [9u64, 9, 1].iter().flat_map(|v| v.to_le_bytes()).collect();
     bytes.extend(gain.planes().flatten().flat_map(|node| node.to_le_bytes()));

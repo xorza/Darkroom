@@ -8,7 +8,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::statistics;
 use crate::math::statistics::radix_median::RadixMedian;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// The 5×5 window, as astroscrappy's `medfilt5`, whose median tells a saturated star's core from a
 /// saturated hit.

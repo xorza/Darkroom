@@ -10,7 +10,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 const SIZE: Size2us = Size2us::new(2, 2);
 

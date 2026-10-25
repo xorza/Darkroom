@@ -7,7 +7,6 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
-use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::{FlagScratch, FlaggedSources, Validity};
 use crate::registration::resample::frame_sampler::{
     FilterSampling, FrameSampler, RowOutput, SampleMethod, SampleRow, SampleRule, WindowAxes,
@@ -23,6 +22,7 @@ use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::isa_tier::IsaTier;
+use common::Size2us;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
 #[derive(Debug, Clone)]
@@ -309,7 +309,7 @@ impl Oracle<'_> {
 
 /// A `size` plane of signed, unstructured values with a few bright pixels among them.
 fn fixture(size: Size2us, seed: usize) -> Buffer2<f32> {
-    Buffer2::from_fn(size.width, size.height, |x, y| {
+    Buffer2::from_fn(size, |x, y| {
         let i = y * size.width + x;
         if (i + seed).is_multiple_of(37) {
             40.0

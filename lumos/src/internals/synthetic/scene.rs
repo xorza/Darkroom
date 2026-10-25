@@ -9,7 +9,7 @@ use common::Buffer2;
 
 use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette, add_uniform_bg};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 use glam::DVec2;
 
 /// A true point source (star) in sky coordinates. Its on-sensor shape comes entirely from
@@ -35,7 +35,7 @@ pub(crate) enum BgField {
 impl BgField {
     /// Render this background into a fresh `size`-sized buffer of normalized values.
     pub(crate) fn render(&self, size: Size2us) -> Buffer2<f32> {
-        let mut pixels = Buffer2::new_default(size.width, size.height);
+        let mut pixels = Buffer2::new_default(size);
         match self {
             Self::Uniform { level } => add_uniform_bg(&mut pixels, *level),
             Self::Gradient(gradient) => gradient.add_to(&mut pixels),

@@ -10,7 +10,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::io::raw;
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::sensor_layout::SensorLayout;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The length of LibRaw's `cblack` table: four channel values, the spatial pattern's height and
 /// width, and the pattern.
@@ -298,10 +298,7 @@ impl BlackLevel {
             .reduce(FlagCounts::default, FlagCounts::merged);
         DecodedRaw {
             pixels,
-            flags: PixelFlags::from_counted(
-                Buffer2::new(active.width, active.height, flags),
-                counts,
-            ),
+            flags: PixelFlags::from_counted(Buffer2::new(active, flags), counts),
         }
     }
 }

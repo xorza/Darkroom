@@ -25,7 +25,7 @@ use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A kept frame, its planes mapped: the same whether this run wrote it or a run before did, so a
 /// first run and a reuse give the combine frames of one shape.
@@ -245,17 +245,14 @@ impl KeptFrame {
         let mut channels = ArrayVec::new();
         for (channel, digest) in digests.channels.iter().enumerate() {
             let Copied { plane, samples } = copied(&spill.channel_path(channel), digest, pixels)?;
-            planes.push(Buffer2::new(size.width, size.height, samples));
+            planes.push(Buffer2::new(size, samples));
             channels.push(plane);
         }
         let (image_flags, flags) = match (flags, digests.flags) {
             (Some(counts), Some(digest)) => {
                 let Copied { plane, samples } = copied(&spill.flags_path(), &digest, pixels)?;
                 (
-                    PixelFlags::from_counted(
-                        Buffer2::new(size.width, size.height, samples),
-                        counts,
-                    ),
+                    PixelFlags::from_counted(Buffer2::new(size, samples), counts),
                     Some(StoredFlags { plane, counts }),
                 )
             }
@@ -311,7 +308,7 @@ fn shared_gain(
         (0..kept.channels)
             .map(|channel| {
                 let nodes = file.chunk(channel * count..(channel + 1) * count);
-                Buffer2::new(grid.cols, grid.rows, nodes.to_vec())
+                Buffer2::new((grid.cols, grid.rows), nodes.to_vec())
             })
             .collect(),
     );

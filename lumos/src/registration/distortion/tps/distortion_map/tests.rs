@@ -1,11 +1,10 @@
 use glam::DVec2;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::distortion::tps::distortion_map::DistortionMap;
 use crate::registration::distortion::tps::tests::{
     EXACT_PX, assert_near, fit_default, square_source_4,
 };
+use common::{Size2us, Vec2us};
 
 /// `DistortionMap` from pure translation: grid dimensions, vectors, and statistics.
 #[test]

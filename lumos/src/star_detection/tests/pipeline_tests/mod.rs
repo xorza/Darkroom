@@ -14,7 +14,6 @@ use crate::internals::synthetic::observe::SimFrame;
 use crate::internals::visual::comparison::Comparison;
 use crate::internals::visual::report::{DetectionMetrics, save_metrics};
 use crate::internals::visual::{ToneMap, save};
-use crate::math::size2us::Size2us;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::fwhm_config::{FwhmMode, MatchedFilter};
@@ -75,7 +74,7 @@ impl PipelineCase<'_> {
             min_decided,
         } = self;
         let pixels = frame.image.channel(0);
-        let size = Size2us::new(pixels.width(), pixels.height());
+        let size = pixels.size();
         let truth = &frame.truth.sources;
         save(
             pixels,
@@ -121,12 +120,12 @@ impl PipelineCase<'_> {
         // What the threshold is applied to: the residual itself, or its matched-filtered image,
         // which lifts a smooth plateau by 2√π·s against noise, twice what it lifts a star's peak
         // by.
-        let clean_residual = Buffer2::from_fn(size.width, size.height, residual_at);
+        let clean_residual = Buffer2::from_fn(size, residual_at);
         let thresholded = match config.fwhm.mode {
             None => clean_residual,
             Some(FwhmMode::Fixed(fwhm)) => {
-                let mut output = Buffer2::new_filled(size.width, size.height, 0.0);
-                let mut temp = Buffer2::new_filled(size.width, size.height, 0.0);
+                let mut output = Buffer2::new_filled(size, 0.0);
+                let mut temp = Buffer2::new_filled(size, 0.0);
                 output.pixels_mut().copy_from_slice(clean_residual.pixels());
                 matched_filter_fresh(
                     &mut output,

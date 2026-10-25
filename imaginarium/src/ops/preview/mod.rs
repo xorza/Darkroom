@@ -1,5 +1,7 @@
 mod cpu;
 
+use common::Size2us;
+
 use crate::image::Image;
 
 /// Generates a downscaled `RGBA_U8` **preview** of an image in one fused pass —
@@ -12,13 +14,12 @@ use crate::image::Image;
 /// always `RGBA_U8`; grayscale and RGB sources get an opaque alpha.
 #[derive(Debug, Clone, Copy)]
 pub struct Preview {
-    pub width: usize,
-    pub height: usize,
+    pub size: Size2us,
 }
 
 impl Preview {
-    pub const fn new(width: usize, height: usize) -> Self {
-        Self { width, height }
+    pub const fn new(size: Size2us) -> Self {
+        Self { size }
     }
 
     /// Area-averages `input` down to the target size and converts it to `RGBA_U8`.

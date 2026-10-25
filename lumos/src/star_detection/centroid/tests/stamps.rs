@@ -64,7 +64,7 @@ fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit>
 
 #[test]
 fn extract_stamp_valid_center() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
 
     let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
     assert_eq!(fit.stamp.z.len(), 11 * 11);
@@ -82,7 +82,7 @@ fn extract_stamp_valid_center() {
 
 #[test]
 fn extract_stamp_edge_invalid() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
 
     assert!(extract(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
     assert!(extract(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
@@ -92,7 +92,7 @@ fn extract_stamp_edge_invalid() {
 
 #[test]
 fn extract_stamp_peak_value() {
-    let mut pixels = Buffer2::new_filled(64, 64, 0.1f32);
+    let mut pixels = Buffer2::new_filled((64, 64), 0.1f32);
     pixels[(32, 32)] = 0.9;
 
     let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
@@ -101,7 +101,7 @@ fn extract_stamp_peak_value() {
 
 #[test]
 fn extract_stamp_coordinates() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
 
     // A radius-2 stamp about (32, 32) spans x, y 30..=34: its origin at (30, 30) plus the grid's
     // own 0..=4.
@@ -112,7 +112,7 @@ fn extract_stamp_coordinates() {
 
 #[test]
 fn extract_stamp_fractional_pos() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
 
     // Fractional position 32.3, 32.7 rounds to 32, 33, so the top-left pixel is (30, 31) and the
     // centre sits at (2.3, 1.7) within the stamp.
@@ -123,7 +123,7 @@ fn extract_stamp_fractional_pos() {
 
 #[test]
 fn stamp_too_small_for_the_parameter_count_is_rejected() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
     let grid = StampGrid::new(1);
     // A least-squares fit needs strictly more samples than parameters: a radius-1 stamp holds 9 >
     // 6, a radius-0 stamp 1.
@@ -221,7 +221,7 @@ fn local_annulus_removes_a_sky_the_map_left() {
 #[test]
 fn local_annulus_needs_ten_pixels_in_the_frame() {
     let annulus = |width| {
-        let residual = Buffer2::new_filled(width, 5, 0.25f32);
+        let residual = Buffer2::new_filled((width, 5), 0.25f32);
         StampBg::measure(
             MaskedPlane::from(&residual),
             DVec2::splat(1.0),
@@ -242,7 +242,7 @@ fn local_annulus_needs_ten_pixels_in_the_frame() {
 fn the_annulus_reads_the_sky_around_the_star() {
     let size = Size2us::new(240, 240);
     let centre = DVec2::splat(120.0);
-    let mut residual = Buffer2::new_filled(size.width, size.height, 0.25f32);
+    let mut residual = Buffer2::new_filled(size, 0.25f32);
     for y in 104..137 {
         for x in 104..137 {
             if (x as f64 - 120.0).hypot(y as f64 - 120.0) < 16.0 {

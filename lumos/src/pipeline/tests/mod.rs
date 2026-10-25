@@ -36,7 +36,6 @@ use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::fits::cfa;
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::load_ctx::LoadCtx;
-use crate::math::size2us::Size2us;
 use crate::pipeline::align_stack_config::{AlignStackConfig, CalibratedLights, Reference};
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
@@ -51,6 +50,7 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::StarDetector;
+use common::Size2us;
 
 fn base_field() -> LinearImage {
     star_field(Size2us::new(256, 256), 40, 66666).image
@@ -625,7 +625,7 @@ fn public_input_errors() {
 fn write_mono_cfa_light(dir: &Path, idx: usize, image: &LinearImage) -> PathBuf {
     let path = dir.join(format!("light_{idx}.fits"));
     let mut cfa = make_cfa(
-        Size2us::new(image.width(), image.height()),
+        image.size(),
         image.channel(0).pixels().to_vec(),
         CfaType::Mono,
     );

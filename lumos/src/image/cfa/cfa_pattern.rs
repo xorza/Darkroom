@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.

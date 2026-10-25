@@ -175,7 +175,7 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
         let dst = far.width * y + SHIFT;
         far_data[dst..dst + near.width].copy_from_slice(near_pixels.row(y));
     }
-    let far_pixels = Buffer2::new(far.width, far.height, far_data);
+    let far_pixels = Buffer2::new(far, far_data);
 
     let near_pos = Measured::flat(&near_pixels, 0.1, 0.01)
         .windowed(true_pos, TEST_EXPECTED_FWHM)
@@ -295,7 +295,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     ];
 
     for case in cases {
-        let residual = Buffer2::new_filled(case.size.width, case.size.height, 0.0f32);
+        let residual = Buffer2::new_filled(case.size, 0.0f32);
         let centre = StampAt {
             residual: &residual,
             pos: case.pos,

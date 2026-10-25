@@ -29,7 +29,7 @@ fn main() {
     print_image_info("Input", &input);
 
     let desc = input.desc();
-    let center = Vec2::new(desc.width as f32 / 2.0, desc.height as f32 / 2.0);
+    let center = Vec2::new(desc.size.width as f32 / 2.0, desc.size.height as f32 / 2.0);
 
     let mut main = GpuImage::from_image(&gpu, &input).expect("upload");
     let mut scratch = GpuImage::new_empty(&gpu, desc).expect("allocate");

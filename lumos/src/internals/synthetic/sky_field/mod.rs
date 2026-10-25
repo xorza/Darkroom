@@ -11,9 +11,7 @@
 
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use common::Buffer2;
+use common::{Buffer2, Size2us, Vec2us};
 use glam::Vec2;
 
 /// The sky a field is drawn on.
@@ -58,7 +56,7 @@ impl SkyField {
     )]
     pub(crate) fn render(size: Size2us, sky: Sky, stars: GaussianStars<'_>) -> Self {
         let GaussianStars { sigma, peaks } = stars;
-        let mut pixels = Buffer2::new_filled(size.width, size.height, sky.level);
+        let mut pixels = Buffer2::new_filled(size, sky.level);
         for &(center, peak) in peaks {
             SyntheticStar::new(center, peak, StarProfile::gaussian(sigma)).add_to(&mut pixels);
         }

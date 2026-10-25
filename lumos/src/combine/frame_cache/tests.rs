@@ -1,4 +1,4 @@
-use common::TempDir;
+use common::{Size2us, TempDir};
 
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_cache::*;
@@ -221,7 +221,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     let stats = Admitted::measure(&image);
     let short_coverage = StoredFrame::from_memory(
         image,
-        FrameQuality::from_coverage(Buffer2::new(2, 1, vec![1.0; 2])),
+        FrameQuality::from_coverage(Buffer2::new((2, 1), vec![1.0; 2])),
         stats,
     );
     let error = validate_frames(&[short_coverage], dimensions).unwrap_err();
@@ -336,14 +336,14 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
-            coverage: Buffer2::new(4, 1, support),
-            confidence: Buffer2::new(4, 1, confidence),
+            coverage: Buffer2::new((4, 1), support),
+            confidence: Buffer2::new((4, 1), confidence),
         };
     let drizzled: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Drizzled {
             drops: [DropPlanes {
-                weight: Buffer2::new(4, 1, support),
-                confidence: Buffer2::new(4, 1, confidence),
+                weight: Buffer2::new((4, 1), support),
+                confidence: Buffer2::new((4, 1), confidence),
             }]
             .into_iter()
             .collect(),
@@ -460,7 +460,7 @@ fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
 fn the_combine_stage_counts_active_inputs_and_full_outputs() {
     let dimensions = ImageDimensions::new((2, 1), ChannelLayout::Rgb);
     let image = || LinearImage::from_interleaved(dimensions, vec![1.0; 6]);
-    let plane = || Buffer2::new(2, 1, vec![1.0; 2]);
+    let plane = || Buffer2::new((2, 1), vec![1.0; 2]);
     let frames = |flagged: bool| {
         let mut frames = vec![
             StackFrame::from(image()),
@@ -632,7 +632,7 @@ fn finish_product_partial_coverage() {
         .iter()
         .map(|c| {
             let mut frame = StackFrame::from(LinearImage::from_interleaved(dims, vec![0.5; 3]));
-            frame.quality = FrameQuality::from_coverage(Buffer2::new(3, 1, c.to_vec()));
+            frame.quality = FrameQuality::from_coverage(Buffer2::new((3, 1), c.to_vec()));
             frame
         })
         .collect();

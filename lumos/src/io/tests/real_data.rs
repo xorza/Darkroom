@@ -18,10 +18,7 @@ fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     let ctx = LoadCtx::default();
     let declared = ctx.cfa_peek(path).unwrap().info.dimensions;
     let cfa = ctx.cfa(path).unwrap();
-    assert_eq!(
-        (cfa.data().width(), cfa.data().height()),
-        (declared.width(), declared.height())
-    );
+    assert_eq!(cfa.data().size(), declared.size());
     let image = cfa.demosaic_measured(MarkesteijnPasses::One);
     assert_eq!(image.dimensions().size(), declared.size());
     assert_eq!(image.channels(), 3);

@@ -8,8 +8,10 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion};
 use strum::IntoEnumIterator;
 
+use common::Size2us;
+
 use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
-use crate::bench::scene::{self, HEIGHT, WIDTH};
+use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ALL_FORMATS;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
@@ -33,8 +35,9 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Sample);
     for format in ALL_FORMATS {
         let mut layers = None;
-        let mut out = Image::new_black(ImageDesc::new(WIDTH, 1, format)).unwrap();
-        group.throughput(fixture::throughput(WIDTH, 2 * format.byte_count()));
+        let mut out =
+            Image::new_black(ImageDesc::new(Size2us::new(FRAME.width, 1), format)).unwrap();
+        group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_count()));
         for mode in BlendMode::iter() {
             let params = Blend::new(mode, ALPHA);
             for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
@@ -47,7 +50,8 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     BenchmarkId::new(Backend::Cpu.case(variant.name), input),
                     |b| {
                         let [src, dst] = layers.get_or_insert_with(|| {
-                            [1, 2].map(|seed| scene::sky(format, WIDTH, 1, seed))
+                            [1, 2]
+                                .map(|seed| scene::sky(format, Size2us::new(FRAME.width, 1), seed))
                         });
                         let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
                         if let Some(kernel) = variant.kernel {
@@ -88,7 +92,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut pipeline = None;
     for format in ALL_FORMATS {
         let mut layers = None;
-        let pixels = WIDTH * HEIGHT;
+        let pixels = FRAME.pixel_count();
         group.throughput(fixture::throughput(pixels, 2 * format.byte_count()));
         for backend in backends.all() {
             match backend {
@@ -101,9 +105,8 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
             .apply(&mut group);
             let id = BenchmarkId::new(backend.id(), fixture::format_id(format));
             group.bench_function(id, |b| {
-                let [src, dst] = layers.get_or_insert_with(|| {
-                    [1, 2].map(|seed| scene::sky(format, WIDTH, HEIGHT, seed))
-                });
+                let [src, dst] = layers
+                    .get_or_insert_with(|| [1, 2].map(|seed| scene::sky(format, FRAME, seed)));
                 match backend {
                     Backend::Cpu => {
                         let mut output = Image::new_black(src.desc()).unwrap();

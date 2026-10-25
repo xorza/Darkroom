@@ -6,10 +6,9 @@ use crate::image::image_provenance::{
 };
 use crate::internals::images::gray_image;
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
+use common::{Size2us, Vec2us};
 
 /// `image` reduced to one plane, as the measurement plane is before its sky goes.
 fn prepare(image: &LinearImage, pool: &DetectionResources) -> Pooled<Buffer2<f32>> {
@@ -233,7 +232,7 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 
     use crate::internals::images::rgb_image;
 
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     let size = Size2us::new(2, 1);
     let image = rgb_image(size, [vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]]);

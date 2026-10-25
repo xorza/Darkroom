@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::DimensionsError;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Image dimensions: pixel size and the channels' layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,15 +40,11 @@ impl ImageDimensions {
             return Err(DimensionsError::ZeroHeight);
         }
         if width > Self::MAX_SIDE || height > Self::MAX_SIDE {
-            return Err(DimensionsError::SidePastMax { width, height });
+            return Err(DimensionsError::SidePastMax { size });
         }
         let channels = layout.count();
         if size.pixel_count().checked_mul(channels).is_none() {
-            return Err(DimensionsError::SampleCount {
-                width,
-                height,
-                channels,
-            });
+            return Err(DimensionsError::SampleCount { size, channels });
         }
         Ok(Self { size, layout })
     }
@@ -128,7 +124,7 @@ mod tests {
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::error::DimensionsError;
     use crate::image::image_dimensions::ImageDimensions;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     #[test]
     fn checked_names_the_first_rule_broken() {
@@ -153,16 +149,14 @@ mod tests {
                 past,
                 1,
                 DimensionsError::SidePastMax {
-                    width: past,
-                    height: 1,
+                    size: Size2us::new(past, 1),
                 },
             ),
             (
                 1,
                 past,
                 DimensionsError::SidePastMax {
-                    width: 1,
-                    height: past,
+                    size: Size2us::new(1, past),
                 },
             ),
         ] {

@@ -201,11 +201,11 @@ mod tests {
     use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::quality_map::QualityMap;
-    use crate::math::size2us::Size2us;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;
     use crate::stack_product::weight_kind::WeightKind;
+    use common::Size2us;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
         let dimensions = ImageDimensions::new((2, 1), ChannelLayout::try_from(channels).unwrap());
@@ -258,11 +258,10 @@ mod tests {
     #[test]
     fn filling_holds_each_plane_at_its_empty_value() {
         let measured =
-            || QualityMap::PerChannel([0, 1, 2].map(|_| Buffer2::new(2, 1, vec![5.0; 2])));
+            || QualityMap::PerChannel([0, 1, 2].map(|_| Buffer2::new((2, 1), vec![5.0; 2])));
         let mut filled = StackProduct {
             coverage: Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
-                2,
-                1,
+                (2, 1),
                 vec![1.0; 2],
             )))),
             weight: Some(measured()),

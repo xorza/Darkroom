@@ -22,8 +22,7 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FlagBytes, PlaneHdu};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 pub(super) const FLAGS_EXTNAME: &str = "LUMFLAGS";
 pub(super) const FLAGS_FORMAT: &str = "PIXFLAGS";
@@ -93,7 +92,7 @@ pub(crate) fn join(
     stored: Buffer2<u8>,
     decoded: Option<&PixelFlags>,
 ) -> Result<Option<PixelFlags>, FitsLoadError> {
-    let size = Size2us::from(&stored);
+    let size = stored.size();
     let mut bytes = stored;
     let unknown = !QualityFlags::KNOWN.byte();
     let no_data = QualityFlags::NO_DATA.byte();
@@ -122,7 +121,7 @@ pub(crate) fn join(
 /// The bytes of a flags HDU [`locate`] found, as read, as the plane of the `size` image
 /// they are for.
 pub(crate) fn plane(bytes: Vec<u8>, size: Size2us) -> Buffer2<u8> {
-    Buffer2::new(size.width, size.height, bytes)
+    Buffer2::new(size, bytes)
 }
 
 /// The keyword that names the flag at its bit `i`: `LUMFBi`.
@@ -140,8 +139,7 @@ mod tests {
     use crate::internals::fits::fits_refusal;
     use crate::io::fits::error::FitsRefusal;
     use crate::io::fits::flags_extension;
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
+    use common::{Size2us, Vec2us};
 
     /// The stored flags join those the decode found, bit by bit. Stored, row-major over 3×2:
     /// nothing, `NO_DATA`, `SATURATED | DEFECT` (6), nothing, `COSMIC_RAY | REPAIRED` (24),

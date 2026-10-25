@@ -7,7 +7,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A frame as the warp reads it: its planes, its flags and its metadata, borrowed from a
 /// `LinearImage` in memory.

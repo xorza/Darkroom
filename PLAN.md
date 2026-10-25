@@ -180,20 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 3. Geometry and the grid in `common`
-
-- [ ] `Size2us`, `Vec2us` and `URect` (as `Rect2us`) move from
-  `lumos/src/math/` to `common` with their tests, public at its root. Proof:
-  the moved tests pass in `common`.
-- [ ] `Buffer2` holds a `Size2us`: `new`, `new_default`, `new_filled`,
-  `from_fn` and `reshape` take `impl Into<Size2us>`, and `size()` replaces
-  `Size2us::from(&buffer)`. Every caller is rewritten. Proof: the `Buffer2`
-  tests, with sizes that are not square, so a transposed size fails.
-- [ ] Every `width, height` pair in imaginarium becomes a `Size2us`:
-  `ImageDesc`, `Preview`, the drawing canvas, the bench scene (`sky`), the
-  test helpers (`create_test_image`) and each fn that takes the pair. Proof:
-  the tests of each.
-
 ### 4. One CPU detection, one bench policy
 
 - [ ] `SimdTier` moves to `common`, with `dispatch` and `at_or_below` public
@@ -298,4 +284,14 @@ with every other edit.
   `LinearImage::ram_bytes`, as `CfaImage` has, adds the flag plane and a gain
   the image holds alone, and a gain read back from the cache is the image's
   own.
+- Batch 3, constructors: `ImageDesc::new` and `Preview::new` take a
+  `Size2us`, not `impl Into<Size2us>`: both are `const fn`, which cannot call
+  `Into`. `Buffer2`'s constructors take the sugar. `from_fn` keeps its
+  `(x, y)` closure, the order of `Buffer2`'s indexing. The bench scene's
+  `WIDTH` and `HEIGHT` became one `FRAME`, and `LinearImage::size` joined its
+  `width` and `height`, as `CfaImage` has one. The pairs outside imaginarium
+  went too: lens's `Image::from_planes`, three test helpers, and the errors
+  that carried a width and a height (`DimensionsError::SidePastMax` and
+  `SampleCount`, `BundleError::DefectExtentOutOfRange`,
+  `DrawablePreviewError::EdgeTooLong`) now take a `Size2us`.
 

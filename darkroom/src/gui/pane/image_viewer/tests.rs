@@ -1,4 +1,5 @@
 use super::*;
+use common::Size2us;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -152,7 +153,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
     // texture at nothing, so it keeps the source's own size.
     store.publish(
         node,
-        preview_store::internals::image_value(512, 256, ColorFormat::RGB_U8),
+        preview_store::internals::image_value(Size2us::new(512, 256), ColorFormat::RGB_U8),
     );
     store.settle(h.ui());
 

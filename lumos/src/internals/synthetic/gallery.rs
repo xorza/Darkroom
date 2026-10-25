@@ -27,9 +27,8 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene, TrueSource};
 use crate::internals::visual::{self, ToneMap};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::transform::Transform;
+use common::{Size2us, Vec2us};
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
@@ -70,7 +69,7 @@ fn checkerboard(size: Size2us, cell_size: usize, [value_a, value_b]: [f32; 2]) -
             pixels[size.idx_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
         }
     }
-    Buffer2::new(size.width, size.height, pixels)
+    Buffer2::new(size, pixels)
 }
 
 /// `base` repeated at each of `dithers`: each translated by its offset, with an independent noise

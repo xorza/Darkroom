@@ -3,24 +3,26 @@ use std::array;
 use common::Buffer2;
 
 use crate::image_ops::ml::backend::*;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A plane whose every sample names its pixel and channel: `c/4 + (x + y·w)/(4·w·h)`, inside
 /// `[c/4, c/4 + 1/4)` so nothing reaches the clamp, and distinct at f32 resolution — a wrong tile
 /// origin, a wrong row stride or a swapped channel reads a different value.
-fn ramp(width: usize, height: usize, channel: usize) -> Buffer2<f32> {
-    let count = (width * height) as f32;
-    let pixels = (0..width * height)
-        .map(|i| channel as f32 / 4.0 + i as f32 / (4.0 * count))
+fn ramp(size: Size2us, channel: usize) -> Buffer2<f32> {
+    let count = size.pixel_count();
+    let pixels = (0..count)
+        .map(|i| channel as f32 / 4.0 + i as f32 / (4.0 * count as f32))
         .collect();
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size, pixels)
 }
 
 #[test]
 fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
     // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
     let (side, tile) = (640usize, Vec2us::new(128, 96));
-    let planar = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(side, side, c)));
+    let planar = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
+        ramp(Size2us::new(side, side), c)
+    }));
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     fill_tile_input(&planar, tile, &mut input);
 
@@ -45,7 +47,7 @@ fn a_mono_master_replicates_into_all_three_model_channels() {
     // channels at zero — and the clamp is what keeps a sub-background or star-core sample in
     // the [0,1] domain the model was trained on.
     let side = WINDOW;
-    let plane = Buffer2::from_fn(side, side, |x, y| match (x, y) {
+    let plane = Buffer2::from_fn((side, side), |x, y| match (x, y) {
         (0, 0) => -0.25,
         (1, 0) => 1.5,
         _ => 0.5,
@@ -111,10 +113,8 @@ fn feather_ramps_from_either_edge() {
 #[test]
 fn an_identity_model_reproduces_the_input() {
     let size = Size2us::new(700, 600);
-    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
-        ramp(size.width, size.height, c)
-    }));
-    let gray = LinearImage::from(ramp(size.width, size.height, 1));
+    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
+    let gray = LinearImage::from(ramp(size, 1));
     for image in [rgb, gray] {
         let mut output = image.clone();
         output.metadata.header.exposure_time = Some(30.0);
@@ -162,7 +162,7 @@ fn the_stride_must_cover_the_frame() {
         assert_eq!(validate_stride(stride), Ok(()), "{stride}");
     }
     for stride in [0, MAX_STRIDE + 1, WINDOW] {
-        let mut image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
+        let mut image = LinearImage::from(Buffer2::new_filled((WINDOW, WINDOW), 0.5f32));
         let error = run_tiles(Planes::InPlace(&mut image), stride, |_, _| {
             panic!("a stride refused runs no tile")
         })
@@ -234,10 +234,8 @@ fn whole_frame_blend(
 #[test]
 fn a_band_blends_what_the_whole_frame_blended() {
     let size = Size2us::new(600, 1100);
-    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
-        ramp(size.width, size.height, c)
-    }));
-    let gray = LinearImage::from(ramp(size.width, size.height, 1));
+    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
+    let gray = LinearImage::from(ramp(size, 1));
     let model = || {
         let mut count = 0.0f32;
         move |input: &[f32], output: &mut [f32]| {
@@ -260,7 +258,7 @@ fn a_band_blends_what_the_whole_frame_blended() {
             },
         )
         .unwrap();
-        let zeroed = || Buffer2::new_filled(size.width, size.height, 0.0f32);
+        let zeroed = || Buffer2::new_filled(size, 0.0f32);
         let mut apart = if image.is_rgb() {
             LinearImage::from(array::from_fn::<_, 3, _>(|_| zeroed()))
         } else {

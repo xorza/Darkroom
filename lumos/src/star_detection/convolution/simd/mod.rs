@@ -9,9 +9,8 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+use common::{Size2us, Vec2us};
 
 /// The rows a column or 2D convolution reads its taps from: whole rows of an image of `size`, image
 /// row `n` in slot `n` modulo the slots held. A ring of a filter's tap count holds every row a band
@@ -321,13 +320,12 @@ impl WeightedTap<'_> {
 pub(super) mod plane_ring {
     use common::Buffer2;
 
-    use crate::math::size2us::Size2us;
     use crate::star_detection::convolution::simd::RowRing;
 
     impl<'a> RowRing<'a> {
         /// Every row of `image`, each in its own slot.
         pub(crate) fn plane(image: &'a Buffer2<f32>) -> Self {
-            Self::new(image.pixels(), Size2us::from(image))
+            Self::new(image.pixels(), image.size())
         }
     }
 }
@@ -335,10 +333,10 @@ pub(super) mod plane_ring {
 #[cfg(feature = "internals")]
 mod internals {
     #[cfg(test)]
-    use crate::math::vec2us::Vec2us;
-    #[cfg(test)]
     use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_idx};
     use crate::star_detection::convolution::simd::{ConvolveRow, convolve_pixel_scalar};
+    #[cfg(test)]
+    use common::Vec2us;
 
     impl ConvolveRow<'_> {
         /// The scalar row convolution the kernel is tested and benched against.

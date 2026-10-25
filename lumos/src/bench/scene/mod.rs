@@ -20,9 +20,9 @@ use crate::internals::synthetic::camera::{Camera, SensorDefects};
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
 use crate::{CalibrationSet, MasterRole};
+use common::Size2us;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.
 pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
@@ -160,7 +160,7 @@ impl Field {
         let corner = |at: f64| (at as usize / side * side).min(3 * side);
         let (left, top) = (corner(star.x), corner(star.y));
         let plane = frame.image.channel(0);
-        Buffer2::from_fn(side, side, |x, y| plane[(left + x, top + y)])
+        Buffer2::from_fn((side, side), |x, y| plane[(left + x, top + y)])
     }
 
     /// Exposure `idx` of a sequence on the field, calibrated, on a mono sensor of `size`, as the

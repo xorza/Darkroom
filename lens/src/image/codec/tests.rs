@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::io::Cursor;
 
-use common::{Buffer2, SerdeFormat};
+use common::{Buffer2, SerdeFormat, Size2us};
 use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
 use lumos::{
     ChannelLayout, FlatGain, FrameGain, ImageDimensions, ImageMetadata, LinearImage, PixelFlags,
@@ -73,7 +73,7 @@ fn gain() -> FlatGain {
 #[tokio::test]
 async fn every_interleaved_format_round_trips_pixel_exact() {
     for format in ALL_FORMATS {
-        let desc = ImageDesc::new(3, 2, format);
+        let desc = ImageDesc::new(Size2us::new(3, 2), format);
         let pixels: Vec<u8> = (0..desc.size_in_bytes())
             .map(|i| u8::try_from(i * 37 % 251).unwrap())
             .collect();
@@ -92,7 +92,7 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
         assert_eq!(metadata.header.object.as_deref(), Some("M31"), "{format}");
     }
 
-    let desc = ImageDesc::new(2, 1, ColorFormat::RGB_U8);
+    let desc = ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let bytes = encoded(Image::from(
         CpuImage::new_with_data(desc, pixels.clone()).unwrap(),
@@ -147,7 +147,7 @@ async fn a_planar_image_round_trips_whole() {
         [vec![0.5, 1.0]],
     );
     mono.metadata = named("NGC 7000");
-    mono.set_flags(PixelFlags::from_bytes(Buffer2::new(2, 1, vec![0, 5])));
+    mono.set_flags(PixelFlags::from_bytes(Buffer2::new((2, 1), vec![0, 5])));
     mono.set_flat_gain(Some(FrameGain::Own(Box::new(gain()))));
     let mono = Image::from(mono);
     // Two `f32` samples, two flag bytes, and the gain's 2 nodes of one channel, 4 bytes each.

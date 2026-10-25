@@ -134,7 +134,7 @@ fn windowed_covariance_deconvolves_to_the_source() {
             sigma_y,
             angle: 0.0,
         };
-        let pixels = Buffer2::from_fn(size.width, size.height, |x, y| {
+        let pixels = Buffer2::from_fn(size, |x, y| {
             let dx = x as f64 - pos.x;
             let dy = y as f64 - pos.y;
             profile.shape_at(dx, dy) as f32
@@ -230,7 +230,7 @@ fn inverse_variance_weights_downweight_bright_pixels() {
     // The same weights reach the fit through `prepare`'s single pass, which is the only production
     // path to them — a flat stamp 0.5 above the sky (dyadic, so exact) must weigh every pixel as
     // the signal 0.5 above.
-    let pixels = Buffer2::new_filled(32, 32, 0.625f32);
+    let pixels = Buffer2::new_filled((32, 32), 0.625f32);
     let fit = StampFit::prepare::<6>(FitInputs {
         pixels: &pixels,
         pos: DVec2::splat(16.0),

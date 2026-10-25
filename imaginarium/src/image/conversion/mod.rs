@@ -20,8 +20,8 @@ use crate::image::Image;
 pub(crate) fn convert_image(from: &Image, to: &mut Image) {
     let (from_desc, to_desc) = (from.desc(), to.desc());
     assert_eq!(
-        (from_desc.width, from_desc.height),
-        (to_desc.width, to_desc.height),
+        (from_desc.size.width, from_desc.size.height),
+        (to_desc.size.width, to_desc.size.height),
         "source/target dimensions mismatch"
     );
     assert_ne!(
@@ -29,7 +29,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) {
         "a conversion to the same format is a copy"
     );
 
-    let width = from_desc.width;
+    let width = from_desc.size.width;
     let from_stride = from_desc.row_bytes();
     let to_stride = to_desc.row_bytes();
     let from_bytes = from.bytes();

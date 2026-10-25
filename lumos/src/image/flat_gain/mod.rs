@@ -20,8 +20,7 @@ use crate::image::error::InvalidFlatGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::image_dimensions::ImageDimensions;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Pixels between the grid's nodes on each axis.
 ///
@@ -100,7 +99,7 @@ impl TryFrom<FlatGainRecord> for FlatGain {
             record
                 .nodes
                 .into_iter()
-                .map(|plane| Buffer2::new(grid.cols, grid.rows, plane))
+                .map(|plane| Buffer2::new((grid.cols, grid.rows), plane))
                 .collect(),
             record.bins.into_iter().collect(),
         ))
@@ -118,7 +117,7 @@ impl FlatGain {
         cfa_type: &CfaType,
         excluded: impl Fn(usize) -> bool + Sync,
     ) -> Self {
-        let size = Size2us::from(divisor);
+        let size = divisor.size();
         let cols = nodes_along(size.width);
         let rows = nodes_along(size.height);
         let flat = NormalizedFlat {
@@ -128,7 +127,7 @@ impl FlatGain {
         };
         let nodes = (0..cfa_type.color_count())
             .map(|color| {
-                let mut plane = Buffer2::new_default(cols, rows);
+                let mut plane = Buffer2::new_default((cols, rows));
                 par::chunks_mut(plane.pixels_mut(), cols)
                     .enumerate()
                     .for_each(|(j, row)| {
@@ -191,7 +190,7 @@ impl FlatGain {
         let mut nodes: ArrayVec<Buffer2<f32>, 3> = self
             .nodes
             .iter()
-            .map(|_| Buffer2::new_default(grid.cols, grid.rows))
+            .map(|_| Buffer2::new_default((grid.cols, grid.rows)))
             .collect();
         let rows: Vec<ArrayVec<&mut [f32], 3>> = {
             let mut planes: ArrayVec<_, 3> = nodes
@@ -400,7 +399,7 @@ impl<E: Fn(usize) -> bool> NormalizedFlat<'_, E> {
     /// known, for a color the sensor has no photosite of.
     fn node_gain(&self, color: usize, node: Vec2us) -> f32 {
         let divisor = self.divisor;
-        let size = Size2us::from(divisor);
+        let size = divisor.size();
         let mut half = STEP / 2;
         loop {
             let window = |extent: usize, centre: usize| {

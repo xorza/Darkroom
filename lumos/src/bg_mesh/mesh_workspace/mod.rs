@@ -5,7 +5,6 @@ use common::Buffer2;
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::tile_stats::{ColorSites, TileInput, TileScratch, TileStats};
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::ScratchPool;
 
 /// The σ-clip passes of each tile a mesh measures by default, for the sky of a frame and the
@@ -61,7 +60,7 @@ impl MeshWorkspace {
     /// Measure every tile of `input` into the grid, rebuilding the grid when the frame or the tile
     /// size changed.
     fn fill_tile_stats(&mut self, input: &TileInput<'_>, params: MeshParams) {
-        let dimensions = Size2us::from(input.pixels);
+        let dimensions = input.pixels.size();
         let tile_size = params.tile_size;
         if self
             .grid
@@ -82,7 +81,7 @@ impl MeshWorkspace {
                 .as_ref()
                 .is_none_or(|scratch| scratch.width() != tiles_x || scratch.height() != tiles_y)
         {
-            self.median_filter_scratch = Some(Buffer2::new_default(tiles_x, tiles_y));
+            self.median_filter_scratch = Some(Buffer2::new_default((tiles_x, tiles_y)));
         }
         let grid = self.grid.as_mut().unwrap();
         grid.fill_tile_stats(input, &self.tile_scratch);

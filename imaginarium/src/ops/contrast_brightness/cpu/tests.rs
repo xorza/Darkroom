@@ -7,10 +7,11 @@ use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 use crate::simd_tier::SimdTier;
+use common::Size2us;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Image {
-    let desc = ImageDesc::new(width, 1, format);
+    let desc = ImageDesc::new(Size2us::new(width, 1), format);
     assert_eq!(
         bytes.len(),
         desc.row_bytes(),
@@ -158,7 +159,7 @@ fn identity_params_leave_every_format_bit_identical() {
     // contrast 1.0 / brightness 0.0 folds to `value * 1.0 + 0.0`, which is
     // exact for floats too — so this is an equality check, not an epsilon one.
     for format in ALL_FORMATS {
-        let input = create_test_image(format, 17, 5, 0);
+        let input = create_test_image(format, Size2us::new(17, 5), 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(1.0, 0.0).apply_cpu(&mut output);
@@ -173,7 +174,7 @@ fn identity_params_leave_every_format_bit_identical() {
 #[test]
 fn alpha_survives_every_alpha_format() {
     for format in ALL_FORMATS.into_iter().filter(|format| format.has_alpha()) {
-        let input = create_test_image(format, 16, 4, 0);
+        let input = create_test_image(format, Size2us::new(16, 4), 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(2.0, 0.3).apply_cpu(&mut output);
@@ -214,7 +215,7 @@ fn every_knob_direction_changes_every_format() {
 
     for (label, params, width, height) in cases {
         for format in ALL_FORMATS {
-            let input = create_test_image(format, width, height, 0);
+            let input = create_test_image(format, Size2us::new(width, height), 0);
             let mut output = input.clone();
 
             params.apply_cpu(&mut output);
@@ -230,7 +231,7 @@ fn every_knob_direction_changes_every_format() {
 #[test]
 fn extreme_brightness_clamps_to_the_range_ends() {
     for format in ALL_FORMATS {
-        let input = create_test_image(format, 4, 2, 0);
+        let input = create_test_image(format, Size2us::new(4, 2), 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
 
         // Saturating up pins every color channel at the format's maximum, and
@@ -288,7 +289,7 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
             };
 
             for (contrast, brightness) in PARAM_SWEEP {
-                let input = create_test_image(format, 17, 5, 0);
+                let input = create_test_image(format, Size2us::new(17, 5), 0);
                 let op = ContrastBrightness::new(contrast, brightness);
 
                 let mut actual = input.clone();

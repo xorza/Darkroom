@@ -8,8 +8,7 @@ use libraw_sys as sys;
 
 use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Why a camera RAW file did not decode.
 ///

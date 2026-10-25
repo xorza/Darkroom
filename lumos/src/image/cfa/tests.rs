@@ -35,9 +35,8 @@ use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::VERSION_KEYWORD;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::{raw, writer};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
+use common::{Size2us, Vec2us};
 
 #[test]
 fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {
@@ -112,7 +111,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     let bytes = [0u8, 17, 6, 0, 24, 32];
     let cfa = |bytes: [u8; 6]| {
         let mut image = CfaImage::from_plane(
-            Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            Buffer2::new((3, 2), vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
             CfaType::Mono,
             ImageMetadata::default(),
         );
@@ -161,7 +160,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     let size = Size2us::new(12, 6);
     let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
+        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
         &bayer,
         |_| false,
     ));
@@ -169,7 +168,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
     let path = dir.join("light.fits");
     let write = || {
         let mut image = CfaImage::from_plane(
-            Buffer2::new(12, 6, vec![0.25; size.pixel_count()]),
+            Buffer2::new((12, 6), vec![0.25; size.pixel_count()]),
             bayer,
             ImageMetadata::default(),
         );
@@ -336,7 +335,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
 fn a_gain_the_run_holds_is_not_read_again() {
     let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn(12, 6, |x, _| 1.0 - 0.3 * x as f32 / 12.0),
+        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
         &bayer,
         |_| false,
     ));
@@ -344,7 +343,7 @@ fn a_gain_the_run_holds_is_not_read_again() {
     let paths = ["first.fits", "second.fits"].map(|name| {
         let path = dir.join(name);
         let mut image = CfaImage::from_plane(
-            Buffer2::new(12, 6, vec![0.25; 72]),
+            Buffer2::new((12, 6), vec![0.25; 72]),
             bayer,
             ImageMetadata::default(),
         );
@@ -394,7 +393,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
     let write = || {
         let image = {
             let mut image = CfaImage::from_plane(
-                Buffer2::new(3, 2, vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
+                Buffer2::new((3, 2), vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
                 CfaType::Mono,
                 ImageMetadata::default(),
             );
@@ -528,7 +527,7 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
         .derived
         .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 4096.0));
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn(64, 64, |x, _| 1.0 - 0.5 * x as f32 / 64.0),
+        &Buffer2::from_fn((64, 64), |x, _| 1.0 - 0.5 * x as f32 / 64.0),
         &cfa_type,
         |_| false,
     ));
@@ -631,7 +630,7 @@ fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
 #[test]
 fn master_cfa_save_load_round_trips_data_and_pattern() {
     let cfa = CfaImage::from_plane(
-        Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+        Buffer2::new((2, 2), vec![0.1f32, 0.2, 0.3, 0.4]),
         CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
         ImageMetadata {
             header: ObservationHeader {
@@ -716,7 +715,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
         ("xtrans", CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
     ] {
         let image = CfaImage::from_plane(
-            Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+            Buffer2::new((2, 2), vec![0.1f32, 0.2, 0.3, 0.4]),
             cfa_type,
             ImageMetadata::default(),
         );
@@ -733,7 +732,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
 #[test]
 fn data_len() {
     let img = CfaImage::from_plane(
-        Buffer2::new(10, 20, vec![0.0; 200]),
+        Buffer2::new((10, 20), vec![0.0; 200]),
         CfaType::Mono,
         ImageMetadata::default(),
     );

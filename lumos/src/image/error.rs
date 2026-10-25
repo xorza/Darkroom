@@ -1,6 +1,7 @@
 //! The errors of the image types: a record or a pattern that is not one, and a frame of another
 //! shape than its set's.
 
+use common::Size2us;
 use thiserror::Error;
 
 use crate::image::image_dimensions::ImageDimensions;
@@ -42,16 +43,12 @@ pub enum DimensionsError {
     ZeroWidth,
     #[error("height must be positive")]
     ZeroHeight,
-    #[error("{width}x{height} has a side past MAX_SIDE")]
-    SidePastMax { width: usize, height: usize },
+    #[error("{size} has a side past MAX_SIDE")]
+    SidePastMax { size: Size2us },
     #[error("only 1 (grayscale) or 3 (RGB) channels supported, got {count}")]
     Channels { count: usize },
-    #[error("{width}x{height}x{channels} samples overflow usize")]
-    SampleCount {
-        width: usize,
-        height: usize,
-        channels: usize,
-    },
+    #[error("{size}x{channels} samples overflow usize")]
+    SampleCount { size: Size2us, channels: usize },
 }
 
 /// Why a record is no [`FlatGain`](crate::image::flat_gain::FlatGain): what a damaged kept frame

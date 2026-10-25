@@ -25,8 +25,7 @@ use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Raw CFA image - single channel with color filter pattern metadata.
 /// Represents sensor data before demosaicing.
@@ -104,7 +103,7 @@ impl StackableImage for CfaImage {
 impl CfaImage {
     /// The sensor extent the samples cover.
     pub(crate) const fn size(&self) -> Size2us {
-        Size2us::new(self.data.width(), self.data.height())
+        self.data.size()
     }
 
     /// OR `flags` into every pixel whose row-major index satisfies `holds`, creating the flag
@@ -429,9 +428,9 @@ impl CfaImage {
         }
         let mut image = LinearImage::from_interleaved(dimensions, pixels);
         image.metadata = metadata;
-        image.set_flags(proxy_flags.and_then(|bytes| {
-            PixelFlags::from_bytes(Buffer2::new(size.width, size.height, bytes))
-        }));
+        image.set_flags(
+            proxy_flags.and_then(|bytes| PixelFlags::from_bytes(Buffer2::new(size, bytes))),
+        );
         image
     }
 }

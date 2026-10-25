@@ -3,10 +3,10 @@
 use glam::DVec2;
 
 use crate::math::dmat3::DMat3;
-use crate::math::size2us::Size2us;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
+use common::Size2us;
 
 /// The source position of every pixel of one output row, evaluated once and read by every channel,
 /// the quality maps and the validity warp.

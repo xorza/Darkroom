@@ -54,7 +54,7 @@ impl Demosaic {
         gains: [f32; 3],
         cancel: &CancelToken,
     ) -> Result<LinearPixels, Cancelled> {
-        let dimensions = ImageDimensions::new(&data, ChannelLayout::Rgb);
+        let dimensions = ImageDimensions::new(data.size(), ChannelLayout::Rgb);
         let planes = match self {
             Self::None => return Ok(LinearPixels::from(data)),
             Self::Rcd(pattern) => {

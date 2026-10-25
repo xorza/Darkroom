@@ -7,7 +7,7 @@ const GAUSSIAN_2: StarProfile = StarProfile::gaussian(2.0);
 
 #[test]
 fn gaussian_peaks_at_its_centre_and_vanishes_at_the_corner() {
-    let mut pixels = Buffer2::new_filled(64, 64, 0.0f32);
+    let mut pixels = Buffer2::new_filled((64, 64), 0.0f32);
     SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2).add_to(&mut pixels);
 
     assert!(pixels[(32, 32)] > 0.9, "peak should be near 1.0");
@@ -31,7 +31,7 @@ fn truncated_and_exact_agree_inside_the_radius_and_differ_outside() {
     let size = Size2us::new(64, 64);
     let star = SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2);
 
-    let mut truncated = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut truncated = Buffer2::new_filled(size, 0.0f32);
     star.add_to(&mut truncated);
     let exact = star.stamp(size, 0.0);
 

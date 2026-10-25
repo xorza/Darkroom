@@ -44,7 +44,6 @@ use crate::internals::test_rng::TestRng;
 use crate::io::fits::cfa;
 use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
-use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
@@ -54,6 +53,7 @@ use crate::registration::warp_transform::WarpTransform;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
+use common::Size2us;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
 fn pinned_host() -> bool {

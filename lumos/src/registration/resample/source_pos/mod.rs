@@ -3,7 +3,7 @@
 use glam::DVec2;
 
 use crate::math::floor_i32::FloorI32;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A source position as its integer cell and the fraction within that cell.
 ///
