@@ -336,8 +336,9 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         ImageDimensions::new((2, 2), ChannelLayout::Rgb)
     );
     // The decode reads the two rows of the three planes at once: 12 samples of 4 bytes, swapped
-    // into 48 B of words, beside the frame, and the reader's section shape, 8 B for each of the
-    // three axes.
+    // into 48 B of words, beside the frame, the reader's section shape, 8 B for each of the
+    // three axes, and the staging the checksum finish reads a stream's unit through, its
+    // one padded block.
     let peek = linear_peek(&rgb_path, &rgb_load_ctx()).unwrap().info;
     assert_eq!(
         peek.dimensions,
@@ -348,7 +349,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         peek.decoder,
         DecoderBytes {
             source: 0,
-            beside: 48 + 24
+            beside: 48 + 24 + BLOCK_SIZE
         }
     );
 
