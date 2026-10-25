@@ -1,7 +1,9 @@
 # Parallel work, the API surface and the compressed read (2026-10-24)
 
-Facts gathered for `.notes/proposal-parallel-work.md`. Workspace at `584c868d3`,
-rayon 1.12.0, rayon-core 1.13.0, cargo-drive at xorza/drive `58666cd`.
+Facts gathered for the parallel-work proposal, which landed: its decisions are
+in the doc comments of `common::par` and of the code they govern. Workspace at
+`584c868d3`, rayon 1.12.0, rayon-core 1.13.0, cargo-drive at xorza/drive
+`58666cd`.
 
 ## Rayon nests jobs on one stack
 
