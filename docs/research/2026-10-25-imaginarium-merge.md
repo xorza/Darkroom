@@ -1,8 +1,10 @@
 # imaginarium in the workspace (2026-10-25)
 
-Facts gathered for `PLAN.md`. Workspace at `4b4373674`, imaginarium at
-`93cae6e` (its `origin/main`, 130 commits), cargo-drive 0.2.1. Host: macOS on
-arm64, with the `x86_64-apple-darwin` target installed.
+Facts gathered for the plan that set the crate seams; its decisions are in
+`AGENTS.md`, `imaginarium/AGENTS.md` and `lumos/AGENTS.md`. Workspace at
+`4b4373674`, imaginarium at `93cae6e` (its `origin/main`, 130 commits),
+cargo-drive 0.2.1. Host: macOS on arm64, with the `x86_64-apple-darwin` target
+installed.
 
 ## The crate
 

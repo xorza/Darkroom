@@ -10,8 +10,8 @@
 use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::sample_domain::{Pedestal, ScaleOrigin};
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::sample_domain::{Pedestal, ScaleOrigin};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 
 /// Whether the `BSCALE` the samples carry was declared or assumed. Its presence marks a

@@ -3,7 +3,7 @@ use crate::calibration::master_subtraction::*;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::dark_comparison::DarkComparison;
+use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::internals::cfa::constant_cfa;
 use common::Size2us;
 

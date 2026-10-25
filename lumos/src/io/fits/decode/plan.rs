@@ -12,7 +12,7 @@ use fits_well::{FitsError, ImageReader};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::frame_desc::MAX_SIDE;
-use crate::image::sample_domain::ScaleOrigin;
+use crate::image::metadata::sample_domain::ScaleOrigin;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale};
@@ -72,27 +72,27 @@ impl<'a> FitsHduDescription<'a> {
         tiles: Option<&[usize]>,
         reader: impl FnOnce(&[ArrayVec<Range<usize>, 3>]) -> Result<u64, FitsError>,
     ) -> Result<FitsDecodePlan, FitsLoadError> {
-        let dimensions = dimensions_from_shape(self.image.shape, cube)?;
+        let desc = desc_from_shape(self.image.shape, cube)?;
         let stored_bitpix = self.image.bitpix;
         let scaling = self.image.scaling;
         let sample_type = SampleType::from_scaling(stored_bitpix, scaling);
         let data_max = self.data_max(float_scale)?;
         let sample_scale = self.sample_scale(float_scale, data_max)?;
         let decoded_bytes = checked_bytes(
-            dimensions.sample_count(),
+            desc.sample_count(),
             size_of::<f32>(),
             FitsAllocation::DecodedOutput,
         )?;
-        let row_samples = dimensions
+        let row_samples = desc
             .width()
-            .checked_mul(dimensions.channel_count())
+            .checked_mul(desc.channel_count())
             .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
         let row_f32_bytes = row_samples
             .checked_mul(size_of::<f32>())
             .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
         let rows_per_chunk = chunk_rows(
             CHUNK_BYTES / row_f32_bytes.max(1),
-            dimensions.height(),
+            desc.height(),
             tiles.map(|tiles| tiles[1]),
         );
         let chunk_samples = row_samples
@@ -109,7 +109,7 @@ impl<'a> FitsHduDescription<'a> {
         // A byte per pixel, which the decode builds beside the planes once it meets a null or a
         // saturation level to flag against.
         let flag_plane_bytes = if may_carry_nulls(sample_type, &scaling) || data_max.is_some() {
-            checked_bytes(dimensions.pixel_count(), 1, FitsAllocation::FlagPlane)?
+            checked_bytes(desc.pixel_count(), 1, FitsAllocation::FlagPlane)?
         } else {
             0
         };
@@ -122,7 +122,7 @@ impl<'a> FitsHduDescription<'a> {
 
         Ok(FitsDecodePlan {
             shape: self.image.shape.to_vec(),
-            dimensions,
+            desc,
             sample_type,
             scaling,
             sample_scale,
@@ -253,7 +253,7 @@ impl<'a> FitsHduDescription<'a> {
 #[derive(Debug)]
 pub(super) struct FitsDecodePlan {
     pub(super) shape: Vec<usize>,
-    pub(super) dimensions: PlanarDesc,
+    pub(super) desc: PlanarDesc,
     pub(super) sample_type: SampleType,
     pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See
@@ -365,7 +365,7 @@ fn checked_bytes(
         .ok_or_else(|| overflow(allocation))
 }
 
-pub(super) fn dimensions_from_shape(
+pub(super) fn desc_from_shape(
     shape: &[usize],
     cube: FitsCubeInterpretation,
 ) -> Result<PlanarDesc, FitsLoadError> {

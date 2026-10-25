@@ -24,8 +24,8 @@ pub(super) struct FrameRegistrar<'a> {
     run: &'a AlignStackRun<'a>,
     parking: &'a FrameParking,
     count: usize,
-    /// The dimensions of every light, and so of the sets they warp into.
-    dimensions: PlanarDesc,
+    /// The descriptor of every light, and so of the sets they warp into.
+    desc: PlanarDesc,
     /// What each warp works in beside its result.
     scratch: WarpScratch,
 }
@@ -35,7 +35,7 @@ pub(super) struct FrameRegistrar<'a> {
 #[derive(Debug)]
 pub(super) struct LightSet {
     pub(super) count: usize,
-    pub(super) dimensions: PlanarDesc,
+    pub(super) desc: PlanarDesc,
     pub(super) reference: usize,
     pub(super) reference_stars: Vec<Star>,
 }
@@ -72,7 +72,7 @@ impl<'a> FrameRegistrar<'a> {
     ) -> Self {
         let LightSet {
             count,
-            dimensions,
+            desc,
             reference,
             reference_stars,
         } = lights;
@@ -88,7 +88,7 @@ impl<'a> FrameRegistrar<'a> {
             run,
             parking,
             count,
-            dimensions,
+            desc,
             scratch: WarpScratch::default(),
         }
     }
@@ -141,9 +141,7 @@ impl<'a> FrameRegistrar<'a> {
         let inliers = registration.inlier_count();
         let rms_error = registration.rms_error();
         let warp = registration.into_warp();
-        let mut result = warped
-            .take()
-            .unwrap_or_else(|| WarpResult::new(self.dimensions));
+        let mut result = warped.take().unwrap_or_else(|| WarpResult::new(self.desc));
         let image = image.into_resident();
         let job = Warp {
             transform: &warp,

@@ -6,15 +6,15 @@ use std::fmt::Display;
 use fits_well::header::{Header, Keyword, RecordName, keywords};
 use fits_well::image::SampleType;
 
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::RowOrder;
-use crate::image::observation_header::ObservationHeader;
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::RowOrder;
+use crate::image::metadata::observation_header::ObservationHeader;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
 

@@ -37,7 +37,7 @@ pub(crate) struct BgMesh {
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
-    dimensions: Size2us,
+    size: Size2us,
     /// Which tiles measured their own statistics; the others were filled from them.
     measured: Vec<bool>,
 }
@@ -50,16 +50,16 @@ impl BgMesh {
     /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
     ///
     /// Constructed and populated only by [`MeshWorkspace`](mesh_workspace::MeshWorkspace).
-    fn new_uninit(dimensions: Size2us, tile_size: usize) -> Self {
+    fn new_uninit(size: Size2us, tile_size: usize) -> Self {
         debug_assert!(
-            dimensions.width > 0 && dimensions.height > 0 && tile_size > 0,
+            size.width > 0 && size.height > 0 && tile_size > 0,
             "BackgroundMesh needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
-            dimensions.width,
-            dimensions.height
+            size.width,
+            size.height
         );
-        let tile_size = clamped_tile_size(dimensions, tile_size);
-        let cols = MeshAxis::new(dimensions.width, tile_size);
-        let rows = MeshAxis::new(dimensions.height, tile_size);
+        let tile_size = clamped_tile_size(size, tile_size);
+        let cols = MeshAxis::new(size.width, tile_size);
+        let rows = MeshAxis::new(size.height, tile_size);
         let (tiles_x, tiles_y) = (cols.count(), rows.count());
         let n = tiles_x * tiles_y;
 
@@ -70,13 +70,13 @@ impl BgMesh {
             centers_x,
             centers_y,
             tile_size,
-            dimensions,
+            size,
             measured: vec![false; n],
         }
     }
 
-    fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
-        self.dimensions == dimensions && self.tile_size == clamped_tile_size(dimensions, tile_size)
+    fn matches_layout(&self, size: Size2us, tile_size: usize) -> bool {
+        self.size == size && self.tile_size == clamped_tile_size(size, tile_size)
     }
 
     /// The least and the greatest tile σ.
@@ -98,8 +98,8 @@ impl BgMesh {
     /// leave a sky anywhere, and every tile is measured without it.
     fn fill_tile_stats(&mut self, input: &TileInput<'_>, tile_scratch: &ScratchPool<TileScratch>) {
         let tiles_x = self.stats.width();
-        let cols = MeshAxis::new(self.dimensions.width, self.tile_size);
-        let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
+        let cols = MeshAxis::new(self.size.width, self.tile_size);
+        let rows = MeshAxis::new(self.size.height, self.tile_size);
         let tile_at = |idx: usize| {
             let (tx, ty) = (idx % tiles_x, idx / tiles_x);
             Rect2us::new(
@@ -263,13 +263,13 @@ impl Reflection {
     }
 }
 
-/// The tile size a grid over `dimensions` uses: `tile_size`, cut to the image's shorter side so
+/// The tile size a grid over `size` uses: `tile_size`, cut to the image's shorter side so
 /// a tile never exceeds the frame.
-const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
-    let side = if dimensions.width < dimensions.height {
-        dimensions.width
+const fn clamped_tile_size(size: Size2us, tile_size: usize) -> usize {
+    let side = if size.width < size.height {
+        size.width
     } else {
-        dimensions.height
+        size.height
     };
     if tile_size < side { tile_size } else { side }
 }

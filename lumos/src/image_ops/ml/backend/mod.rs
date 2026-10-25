@@ -141,12 +141,12 @@ fn run_tiles(
     mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,
 ) -> Result<(), MlError> {
     validate_stride(stride)?;
-    let dimensions = planes.input().desc();
-    let size = dimensions.size();
+    let desc = planes.input().desc();
+    let size = desc.size();
     if size.width < WINDOW || size.height < WINDOW {
         return Err(MlError::TooSmall(size));
     }
-    let mut blend = FeatherBlend::new(dimensions);
+    let mut blend = FeatherBlend::new(desc);
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     let mut output = vec![0.0f32; WINDOW * WINDOW * 3];
     let xs = tile_starts(size.width, stride);
@@ -255,7 +255,7 @@ const fn feather(i: usize) -> f32 {
 /// shares a band row, and a row is normalized into the frame's planes and cleared once final.
 #[derive(Debug)]
 struct FeatherBlend {
-    dimensions: PlanarDesc,
+    desc: PlanarDesc,
     channels: [Vec<f32>; 3],
     weight: Vec<f32>,
     /// The frame rows written so far: every row above this one.
@@ -263,11 +263,11 @@ struct FeatherBlend {
 }
 
 impl FeatherBlend {
-    /// Nothing yet over a frame of `dimensions`, whose channel count the image it makes takes.
-    fn new(dimensions: PlanarDesc) -> Self {
-        let band = WINDOW * dimensions.width();
+    /// Nothing yet over a frame of `desc`, whose channel count the image it makes takes.
+    fn new(desc: PlanarDesc) -> Self {
+        let band = WINDOW * desc.width();
         Self {
-            dimensions,
+            desc,
             channels: [vec![0.0f32; band], vec![0.0; band], vec![0.0; band]],
             weight: vec![0.0f32; band],
             written: 0,
@@ -276,7 +276,7 @@ impl FeatherBlend {
 
     /// Add `out`, the model's NHWC output for the tile at `tile`.
     fn add(&mut self, out: &[f32], tile: Vec2us) {
-        let width = self.dimensions.width();
+        let width = self.desc.width();
         for hh in 0..WINDOW {
             let fy = feather(hh);
             let row = (tile.y + hh) % WINDOW * width + tile.x;
@@ -297,17 +297,17 @@ impl FeatherBlend {
     /// of the model's three channels.
     fn write_rows(&mut self, image: &mut LinearImage, end: usize) {
         let Self {
-            dimensions,
+            desc,
             channels,
             weight,
             written,
         } = self;
-        debug_assert_eq!(image.desc(), *dimensions);
-        let width = dimensions.width();
+        debug_assert_eq!(image.desc(), *desc);
+        let width = desc.width();
         for y in *written..end {
             let band = y % WINDOW * width..(y % WINDOW + 1) * width;
             let weight = &mut weight[band.clone()];
-            if dimensions.is_rgb() {
+            if desc.is_rgb() {
                 for (c, channel) in channels.iter_mut().enumerate() {
                     let sums = &mut channel[band.clone()];
                     let row = image.channel_mut(c).row_mut(y);

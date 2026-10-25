@@ -22,10 +22,10 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     use common::Buffer2;
     use glam::Vec2;
 
-    use crate::image::image_provenance::{
+    use crate::image::linear_image::LinearImage;
+    use crate::image::metadata::image_provenance::{
         ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
     };
-    use crate::image::linear_image::LinearImage;
 
     use crate::internals::images::rgb_image;
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};

@@ -2,8 +2,8 @@ use fits_well::io::{ChecksumReport, ChecksumStatus};
 use serde::Serialize;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
-use crate::image::sample_domain::Pedestal;
+use crate::image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::image::metadata::sample_domain::Pedestal;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 
 /// Selects the image HDU decoded from a FITS container.

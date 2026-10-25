@@ -3,10 +3,10 @@ use std::io;
 
 use common::Size2us;
 
+use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::ColorFormat;
 use crate::error::{CodecError, DescError, TiffSampleType};
-use crate::image::image_desc::InterleavedDesc;
-use crate::image::raster_format::RasterFormat;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 
 /// A wrapped foreign error is the source and its own message; a case of imaginarium's own has no
 /// source.

@@ -13,17 +13,17 @@ use imaginarium::{
     ChannelCount, ColorFormat, InterleavedImage, PlanarImage, RasterFormat, SampleType,
 };
 
-use crate::image::derived_facts::DerivedFacts;
 use crate::image::frame_desc::MAX_SIDE;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{
+use crate::image::linear_image::LinearImage;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer, RowOrder,
     SourceProvenance,
 };
-use crate::image::linear_image::LinearImage;
-use crate::image::observation_header::ObservationHeader;
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::image::preview_image::PreviewImage;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullSamples;

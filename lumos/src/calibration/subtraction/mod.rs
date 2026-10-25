@@ -11,8 +11,8 @@ use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtractor::Subtractor;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::sample_domain::{DomainMap, SampleDomain};
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::metadata::sample_domain::{DomainMap, SampleDomain};
 
 /// The additive masters taken from one frame, in order, resolved against it: each one's map into
 /// the frame's domain as it stands when that master applies — a bias moves the pedestal the next

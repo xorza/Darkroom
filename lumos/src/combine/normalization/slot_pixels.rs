@@ -30,7 +30,7 @@ impl<'a> SlotPixels<'a> {
         planes: SlotPlanes<'_>,
         domain: Option<&'a CommonDomain>,
     ) -> Result<ArrayVec<Self, 3>, StackError> {
-        let size = planes.dimensions.size();
+        let size = planes.desc.size();
         let mosaic = planes.slots.mosaic();
         (0..planes.slots.count())
             .map(|slot| match (domain, mosaic) {

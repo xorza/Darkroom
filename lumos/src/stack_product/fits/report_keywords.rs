@@ -3,7 +3,7 @@
 
 use fits_well::header::{Header, Keyword};
 
-use crate::image::flag_counts::FlagCounts;
+use crate::image::flags::flag_counts::FlagCounts;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::metadata::dark_comparison_keywords::DarkComparisonKeywords;
 use crate::stack_product::run_report::RunReport;

@@ -68,8 +68,8 @@ use crate::calibration::error::CalibrationError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::masked_plane::MaskedPlane;
-use crate::image::quality_flags::QualityFlags;
 use crate::math::statistics::median_mad::MedianMad;
 use common::Size2us;
 
@@ -89,7 +89,7 @@ pub(crate) struct DefectMap {
     mask: BitBuffer2,
     /// Pixels set in `mask` — a pixel both hot and dead counts once.
     count: usize,
-    dimensions: Size2us,
+    size: Size2us,
 }
 
 /// The hot pixels of a dark: each one's flat index, and how far it stands above the dark around it.
@@ -103,26 +103,22 @@ pub(crate) struct HotPixels {
 }
 
 impl DefectMap {
-    /// An empty map for a sensor of `dimensions`, ready for [`Self::detect_hot`] and
+    /// An empty map for a sensor of `size`, ready for [`Self::detect_hot`] and
     /// [`Self::detect_cold`].
-    pub(crate) fn new(dimensions: Size2us) -> Self {
+    pub(crate) fn new(size: Size2us) -> Self {
         Self {
             hot: HotPixels::default(),
             cold_idxs: Vec::new(),
-            mask: BitBuffer2::new_default(dimensions),
+            mask: BitBuffer2::new_default(size),
             count: 0,
-            dimensions,
+            size,
         }
     }
 
-    /// A map with these defect lists, or `None` when an index lies outside `dimensions`.
-    pub(crate) fn from_lists(
-        dimensions: Size2us,
-        hot: HotPixels,
-        cold_idxs: Vec<usize>,
-    ) -> Option<Self> {
+    /// A map with these defect lists, or `None` when an index lies outside `size`.
+    pub(crate) fn from_lists(size: Size2us, hot: HotPixels, cold_idxs: Vec<usize>) -> Option<Self> {
         debug_assert_eq!(hot.idxs.len(), hot.excess.len());
-        let pixel_count = dimensions.pixel_count();
+        let pixel_count = size.pixel_count();
         if hot
             .idxs
             .iter()
@@ -131,7 +127,7 @@ impl DefectMap {
         {
             return None;
         }
-        let mut map = Self::new(dimensions);
+        let mut map = Self::new(size);
         map.hot = hot;
         map.cold_idxs = cold_idxs;
         map.rebuild_mask();
@@ -139,8 +135,8 @@ impl DefectMap {
     }
 
     /// The sensor extent the indices apply to.
-    pub(crate) const fn dimensions(&self) -> Size2us {
-        self.dimensions
+    pub(crate) const fn size(&self) -> Size2us {
+        self.size
     }
 
     /// The hot pixels — above `median + kσ` in the background-subtracted dark — with their excess.
@@ -164,7 +160,7 @@ impl DefectMap {
     /// How many pixels the map names, in all and per color of `cfa`, the filter of the masters it
     /// was detected on.
     pub(crate) fn summary(&self, cfa: &CfaType) -> DefectSummary {
-        let photosites = cfa.photosites_per_color(self.dimensions);
+        let photosites = cfa.photosites_per_color(self.size);
         let of = |photosites| ColorDefects {
             photosites,
             ..ColorDefects::default()
@@ -174,7 +170,7 @@ impl DefectMap {
             &[red, green, blue] => ColorShares::Mosaic([of(red), of(green), of(blue)]),
             other => unreachable!("a sensor has one color or three, not {}", other.len()),
         };
-        let color_of = |idx: usize| cfa.slot_at(self.dimensions.point_of(idx));
+        let color_of = |idx: usize| cfa.slot_at(self.size.point_of(idx));
         for &idx in &self.hot.idxs {
             colors.slot_mut(color_of(idx)).hot += 1;
         }
@@ -187,7 +183,7 @@ impl DefectMap {
             hot_pixels: self.hot.idxs.len(),
             cold_pixels: self.cold_idxs.len(),
             defective_pixels: self.count,
-            pixels: self.dimensions.pixel_count(),
+            pixels: self.size.pixel_count(),
             colors,
         }
     }
@@ -208,7 +204,7 @@ impl DefectMap {
         sigma_threshold: SigmaThreshold,
         cancel: &CancelToken,
     ) -> Result<Self, CalibrationError> {
-        self.assert_dimensions(dark);
+        self.assert_size(dark);
         self.hot = detect_hot_pixels(dark, sigma_threshold.get(), cancel)?;
         self.rebuild_mask();
         Ok(self)
@@ -229,24 +225,24 @@ impl DefectMap {
         flat: &CfaImage,
         cancel: &CancelToken,
     ) -> Result<Self, CalibrationError> {
-        self.assert_dimensions(flat);
+        self.assert_size(flat);
         self.cold_idxs = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel)?;
         self.rebuild_mask();
         Ok(self)
     }
 
     /// Every master feeding one map corrects the same sensor.
-    fn assert_dimensions(&self, master: &CfaImage) {
+    fn assert_size(&self, master: &CfaImage) {
         let size = master.size();
         debug_assert!(
-            size == self.dimensions,
+            size == self.size,
             "a {size:?} master cannot feed a defect map for {:?}",
-            self.dimensions
+            self.size
         );
     }
 
     fn rebuild_mask(&mut self) {
-        self.mask = BitBuffer2::new_default(self.dimensions);
+        self.mask = BitBuffer2::new_default(self.size);
         for &idx in self.hot.idxs.iter().chain(&self.cold_idxs) {
             self.mask.set(idx, true);
         }
@@ -261,7 +257,7 @@ impl DefectMap {
     /// The image is the map's sensor size, and `unmeasured` its [`CfaImage::unmeasured_mask`],
     /// which the defects join: the mask then covers every pixel no later repair may read either.
     pub(crate) fn correct(&self, image: &mut CfaImage, unmeasured: Option<&mut BitBuffer2>) {
-        self.assert_dimensions(image);
+        self.assert_size(image);
         if self.count == 0 {
             return;
         }
@@ -284,8 +280,7 @@ impl DefectMap {
                 pixels: image.data(),
                 mask: Some(mask),
             };
-            image.data_mut()[idx] =
-                lattice.median(plane, self.dimensions.point_of(idx), &mut scratch);
+            image.data_mut()[idx] = lattice.median(plane, self.size.point_of(idx), &mut scratch);
         }
         for idxs in [&self.hot.idxs, &self.cold_idxs] {
             image.add_flags_at(QualityFlags::DEFECT.union(QualityFlags::REPAIRED), idxs);

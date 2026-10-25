@@ -21,7 +21,7 @@ use glam::{Affine2, Vec2};
 use rayon::prelude::*;
 
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::affine_warp::AffineWarp;
 use crate::ops::affine_warp::cpu::packed_source::PackedSource;
 

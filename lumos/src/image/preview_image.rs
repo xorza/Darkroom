@@ -2,8 +2,8 @@
 
 use imaginarium::InterleavedImage;
 
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
+use crate::image::metadata::image_metadata::ImageMetadata;
 
 /// A decoded display or inspection product that cannot enter the scientific pipeline directly, in
 /// the layout its decoder produced, so a consumer that wants planes does not get them interleaved

@@ -18,9 +18,9 @@
 
 use common::Buffer2;
 
-use crate::image::flag_counts::FlagCounts;
-use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;

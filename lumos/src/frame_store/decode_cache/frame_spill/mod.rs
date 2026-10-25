@@ -25,11 +25,11 @@ use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::image::flag_counts::FlagCounts;
+use crate::image::flags::flag_counts::FlagCounts;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::frame_desc;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::io::decoder::fnv1a;
 use common::Size2us;
 
@@ -136,9 +136,9 @@ impl<'a> FrameSpill<'a> {
             &Commit {
                 key: self.key,
                 source: self.source.as_os_str().as_encoded_bytes().to_vec(),
-                width: decoded.dimensions.width(),
-                height: decoded.dimensions.height(),
-                channels: decoded.dimensions.channel_count(),
+                width: decoded.desc.width(),
+                height: decoded.desc.height(),
+                channels: decoded.desc.channel_count(),
                 flags: decoded.flags,
                 gain: decoded.gain,
                 digests,
@@ -166,15 +166,14 @@ impl<'a> FrameSpill<'a> {
             return None;
         }
         let layout = ChannelLayout::try_from(commit.channels).ok()?;
-        let dimensions =
-            frame_desc::checked(Size2us::new(commit.width, commit.height), layout).ok()?;
+        let desc = frame_desc::checked(Size2us::new(commit.width, commit.height), layout).ok()?;
         Some(Committed {
             admitted: Admitted {
                 stats: commit.stats.into_owned(),
                 facts: commit.facts.into_owned(),
             },
             decoded: Decoded {
-                dimensions,
+                desc,
                 flags: commit.flags,
                 gain: commit.gain,
                 metadata: commit.metadata.into_owned(),
@@ -220,7 +219,7 @@ struct Commit<'a> {
 /// divided, and its metadata with no flat gain.
 #[derive(Debug, Clone)]
 pub(crate) struct Decoded {
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) flags: Option<FlagCounts>,
     pub(crate) gain: Option<KeptGain>,
     pub(crate) metadata: ImageMetadata,

@@ -4,8 +4,8 @@ mod real_data;
 use common::Buffer2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_map::QualityMap;
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::internals::assertions::assert_close;
 use crate::internals::images::{mono_image, rgb_image};

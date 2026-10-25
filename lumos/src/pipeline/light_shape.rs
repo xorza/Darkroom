@@ -25,7 +25,7 @@ use crate::star_detection::resources::DetectionResources;
 #[derive(Debug)]
 pub(super) struct LightShape {
     pub(super) count: usize,
-    pub(super) dimensions: PlanarDesc,
+    pub(super) desc: PlanarDesc,
     pub(super) prepared: Footprint,
     pub(super) held: usize,
     pub(super) peeked: usize,
@@ -56,7 +56,7 @@ impl LightShape {
     pub(super) fn decoded(peek: FramePeek, count: usize, workers: usize) -> Self {
         Self {
             count,
-            dimensions: peek.dimensions,
+            desc: peek.desc,
             prepared: peek.footprint(workers),
             held: 0,
             peeked: 0,
@@ -68,7 +68,7 @@ impl LightShape {
     /// The bytes a warped light keeps: its channels, its two quality planes, its flags and its
     /// gain grid.
     const fn warped(&self) -> usize {
-        StoredLayout::warped(self.dimensions).heap_bytes(self.dimensions)
+        StoredLayout::warped(self.desc).heap_bytes(self.desc)
     }
 
     /// The most the lights write to a spill: each as it is warped, which is no smaller than as it
@@ -101,13 +101,13 @@ impl LightShape {
     /// What each worker's detector holds throughout, its filters' bands on `workers`: its pool of
     /// image-sized planes.
     fn detector_bytes(&self, workers: usize) -> usize {
-        DetectionResources::heap_bytes(self.dimensions.size(), workers)
+        DetectionResources::heap_bytes(self.desc.size(), workers)
     }
 
     /// What each light's warp on `workers` holds beside its source and its result: a flagged
     /// light's planes.
     const fn warp_bytes(&self, workers: usize) -> usize {
-        WarpScratch::heap_bytes(self.dimensions.size(), workers)
+        WarpScratch::heap_bytes(self.desc.size(), workers)
     }
 
     /// The stages of the lights with the reference found, under `config` on `workers`: each light
@@ -159,7 +159,7 @@ impl LightShape {
     /// The normalization and the combine of the warped lights, each kept at `kept`, beside the
     /// source gains: every warped light covers only the pixels its warp reached.
     fn combined(&self, kept: usize, config: &AlignStackConfig, workers: usize) -> [Stage; 2] {
-        let dimensions = self.dimensions;
+        let desc = self.desc;
         let stages = PlannedCombine {
             normalization: config.stack.normalization,
             quality: config.stack.quality,
@@ -167,9 +167,9 @@ impl LightShape {
         .stages(
             PlannedFrames {
                 count: self.count,
-                dimensions,
-                layout: StoredLayout::warped(dimensions),
-                slots: Slots::new(None, dimensions.channel_count()),
+                desc,
+                layout: StoredLayout::warped(desc),
+                slots: Slots::new(None, desc.channel_count()),
                 coverage: SetCoverage::Common,
                 workers,
             },
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
         let peek = FramePeek {
-            dimensions: PlanarDesc::new((4, 4), ChannelLayout::Mono),
+            desc: PlanarDesc::new((4, 4), ChannelLayout::Mono),
             decoder: DecoderBytes::default(),
             mosaic: None,
         };

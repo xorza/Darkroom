@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 
 /// Channel value with no alpha role, as `NO_ALPHA` in `packed.wgsl`.
 const NO_ALPHA: u32 = u32::MAX;

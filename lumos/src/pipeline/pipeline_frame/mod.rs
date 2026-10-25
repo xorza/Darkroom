@@ -3,8 +3,8 @@
 use imaginarium::PlanarDesc;
 
 use crate::frame_store::stored_image::StoredImage;
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
+use crate::image::metadata::image_metadata::ImageMetadata;
 
 /// A calibrated frame waiting to be registered, held wherever the memory tier put it.
 ///
@@ -39,7 +39,7 @@ impl PipelineFrame {
     pub(super) fn desc(&self) -> PlanarDesc {
         match self {
             Self::Resident(image) => image.desc(),
-            Self::Spilled(stored) => stored.dimensions,
+            Self::Spilled(stored) => stored.desc,
         }
     }
 }

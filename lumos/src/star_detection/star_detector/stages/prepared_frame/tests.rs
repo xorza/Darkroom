@@ -1,7 +1,7 @@
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::image_provenance::{
+use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
 use crate::internals::images::mono_image;
@@ -178,11 +178,11 @@ fn detection_weights_ignore_signal() {
 fn prepare_rgb_equal_noise_is_mean() {
     // Distinct per-channel levels; a 4 × 4 frame is too small for the noise estimate, which reads
     // 0 in every channel, so the weights are equal and the detection plane is the plain mean.
-    let dims = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
+    let desc = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
     let r = channel_with_mad(0.30, 0.02);
     let g = channel_with_mad(0.50, 0.02);
     let b = channel_with_mad(0.70, 0.02);
-    let image = LinearImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
+    let image = LinearImage::from_planar_channels(desc, vec![r.clone(), g.clone(), b.clone()]);
 
     let pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &pool);
@@ -200,12 +200,12 @@ fn prepare_rgb_equal_noise_is_mean() {
 fn prepare_rgb_red_star_survives() {
     // A star bright only in R must remain prominent in the detection plane. With equal weights the
     // star peak lands at 1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
-    let dims = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
+    let desc = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
     let mut r = channel_with_mad(0.10, 0.01);
     r[5] = 0.90; // bright red star, off the symmetric background
     let g = channel_with_mad(0.10, 0.01);
     let b = channel_with_mad(0.10, 0.01);
-    let image = LinearImage::from_planar_channels(dims, vec![r, g, b]);
+    let image = LinearImage::from_planar_channels(desc, vec![r, g, b]);
 
     let pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &pool);
@@ -226,7 +226,7 @@ fn prepare_rgb_red_star_survives() {
 /// that a flat lifted to 0.99 is not saturated, and a flagged one at 0.5 is.
 #[test]
 fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
-    use crate::image::pixel_flags::PixelFlags;
+    use crate::image::flags::pixel_flags::PixelFlags;
 
     use crate::internals::images::rgb_image;
 
@@ -320,7 +320,7 @@ fn the_detection_threshold_passes_the_sky_it_states() {
 /// collapsed threshold passes.
 #[test]
 fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
-    use crate::image::pixel_flags::PixelFlags;
+    use crate::image::flags::pixel_flags::PixelFlags;
     use crate::star_detection::star_detector::stages::detect::Candidates;
 
     let size = Size2us::new(128, 128);

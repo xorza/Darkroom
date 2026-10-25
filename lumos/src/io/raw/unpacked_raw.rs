@@ -11,15 +11,15 @@ use rayon::prelude::*;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{
+use crate::image::flags::quality_flags::SATURATION_FRACTION;
+use crate::image::linear_image::LinearImage;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
-use crate::image::linear_image::LinearImage;
-use crate::image::observation_header::ObservationHeader;
-use crate::image::quality_flags::SATURATION_FRACTION;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::black_level::{
     BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
@@ -232,7 +232,7 @@ impl UnpackedRaw {
     }
 
     /// The active area of `raw` normalized, and the flags its raw values themselves settle:
-    /// [`QualityFlags`](crate::image::quality_flags::QualityFlags)`::SATURATED` at each
+    /// [`QualityFlags`](crate::image::flags::quality_flags::QualityFlags)`::SATURATED` at each
     /// channel's saturation level, and `NO_DATA` on the zeros of a `zero_is_bad` camera; no flags
     /// when no photosite carries either.
     ///

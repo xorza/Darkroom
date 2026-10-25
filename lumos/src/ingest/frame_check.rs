@@ -39,21 +39,21 @@ impl FrameCheck<'_> {
     pub(crate) fn stored(
         self,
         frame: &StoredFrame,
-        dimensions: PlanarDesc,
+        desc: PlanarDesc,
     ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
-        self.geometry(frame, dimensions)?;
-        self.stored_samples(&frame.channels, dimensions.pixel_count())?;
-        self.stored_quality(frame, dimensions)
+        self.geometry(frame, desc)?;
+        self.stored_samples(&frame.channels, desc.pixel_count())?;
+        self.stored_quality(frame, desc)
     }
 
     /// The quality pair of a stored frame, if it carries one — see [`Self::quality_pair`].
     pub(crate) fn stored_quality(
         self,
         frame: &StoredFrame,
-        dimensions: PlanarDesc,
+        desc: PlanarDesc,
     ) -> Result<(), AdmissionError> {
-        let pixel_count = dimensions.pixel_count();
+        let pixel_count = desc.pixel_count();
         match &frame.quality {
             FrameQuality::Planes {
                 coverage,
@@ -142,24 +142,24 @@ impl FrameCheck<'_> {
     ///
     /// A stored plane carries no width or height, so this compares plane counts and sample counts
     /// — enough to guarantee every `chunk(..)` below is in range.
-    fn geometry(self, frame: &StoredFrame, dimensions: PlanarDesc) -> Result<(), AdmissionError> {
+    fn geometry(self, frame: &StoredFrame, desc: PlanarDesc) -> Result<(), AdmissionError> {
         let idx = self.idx;
-        if frame.channels.len() != dimensions.channel_count() {
+        if frame.channels.len() != desc.channel_count() {
             return Err(AdmissionError::StoredFrameChannels {
                 idx,
-                expected: dimensions.channel_count(),
+                expected: desc.channel_count(),
                 actual: frame.channels.len(),
             });
         }
         if let FrameQuality::Drizzled { drops } = &frame.quality {
             assert!(
-                drops.len() == 1 || drops.len() == dimensions.channel_count(),
+                drops.len() == 1 || drops.len() == desc.channel_count(),
                 "a drizzled frame's drops are shared or one per channel, not {} for {}",
                 drops.len(),
-                dimensions.channel_count()
+                desc.channel_count()
             );
         }
-        let expected = dimensions.pixel_count();
+        let expected = desc.pixel_count();
         let planes = frame
             .channels
             .iter()

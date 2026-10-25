@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::error::ConditionMismatch;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 
 /// The exposure and sensor temperature a frame was taken under, as its source states them. Carried
 /// with the frame's statistics, because the metadata they come from is dropped for every frame but

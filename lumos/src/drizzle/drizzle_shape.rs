@@ -130,7 +130,7 @@ impl DrizzleShape {
             FrameOrigin::Memory => DecoderBytes::default(),
         };
         let way = FramePeek {
-            dimensions: input,
+            desc: input,
             decoder,
             mosaic: deposit.mosaic(),
         }
@@ -155,7 +155,7 @@ impl DrizzleShape {
         .stages(
             PlannedFrames {
                 count: frame_count,
-                dimensions: output,
+                desc: output,
                 layout: drizzled,
                 slots: Slots::new(None, output.channel_count()),
                 coverage: deposit.set_coverage(),

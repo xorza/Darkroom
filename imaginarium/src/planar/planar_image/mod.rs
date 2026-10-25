@@ -7,7 +7,7 @@ use common::Buffer2;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::error::PlanesError;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::planar::channel_layout::ChannelLayout;
 use crate::planar::planar_desc::PlanarDesc;
 

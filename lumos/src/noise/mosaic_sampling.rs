@@ -5,10 +5,10 @@ use std::f32::consts::SQRT_2;
 use arrayvec::ArrayVec;
 use common::Buffer2;
 
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::FlatGain;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::BinnedSamples;

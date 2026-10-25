@@ -21,8 +21,8 @@ pub(crate) mod scene;
 use criterion::Criterion;
 
 use crate::bench::fixture::Backends;
-use crate::image;
-use crate::image::conversion;
+use crate::codec;
+use crate::interleaved::conversion;
 use crate::ops::{affine_warp, blend, contrast_brightness, preview};
 
 /// Every case, atomic first. The host's adapters are listed once here; no device opens.
@@ -39,5 +39,5 @@ pub fn run(c: &mut Criterion) {
     blend::bench::integration(c, &backends);
     affine_warp::bench::integration(c, &backends);
     preview::bench::integration(c);
-    image::bench::integration(c);
+    codec::bench::integration(c);
 }

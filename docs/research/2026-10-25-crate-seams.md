@@ -1,7 +1,9 @@
 # Crate seams and image types (2026-10-25)
 
-Facts gathered for `PLAN.md`. Workspace at the merge of
-`imaginarium-workspace-crate` into `master` (`92eed8893` and `14b984112`).
+Facts gathered for the plan that set the crate seams; its decisions are in
+`AGENTS.md`, `imaginarium/AGENTS.md` and `lumos/AGENTS.md`. Workspace at the
+merge of `imaginarium-workspace-crate` into `master` (`92eed8893` and
+`14b984112`).
 
 ## Sizes
 

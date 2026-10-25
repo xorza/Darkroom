@@ -12,9 +12,9 @@ use crate::frame_store::stored_frame::{StoredFrame, WrittenFrame};
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::flag_counts::FlagCounts;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 
 /// An image whose channels, flags and flat gain are memory maps: a calibrated light parked between
@@ -22,7 +22,7 @@ use crate::image::stackable_image::{ImageParts, StackableImage};
 #[derive(Debug)]
 pub(crate) struct StoredImage {
     pub(crate) metadata: ImageMetadata,
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     /// The image's [`PixelFlags`], for an image that carries any and keeps them. Stored with the
     /// channels: without them the fill under every null reads back as a measurement.
@@ -48,8 +48,8 @@ impl StoredImage {
         flags: Option<&PixelFlags>,
         mut sink: impl PlaneSink,
     ) -> Result<Self, FrameStoreError> {
-        let dimensions = image.desc();
-        let channels = (0..dimensions.channel_count())
+        let desc = image.desc();
+        let channels = (0..desc.channel_count())
             .map(|channel| sink.write(PlaneRole::Channel(channel), image.channel(channel).pixels()))
             .collect::<Result<_, _>>()?;
         let flags = match flags {
@@ -65,7 +65,7 @@ impl StoredImage {
             .transpose()?;
         Ok(Self {
             metadata: image.metadata().clone(),
-            dimensions,
+            desc,
             channels,
             flags,
             flat_gain,
@@ -74,7 +74,7 @@ impl StoredImage {
 
     /// Each channel's samples, read in place from the map.
     pub(crate) fn planes(&self) -> impl Iterator<Item = &[f32]> {
-        let samples = self.dimensions.pixel_count();
+        let samples = self.desc.pixel_count();
         self.channels
             .iter()
             .map(move |plane| plane.chunk(0..samples))
@@ -88,7 +88,7 @@ impl StoredImage {
     /// The image read back into RAM, of `cfa_type`: its channels, flags, flat gain and metadata,
     /// each plane copied out of its map front to back.
     pub(crate) fn into_image<I: StackableImage>(self, cfa_type: Option<CfaType>) -> I {
-        let size = self.dimensions.size();
+        let size = self.desc.size();
         let planes = self
             .planes()
             .map(|plane| Buffer2::new(size, plane.to_vec()))
@@ -151,10 +151,10 @@ mod tests {
     use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_image::StoredImage;
     use crate::image::cfa::cfa_type::CfaType;
+    use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::linear_image::LinearImage;
-    use crate::image::pixel_flags::PixelFlags;
     use common::Size2us;
 
     /// A parked image leaves the page cache whole where the system evicts, its flags with its

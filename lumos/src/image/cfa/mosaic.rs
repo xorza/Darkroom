@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::image_provenance::ColorProvenance;
+use crate::image::metadata::image_provenance::ColorProvenance;
 use common::Vec2us;
 
 /// A pattern of red, green and blue filters over a sensor's photosites, anchored at the origin of

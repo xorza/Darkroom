@@ -232,7 +232,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::combine::error::*;
-    use crate::image::image_provenance::RowOrder;
+    use crate::image::metadata::image_provenance::RowOrder;
 
     /// Survivors 0, 1 and 2 are inputs 0, 3 and 5: a frame index and a reference index both read
     /// through the list, and an error that names no frame comes back as it was.

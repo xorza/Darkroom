@@ -22,9 +22,9 @@ use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::image::error::FrameDimensionMismatch;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_map::QualityMap;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::images::mono_image;
 use crate::internals::synthetic::fixtures::star_field;
@@ -45,11 +45,11 @@ const MAX_DEPOSITS: f32 = 49.0;
 /// axis. The other kernels' weights are all positive, so it is 1 for them.
 const LOBE_EXCESS: f32 = 1.7;
 
-/// An accumulator for frames of `input_dims`, each channel reaching its own.
-fn accumulator(input_dims: PlanarDesc, config: DrizzleConfig) -> DrizzleAccumulator {
+/// An accumulator for frames of `input_desc`, each channel reaching its own.
+fn accumulator(input_desc: PlanarDesc, config: DrizzleConfig) -> DrizzleAccumulator {
     let blank = LinearImage::from_planar_channels(
-        input_dims,
-        (0..input_dims.channel_count()).map(|_| vec![0.0; input_dims.pixel_count()]),
+        input_desc,
+        (0..input_desc.channel_count()).map(|_| vec![0.0; input_desc.pixel_count()]),
     );
     DrizzleAccumulator::new(&blank, config, 0).expect("test drizzle config must be valid")
 }

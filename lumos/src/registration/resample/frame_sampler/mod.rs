@@ -21,8 +21,8 @@
 
 use arrayvec::ArrayVec;
 
-use crate::image::pixel_flags::Reach;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::Reach;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::registration::resample::flagged_sources::{FlaggedSources, Validity};
 use crate::registration::resample::interior_window::InteriorWindow;
 use crate::registration::resample::ringing_clamp::RingingClamp;

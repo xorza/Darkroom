@@ -2,8 +2,8 @@
 
 use crate::frame::frame_facts::FrameFacts;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::image_provenance::RowOrder;
-use crate::image::sample_domain::SampleDomain;
+use crate::image::metadata::image_provenance::RowOrder;
+use crate::image::metadata::sample_domain::SampleDomain;
 use crate::ingest::error::AdmissionError;
 
 /// The facts a frame set must agree on — sample domain, row order and CFA pattern — each held by

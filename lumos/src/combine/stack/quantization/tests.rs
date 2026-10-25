@@ -3,7 +3,7 @@ use arrayvec::ArrayVec;
 use crate::combine::normalization::{FrameNorm, SlotNorm};
 use crate::combine::stack::quantization;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::math::statistics;
 
 fn stats(quantization_sigma: Option<f32>) -> FrameStats {

@@ -707,7 +707,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
 #[test]
 fn band_count_does_not_change_the_result() {
     let image = star_field(Size2us::new(64, 64), 24, 4242).image;
-    let dimensions = image.desc();
+    let desc = image.desc();
     let centre = DVec2::new(32.0, 32.0);
     let warp = |transform: Transform| WarpTransform::new(transform.inverse());
 
@@ -746,7 +746,7 @@ fn band_count_does_not_change_the_result() {
         (
             "sip",
             sip_warp(
-                dimensions.size(),
+                desc.size(),
                 Transform::similarity(DVec2::new(0.7, -0.4), 0.3, 1.0),
                 |d| d * 2e-5 * d.length_squared(),
             ),
@@ -756,7 +756,7 @@ fn band_count_does_not_change_the_result() {
     for (name, warp) in &warps {
         for kernel in DrizzleKernel::ALL {
             let drizzle = |band_rows: usize| {
-                let mut accumulator = accumulator(dimensions, usual_config(kernel));
+                let mut accumulator = accumulator(desc, usual_config(kernel));
                 let frame = DrizzleFrame {
                     source: image.clone(),
                     warp: warp.clone(),
@@ -769,11 +769,11 @@ fn band_count_does_not_change_the_result() {
 
             // One band is the serial walk; 5 rows over a 64- or 128-row output is a dozen or more
             // of them, so most drops land inside a band and some straddle a boundary.
-            let (single, single_unconverged) = drizzle(dimensions.height() * 2);
+            let (single, single_unconverged) = drizzle(desc.height() * 2);
             let (many, many_unconverged) = drizzle(5);
 
             let case = format!("{name}/{kernel:?}");
-            for channel in 0..dimensions.channel_count() {
+            for channel in 0..desc.channel_count() {
                 assert_eq!(
                     single.image.channel(channel),
                     many.image.channel(channel),

@@ -5,8 +5,8 @@ use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
 use crate::noise::mrs_noise::NoisePlane;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::sky_noise::SkyNoise;

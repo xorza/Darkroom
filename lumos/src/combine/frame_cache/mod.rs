@@ -39,16 +39,16 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::dark_comparison::DarkComparison;
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::flag_counts::AtomicFlagCounts;
+use crate::image::flags::flag_counts::AtomicFlagCounts;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::flat_gain::{GainGrid, GainRows};
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::observation_header::ObservationHeader;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::quality_map::QualityMap;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::observation_header::ObservationHeader;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::ingest_run::IngestRun;
 use crate::ingest::set_facts::SetFacts;
@@ -143,7 +143,7 @@ impl FrameCache {
                     idx,
                     cancel: &CancelToken::never(),
                 }
-                .stored(frame, core.dimensions)
+                .stored(frame, core.desc)
                 .is_ok(),
                 "stored frame {idx} breaks the pipeline's own frame contract"
             );
@@ -159,20 +159,20 @@ impl FrameCache {
     ) -> Result<Self, StackError> {
         debug_assert!(!frames.is_empty(), "`combine_cached` refuses an empty set");
         Cancelled::check(&monitor.cancel)?;
-        let dimensions = frames[0].image.desc();
+        let desc = frames[0].image.desc();
         let metadata = frames[0].image.metadata.clone();
 
         // Width and height before the shared check, which a stored plane can only compare by
         // sample count: a 4×2 frame in a 2×4 set has the right count and the wrong shape.
         for (idx, frame) in frames.iter().enumerate() {
-            FrameDimensionMismatch::check(idx, dimensions, frame.image.desc())?;
+            FrameDimensionMismatch::check(idx, desc, frame.image.desc())?;
             for (kind, plane) in frame.quality.present() {
                 let actual = plane.size();
-                if actual != dimensions.size() {
+                if actual != desc.size() {
                     return Err(StackError::PlaneDimensionMismatch {
                         idx,
                         plane: kind,
-                        expected: dimensions.size(),
+                        expected: desc.size(),
                         actual,
                     });
                 }
@@ -188,13 +188,13 @@ impl FrameCache {
                 idx,
                 cancel: &monitor.cancel,
             }
-            .stored(frame, dimensions)?;
+            .stored(frame, desc)?;
         }
         Self::measured(
             stored,
             CacheCore {
                 tier: StorageTier::UNPLANNED,
-                dimensions,
+                desc,
                 metadata,
                 monitor,
             },
@@ -209,11 +209,11 @@ impl FrameCache {
         core: CacheCore,
         normalization: Normalization,
     ) -> Result<Self, StackError> {
-        let slots = Slots::of_frames(&frames, core.dimensions);
+        let slots = Slots::of_frames(&frames, core.desc);
         let frame_norms = FrameNorm::measure(
             SlotPlanes {
                 frames: &frames,
-                dimensions: core.dimensions,
+                desc: core.desc,
                 slots,
                 cancel: &core.monitor.cancel,
             },
@@ -244,7 +244,7 @@ impl FrameCache {
             flags,
             report,
         } = combined;
-        let dimensions = self.core.dimensions;
+        let desc = self.core.desc;
         // Every frame carries the first one's pattern: `SetFacts` held them to it.
         let cfa_type = self.frames[0].facts.cfa_type;
         // Every saturated sample of the stack is flagged only when every frame's was.
@@ -292,7 +292,7 @@ impl FrameCache {
                 Some(coverage) => Coverage::PerPixel(QualityMap::from(coverage)),
                 None => Coverage::Uniform {
                     value: 1.0,
-                    size: dimensions.size(),
+                    size: desc.size(),
                 },
             }),
             weight: weight_pixels.map(QualityMap::from),
@@ -332,23 +332,21 @@ impl FrameCache {
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.monitor.cancel.clone();
         let frame_norms = self.frame_norms.as_deref();
-        let dimensions = self.core.dimensions;
+        let desc = self.core.desc;
         let chunking = self.core.chunk_rows(self.combine_stage(planes));
-        let mut output_weight = planes.weight.then(|| PlanarImage::new_zeroed(dimensions));
+        let mut output_weight = planes.weight.then(|| PlanarImage::new_zeroed(desc));
         let mut output_inverse_variance = planes
             .inverse_variance
-            .then(|| PlanarImage::new_zeroed(dimensions));
-        let mut output_dispersion = planes
-            .dispersion
-            .then(|| PlanarImage::new_zeroed(dimensions));
+            .then(|| PlanarImage::new_zeroed(desc));
+        let mut output_dispersion = planes.dispersion.then(|| PlanarImage::new_zeroed(desc));
         let mut output_coverage = self
             .coverage_layout(planes)
-            .map(|layout| PlanarImage::new_zeroed(PlanarDesc::new(dimensions.size(), layout)));
+            .map(|layout| PlanarImage::new_zeroed(PlanarDesc::new(desc.size(), layout)));
         let inverse_frame_count = 1.0 / self.frames.len() as f32;
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags = self
             .flag_plane()
-            .then(|| Buffer2::<u8>::new_default(dimensions.size()));
+            .then(|| Buffer2::<u8>::new_default(desc.size()));
         let excluded = AtomicFlagCounts::default();
         let kept_flagged = AtomicFlagCounts::default();
         let fallback_pixels = AtomicU64::new(0);
@@ -385,7 +383,7 @@ impl FrameCache {
                 flags.extend(chunks.iter().map(|chunk| chunk.flags));
                 // The node rows of each frame's flat gain the chunk reads, for the noise model, and
                 // the grid they share: every frame has the stack's size.
-                let gain_grid = GainGrid::of(dimensions.size());
+                let gain_grid = GainGrid::of(desc.size());
                 let mut gains: Vec<Option<GainRows<'_>>> = kept_gains.take();
                 gains.extend(self.frames.iter().map(|frame| {
                     frame
@@ -615,7 +613,7 @@ impl FrameCache {
         if !planes.coverage || self.frames.iter().all(|frame| frame.quality.is_none()) {
             None
         } else if self.frames.iter().any(|frame| frame.quality.per_channel()) {
-            Some(self.core.dimensions.layout())
+            Some(self.core.desc.layout())
         } else {
             Some(ChannelLayout::Mono)
         }
@@ -633,7 +631,7 @@ impl FrameCache {
     /// planes when any are gathered, and the flag plane when the combine writes one.
     fn combine_stage(&self, planes: QualityPlanes) -> Stage {
         CombineCost {
-            dimensions: self.core.dimensions,
+            desc: self.core.desc,
             quality: planes,
             coverage_planes: self.coverage_layout(planes).map_or(0, ChannelLayout::count),
             flag_planes: usize::from(self.flag_plane()),

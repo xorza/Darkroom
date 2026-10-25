@@ -2,10 +2,10 @@ use common::Buffer2;
 
 use crate::calibration::cosmic_ray::noise_model::*;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::derived_facts::DerivedFacts;
 use crate::image::masked_plane::MaskedPlane;
-use crate::image::observation_header::ObservationHeader;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::Size2us;
 
 /// With a gain the source term is `(signal − sky)·g/electrons`: σ 0.5, sky 1, 4 electrons per

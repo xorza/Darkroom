@@ -9,23 +9,23 @@ use fits_well::io::{ChecksumReport, ChecksumStatus};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::frame_stats::FrameStats;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::*;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::*;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::derived_facts::DerivedFacts;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{ColorProvenance, DemosaicProvenance};
-use crate::image::observation_header::ObservationHeader;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::{ColorProvenance, DemosaicProvenance};
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::internals::test_rng::TestRng;
@@ -645,10 +645,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     let path = dir.join("master.fits");
     cfa.write_fits(&path).unwrap();
     let info = LoadCtx::default().cfa_peek(&path).unwrap().info;
-    assert_eq!(
-        info.dimensions,
-        PlanarDesc::new((2, 2), ChannelLayout::Mono)
-    );
+    assert_eq!(info.desc, PlanarDesc::new((2, 2), ChannelLayout::Mono));
     assert_eq!(
         info.cfa_type,
         CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))

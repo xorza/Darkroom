@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::blend::{Blend, BlendMode};
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are

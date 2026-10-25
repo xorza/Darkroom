@@ -4,9 +4,9 @@
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
-use crate::image::flag_counts::FlagCounts;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::raw;
 use crate::io::raw::error::BlackLevelError;
 use common::Size2us;

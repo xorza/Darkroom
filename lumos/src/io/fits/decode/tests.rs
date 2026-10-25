@@ -11,10 +11,10 @@ use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::fits_checksum_provenance::FitsChecksumState;
-use crate::image::fits_transfer_provenance::FitsTransferProvenance;
 use crate::image::frame_desc::MAX_SIDE;
-use crate::image::sample_domain::Pedestal;
+use crate::image::metadata::fits_checksum_provenance::FitsChecksumState;
+use crate::image::metadata::fits_transfer_provenance::FitsTransferProvenance;
+use crate::image::metadata::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
 use crate::io::fits::cfa;
@@ -98,9 +98,8 @@ fn write_named_multi_image(path: &Path) {
 #[test]
 fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panicking() {
     for shape in [&[0, 2][..], &[2, 0], &[2, 2, 0]] {
-        let reason = fits_refusal(
-            plan::dimensions_from_shape(shape, FitsCubeInterpretation::Reject).unwrap_err(),
-        );
+        let reason =
+            fits_refusal(plan::desc_from_shape(shape, FitsCubeInterpretation::Reject).unwrap_err());
         assert_eq!(
             reason,
             FitsRefusal::ZeroAxis {
@@ -114,7 +113,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
     let side = MAX_SIDE;
     for shape in [[side + 1, 2], [2, side + 1], [usize::MAX, 2]] {
         let reason = fits_refusal(
-            plan::dimensions_from_shape(&shape, FitsCubeInterpretation::Reject).unwrap_err(),
+            plan::desc_from_shape(&shape, FitsCubeInterpretation::Reject).unwrap_err(),
         );
         assert_eq!(
             reason,
@@ -132,7 +131,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         "FITS image 1073741825x2 has a side past 1073741824 px"
     );
     assert_eq!(
-        plan::dimensions_from_shape(&[side, 1], FitsCubeInterpretation::Reject)
+        plan::desc_from_shape(&[side, 1], FitsCubeInterpretation::Reject)
             .unwrap()
             .size(),
         (side, 1).into()
@@ -336,7 +335,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     // one padded block.
     let peek = linear_peek(&rgb_path, &rgb_load_ctx()).unwrap().info;
     assert_eq!(
-        peek.dimensions,
+        peek.desc,
         loaded.desc(),
         "the header gives what the decode makes"
     );
@@ -418,7 +417,7 @@ fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
         )
         .unwrap();
         for loaded in [from_peek, load_linear(&path, &rgb_load_ctx()).unwrap()] {
-            assert_eq!(loaded.desc(), info.dimensions, "{tiles:?}");
+            assert_eq!(loaded.desc(), info.desc, "{tiles:?}");
             assert_eq!(loaded.desc(), PlanarDesc::new((2, 2), ChannelLayout::Rgb));
             assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
             assert_eq!(loaded.channel(1).pixels(), &[10.0, 20.0, 30.0, 40.0]);

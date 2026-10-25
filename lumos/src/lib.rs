@@ -70,8 +70,6 @@ pub use calibration::error::{
     CalibrationError, DarkMismatch, MasterBuildError, MasterStackError, SubtractionError,
 };
 pub use error::InvalidConfigField;
-pub use image::bg_split::BgSplit;
-pub use image::calibration_state::CalibrationState;
 pub use image::cfa::cfa_color::CfaColor;
 pub use image::cfa::cfa_image::CfaImage;
 pub use image::cfa::cfa_pattern::CfaPattern;
@@ -79,29 +77,31 @@ pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 pub use image::cfa::mosaic::Mosaic;
 pub use image::cfa::xtrans_pattern::XTransPattern;
-pub use image::dark_comparison::DarkComparison;
-pub use image::derived_facts::DerivedFacts;
 pub use image::error::{FrameDescError, FrameDimensionMismatch, XTransPatternError};
-pub use image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
-pub use image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+pub use image::flags::pixel_flags::PixelFlags;
+pub use image::flags::quality_flags::QualityFlags;
 pub use image::flat_gain::FlatGain;
 pub use image::flat_gain::frame_gain::FrameGain;
 pub use image::frame_desc;
-pub use image::image_metadata::ImageMetadata;
-pub use image::image_provenance::{
+pub use image::linear_image::LinearImage;
+pub use image::metadata::bg_split::BgSplit;
+pub use image::metadata::calibration_state::CalibrationState;
+pub use image::metadata::dark_comparison::DarkComparison;
+pub use image::metadata::derived_facts::DerivedFacts;
+pub use image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+pub use image::metadata::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+pub use image::metadata::image_metadata::ImageMetadata;
+pub use image::metadata::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer,
     RowOrder, SourceProvenance,
 };
-pub use image::linear_image::LinearImage;
-pub use image::mosaic_noise::MosaicNoise;
-pub use image::observation_header::ObservationHeader;
-pub use image::pixel_flags::PixelFlags;
+pub use image::metadata::mosaic_noise::MosaicNoise;
+pub use image::metadata::observation_header::ObservationHeader;
+pub use image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+pub use image::metadata::temperature_difference::TemperatureDifference;
+pub use image::metadata::temperature_source::TemperatureSource;
+pub use image::metadata::unverified_conditions::UnverifiedConditions;
 pub use image::preview_image::PreviewImage;
-pub use image::quality_flags::QualityFlags;
-pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
-pub use image::temperature_difference::TemperatureDifference;
-pub use image::temperature_source::TemperatureSource;
-pub use image::unverified_conditions::UnverifiedConditions;
 pub use io::error::{ImageError, ScientificRefusal, WriteError};
 pub use io::fits::error::{FitsAllocation, FitsRefusal};
 pub use io::fits::fits_load_config::{
@@ -187,8 +187,8 @@ pub use frame::capture_condition::CaptureCondition;
 pub use frame::error::ConditionMismatch;
 pub use frame::frame_plane::FramePlane;
 pub use frame_store::error::FrameStoreError;
-pub use image::flag_counts::FlagCounts;
-pub use image::quality_map::QualityMap;
+pub use image::flags::flag_counts::FlagCounts;
+pub use image::flags::quality_map::QualityMap;
 pub use ingest::error::AdmissionError;
 pub use ingest::ingest_config::IngestConfig;
 pub use progress::progress_callback::ProgressCallback;

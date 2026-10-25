@@ -4,15 +4,15 @@ use common::Buffer2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::frame_stats::FrameStats;
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::metadata::bg_split::BgSplit;
+use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
 use crate::noise::ccd_noise::CcdNoise;
@@ -168,25 +168,22 @@ fn frame_statistics_are_a_median_per_channel() {
 fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     // Eight pixels: four real samples and four the source declared null, filled at 0. Valid 1, 3,
     // 5, 7 → median (3 + 5) / 2 = 4; all eight → (0 + 1) / 2 = 0.5, the fill's level.
-    let dimensions = PlanarDesc::new((8, 1), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((8, 1), ChannelLayout::Mono);
     let samples = vec![1.0f32, 3.0, 5.0, 7.0, 0.0, 0.0, 0.0, 0.0];
-    let mut masked = LinearImage::from_interleaved(dimensions, samples.clone());
+    let mut masked = LinearImage::from_interleaved(desc, samples.clone());
     masked.set_flags(PixelFlags::of_non_finite(
-        dimensions.size(),
+        desc.size(),
         &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
     ));
 
     assert_eq!(FrameStats::measure(&masked).medians[0], 4.0);
-    let plain = LinearImage::from_interleaved(dimensions, samples);
+    let plain = LinearImage::from_interleaved(desc, samples);
     assert_eq!(FrameStats::measure(&plain).medians[0], 0.5);
 
     // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
     // set would panic rather than say so.
-    let mut all_null = LinearImage::from_interleaved(dimensions, vec![4.0; 8]);
-    all_null.set_flags(PixelFlags::of_non_finite(
-        dimensions.size(),
-        &[&[f32::NAN; 8]],
-    ));
+    let mut all_null = LinearImage::from_interleaved(desc, vec![4.0; 8]);
+    all_null.set_flags(PixelFlags::of_non_finite(desc.size(), &[&[f32::NAN; 8]]));
     let empty = FrameStats::measure(&all_null);
     assert_eq!(empty.medians[0], 0.0);
 }

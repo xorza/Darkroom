@@ -154,7 +154,7 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     let layout = libraw.layout()?;
     let cfa_type = libraw_filters::cfa_type(&libraw.image_data())?.ok_or(RawError::NotACfaFrame)?;
     Ok(FrameInfo {
-        dimensions: PlanarDesc::new(layout.active, ChannelLayout::Mono),
+        desc: PlanarDesc::new(layout.active, ChannelLayout::Mono),
         cfa_type,
         decoder: decoder_bytes(libraw, &layout),
         gain_bytes: 0,

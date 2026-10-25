@@ -40,12 +40,12 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 StoredFrame::from_memory(image, quality, stats)
             })
             .collect();
-        let dimensions = PlanarDesc::new(FRAME, ChannelLayout::Mono);
+        let desc = PlanarDesc::new(FRAME, ChannelLayout::Mono);
         b.iter(|| {
             FrameNorm::measure(
                 SlotPlanes {
                     frames: &frames,
-                    dimensions,
+                    desc,
                     slots: Slots::new(None, 1),
                     cancel: &CancelToken::never(),
                 },

@@ -36,6 +36,37 @@ never inherit from this workspace.
 Bindgen needs libclang: Xcode tools on macOS, `winget install LLVM.LLVM` on
 Windows, `libclang-dev` on Linux.
 
+## Crate seams
+
+Facts: `docs/research/2026-10-25-crate-seams.md` and
+`docs/research/2026-10-25-imaginarium-merge.md`.
+
+- **Each crate one layer.** `common` holds the grid and its geometry;
+  imaginarium pixels in either layout, their formats, codecs and generic ops;
+  fits-well and `libraw` a file format's bytes and its own semantics, with no
+  science; lumos the science — the frame model (pixels with metadata, flags
+  and flat gain), the decoders that map a format into it, the stages and the
+  products. Refused: the decoders and the metadata in imaginarium, which would
+  make it an astronomy crate and take lumos's noise statistics and demosaic
+  with it.
+- **imaginarium is a member crate**, so its own conversions call `common::par`
+  and `common::fs`. Refused: bans and wrappers as for fits-well, which leave
+  its trait impls open.
+- **`Buffer2`, `Size2us`, `Vec2us` and `Rect2us` live in `common`**, which
+  every crate that holds a grid uses. Refused: a crate for four types; leaving
+  them in lumos, which makes lens and darkroom depend on it for a size.
+- **One CPU detection, two kernel designs.** `common::SimdTier` detects;
+  lumos writes one kernel over `simd::Isa` (`f32`/`f64` lanes), imaginarium a
+  kernel per tier over `u8`, `u16` and `f32` with byte shuffles. Refused: one
+  kernel framework, which rewrites every imaginarium kernel for no measured
+  gain.
+- **One bench policy**, `common::bench` (`Kind`, `Scale`, `fresh_copies`);
+  each crate keeps its own scenes and ids.
+- **Not now.** A split of lumos into crates: its module graph has cycles,
+  which come out first, and a split is then judged on measured build times. A
+  generic `Frame<P>` for `LinearImage` and `CfaImage`: they share five
+  accessors, and their flat gains differ in shape.
+
 ## Verification
 
 `cargo drive` runs every check: the driver is `cargo-drive`, the same in every
@@ -153,6 +184,13 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   declare one name past its module, the narrower use takes a qualified one, as
   `DrawablePreview` beside `lumos::PreviewImage`; an error and its alias carry
   their domain, as `ExecError` and `ExecResult`.
+- **One channel is `mono`.** `ChannelCount::Mono`, `ColorFormat::MONO_U8`,
+  `ChannelLayout::Mono`; `luma` is the Rec. 709 weighted sum of encoded
+  samples, and an RGB value with `R = G = B` a neutral. Refused: `L`, the PIL
+  mode name; `gray` and `grey`, which the crates spelled both ways.
+- **A descriptor is a `desc`, a `Size2us` a `size`.** `PlanarDesc` and
+  `InterleavedDesc` are read through `desc()`. Refused: `dimensions`, which
+  named both.
 - **The surround is the editor's menu bar, tab strip and status bar**, as
   `AppColors::surround_fill`; `chrome` is palantir's `Chrome` alone, a
   widget's fill, border, radii and shadow. Refused: chrome for the surround,

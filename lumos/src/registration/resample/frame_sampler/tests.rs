@@ -2,9 +2,9 @@ use common::Buffer2;
 use glam::DVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::resample::flagged_sources::{FlagScratch, FlaggedSources, Validity};
 use crate::registration::resample::frame_sampler::{

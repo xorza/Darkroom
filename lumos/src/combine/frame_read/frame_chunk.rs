@@ -203,9 +203,9 @@ mod tests {
     use crate::frame::frame_quality::{DropPlanes, FrameQuality};
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
+    use crate::image::flags::pixel_flags::PixelFlags;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::image::linear_image::LinearImage;
-    use crate::image::pixel_flags::PixelFlags;
-    use crate::image::quality_flags::QualityFlags;
 
     /// A copied chunk reads what the planes hold there, plane for plane, for a frame with warp
     /// planes and flags and for a drizzled one with drops per channel, spilled and resident alike:
@@ -214,11 +214,11 @@ mod tests {
     fn a_copied_chunk_reads_as_the_planes_do() {
         let dir = TempDir::new("frame_chunk_copy");
         let scratch = RunScratch::create(dir.path()).unwrap();
-        let dimensions = PlanarDesc::new((6, 1), ChannelLayout::Rgb);
+        let desc = PlanarDesc::new((6, 1), ChannelLayout::Rgb);
         let ramp = |offset: f32| -> Vec<f32> { (0..6).map(|x| offset + x as f32).collect() };
         let mut image =
-            LinearImage::from_planar_channels(dimensions, [ramp(0.0), ramp(10.0), ramp(20.0)]);
-        image.set_flags(PixelFlags::from_fn(dimensions.size(), |idx| {
+            LinearImage::from_planar_channels(desc, [ramp(0.0), ramp(10.0), ramp(20.0)]);
+        image.set_flags(PixelFlags::from_fn(desc.size(), |idx| {
             if idx == 3 {
                 QualityFlags::SATURATED
             } else {

@@ -1,7 +1,7 @@
 use common::Buffer2;
 use glam::DVec2;
 
-use crate::image::pixel_flags::Reach;
+use crate::image::flags::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;

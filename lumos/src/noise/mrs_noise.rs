@@ -7,8 +7,8 @@ use std::ops::Range;
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
-use crate::image::bg_split::BgSplit;
 use crate::image::flat_gain::gain_bins::GainBins;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::math::wavelet;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::{BinnedSamples, Samples};

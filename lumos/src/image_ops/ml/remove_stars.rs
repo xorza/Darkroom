@@ -58,11 +58,11 @@ impl RemoveStars {
     /// spared. Callers who still need the original pixels afterward should `.clone()` before
     /// calling. Both layers keep `image`'s metadata, flags and flat gain.
     pub fn split(&mut self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
-        let dimensions = image.desc();
+        let desc = image.desc();
         let mut starless = LinearImage::new(
             PlanarImage::from_planar_channels(
-                dimensions,
-                (0..dimensions.channel_count()).map(|_| vec![0.0; dimensions.pixel_count()]),
+                desc,
+                (0..desc.channel_count()).map(|_| vec![0.0; desc.pixel_count()]),
             ),
             image.flags().cloned(),
             image.metadata.clone(),
@@ -110,11 +110,11 @@ mod tests {
         // (1.0, 0.0)  -> 1 - 0.0/1.0  = 1.0
         // (0.5, 1.0)  -> denominator floors at 1e-4 -> huge negative -> clamps to 0.0
         let mut orig = mono_image(Size2us::new(3, 1), vec![0.75, 1.0, 0.5]);
-        let dimensions = orig.desc();
+        let desc = orig.desc();
         let starless = mono_image(Size2us::new(3, 1), vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         assert_eq!(orig.channel(0).pixels(), &[0.5, 1.0, 0.0]);
-        assert_eq!(orig.desc(), dimensions);
+        assert_eq!(orig.desc(), desc);
     }
 
     #[test]

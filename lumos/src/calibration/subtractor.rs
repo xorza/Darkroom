@@ -3,9 +3,9 @@
 use crate::calibration::dark_match::DarkMatch;
 use crate::calibration::error::SubtractionFault;
 use crate::calibration::master_role::MasterRole;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::sample_domain::{DomainMap, SampleDomain};
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::sample_domain::{DomainMap, SampleDomain};
 
 /// A master in the role it is subtracted in: a light's bias or dark, a flat's flat-dark or bias, a
 /// dark's bias.

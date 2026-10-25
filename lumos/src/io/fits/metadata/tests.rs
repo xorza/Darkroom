@@ -1,17 +1,17 @@
 use fits_well::header::Header;
 use fits_well::image::SampleType;
 
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::RowOrder;
-use crate::image::observation_header::ObservationHeader;
-use crate::image::temperature_difference::TemperatureDifference;
-use crate::image::temperature_source::TemperatureSource;
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::RowOrder;
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::temperature_difference::TemperatureDifference;
+use crate::image::metadata::temperature_source::TemperatureSource;
 use crate::internals::fits::fits_refusal;
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::metadata::{

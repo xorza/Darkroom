@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::image_provenance::ColorProvenance;
+use crate::image::metadata::image_provenance::ColorProvenance;
 use common::{Size2us, Vec2us};
 
 /// The color filter over a sensor's photosites, anchored at the origin of the image data it

@@ -20,13 +20,13 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::internals::panic_message;
 use crate::io::decoder::decoder_kind::DecoderKind;
@@ -51,8 +51,8 @@ fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
 fn a_parked_image_reads_back_and_leaves_no_file() {
     let dir = TempDir::new("frame_store_image");
     let scratch = RunScratch::create(dir.path()).unwrap();
-    let dimensions = PlanarDesc::new((3, 2), ChannelLayout::Mono);
-    let mut image = LinearImage::from_interleaved(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+    let desc = PlanarDesc::new((3, 2), ChannelLayout::Mono);
+    let mut image = LinearImage::from_interleaved(desc, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.header.exposure_time = Some(30.0);
 
     let stored = StoredImage::write(&image, image.flags(), &scratch).unwrap();
@@ -68,7 +68,7 @@ fn a_parked_image_reads_back_and_leaves_no_file() {
 
     // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
     image.set_flags(PixelFlags::of_non_finite(
-        dimensions.size(),
+        desc.size(),
         &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
     ));
     let masked = StoredImage::write(&image, image.flags(), &scratch).unwrap();
@@ -129,8 +129,8 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
 
 #[test]
 fn light_frame_keeps_quality_with_its_planes() {
-    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
-    let image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let desc = PlanarDesc::new((2, 2), ChannelLayout::Mono);
+    let image = LinearImage::from_interleaved(desc, vec![1.0, 2.0, 3.0, 4.0]);
     // The last pixel has no support, so its confidence is zero too — the pairing every consumer of
     // a frame-quality pair relies on.
     let coverage = Buffer2::new((2, 2), vec![1.0, 0.5, 0.25, 0.0]);
@@ -158,8 +158,8 @@ fn light_frame_keeps_quality_with_its_planes() {
 
 #[test]
 fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
-    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
-    let mut image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let desc = PlanarDesc::new((2, 2), ChannelLayout::Mono);
+    let mut image = LinearImage::from_interleaved(desc, vec![1.0, 2.0, 3.0, 4.0]);
 
     // A frame whose source declared nothing undefined carries no planes at all — the case that
     // keeps this free for every RAW frame and almost every camera FITS.
@@ -169,7 +169,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     // flags for: the combine gathers every pixel but 2, each at unit confidence, as nothing was
     // interpolated.
     image.set_flags(PixelFlags::of_non_finite(
-        dimensions.size(),
+        desc.size(),
         &[&[1.0, 2.0, f32::NAN, 4.0]],
     ));
     let quality = FrameQuality::<Buffer2<f32>>::for_unwarped(image.flag_counts());
@@ -195,7 +195,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let dir = TempDir::new("frame_store_cached_quality");
-    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let identity = FileIdentity {
         len: 16,
         mtime_ns: 1,
@@ -203,9 +203,9 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         changed_ns: None,
     };
     let key = CacheKey::new(identity, DecoderKind::Linear, &LoadCtx::default());
-    let mut image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let mut image = LinearImage::from_interleaved(desc, vec![1.0, 2.0, 3.0, 4.0]);
     image.set_flags(PixelFlags::of_non_finite(
-        dimensions.size(),
+        desc.size(),
         &[&[1.0, 2.0, f32::NAN, 4.0]],
     ));
     let cache = |name, image: &LinearImage| {
@@ -221,7 +221,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     assert!(written.samples.is_none());
     drop(written);
     let reused = reuse(&spill).unwrap();
-    assert_eq!(reused.desc(), dimensions);
+    assert_eq!(reused.desc(), desc);
     let frame = reused.into_frame();
     assert_eq!(frame.channels[0].chunk(0..4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(frame.quality.mask(), Some(QualityFlags::NO_DATA));
@@ -277,7 +277,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     assert!(reuse_image::<LinearImage>(&spill).is_none());
 
     // A frame of no mask keeps one slot of samples, on the first run as on a reuse.
-    let plain = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let plain = LinearImage::from_interleaved(desc, vec![1.0, 2.0, 3.0, 4.0]);
     let (spill, written) = cache("plain", &plain);
     assert_eq!(written.samples.as_ref().map(ArrayVec::len), Some(1));
     drop(written);

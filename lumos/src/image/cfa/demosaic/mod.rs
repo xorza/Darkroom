@@ -19,7 +19,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::image_provenance::DemosaicProvenance;
+use crate::image::metadata::image_provenance::DemosaicProvenance;
 use crate::memory::footprint::Footprint;
 
 /// The demosaic of a sensor's frame: none on a mono sensor, whose samples pass through, RCD on a
@@ -52,7 +52,7 @@ impl Demosaic {
         gains: [f32; 3],
         cancel: &CancelToken,
     ) -> Result<PlanarImage, Cancelled> {
-        let dimensions = PlanarDesc::new(data.size(), ChannelLayout::Rgb);
+        let desc = PlanarDesc::new(data.size(), ChannelLayout::Rgb);
         let planes = match self {
             Self::None => return Ok(PlanarImage::from(data)),
             Self::Rcd(pattern) => {
@@ -64,7 +64,7 @@ impl Demosaic {
                 cancel,
             )?,
         };
-        Ok(PlanarImage::from_planar_channels(dimensions, planes))
+        Ok(PlanarImage::from_planar_channels(desc, planes))
     }
 
     /// How far the demosaic reads from an output pixel: an input photosite this far away can
@@ -88,15 +88,13 @@ impl Demosaic {
         }
     }
 
-    /// What the demosaic of a `dimensions` frame holds on `workers`.
-    pub(crate) const fn footprint(self, dimensions: PlanarDesc, workers: usize) -> Footprint {
+    /// What the demosaic of a `desc` frame holds on `workers`.
+    pub(crate) const fn footprint(self, desc: PlanarDesc, workers: usize) -> Footprint {
         match self {
-            Self::None => {
-                Footprint::kept(dimensions.pixel_count().saturating_mul(size_of::<f32>()))
-            }
-            Self::Rcd(_) => rcd::footprint(dimensions.size(), workers),
+            Self::None => Footprint::kept(desc.pixel_count().saturating_mul(size_of::<f32>())),
+            Self::Rcd(_) => rcd::footprint(desc.size(), workers),
             Self::Markesteijn { passes, .. } => {
-                markesteijn::footprint(dimensions.size(), passes, workers)
+                markesteijn::footprint(desc.size(), passes, workers)
             }
         }
     }
@@ -147,10 +145,10 @@ mod memory_tests {
                 markesteijn::internals::workspace_bytes(MarkesteijnPasses::One, 4),
             ),
         ] {
-            for dimensions in [even, odd] {
-                let plane = dimensions.pixel_count() * 4;
+            for desc in [even, odd] {
+                let plane = desc.pixel_count() * 4;
                 assert_eq!(
-                    Demosaic::of(cfa_type, MarkesteijnPasses::One).footprint(dimensions, 4),
+                    Demosaic::of(cfa_type, MarkesteijnPasses::One).footprint(desc, 4),
                     Footprint {
                         kept: 3 * plane,
                         peak: 4 * plane + workspace,

@@ -17,9 +17,9 @@ use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 /// 320 + 80 = 400 B, and its way peaks at the decoder's 500 B.
 #[test]
 fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
-    let dimensions = PlanarDesc::new((10, 8), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((10, 8), ChannelLayout::Mono);
     let info = |cfa_type| FrameInfo {
-        dimensions,
+        desc,
         cfa_type,
         decoder: DecoderBytes {
             source: 0,
@@ -51,7 +51,7 @@ fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
             "source of {source} B"
         );
     }
-    let noise = MosaicNoiseMeasure::heap_bytes(dimensions.size(), rggb.mosaic().unwrap());
+    let noise = MosaicNoiseMeasure::heap_bytes(desc.size(), rggb.mosaic().unwrap());
     let demosaic_peak = 4 * 320 + rcd::internals::workspace_bytes(4) + 80;
     assert_eq!(
         info(rggb).demosaiced(info(rggb).decoded(), MarkesteijnPasses::One, 4),

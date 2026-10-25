@@ -20,10 +20,10 @@ use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame, Written
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::{StoredFlags, StoredImage};
 use crate::frame_store::stored_plane::{PublishedPlane, StoredPlane};
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::flat_gain::{FlatGain, GainGrid};
-use crate::image::pixel_flags::PixelFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use common::Size2us;
 
@@ -117,7 +117,7 @@ impl KeptFrame {
             "a decode's gain is a source gain, which its key keeps once"
         );
         let decoded = Decoded {
-            dimensions: stored.dimensions,
+            desc: stored.desc,
             flags: stored.flag_counts().copied(),
             gain: image.flat_gain().map(|gain| KeptGain::of(gain)),
             metadata: mem::take(&mut stored.metadata),
@@ -145,14 +145,14 @@ impl KeptFrame {
             admitted,
             decoded:
                 Decoded {
-                    dimensions,
+                    desc,
                     flags,
                     gain,
                     metadata,
                 },
             digests,
         } = committed;
-        let channels = (0..dimensions.channel_count())
+        let channels = (0..desc.channel_count())
             .map(|channel| FrameSpill::map(&spill.channel_path(channel)))
             .collect::<Option<_>>()?;
         let flags = match flags {
@@ -175,14 +175,14 @@ impl KeptFrame {
             Some(gain) => Some(StoredGain::Shared(shared_gain(
                 spill,
                 gain,
-                dimensions.size(),
+                desc.size(),
                 gains,
             )?)),
             None => None,
         };
         let image = StoredImage {
             metadata,
-            dimensions,
+            desc,
             channels,
             flags,
             flat_gain,
@@ -195,7 +195,7 @@ impl KeptFrame {
     }
 
     pub(crate) const fn desc(&self) -> PlanarDesc {
-        self.image.dimensions
+        self.image.desc
     }
 
     /// The frame as the combine reads it, its planes where they are mapped.
@@ -229,15 +229,15 @@ impl KeptFrame {
             admitted,
             decoded:
                 Decoded {
-                    dimensions,
+                    desc,
                     flags,
                     gain,
                     metadata,
                 },
             digests,
         } = committed;
-        let size = dimensions.size();
-        if digests.channels.len() != dimensions.channel_count() {
+        let size = desc.size();
+        if digests.channels.len() != desc.channel_count() {
             return None;
         }
         let pixels = size.pixel_count();
@@ -276,7 +276,7 @@ impl KeptFrame {
             image,
             stored: StoredImage {
                 metadata,
-                dimensions,
+                desc,
                 channels,
                 flags,
                 flat_gain: flat_gain.map(StoredGain::Shared),

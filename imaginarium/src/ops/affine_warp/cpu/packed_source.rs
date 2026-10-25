@@ -6,7 +6,7 @@ use common::{Size2us, Vec2us};
 use glam::Vec2;
 
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// The input image a transform samples: its pixels in row-major order, each its `N` channels of
 /// `T` side by side.

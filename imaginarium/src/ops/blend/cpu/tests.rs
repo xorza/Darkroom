@@ -2,8 +2,8 @@ use common::Size2us;
 use strum::IntoEnumIterator;
 
 use crate::color::color_format::{ColorFormat, SampleType};
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::blend::cpu;

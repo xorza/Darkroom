@@ -39,7 +39,7 @@ fn raw_frame_info_matches_full_decode() {
     assert_eq!(from_peek.data().pixels(), loaded.data().pixels());
     let peeked = peek.info;
     assert_eq!(
-        peeked.dimensions.size(),
+        peeked.desc.size(),
         loaded.data().size(),
         "peeked header dims must match the decoded frame"
     );

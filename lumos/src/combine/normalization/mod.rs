@@ -32,7 +32,7 @@ use crate::combine::normalization::norm_fit::{Fitted, NormFit};
 use crate::combine::normalization::slot_planes::SlotPlanes;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::sample_domain::DomainMap;
+use crate::image::metadata::sample_domain::DomainMap;
 
 /// Frame normalization method applied before stacking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,5 +1,5 @@
 use super::*;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::pixels_equal;
 use common::Size2us;

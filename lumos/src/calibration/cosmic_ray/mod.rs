@@ -45,8 +45,8 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::masked_plane::MaskedPlane;
-use crate::image::quality_flags::QualityFlags;
 use common::Size2us;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small

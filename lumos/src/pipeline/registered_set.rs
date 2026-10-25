@@ -3,7 +3,7 @@
 use imaginarium::PlanarDesc;
 
 use crate::combine::frame_cache::core::CacheCore;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::pipeline::align_stack_result::{AlignStackResult, LightOutcome};
 use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::error::AlignStackError;
@@ -20,7 +20,7 @@ pub(super) struct RegisteredSet {
     /// The reference's: the master follows the alignment anchor, not whichever frame reaches the
     /// combine first.
     pub(super) metadata: ImageMetadata,
-    pub(super) dimensions: PlanarDesc,
+    pub(super) desc: PlanarDesc,
     pub(super) parking: FrameParking,
 }
 
@@ -92,7 +92,7 @@ impl RegisteredSet {
                 frames,
                 CacheCore {
                     tier: self.parking.into_tier(),
-                    dimensions: self.dimensions,
+                    desc: self.desc,
                     metadata: self.metadata,
                     monitor: run.ingest.monitor(),
                 },

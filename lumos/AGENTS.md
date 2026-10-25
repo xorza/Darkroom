@@ -22,6 +22,29 @@ source extraction, error bars.
 - **Precision outranks speed.** Never trade the stacked result's accuracy for
   throughput.
 
+## Frames and files
+
+- **A frame holds imaginarium's planes** (`PlanarImage`, `PlanarDesc`), with
+  lumos's metadata, flags and flat gain. lumos keeps its own side limit,
+  `frame_desc::MAX_SIDE`, which its `i32` pixel lanes set: `LinearImage` and
+  `CfaImage` assert it, and every reader of an untrusted size checks it.
+- **`image/` groups by subject**: `metadata/` for what a frame carries beside
+  its samples, `flags/` for the quality flags, `cfa/` and `flat_gain/`, and
+  the frame types at the top.
+- **A file sits with the type it stores.** The calibration bundle is in
+  `calibration`, the product file in `stack_product`; the FITS extensions both
+  write stay in `io::fits`. Each type reads and writes through its own
+  methods, as `LinearImage::write_fits` and `StackProduct::read_fits`.
+  Refused: the `impl` blocks in `io`, which break one struct per file; free
+  functions, which `lumos::writer` was.
+- **The identity of a decode lives with the decoders**: `io::decoder` holds
+  the `Decoder` trait and the `DecoderKind`, `DecodePins` and `DecodeParams`
+  that name it.
+- **The camera RAW format is `libraw`'s.** `io::raw` maps LibRaw's facts into
+  a `CfaImage` — the pattern, the black levels and their flags, the
+  saturation, the white balance, the metadata; which codecs are lossy is
+  lumos's reading of them (`RawDecoder::classify`).
+
 ## Memory
 
 - **The memory budget is soft: it steers caching and spilling, and never refuses

@@ -14,28 +14,28 @@ use crate::frame_store::decode_cache::frame_spill::{
     Commit, Decoded, FrameSpill, KeptGain, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
-use crate::image::bg_split::BgSplit;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::derived_facts::DerivedFacts;
-use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
-use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
-use crate::image::flag_counts::FlagCounts;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::gain_key::GainKey;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{
+use crate::image::metadata::bg_split::BgSplit;
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
+use crate::image::metadata::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
-use crate::image::mosaic_noise::MosaicNoise;
-use crate::image::observation_header::ObservationHeader;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::image::temperature_difference::TemperatureDifference;
-use crate::image::temperature_source::TemperatureSource;
+use crate::image::metadata::mosaic_noise::MosaicNoise;
+use crate::image::metadata::observation_header::ObservationHeader;
+use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::metadata::temperature_difference::TemperatureDifference;
+use crate::image::metadata::temperature_source::TemperatureSource;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::math::statistics;
 
@@ -192,7 +192,7 @@ fn metadata() -> ImageMetadata {
 /// What a decode of 4 × 3 mono left, its flags of `flags`, with [`metadata`].
 fn decoded(flags: Option<FlagCounts>) -> Decoded {
     Decoded {
-        dimensions: PlanarDesc::new((4, 3), ChannelLayout::Mono),
+        desc: PlanarDesc::new((4, 3), ChannelLayout::Mono),
         flags,
         gain: None,
         metadata: metadata(),
@@ -280,7 +280,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
         let committed = spill.committed().unwrap();
         assert_eq!(committed.decoded.flags, flags);
         assert_eq!(
-            committed.decoded.dimensions,
+            committed.decoded.desc,
             PlanarDesc::new((4, 3), ChannelLayout::Mono)
         );
         assert_eq!(

@@ -2,7 +2,7 @@ mod cpu;
 
 use common::Size2us;
 
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// Generates a downscaled `RGBA_U8` **preview** of an image in one fused pass —
 /// area-average downscale and format conversion at the same time, for fast

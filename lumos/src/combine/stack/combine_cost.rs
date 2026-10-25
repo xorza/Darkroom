@@ -10,14 +10,14 @@ use crate::stack_product::quality_planes::QualityPlanes;
 /// while it does.
 const CHUNK_COPIES: usize = 2;
 
-/// What a combine of `dimensions` holds: the output planes `quality` asks for, its
+/// What a combine of `desc` holds: the output planes `quality` asks for, its
 /// `coverage_planes` and `flag_planes`, and a [`CombineScratch`] for `frame_count` frames on each
 /// of its `workers`, throughout; and on the spill tier, for each output row,
 /// [`CHUNK_COPIES`] copies of every frame's row, `frame_pixel_bytes` a pixel over all the frames.
 /// A resident combine reads its frames where they lie, which [`Units::Rows`] charges nothing for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CombineCost {
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) quality: QualityPlanes,
     pub(crate) coverage_planes: usize,
     pub(crate) flag_planes: usize,
@@ -30,7 +30,7 @@ impl CombineCost {
     /// The combine as a stage of rows, each frame kept at `kept`.
     pub(crate) const fn stage(self, kept: usize) -> Stage {
         let Self {
-            dimensions,
+            desc,
             quality,
             coverage_planes,
             flag_planes,
@@ -40,11 +40,11 @@ impl CombineCost {
         } = self;
         Stage {
             kept,
-            held: quality.pixel_bytes(dimensions.channel_count(), coverage_planes, flag_planes)
-                * dimensions.pixel_count()
+            held: quality.pixel_bytes(desc.channel_count(), coverage_planes, flag_planes)
+                * desc.pixel_count()
                 + workers.saturating_mul(CombineScratch::heap_bytes(frame_count)),
-            in_flight: CHUNK_COPIES * frame_pixel_bytes * dimensions.width(),
-            units: Units::Rows(dimensions.height()),
+            in_flight: CHUNK_COPIES * frame_pixel_bytes * desc.width(),
+            units: Units::Rows(desc.height()),
         }
     }
 }

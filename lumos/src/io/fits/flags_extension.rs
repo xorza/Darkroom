@@ -14,8 +14,8 @@ use fits_well::image::Scaling;
 use fits_well::io::Hdu;
 use rayon::prelude::*;
 
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::error::WriteError;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY};
@@ -134,8 +134,8 @@ fn bit_keyword(flag: QualityFlags) -> fits_well::Result<Keyword> {
 #[cfg(test)]
 mod tests {
 
-    use crate::image::pixel_flags::PixelFlags;
-    use crate::image::quality_flags::QualityFlags;
+    use crate::image::flags::pixel_flags::PixelFlags;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::internals::fits::fits_refusal;
     use crate::io::fits::error::FitsRefusal;
     use crate::io::fits::flags_extension;

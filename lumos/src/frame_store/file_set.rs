@@ -261,7 +261,7 @@ impl<'a, P: AsRef<Path>, D: Decoder> FileSet<'a, P, D> {
                 && gains.iter().all(|held| held.key != gain.key)
             {
                 gains.push(gain);
-                bytes += gain.bytes(decoded.dimensions.size());
+                bytes += gain.bytes(decoded.desc.size());
             }
         }
         kept.uncached
@@ -400,15 +400,15 @@ fn committed_info(probed: &Mutex<Probed>) -> FrameInfo {
     let committed = probed
         .committed()
         .expect("a frame the cache holds was probed");
-    let dimensions = committed.decoded.dimensions;
+    let desc = committed.decoded.desc;
     FrameInfo {
-        dimensions,
+        desc,
         cfa_type: committed.admitted.facts.cfa_type.unwrap_or(CfaType::Mono),
         decoder: DecoderBytes::default(),
         gain_bytes: committed
             .decoded
             .gain
-            .map_or(0, |gain| gain.bytes(dimensions.size())),
+            .map_or(0, |gain| gain.bytes(desc.size())),
     }
 }
 
@@ -495,7 +495,7 @@ mod tests {
             SetPeek {
                 idx: 0,
                 info: FrameInfo {
-                    dimensions: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
+                    desc: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
                     cfa_type: CfaType::Mono,
                     decoder: DecoderBytes::default(),
                     gain_bytes: 0,
@@ -547,7 +547,7 @@ mod tests {
             SetPeek {
                 idx: 0,
                 info: FrameInfo {
-                    dimensions: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
+                    desc: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
                     cfa_type: CfaType::Mono,
                     decoder: DecoderBytes::default(),
                     gain_bytes: 0,
@@ -562,10 +562,7 @@ mod tests {
         assert_eq!(changed.uncached(), 1);
         let peek = changed.peek(&ctx).unwrap();
         assert_eq!((peek.idx, peek.held), (1, 4 * 2 * 13));
-        assert_eq!(
-            peek.info.dimensions,
-            PlanarDesc::new((4, 2), ChannelLayout::Rgb)
-        );
+        assert_eq!(peek.info.desc, PlanarDesc::new((4, 2), ChannelLayout::Rgb));
         tiff(dir.path(), "2.tiff", 3, 0.0625);
         for (idx, expected) in [(0, 0.25), (1, 0.125), (2, 0.0625)] {
             let loaded = changed.decode(idx, &ctx).unwrap();

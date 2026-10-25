@@ -161,7 +161,7 @@ impl AlignStackRun<'_> {
         // Bounded by the plan, which charges each in-flight light its decode and the detector's
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
         // is also what a cancel has to drain.
-        let intake = self.intake(shape.dimensions, count, slots);
+        let intake = self.intake(shape.desc, count, slots);
         let mut detectors = self.detectors(slots)?;
         let lights = match lights {
             // A held light stays where the caller put it, whatever the tier.
@@ -238,13 +238,13 @@ impl AlignStackRun<'_> {
             .reference
             .select(&candidates, self.required_stars())?;
         let metadata = frames[reference].image.metadata().clone();
-        let dimensions = frames[reference].image.desc();
+        let desc = frames[reference].image.desc();
         let registrar = FrameRegistrar::new(
             self,
             &parking,
             LightSet {
                 count,
-                dimensions,
+                desc,
                 reference,
                 reference_stars: mem::take(&mut frames[reference].stars),
             },
@@ -275,7 +275,7 @@ impl AlignStackRun<'_> {
                 .collect(),
             reference,
             metadata,
-            dimensions,
+            desc,
             parking,
         }
         .combine(self)
@@ -313,7 +313,7 @@ impl AlignStackRun<'_> {
             "Preparing, detecting and registering lights in one pass"
         );
         let slots = workers.min(count);
-        let intake = self.intake(shape.dimensions, count, slots);
+        let intake = self.intake(shape.desc, count, slots);
         let mut workers: Vec<PassWorker> = self
             .detectors(slots)?
             .into_iter()
@@ -338,13 +338,13 @@ impl AlignStackRun<'_> {
         }
         .check(reference, self.required_stars())?;
         let metadata = first.image.metadata.clone();
-        let dimensions = first.image.desc();
+        let desc = first.image.desc();
         let registrar = FrameRegistrar::new(
             self,
             &parking,
             LightSet {
                 count,
-                dimensions,
+                desc,
                 reference,
                 reference_stars: mem::take(&mut first.stars),
             },
@@ -385,18 +385,18 @@ impl AlignStackRun<'_> {
             lights,
             reference,
             metadata,
-            dimensions,
+            desc,
             parking,
         }
         .combine(self)
     }
 
-    /// The intake of `count` lights of `dimensions`, `slots` of them decoded at once.
-    fn intake(&self, dimensions: PlanarDesc, count: usize, slots: usize) -> LightIntake<'_> {
+    /// The intake of `count` lights of `desc`, `slots` of them decoded at once.
+    fn intake(&self, desc: PlanarDesc, count: usize, slots: usize) -> LightIntake<'_> {
         LightIntake {
             intake: FrameIntake::new(
                 IntakePlan {
-                    dimensions,
+                    desc,
                     frame_count: count,
                     decode_slots: slots,
                     stage: StackingStage::Preparing,

@@ -1,4 +1,4 @@
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::error::BlackLevelError;
 use common::{Size2us, Vec2us};

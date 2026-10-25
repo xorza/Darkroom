@@ -10,8 +10,8 @@
 use arrayvec::ArrayVec;
 
 use crate::frame::frame_plane::FramePlane;
-use crate::image::flag_counts::FlagCounts;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::quality_flags::QualityFlags;
 
 /// The per-pixel quality a frame carries: how much of each pixel had support, and how confident the
 /// interpolation that produced it was.

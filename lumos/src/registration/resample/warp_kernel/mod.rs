@@ -3,7 +3,7 @@
 
 use glam::{DMat2, DVec2};
 
-use crate::image::pixel_flags::Reach;
+use crate::image::flags::pixel_flags::Reach;
 use crate::math::floor_i32::FloorI32;
 use crate::math::grid;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, LanczosOrder};

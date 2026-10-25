@@ -21,12 +21,12 @@ pub(crate) enum SetCoverage {
 }
 
 /// A normalization a memory plan prices before its frames exist: `frame_count` frames of
-/// `dimensions` read in `slots`, covering the pixels as `coverage` says, measured by `threads`
+/// `desc` read in `slots`, covering the pixels as `coverage` says, measured by `threads`
 /// workers.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlannedNormalization {
     pub(crate) frame_count: usize,
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) slots: Slots,
     pub(crate) normalization: Normalization,
     pub(crate) coverage: SetCoverage,
@@ -51,21 +51,21 @@ impl PlannedNormalization {
     pub(crate) fn heap_bytes(self) -> usize {
         let Self {
             frame_count,
-            dimensions,
+            desc,
             slots,
             normalization,
             coverage,
             threads,
         } = self;
         let samples: ArrayVec<usize, 3> = (0..slots.count())
-            .map(|slot| StratifiedSamples::new(dimensions.size(), slots.mosaic(), slot).len())
+            .map(|slot| StratifiedSamples::new(desc.size(), slots.mosaic(), slot).len())
             .collect();
         let most = samples.iter().copied().max().unwrap_or(0);
         let shared: usize = samples
             .iter()
             .map(|&count| count * (size_of::<usize>() + size_of::<f32>()))
             .sum();
-        let mask = CommonDomain::heap_bytes(dimensions.pixel_count());
+        let mask = CommonDomain::heap_bytes(desc.pixel_count());
         let masks = mask * (1 + slots.mosaic().map_or(0, |_| slots.count()));
         let workers = threads.min(frame_count * slots.count());
         let sample = size_of::<f32>();

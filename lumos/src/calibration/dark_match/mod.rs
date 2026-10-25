@@ -3,10 +3,10 @@
 use crate::calibration::error::DarkMismatch;
 use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::capture_conditions::CaptureConditions;
-use crate::image::calibration_state::CalibrationState;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::temperature_difference::TemperatureDifference;
-use crate::image::temperature_source::TemperatureSource;
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::temperature_difference::TemperatureDifference;
+use crate::image::metadata::temperature_source::TemperatureSource;
 
 /// How a master holding dark signal is taken from a frame — a dark from a light, a flat-dark from
 /// a flat: the factor on its signal, and what could not be compared.

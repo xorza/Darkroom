@@ -3,9 +3,9 @@ use std::{fmt, io};
 use common::Size2us;
 use thiserror::Error;
 
+use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::{ColorFormat, SampleType};
-use crate::image::image_desc::InterleavedDesc;
-use crate::image::raster_format::RasterFormat;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 
 /// Why a size and a pixel layout describe no image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
