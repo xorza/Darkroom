@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::tests::{Mask, check};
+use common::Size2us;
 
 #[derive(Debug)]
 struct RandomMaskCase {

@@ -7,7 +7,7 @@
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The total-flux range of [`star_field`]'s stars, log-uniform: bright, and clear of saturation on
 /// the 0.1 sky at the 4-px FWHM.

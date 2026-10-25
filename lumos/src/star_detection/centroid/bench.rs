@@ -16,7 +16,6 @@ use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BgField, Scene, TrueSource};
 use crate::math::fwhm;
-use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::moffat_fit::MoffatFit;
@@ -24,6 +23,7 @@ use crate::star_detection::centroid::stamp::FitInputs;
 use crate::star_detection::centroid::stamp_bg::StampBg;
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
+use common::Size2us;
 
 /// The sky the stars sit on, which the residual has taken out.
 const SKY: f32 = 0.1;

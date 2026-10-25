@@ -2,8 +2,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::io::raw::black_level::{BlackLevel, DngLevels, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::error::BlackLevelError;
 use crate::io::raw::sensor_layout::SensorLayout;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// RGGB in LibRaw's `filters` word: (0, 0) red, (0, 1) and (1, 0) green, (1, 1) blue, the second
 /// green read as channel 3.

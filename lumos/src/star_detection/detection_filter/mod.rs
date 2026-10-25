@@ -14,11 +14,11 @@ use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::star_detection::convolution::filter_kernels::MatchedKernel;
 use crate::star_detection::detection_plane::Prefilter;
 use crate::star_detection::median_filter::MedianRows;
+use common::Size2us;
 
 /// The bands each worker takes of a plane on average: more than one, so a worker that finishes
 /// early takes another.

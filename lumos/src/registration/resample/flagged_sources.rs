@@ -21,11 +21,11 @@ use common::Buffer2;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;
 use crate::simd::{F32_LANES, Isa};
+use common::Size2us;
 
 /// A flagged frame's sources as the warp samples them, prepared once per frame in a
 /// [`FlagScratch`].
@@ -91,8 +91,8 @@ impl FlagScratch {
     /// pixel is written, so none is cleared.
     pub(crate) fn output(&mut self, size: Size2us) -> Buffer2<u8> {
         match self.output.take() {
-            Some(plane) if Size2us::from(&plane) == size => plane,
-            _ => Buffer2::new_default(size.width, size.height),
+            Some(plane) if plane.size() == size => plane,
+            _ => Buffer2::new_default(size),
         }
     }
 
@@ -112,11 +112,8 @@ impl Shapeless for FlagScratch {}
 
 /// The plane in `slot`, made for `size` when it holds none of that size.
 fn sized(slot: &mut Option<Buffer2<u8>>, size: Size2us) -> &mut Buffer2<u8> {
-    if slot
-        .as_ref()
-        .is_none_or(|plane| Size2us::from(plane) != size)
-    {
-        *slot = Some(Buffer2::new_default(size.width, size.height));
+    if slot.as_ref().is_none_or(|plane| plane.size() != size) {
+        *slot = Some(Buffer2::new_default(size));
     }
     slot.as_mut().expect("the slot was filled above")
 }

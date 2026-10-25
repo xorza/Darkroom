@@ -10,11 +10,11 @@ use common::Buffer2;
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Single-channel image from explicit pixel values, row-major.
 pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
-    LinearImage::from(Buffer2::new(size.width, size.height, pixels))
+    LinearImage::from(Buffer2::new(size, pixels))
 }
 
 /// Three-channel image from planar values, one `Vec` per channel: red, green and blue.

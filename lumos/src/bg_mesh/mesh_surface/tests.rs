@@ -5,7 +5,7 @@ use crate::bg_mesh::mesh_spline::MeshSpline;
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams};
 use crate::bg_mesh::tile_stats::TileComponent;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// Tiles of 32 px, two σ-clip passes and the 3×3 median.
 const PARAMS: MeshParams = MeshParams {
@@ -20,7 +20,7 @@ const PARAMS: MeshParams = MeshParams {
 #[test]
 fn only_the_noise_is_held_to_the_tiles_range() {
     let sigmas = [1.0f32, 1.0, 1.0, 4.0];
-    let pixels = Buffer2::from_fn(64, 128, |x, y| {
+    let pixels = Buffer2::from_fn((64, 128), |x, y| {
         let k = y / 32;
         let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
         (k * k) as f32 + sign * sigmas[k]
@@ -50,7 +50,7 @@ fn only_the_noise_is_held_to_the_tiles_range() {
 /// on whichever vector tier the row runs.
 #[test]
 fn a_pixel_is_its_row_bit_for_bit() {
-    let pixels = Buffer2::from_fn(100, 70, |x, y| {
+    let pixels = Buffer2::from_fn((100, 70), |x, y| {
         let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
         0.1 + 0.001 * x as f32 + 0.002 * y as f32 + sign * (0.01 + 0.0005 * (x / 32) as f32)
     });
@@ -80,7 +80,7 @@ fn a_pixel_is_its_row_bit_for_bit() {
 fn the_lower_tile_row_is_the_last_centre_at_or_before() {
     let mut spline = MeshSpline::default();
     let mut surface = MeshSurface::default();
-    let grid = BgMesh::computed(&Buffer2::new_filled(64, 128, 0.5), None, PARAMS);
+    let grid = BgMesh::computed(&Buffer2::new_filled((64, 128), 0.5), None, PARAMS);
     spline.solve(&grid, TileComponent::Sky, &mut surface);
     for (pos, tile) in [
         (-10.0, 0),
@@ -95,7 +95,7 @@ fn the_lower_tile_row_is_the_last_centre_at_or_before() {
     ] {
         assert_eq!(surface.lower_tile_row(pos), tile, "y = {pos}");
     }
-    let single = BgMesh::computed(&Buffer2::new_filled(32, 32, 0.5), None, PARAMS);
+    let single = BgMesh::computed(&Buffer2::new_filled((32, 32), 0.5), None, PARAMS);
     spline.solve(&single, TileComponent::Sky, &mut surface);
     for pos in [0.0, 15.5, 100.0] {
         assert_eq!(surface.lower_tile_row(pos), 0, "one tile, y = {pos}");

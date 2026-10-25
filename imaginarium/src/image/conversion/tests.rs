@@ -2,6 +2,7 @@ use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::image::conversion::scalar::{self, Luminance};
 use crate::image::{Image, ImageDesc};
 use crate::internals::create_test_image;
+use common::Size2us;
 
 /// `(r·13933 + g·46871 + b·4732) / 65536`, rounded half to even:
 /// red 255 → 3 552 915 / 65536 = 54.21 → 54; green 255 → 11 952 105 / 65536 = 182.38 → 182;
@@ -115,9 +116,9 @@ fn whole_images_convert_by_the_rule() {
         ),
     ];
     for (from, bytes, to, expected) in cases {
-        let image = Image::new_with_data(ImageDesc::new(5, 1, from), bytes).unwrap();
+        let image = Image::new_with_data(ImageDesc::new(Size2us::new(5, 1), from), bytes).unwrap();
         let converted = image.convert_to(to);
-        assert_eq!(converted.desc(), ImageDesc::new(5, 1, to));
+        assert_eq!(converted.desc(), ImageDesc::new(Size2us::new(5, 1), to));
         assert_eq!(converted.bytes(), expected, "{from} -> {to}");
     }
 }
@@ -129,7 +130,8 @@ fn converting_to_the_same_format_copies() {
         let bytes: Vec<u8> = (0..3 * 2 * format.byte_count())
             .map(|i| (i * 37 % 251) as u8)
             .collect();
-        let image = Image::new_with_data(ImageDesc::new(3, 2, format), bytes.clone()).unwrap();
+        let image = Image::new_with_data(ImageDesc::new(Size2us::new(3, 2), format), bytes.clone())
+            .unwrap();
         assert_eq!(image.convert_to(format).bytes(), bytes, "{format}");
         assert_eq!(image.convert(format).bytes(), bytes, "{format}");
     }
@@ -153,7 +155,7 @@ fn conversion_snapshot() {
     }
 
     let digests = ALL_FORMATS.map(|from| {
-        let mut source = create_test_image(from, 37, 5, 3);
+        let mut source = create_test_image(from, Size2us::new(37, 5), 3);
         if from.sample_type == SampleType::F32 {
             let edges = [-1.0f32, -0.0, 1.5, 255.0, f32::INFINITY, f32::NEG_INFINITY];
             let floats: &mut [f32] = bytemuck::cast_slice_mut(source.bytes_mut());

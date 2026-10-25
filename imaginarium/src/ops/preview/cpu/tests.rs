@@ -3,9 +3,10 @@ use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::internals::create_test_image;
 use crate::ops::preview::Preview;
+use common::Size2us;
 
 fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
-    Image::new_with_data(ImageDesc::new(w, h, fmt), bytes).unwrap()
+    Image::new_with_data(ImageDesc::new(Size2us::new(w, h), fmt), bytes).unwrap()
 }
 
 /// Same-size "downscale" is a per-pixel convert: each footprint is one pixel,
@@ -20,7 +21,7 @@ fn test_same_size_is_identity_rgba8() {
             10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160,
         ],
     );
-    let out = Preview::new(2, 2).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(2, 2)).to_rgba8(&src);
     assert_eq!(out.desc(), src.desc());
     assert_eq!(out.bytes(), src.bytes());
 }
@@ -37,9 +38,9 @@ fn test_box_average_2x_to_1x() {
             0, 0, 0, 255, 100, 100, 100, 255, 200, 200, 200, 255, 40, 40, 40, 255,
         ],
     );
-    let out = Preview::new(1, 1).to_rgba8(&src);
-    assert_eq!(out.desc().width, 1);
-    assert_eq!(out.desc().height, 1);
+    let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
+    assert_eq!(out.desc().size.width, 1);
+    assert_eq!(out.desc().size.height, 1);
     assert_eq!(out.bytes(), &[85, 85, 85, 255]);
 }
 
@@ -48,7 +49,7 @@ fn test_box_average_2x_to_1x() {
 #[test]
 fn test_l8_broadcasts_with_opaque_alpha() {
     let src = img(2, 2, ColorFormat::L_U8, vec![0, 100, 200, 40]);
-    let out = Preview::new(1, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[85, 85, 85, 255]);
 }
 
@@ -56,7 +57,7 @@ fn test_l8_broadcasts_with_opaque_alpha() {
 #[test]
 fn test_rgb8_gains_opaque_alpha() {
     let src = img(1, 1, ColorFormat::RGB_U8, vec![12, 34, 56]);
-    let out = Preview::new(1, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[12, 34, 56, 255]);
 }
 
@@ -70,7 +71,7 @@ fn test_u16_rescaled_to_u8() {
         .flat_map(|v| v.to_le_bytes())
         .collect();
     let src = img(1, 1, ColorFormat::RGBA_U16, px);
-    let out = Preview::new(1, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[255, 128, 0, 255]);
 }
 
@@ -83,7 +84,7 @@ fn test_f32_scaled_to_u8() {
         .flat_map(|v| v.to_le_bytes())
         .collect();
     let src = img(1, 1, ColorFormat::RGB_F32, px);
-    let out = Preview::new(1, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[255, 0, 51, 255]);
 }
 
@@ -92,7 +93,7 @@ fn test_f32_scaled_to_u8() {
 #[test]
 fn test_non_integer_downscale_footprints() {
     let src = img(3, 1, ColorFormat::L_U8, vec![0, 60, 120]);
-    let out = Preview::new(2, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(2, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[0, 0, 0, 255, 90, 90, 90, 255]);
 }
 
@@ -101,20 +102,23 @@ fn test_non_integer_downscale_footprints() {
 #[test]
 fn test_footprint_mean_ties_to_even() {
     let src = img(4, 1, ColorFormat::L_U8, vec![1, 2, 2, 3]);
-    let out = Preview::new(2, 1).to_rgba8(&src);
+    let out = Preview::new(Size2us::new(2, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[2, 2, 2, 255, 2, 2, 2, 255]);
 
     let words: Vec<u8> = [257u16, 514].iter().flat_map(|v| v.to_le_bytes()).collect();
     let src = img(2, 1, ColorFormat::L_U16, words);
-    assert_eq!(Preview::new(1, 1).to_rgba8(&src).bytes(), &[2, 2, 2, 255]);
+    assert_eq!(
+        Preview::new(Size2us::new(1, 1)).to_rgba8(&src).bytes(),
+        &[2, 2, 2, 255]
+    );
 }
 
 /// A one-pixel footprint is the format conversion to `RGBA_U8`, for every format.
 #[test]
 fn test_same_size_is_the_conversion() {
     for format in ALL_FORMATS {
-        let src = create_test_image(format, 7, 3, 5);
-        let out = Preview::new(7, 3).to_rgba8(&src);
+        let src = create_test_image(format, Size2us::new(7, 3), 5);
+        let out = Preview::new(Size2us::new(7, 3)).to_rgba8(&src);
         assert_eq!(
             out.bytes(),
             src.convert_to(ColorFormat::RGBA_U8).bytes(),
@@ -127,11 +131,11 @@ fn test_same_size_is_the_conversion() {
 #[test]
 fn test_all_formats_to_rgba8() {
     for format in ALL_FORMATS {
-        let src = create_test_image(format, 17, 11, 3);
-        let out = Preview::new(8, 5).to_rgba8(&src);
+        let src = create_test_image(format, Size2us::new(17, 11), 3);
+        let out = Preview::new(Size2us::new(8, 5)).to_rgba8(&src);
         assert_eq!(out.desc().color_format, ColorFormat::RGBA_U8);
-        assert_eq!(out.desc().width, 8);
-        assert_eq!(out.desc().height, 5);
+        assert_eq!(out.desc().size.width, 8);
+        assert_eq!(out.desc().size.height, 5);
         assert_eq!(out.bytes().len(), 8 * 5 * 4);
     }
 }

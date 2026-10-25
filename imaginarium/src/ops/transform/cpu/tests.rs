@@ -3,14 +3,15 @@ use crate::color::color_format::ALL_FORMATS;
 use crate::image::image_desc::ImageDesc;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::pixels_equal;
+use common::Size2us;
 
-fn image_u8(width: usize, height: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
-    Image::new_with_data(ImageDesc::new(width, height, fmt), bytes).unwrap()
+fn image_u8(size: Size2us, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
+    Image::new_with_data(ImageDesc::new(size, fmt), bytes).unwrap()
 }
 
-fn image_f32(width: usize, height: usize, fmt: ColorFormat, values: &[f32]) -> Image {
+fn image_f32(size: Size2us, fmt: ColorFormat, values: &[f32]) -> Image {
     let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-    Image::new_with_data(ImageDesc::new(width, height, fmt), bytes).unwrap()
+    Image::new_with_data(ImageDesc::new(size, fmt), bytes).unwrap()
 }
 
 /// Identity transform is a bit-exact copy for every format and both filters:
@@ -20,7 +21,7 @@ fn test_identity_is_exact_all_formats() {
     for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
         for format in ALL_FORMATS {
             // Non-power-of-two dimensions to exercise edge rows/columns.
-            let input = create_test_image(format, 13, 7, 0);
+            let input = create_test_image(format, Size2us::new(13, 7), 0);
             let mut output = Image::new_black(input.desc()).unwrap();
 
             Transform::new()
@@ -39,7 +40,7 @@ fn test_identity_is_exact_all_formats() {
 /// Input row [10,20,30,40] translated +1 in x becomes [0,10,20,30].
 #[test]
 fn test_integer_translate_shifts_pixels() {
-    let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 20, 30, 40]);
+    let input = image_u8(Size2us::new(4, 1), ColorFormat::L_U8, vec![10, 20, 30, 40]);
     let mut output = Image::new_black(input.desc()).unwrap();
 
     Transform::new()
@@ -54,8 +55,9 @@ fn test_integer_translate_shifts_pixels() {
 /// `src_x` = 2*ox + 0.5, round-ties-to-even → 0, 2, ... so [10,20,30,40] → [10,30].
 #[test]
 fn test_nearest_downscale_picks_even_columns() {
-    let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 20, 30, 40]);
-    let mut output = Image::new_black(ImageDesc::new(2, 1, ColorFormat::L_U8)).unwrap();
+    let input = image_u8(Size2us::new(4, 1), ColorFormat::L_U8, vec![10, 20, 30, 40]);
+    let mut output =
+        Image::new_black(ImageDesc::new(Size2us::new(2, 1), ColorFormat::L_U8)).unwrap();
 
     Transform::new()
         .scale(Vec2::new(0.5, 0.5))
@@ -70,8 +72,9 @@ fn test_nearest_downscale_picks_even_columns() {
 /// math exact: [0.25,0.75,0.5] → [0.125, 0.5, 0.625].
 #[test]
 fn test_bilinear_half_pixel_average() {
-    let input = image_f32(3, 1, ColorFormat::L_F32, &[0.25, 0.75, 0.5]);
-    let mut output = Image::new_black(ImageDesc::new(3, 1, ColorFormat::L_F32)).unwrap();
+    let input = image_f32(Size2us::new(3, 1), ColorFormat::L_F32, &[0.25, 0.75, 0.5]);
+    let mut output =
+        Image::new_black(ImageDesc::new(Size2us::new(3, 1), ColorFormat::L_F32)).unwrap();
 
     Transform::new()
         .translate(Vec2::new(0.5, 0.0))
@@ -87,12 +90,12 @@ fn test_bilinear_half_pixel_average() {
 #[test]
 fn test_rgba_alpha_is_interpolated() {
     let input = image_f32(
-        2,
-        1,
+        Size2us::new(2, 1),
         ColorFormat::RGBA_F32,
         &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
     );
-    let mut output = Image::new_black(ImageDesc::new(2, 1, ColorFormat::RGBA_F32)).unwrap();
+    let mut output =
+        Image::new_black(ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32)).unwrap();
 
     Transform::new()
         .translate(Vec2::new(0.5, 0.0))
@@ -109,7 +112,7 @@ fn test_rgba_alpha_is_interpolated() {
 #[test]
 fn test_fully_out_of_bounds_is_zero_all_formats() {
     for format in ALL_FORMATS {
-        let input = create_test_image(format, 3, 3, 0);
+        let input = create_test_image(format, Size2us::new(3, 3), 0);
         let mut output = Image::new_black(input.desc()).unwrap();
 
         Transform::new()
@@ -127,8 +130,8 @@ fn test_fully_out_of_bounds_is_zero_all_formats() {
 /// confirming the filter parameter actually changes behavior.
 #[test]
 fn test_filter_modes_differ_on_upscale() {
-    let input = image_u8(2, 1, ColorFormat::L_U8, vec![0, 100]);
-    let out_desc = ImageDesc::new(4, 1, ColorFormat::L_U8);
+    let input = image_u8(Size2us::new(2, 1), ColorFormat::L_U8, vec![0, 100]);
+    let out_desc = ImageDesc::new(Size2us::new(4, 1), ColorFormat::L_U8);
 
     let mut nearest = Image::new_black(out_desc).unwrap();
     Transform::new()
@@ -166,7 +169,7 @@ fn simd_matches_scalar_reference() {
         let Some(kernel) = packed_kernel(tier, format, transform.filter) else {
             continue;
         };
-        let input = create_test_image(format, 37, 19, 7);
+        let input = create_test_image(format, Size2us::new(37, 19), 7);
         let mut scalar = Image::new_black(input.desc()).unwrap();
         let mut simd = Image::new_black(input.desc()).unwrap();
 
@@ -184,7 +187,7 @@ fn simd_matches_scalar_reference() {
 /// give 11.5 → 12, 10 and 11 give 10.5 → 10.
 #[test]
 fn bilinear_rounds_ties_to_even() {
-    let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 11, 11, 12]);
+    let input = image_u8(Size2us::new(4, 1), ColorFormat::L_U8, vec![10, 11, 11, 12]);
     let mut output = Image::new_black(input.desc()).unwrap();
     Transform::new()
         .translate(Vec2::new(0.5, 0.0))
@@ -219,7 +222,7 @@ fn invertibility_needs_a_normal_determinant_and_a_finite_inverse() {
 #[test]
 #[should_panic(expected = "the transform is not invertible")]
 fn a_singular_transform_is_refused() {
-    let input = image_u8(2, 1, ColorFormat::L_U8, vec![1, 2]);
+    let input = image_u8(Size2us::new(2, 1), ColorFormat::L_U8, vec![1, 2]);
     let mut output = Image::new_black(input.desc()).unwrap();
     Transform::new()
         .scale(Vec2::new(0.0, 1.0))

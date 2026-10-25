@@ -9,11 +9,10 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::warp_transform::WarpTransform;
+use common::{Size2us, Vec2us};
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -284,8 +283,8 @@ struct CentralRegions {
 
 /// Extract central region of two images for comparison (avoids border artifacts).
 fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> CentralRegions {
-    let size = Size2us::from(a);
-    debug_assert_eq!(size, Size2us::from(b), "two images of one size");
+    let size = a.size();
+    debug_assert_eq!(size, b.size(), "two images of one size");
     let inner_width = size.width - 2 * margin;
     let inner_height = size.height - 2 * margin;
 

@@ -5,7 +5,7 @@ use crate::calibration::defect_map::DefectMap;
 use crate::calibration::error::CalibrationError;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The sensor a component is of: its CFA pattern, which a defect map does not state, and its
 /// extent.
@@ -95,7 +95,7 @@ mod tests {
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::cfa::constant_cfa;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// The first component sets the sensor, and each of the rest is refused on its pattern before
     /// its extent: a dark of another pattern and size reads as the pattern. A defect map states

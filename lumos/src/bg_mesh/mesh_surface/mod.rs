@@ -10,10 +10,9 @@ use crate::bg_mesh::mesh_axis::MeshAxis;
 use crate::bg_mesh::mesh_surface::simd::{InterpolateSegment, SegmentRamp};
 use crate::bg_mesh::spline::natural_spline::NaturalSpline;
 use crate::bg_mesh::spline::spline_segment::{SplineNode, SplineSegment};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::{Pooled, Scratch, ScratchPool, Shapeless};
 use crate::simd::Kernel;
+use common::{Size2us, Vec2us};
 
 /// One component of a mesh — its sky or its σ — as the natural bicubic spline through the tile
 /// centres carries it to every pixel of the frame: the tiles' values, the y pass's second
@@ -261,8 +260,8 @@ impl SurfaceReader<'_> {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::bg_mesh::mesh_surface::MeshSurface;
-    use crate::math::size2us::Size2us;
     use crate::scratch_pool::ScratchPool;
+    use common::Size2us;
 
     impl MeshSurface {
         /// A surface of `value` at every pixel of a frame of `size`: a mesh of one tile, whose
@@ -282,7 +281,7 @@ pub(crate) mod internals {
         /// The surface read out into a plane.
         #[cfg(test)]
         pub(crate) fn plane(&self) -> common::Buffer2<f32> {
-            let mut plane = common::Buffer2::new_default(self.size.width, self.size.height);
+            let mut plane = common::Buffer2::new_default(self.size);
             let mut reader = self.reader();
             for (y, row) in plane.pixels_mut().chunks_mut(self.size.width).enumerate() {
                 row.copy_from_slice(reader.row(y));

@@ -1,3 +1,4 @@
+use common::Size2us;
 use strum::IntoEnumIterator;
 
 use crate::color::color_format::ALL_FORMATS;
@@ -19,8 +20,8 @@ fn gpu_matches_cpu() {
     };
     let pipeline = GpuBlendPipeline::new(&gpu);
     for format in ALL_FORMATS {
-        let src_cpu = create_test_image(format, 13, 5, 0);
-        let dst_cpu = create_test_image(format, 13, 5, 100);
+        let src_cpu = create_test_image(format, Size2us::new(13, 5), 0);
+        let dst_cpu = create_test_image(format, Size2us::new(13, 5), 100);
         let src = GpuImage::from_image(&gpu, &src_cpu).unwrap();
         let dst = GpuImage::from_image(&gpu, &dst_cpu).unwrap();
         for mode in BlendMode::iter() {

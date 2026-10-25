@@ -3,8 +3,8 @@
 
 use glam::DVec2;
 
-use crate::math::size2us::Size2us;
 use crate::registration::transform::Transform;
+use common::Size2us;
 
 /// The grid a drizzle run reconstructs onto: `scale` times finer than the reference grid, and
 /// large enough for every drop of a validated config.

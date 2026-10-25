@@ -12,7 +12,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::{FlatGain, GainGrid, GainRows};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Each channel's node grid of a frame's [`FrameGain`], wherever it lies: a source gain where the
 /// run holds it for every frame that shares it, and a frame's own in RAM on the resident tier or
@@ -126,7 +126,7 @@ impl StoredGain {
                     planes
                         .iter()
                         .map(|plane| {
-                            Buffer2::new(grid.cols, grid.rows, plane.chunk(0..count).to_vec())
+                            Buffer2::new((grid.cols, grid.rows), plane.chunk(0..count).to_vec())
                         })
                         .collect(),
                     bins,

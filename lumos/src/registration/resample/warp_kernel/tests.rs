@@ -3,7 +3,6 @@ use glam::DVec2;
 
 use crate::image::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
-use crate::math::size2us::Size2us;
 use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{
@@ -13,6 +12,7 @@ use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::simd::isa_tier::IsaTier;
 use crate::simd::{Isa, Kernel};
+use common::Size2us;
 
 const FILTERS: [Filter; 5] = [
     Filter::Bilinear,
@@ -245,7 +245,7 @@ fn bicubic_kernel_hand_values() {
 /// the last centre it holds to the edge pixel: (1.45, −0.45) is (1, 0).
 #[test]
 fn nearest_rounds_a_half_up() {
-    let input = Buffer2::new(2, 2, vec![10.0, 20.0, 30.0, 40.0]);
+    let input = Buffer2::new((2, 2), vec![10.0, 20.0, 30.0, 40.0]);
     let size = Size2us::new(2, 2);
     for (x, y, expected) in [
         (0.4, 0.4, 10.0),

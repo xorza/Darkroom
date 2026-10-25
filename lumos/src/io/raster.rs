@@ -75,12 +75,12 @@ pub(crate) fn linear(
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
     let desc = decoded.desc();
-    if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
+    if desc.size.width > ImageDimensions::MAX_SIDE || desc.size.height > ImageDimensions::MAX_SIDE {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::RasterSideTooLong {
-                width: desc.width,
-                height: desc.height,
+                width: desc.size.width,
+                height: desc.size.height,
             },
         ));
     }

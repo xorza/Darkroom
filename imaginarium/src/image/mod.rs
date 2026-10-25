@@ -25,11 +25,7 @@ impl Image {
     /// Dimensions and format derived from the owned typed storage.
     #[inline]
     pub const fn desc(&self) -> ImageDesc {
-        ImageDesc::new(
-            self.pixels.width(),
-            self.pixels.height(),
-            self.pixels.format(),
-        )
+        ImageDesc::new(self.pixels.size(), self.pixels.format())
     }
 
     /// The interleaved pixel bytes — a zero-copy `&[u8]` view of the typed buffer.
@@ -50,7 +46,7 @@ impl Image {
 
     pub fn new_black(desc: ImageDesc) -> Result<Self> {
         desc.validate()?;
-        let pixels = ImagePixels::new_zeroed(desc.color_format, desc.width, desc.height);
+        let pixels = ImagePixels::new_zeroed(desc.color_format, desc.size);
         Ok(Self { pixels })
     }
 
@@ -65,7 +61,7 @@ impl Image {
                 desc.size_in_bytes()
             )));
         }
-        let pixels = ImagePixels::from_bytes(desc.color_format, desc.width, desc.height, bytes);
+        let pixels = ImagePixels::from_bytes(desc.color_format, desc.size, bytes);
         Ok(Self { pixels })
     }
 
@@ -76,14 +72,14 @@ impl Image {
     /// If `T` is not the format's sample type.
     pub(crate) fn from_samples<T: Sample>(desc: ImageDesc, samples: Vec<T>) -> Result<Self> {
         desc.validate()?;
-        let expected = desc.width * desc.height * desc.color_format.channel_count.count();
+        let expected = desc.size.pixel_count() * desc.color_format.channel_count.count();
         if samples.len() != expected {
             return Err(Error::SizeMismatch(format!(
                 "{} samples do not make a {desc} image of {expected}",
                 samples.len()
             )));
         }
-        let pixels = ImagePixels::from_samples(desc.color_format, desc.width, desc.height, samples);
+        let pixels = ImagePixels::from_samples(desc.color_format, desc.size, samples);
         Ok(Self { pixels })
     }
 
@@ -118,7 +114,7 @@ impl Image {
             return self.clone();
         }
         let mut result = Self {
-            pixels: ImagePixels::new_zeroed(color_format, source.width, source.height),
+            pixels: ImagePixels::new_zeroed(color_format, source.size),
         };
         convert_image(self, &mut result);
         result

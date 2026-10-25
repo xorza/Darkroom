@@ -5,12 +5,12 @@
 //! exactly its own pixels. Every Isa folds the products in one order, so a sample is the same bits
 //! on every CPU.
 
-use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::Validity;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
+use common::Size2us;
 
 /// Weight sums over the taps of a window that hold data, the weight of a tap being `L = wₓ·w_y`.
 #[derive(Debug, Clone, Copy, Default)]

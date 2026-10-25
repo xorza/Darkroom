@@ -14,13 +14,12 @@ use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::internals::images::gray_image;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
+use common::{Size2us, Vec2us};
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
 /// `64·ε` of its absolute sum, and a window the warp normalizes has `Σ|L| ≤ 8·Σ L` (its squares
@@ -556,7 +555,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
 fn a_warp_moves_the_flat_gain_with_the_pixels() {
     let size = Size2us::new(9, 9);
     let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
-    let divisor = Buffer2::from_fn(9, 9, |x, _| 1.0 / (1.0 + x as f32 / 8.0));
+    let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
         &divisor,
         &CfaType::Mono,

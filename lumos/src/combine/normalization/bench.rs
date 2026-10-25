@@ -29,7 +29,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let frames: Vec<StoredFrame> = (0..2)
             .map(|idx| {
                 let image = field.aligned(FRAME, idx).image;
-                let coverage = Buffer2::from_fn(FRAME.width, FRAME.height, |x, y| {
+                let coverage = Buffer2::from_fn(FRAME, |x, y| {
                     let outside = x >= FRAME.width - DITHER[0] || y < DITHER[1];
                     if idx > 0 && outside { 0.0 } else { 1.0 }
                 });

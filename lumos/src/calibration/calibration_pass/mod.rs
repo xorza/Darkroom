@@ -81,8 +81,7 @@ impl CalibrationPass<'_> {
         debug_assert!(imposed.is_none_or(|bytes| bytes.len() == pixels));
         let flags = match image.take_flags() {
             Some(flags) => Some(flags.into_buffer()),
-            None => (imposed.is_some() || saturation.is_some())
-                .then(|| Buffer2::new_default(size.width, size.height)),
+            None => (imposed.is_some() || saturation.is_some()).then(|| Buffer2::new_default(size)),
         };
         let width = size.width.max(1);
         let rows = par::chunks_mut(image.data_mut().pixels_mut(), width);

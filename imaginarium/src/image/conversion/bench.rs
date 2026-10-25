@@ -5,8 +5,10 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion};
 
+use common::Size2us;
+
 use crate::bench::fixture::{self, Backend, Kind, Scale, Variant};
-use crate::bench::scene::{self, HEIGHT, WIDTH};
+use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::image::Image;
 use crate::image::conversion::{scalar, simd};
@@ -19,20 +21,23 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for from in ALL_FORMATS {
         let mut source = None;
         for to in pairs_from(from) {
-            let mut row = Image::new_black(ImageDesc::new(WIDTH, 1, to)).unwrap();
-            group.throughput(fixture::throughput(WIDTH, from.byte_count()));
+            let mut row =
+                Image::new_black(ImageDesc::new(Size2us::new(FRAME.width, 1), to)).unwrap();
+            group.throughput(fixture::throughput(FRAME.width, from.byte_count()));
             for variant in Variant::all(|tier| simd::tier_converter(tier, from, to)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.name), pair_id(from, to));
                 group.bench_function(id, |b| {
                     let src = source
-                        .get_or_insert_with(|| scene::sky(from, WIDTH, 1, 1))
+                        .get_or_insert_with(|| scene::sky(from, Size2us::new(FRAME.width, 1), 1))
                         .bytes();
                     let dst = row.bytes_mut();
                     if let Some(kernel) = variant.kernel {
-                        b.iter(|| unsafe { kernel(black_box(src), black_box(&mut *dst), WIDTH) });
+                        b.iter(|| unsafe {
+                            kernel(black_box(src), black_box(&mut *dst), FRAME.width);
+                        });
                     } else {
                         let convert = scalar::row_converter(from, to);
-                        b.iter(|| convert(black_box(src), black_box(&mut *dst), WIDTH));
+                        b.iter(|| convert(black_box(src), black_box(&mut *dst), FRAME.width));
                     }
                 });
             }
@@ -48,11 +53,11 @@ pub(crate) fn integration(c: &mut Criterion) {
     for from in ALL_FORMATS {
         let mut source = None;
         for to in pairs_from(from) {
-            group.throughput(fixture::throughput(WIDTH * HEIGHT, from.byte_count()));
+            group.throughput(fixture::throughput(FRAME.pixel_count(), from.byte_count()));
             group.bench_function(
                 BenchmarkId::new(Backend::Cpu.id(), pair_id(from, to)),
                 |b| {
-                    let source = source.get_or_insert_with(|| scene::sky(from, WIDTH, HEIGHT, 1));
+                    let source = source.get_or_insert_with(|| scene::sky(from, FRAME, 1));
                     b.iter_with_large_drop(|| black_box(&*source).convert_to(to));
                 },
             );

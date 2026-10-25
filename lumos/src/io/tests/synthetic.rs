@@ -51,12 +51,11 @@ use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::writer;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewImage};
+use common::{Size2us, Vec2us};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {

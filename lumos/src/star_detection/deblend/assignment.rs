@@ -1,9 +1,8 @@
 //! [`Assignment`]: the per-peak boxes and areas a component's split accumulates.
 
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend;
 use crate::star_detection::deblend::pixel::Pixel;
+use common::{Rect2us, Vec2us};
 
 /// Peaks at or under this many are searched in full for every pixel; past it, a cell grid finds a
 /// pixel's nearest peak in the few cells around it, so a component holding thousands of stars
@@ -16,7 +15,7 @@ const FULL_SEARCH_PEAKS: usize = 8;
 /// components.
 #[derive(Debug, Default)]
 pub(crate) struct Assignment {
-    pub(super) bboxes: Vec<URect>,
+    pub(super) bboxes: Vec<Rect2us>,
     pub(super) areas: Vec<usize>,
     /// The grid's origin, the component's top-left pixel.
     origin: Vec2us,
@@ -35,9 +34,9 @@ pub(crate) struct Assignment {
 impl Assignment {
     /// Clear the boxes and areas for `peaks`, and grid them over `bbox` when there are enough:
     /// cells of side `⌈√(area / peaks)⌉`, about one peak each.
-    pub(super) fn reset(&mut self, peaks: &[Pixel], bbox: URect) {
+    pub(super) fn reset(&mut self, peaks: &[Pixel], bbox: Rect2us) {
         self.bboxes.clear();
-        self.bboxes.resize(peaks.len(), URect::empty());
+        self.bboxes.resize(peaks.len(), Rect2us::empty());
         self.areas.clear();
         self.areas.resize(peaks.len(), 0);
         if peaks.len() <= FULL_SEARCH_PEAKS {

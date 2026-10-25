@@ -35,10 +35,9 @@ use crate::internals::cfa::make_cfa;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
 use crate::progress::progress_monitor::ProgressMonitor;
+use common::{Size2us, Vec2us};
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> Admitted {
@@ -76,7 +75,7 @@ fn frame_stats(median: f32, mad: f32) -> Admitted {
 ///   ch2: f0 = [8,9,10], f1 = [200,300,400], f2 = [30,40,50]
 fn affine_rgb_frames(mads: [f32; 3]) -> Vec<StoredFrame> {
     let dimensions = ImageDimensions::new((5, 1), ChannelLayout::Rgb);
-    let coverage = Buffer2::new(5, 1, vec![0.0, 1.0, 1.0, 1.0, 0.0]);
+    let coverage = Buffer2::new((5, 1), vec![0.0, 1.0, 1.0, 1.0, 0.0]);
     let channels = [
         [
             vec![1.0, 2.0, 3.0, 4.0, 5.0],
@@ -499,8 +498,8 @@ fn stacked_frames_land_on_the_reference_level() {
 #[test]
 fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Mono);
-    let coverage = Buffer2::new(4, 1, vec![1.0, 0.5, 1e-4, 0.0]);
-    let confidence = Buffer2::new(4, 1, vec![1.0, 2.0, 4.0, 0.0]);
+    let coverage = Buffer2::new((4, 1), vec![1.0, 0.5, 1e-4, 0.0]);
+    let confidence = Buffer2::new((4, 1), vec![1.0, 2.0, 4.0, 0.0]);
     let image = LinearImage::from_interleaved(dimensions, vec![0.5; 4]);
     let frame = StoredFrame::from_memory(
         image,
@@ -536,12 +535,12 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     let rgb = ImageDimensions::new((4, 1), ChannelLayout::Rgb);
     let warped = StoredFrame::from_memory(
         LinearImage::from_interleaved(rgb, vec![0.5; 12]),
-        FrameQuality::from_coverage(Buffer2::new(4, 1, vec![1.0, 1.0, 1.0, 0.0])),
+        FrameQuality::from_coverage(Buffer2::new((4, 1), vec![1.0, 1.0, 1.0, 0.0])),
         channel_stats(&[(0.5, 0.1); 3]),
     );
     let drops = |weights: [f32; 4]| DropPlanes {
-        weight: Buffer2::new(4, 1, weights.to_vec()),
-        confidence: Buffer2::new(4, 1, weights.to_vec()),
+        weight: Buffer2::new((4, 1), weights.to_vec()),
+        confidence: Buffer2::new((4, 1), weights.to_vec()),
     };
     let drizzled = StoredFrame::from_memory(
         LinearImage::from_interleaved(rgb, vec![0.5; 12]),
@@ -774,7 +773,7 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
                     Some(pixel) if k == 2 => {
                         let mut coverage = vec![1.0; size.pixel_count()];
                         coverage[pixel] = 0.0;
-                        FrameQuality::from_coverage(Buffer2::new(size.width, size.height, coverage))
+                        FrameQuality::from_coverage(Buffer2::new(size, coverage))
                     }
                     _ => FrameQuality::None,
                 };
@@ -862,7 +861,7 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     };
     check(every(Size2us::new(pixel_count, 1)), [0, 3, 6, 9], 199_996);
 
-    let even = Buffer2::from_fn(pixel_count, 1, |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
+    let even = Buffer2::from_fn((pixel_count, 1), |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
     let frame = StoredFrame::from_memory(
         LinearImage::from_interleaved(
             ImageDimensions::new((pixel_count, 1), ChannelLayout::Mono),
@@ -922,8 +921,8 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     let warped = StoredFrame::from_memory(
         image.clone(),
         FrameQuality::Planes {
-            coverage: Buffer2::new(4, 1, vec![1.0; 4]),
-            confidence: Buffer2::new(4, 1, vec![1.0, 0.5, 0.25, 1.0]),
+            coverage: Buffer2::new((4, 1), vec![1.0; 4]),
+            confidence: Buffer2::new((4, 1), vec![1.0, 0.5, 0.25, 1.0]),
         },
         stats.clone(),
     );
@@ -965,8 +964,8 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     // `c` is channel `c`.
     let rgb = ImageDimensions::new((4, 1), ChannelLayout::Rgb);
     let drops = |confidence: [f32; 4]| DropPlanes {
-        weight: Buffer2::new(4, 1, vec![1.0; 4]),
-        confidence: Buffer2::new(4, 1, confidence.to_vec()),
+        weight: Buffer2::new((4, 1), vec![1.0; 4]),
+        confidence: Buffer2::new((4, 1), confidence.to_vec()),
     };
     let drizzled = StoredFrame::from_memory(
         LinearImage::from_interleaved(rgb, vec![0.5; 12]),
@@ -1216,7 +1215,7 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
                 .collect();
             let drops = (0..3)
                 .map(|c| {
-                    let reached = Buffer2::from_fn(8, 1, |x, _| {
+                    let reached = Buffer2::from_fn((8, 1), |x, _| {
                         f32::from(u8::from(reaches(frame, c).contains(&x)))
                     });
                     DropPlanes {
@@ -1337,8 +1336,8 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
                     .collect();
                 let drops = (0..3)
                     .map(|_| DropPlanes {
-                        weight: Buffer2::new(6, 1, reached.clone()),
-                        confidence: Buffer2::new(6, 1, reached.clone()),
+                        weight: Buffer2::new((6, 1), reached.clone()),
+                        confidence: Buffer2::new((6, 1), reached.clone()),
                     })
                     .collect();
                 let mut admitted = channel_stats(&[(median, 0.0); 3]);
@@ -1435,7 +1434,7 @@ fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
             .collect();
         let drops = (0..3)
             .map(|_| {
-                let reach = Buffer2::from_fn(4, 1, |x, _| f32::from(u8::from(x == reached)));
+                let reach = Buffer2::from_fn((4, 1), |x, _| f32::from(u8::from(x == reached)));
                 DropPlanes {
                     weight: reach.clone(),
                     confidence: reach,

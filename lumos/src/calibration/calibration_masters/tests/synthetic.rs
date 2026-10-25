@@ -17,9 +17,8 @@ use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
+use common::{Size2us, Vec2us};
 
 /// A uniformly lit sky seen through a vignette, with bias and dark on top, calibrates to the sky
 /// times the flat's mean at every pixel. Noiseless, so the check is the arithmetic's own: the

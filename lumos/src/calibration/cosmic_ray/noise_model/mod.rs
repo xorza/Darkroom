@@ -6,9 +6,9 @@ use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::image::flat_gain::FlatGain;
 use crate::image::image_metadata::ImageMetadata;
 use crate::math::statistics::spread::Spread;
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::ccd_noise::NoiseAt;
+use common::Vec2us;
 
 /// [`NoiseEstimation`] resolved on a frame: the electrons one unit of its samples is worth, when
 /// known.

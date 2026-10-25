@@ -14,7 +14,7 @@ use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
 use crate::image::cfa::bayer_phase::BayerPhase;
 use crate::image::cfa::cfa_pattern::CfaPattern;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Phase-sized masks a phase's detection holds beside the mono detector's: the frame's [`KeptOut`]
 /// sampled to the phase, two.
@@ -71,7 +71,7 @@ impl<'a> BayerDetector<'a> {
         bgs: &PixelBgs<'_>,
         kept_out: Option<&KeptOut>,
     ) -> &BitBuffer2 {
-        let size = Size2us::from(&*data);
+        let size = data.size();
         let Self {
             mono,
             pattern,

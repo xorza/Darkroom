@@ -5,7 +5,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::dark_comparison::DarkComparison;
 use crate::internals::cfa::constant_cfa;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 fn frame(value: f32, exposure: f64) -> CfaImage {
     let mut frame = constant_cfa(Size2us::new(2, 2), value, CfaType::Mono);

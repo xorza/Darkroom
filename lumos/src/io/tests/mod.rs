@@ -2,7 +2,7 @@
 mod real_data;
 mod synthetic;
 
-use common::{Buffer2, TempDir, fs};
+use common::{Buffer2, Size2us, TempDir, fs};
 use fits_well::image::SampleType;
 use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
@@ -22,7 +22,7 @@ use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::raster;
 use crate::io::writer;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 #[test]
 fn metadata_default() {
@@ -42,8 +42,8 @@ fn convert_to_imaginarium_image_grayscale() {
     let image: Image = astro.into();
     let desc = image.desc();
 
-    assert_eq!(desc.width, 3);
-    assert_eq!(desc.height, 2);
+    assert_eq!(desc.size.width, 3);
+    assert_eq!(desc.size.height, 2);
     assert_eq!(desc.color_format, ColorFormat::L_F32);
 
     let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
@@ -68,8 +68,8 @@ fn convert_to_imaginarium_image_rgb() {
     let image: Image = astro.into();
     let desc = image.desc();
 
-    assert_eq!(desc.width, 2);
-    assert_eq!(desc.height, 2);
+    assert_eq!(desc.size.width, 2);
+    assert_eq!(desc.size.height, 2);
     assert_eq!(desc.color_format, ColorFormat::RGB_F32);
 
     let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
@@ -92,8 +92,8 @@ fn convert_fits_to_imaginarium_image() {
     let image: Image = astro.into();
 
     let desc = image.desc();
-    assert_eq!(desc.width, 100);
-    assert_eq!(desc.height, 100);
+    assert_eq!(desc.size.width, 100);
+    assert_eq!(desc.size.height, 100);
     assert_eq!(desc.color_format, ColorFormat::L_F32);
 }
 
@@ -130,7 +130,7 @@ fn load_full_example_fits() {
 
 #[test]
 fn from_image_no_stride_padding() {
-    let desc = ImageDesc::new(3, 2, ColorFormat::L_F32);
+    let desc = ImageDesc::new(Size2us::new(3, 2), ColorFormat::L_F32);
     let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
@@ -185,7 +185,7 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
     let path = dir.join("holes.tiff");
     let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
     let image = Image::new_with_data(
-        ImageDesc::new(2, 2, ColorFormat::L_F32),
+        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_F32),
         bytemuck::cast_slice(&samples).to_vec(),
     )
     .unwrap();
@@ -221,7 +221,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let float_path = dir.join("linear_float.tiff");
     let float_pixels = vec![-0.25f32, 0.5, 1.25, 3.0];
     let float_image = Image::new_with_data(
-        ImageDesc::new(2, 2, ColorFormat::L_F32),
+        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_F32),
         bytemuck::cast_slice(&float_pixels).to_vec(),
     )
     .unwrap();
@@ -245,7 +245,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let png = dir.join("display.png");
     let jpeg = dir.join("lossy.jpg");
     let integer_image = Image::new_with_data(
-        ImageDesc::new(2, 2, ColorFormat::L_U8),
+        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_U8),
         vec![0, 64, 128, 255],
     )
     .unwrap();
@@ -280,7 +280,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let alpha_path = dir.join("alpha.tiff");
     let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
     let alpha_image = Image::new_with_data(
-        ImageDesc::new(2, 1, ColorFormat::RGBA_F32),
+        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32),
         bytemuck::cast_slice(&alpha_pixels).to_vec(),
     )
     .unwrap();
@@ -360,7 +360,7 @@ fn roundtrip_linear_to_image_to_linear() {
 
 #[test]
 fn image_rgba_to_linear_drops_alpha() {
-    let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
+    let desc = ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32);
     let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
@@ -418,7 +418,7 @@ fn from_planar_channels_grayscale() {
     assert!(image.is_grayscale());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
 
-    let plane = Buffer2::new(2, 2, vec![5.0, 6.0, 7.0, 8.0]);
+    let plane = Buffer2::new((2, 2), vec![5.0, 6.0, 7.0, 8.0]);
     let pixels = plane.pixels().as_ptr();
     let image = LinearImage::from(plane);
     assert_eq!(
@@ -442,9 +442,9 @@ fn from_planar_channels_rgb() {
     assert_eq!(image.channel(2).pixels(), &[5.0, 6.0]);
 
     let planes = [
-        Buffer2::new(2, 1, vec![7.0, 8.0]),
-        Buffer2::new(2, 1, vec![9.0, 10.0]),
-        Buffer2::new(2, 1, vec![11.0, 12.0]),
+        Buffer2::new((2, 1), vec![7.0, 8.0]),
+        Buffer2::new((2, 1), vec![9.0, 10.0]),
+        Buffer2::new((2, 1), vec![11.0, 12.0]),
     ];
     let green_pixels = planes[1].pixels().as_ptr();
     let image = LinearImage::from(planes);
@@ -462,9 +462,9 @@ fn from_planar_channels_rgb() {
 #[should_panic(expected = "all RGB planes must share width")]
 fn rgb_planes_reject_mismatched_dimensions() {
     let _image = LinearImage::from([
-        Buffer2::new(2, 1, vec![1.0, 2.0]),
-        Buffer2::new(1, 1, vec![3.0]),
-        Buffer2::new(2, 1, vec![4.0, 5.0]),
+        Buffer2::new((2, 1), vec![1.0, 2.0]),
+        Buffer2::new((1, 1), vec![3.0]),
+        Buffer2::new((2, 1), vec![4.0, 5.0]),
     ]);
 }
 
@@ -474,16 +474,16 @@ fn rgb_planes_reject_mismatched_dimensions() {
 #[test]
 #[should_panic(expected = "width must be positive")]
 fn single_plane_rejects_an_empty_image() {
-    let _image = LinearImage::from(Buffer2::<f32>::new(0, 4, vec![]));
+    let _image = LinearImage::from(Buffer2::<f32>::new((0, 4), vec![]));
 }
 
 #[test]
 #[should_panic(expected = "height must be positive")]
 fn rgb_planes_reject_an_empty_image() {
     let _image = LinearImage::from([
-        Buffer2::<f32>::new(4, 0, vec![]),
-        Buffer2::<f32>::new(4, 0, vec![]),
-        Buffer2::<f32>::new(4, 0, vec![]),
+        Buffer2::<f32>::new((4, 0), vec![]),
+        Buffer2::<f32>::new((4, 0), vec![]),
+        Buffer2::<f32>::new((4, 0), vec![]),
     ]);
 }
 

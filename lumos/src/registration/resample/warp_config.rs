@@ -157,15 +157,11 @@ pub(crate) mod internals {
             transform: &WarpTransform,
         ) -> Buffer2<f32> {
             let image = LinearImage::from_interleaved(
-                ImageDimensions::new((input.width(), input.height()), ChannelLayout::Mono),
+                ImageDimensions::new(input.size(), ChannelLayout::Mono),
                 input.pixels().to_vec(),
             );
             let warped = self.warp(&image, transform);
-            Buffer2::new(
-                input.width(),
-                input.height(),
-                warped.image.channel(0).pixels().to_vec(),
-            )
+            Buffer2::new(input.size(), warped.image.channel(0).pixels().to_vec())
         }
 
         /// The default parameters with `method` as the kernel.

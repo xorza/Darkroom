@@ -49,13 +49,10 @@ fn grid_shape_and_flat_skies() {
         (Size2us::new(64, 64), 32, 2, 2, -0.5),
         (Size2us::new(64, 64), 64, 1, 1, 100.0),
     ] {
-        let grid = make_grid(
-            &Buffer2::new_filled(size.width, size.height, value),
-            tile_size,
-        );
+        let grid = make_grid(&Buffer2::new_filled(size, value), tile_size);
         assert_eq!(
-            (grid.stats.width(), grid.stats.height()),
-            (cols, rows),
+            grid.stats.size(),
+            Size2us::new(cols, rows),
             "{size:?} at {tile_size}"
         );
         for stats in grid.stats.pixels() {
@@ -80,7 +77,7 @@ fn grid_shape_and_flat_skies() {
 #[test]
 fn skewed_tile_sky_sits_below_median() {
     let ramp = |j: usize| 0.1 + j as f32 * 2e-5 + if j >= 412 { 0.005 } else { 0.0 };
-    let pixels = Buffer2::from_fn(32, 32, |x, y| {
+    let pixels = Buffer2::from_fn((32, 32), |x, y| {
         let i = y * 32 + x;
         ramp(i.min(1023 - i))
     });
@@ -100,7 +97,7 @@ fn skewed_tile_sky_sits_below_median() {
 /// 0.6. A 2 × 2 grid is not median-filtered.
 #[test]
 fn masked_pixels_never_reach_the_statistics() {
-    let mut pixels = Buffer2::from_fn(64, 64, |x, y| [[0.2f32, 0.4], [0.6, 0.8]][y / 32][x / 32]);
+    let mut pixels = Buffer2::from_fn((64, 64), |x, y| [[0.2f32, 0.4], [0.6, 0.8]][y / 32][x / 32]);
     let mut mask = BitBuffer2::new_filled(Size2us::new(64, 64), false);
     for y in 2..32 {
         for x in 0..32 {
@@ -126,7 +123,7 @@ fn masked_pixels_never_reach_the_statistics() {
 /// for nine samples, 2·1.4826·1.1011, and no value lies past 3σ ≈ 9.8.
 #[test]
 fn median_computation_correctness() {
-    let pixels = Buffer2::new(3, 3, (1..=9).map(|x| x as f32).collect());
+    let pixels = Buffer2::new((3, 3), (1..=9).map(|x| x as f32).collect());
     let stats = make_grid(&pixels, 3).stats[(0, 0)];
     assert_eq!(
         (stats.sky, stats.sigma),
@@ -140,7 +137,7 @@ fn mad_sigma_known_value() {
     // whole image in one 10×10 tile and gives 10 copies of each value.
     let width = 10;
     let height = 10;
-    let pixels = Buffer2::from_fn(width, height, |x, _| x as f32);
+    let pixels = Buffer2::from_fn((width, height), |x, _| x as f32);
     let grid = make_grid(&pixels, 10);
     let stats = grid.stats[(0, 0)];
 
@@ -176,7 +173,7 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
             10_000.0
         }
     };
-    let pixels = Buffer2::from_fn(32, 32, |x, y| {
+    let pixels = Buffer2::from_fn((32, 32), |x, y| {
         let i = y * 32 + x;
         value(i.min(1023 - i))
     });
@@ -238,10 +235,7 @@ fn tile_centres_are_the_mean_pixel_index() {
         },
     ];
     for case in cases {
-        let grid = make_grid(
-            &Buffer2::new_filled(case.size.width, case.size.height, 0.5),
-            case.tile_size,
-        );
+        let grid = make_grid(&Buffer2::new_filled(case.size, 0.5), case.tile_size);
         assert_eq!(grid.centers_x, case.centers_x, "{:?}", case.size);
         assert_eq!(grid.centers_y, case.centers_y, "{:?}", case.size);
     }
@@ -259,7 +253,7 @@ fn tile_centres_are_the_mean_pixel_index() {
 fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
     let size = 160;
     let plane = |x: f32, y: f32| 0.1 + 1e-3 * x + 2e-3 * y;
-    let pixels = Buffer2::from_fn(size, size, |x, y| plane(x as f32, y as f32));
+    let pixels = Buffer2::from_fn((size, size), |x, y| plane(x as f32, y as f32));
     let grid = make_grid(&pixels, 32);
     let sigma = grid.stats[(2, 2)].sigma;
     for ty in 0..5 {
@@ -279,7 +273,7 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
         }
     }
 
-    let mut pixels = Buffer2::new_filled(size, size, 50.0f32);
+    let mut pixels = Buffer2::new_filled((size, size), 50.0f32);
     for (tx, ty) in [(0, 0), (2, 0), (2, 2)] {
         for y in 32 * ty..32 * (ty + 1) {
             for x in 32 * tx..32 * (tx + 1) {
@@ -298,7 +292,7 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
 /// every tile leaves no sky to take, and each tile reads all its pixels: 15.5/64 and 47.5/64.
 #[test]
 fn a_masked_tile_takes_its_neighbours_sky() {
-    let pixels = Buffer2::from_fn(64, 32, |x, _| x as f32 / 64.0);
+    let pixels = Buffer2::from_fn((64, 32), |x, _| x as f32 / 64.0);
     let mut mask = BitBuffer2::new_filled(Size2us::new(64, 32), false);
     for y in 0..32 {
         for x in 0..32 {
@@ -316,7 +310,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
 
     // Four tiles of the ramp x/128, the first three masked: each searches outward ring by ring
     // past the bad ones, and all three take tile 3's 111.5/128.
-    let wide = Buffer2::from_fn(128, 32, |x, _| x as f32 / 128.0);
+    let wide = Buffer2::from_fn((128, 32), |x, _| x as f32 / 128.0);
     let mut first_three = BitBuffer2::new_filled(Size2us::new(128, 32), false);
     for y in 0..32 {
         for x in 0..96 {
@@ -334,7 +328,7 @@ fn a_masked_tile_takes_its_neighbours_sky() {
 #[test]
 fn a_grid_under_three_tiles_is_not_filtered() {
     let skies = [[0.1f32, 0.2], [0.3, 0.9]];
-    let pixels = Buffer2::from_fn(64, 64, |x, y| skies[y / 32][x / 32]);
+    let pixels = Buffer2::from_fn((64, 64), |x, y| skies[y / 32][x / 32]);
     let grid = make_grid(&pixels, 32);
     for (ty, row) in skies.iter().enumerate() {
         for (tx, &sky) in row.iter().enumerate() {

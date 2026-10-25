@@ -26,8 +26,14 @@ pub(super) fn apply(
     let uniform = Params {
         inv_matrix: inv.matrix2.to_cols_array(),
         inv_translation: inv.translation.to_array(),
-        input_size: [extent(input_desc.width), extent(input_desc.height)],
-        output_size: [extent(output_desc.width), extent(output_desc.height)],
+        input_size: [
+            extent(input_desc.size.width),
+            extent(input_desc.size.height),
+        ],
+        output_size: [
+            extent(output_desc.size.width),
+            extent(output_desc.size.height),
+        ],
         channels: extent(format.channel_count.count()),
         elem_size: extent(format.sample_type.size()),
         filter_mode: match params.filter {
@@ -41,7 +47,7 @@ pub(super) fn apply(
         KernelJob {
             params: bytemuck::bytes_of(&uniform),
             buffers: &[input.read_buffer(), output.write_buffer()],
-            invocations: extent(output_desc.width * output_desc.height),
+            invocations: extent(output_desc.size.width * output_desc.size.height),
             // Sub-word elements are ORed into the output.
             output: if format.sample_type.size() < 4 {
                 OutputStart::Zeroed

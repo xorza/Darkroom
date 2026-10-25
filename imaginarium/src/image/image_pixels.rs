@@ -2,7 +2,7 @@
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use common::Buffer2;
+use common::{Buffer2, Size2us};
 
 /// Tightly packed pixels of one of the nine formats, typed.
 #[derive(Debug, Clone)]
@@ -103,17 +103,12 @@ fn build_for(format: ColorFormat, builder: impl Build) -> ImagePixels {
 /// All-zero pixels.
 #[derive(Debug)]
 struct Zeroed {
-    width: usize,
-    height: usize,
+    size: Size2us,
 }
 
 impl Build for Zeroed {
     fn build<T: Stored<N>, const N: usize>(self) -> ImagePixels {
-        T::wrap(Buffer2::new_filled(
-            self.width,
-            self.height,
-            [T::zeroed(); N],
-        ))
+        T::wrap(Buffer2::new_filled(self.size, [T::zeroed(); N]))
     }
 }
 
@@ -121,8 +116,7 @@ impl Build for Zeroed {
 /// storage aligned for their type.
 #[derive(Debug)]
 struct FromBytes {
-    width: usize,
-    height: usize,
+    size: Size2us,
     bytes: Vec<u8>,
 }
 
@@ -130,15 +124,14 @@ impl Build for FromBytes {
     fn build<T: Stored<N>, const N: usize>(self) -> ImagePixels {
         let pixels = bytemuck::try_cast_vec::<u8, [T; N]>(self.bytes)
             .unwrap_or_else(|(_, bytes)| bytemuck::pod_collect_to_vec(&bytes));
-        T::wrap(Buffer2::new(self.width, self.height, pixels))
+        T::wrap(Buffer2::new(self.size, pixels))
     }
 }
 
 /// Pixels taken from typed samples, keeping their allocation.
 #[derive(Debug)]
 struct FromSamples<T> {
-    width: usize,
-    height: usize,
+    size: Size2us,
     samples: Vec<T>,
 }
 
@@ -147,17 +140,16 @@ impl<T: Sample> Build for FromSamples<T> {
         let pixels = bytemuck::try_cast_vec::<T, [U; N]>(self.samples)
             .map_err(|(error, _)| error)
             .expect("the samples are of the format's sample type, whole pixels of it");
-        U::wrap(Buffer2::new(self.width, self.height, pixels))
+        U::wrap(Buffer2::new(self.size, pixels))
     }
 }
 
 impl ImagePixels {
-    /// Takes `samples`, which must be of `format`'s sample type and hold exactly
-    /// `width · height` of its pixels.
+    /// Takes `samples`, which must be of `format`'s sample type and hold exactly the pixels of
+    /// `size`.
     pub(crate) fn from_samples<T: Sample>(
         format: ColorFormat,
-        width: usize,
-        height: usize,
+        size: Size2us,
         samples: Vec<T>,
     ) -> Self {
         assert_eq!(
@@ -165,35 +157,16 @@ impl ImagePixels {
             T::TYPE,
             "samples of another type than {format}"
         );
-        build_for(
-            format,
-            FromSamples {
-                width,
-                height,
-                samples,
-            },
-        )
+        build_for(format, FromSamples { size, samples })
     }
 
-    pub(crate) fn new_zeroed(format: ColorFormat, width: usize, height: usize) -> Self {
-        build_for(format, Zeroed { width, height })
+    pub(crate) fn new_zeroed(format: ColorFormat, size: Size2us) -> Self {
+        build_for(format, Zeroed { size })
     }
 
-    /// Takes `bytes`, which must hold exactly `width · height` pixels of `format`.
-    pub(crate) fn from_bytes(
-        format: ColorFormat,
-        width: usize,
-        height: usize,
-        bytes: Vec<u8>,
-    ) -> Self {
-        build_for(
-            format,
-            FromBytes {
-                width,
-                height,
-                bytes,
-            },
-        )
+    /// Takes `bytes`, which must hold exactly the pixels of `size` in `format`.
+    pub(crate) fn from_bytes(format: ColorFormat, size: Size2us, bytes: Vec<u8>) -> Self {
+        build_for(format, FromBytes { size, bytes })
     }
 
     pub(crate) const fn format(&self) -> ColorFormat {
@@ -210,12 +183,8 @@ impl ImagePixels {
         }
     }
 
-    pub(crate) const fn width(&self) -> usize {
-        with_pixels!(self, pixels => pixels.width())
-    }
-
-    pub(crate) const fn height(&self) -> usize {
-        with_pixels!(self, pixels => pixels.height())
+    pub(crate) const fn size(&self) -> Size2us {
+        with_pixels!(self, pixels => pixels.size())
     }
 
     pub(crate) fn bytes(&self) -> &[u8] {

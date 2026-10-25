@@ -9,10 +9,9 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::unsafe_send_ptr::UnsafeSendPtr;
+use common::{Size2us, Vec2us};
 
 /// Which pixels of an image carry which [`QualityFlags`].
 ///
@@ -33,7 +32,7 @@ impl PixelFlags {
         size: Size2us,
         flags_at: impl Fn(usize) -> QualityFlags + Sync,
     ) -> Option<Self> {
-        let mut bits = Buffer2::new_default(size.width, size.height);
+        let mut bits = Buffer2::new_default(size);
         par::iter_mut(bits.pixels_mut())
             .enumerate()
             .for_each(|(idx, byte)| *byte = flags_at(idx).byte());
@@ -88,7 +87,7 @@ impl PixelFlags {
             return None;
         }
         let mut plane = Self {
-            bits: Buffer2::new_default(size.width, size.height),
+            bits: Buffer2::new_default(size),
             counts: FlagCounts::default(),
         };
         plane.or_at(flags, idxs);
@@ -123,7 +122,7 @@ impl PixelFlags {
         out: &mut Buffer2<u8>,
         scratch: &DilationScratch,
     ) {
-        debug_assert_eq!(Size2us::from(&*out), self.size());
+        debug_assert_eq!(out.size(), self.size());
         out.pixels_mut().copy_from_slice(self.bits.pixels());
         dilate_bytes(out.pixels_mut(), self.size(), spec, scratch, STRIP_WIDTH);
     }
@@ -141,7 +140,7 @@ impl PixelFlags {
     }
 
     pub const fn size(&self) -> Size2us {
-        Size2us::new(self.bits.width(), self.bits.height())
+        self.bits.size()
     }
 
     /// Each pixel's [`QualityFlags::byte`], row-major.
@@ -485,7 +484,7 @@ impl WindowParts {
 pub(crate) mod internals {
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     impl PixelFlags {
         /// The pixels where any of `planes` holds a non-finite sample, flagged
@@ -518,7 +517,7 @@ mod tests {
     };
     use crate::image::quality_flags::QualityFlags;
     use crate::internals::test_rng::TestRng;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     #[test]
     fn a_pixel_has_no_data_when_any_channel_is_non_finite() {
@@ -570,12 +569,7 @@ mod tests {
         assert!(PixelFlags::of_non_finite(size, &[&green]).is_none());
 
         // The bytes round-trip with their counts, as a spill reads them back.
-        let restored = PixelFlags::from_bytes(Buffer2::new(
-            size.width,
-            size.height,
-            flags.bytes().to_vec(),
-        ))
-        .unwrap();
+        let restored = PixelFlags::from_bytes(Buffer2::new(size, flags.bytes().to_vec())).unwrap();
         assert_eq!(restored.bytes(), flags.bytes());
         assert_eq!(restored.count(QualityFlags::NO_DATA), 2);
     }
@@ -608,7 +602,7 @@ mod tests {
             })
             .unwrap();
             let scratch = DilationScratch::default();
-            let mut out = Buffer2::new_default(width, height);
+            let mut out = Buffer2::new_default((width, height));
             for reach in [1, 40].map(Reach::symmetric) {
                 let spec = DilationSpec {
                     reach,

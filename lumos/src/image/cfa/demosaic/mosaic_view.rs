@@ -15,8 +15,7 @@ use rayon::prelude::*;
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::tiled::{NativePixel, OutputPlanes, TileKernel, TilePlace};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// A color filter a demosaic reads a mosaic through, anchored at the mosaic's first pixel.
 pub(crate) trait MosaicPattern: Copy + Sync {
@@ -41,7 +40,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
     /// # Panics
     /// When `data` is empty.
     pub(crate) fn new(data: &'a Buffer2<f32>, pattern: P) -> Self {
-        let size = Size2us::from(data);
+        let size = data.size();
         assert!(
             size.width > 0 && size.height > 0,
             "a mosaic of {size} holds no samples"
@@ -257,15 +256,14 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::demosaic::mosaic_view::MosaicView;
     use crate::internals::cfa::XTRANS_PATTERN;
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
+    use common::{Size2us, Vec2us};
 
     /// A view takes its plane's size, which must not be empty, reads each pixel's own sample as it
     /// is, and balances it by its color's gain: on RGGB, (1, 0) is green under 1, (1, 1) blue
     /// under 4, so 0.5 reads 0.5 and 2.
     #[test]
     fn a_view_reads_its_samples_and_balances_them_by_color() {
-        let data = Buffer2::new_filled(6, 4, 0.5);
+        let data = Buffer2::new_filled((6, 4), 0.5);
         let bayer = MosaicView::new(&data, CfaPattern::Rggb).with_gains([2.0, 1.0, 4.0]);
         assert_eq!(bayer.size, Size2us::new(6, 4));
         let blue = bayer.native(Vec2us::new(1, 1));
@@ -277,7 +275,7 @@ mod tests {
             Size2us::new(6, 4)
         );
         for size in [Size2us::new(0, 2), Size2us::new(2, 0)] {
-            let data = Buffer2::new_default(size.width, size.height);
+            let data = Buffer2::new_default(size);
             let refused = std::panic::catch_unwind(|| {
                 MosaicView::new(&data, CfaPattern::Rggb);
             });

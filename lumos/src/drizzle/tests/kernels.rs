@@ -10,7 +10,7 @@ use glam::DVec2;
 use super::*;
 use crate::image::channel_layout::ChannelLayout;
 use crate::internals::images::rgb_image;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// One pixel of an image set apart from its background.
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +30,7 @@ impl OnePixel {
 
 /// A pixel-weight map that lets only `pixel` deposit.
 fn only(size: Size2us, pixel: Vec2us) -> Buffer2<f32> {
-    let mut weights = Buffer2::new_filled(size.width, size.height, 0.0);
+    let mut weights = Buffer2::new_filled(size, 0.0);
     weights[(pixel.x, pixel.y)] = 1.0;
     weights
 }
@@ -452,7 +452,7 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
     let size = Size2us::new(12, 12);
     let pixel = Vec2us::new(5, 5);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
-    let mut excluded = Buffer2::new_filled(size.width, size.height, 1.0);
+    let mut excluded = Buffer2::new_filled(size, 1.0);
     excluded[(pixel.x, pixel.y)] = 0.0;
     for (kernel, footprint) in [
         (DrizzleKernel::Turbo, 9),
@@ -508,7 +508,7 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
 #[test]
 fn pixel_weights_scale_their_pixel_share() {
     let size = Size2us::new(4, 4);
-    let mut half = Buffer2::new_filled(4, 4, 1.0f32);
+    let mut half = Buffer2::new_filled((4, 4), 1.0f32);
     half[(1, 1)] = 0.5;
     let mut acc = accumulator(
         ImageDimensions::new(size, ChannelLayout::Mono),
@@ -536,7 +536,7 @@ fn a_frame_of_zero_pixel_weights_is_not_gathered() {
         vec![constant_image(size, 3.0), constant_image(size, 100.0)],
         &[Transform::identity(); 2],
     );
-    frames[1].pixel_weight_map = Some(Buffer2::new_filled(size.width, size.height, 0.0));
+    frames[1].pixel_weight_map = Some(Buffer2::new_filled(size, 0.0));
     let product = drizzle_plain(frames, &usual_config(DrizzleKernel::Turbo)).unwrap();
     let weight = weight_plane(&product);
     for (idx, &value) in product.image.channel(0).pixels().iter().enumerate() {

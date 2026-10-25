@@ -176,8 +176,8 @@ fn register_transform(library: &mut Library) {
                 let image = inputs[0].required_custom::<Image>();
                 let scalar = |idx: usize| inputs[idx].required_f64() as f32;
                 let center = Vec2::new(
-                    image.desc().width as f32 / 2.0,
-                    image.desc().height as f32 / 2.0,
+                    image.desc().size.width as f32 / 2.0,
+                    image.desc().size.height as f32 / 2.0,
                 );
                 let scale = Vec2::new(scalar(1), scalar(2));
                 let transform = Transform::new()
@@ -242,6 +242,7 @@ fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
 
 #[cfg(test)]
 mod tests {
+    use common::Size2us;
     use imaginarium::{ColorFormat, ContrastBrightness};
     use scenarium::DynamicValue;
 
@@ -250,7 +251,7 @@ mod tests {
 
     #[test]
     fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
-        let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
+        let desc = imaginarium::ImageDesc::new(Size2us::new(9, 4), ColorFormat::RGBA_U8);
         let op = ContrastBrightness::new(1.5, 0.1);
         let pattern: Vec<u8> = (0..desc.size_in_bytes())
             .map(|idx| u8::try_from(idx % 251).unwrap())

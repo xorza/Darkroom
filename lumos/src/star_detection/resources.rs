@@ -6,7 +6,6 @@ use common::Buffer2;
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::{Pooled, ScratchPool};
 use crate::star_detection::bg::workspace::BgWorkspace;
 use crate::star_detection::convolution;
@@ -19,6 +18,7 @@ use crate::star_detection::duplicates::Duplicates;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
+use common::Size2us;
 
 /// Reusable planes and stage workspaces for star detection, kept across `detect()` calls so a
 /// frame after the first allocates nothing but the stars it hands back.
@@ -123,9 +123,9 @@ impl DetectionResources {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::math::size2us::Size2us;
     use crate::scratch_pool::ScratchPool;
     use crate::star_detection::resources::DetectionResources;
+    use common::Size2us;
 
     #[cfg(test)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,9 +160,9 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::size2us::Size2us;
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::resources::internals::BufferCounts;
+    use common::Size2us;
 
     const fn counts(floats: usize, bitmasks: usize) -> BufferCounts {
         BufferCounts {

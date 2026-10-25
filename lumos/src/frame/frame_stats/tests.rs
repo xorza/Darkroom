@@ -16,9 +16,8 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::noise::ccd_noise::CcdNoise;
+use common::{Size2us, Vec2us};
 
 const SEED: u64 = 7;
 
@@ -88,7 +87,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
                 (0.5 + sigma * f64::from(rng.next_gaussian_f32())) as f32
             })
             .collect();
-        let divisor = Buffer2::from_fn(size.width, size.height, |x, _| (1.0 / gain(x)) as f32);
+        let divisor = Buffer2::from_fn(size, |x, _| (1.0 / gain(x)) as f32);
         (pixels, divisor)
     };
     let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));

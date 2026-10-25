@@ -4,7 +4,7 @@
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Samples a slot's gain fit runs on, at most: a stratified 65 536 of its measured pixels.
 pub(crate) const SAMPLE_LIMIT: usize = 65_536;

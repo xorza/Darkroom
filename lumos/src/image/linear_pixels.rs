@@ -9,7 +9,7 @@ use imaginarium::{ChannelCount, Image};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -29,13 +29,13 @@ impl LinearPixels {
         );
 
         if dimensions.is_grayscale() {
-            return Buffer2::new(dimensions.width(), dimensions.height(), pixels).into();
+            return Buffer2::new(dimensions.size(), pixels).into();
         }
 
         // Keeps the allocation when its capacity is a whole number of pixels, else copies once.
         let pixels: Vec<[f32; 3]> = bytemuck::try_cast_vec(pixels)
             .unwrap_or_else(|(_, pixels)| bytemuck::pod_collect_to_vec(&pixels));
-        Buffer2::new(dimensions.width(), dimensions.height(), pixels)
+        Buffer2::new(dimensions.size(), pixels)
             .deinterleave()
             .into()
     }
@@ -55,7 +55,7 @@ impl LinearPixels {
                 "Channel 0 pixel count mismatch"
             );
             assert!(channels.next().is_none(), "Too many channels for grayscale");
-            return Buffer2::new(dimensions.width(), dimensions.height(), channel).into();
+            return Buffer2::new(dimensions.size(), channel).into();
         }
 
         let r = channels.next().expect("Expected 3 channels for RGB");
@@ -78,18 +78,18 @@ impl LinearPixels {
         );
         assert!(channels.next().is_none(), "Too many channels for RGB");
         [
-            Buffer2::new(dimensions.width(), dimensions.height(), r),
-            Buffer2::new(dimensions.width(), dimensions.height(), g),
-            Buffer2::new(dimensions.width(), dimensions.height(), b),
+            Buffer2::new(dimensions.size(), r),
+            Buffer2::new(dimensions.size(), g),
+            Buffer2::new(dimensions.size(), b),
         ]
         .into()
     }
 
     pub(crate) fn new_zeroed(dimensions: ImageDimensions) -> Self {
         if dimensions.is_grayscale() {
-            Buffer2::new_default(dimensions.width(), dimensions.height()).into()
+            Buffer2::new_default(dimensions.size()).into()
         } else {
-            array::from_fn(|_| Buffer2::new_default(dimensions.width(), dimensions.height())).into()
+            array::from_fn(|_| Buffer2::new_default(dimensions.size())).into()
         }
     }
 
@@ -182,7 +182,7 @@ impl LinearPixels {
 
     pub(crate) fn dimensions(&self) -> ImageDimensions {
         let plane = self.channel(0);
-        ImageDimensions::new((plane.width(), plane.height()), self.layout())
+        ImageDimensions::new(plane.size(), self.layout())
     }
 
     pub(crate) fn into_l(self) -> Buffer2<f32> {
@@ -202,7 +202,7 @@ impl LinearPixels {
 
 impl From<Buffer2<f32>> for LinearPixels {
     fn from(plane: Buffer2<f32>) -> Self {
-        if let Err(error) = ImageDimensions::checked(Size2us::from(&plane), ChannelLayout::Mono) {
+        if let Err(error) = ImageDimensions::checked(plane.size(), ChannelLayout::Mono) {
             panic!("{error}");
         }
         Self::L(plane)

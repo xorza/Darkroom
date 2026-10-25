@@ -1,13 +1,13 @@
 use common::Buffer2;
 
-use crate::math::size2us::Size2us;
 use crate::math::wavelet::{
     B3, SmoothRow, atrous_smooth, atrous_smooth_serial, max_scales, reflect, white_noise_sigma,
 };
 use crate::simd::isa_tier::IsaTier;
+use common::Size2us;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
-    Buffer2::from_fn(size.width, size.height, |x, y| {
+    Buffer2::from_fn(size, |x, y| {
         let (x, y) = (x as f32, y as f32);
         0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
     })
@@ -46,8 +46,8 @@ fn max_scales_bounds_by_dimension() {
 fn atrous_smooth_preserves_constant() {
     // The B3 kernel sums to 1, so a flat field is reproduced exactly at every hole spacing.
     let size = Size2us::new(8, 6);
-    let src = Buffer2::new_filled(size.width, size.height, 0.42);
-    let mut dst = Buffer2::new_default(size.width, size.height);
+    let src = Buffer2::new_filled(size, 0.42);
+    let mut dst = Buffer2::new_default(size);
     for step in [1usize, 2, 4] {
         atrous_smooth(&src, &mut dst, step);
         // The weights are dyadic and sum to 1; the two passes round 0.42 by a few ulps at most.
@@ -71,8 +71,8 @@ fn atrous_smooth_is_the_b3_convolution() {
     let size = Size2us::new(17, 13);
     let src = pattern(size);
     let weights = [1.0f64, 4.0, 6.0, 4.0, 1.0].map(|w| w / 16.0);
-    let mut dst = Buffer2::new_default(size.width, size.height);
-    let mut serial = Buffer2::new_default(size.width, size.height);
+    let mut dst = Buffer2::new_default(size);
+    let mut serial = Buffer2::new_default(size);
     let mut col = vec![9.0; 3];
     let bound = 8.0 * f64::from(f32::EPSILON) * 0.8;
     for step in [1usize, 2, 4, 8] {

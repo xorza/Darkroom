@@ -4,9 +4,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use common::Buffer2;
-
-use crate::math::vec2us::Vec2us;
+use crate::vec2us::Vec2us;
 
 /// How many columns and rows a 2D grid has.
 ///
@@ -64,13 +62,6 @@ impl Size2us {
     #[inline]
     pub const fn contains(self, point: Vec2us) -> bool {
         point.x < self.width && point.y < self.height
-    }
-}
-
-/// The size of a plane of pixels.
-impl<T> From<&Buffer2<T>> for Size2us {
-    fn from(plane: &Buffer2<T>) -> Self {
-        Self::new(plane.width(), plane.height())
     }
 }
 

@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// A pixel with its coordinates and value: 12 bytes, which a deblend holds one of for each pixel
 /// of the component it splits. A frame's sides fit a `u32`.
@@ -44,8 +44,8 @@ impl Pixel {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::math::vec2us::Vec2us;
     use crate::star_detection::deblend::pixel::Pixel;
+    use common::Vec2us;
 
     impl Pixel {
         /// The pixel at `pos`.

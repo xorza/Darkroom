@@ -21,7 +21,7 @@ use crate::error::InvalidConfigField;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 pub(crate) const WINDOW: usize = 512;

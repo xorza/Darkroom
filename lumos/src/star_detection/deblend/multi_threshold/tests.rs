@@ -9,9 +9,6 @@ use common::Buffer2;
 use glam::Vec2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::size2us::Size2us;
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::internals::{
     Ladder, TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
     make_test_component, separated_pair,
@@ -20,6 +17,7 @@ use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::multi_threshold::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
+use common::{Rect2us, Size2us, Vec2us};
 
 #[test]
 fn single_star_no_deblending() {
@@ -495,15 +493,15 @@ fn n_thresholds_effect() {
 
 #[test]
 fn single_pixel_component() {
-    let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+    let mut pixels = Buffer2::new_filled((10, 10), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((10, 10), 0u32);
 
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
     let labels = LabelMap::from_raw(&labels_buf, 1);
     let data = ComponentData {
-        bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
+        bbox: Rect2us::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
         area: 1,
     };
@@ -517,10 +515,10 @@ fn single_pixel_component() {
 
 #[test]
 fn flat_profile_no_deblend() {
-    let mut pixels = Buffer2::new_filled(50, 50, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(50, 50, 0u32);
+    let mut pixels = Buffer2::new_filled((50, 50), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((50, 50), 0u32);
 
-    let mut bbox = URect::empty();
+    let mut bbox = Rect2us::empty();
     let mut area = 0;
 
     for y in 10..40 {
@@ -562,10 +560,10 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
     // well-separated stars must still deblend into two objects that share the whole area.
     let width = 100;
     let height = 100;
-    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(width, height, 0u32);
+    let mut pixels = Buffer2::new_filled((width, height), 0.0f32);
+    let mut labels_buf = Buffer2::new_filled((width, height), 0u32);
 
-    let mut bbox = URect::empty();
+    let mut bbox = Rect2us::empty();
     let mut area = 0;
     // The whole rectangle is one connected component; most of it stays at 0.0.
     for y in 10..90 {
@@ -854,9 +852,9 @@ fn a_region_under_min_area_is_no_object() {
 #[test]
 fn the_scratch_follows_the_pixels_not_the_box() {
     let size = Size2us::new(1000, 1000);
-    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
-    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-    let mut bbox = URect::empty();
+    let mut pixels = Buffer2::new_filled(size, 0.0f32);
+    let mut labels = Buffer2::new_filled(size, 0u32);
+    let mut bbox = Rect2us::empty();
     for i in 0..1000 {
         pixels[(i, i)] = 1.0 + (i % 7) as f32 / 10.0;
         labels[(i, i)] = 1;

@@ -93,7 +93,7 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         cancel: &CancelToken::never(),
     };
     let master = CfaImage::from_plane(
-        Buffer2::new_filled(4, 4, 0.1),
+        Buffer2::new_filled((4, 4), 0.1),
         CfaType::Mono,
         ImageMetadata::default(),
     );

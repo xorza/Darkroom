@@ -6,7 +6,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::image_metadata::ImageMetadata;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A Fujifilm X-Trans color layout: 8 red, 20 green and 8 blue, every green with as many red as
 /// blue neighbours.
@@ -26,7 +26,7 @@ pub(crate) const XTRANS_PATTERN: XTransPattern = match XTransPattern::new([
 
 /// A `CfaImage` over raw pixel data of `size` and `cfa_type`.
 pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
-    cfa_from_plane(Buffer2::new(size.width, size.height, pixels), cfa_type)
+    cfa_from_plane(Buffer2::new(size, pixels), cfa_type)
 }
 
 /// Wrap an already-built plane. The plane carries its own dimensions, so unlike [`make_cfa`] this
@@ -37,8 +37,5 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
 
 /// Create a `CfaImage` filled with a constant value.
 pub(crate) fn constant_cfa(size: Size2us, value: f32, cfa_type: CfaType) -> CfaImage {
-    cfa_from_plane(
-        Buffer2::new_filled(size.width, size.height, value),
-        cfa_type,
-    )
+    cfa_from_plane(Buffer2::new_filled(size, value), cfa_type)
 }

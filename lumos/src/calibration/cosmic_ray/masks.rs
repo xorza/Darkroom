@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::FINE_STRUCTURE_SIGMA_FLOOR;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
 pub(crate) const CONCURRENT_MASKS: usize = 3;
@@ -190,7 +190,7 @@ impl<K: Fn(usize) -> bool + Sync> Growth<'_, K> {
 pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::calibration::cosmic_ray::masks::CrMasks;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// One of the masks a detection on a `size` plane holds, sized as the detector sizes it, for
     /// `cosmic_ray_scratch` to weigh.

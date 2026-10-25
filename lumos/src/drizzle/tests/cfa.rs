@@ -19,13 +19,12 @@ use crate::internals::synthetic::metrics;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
-use crate::math::vec2us::Vec2us;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
 use crate::registration::transform_model::TransformModel;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
-use common::TempDir;
+use common::{TempDir, Vec2us};
 use glam::DVec2;
 
 /// The known scene: color `color`'s value at reference pixel `(x, y)`, distinct in every

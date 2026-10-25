@@ -588,7 +588,7 @@ mod tests {
     fn the_frames_of_one_gain_share_it_and_the_set_charges_each_once() {
         let dir = TempDir::new("file_set_gain");
         let gain = Arc::new(FlatGain::of_divisor(
-            &Buffer2::from_fn(3, 2, |x, y| 0.5 + 0.1 * (x + y) as f32),
+            &Buffer2::from_fn((3, 2), |x, y| 0.5 + 0.1 * (x + y) as f32),
             &CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             |_| false,
         ));

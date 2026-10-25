@@ -6,7 +6,6 @@ use common::Buffer2;
 use glam::Vec2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::moffat_fit::*;
 use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
@@ -14,6 +13,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
 };
 use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
+use common::Size2us;
 
 /// One Moffat recovery case, as `gaussian_fit`'s `RecoveryCase` with one more axis: `fixed_beta`,
 /// the shape the fitter is told to assume, which `wrong_beta` sets apart from the rendered `beta`.
@@ -274,7 +274,7 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
         },
     )
     .stamp(Size2us::new(21, 21), 0.1);
-    let uniform = Buffer2::new_filled(21, 21, 0.5f32);
+    let uniform = Buffer2::new_filled((21, 21), 0.5f32);
     for (name, pixels, seed, sky, lands) in [
         ("the star", &star, DVec2::splat(10.0), 0.1, true),
         ("uniform stamp", &uniform, DVec2::splat(10.0), 0.5, false),

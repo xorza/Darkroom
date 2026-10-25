@@ -223,7 +223,7 @@ mod tests {
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
     use crate::io::fits::plane_hdu::{FlagBytes, FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// The file `hdu` writes in chunks of 8 bytes — a row of `f32` samples of a 3-wide plane at
     /// a time, two rows of bytes — which must be the file fits-well writes whole of `image`.

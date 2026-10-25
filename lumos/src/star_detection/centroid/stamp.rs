@@ -11,11 +11,11 @@ use common::Buffer2;
 use glam::DVec2;
 
 use crate::math::lm_controller::LmFit;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::MAX_STAMP_RADIUS;
 use crate::star_detection::centroid::profile_bounds::MIN_PROFILE_SIGMA;
 use crate::star_detection::centroid::profile_problem::{FitData, LmModel};
 use crate::star_detection::centroid::star_noise::StarNoise;
+use common::Vec2us;
 
 /// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;

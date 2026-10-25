@@ -4,8 +4,7 @@
 use common::Buffer2;
 use glam::Vec2;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Add uniform background to image.
 pub(super) fn add_uniform_bg(pixels: &mut [f32], level: f32) {
@@ -33,7 +32,7 @@ impl Gradient {
             end: level_end,
             angle,
         } = self;
-        let size = Size2us::from(&*pixels);
+        let size = pixels.size();
         let cos_a = angle.cos();
         let sin_a = angle.sin();
         let project = |x: f32, y: f32| x * cos_a + y * sin_a;
@@ -81,7 +80,7 @@ impl Vignette {
 
     /// Add the vignette to `pixels`.
     pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) {
-        let size = Size2us::from(&*pixels);
+        let size = pixels.size();
         for y in 0..size.height {
             for x in 0..size.width {
                 pixels[size.idx_of(Vec2us::new(x, y))] += self.at(size, x, y);
@@ -126,7 +125,7 @@ impl NebulaConfig {
     /// Creates an elliptical Gaussian-like bright region to simulate
     /// emission nebulae or light pollution gradients.
     pub(crate) fn add_to(&self, pixels: &mut Buffer2<f32>) {
-        let size = Size2us::from(&*pixels);
+        let size = pixels.size();
         let cx = self.center.x * size.width as f32;
         let cy = self.center.y * size.height as f32;
         let diag = ((size.width * size.width + size.height * size.height) as f32).sqrt();
@@ -176,7 +175,7 @@ mod tests {
     #[test]
     fn gradient_spans_its_end_levels() {
         let size = Size2us::new(64, 4);
-        let mut pixels = Buffer2::new_default(64, 4);
+        let mut pixels = Buffer2::new_default((64, 4));
         Gradient {
             start: 0.0,
             end: 1.0,
@@ -189,7 +188,7 @@ mod tests {
         // At π/2 the f32 cosine is −4.371e-8, not 0, so a row's 63 columns tilt it by
         // 63·4.371e-8 = 2.754e-6, and the projection, the offset, the division and the scale
         // round once each, half an ulp of 3 (1.2e-7) at most: 3.23e-6 off the row's level `y`.
-        let mut pixels = Buffer2::new_default(64, 4);
+        let mut pixels = Buffer2::new_default((64, 4));
         Gradient {
             start: 0.0,
             end: 3.0,
@@ -200,7 +199,7 @@ mod tests {
             assert_close!(value, (idx / 64) as f32, 3.23e-6, "pixel {idx}");
         }
 
-        let mut pixels = Buffer2::new_default(1, 4);
+        let mut pixels = Buffer2::new_default((1, 4));
         Gradient {
             start: 0.0,
             end: 1.0,
@@ -215,7 +214,7 @@ mod tests {
     /// roundings of at most half an ulp of 0.4 each, ε/4 in all.
     #[test]
     fn vignette_reads_its_levels_at_centre_and_corner() {
-        let mut pixels = Buffer2::new_default(64, 64);
+        let mut pixels = Buffer2::new_default((64, 64));
         Vignette {
             center: 0.5,
             edge: 0.1,

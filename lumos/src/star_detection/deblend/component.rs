@@ -2,13 +2,12 @@
 
 use common::Buffer2;
 
-use crate::math::size2us::Size2us;
-use crate::math::urect::URect;
 use crate::star_detection::deblend::assignment::Assignment;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::labeling::component_data::ComponentData;
 use crate::star_detection::labeling::{LabelMap, LabelRun};
+use common::Rect2us;
 
 /// One connected component of the residual: the pixels of its runs, and the brightest of them.
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +26,7 @@ impl<'a> Component<'a> {
         labels: &'a LabelMap,
     ) -> Self {
         debug_assert_eq!(
-            Size2us::from(residual),
+            residual.size(),
             labels.size(),
             "residual and labels must have same dimensions"
         );
@@ -50,7 +49,7 @@ impl<'a> Component<'a> {
         self.residual
     }
 
-    pub(crate) const fn bbox(&self) -> URect {
+    pub(crate) const fn bbox(&self) -> Rect2us {
         self.data.bbox
     }
 

@@ -10,11 +10,11 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::{astrometric_rms, score_detection};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scene};
-use crate::math::size2us::Size2us;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{
     MATCH_RADIUS, Scenario, detected_poss, synthetic_config, truth_poss,
 };
+use common::Size2us;
 
 #[test]
 fn completeness_and_reliability_high_for_bright_field() {

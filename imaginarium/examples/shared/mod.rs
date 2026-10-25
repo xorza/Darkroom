@@ -37,8 +37,8 @@ pub(crate) fn print_image_info(name: &str, image: &Image) {
     println!(
         "{}: {}x{} {}",
         name,
-        image.desc().width,
-        image.desc().height,
+        image.desc().size.width,
+        image.desc().size.height,
         image.desc().color_format
     );
 }

@@ -24,6 +24,7 @@
 //! A scenario changes the editor as production does: the camera and the drag are one held
 //! gesture of edit intents through `OpenDocument::apply_edit`, whose relayout the frame takes.
 
+use common::Size2us;
 use std::sync::Arc;
 
 use criterion::measurement::WallTime;
@@ -303,9 +304,9 @@ impl Editor {
 /// A 6000 × 4000 frame of float RGB at `level`, one plane per channel: a stacked frame as lumos
 /// publishes one.
 fn stacked_frame(level: f32) -> DynamicValue {
-    let (width, height) = (6000, 4000);
-    let planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![level; width * height]);
-    DynamicValue::from_custom(lens::Image::from_planes(width, height, planes))
+    let size = Size2us::new(6000, 4000);
+    let planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![level; size.pixel_count()]);
+    DynamicValue::from_custom(lens::Image::from_planes(size, planes))
 }
 
 /// One editor-frame case: the made graph in `scenario`, painted on `backend`.

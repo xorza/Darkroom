@@ -5,7 +5,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::DomainMap;
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Each sample is `(L − B·g_b − o_b − D·g_d·k − o_d)/F`, rounded to f32 once: within half a
 /// unit in its last place of that value, worked in f64 in another order, where three rounded

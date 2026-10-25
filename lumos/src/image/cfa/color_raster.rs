@@ -3,8 +3,7 @@
 use arrayvec::ArrayVec;
 
 use crate::image::cfa::cfa_type::CfaType;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// The photosites of one color of a mosaic over an image, in raster order: how many there are,
 /// and the pixel index of each by its rank among them, in closed form — the pattern repeats, so a
@@ -85,8 +84,7 @@ mod tests {
     use crate::image::cfa::color_raster::ColorRaster;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::image::cfa::xtrans_pattern::XTransPattern;
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
+    use common::{Size2us, Vec2us};
 
     /// Every rank lands where a walk over the pixels in raster order finds that photosite, for each
     /// color of an RGGB and an X-Trans mosaic, over sizes that end mid-period on either axis or

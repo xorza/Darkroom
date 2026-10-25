@@ -9,7 +9,6 @@ use crate::image_ops::extract_bg::ExtractBg;
 use crate::internals::init_tracing;
 use crate::internals::real_data;
 use crate::internals::visual;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
@@ -17,7 +16,7 @@ use crate::math::statistics;
 /// flattening the background drives them together.
 fn corner_bg_spread(image: &LinearImage) -> f32 {
     let plane = image.intensity_plane();
-    let size = Size2us::from(&plane);
+    let size = plane.size();
     let px = plane.pixels();
     let patch = 256.min(size.width / 4).min(size.height / 4);
     let inset = patch / 2;

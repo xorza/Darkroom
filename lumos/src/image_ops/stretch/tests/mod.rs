@@ -4,8 +4,8 @@ mod real_data;
 use crate::image_ops::stretch::*;
 use crate::internals::assertions::assert_close;
 use crate::internals::images::{gray_image, rgb_image};
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
+use common::Size2us;
 use std::f32::consts::LN_10;
 use std::iter;
 

@@ -11,8 +11,8 @@ use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FLAGS_FORMAT, FLAGS_VERSIO
 use crate::io::fits::gain_extension::{GAIN_EXTNAME, GAIN_FORMAT, GAIN_VERSION};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::product::{QUALITY_FORMAT, QUALITY_VERSION};
-use crate::math::size2us::Size2us;
 use crate::stack_product::weight_kind::WeightKind;
+use common::Size2us;
 
 /// An image extension that describes another image of its file rather than being one; it shows
 /// as its `EXTNAME`.

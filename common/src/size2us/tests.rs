@@ -1,5 +1,5 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use crate::size2us::Size2us;
+use crate::vec2us::Vec2us;
 #[test]
 fn size_measures_extent_and_indexes_row_major() {
     let size = Size2us::new(4, 3);

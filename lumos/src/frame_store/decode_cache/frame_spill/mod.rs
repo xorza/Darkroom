@@ -31,7 +31,7 @@ use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The commit layout pin: the digest of a fixed [`Commit`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with

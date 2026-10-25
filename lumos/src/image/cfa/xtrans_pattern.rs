@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicPattern;
 use crate::image::error::XTransPatternError;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// A Fujifilm X-Trans color filter layout: 6×6 color indices (0 = red, 1 = green, 2 = blue),
 /// the color at `(x, y)` the index at row `y % 6` and column `x % 6`.

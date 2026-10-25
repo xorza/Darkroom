@@ -1,6 +1,5 @@
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 use glam::Vec2;
 
 const FLAT: Sky = Sky {

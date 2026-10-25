@@ -5,9 +5,8 @@ use common::Buffer2;
 use crate::image_ops::hdr::Hdr;
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{gray_image, rgb_image};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::math::wavelet;
+use common::{Size2us, Vec2us};
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
@@ -120,7 +119,7 @@ fn hdr_preserves_fine_detail() {
 /// The starlet residual of `plane` over `scales`, as `Hdr::compress` smooths it.
 fn residual(plane: &Buffer2<f32>, scales: usize) -> Buffer2<f32> {
     let mut c_cur = plane.clone();
-    let mut c_next = Buffer2::new_default(plane.width(), plane.height());
+    let mut c_next = Buffer2::new_default(plane.size());
     for j in 0..scales {
         wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
         mem::swap(&mut c_cur, &mut c_next);
@@ -143,9 +142,9 @@ fn linear_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
 /// residual toward its mean, re-sum and exponentiate — the computation `Hdr::compress` collapses
 /// algebraically. Every input here is above the log floor.
 fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
-    let size = Size2us::from(px);
-    let mut c_cur = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
-    let mut c_next = Buffer2::new_default(size.width, size.height);
+    let size = px.size();
+    let mut c_cur = Buffer2::new(size, px.iter().map(|v| v.ln()).collect());
+    let mut c_next = Buffer2::new_default(size);
     let mut layers: Vec<Vec<f32>> = Vec::new();
     for j in 0..scales {
         wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
@@ -299,13 +298,13 @@ fn near_black_pixels_keep_their_ratio() {
     px[dim] = 1e-4;
     px[bright] = 1e-3;
     let (scales, amount) = (4, 0.8);
-    let plane = Buffer2::new(size.width, size.height, px.clone());
+    let plane = Buffer2::new(size, px.clone());
     let control = linear_hdr(&plane, scales, amount);
     assert!(
         control[bright] / control[dim] < 1.5,
         "the control: subtraction lifts both alike"
     );
-    let logs = Buffer2::new(size.width, size.height, px.iter().map(|v| v.ln()).collect());
+    let logs = Buffer2::new(size, px.iter().map(|v| v.ln()).collect());
     let base = residual(&logs, scales);
     let expected = (px[bright] / px[dim]) * (-amount * (base[bright] - base[dim])).exp();
     let mut img = rgb_image(size, [px.clone(), px.clone(), px]);

@@ -10,10 +10,9 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 
 use crate::image::masked_plane::MaskedPlane;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
+use common::{Size2us, Vec2us};
 
 /// Flat per-stamp sky: the residual's offset from zero and its noise, valid at the stamp scale.
 #[derive(Debug, Clone, Copy)]
@@ -38,7 +37,7 @@ impl StampBg {
             pixels: residual,
             mask: no_data,
         } = residual;
-        let spans = || AnnulusSpans::about(pos, annulus, Size2us::from(residual));
+        let spans = || AnnulusSpans::about(pos, annulus, residual.size());
         let measured = |&at: &Vec2us| no_data.is_none_or(|no_data| !no_data.get_at(at));
         // The annulus pixels inside the frame that hold a measurement, row by row, as image
         // positions.

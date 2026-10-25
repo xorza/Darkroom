@@ -11,8 +11,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack, Photosites};
 use crate::io::raw::sensor_layout::SensorLayout;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// RGGB as LibRaw's `filters` word spells it.
 const RGGB: u32 = 0x9494_9494;

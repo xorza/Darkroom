@@ -47,7 +47,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::masked_plane::MaskedPlane;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The tile side of the mesh the local background comes from: as the dark-current model's, small
 /// beside a sensor's gradients and amp glow, large enough for a robust sky per color.
@@ -93,7 +93,7 @@ pub(crate) fn reject(
 ) -> Result<usize, CosmicRayError> {
     let layout = Layout::of(&image.cfa_type())?;
     let noise = NoiseModel::resolve(&config.noise, &image.metadata)?;
-    let size = Size2us::from(image.data());
+    let size = image.data().size();
     let kept_out = KeptOut::of(image.data(), image.flags());
     // Measured once, before any repair: a hit spoils a tile's statistics no more than a star does,
     // and the mesh's clip and median filter are what keep both out.

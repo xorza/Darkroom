@@ -351,14 +351,16 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
             vec![0.25, 0.75],
         ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
-            2,
-            1,
+            (2, 1),
             vec![1.0, 0.5],
         )))),
-        weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
+        weight: Some(QualityMap::Shared(Buffer2::new((2, 1), vec![2.0, 1.0]))),
         weight_kind: WeightKind::InverseVariance,
-        inverse_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
-        dispersion: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.6, f32::NAN]))),
+        inverse_variance: Some(QualityMap::Shared(Buffer2::new((2, 1), vec![2.0, 1.0]))),
+        dispersion: Some(QualityMap::Shared(Buffer2::new(
+            (2, 1),
+            vec![0.6, f32::NAN],
+        ))),
         cfa_type: None,
         report: RunReport {
             excluded_samples: FlagCounts::default(),
@@ -396,7 +398,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     assert_eq!(uniform.to_plane(0).pixels(), &[0.5, 0.5]);
 
     // The conversions to an image move the planes rather than copy them.
-    let shared_plane = Buffer2::new(2, 1, vec![3.0, 4.0]);
+    let shared_plane = Buffer2::new((2, 1), vec![3.0, 4.0]);
     let shared_pixels = shared_plane.pixels().as_ptr();
     let shared_image = LinearImage::from(QualityMap::Shared(shared_plane));
     assert_eq!(
@@ -407,9 +409,9 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     assert_eq!(shared_image.channel(0).pixels().as_ptr(), shared_pixels);
 
     let per_channel_planes = [
-        Buffer2::new(1, 1, vec![5.0]),
-        Buffer2::new(1, 1, vec![6.0]),
-        Buffer2::new(1, 1, vec![7.0]),
+        Buffer2::new((1, 1), vec![5.0]),
+        Buffer2::new((1, 1), vec![6.0]),
+        Buffer2::new((1, 1), vec![7.0]),
     ];
     let per_channel_pixels = per_channel_planes[1].pixels().as_ptr();
     let per_channel_map = QualityMap::PerChannel(per_channel_planes);

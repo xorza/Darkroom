@@ -36,7 +36,7 @@ use crate::io::fits::flags_extension::{self, FLAGS_EXTNAME};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::tile_parallel;
 use crate::io::load_ctx::LoadCtx;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
@@ -348,10 +348,7 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
         i64::try_from(dimensions.width),
         i64::try_from(dimensions.height),
     ) else {
-        return Err(BundleError::DefectExtentOutOfRange {
-            width: dimensions.width,
-            height: dimensions.height,
-        });
+        return Err(BundleError::DefectExtentOutOfRange { size: dimensions });
     };
     header.set("LUMWID", width)?.set("LUMHEI", height)?;
     Ok(EncodedDefectMap { table, header })
@@ -379,7 +376,7 @@ mod tests {
     use crate::calibration::defect_map::DefectMap;
     use crate::io::fits::calibration_bundle::encode_defect_map;
     use crate::io::fits::calibration_bundle::error::BundleError;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// A sensor extent past `i64::MAX` is refused with both edges, not written as a wrapped
     /// `LUMWID`; a zero height keeps the map's mask empty.
@@ -389,7 +386,7 @@ mod tests {
         let map = DefectMap::new(Size2us::new(width, 0));
         assert!(matches!(
             encode_defect_map(&map),
-            Err(BundleError::DefectExtentOutOfRange { width: w, height: 0 }) if w == width
+            Err(BundleError::DefectExtentOutOfRange { size }) if size == Size2us::new(width, 0)
         ));
     }
 }

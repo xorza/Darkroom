@@ -175,7 +175,7 @@ pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
     output: &mut Image,
 ) {
     let source = PackedSource::<T>::of(input);
-    let out_w = output.desc().width;
+    let out_w = output.desc().size.width;
     let out_stride = output.desc().row_bytes();
     let inv = transform.inverse();
 

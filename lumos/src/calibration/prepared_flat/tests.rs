@@ -12,8 +12,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 fn prepare(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> PreparedFlat {
     if let Some(subtractor) = subtractor {

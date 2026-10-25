@@ -8,6 +8,8 @@ use tiff::encoder::colortype::{
 };
 use tiff::encoder::{TiffEncoder, TiffValue};
 
+use common::Size2us;
+
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::error::{Error, Result};
 use crate::image::Image;
@@ -49,7 +51,7 @@ fn load_png_jpeg(input: &mut dyn BufReadSeek, format: image_lib::ImageFormat) ->
     reader.no_limits();
     let img = reader.decode()?;
     let (width, height) = (img.width() as usize, img.height() as usize);
-    let desc = |format| ImageDesc::new(width, height, format);
+    let desc = |format| ImageDesc::new(Size2us::new(width, height), format);
     // Each decoded buffer is handed over whole. Grey with alpha has no format of its own here;
     // it widens to RGBA, which keeps the alpha.
     match img {
@@ -101,8 +103,7 @@ fn load_tiff(input: &mut dyn BufReadSeek) -> Result<Image> {
     let (width, height) = decoder.dimensions()?;
     let desc = |sample_type| {
         ImageDesc::new(
-            width as usize,
-            height as usize,
+            Size2us::new(width as usize, height as usize),
             ColorFormat::new(channel_count, sample_type),
         )
     };
@@ -144,7 +145,7 @@ fn encoder_dimensions(image: &Image) -> Result<[u32; 2]> {
             Error::UnsupportedFormat(format!("{desc} is larger than an image file can hold"))
         })
     };
-    Ok([fit(desc.width)?, fit(desc.height)?])
+    Ok([fit(desc.size.width)?, fit(desc.size.height)?])
 }
 
 fn save_jpg(image: &Image, mut out: &mut dyn WriteSeek) -> Result<()> {

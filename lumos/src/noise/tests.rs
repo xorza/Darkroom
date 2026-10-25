@@ -2,16 +2,14 @@ use common::Buffer2;
 
 use crate::internals::assertions::assert_close;
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mrs_noise::{self, NoisePlane};
+use common::Size2us;
 
 fn white_noise(size: Size2us, sigma: f32, seed: u64) -> Buffer2<f32> {
     let mut rng = TestRng::new(seed);
-    Buffer2::from_fn(size.width, size.height, |_, _| {
-        sigma * rng.next_gaussian_f32()
-    })
+    Buffer2::from_fn(size, |_, _| sigma * rng.next_gaussian_f32())
 }
 
 /// White Gaussian noise of σ = 1 reads its σ. Two fresh frames of 10⁶ analysed pixels: each
@@ -45,8 +43,7 @@ fn a_ramp_leaves_the_noise_estimate() {
     let size = Size2us::new(512, 512);
     let noise = white_noise(size, 0.01, 3);
     let ramped = Buffer2::new(
-        512,
-        512,
+        (512, 512),
         noise
             .iter()
             .enumerate()
@@ -79,11 +76,9 @@ fn excluded_pixels_leave_the_estimate() {
     let size = Size2us::new(512, 512);
     let left = white_noise(size, 0.01, 5);
     let right = white_noise(size, 0.05, 6);
-    let frame = Buffer2::from_fn(
-        512,
-        512,
-        |x, y| if x < 256 { left[(x, y)] } else { right[(x, y)] },
-    );
+    let frame = Buffer2::from_fn((512, 512), |x, y| {
+        if x < 256 { left[(x, y)] } else { right[(x, y)] }
+    });
     let sigma = NoisePlane {
         samples: &frame,
         excluded: |idx| idx % 512 >= 256,
@@ -93,7 +88,7 @@ fn excluded_pixels_leave_the_estimate() {
     // A constant frame has no noise.
     assert_eq!(
         NoisePlane {
-            samples: &Buffer2::new_filled(512, 512, 0.5),
+            samples: &Buffer2::new_filled((512, 512), 0.5),
             excluded: |_| false
         }
         .sigma(),

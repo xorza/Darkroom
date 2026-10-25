@@ -7,10 +7,10 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::FlatGain;
 use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 use crate::noise::mosaic_sampling::MosaicSampling;
+use common::Size2us;
 
 /// An undemosaiced mosaic of three colors, as its noise is measured: its plane under its
 /// pattern, the flags that leave photosites out, the flat gain that divided it when one did, and
@@ -60,7 +60,7 @@ impl<'a> MosaicNoiseMeasure<'a> {
             quantization_sigma,
         } = self;
         let sampling = MosaicSampling {
-            size: Size2us::from(plane),
+            size: plane.size(),
             mosaic,
             excluded: |idx| flags.is_some_and(|flags| flags.is_flagged(idx)),
             per_color: MAX_STATISTIC_SAMPLES,
@@ -97,11 +97,10 @@ mod tests {
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::mosaic::Mosaic;
-    use crate::math::size2us::Size2us;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
-    use crate::math::vec2us::Vec2us;
     use crate::noise::mosaic_noise_measure::{MosaicNoiseMeasure, color_medians};
     use crate::noise::mosaic_sampling::MosaicSampling;
+    use common::{Size2us, Vec2us};
 
     /// Over an 8 × 4 RGGB mosaic a photosite pairs with the one two to its right, so six pairs a
     /// row, three of each of its two colors: 6 red, 12 green and 6 blue, 24 pairs at 4 bytes and a
@@ -139,7 +138,7 @@ mod tests {
         let size = Size2us::new(64, 64);
         let rggb = Mosaic::Bayer(CfaPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
-        let mosaic = Buffer2::from_fn(64, 64, |x, y| levels[rggb.slot_at(Vec2us::new(x, y))]);
+        let mosaic = Buffer2::from_fn((64, 64), |x, y| levels[rggb.slot_at(Vec2us::new(x, y))]);
         let sampling = MosaicSampling {
             size,
             mosaic: rggb,

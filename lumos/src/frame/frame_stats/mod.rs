@@ -13,10 +13,10 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::vec2us::Vec2us;
 use crate::noise::ccd_noise::CcdNoise;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 use crate::noise::mrs_noise::{self, NoisePlane, PixelGains};
+use common::Vec2us;
 
 /// Per-frame statistics, per slot: a channel, or a color of a mosaic, whose one channel holds three
 /// colors of their own level and noise.

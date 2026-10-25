@@ -22,9 +22,8 @@ use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::progress::progress_monitor::ProgressMonitor;
+use common::{Size2us, Vec2us};
 
 const W: usize = 128;
 const H: usize = 128;

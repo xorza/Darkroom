@@ -149,9 +149,9 @@ fn typed_row<T: Sample>(affine: ChannelAffine, format: ColorFormat, row: &mut [u
 /// flat kernels, whole pixels for the alpha-preserving ones.
 pub(super) const fn kernel_count(desc: ImageDesc) -> usize {
     if desc.color_format.has_alpha() {
-        desc.width
+        desc.size.width
     } else {
-        desc.width * desc.color_format.channel_count.count()
+        desc.size.width * desc.color_format.channel_count.count()
     }
 }
 

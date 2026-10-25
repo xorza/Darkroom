@@ -25,11 +25,9 @@ use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_axis::MeshAxis;
 use crate::bg_mesh::tile_stats::{TileInput, TileScratch, TileStats};
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::ScratchPool;
+use common::{Rect2us, Size2us, Vec2us};
 
 /// Tile grid with each tile's statistics and centre.
 #[derive(Debug)]
@@ -68,7 +66,7 @@ impl BgMesh {
         let centers_x = (0..tiles_x).map(|tile| cols.centre(tile)).collect();
         let centers_y = (0..tiles_y).map(|tile| rows.centre(tile)).collect();
         Self {
-            stats: Buffer2::new_default(tiles_x, tiles_y),
+            stats: Buffer2::new_default((tiles_x, tiles_y)),
             centers_x,
             centers_y,
             tile_size,
@@ -104,7 +102,7 @@ impl BgMesh {
         let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
         let tile_at = |idx: usize| {
             let (tx, ty) = (idx % tiles_x, idx / tiles_x);
-            URect::new(
+            Rect2us::new(
                 Vec2us::new(cols.start(tx), rows.start(ty)),
                 Vec2us::new(cols.end(tx), rows.end(ty)),
             )

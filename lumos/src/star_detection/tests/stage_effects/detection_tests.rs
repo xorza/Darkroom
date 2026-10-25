@@ -8,7 +8,6 @@
 
 use crate::internals::init_tracing;
 use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
-use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
@@ -36,7 +35,7 @@ fn every_isolated_star_is_one_candidate() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::from(&pixels);
+    let size = pixels.size();
     let bg = bg_estimate(&pixels);
     let candidates = detect_stars_test(
         &bg.residual_of(&pixels),
@@ -97,8 +96,7 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
     .channel(0)
     .clone();
     let scaled = Buffer2::new(
-        pixels.width(),
-        pixels.height(),
+        pixels.size(),
         pixels.pixels().iter().map(|&v| v * scale).collect(),
     );
     let config = ExtractionConfig::default();
@@ -137,7 +135,7 @@ fn the_threshold_decides_per_star() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::from(&pixels);
+    let size = pixels.size();
     let bg = bg_estimate(&pixels);
     let residual = bg.residual_of(&pixels);
     let sky = bg.sky_noise();
@@ -183,7 +181,7 @@ fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let size = Size2us::from(&pixels);
+    let size = pixels.size();
     let bg = bg_estimate(&pixels);
     let residual = bg.residual_of(&pixels);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();

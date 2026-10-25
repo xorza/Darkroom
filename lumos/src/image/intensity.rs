@@ -1,7 +1,7 @@
 //! [`Intensity`]: an image's combined intensity, read where it is needed.
 
 use crate::image::rgb::Rgb;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// An image's combined intensity, read a pixel at a time from its channels: the channel itself for
 /// a grayscale image, [`Rgb::intensity`] of the three for RGB. Bit for bit the plane it replaces,

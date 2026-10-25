@@ -7,7 +7,7 @@ use crate::image_ops::local_contrast::{
 use crate::internals::images::{gray_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A low-contrast horizontal gradient, intensity 0.45 to 0.55.
 fn low_contrast(size: Size2us) -> Vec<f32> {
@@ -91,17 +91,14 @@ fn clahe_increases_low_contrast_and_every_knob_matters() {
 
 #[test]
 fn clahe_tile_mappings_are_monotonic() {
-    let intensity = Buffer2::from_fn(80, 80, |x, y| {
+    let intensity = Buffer2::from_fn((80, 80), |x, y| {
         f32::midpoint(x as f32 / 79.0, y as f32 / 79.0)
     });
     let grid = TileGrid {
         cols: TileAxis::new(80, 4),
         rows: TileAxis::new(80, 4),
     };
-    let luts = grid.luts(
-        Intensity::mono(Size2us::from(&intensity), intensity.pixels()),
-        2.0,
-    );
+    let luts = grid.luts(Intensity::mono(intensity.size(), intensity.pixels()), 2.0);
     for lut in &luts {
         for w in lut.windows(2) {
             assert!(

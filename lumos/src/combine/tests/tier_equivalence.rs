@@ -21,8 +21,8 @@ use crate::combine::stack_config::combine::Combine;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
-use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
+use common::Size2us;
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
 fn write_const_fits(path: &Path, size: Size2us, value: u16) {

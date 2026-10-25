@@ -4,7 +4,7 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::image_dimensions::ImageDimensions;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// The slots of a frame's noise and weights: one per channel, or one per color of a mosaic, whose
 /// one channel holds three colors with their own noise.

@@ -14,7 +14,7 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::raw::error::{LibrawCode, RawError};
 use crate::io::raw::raw_decoder::{CodecFacts, CrxCoding, RawDecoder};
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// One open LibRaw instance, the file bytes it parses in place, and the state its callbacks
 /// write.

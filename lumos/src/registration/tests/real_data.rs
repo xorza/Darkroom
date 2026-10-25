@@ -8,7 +8,6 @@ use std::time::Instant;
 use glam::DVec2;
 
 use crate::internals::real_data::{LightPair, first_and_last_lights};
-use crate::math::size2us::Size2us;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
 use crate::registration::point_normalization::centroid;
@@ -127,7 +126,7 @@ fn register_two_lights() {
     println!("  Improvement:       {improvement:.1}%");
     println!(
         "  Max SIP correction: {:.4} pixels",
-        sip.max_grid_correction(Size2us::new(img1.width(), img1.height()), 50.0)
+        sip.max_grid_correction(img1.size(), 50.0)
     );
 
     assert!(

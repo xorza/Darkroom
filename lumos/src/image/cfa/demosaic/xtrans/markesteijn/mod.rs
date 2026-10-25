@@ -36,8 +36,8 @@ use crate::image::cfa::demosaic::tiled::{TileKernel, Tiling};
 use crate::image::cfa::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::image::cfa::demosaic::xtrans::markesteijn::tile::{Tile, TileJob};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::math::size2us::Size2us;
 use crate::memory::footprint::Footprint;
+use common::Size2us;
 
 /// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
 /// per core) a 26 MP frame demosaics in 245 ms at one pass and 703 ms at three with tiles of 96,

@@ -207,7 +207,7 @@ impl DrizzleRun<'_> {
         // Every frame's drops' weight at each output pixel, before any frame weight, in the planes
         // of their weights: how much signal landed there, which the fill gate reads.
         let mut depth: ArrayVec<Buffer2<f32>, MAX_CHANNELS> = (0..deposit.weight_planes())
-            .map(|_| Buffer2::new_default(output.width(), output.height()))
+            .map(|_| Buffer2::new_default(output.size()))
             .collect();
         let mut unconverged_points = 0;
         let mut metadata = None;

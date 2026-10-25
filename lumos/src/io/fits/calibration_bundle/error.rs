@@ -1,5 +1,6 @@
 //! Why a calibration bundle could not be written or read.
 
+use common::Size2us;
 use std::io;
 
 use crate::calibration::error::CalibrationError;
@@ -18,8 +19,8 @@ pub enum BundleError {
     #[error("defect index {idx} exceeds the FITS signed 64-bit range")]
     DefectIdxOutOfRange { idx: usize },
     /// A defect map's sensor extent past the FITS signed 64-bit range.
-    #[error("defect map of {width}×{height} exceeds the FITS signed 64-bit range")]
-    DefectExtentOutOfRange { width: usize, height: usize },
+    #[error("defect map of {size} exceeds the FITS signed 64-bit range")]
+    DefectExtentOutOfRange { size: Size2us },
     /// The file could not be opened or read.
     #[error("calibration-master bundle: {0}")]
     Io(#[from] io::Error),

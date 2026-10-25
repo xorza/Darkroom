@@ -3,7 +3,7 @@
 use common::Buffer2;
 
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Create a diagonal gradient for interpolation testing.
 ///
@@ -12,14 +12,12 @@ use crate::math::size2us::Size2us;
 /// making it useful for testing interpolation accuracy.
 pub(crate) fn diagonal_gradient(size: Size2us) -> Buffer2<f32> {
     let scale = (size.width + size.height) as f32;
-    Buffer2::from_fn(size.width, size.height, |x, y| {
-        (x as f32 + y as f32 * 0.5) / scale
-    })
+    Buffer2::from_fn(size, |x, y| (x as f32 + y as f32 * 0.5) / scale)
 }
 
 /// A horizontal gradient from `left` at the first column to `right` at the last.
 pub(crate) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
-    Buffer2::from_fn(size.width, size.height, |x, _| {
+    Buffer2::from_fn(size, |x, _| {
         let t = if size.width > 1 {
             x as f32 / (size.width - 1) as f32
         } else {

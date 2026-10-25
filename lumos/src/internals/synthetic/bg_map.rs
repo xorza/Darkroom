@@ -5,7 +5,6 @@
 use common::Buffer2;
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
-use crate::math::size2us::Size2us;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::bg_estimate::BgEstimate;
 use crate::star_detection::bg::sky_noise::{SkyNoise, noise_floor_for};
@@ -13,6 +12,7 @@ use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
+use common::Size2us;
 
 /// Create a uniform `BgEstimate` with constant background and noise values.
 pub(crate) fn uniform(size: Size2us, bg: f32, noise: f32) -> BgEstimate {
@@ -32,7 +32,7 @@ pub(crate) fn uniform(size: Size2us, bg: f32, noise: f32) -> BgEstimate {
 ///
 /// The counterpart to [`uniform`]: that one hands back a flat map, this one measures the image.
 pub(crate) fn estimate(pixels: &Buffer2<f32>, config: &BgConfig) -> BgEstimate {
-    let mut pool = DetectionResources::new(Size2us::from(pixels));
+    let mut pool = DetectionResources::new(pixels.size());
     estimate_in(pixels, config, &mut pool)
 }
 

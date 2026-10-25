@@ -1,3 +1,4 @@
+use common::Size2us;
 use strum::IntoEnumIterator;
 
 use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
@@ -74,7 +75,8 @@ fn blending_a_value_over_itself_keeps_it() {
             bytemuck::cast_slice(&words).to_vec(),
         ),
     ] {
-        let image = Image::new_with_data(ImageDesc::new(width, 1, format), data).unwrap();
+        let image =
+            Image::new_with_data(ImageDesc::new(Size2us::new(width, 1), format), data).unwrap();
         let output = blend(Blend::new(BlendMode::Normal, 0.3), &image, &image);
         assert!(
             pixels_equal(&image, &output),
@@ -87,8 +89,8 @@ fn blending_a_value_over_itself_keeps_it() {
 #[test]
 fn alpha_zero_returns_dst() {
     for format in ALL_FORMATS {
-        let src = create_test_image(format, 8, 4, 0);
-        let dst = create_test_image(format, 8, 4, 100);
+        let src = create_test_image(format, Size2us::new(8, 4), 0);
+        let dst = create_test_image(format, Size2us::new(8, 4), 100);
 
         let output = blend(Blend::new(BlendMode::Normal, 0.0), &src, &dst);
 
@@ -105,8 +107,8 @@ fn alpha_zero_returns_dst() {
 #[test]
 fn alpha_one_normal_returns_src() {
     for format in ALL_FORMATS {
-        let src = create_test_image(format, 8, 4, 0);
-        let dst = create_test_image(format, 8, 4, 100);
+        let src = create_test_image(format, Size2us::new(8, 4), 0);
+        let dst = create_test_image(format, Size2us::new(8, 4), 100);
 
         let output = blend(Blend::new(BlendMode::Normal, 1.0), &src, &dst);
 
@@ -121,8 +123,8 @@ fn alpha_one_normal_returns_src() {
 #[test]
 fn multiply_by_white_keeps_dst_color() {
     let format = ColorFormat::RGBA_U8;
-    let mut src = create_test_image(format, 8, 4, 50);
-    let dst = create_test_image(format, 8, 4, 100);
+    let mut src = create_test_image(format, Size2us::new(8, 4), 50);
+    let dst = create_test_image(format, Size2us::new(8, 4), 100);
     // White color channels, dst's alpha, so only the color result is under test.
     for (i, byte) in src.bytes_mut().iter_mut().enumerate() {
         *byte = if i % 4 == 3 { dst.bytes()[i] } else { u8::MAX };
@@ -140,13 +142,13 @@ fn multiply_by_white_keeps_dst_color() {
 #[test]
 fn multiply_by_black_zeroes_color() {
     let format = ColorFormat::RGBA_U8;
-    let mut src = create_test_image(format, 8, 4, 50);
+    let mut src = create_test_image(format, Size2us::new(8, 4), 50);
     for (i, byte) in src.bytes_mut().iter_mut().enumerate() {
         if i % 4 != 3 {
             *byte = 0;
         }
     }
-    let dst = create_test_image(format, 8, 4, 100);
+    let dst = create_test_image(format, Size2us::new(8, 4), 100);
 
     let output = blend(Blend::new(BlendMode::Multiply, 1.0), &src, &dst);
 
@@ -169,8 +171,8 @@ fn multiply_by_black_zeroes_color() {
 fn simd_matches_scalar_reference() {
     for format in ALL_FORMATS {
         for width in [3, 17, 64] {
-            let src = create_test_image(format, width, 3, 0);
-            let mut dst = create_test_image(format, width, 3, 100);
+            let src = create_test_image(format, Size2us::new(width, 3), 0);
+            let mut dst = create_test_image(format, Size2us::new(width, 3), 100);
             if format.sample_type == SampleType::F32 {
                 let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
                 let samples: &mut [f32] = bytemuck::cast_slice_mut(dst.bytes_mut());

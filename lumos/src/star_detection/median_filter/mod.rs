@@ -133,7 +133,6 @@ pub(crate) mod internals {
     use common::{Buffer2, par};
     use rayon::prelude::*;
 
-    use crate::math::size2us::Size2us;
     use crate::star_detection::median_filter::MedianRows;
 
     impl<'a> MedianRows<'a> {
@@ -150,8 +149,8 @@ pub(crate) mod internals {
     /// The 3×3 median of `pixels`, into `output`, a row at a time; an image under 3 × 3 is left as
     /// it is.
     pub(crate) fn apply_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
-        let size = Size2us::from(pixels);
-        debug_assert_eq!(size, Size2us::from(&*output));
+        let size = pixels.size();
+        debug_assert_eq!(size, output.size());
         if size.width < 3 || size.height < 3 {
             output.copy_from_slice(pixels);
             return;

@@ -84,7 +84,7 @@ mod tests {
         CalibrationMasters::from_images(
             CalibrationSet {
                 dark: Some(CfaImage::from_plane(
-                    Buffer2::new_filled(4, 4, 0.1),
+                    Buffer2::new_filled((4, 4), 0.1),
                     CfaType::Mono,
                     ImageMetadata::default(),
                 )),

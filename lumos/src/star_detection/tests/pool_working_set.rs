@@ -11,7 +11,6 @@
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::internals::synthetic::fixtures::star_field;
-use crate::math::size2us::Size2us;
 use crate::star_detection::convolution;
 use crate::star_detection::detection_filter::BandScratch;
 use crate::star_detection::resources::internals::BufferCounts;
@@ -21,6 +20,7 @@ use crate::star_detection::resources::{
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::bg_config::MIN_TILE_SIZE;
 use crate::star_detection::star_detector::StarDetector;
+use common::Size2us;
 
 /// The detection working set at its high-water mark over every preset: the buffers the pool holds
 /// at rest once every stage has run and returned its scratch. Because buffers are recycled across

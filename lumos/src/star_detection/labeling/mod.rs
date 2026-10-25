@@ -15,8 +15,8 @@ pub(crate) mod labeler;
 mod run;
 mod union_find;
 
-use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::component_data::ComponentData;
+use common::Size2us;
 
 /// The connected components of a mask: each one's box and area, and its pixels as runs.
 #[derive(Debug, Default)]
@@ -70,18 +70,17 @@ pub(crate) mod internals {
     use common::Buffer2;
 
     use crate::bit_buffer2::BitBuffer2;
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::labeling::labeler::Labeler;
     use crate::star_detection::labeling::{LabelMap, LabelRun};
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+    use common::Vec2us;
 
     impl LabelMap {
         /// Adopt pre-computed labels `1..=label_count`, bypassing connected-component analysis;
         /// the components and their runs are collected by a scan of every pixel.
         pub(crate) fn from_raw(labels: &Buffer2<u32>, label_count: usize) -> Self {
-            let size = Size2us::new(labels.width(), labels.height());
+            let size = labels.size();
             let mut components = vec![ComponentData::default(); label_count];
             let mut runs_by_label: Vec<Vec<LabelRun>> = vec![Vec::new(); label_count];
             for y in 0..size.height {

@@ -57,8 +57,6 @@ use crate::internals::fits::rewrite_fits;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::writer;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -67,6 +65,7 @@ use crate::{
     ColorShares, DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata,
     MasterRole,
 };
+use common::{Size2us, Vec2us};
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {
@@ -1036,7 +1035,7 @@ fn defect_detection_zero_median_no_false_positives() {
     data[50] = 0.5;
 
     let dark = CfaImage::from_plane(
-        Buffer2::new(10, 10, data),
+        Buffer2::new((10, 10), data),
         CfaType::Mono,
         ImageMetadata {
             header: ObservationHeader::default(),
@@ -1072,7 +1071,7 @@ fn defect_detection_zero_median_no_false_positives() {
 fn calibrate_hot_pixel_correction() {
     let (w, h) = (6, 6);
     let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let mut dark_pixels = Buffer2::new_filled(w, h, 0.0625_f32);
+    let mut dark_pixels = Buffer2::new_filled((w, h), 0.0625_f32);
     dark_pixels[(2, 2)] = 0.9;
     let masters = bundle(CalibrationSet {
         dark: Some(cfa_from_plane(dark_pixels, pattern)),
@@ -1095,7 +1094,7 @@ fn calibrate_hot_pixel_correction() {
     );
 
     let baseline = [0.5f32, 0.3, 0.2];
-    let mut light_pixels = Buffer2::new_default(w, h);
+    let mut light_pixels = Buffer2::new_default((w, h));
     for y in 0..h {
         for x in 0..w {
             light_pixels[(x, y)] = baseline[pattern.slot_at(Vec2us::new(x, y))];
@@ -1137,8 +1136,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let flat = CfaImage::from_plane(
         Buffer2::new(
-            4,
-            4,
+            (4, 4),
             vec![
                 0.5, 0.7, 0.9, 0.7, 0.7, 0.4, 0.7, 0.4, 0.9, 0.7, 0.5, 0.7, 0.7, 0.4, 0.7, 0.4,
             ],

@@ -54,7 +54,6 @@ pub(crate) mod internals {
     use common::{Buffer2, par};
     use rayon::prelude::*;
 
-    use crate::math::size2us::Size2us;
     use crate::simd::Kernel;
     use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
     use crate::star_detection::convolution::simd::{
@@ -184,7 +183,7 @@ pub(crate) mod internals {
     ) {
         let mut kernels = FilterKernels::default();
         let kernel = kernels.matched(filter);
-        let size = Size2us::from(&*values);
+        let size = values.size();
         let width = size.width;
         par::chunks_mut(temp.pixels_mut(), width)
             .zip(par::chunks(values.pixels(), width))

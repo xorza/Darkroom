@@ -10,8 +10,8 @@ use crate::drizzle::accumulator::drop_quad::DropQuad;
 use crate::drizzle::accumulator::frame_source::{Drop, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
-use crate::math::vec2us::Vec2us;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
+use common::Vec2us;
 
 /// The lattice points of [`QUAD_CORNERS`](crate::drizzle::accumulator::frame_source::QUAD_CORNERS)
 /// about pixel `(x, y)`, as `(x + dx, y + dy)`: lattice
@@ -493,11 +493,11 @@ mod tests {
     use crate::drizzle::drizzle_frame::DrizzleFrame;
     use crate::drizzle::output_grid::OutputGrid;
     use crate::internals::images::gray_image;
-    use crate::math::size2us::Size2us;
     use crate::registration::distortion::sip::SipModel;
     use crate::registration::distortion::sip::sip_order::SipOrder;
     use crate::registration::transform::Transform;
     use crate::registration::warp_transform::WarpTransform;
+    use common::Size2us;
 
     /// One warp of [`the_corner_lattice_maps_the_corners_each_drop_would`].
     #[derive(Debug)]

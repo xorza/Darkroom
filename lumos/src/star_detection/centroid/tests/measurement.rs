@@ -46,7 +46,7 @@ fn windowed_centroid_limits() {
     );
 
     let lone = |k: usize| {
-        let mut residual = Buffer2::new_filled(64, 64, 0.0f32);
+        let mut residual = Buffer2::new_filled((64, 64), 0.0f32);
         residual[(32 + k, 32)] = 1.0;
         residual
     };
@@ -58,12 +58,12 @@ fn windowed_centroid_limits() {
     );
 
     assert_eq!(
-        measure(&Buffer2::new_filled(64, 64, 0.0), centre),
+        measure(&Buffer2::new_filled((64, 64), 0.0), centre),
         None,
         "no light"
     );
     assert_eq!(
-        measure(&Buffer2::new_filled(64, 64, -0.5), centre),
+        measure(&Buffer2::new_filled((64, 64), -0.5), centre),
         None,
         "only negative light"
     );
@@ -218,7 +218,7 @@ fn the_windowed_centroid_reports_its_propagated_noise() {
 /// point-symmetric about its peak pixel and the other is outside its stamp, so exactly.
 #[test]
 fn measure_star_multiple_stars_independent() {
-    let mut pixels = Buffer2::new_filled(128, 128, 0.1f32);
+    let mut pixels = Buffer2::new_filled((128, 128), 0.1f32);
     for (centre, amplitude) in [(Vec2::splat(40.0), 0.8), (Vec2::splat(90.0), 0.6)] {
         SyntheticStar::new(centre, amplitude, StarProfile::gaussian(2.5)).add_to(&mut pixels);
     }
@@ -245,7 +245,7 @@ fn measure_star_multiple_stars_independent() {
 
     // A candidate whose stamp would leave the frame is not measured.
     let edge = Region {
-        bbox: URect::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
+        bbox: Rect2us::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
         peak: Vec2us::new(3, 32),
         area: 18,
     };
@@ -360,7 +360,7 @@ fn moment_star_local_offset_removes_what_the_global_map_left() {
 
 #[test]
 fn moment_star_invalid_position_returns_none() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
     let measured = Measured::flat(&pixels, 0.1, 0.01);
     assert!(
         measured
@@ -368,7 +368,7 @@ fn moment_star_invalid_position_returns_none() {
             .is_none()
     );
     // No net light above the sky: not a star.
-    let flat = Measured::flat(&Buffer2::new_filled(64, 64, 0.1f32), 0.1, 0.01);
+    let flat = Measured::flat(&Buffer2::new_filled((64, 64), 0.1f32), 0.1, 0.01);
     assert!(
         flat.compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
             .is_none()
@@ -387,7 +387,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let sky = |x: usize| 0.1 + 0.02 * x as f32;
     let mut pixels =
         SyntheticStar::new(Vec2::splat(32.0), 1.0, StarProfile::gaussian(2.5)).stamp(size, 0.0);
-    let mut sky_plane = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut sky_plane = Buffer2::new_filled(size, 0.0f32);
     for y in 0..size.height {
         for x in 0..size.width {
             pixels[(x, y)] += sky(x);
@@ -411,7 +411,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let radius = measure_grid::stamp_radius(4.0);
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
-        bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
+        bbox: Rect2us::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
         peak: Vec2us::new(34, 32),
         area: 40,
     };
@@ -462,7 +462,7 @@ fn sky_noise_adds_no_flux_or_snr() {
     const SIGMA: f32 = 0.0625;
     const SKY: f32 = 0.25;
     let size = Size2us::new(48, 48);
-    let pixels = Buffer2::from_fn(size.width, size.height, |x, y| {
+    let pixels = Buffer2::from_fn(size, |x, y| {
         if (x + y) % 2 == 0 {
             SKY + SIGMA
         } else {
@@ -510,7 +510,7 @@ fn empty_sky_stamps_measure_no_signal() {
     let side = 496;
     let size = Size2us::new(side, side);
     let sigma = 0.01f32;
-    let mut residual = Buffer2::new_filled(side, side, 0.0f32);
+    let mut residual = Buffer2::new_filled((side, side), 0.0f32);
     patterns::add_gaussian_noise(residual.pixels_mut(), sigma, 7);
     let sky = bg_map::uniform(size, 0.0, sigma).sky_noise();
 

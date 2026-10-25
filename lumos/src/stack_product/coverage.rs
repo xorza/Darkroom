@@ -4,7 +4,7 @@ use common::Buffer2;
 
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// The share of frames that reached each pixel, in `[0, 1]`.
 ///
@@ -34,7 +34,7 @@ impl Coverage {
     /// it when a plane is genuinely what is wanted.
     pub fn to_plane(&self, channel: usize) -> Buffer2<f32> {
         match self {
-            Self::Uniform { value, size } => Buffer2::new_filled(size.width, size.height, *value),
+            Self::Uniform { value, size } => Buffer2::new_filled(*size, *value),
             Self::PerPixel(map) => map.channel(channel).clone(),
         }
     }

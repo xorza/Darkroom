@@ -20,7 +20,7 @@ const PARAMS: MeshParams = MeshParams {
 #[test]
 fn y_spline_derivatives_through_the_mesh() {
     const C: f32 = 1.0 / 64.0;
-    let pixels = Buffer2::from_fn(96, 128, |_, y| {
+    let pixels = Buffer2::from_fn((96, 128), |_, y| {
         let k = (y / 32) as f32;
         k * k * C
     });

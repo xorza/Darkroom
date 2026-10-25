@@ -5,9 +5,9 @@ use serde::Serialize;
 
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::subsample::Subsample;
+use common::Size2us;
 
 /// What a linear image's null samples do to the load: a FITS null (IEEE NaN for a floating-point
 /// `BITPIX`, the `BLANK` value for an integer one) or a floating-point raster's NaN or infinity.
@@ -162,7 +162,7 @@ mod tests {
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
     use crate::io::null_policy::{self, FILL_MEDIAN_SAMPLES, NullPolicy, NullSamples};
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// Two 2×1 planes with one null each, at different pixels. `Mask` flags both pixels and fills
     /// each plane with its own finite sample (the median of one value); `Reject` counts 2 samples,

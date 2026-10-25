@@ -39,9 +39,9 @@ use crate::internals::synthetic::fixtures::{
 };
 use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::math::size2us::Size2us;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detector::StarDetector;
+use common::Size2us;
 
 /// How near a detection must lie to a source to be that source's: one FWHM of the scenarios' 4-px
 /// PSF, past which a centroid is not a measurement of the source.

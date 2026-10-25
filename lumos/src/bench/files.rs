@@ -136,7 +136,7 @@ mod tests {
     use crate::image::flat_gain::shared_gains::SharedGains;
     use crate::io::fits::decode;
     use crate::io::load_ctx::LoadCtx;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// Each file loads back as what was written, to within half the 16-bit step `0.5 / 65535` for
     /// the integer files and exactly for the float ones.

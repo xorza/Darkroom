@@ -5,8 +5,7 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {
@@ -57,7 +56,7 @@ fn slice_and_iteration_preserve_row_major_order() {
     let source = [
         true, false, true, false, false, true, false, true, true, false, false, true,
     ];
-    let buffer = BitBuffer2::from_plane(&Buffer2::new(4, 3, source.to_vec()));
+    let buffer = BitBuffer2::from_plane(&Buffer2::new((4, 3), source.to_vec()));
     assert_eq!(iter_bits(&buffer), source);
 
     // The set-bit walk visits exactly the true positions, in row-major order.

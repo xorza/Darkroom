@@ -17,11 +17,11 @@ use std::collections::VecDeque;
 use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::labeler::Labeler;
 use crate::star_detection::labeling::labeler::internals::label_in_strips;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+use common::Size2us;
 
 mod parallel;
 mod property_based;
@@ -48,14 +48,14 @@ impl Mask {
             .flat_map(|row| row.bytes().map(|b| b == b'#'))
             .collect();
         Self {
-            data: Buffer2::new(width, rows.len(), data),
+            data: Buffer2::new((width, rows.len()), data),
         }
     }
 
     /// The pixels `(x, y)` for which `set` holds.
     fn from_fn(size: Size2us, set: impl FnMut(usize, usize) -> bool) -> Self {
         Self {
-            data: Buffer2::from_fn(size.width, size.height, set),
+            data: Buffer2::from_fn(size, set),
         }
     }
 
@@ -90,7 +90,7 @@ fn neighbours(connectivity: Connectivity) -> &'static [(isize, isize)] {
 /// Flood fill from each unlabelled foreground pixel in raster order: naive, slow and obviously
 /// correct, and numbered the way the labeler numbers.
 fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
-    let Size2us { width, height } = Size2us::from(&mask.data);
+    let Size2us { width, height } = mask.data.size();
     let mut labels = vec![0u32; mask.data.len()];
     let mut next = 0u32;
     let mut queue = VecDeque::new();
@@ -123,7 +123,7 @@ fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
 fn verify_components(label_map: &LabelMap) {
     let size = label_map.size();
     let scanned = LabelMap::from_raw(
-        &Buffer2::new(size.width, size.height, label_map.labels()),
+        &Buffer2::new(size, label_map.labels()),
         label_map.label_count(),
     );
     assert_eq!(label_map.components().len(), scanned.components().len());

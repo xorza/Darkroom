@@ -17,10 +17,10 @@ use crate::ingest::error::AdmissionError;
 use crate::internals::images::rgb_image;
 use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::writer;
-use crate::math::vec2us::Vec2us;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
+use common::Vec2us;
 
 /// At scale 2 and pixfrac 0.8 every cell holds a quarter of exactly one drop (see
 /// `one_bright_pixel_fills_its_own_block`), so a flat frame covers the whole grid at weight 0.25
@@ -865,7 +865,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         constant_image(Size2us::new(4, 4), 1.0),
         WarpTransform::new(Transform::identity()),
     );
-    frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
+    frame.pixel_weight_map = Some(Buffer2::new_filled((3, 3), 1.0));
     let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
@@ -892,7 +892,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         constant_image(Size2us::new(4, 4), 1.0),
         WarpTransform::new(Transform::identity()),
     );
-    frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
+    frame.pixel_weight_map = Some(Buffer2::new((4, 4), pixel_weights));
     let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,

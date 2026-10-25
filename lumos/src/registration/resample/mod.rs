@@ -14,7 +14,6 @@ use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;
 use crate::image::quality_flags::QualityFlags;
-use crate::math::size2us::Size2us;
 use crate::registration::resample::flagged_sources::FlagScratch;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, SampleRule, WindowAxes,
@@ -25,6 +24,7 @@ use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::unsafe_send_ptr::UnsafeSendPtr;
+use common::Size2us;
 
 mod flagged_sources;
 mod frame_sampler;
@@ -146,8 +146,8 @@ impl WarpResult {
                 None,
                 ImageMetadata::default(),
             ),
-            coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
-            confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
+            coverage: Buffer2::new_default(dimensions.size()),
+            confidence: Buffer2::new_default(dimensions.size()),
         }
     }
 

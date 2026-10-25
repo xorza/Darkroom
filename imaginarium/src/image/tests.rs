@@ -6,13 +6,16 @@ use crate::image::Image;
 use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 use crate::internals::{create_test_image, lena};
-use common::{Buffer2, par};
+use common::{Buffer2, Size2us, par};
 use rayon::iter::ParallelIterator;
 
 #[test]
 fn lena_reads_as_packed_rgba() {
     let img = lena(ColorFormat::RGBA_U8);
-    assert_eq!(img.desc(), ImageDesc::new(895, 551, ColorFormat::RGBA_U8));
+    assert_eq!(
+        img.desc(),
+        ImageDesc::new(Size2us::new(895, 551), ColorFormat::RGBA_U8)
+    );
     assert_eq!(img.desc().row_bytes(), 895 * 4);
     assert_eq!(img.bytes().len(), 895 * 4 * 551);
 }
@@ -29,7 +32,7 @@ fn round_trip(image: &Image, format: FileFormat) -> Result<Image, Error> {
 #[test]
 fn every_format_round_trips_through_tiff() {
     for format in ALL_FORMATS {
-        let image = create_test_image(format, 17, 5, 3);
+        let image = create_test_image(format, Size2us::new(17, 5), 3);
         let reloaded = round_trip(&image, FileFormat::Tiff).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
@@ -40,7 +43,7 @@ fn every_format_round_trips_through_tiff() {
 #[test]
 fn integer_formats_round_trip_through_png() {
     for format in ALL_FORMATS {
-        let image = create_test_image(format, 17, 5, 3);
+        let image = create_test_image(format, Size2us::new(17, 5), 3);
         let result = round_trip(&image, FileFormat::Png);
         if format.sample_type.is_float() {
             assert!(
@@ -59,7 +62,7 @@ fn integer_formats_round_trip_through_png() {
 #[test]
 fn jpeg_refuses_what_it_cannot_store() {
     for format in ALL_FORMATS {
-        let image = create_test_image(format, 8, 8, 0);
+        let image = create_test_image(format, Size2us::new(8, 8), 0);
         let result = image.encode(Cursor::new(Vec::new()), FileFormat::Jpeg);
         if format == ColorFormat::L_U8 || format == ColorFormat::RGB_U8 {
             result.unwrap();
@@ -87,22 +90,28 @@ fn grey_alpha_png_widens_to_rgba() {
     .unwrap();
     png.set_position(0);
     let reloaded = Image::decode(png, FileFormat::Png).unwrap();
-    assert_eq!(reloaded.desc(), ImageDesc::new(2, 1, ColorFormat::RGBA_U8));
+    assert_eq!(
+        reloaded.desc(),
+        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8)
+    );
     assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
 }
 
 #[test]
 fn construction_checks_dimensions_and_length() {
     assert!(matches!(
-        Image::new_with_data(ImageDesc::new(1, 1, ColorFormat::L_U16), vec![0; 3]),
+        Image::new_with_data(ImageDesc::new(Size2us::new(1, 1), ColorFormat::L_U16), vec![0; 3]),
         Err(Error::SizeMismatch(message)) if message == "bytes length 3 does not match expected size 2"
     ));
     assert!(matches!(
-        Image::new_black(ImageDesc::new(0, 4, ColorFormat::L_U8)),
+        Image::new_black(ImageDesc::new(Size2us::new(0, 4), ColorFormat::L_U8)),
         Err(Error::SizeMismatch(message)) if message == "image dimensions must be non-zero, got 0x4"
     ));
     assert!(matches!(
-        Image::new_black(ImageDesc::new(usize::MAX / 2, 3, ColorFormat::RGBA_F32)),
+        Image::new_black(ImageDesc::new(
+            Size2us::new(usize::MAX / 2, 3),
+            ColorFormat::RGBA_F32
+        )),
         Err(Error::SizeMismatch(_))
     ));
 }
@@ -112,7 +121,7 @@ fn construction_checks_dimensions_and_length() {
 #[test]
 fn byte_vectors_are_reused_where_the_layout_allows() {
     for format in ALL_FORMATS {
-        let desc = ImageDesc::new(6, 2, format);
+        let desc = ImageDesc::new(Size2us::new(6, 2), format);
         let bytes: Vec<u8> = (0..desc.size_in_bytes())
             .map(|i| (i * 7 % 251) as u8)
             .collect();
@@ -145,7 +154,7 @@ fn byte_vectors_are_reused_where_the_layout_allows() {
 /// The same format is a move-through: the very same allocation comes back.
 #[test]
 fn convert_to_the_same_format_keeps_the_allocation() {
-    let image = create_test_image(ColorFormat::RGBA_U16, 3, 2, 0);
+    let image = create_test_image(ColorFormat::RGBA_U16, Size2us::new(3, 2), 0);
     let pointer = image.bytes().as_ptr();
     assert_eq!(
         image.convert(ColorFormat::RGBA_U16).bytes().as_ptr(),
@@ -157,12 +166,15 @@ fn convert_to_the_same_format_keeps_the_allocation() {
 #[test]
 fn planes_interleave_into_the_format_they_spell() {
     let planes = [
-        Buffer2::new(2, 1, vec![1u8, 4]),
-        Buffer2::new(2, 1, vec![2u8, 5]),
-        Buffer2::new(2, 1, vec![3u8, 6]),
+        Buffer2::new((2, 1), vec![1u8, 4]),
+        Buffer2::new((2, 1), vec![2u8, 5]),
+        Buffer2::new((2, 1), vec![3u8, 6]),
     ];
     let image = Image::from(planes.each_ref());
-    assert_eq!(image.desc(), ImageDesc::new(2, 1, ColorFormat::RGB_U8));
+    assert_eq!(
+        image.desc(),
+        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8)
+    );
     assert_eq!(image.bytes(), &[1, 2, 3, 4, 5, 6]);
 
     let back: [Buffer2<u8>; 3] = (&image).try_into().unwrap();
@@ -170,7 +182,7 @@ fn planes_interleave_into_the_format_they_spell() {
     let taken: [Buffer2<u8>; 3] = image.try_into().unwrap();
     assert_eq!(taken, planes);
 
-    let grey = Image::from([&Buffer2::new(3, 1, vec![10u16, 20, 30])]);
+    let grey = Image::from([&Buffer2::new((3, 1), vec![10u16, 20, 30])]);
     assert_eq!(grey.desc().color_format, ColorFormat::L_U16);
     assert_eq!(grey.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
     // A grey image taken is its one plane, in the same allocation.
@@ -185,10 +197,13 @@ fn planes_interleave_into_the_format_they_spell() {
 #[test]
 #[should_panic(expected = "a parallel loop's body starts no parallel work")]
 fn planes_converted_in_a_parallel_body_panic() {
-    let plane = Buffer2::new(2, 1, vec![1.0f32, 2.0]);
+    let plane = Buffer2::new((2, 1), vec![1.0f32, 2.0]);
     let convert = || {
         let image = Image::from([&plane, &plane, &plane]);
-        assert_eq!(image.desc(), ImageDesc::new(2, 1, ColorFormat::RGB_F32));
+        assert_eq!(
+            image.desc(),
+            ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_F32)
+        );
     };
     convert();
     par::into_iter(0..2).for_each(|_| convert());
@@ -196,7 +211,7 @@ fn planes_converted_in_a_parallel_body_panic() {
 
 #[test]
 fn deinterleaving_into_another_format_is_refused() {
-    let image = Image::new_black(ImageDesc::new(2, 2, ColorFormat::RGB_U8)).unwrap();
+    let image = Image::new_black(ImageDesc::new(Size2us::new(2, 2), ColorFormat::RGB_U8)).unwrap();
     let result: Result<[Buffer2<f32>; 1], Error> = (&image).try_into();
     assert!(matches!(
         result,
@@ -212,6 +227,6 @@ fn deinterleaving_into_another_format_is_refused() {
 #[test]
 #[should_panic(expected = "an image needs at least one pixel")]
 fn empty_planes_are_refused() {
-    let empty: Buffer2<f32> = Buffer2::new(0, 3, Vec::new());
+    let empty: Buffer2<f32> = Buffer2::new((0, 3), Vec::new());
     drop(Image::from([&empty]));
 }

@@ -7,7 +7,6 @@ use glam::Vec2;
 
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::math::size2us::Size2us;
 use crate::star_detection::centroid::gaussian_fit::*;
 use crate::star_detection::centroid::profile_problem::internals::{
     ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
@@ -15,6 +14,7 @@ use crate::star_detection::centroid::profile_problem::internals::{
 };
 use crate::star_detection::centroid::stamp::StampGrid;
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
+use common::Size2us;
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
 /// the fitter about its background, then check what it got back.
@@ -556,7 +556,7 @@ fn gaussian_fit_rejects_what_the_data_cannot_support() {
         let pixels = match case.sigma {
             Some(sigma) => SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::gaussian(sigma))
                 .stamp(size, 0.1),
-            None => Buffer2::new_filled(case.side, case.side, 0.1),
+            None => Buffer2::new_filled((case.side, case.side), 0.1),
         };
         let fit = GaussianFit::new(FitInputs {
             pixels: &pixels,

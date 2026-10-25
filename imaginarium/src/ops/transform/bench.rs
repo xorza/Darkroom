@@ -9,8 +9,10 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion};
 use glam::Vec2;
 
+use common::Size2us;
+
 use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
-use crate::bench::scene::{self, HEIGHT, TILE, WIDTH};
+use crate::bench::scene::{self, FRAME, TILE};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
@@ -34,14 +36,16 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "transform", Scale::Frame);
     for format in ALL_FORMATS {
         let mut tile = None;
-        let mut output = Image::new_black(ImageDesc::new(TILE, TILE, format)).unwrap();
+        let mut output =
+            Image::new_black(ImageDesc::new(Size2us::new(TILE, TILE), format)).unwrap();
         group.throughput(fixture::throughput(TILE * TILE, format.byte_count()));
         for filter in FILTERS {
-            let transform = rotation(TILE, TILE, filter);
+            let transform = rotation(Size2us::new(TILE, TILE), filter);
             for variant in Variant::all(|tier| cpu::packed_kernel(tier, format, filter)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.name), case_id(filter, format));
                 group.bench_function(id, |b| {
-                    let tile = tile.get_or_insert_with(|| scene::sky(format, TILE, TILE, 1));
+                    let tile =
+                        tile.get_or_insert_with(|| scene::sky(format, Size2us::new(TILE, TILE), 1));
                     if let Some(kernel) = variant.kernel {
                         b.iter(|| unsafe {
                             kernel(&transform, black_box(tile), black_box(&mut output));
@@ -67,10 +71,10 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut pipeline = None;
     for format in ALL_FORMATS {
         let mut source = None;
-        let pixels = WIDTH * HEIGHT;
+        let pixels = FRAME.pixel_count();
         group.throughput(fixture::throughput(pixels, format.byte_count()));
         for filter in FILTERS {
-            let transform = rotation(WIDTH, HEIGHT, filter);
+            let transform = rotation(FRAME, filter);
             for backend in backends.all() {
                 match backend {
                     Backend::Cpu => Scale::Frame,
@@ -82,7 +86,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                 .apply(&mut group);
                 let id = BenchmarkId::new(backend.id(), case_id(filter, format));
                 group.bench_function(id, |b| {
-                    let frame = source.get_or_insert_with(|| scene::sky(format, WIDTH, HEIGHT, 1));
+                    let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                     match backend {
                         Backend::Cpu => {
                             let mut output = Image::new_black(frame.desc()).unwrap();
@@ -108,9 +112,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     group.finish();
 }
 
-/// A rotation by π/6 about the centre of a `width` × `height` image, sampled by `filter`.
-fn rotation(width: usize, height: usize, filter: FilterMode) -> Transform {
-    let centre = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+/// A rotation by π/6 about the centre of an image of `size`, sampled by `filter`.
+fn rotation(size: Size2us, filter: FilterMode) -> Transform {
+    let centre = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
     Transform::new()
         .rotate_around(PI / 6.0, centre)
         .filter(filter)

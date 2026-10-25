@@ -15,9 +15,8 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 };
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+use common::{Size2us, Vec2us};
 
 /// A phase plane's rows, and the columns its sites take.
 const HALF: usize = TILE / 2;

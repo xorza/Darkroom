@@ -4,7 +4,7 @@
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::xtrans::markesteijn::{CROP, TILE};
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// Each `(row % 3, col % 3)`'s hexagon as flat offsets — in the input crop's stride, which the
 /// samples are read in, and in the tile's, which its buffers are — beside the pattern's colors and

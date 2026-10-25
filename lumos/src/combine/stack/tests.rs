@@ -51,7 +51,6 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
 use crate::io::writer;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::budget::Budget;
@@ -61,6 +60,7 @@ use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use crate::stack_product::weight_kind::WeightKind;
+use common::Size2us;
 
 /// The combine, with no progress reported and no cancel.
 fn combine(frames: Vec<StackFrame>, config: &StackConfig) -> Result<StackProduct, StackError> {
@@ -191,7 +191,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 // Every third frame was divided by a vignetted flat, whose gain the noise model
                 // reads per sample: a mono flat for a mono frame, a mosaic's for a color one.
                 if f.is_multiple_of(3) {
-                    let divisor = Buffer2::from_fn(w, h, |x, _| 1.0 - 0.4 * x as f32 / w as f32);
+                    let divisor = Buffer2::from_fn((w, h), |x, _| 1.0 - 0.4 * x as f32 / w as f32);
                     let cfa = if channels == 1 {
                         CfaType::Mono
                     } else {
@@ -205,7 +205,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 }
                 // Every other frame gets a partial coverage map (warped-border emulation).
                 let quality = if f.is_multiple_of(2) {
-                    let mut coverage = Buffer2::new_filled(w, h, 1.0f32);
+                    let mut coverage = Buffer2::new_filled((w, h), 1.0f32);
                     coverage[0] = 0.0;
                     FrameQuality::from_coverage(coverage)
                 } else {
@@ -831,13 +831,13 @@ fn stack_images_dimension_errors() {
     for (expected_plane, coverage, confidence) in [
         (
             FramePlane::Coverage,
-            Buffer2::new_filled(2, 2, 1.0),
-            Buffer2::new_filled(4, 4, 1.0),
+            Buffer2::new_filled((2, 2), 1.0),
+            Buffer2::new_filled((4, 4), 1.0),
         ),
         (
             FramePlane::Confidence,
-            Buffer2::new_filled(4, 4, 1.0),
-            Buffer2::new_filled(2, 2, 1.0),
+            Buffer2::new_filled((4, 4), 1.0),
+            Buffer2::new_filled((2, 2), 1.0),
         ),
     ] {
         let frame = stack_frame(
@@ -881,14 +881,14 @@ fn stack_images_rejects_invalid_warp_quality_values() {
     // so the out-of-range value is paired with an in-range partner to isolate it.
     for (coverage, confidence, expected_plane, expected_value) in [
         (
-            Buffer2::new(2, 1, vec![1.0, 1.1]),
-            Buffer2::new(2, 1, vec![1.0, 1.0]),
+            Buffer2::new((2, 1), vec![1.0, 1.1]),
+            Buffer2::new((2, 1), vec![1.0, 1.0]),
             FramePlane::Coverage,
             1.1,
         ),
         (
-            Buffer2::new(2, 1, vec![1.0, 1.0]),
-            Buffer2::new(2, 1, vec![1.0, -0.1]),
+            Buffer2::new((2, 1), vec![1.0, 1.0]),
+            Buffer2::new((2, 1), vec![1.0, -0.1]),
             FramePlane::Confidence,
             -0.1,
         ),
@@ -939,8 +939,8 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
             vec![stack_frame(
                 LinearImage::from_interleaved(dims, vec![1.0; 2]),
                 FrameQuality::Planes {
-                    coverage: Buffer2::new(2, 1, coverage),
-                    confidence: Buffer2::new(2, 1, confidence),
+                    coverage: Buffer2::new((2, 1), coverage),
+                    confidence: Buffer2::new((2, 1), confidence),
                 },
             )],
             &StackConfig {
@@ -970,8 +970,8 @@ fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
         vec![stack_frame(
             LinearImage::from_interleaved(dims, vec![1.0; 2]),
             FrameQuality::Planes {
-                coverage: Buffer2::new(2, 1, vec![1.0, 0.0]),
-                confidence: Buffer2::new(2, 1, vec![1.0, 0.0]),
+                coverage: Buffer2::new((2, 1), vec![1.0, 0.0]),
+                confidence: Buffer2::new((2, 1), vec![1.0, 0.0]),
             },
         )],
         &StackConfig {
@@ -1121,7 +1121,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
         with_noise(
             stack_frame(
                 LinearImage::from_interleaved(dims, vec![value; 2]),
-                FrameQuality::from_coverage(Buffer2::new(2, 1, coverage.to_vec())),
+                FrameQuality::from_coverage(Buffer2::new((2, 1), coverage.to_vec())),
             ),
             1.0,
         )
@@ -1179,7 +1179,7 @@ fn coverage_decides_which_frames_reach_each_pixel() {
 #[test]
 fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
     let dims = ImageDimensions::new((6, 1), ChannelLayout::Mono);
-    let coverage = Buffer2::new(6, 1, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
+    let coverage = Buffer2::new((6, 1), vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
     let make_cache = |fill: [f32; 4]| {
         let frames = [
             [fill[0], fill[1], 10.0, 14.0, fill[2], fill[3]],
@@ -1287,11 +1287,11 @@ fn only_normalization_requires_common_coverage() {
         vec![
             stack_frame(
                 LinearImage::from_interleaved(dims, vec![1.0, 2.0, 5.0]),
-                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![1.0, 0.0, 0.0])),
+                FrameQuality::from_coverage(Buffer2::new((3, 1), vec![1.0, 0.0, 0.0])),
             ),
             stack_frame(
                 LinearImage::from_interleaved(dims, vec![3.0, 4.0, 6.0]),
-                FrameQuality::from_coverage(Buffer2::new(3, 1, vec![0.0, 1.0, 0.0])),
+                FrameQuality::from_coverage(Buffer2::new((3, 1), vec![0.0, 1.0, 0.0])),
             ),
         ]
     };
@@ -1347,8 +1347,8 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
             stack_frame(
                 a,
                 FrameQuality::Planes {
-                    coverage: Buffer2::new(2, 1, vec![1.0, 1.0]),
-                    confidence: Buffer2::new(2, 1, vec![1.0, 1.0]),
+                    coverage: Buffer2::new((2, 1), vec![1.0, 1.0]),
+                    confidence: Buffer2::new((2, 1), vec![1.0, 1.0]),
                 },
             ),
             1.0,
@@ -1357,8 +1357,8 @@ fn confidence_scales_a_samples_noise_rather_than_its_weight() {
             stack_frame(
                 b,
                 FrameQuality::Planes {
-                    coverage: Buffer2::new(2, 1, vec![1.0, 0.0]),
-                    confidence: Buffer2::new(2, 1, vec![0.5, 0.0]),
+                    coverage: Buffer2::new((2, 1), vec![1.0, 0.0]),
+                    confidence: Buffer2::new((2, 1), vec![0.5, 0.0]),
                 },
             ),
             1.0,
@@ -1712,7 +1712,7 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         .map(|(&v, c)| {
             stack_frame(
                 LinearImage::from_interleaved(dims, vec![v]),
-                FrameQuality::from_coverage(Buffer2::new(1, 1, vec![c])),
+                FrameQuality::from_coverage(Buffer2::new((1, 1), vec![c])),
             )
         })
         .collect();
@@ -2333,7 +2333,7 @@ fn a_core_saturated_in_every_frame_keeps_its_clipped_value() {
 fn each_samples_noise_reads_the_gain_its_flat_applied() {
     let dims = ImageDimensions::new((2, 1), ChannelLayout::Mono);
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::new(2, 1, vec![0.5; 2]),
+        &Buffer2::new((2, 1), vec![0.5; 2]),
         &CfaType::Mono,
         |_| false,
     ));
@@ -2477,7 +2477,7 @@ fn a_pixel_too_few_frames_reached_combines_by_its_median() {
                 dims,
                 vec![1.0, edge.get(frame).copied().unwrap_or(0.0)],
             );
-            let coverage = Buffer2::new(2, 1, vec![1.0, f32::from(u8::from(reached))]);
+            let coverage = Buffer2::new((2, 1), vec![1.0, f32::from(u8::from(reached))]);
             stack_frame(
                 image,
                 FrameQuality::Planes {

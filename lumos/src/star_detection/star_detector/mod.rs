@@ -5,7 +5,6 @@ pub(super) mod stages;
 
 use crate::error::InvalidConfigField;
 use crate::image::linear_image::LinearImage;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
@@ -48,7 +47,7 @@ impl StarDetector {
     pub fn detect(&mut self, image: &LinearImage) -> DetectionResult {
         let config = &self.config;
         let resources = &mut self.resources;
-        resources.reshape(Size2us::new(image.width(), image.height()));
+        resources.reshape(image.size());
 
         let mut frame = PreparedFrame::new(image, config, resources);
         let fwhm = frame.estimate_fwhm(config, resources);

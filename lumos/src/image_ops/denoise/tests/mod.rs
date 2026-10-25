@@ -14,7 +14,7 @@ use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::SkyNoise;
 use crate::internals::test_rng::TestRng;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A flat `bg` with white Gaussian `noise`.
 fn noisy(size: Size2us, bg: f32, noise: SkyNoise) -> Vec<f32> {
@@ -308,7 +308,7 @@ fn a_zero_variance_plane_leaves_the_image() {
             ImageDimensions::new(size, ChannelLayout::Mono),
             pixels.clone(),
         );
-        let variance = QualityMap::Shared(Buffer2::new_default(size.width, size.height));
+        let variance = QualityMap::Shared(Buffer2::new_default(size));
         Denoise {
             threshold,
             strength: 1.0,
@@ -342,11 +342,7 @@ fn the_variance_threshold_scales_with_the_data() {
             ImageDimensions::new(size, ChannelLayout::Mono),
             pixels.iter().map(|&value| value * scale).collect(),
         );
-        let variance = QualityMap::Shared(Buffer2::new_filled(
-            size.width,
-            size.height,
-            0.03 * 0.03 * scale * scale,
-        ));
+        let variance = QualityMap::Shared(Buffer2::new_filled(size, 0.03 * 0.03 * scale * scale));
         denoise.apply_with_variance(&mut image, &variance).unwrap();
         image.channel(0).pixels().to_vec()
     };

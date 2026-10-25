@@ -9,7 +9,6 @@ use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette};
 use crate::internals::synthetic::scene::BgField;
 use crate::internals::visual::{ToneMap, save};
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
 use crate::star_detection::tests::Scenario;
@@ -98,7 +97,7 @@ fn rendered_skies_are_recovered() {
         .image
         .channel(0)
         .clone();
-        let size = Size2us::from(&pixels);
+        let size = pixels.size();
         let truth = case.sky.render(size);
         let bare = bg_map::estimate(&truth, &config);
         let bg = bg_map::estimate(&pixels, &config);
@@ -114,8 +113,7 @@ fn rendered_skies_are_recovered() {
         let noisy = bg_map::estimate(&noise_only, &config);
 
         let residual = Buffer2::new(
-            size.width,
-            size.height,
+            size,
             pixels
                 .iter()
                 .zip(bg.bg.plane().iter())

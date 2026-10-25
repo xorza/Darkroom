@@ -4,9 +4,8 @@
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::masked_plane::MaskedPlane;
-use crate::math::size2us::Size2us;
 use crate::math::statistics;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// One same-color neighbour of a phase: its offset, and its squared distance, which orders the
 /// stencil and decides its ties.
@@ -125,7 +124,7 @@ impl CfaLattice {
         scratch: &mut Gathered,
     ) -> f32 {
         let MaskedPlane { pixels, mask } = plane;
-        let size = Size2us::from(pixels);
+        let size = pixels.size();
         let count = self.count;
         scratch.values.clear();
         // The distance of the last neighbour taken: the count stops only between tie groups.
@@ -165,7 +164,7 @@ pub(crate) struct Gathered {
 
 #[cfg(test)]
 mod tests {
-    use common::Buffer2;
+    use common::{Buffer2, Size2us};
 
     use super::*;
     use crate::bit_buffer2::BitBuffer2;
@@ -270,7 +269,7 @@ mod tests {
                 }
                 _ => 0.125 * (cfa.slot_at(pos) + 1) as f32,
             };
-            let pixels = Buffer2::from_fn(size.width, size.height, |x, y| level(Vec2us::new(x, y)));
+            let pixels = Buffer2::from_fn(size, |x, y| level(Vec2us::new(x, y)));
             let mut scratch = Gathered::default();
             for y in 0..size.height {
                 for x in 0..size.width {
@@ -293,8 +292,7 @@ mod tests {
         let lattice = CfaLattice::new(&CfaType::Mono);
         let size = Size2us::new(3, 3);
         let pixels = Buffer2::new(
-            3,
-            3,
+            (3, 3),
             vec![
                 10.0, 10.0, 10.0, 10.0, 999.0, 1000.0, 1000.0, 1000.0, 1000.0,
             ],
@@ -343,7 +341,7 @@ mod tests {
     #[test]
     fn the_median_clips_at_the_border() {
         let lattice = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
-        let mut pixels = Buffer2::new_filled(4, 4, 10.0);
+        let mut pixels = Buffer2::new_filled((4, 4), 10.0);
         pixels[(0, 0)] = 999.0;
         pixels[(2, 0)] = 50.0;
         pixels[(0, 2)] = 60.0;

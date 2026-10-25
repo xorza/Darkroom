@@ -1,4 +1,4 @@
-use common::Buffer2;
+use common::{Buffer2, Size2us};
 
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::mesh_spline::MeshSpline;
@@ -15,9 +15,9 @@ use crate::star_detection::median_filter::internals::apply_3x3;
 use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// A plane of noise around a slope, its sky the mesh of 16-px tiles measures on it.
-fn frame(width: usize, height: usize, seed: u64) -> (Buffer2<f32>, MeshSurface) {
+fn frame(size: Size2us, seed: u64) -> (Buffer2<f32>, MeshSurface) {
     let mut rng = TestRng::new(seed);
-    let pixels = Buffer2::from_fn(width, height, |x, y| {
+    let pixels = Buffer2::from_fn(size, |x, y| {
         0.2 + 0.003 * x as f32 + 0.002 * y as f32 + 0.05 * rng.next_f32()
     });
     let mesh = BgMesh::computed(
@@ -52,7 +52,7 @@ fn whole(
             residual
         }
     };
-    let mut temp = Buffer2::new_default(pixels.width(), pixels.height());
+    let mut temp = Buffer2::new_default(pixels.size());
     let mut values = match prefilter {
         Prefilter::None => pixels,
         Prefilter::Median3x3 => {
@@ -93,7 +93,7 @@ fn a_band_at_a_time_is_the_whole_plane_bit_for_bit() {
     ];
     let bands = ScratchPool::default();
     for (width, height) in [(37, 23), (24, 24), (3, 17), (2, 9), (40, 5), (19, 1)] {
-        let (pixels, sky) = frame(width, height, (width * 100 + height) as u64);
+        let (pixels, sky) = frame(Size2us::new(width, height), (width * 100 + height) as u64);
         for source in [
             FilterSource::Plane(&pixels),
             FilterSource::Residual {
@@ -110,7 +110,7 @@ fn a_band_at_a_time_is_the_whole_plane_bit_for_bit() {
                     let expected = whole(source, prefilter, matched);
                     for band in [1, 2, 3, 7, height] {
                         let mut kernels = FilterKernels::default();
-                        let mut output = Buffer2::new_filled(width, height, f32::NAN);
+                        let mut output = Buffer2::new_filled((width, height), f32::NAN);
                         DetectionFilter {
                             prefilter,
                             matched: matched.map(|filter| kernels.matched(filter)),

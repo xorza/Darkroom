@@ -9,11 +9,10 @@ use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::FlatGain;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::vec2us::Vec2us;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::BinnedSamples;
+use common::{Size2us, Vec2us};
 
 /// The photosites of a `size` frame of `mosaic` a statistic samples: those of the rows
 /// [`CfaType::sampled_rows`] takes for about `per_color` samples a color, less the pixels
@@ -117,7 +116,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
     /// of a Bayer and of an X-Trans pattern holds all three colors, so the neighbour is at most six
     /// photosites away.
     pub(crate) fn noise(&self, mosaic: &Buffer2<f32>) -> ArrayVec<f32, 3> {
-        debug_assert_eq!(Size2us::from(mosaic), self.size, "the mosaic sampled");
+        debug_assert_eq!(mosaic.size(), self.size, "the mosaic sampled");
         let mut differences: ArrayVec<Vec<f32>, 3> = self
             .pair_counts()
             .into_iter()
@@ -145,7 +144,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
                 .map(BgSplit::of_sigma)
                 .collect();
         };
-        debug_assert_eq!(Size2us::from(mosaic), self.size, "the mosaic sampled");
+        debug_assert_eq!(mosaic.size(), self.size, "the mosaic sampled");
         let mut binned: ArrayVec<BinnedSamples<Vec<f32>>, 3> = self
             .pair_counts()
             .into_iter()
@@ -192,10 +191,9 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::test_rng::TestRng;
-    use crate::math::size2us::Size2us;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
-    use crate::math::vec2us::Vec2us;
     use crate::noise::mosaic_sampling::MosaicSampling;
+    use common::{Size2us, Vec2us};
 
     /// Each color of a Bayer mosaic reads its own noise, through a gradient the differences
     /// cancel. σ = 0.01 red, 0.02 green, 0.03 blue on a 512² mosaic: every row holds 255 pairs of
@@ -209,7 +207,7 @@ mod tests {
         let rggb = Mosaic::Bayer(CfaPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
-        let mosaic = Buffer2::from_fn(512, 512, |x, y| {
+        let mosaic = Buffer2::from_fn((512, 512), |x, y| {
             let color = rggb.slot_at(Vec2us::new(x, y));
             0.2 + 0.3 * (x as f32 / 512.0) + sigmas[color] * rng.next_gaussian_f32()
         });

@@ -2,7 +2,7 @@ use super::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// An RGGB mosaic of 128 × 128 with red at 1/8 + x/1024, green at 1/4 and blue at 3/8: each
 /// color's mesh reads its own level, and red's gradient. Tiles of 64 are centred at 31.5 and
@@ -14,7 +14,7 @@ fn each_color_reads_its_own_level() {
     let size = 128;
     let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let red = |x: usize| 0.125 + x as f32 / 1024.0;
-    let pixels = Buffer2::from_fn(size, size, |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
+    let pixels = Buffer2::from_fn((size, size), |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
         0 => red(x),
         1 => 0.25,
         _ => 0.375,
@@ -42,7 +42,7 @@ fn each_color_reads_its_own_level() {
 fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     let size = Size2us::new(128, 128);
     let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let pixels = Buffer2::from_fn(size.width, size.height, |x, y| match (x, y) {
+    let pixels = Buffer2::from_fn(size, |x, y| match (x, y) {
         (0..48, 0..48) => 100.0,
         (0..64, 0..64) => 0.5,
         _ => 0.25,
@@ -66,7 +66,7 @@ fn a_mostly_masked_tile_takes_its_neighbours_sky() {
         );
     }
 
-    let flat = Buffer2::new_filled(size.width, size.height, 0.25);
+    let flat = Buffer2::new_filled(size, 0.25);
     let everywhere = BitBuffer2::new_filled(size, true);
     let mesh = ColorMesh::measure(
         MaskedPlane {

@@ -29,9 +29,9 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
-use crate::math::size2us::Size2us;
 use crate::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
+use common::Size2us;
 
 /// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colors, so it never carries more planes, and the output never more channels.
@@ -136,9 +136,7 @@ impl Drizzler {
     pub(crate) fn sums(&self) -> OutputSums {
         let output = self.grid.size();
         let planes = |count: usize| -> ArrayVec<_, MAX_CHANNELS> {
-            (0..count)
-                .map(|_| Buffer2::new_default(output.width, output.height))
-                .collect()
+            (0..count).map(|_| Buffer2::new_default(output)).collect()
         };
         OutputSums {
             data: planes(self.deposit.output_layout().count()),
@@ -182,7 +180,7 @@ impl Drizzler {
                 .flags()
                 .is_some_and(|flags| flags.contains(QualityFlags::RESAMPLE_CARRIED))
         {
-            sums.flags = Some(Buffer2::new_default(width, height));
+            sums.flags = Some(Buffer2::new_default((width, height)));
         }
         let source = FrameSource::new(frame, self.deposit, self.grid);
         let plan = self.plan;
@@ -266,7 +264,7 @@ impl Drizzler {
         let Some(pixel_weights) = &frame.pixel_weight_map else {
             return Ok(());
         };
-        let actual = Size2us::from(pixel_weights);
+        let actual = pixel_weights.size();
         if actual != self.input_dims.size() {
             return Err(StackError::PlaneDimensionMismatch {
                 idx,

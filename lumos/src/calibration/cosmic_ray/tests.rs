@@ -20,8 +20,8 @@ use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNo
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::vec2us::Vec2us;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
+use common::Vec2us;
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -55,7 +55,7 @@ fn removes_cosmic_rays_preserves_stars() {
         pixels: mut data,
         centers: star_cores,
     } = synthetic_field();
-    let size = Size2us::from(&data);
+    let size = data.size();
     // Single-pixel CRs at empty positions + a short horizontal streak.
     let crs = [
         Vec2us::new(10, 10),
@@ -118,7 +118,7 @@ fn sigclip_controls_sensitivity() {
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
-    let size = Size2us::from(&data);
+    let size = data.size();
     data[size.idx_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
     let sensitive = reject(
         &mut cfa_from_plane(data.clone(), CfaType::Mono),
@@ -148,7 +148,7 @@ fn measured_and_stated_gains_both_catch_a_bright_cr() {
     let SkyField {
         pixels: mut data, ..
     } = synthetic_field();
-    let size = Size2us::from(&data);
+    let size = data.size();
     let cr = Vec2us::new(15, 33);
     data[size.idx_of(cr)] = 0.99;
     for noise in [
@@ -314,7 +314,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
 /// that, and this is what would catch a change that broke it. A pixel with no unmasked neighbour
 /// within the 5×5 window widens it a ring at a time to 15×15, then takes `sky`.
 fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Buffer2<f32> {
-    let size = Size2us::from(pixels);
+    let size = pixels.size();
     let src = pixels;
     let mut out = pixels.clone();
     let (wi, hi) = (size.width as isize, size.height as isize);
@@ -357,7 +357,7 @@ fn repair_via_snapshot(pixels: &Buffer2<f32>, mask: &BitBuffer2, sky: f32) -> Bu
 fn a_repair_matches_a_snapshot_reference() {
     let size = Size2us::new(12, 12);
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
-    let pixels = Buffer2::from_fn(12, 12, |x, y| (y * 12 + x) as f32);
+    let pixels = Buffer2::from_fn((12, 12), |x, y| (y * 12 + x) as f32);
 
     let mut mask = BitBuffer2::new_default(size);
     let at = |x, y| size.idx_of(Vec2us::new(x, y));
@@ -515,7 +515,7 @@ fn a_stated_gain_needs_a_unit_on_the_frame() {
 fn a_faint_hit_on_a_gradient_is_caught() {
     let size = Size2us::new(128, 128);
     let mut rng = TestRng::new(0x6A);
-    let mut pixels = Buffer2::from_fn(128, 128, |x, _| {
+    let mut pixels = Buffer2::from_fn((128, 128), |x, _| {
         0.05 + 0.4 * x as f32 / 128.0 + 0.002 * rng.next_gaussian_f32()
     });
     let hit = Vec2us::new(70, 70);
@@ -631,7 +631,7 @@ fn window_medians_match_the_sorted_window_to_the_bit() {
             })
             .collect();
         for r in [1, 2, 3] {
-            let medians = median_window(&Buffer2::new(width, height, data.clone()), r);
+            let medians = median_window(&Buffer2::new((width, height), data.clone()), r);
             for y in 0..height {
                 for x in 0..width {
                     let mut window = Vec::new();
@@ -745,7 +745,7 @@ fn an_xtrans_mosaic_is_refused_untouched() {
         .map(|idx| 0.04 + 0.01 * cfa.slot_at(size.point_of(idx)) as f32)
         .collect();
     data[size.idx_of(Vec2us::new(18, 18))] = 0.95;
-    let mut image = cfa_from_plane(Buffer2::new(size.width, size.height, data.clone()), cfa);
+    let mut image = cfa_from_plane(Buffer2::new(size, data.clone()), cfa);
     image.set_flags(PixelFlags::from_fn(size, |idx| {
         if idx == 7 {
             QualityFlags::SATURATED

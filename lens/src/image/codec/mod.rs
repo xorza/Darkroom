@@ -5,7 +5,7 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use common::{Buffer2, DeserializeError, SerdeFormat};
+use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
 use imaginarium::{ChannelCount, ColorFormat, ImageDesc, SampleType};
 use lumos::{
     ChannelLayout, DimensionsError, FlatGain, FrameGain, ImageDimensions, ImageMetadata,
@@ -186,7 +186,7 @@ impl CustomValueCodec for ImageCodec {
             ImageRecord::Interleaved { metadata } => {
                 let mut bytes = vec![0; pixel_len];
                 reader.read_exact(&mut bytes).await?;
-                let desc = ImageDesc::new(width, height, color_format);
+                let desc = ImageDesc::new(Size2us::new(width, height), color_format);
                 Image {
                     pixels: Pixels::InterleavedCpu {
                         image: imaginarium::Image::new_with_data(desc, bytes)
@@ -241,7 +241,7 @@ async fn read_planar(
     if flagged {
         let mut bytes = vec![0; dimensions.pixel_count()];
         reader.read_exact(&mut bytes).await?;
-        let flags = PixelFlags::from_bytes(Buffer2::new(width, height, bytes))
+        let flags = PixelFlags::from_bytes(Buffer2::new((width, height), bytes))
             .ok_or(DecodeError::EmptyFlags)?;
         planar.set_flags(Some(flags));
     }
@@ -252,8 +252,8 @@ async fn read_planar(
 fn header(desc: ImageDesc, record_len: usize) -> [u8; HEADER_LEN as usize] {
     let mut header = [0; HEADER_LEN as usize];
     header[0..2].copy_from_slice(&format_bytes(desc.color_format));
-    header[2..10].copy_from_slice(&extent(desc.width).to_le_bytes());
-    header[10..18].copy_from_slice(&extent(desc.height).to_le_bytes());
+    header[2..10].copy_from_slice(&extent(desc.size.width).to_le_bytes());
+    header[10..18].copy_from_slice(&extent(desc.size.height).to_le_bytes());
     header[18..26].copy_from_slice(&extent(record_len).to_le_bytes());
     header
 }

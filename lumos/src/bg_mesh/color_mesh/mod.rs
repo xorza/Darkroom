@@ -9,7 +9,7 @@ use crate::bg_mesh::mesh_workspace::{
 use crate::bg_mesh::tile_stats::{ColorSites, TileStats};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::masked_plane::MaskedPlane;
-use crate::math::vec2us::Vec2us;
+use common::Vec2us;
 
 /// A tile mesh per color of a mosaic, one for a mono plane, read bilinearly between the tile
 /// centres.

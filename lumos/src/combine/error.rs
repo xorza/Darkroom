@@ -10,7 +10,7 @@ use crate::frame_store::error::{FrameStoreError, LoadError};
 use crate::image::error::FrameDimensionMismatch;
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///

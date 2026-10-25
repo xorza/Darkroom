@@ -577,8 +577,8 @@ fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
 #[cfg(test)]
 pub(crate) mod internals {
     use super::*;
-    use crate::math::size2us::Size2us;
     use crate::registration::transform::TransformType;
+    use common::Size2us;
 
     /// A fit's u and v coefficients.
     #[derive(Debug)]

@@ -9,8 +9,7 @@ use crate::io::raw::libraw::ProcessedSamples;
 use crate::io::raw::libraw::internals::BayerDump;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use common::{Size2us, Vec2us};
 
 /// A dump at black `black`, with no other option.
 fn black(black: u32) -> BayerDump {
@@ -117,7 +116,7 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         }
     };
     let samples = |margin: u16| -> Buffer2<u16> {
-        Buffer2::from_fn(SIDE, SIDE, |x, y| {
+        Buffer2::from_fn((SIDE, SIDE), |x, y| {
             if x == 0 || y == 0 || x == SIDE - 1 || y == SIDE - 1 {
                 margin
             } else {
@@ -227,12 +226,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
         );
         raw.libraw.set_saved_flip(6);
         let processed = raw.processed_by_libraw().unwrap();
-        assert_eq!(
-            (processed.width(), processed.height()),
-            (visible.width, visible.height),
-            "{}",
-            path.display()
-        );
+        assert_eq!(processed.size(), visible, "{}", path.display());
     }
 }
 
@@ -335,7 +329,7 @@ fn a_stated_linear_limit_sets_the_saturation_level_within_its_bounds() {
 fn the_raw_values_settle_no_data_and_saturation() {
     const SIDE: usize = 24;
     let dump = |procflags: u8| {
-        let mut samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
+        let mut samples = Buffer2::new_filled((SIDE, SIDE), 2000u16);
         samples[7 * SIDE + 5] = 0;
         samples[0] = 0;
         samples[10 * SIDE + 10] = 62_309;
@@ -387,7 +381,7 @@ fn the_raw_values_settle_no_data_and_saturation() {
 fn the_decode_takes_the_masked_means_libraw_truncates() {
     const SIDE: usize = 26;
     let parity = |row: usize, col: usize| (row % 2) * 2 + col % 2;
-    let samples = Buffer2::from_fn(SIDE, SIDE, |col, row| {
+    let samples = Buffer2::from_fn((SIDE, SIDE), |col, row| {
         if col < 2 {
             let p = parity(row, col);
             (2048 + p + usize::from(row / 2 <= p)) as u16
@@ -428,7 +422,7 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
 #[test]
 fn a_value_past_the_bit_depth_is_corrupt_data() {
     const SIDE: usize = 24;
-    let mut samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
+    let mut samples = Buffer2::new_filled((SIDE, SIDE), 2000u16);
     samples[10 * SIDE + 10] = 20_000;
     let narrow = BayerDump {
         otherflags: 0x20,
@@ -447,7 +441,7 @@ fn a_value_past_the_bit_depth_is_corrupt_data() {
 /// cancel rather than as a failure of the file.
 #[test]
 fn a_cancelled_token_stops_libraw() {
-    let samples = Buffer2::new_filled(24, 24, 2000u16);
+    let samples = Buffer2::new_filled((24, 24), 2000u16);
     let cancel = CancelToken::new();
     let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &cancel).unwrap();
     cancel.cancel();
@@ -468,7 +462,7 @@ fn a_cancelled_token_stops_libraw() {
 /// frame.
 #[test]
 fn the_peek_counts_the_file_and_the_raw_buffer() {
-    let samples = Buffer2::new_filled(24, 24, 2000u16);
+    let samples = Buffer2::new_filled((24, 24), 2000u16);
     let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     let info = frame_info(&libraw).unwrap();
     assert_eq!(
@@ -488,7 +482,7 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
 /// the mosaic reads LibRaw's own memory alone.
 #[test]
 fn the_file_goes_once_the_sensor_data_is_unpacked() {
-    let samples = Buffer2::from_fn(24, 24, |x, y| 1000 + (x * 24 + y) as u16);
+    let samples = Buffer2::from_fn((24, 24), |x, y| 1000 + (x * 24 + y) as u16);
     let mut libraw =
         Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     libraw.unpack(1).unwrap();
@@ -505,7 +499,7 @@ fn the_file_goes_once_the_sensor_data_is_unpacked() {
 #[test]
 fn libraws_processing_declares_its_own_span() {
     const SIDE: usize = 24;
-    let samples = Buffer2::new_filled(SIDE, SIDE, 2000u16);
+    let samples = Buffer2::new_filled((SIDE, SIDE), 2000u16);
     let image = bayer_dump(&samples, black(1000))
         .unwrap()
         .processed_by_libraw()

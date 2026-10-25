@@ -134,8 +134,8 @@ fn light_frame_keeps_quality_with_its_planes() {
     let image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     // The last pixel has no support, so its confidence is zero too — the pairing every consumer of
     // a frame-quality pair relies on.
-    let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
-    let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 0.0]);
+    let coverage = Buffer2::new((2, 2), vec![1.0, 0.5, 0.25, 0.0]);
+    let confidence = Buffer2::new((2, 2), vec![4.0, 3.0, 2.0, 0.0]);
     let admitted = Admitted::measure(&image);
     let frame = StoredFrame::from_memory(
         image,
@@ -297,7 +297,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     // frame of that gain shares. A run reads it into RAM once: two frames of one gain reused in
     // one run hold one gain, the one image and frame alike, and the same grid as kept.
     let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::new(2, 2, vec![0.5, 0.25, 1.0, 0.5]),
+        &Buffer2::new((2, 2), vec![0.5, 0.25, 1.0, 0.5]),
         &CfaType::Mono,
         |_| false,
     ));
@@ -466,7 +466,7 @@ fn spill_names_are_stable_per_source_and_key_and_share_one_stem() {
 fn a_flat_gain_of_another_image_is_refused() {
     let store = |size: (usize, usize), channels: usize| {
         let gain = Arc::new(FlatGain::of_divisor(
-            &Buffer2::new(size.0, size.1, vec![0.5; size.0 * size.1]),
+            &Buffer2::new((size.0, size.1), vec![0.5; size.0 * size.1]),
             &CfaType::Mono,
             |_| false,
         ));

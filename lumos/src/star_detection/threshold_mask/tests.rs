@@ -3,12 +3,12 @@
 use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
+use common::Size2us;
 
 /// The mask of `filtered` at `sigma` over `noise`, at the shared test floor.
 fn threshold_mask(filtered: &Buffer2<f32>, noise: &Buffer2<f32>, sigma: f32) -> BitBuffer2 {
-    let mut mask = BitBuffer2::new_filled(Size2us::from(filtered), false);
+    let mut mask = BitBuffer2::new_filled(filtered.size(), false);
     ThresholdParams::test(sigma).fill_mask_plane(filtered, noise, &mut mask);
     mask
 }
@@ -26,8 +26,7 @@ struct ThresholdMaskCase {
 impl ThresholdMaskCase {
     /// The case's pixels and noise, as planes of its size, and the mask of the one over the other.
     fn mask(&self) -> BitBuffer2 {
-        let plane =
-            |values: &[f32]| Buffer2::new(self.size.width, self.size.height, values.to_vec());
+        let plane = |values: &[f32]| Buffer2::new(self.size, values.to_vec());
         threshold_mask(&plane(self.pixels), &plane(self.noise), self.sigma)
     }
 }
@@ -188,14 +187,13 @@ fn row_layout_over_sizes_and_patterns() {
                 .flat_map(|y| (0..size.width).map(move |x| pattern(x, y, size)))
                 .collect();
             let residual = Buffer2::new(
-                size.width,
-                size.height,
+                size,
                 expected
                     .iter()
                     .map(|&on| if on { 1.0 } else { -0.5 })
                     .collect(),
             );
-            let noise = Buffer2::new_filled(size.width, size.height, 0.1f32);
+            let noise = Buffer2::new_filled(size, 0.1f32);
             let mask = threshold_mask(&residual, &noise, 3.0);
             let actual: Vec<bool> = mask.iter().collect();
             assert_eq!(actual, expected, "{name} at {size:?}");

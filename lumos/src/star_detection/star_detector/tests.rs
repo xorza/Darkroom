@@ -1,3 +1,4 @@
+use common::Size2us;
 use glam::DVec2;
 
 use crate::internals::images::gray_image;
@@ -29,10 +30,10 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     use crate::internals::images::rgb_image;
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
     use crate::internals::test_rng::TestRng;
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     let size = Size2us::new(64, 64);
-    let mut star = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut star = Buffer2::new_filled(size, 0.0f32);
     SyntheticStar::new(
         Vec2::new(32.3, 31.6),
         1.0,
@@ -103,7 +104,7 @@ fn detection_is_invariant_to_scale_zero_point_and_rotation() {
     use crate::internals::invariance::Affine;
 
     let frame = Scenario::default().frame();
-    let size = Size2us::new(frame.image.width(), frame.image.height());
+    let size = frame.image.size();
     let base: Vec<f32> = frame
         .image
         .channel(0)

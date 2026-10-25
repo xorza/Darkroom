@@ -227,13 +227,13 @@ mod tests {
             }
         }));
         let warped = FrameQuality::Planes {
-            coverage: Buffer2::new(6, 1, ramp(0.5)),
-            confidence: Buffer2::new(6, 1, ramp(0.25)),
+            coverage: Buffer2::new((6, 1), ramp(0.5)),
+            confidence: Buffer2::new((6, 1), ramp(0.25)),
         };
         let drops: ArrayVec<DropPlanes<Buffer2<f32>>, 3> = (0..3)
             .map(|channel| DropPlanes {
-                weight: Buffer2::new(6, 1, ramp(channel as f32)),
-                confidence: Buffer2::new(6, 1, ramp(5.0 + channel as f32)),
+                weight: Buffer2::new((6, 1), ramp(channel as f32)),
+                confidence: Buffer2::new((6, 1), ramp(5.0 + channel as f32)),
             })
             .collect();
         let drizzled = FrameQuality::Drizzled { drops };

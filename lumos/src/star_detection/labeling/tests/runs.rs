@@ -1,10 +1,10 @@
 //! Masks built for the run extraction: runs across 64-bit word boundaries, full and alternating
 //! words, and runs that overlap, miss or skip rows.
 
-use crate::math::size2us::Size2us;
 use crate::star_detection::labeling::run::Run;
 use crate::star_detection::labeling::tests::{Mask, check};
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+use common::Size2us;
 
 #[test]
 fn search_window_widens_by_one_each_way_for_eight_connectivity() {

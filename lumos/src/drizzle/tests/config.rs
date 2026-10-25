@@ -124,9 +124,7 @@ fn a_scale_past_any_image_is_refused() {
     let at = |scale| drizzle_plain(frames(), &kernel_config(DrizzleKernel::Square, scale, 1.0));
     assert!(matches!(
         at(1e9),
-        Err(DrizzleError::OutputSize(DimensionsError::SidePastMax {
-            width: 2_000_000_000,
-            height: 2_000_000_000,
-        }))
+        Err(DrizzleError::OutputSize(DimensionsError::SidePastMax { size }))
+            if size == Size2us::new(2_000_000_000, 2_000_000_000)
     ));
 }

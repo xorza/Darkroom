@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::{array, slice};
 
-use common::{Buffer2, par};
+use common::{Buffer2, Size2us, par};
 use imaginarium::{ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
@@ -66,6 +66,10 @@ impl LinearImage {
             None,
             ImageMetadata::default(),
         )
+    }
+
+    pub fn size(&self) -> Size2us {
+        self.dimensions().size()
     }
 
     pub fn width(&self) -> usize {
@@ -427,8 +431,7 @@ pub(crate) mod internals {
             let intensity = self.intensity();
             let size = intensity.size();
             Buffer2::new(
-                size.width,
-                size.height,
+                size,
                 (0..size.pixel_count())
                     .map(|idx| intensity.at(idx))
                     .collect(),
@@ -448,7 +451,7 @@ mod tests {
     use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::pixel_flags::PixelFlags;
     use crate::internals::images::{gray_image, rgb_image};
-    use crate::math::size2us::Size2us;
+    use common::Size2us;
 
     /// A 2×1 RGB image holds 6 `f32` samples, 24 bytes; its flag plane adds a byte a pixel, 2; a
     /// gain it holds alone adds its grid, 2 nodes × 3 channels × 4 bytes = 24; a shared one adds
@@ -458,12 +461,12 @@ mod tests {
         let size = Size2us::new(2, 1);
         let mut image = rgb_image(size, [vec![0.1, 0.4], vec![0.2, 0.5], vec![0.3, 0.6]]);
         assert_eq!(image.ram_bytes(), 24);
-        image.set_flags(PixelFlags::from_bytes(Buffer2::new(2, 1, vec![1, 0])));
+        image.set_flags(PixelFlags::from_bytes(Buffer2::new((2, 1), vec![1, 0])));
         assert_eq!(image.ram_bytes(), 26);
         let gain = FlatGain::from_nodes(
             size,
             (0..3)
-                .map(|_| Buffer2::new(2, 1, vec![1.5, 2.0]))
+                .map(|_| Buffer2::new((2, 1), vec![1.5, 2.0]))
                 .collect::<ArrayVec<_, 3>>(),
         );
         image.set_flat_gain(Some(FrameGain::Own(Box::new(gain.clone()))));
@@ -514,13 +517,13 @@ mod tests {
     #[test]
     fn remap_intensity_moves_pixels_with_their_hue() {
         let mut image = rgb_image(Size2us::new(1, 1), [vec![0.2], vec![0.1], vec![0.1]]);
-        image.remap_intensity(|intensity| Buffer2::new(1, 1, vec![2.0 * intensity.at(0)]));
+        image.remap_intensity(|intensity| Buffer2::new((1, 1), vec![2.0 * intensity.at(0)]));
         assert_eq!(image.channel(0).pixels(), &[0.4]);
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);
 
         let mut gray = gray_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
-        gray.remap_intensity(|_| Buffer2::new(3, 1, vec![-0.5, 0.25, 1.5]));
+        gray.remap_intensity(|_| Buffer2::new((3, 1), vec![-0.5, 0.25, 1.5]));
         assert_eq!(gray.channel(0).pixels(), &[0.0, 0.25, 1.0]);
     }
 }

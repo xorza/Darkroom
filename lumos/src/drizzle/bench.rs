@@ -20,9 +20,9 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::math::size2us::Size2us;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::warp_transform::WarpTransform;
+use common::Size2us;
 
 /// Each light's side.
 const SIDE: Size2us = Size2us::new(2048, 2048);

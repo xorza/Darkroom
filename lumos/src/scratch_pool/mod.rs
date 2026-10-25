@@ -20,7 +20,7 @@ use std::thread;
 
 use common::Buffer2;
 
-use crate::math::size2us::Size2us;
+use common::Size2us;
 
 /// A value a [`ScratchPool`] builds at its shape and fits to that shape again on reuse.
 pub(crate) trait Scratch: Send + Sized {
@@ -61,7 +61,7 @@ impl<T: Default + Clone + Send> Scratch for Buffer2<T> {
     type Shape = Size2us;
 
     fn build(shape: Size2us) -> Self {
-        Self::new_default(shape.width, shape.height)
+        Self::new_default(shape)
     }
 
     fn fit(&mut self, shape: Size2us) {
@@ -69,7 +69,7 @@ impl<T: Default + Clone + Send> Scratch for Buffer2<T> {
     }
 
     fn has_shape(&self, shape: Size2us) -> bool {
-        Size2us::from(self) == shape
+        self.size() == shape
     }
 }
 

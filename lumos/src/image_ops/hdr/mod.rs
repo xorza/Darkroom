@@ -83,13 +83,12 @@ impl Hdr {
         let scales = self.scales.min(wavelet::max_scales(size));
 
         let mut c_cur = Buffer2::new(
-            size.width,
-            size.height,
+            size,
             par::into_iter(0..size.pixel_count())
                 .map(|idx| intensity.at(idx).max(LOG_FLOOR).ln())
                 .collect(),
         );
-        let mut c_next = Buffer2::new_default(size.width, size.height);
+        let mut c_next = Buffer2::new_default(size);
         for j in 0..scales {
             wavelet::atrous_smooth(&c_cur, &mut c_next, 1 << j);
             mem::swap(&mut c_cur, &mut c_next);

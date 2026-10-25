@@ -10,13 +10,13 @@
 
 use common::Buffer2;
 
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::deblend::region::Region;
+use common::Vec2us;
 
 /// What the local-maxima deblender reads from the detection configuration.
 #[derive(Debug, Clone, Copy)]

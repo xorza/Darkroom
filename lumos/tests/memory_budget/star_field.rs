@@ -82,7 +82,7 @@ impl StarField {
     /// [`Layout::Mosaic`].
     pub(crate) fn mosaic(&self, idx: usize) -> CfaImage {
         CfaImage::from_plane(
-            Buffer2::new(self.side, self.side, self.render(idx)),
+            Buffer2::new((self.side, self.side), self.render(idx)),
             CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             ImageMetadata::default(),
         )

@@ -1,9 +1,9 @@
 //! [`ComponentPixels`]: one component's pixels, found by position in memory proportional to them.
 
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::component::Component;
 use crate::star_detection::deblend::pixel::Pixel;
 use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+use common::Vec2us;
 
 /// One component's pixels in raster order, with where each row of its box starts.
 ///
@@ -207,14 +207,12 @@ pub(crate) mod internals {
 mod tests {
     use common::Buffer2;
 
-    use crate::math::size2us::Size2us;
-    use crate::math::urect::URect;
-    use crate::math::vec2us::Vec2us;
     use crate::star_detection::deblend::component::Component;
     use crate::star_detection::deblend::component_pixels::ComponentPixels;
     use crate::star_detection::labeling::LabelMap;
     use crate::star_detection::labeling::component_data::ComponentData;
     use crate::star_detection::star_detection_config::extraction_config::Connectivity;
+    use common::{Rect2us, Size2us, Vec2us};
 
     /// A plus of five pixels and one pixel diagonal to its arm: under 8-connectivity the arm's end
     /// (5, 4) reaches the diagonal (6, 3), the centre and the plus's other two diagonal pixels;
@@ -224,9 +222,9 @@ mod tests {
     fn neighbours_follow_the_connectivity() {
         let size = Size2us::new(10, 10);
         let lit = [(4, 3), (3, 4), (4, 4), (5, 4), (4, 5), (6, 3)];
-        let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
-        let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-        let mut bbox = URect::empty();
+        let mut pixels = Buffer2::new_filled(size, 0.0f32);
+        let mut labels = Buffer2::new_filled(size, 0u32);
+        let mut bbox = Rect2us::empty();
         for &(x, y) in &lit {
             pixels[(x, y)] = 1.0;
             labels[(x, y)] = 1;
