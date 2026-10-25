@@ -1,5 +1,7 @@
 //! [`RawDecoder`]: the decoder LibRaw chose for a file, as far as lumos treats decoders apart.
 
+use libraw::CodecFacts;
+
 /// The decoder LibRaw chose for a file at identify, with the facts of its codec lumos has to know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RawDecoder {
@@ -20,28 +22,6 @@ pub(super) enum RawDecoder {
     FiltersAtDecode,
     /// Any other decoder.
     Other,
-}
-
-/// What LibRaw reports of a file's codec at identify, as [`RawDecoder::classify`] reads it.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct CodecFacts<'a> {
-    /// The decoder's name as `libraw_get_decoder_info` reports it, without its terminator.
-    pub(super) name: &'a [u8],
-    /// Whether the samples are floating-point.
-    pub(super) floating_point: bool,
-    /// Whether a compressed Fuji RAF is lossless.
-    pub(super) fuji_lossless: bool,
-    /// A CR3's coding, when the file has a CR3 track.
-    pub(super) crx: Option<CrxCoding>,
-}
-
-/// A CR3 track's coding, from its CMP1 header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CrxCoding {
-    /// 3 for the lossy plane-buffered variant.
-    pub(super) enc_type: i32,
-    /// The wavelet levels: 0 codes the samples themselves, more codes quantized subbands.
-    pub(super) image_levels: i32,
 }
 
 impl RawDecoder {

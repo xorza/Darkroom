@@ -1,12 +1,11 @@
 use common::{Buffer2, CancelToken, TempDir};
+use libraw::internals::BayerDump;
+use libraw::{LibrawCode, LibrawError, ProcessedSamples};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
-use crate::io::raw::error::LibrawCode;
-use crate::io::raw::libraw::ProcessedSamples;
-use crate::io::raw::libraw::internals::BayerDump;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
 use common::{Size2us, Vec2us};
@@ -83,7 +82,7 @@ fn load_rejects_invalid_files() {
             matches!(
                 &error,
                 ImageError::Raw {
-                    source: RawError::Open(_),
+                    source: RawError::Libraw(LibrawError::Open(_)),
                     ..
                 }
             ),
@@ -225,7 +224,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
             "a square frame cannot show a turn"
         );
         raw.libraw.set_saved_flip(6);
-        let processed = raw.processed_by_libraw().unwrap();
+        let processed = raw.processed_by_libraw(None).unwrap();
         assert_eq!(processed.size(), visible, "{}", path.display());
     }
 }
@@ -234,38 +233,38 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
 fn camera_white_balance_is_canonicalized() {
     let bayer = Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
     assert_eq!(
-        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 0),
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], false),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0], 0),
+        camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0], false),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
         camera_white_balance(
             Some(CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
             [2.0, 1.0, 1.5, 9.0],
-            0
+            false
         ),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0], 0),
+        camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0], false),
         None
     );
     // Samples that already carry the as-shot balance have unity left to apply, whatever the
     // multipliers say; a monochrome sensor has none either way.
     assert_eq!(
-        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 1),
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], true),
         Some([1.0; 4])
     );
     assert_eq!(
-        camera_white_balance(Some(CfaType::Mono), [4.0, 2.0, 3.0, 2.0], 1),
+        camera_white_balance(Some(CfaType::Mono), [4.0, 2.0, 3.0, 2.0], true),
         None
     );
     // A sensor LibRaw processes itself (a linear DNG) still reports its multipliers.
     assert_eq!(
-        camera_white_balance(None, [4.0, 2.0, 3.0, 2.0], 0),
+        camera_white_balance(None, [4.0, 2.0, 3.0, 2.0], false),
         Some([2.0, 1.0, 1.5, 1.0])
     );
 }
@@ -282,7 +281,7 @@ fn invalid_camera_white_balance_is_absent() {
 
     for input in invalid {
         assert!(
-            camera_white_balance(cfa_type, input, 0).is_none(),
+            camera_white_balance(cfa_type, input, false).is_none(),
             "{input:?}"
         );
     }
@@ -397,7 +396,7 @@ fn the_decode_takes_the_masked_means_libraw_truncates() {
         },
     )
     .unwrap();
-    let color = &raw.libraw.data().color;
+    let color = raw.libraw.color();
     assert_eq!(
         color.black, 2048,
         "unpack moved the least truncated mean into black"
@@ -430,7 +429,7 @@ fn a_value_past_the_bit_depth_is_corrupt_data() {
     };
     assert!(matches!(
         bayer_dump(&samples, narrow),
-        Err(RawError::CorruptData)
+        Err(RawError::Libraw(LibrawError::CorruptData))
     ));
     assert!(bayer_dump(&samples, BayerDump::default()).is_ok());
     samples[10 * SIDE + 10] = 16_000;
@@ -448,7 +447,10 @@ fn a_cancelled_token_stops_libraw() {
     let path = Path::new("bayer-dump");
     let error = UnpackedRaw::unpack(libraw, 1).unwrap_err();
     assert!(
-        matches!(error, RawError::Unpack(LibrawCode::Cancelled)),
+        matches!(
+            error,
+            RawError::Libraw(LibrawError::Unpack(LibrawCode::Cancelled))
+        ),
         "{error:?}"
     );
     assert!(matches!(
@@ -502,7 +504,7 @@ fn libraws_processing_declares_its_own_span() {
     let samples = Buffer2::new_filled((SIDE, SIDE), 2000u16);
     let image = bayer_dump(&samples, black(1000))
         .unwrap()
-        .processed_by_libraw()
+        .processed_by_libraw(None)
         .unwrap();
     assert_eq!(
         image.dimensions(),
@@ -520,17 +522,10 @@ fn libraws_processing_declares_its_own_span() {
     }
 }
 
-/// The camera is LibRaw's normalized make and model, each read to its terminator and trimmed,
-/// joined by a space; either alone when the other is empty, and `None` when both are.
+/// The camera is LibRaw's normalized make and model, each trimmed, joined by a space; either
+/// alone when the other is empty, and `None` when both are.
 #[test]
 fn the_instrument_joins_the_normalized_make_and_model() {
-    let field = |text: &str| {
-        let mut field: [ffi::c_char; 64] = [0; 64];
-        for (slot, byte) in field.iter_mut().zip(text.bytes()) {
-            *slot = ffi::c_char::from_ne_bytes([byte]);
-        }
-        field
-    };
     for (make, model, expected) in [
         ("Canon", "EOS 6D", Some("Canon EOS 6D")),
         ("Canon ", " EOS 6D", Some("Canon EOS 6D")),
@@ -539,7 +534,7 @@ fn the_instrument_joins_the_normalized_make_and_model() {
         ("", "", None),
     ] {
         assert_eq!(
-            instrument(&field(make), &field(model)).as_deref(),
+            instrument(make, model).as_deref(),
             expected,
             "{make:?} {model:?}"
         );
@@ -553,7 +548,8 @@ fn processed_samples_split_into_one_plane_a_color() {
     let samples = [100, 200, 300, 400, 65_535, 0];
     let processed = ProcessedSamples {
         samples: &samples,
-        dimensions: ImageDimensions::new((2, 1), ChannelLayout::Rgb),
+        size: Size2us::new(2, 1),
+        colors: 3,
     };
     let split: Vec<Vec<f32>> = planes(&processed).collect();
     assert_eq!(

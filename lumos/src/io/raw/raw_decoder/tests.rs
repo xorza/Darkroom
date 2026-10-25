@@ -1,3 +1,5 @@
+use libraw::CrxCoding;
+
 use crate::io::raw::raw_decoder::*;
 
 /// Each decoder name LibRaw reports names its case: a CR3 lossy when wavelet-coded, of type 3,
