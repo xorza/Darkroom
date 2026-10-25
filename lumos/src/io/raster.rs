@@ -9,16 +9,18 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, fs};
-use imaginarium::{ChannelCount, InterleavedImage, RasterFormat};
+use imaginarium::{
+    ChannelCount, ColorFormat, InterleavedImage, PlanarImage, RasterFormat, SampleType,
+};
 
 use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer, RowOrder,
     SourceProvenance,
 };
-use crate::image::linear_image::{self, LinearImage};
+use crate::image::linear_image::LinearImage;
 use crate::image::observation_header::ObservationHeader;
 use crate::image::preview_image::PreviewImage;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
@@ -72,7 +74,7 @@ pub(crate) fn linear(
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
     let desc = decoded.desc();
-    if desc.size.width > ImageDimensions::MAX_SIDE || desc.size.height > ImageDimensions::MAX_SIDE {
+    if desc.size.width > MAX_SIDE || desc.size.height > MAX_SIDE {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::RasterSideTooLong {
@@ -99,8 +101,10 @@ pub(crate) fn linear(
     } else {
         ColorProvenance::Unspecified
     };
-    let mut image = LinearImage::from(decoded);
-    let size = image.dimensions().size();
+    let mut image = LinearImage::from(
+        PlanarImage::try_from(decoded).expect("a float mono or RGB raster has planes"),
+    );
+    let size = image.desc().size();
     let flags = {
         let mut planes = image
             .planes_mut()
@@ -136,8 +140,9 @@ pub(crate) fn preview(
 ) -> Result<PreviewImage, ImageError> {
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
-    let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
-    let target = linear_image::f32_target_format(decoded.desc().color_format);
+    let alpha_dropped = decoded.desc().color_format.has_alpha();
+    let decoded = decoded.without_alpha();
+    let target = ColorFormat::new(decoded.desc().color_format.channel_count, SampleType::F32);
     let metadata = ImageMetadata {
         header: ObservationHeader::default(),
         derived: DerivedFacts::builder()
@@ -172,9 +177,8 @@ pub(crate) fn write_image(path: &Path, image: &InterleavedImage) -> Result<(), W
 
 #[cfg(all(test, feature = "real-data"))]
 pub(crate) mod internals {
-    use std::path::Path;
-
     use imaginarium::{InterleavedImage, RasterFormat};
+    use std::path::Path;
 
     use crate::io::error::ImageError;
     use crate::io::raster;

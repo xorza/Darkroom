@@ -1,7 +1,8 @@
 //! [`PipelineFrame`]: the frame carrier the registered-stacking pipeline moves between stages.
 
+use imaginarium::PlanarDesc;
+
 use crate::frame_store::stored_image::StoredImage;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
 
@@ -35,9 +36,9 @@ impl PipelineFrame {
         }
     }
 
-    pub(super) fn dimensions(&self) -> ImageDimensions {
+    pub(super) fn desc(&self) -> PlanarDesc {
         match self {
-            Self::Resident(image) => image.dimensions(),
+            Self::Resident(image) => image.desc(),
             Self::Spilled(stored) => stored.dimensions,
         }
     }

@@ -9,10 +9,11 @@ use common::{CancelToken, TempDir};
 use glam::DVec2;
 
 use super::*;
+use imaginarium::ChannelLayout;
+
 use crate::combine::error::{StackConfigError, StackError};
 use crate::frame::frame_plane::FramePlane;
 use crate::frame_store::decode_cache::DecodeCache;
-use crate::image::channel_layout::ChannelLayout;
 use crate::ingest::error::AdmissionError;
 use crate::internals::images::rgb_image;
 use crate::io::decoder::linear_decoder::LinearDecoder;
@@ -363,7 +364,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
             ProgressMonitor::unattended(),
         )
         .unwrap();
-    let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), config);
+    let mut acc = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), config);
     acc.add_frame(&DrizzleFrame::new(image, warp.clone()))
         .unwrap();
     assert_eq!(acc.unconverged_points(), 0);
@@ -383,7 +384,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     let t = Vec2us::new(20, 9);
     pixels[size.idx_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
-    let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), point);
+    let mut acc = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), point);
     acc.add_frame(&DrizzleFrame::new(mono_image(size, pixels), warp.clone()))
         .unwrap();
     let out = acc.finalize();
@@ -421,7 +422,7 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
     );
 
     let mut acc = accumulator(
-        ImageDimensions::new(size, ChannelLayout::Mono),
+        PlanarDesc::new(size, ChannelLayout::Mono),
         kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
     acc.add_frame_with_band_rows(&DrizzleFrame::new(constant_image(size, 1.0), warp), 4);
@@ -706,7 +707,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
 #[test]
 fn band_count_does_not_change_the_result() {
     let image = star_field(Size2us::new(64, 64), 24, 4242).image;
-    let dimensions = image.dimensions();
+    let dimensions = image.desc();
     let centre = DVec2::new(32.0, 32.0);
     let warp = |transform: Transform| WarpTransform::new(transform.inverse());
 
@@ -772,7 +773,7 @@ fn band_count_does_not_change_the_result() {
             let (many, many_unconverged) = drizzle(5);
 
             let case = format!("{name}/{kernel:?}");
-            for channel in 0..dimensions.channels() {
+            for channel in 0..dimensions.channel_count() {
                 assert_eq!(
                     single.image.channel(channel),
                     many.image.channel(channel),
@@ -856,7 +857,7 @@ fn a_band_scan_covers_every_reaching_drop() {
 #[test]
 fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let config = DrizzleConfig::default();
-    let mut acc = accumulator(ImageDimensions::new((4, 4), ChannelLayout::Mono), config);
+    let mut acc = accumulator(PlanarDesc::new((4, 4), ChannelLayout::Mono), config);
 
     let mut frame = DrizzleFrame::new(
         constant_image(Size2us::new(4, 4), 1.0),

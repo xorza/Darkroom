@@ -12,8 +12,9 @@ Workspace members, each after the crates it uses:
   2D grid, CPU features, I/O and thread creation. A leaf: in-tree it uses only its own `common-derive`.
 - **`scenarium`** — the node-graph framework: the authoring model and the
   compile → plan → execute pipeline.
-- **`imaginarium`** — interleaved images in nine pixel formats: their codecs,
-  SIMD and GPU ops. GPU work is behind its `wgpu` feature.
+- **`imaginarium`** — pixels in both layouts: interleaved images in nine pixel
+  formats, with their codecs, SIMD and GPU ops, and `f32` planes. GPU work is
+  behind its `wgpu` feature.
 - **`libraw`** — a safe wrapper over LibRaw: every `unsafe` call into
   `libraw-sys`, and LibRaw's state read as plain Rust values.
 - **`lumos`** — the astronomical image-processing pipeline.

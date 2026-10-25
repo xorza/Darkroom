@@ -27,7 +27,7 @@ fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer
 #[test]
 #[should_panic(expected = "non-zero")]
 fn new_uninit_zero_dimension_panics() {
-    // A zero-size image is a logic error upstream (ImageDimensions asserts > 0); fail fast
+    // A zero-size image is a logic error upstream (PlanarDesc asserts > 0); fail fast
     // with a clear message instead of a bare div_ceil divide-by-zero.
     BgMesh::new_uninit(Size2us::new(0, 100), 64);
 }

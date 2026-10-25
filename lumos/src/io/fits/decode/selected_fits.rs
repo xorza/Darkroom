@@ -154,7 +154,7 @@ impl SelectedFits {
         let size = plan.dimensions.size();
         let described = DescribedImage {
             size,
-            channels: plan.dimensions.channels(),
+            channels: plan.dimensions.channel_count(),
             scale: Some(plan.sample_scale.divisor),
             weight_units: WeightUnits::Unitless,
         };
@@ -205,7 +205,7 @@ impl SelectedFits {
         let dimensions = self.plan.dimensions;
         if !dimensions.is_mono() {
             return Err(FitsRefusal::CfaPlanes {
-                planes: dimensions.channels(),
+                planes: dimensions.channel_count(),
             }
             .into());
         }

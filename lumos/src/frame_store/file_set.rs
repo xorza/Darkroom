@@ -14,6 +14,7 @@ use crate::frame_store::run_storage::RunStorage;
 use crate::frame_store::stored_image::StoredImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::shared_gains::SharedGains;
+use crate::image::frame_desc;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::{Decoder, Peek};
@@ -109,7 +110,7 @@ impl<D: Decoder> Early<D> {
     fn held_bytes(&self) -> usize {
         match self {
             Self::Read(read) => D::read_len(read),
-            Self::Decoded(image) => image.dimensions().decoded_bytes(),
+            Self::Decoded(image) => frame_desc::decoded_byte_len(image.desc()),
         }
     }
 }
@@ -423,15 +424,14 @@ mod tests {
     use std::sync::Arc;
 
     use common::{Buffer2, TempDir, fs};
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
-    use crate::image::channel_layout::ChannelLayout;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::ingest::ingest_config::IngestConfig;
     use crate::ingest::ingest_run::IngestRun;
@@ -441,7 +441,7 @@ mod tests {
     /// A float TIFF of `width` × 2 RGB at `level` in `dir`, which no header read answers for.
     fn tiff(dir: &Path, name: &str, width: usize, level: f32) -> PathBuf {
         let image = LinearImage::from_planar_channels(
-            ImageDimensions::new((width, 2), ChannelLayout::Rgb),
+            PlanarDesc::new((width, 2), ChannelLayout::Rgb),
             [level; 3].map(|level| vec![level; width * 2]),
         );
         let path = dir.join(name);
@@ -495,7 +495,7 @@ mod tests {
             SetPeek {
                 idx: 0,
                 info: FrameInfo {
-                    dimensions: ImageDimensions::new((3, 2), ChannelLayout::Rgb),
+                    dimensions: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
                     cfa_type: CfaType::Mono,
                     decoder: DecoderBytes::default(),
                     gain_bytes: 0,
@@ -547,7 +547,7 @@ mod tests {
             SetPeek {
                 idx: 0,
                 info: FrameInfo {
-                    dimensions: ImageDimensions::new((3, 2), ChannelLayout::Rgb),
+                    dimensions: PlanarDesc::new((3, 2), ChannelLayout::Rgb),
                     cfa_type: CfaType::Mono,
                     decoder: DecoderBytes::default(),
                     gain_bytes: 0,
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!((peek.idx, peek.held), (1, 4 * 2 * 13));
         assert_eq!(
             peek.info.dimensions,
-            ImageDimensions::new((4, 2), ChannelLayout::Rgb)
+            PlanarDesc::new((4, 2), ChannelLayout::Rgb)
         );
         tiff(dir.path(), "2.tiff", 3, 0.0625);
         for (idx, expected) in [(0, 0.25), (1, 0.125), (2, 0.0625)] {
@@ -593,7 +593,7 @@ mod tests {
         ));
         let paths = [0.25f32, 0.5, 0.75].map(|level| {
             let mut image = LinearImage::from_planar_channels(
-                ImageDimensions::new((3, 2), ChannelLayout::Rgb),
+                PlanarDesc::new((3, 2), ChannelLayout::Rgb),
                 [level; 3].map(|level| vec![level; 6]),
             );
             image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));

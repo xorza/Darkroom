@@ -1,9 +1,11 @@
 //! [`FrameInfo`]: what a frame is, read from its file's header without decoding it.
 
+use imaginarium::PlanarDesc;
+
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::image::pixel_flags::DilationScratch;
 use crate::image::stackable_image::StackableImage;
 use crate::memory::footprint::Footprint;
@@ -14,7 +16,7 @@ use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 /// the flat gain its file stores, none for a file with none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameInfo {
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) cfa_type: CfaType,
     pub(crate) decoder: DecoderBytes,
     pub(crate) gain_bytes: usize,
@@ -48,7 +50,7 @@ impl FrameInfo {
     /// What `image`, decoded already, settles: its decoder is done, so what it held is not known.
     pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
         Self {
-            dimensions: image.dimensions(),
+            dimensions: image.desc(),
             cfa_type: image.cfa_type().unwrap_or(CfaType::Mono),
             decoder: DecoderBytes::default(),
             gain_bytes: image.flat_gain().map_or(0, |gain| gain.ram_bytes()),
@@ -58,7 +60,7 @@ impl FrameInfo {
     /// The frame's decode: its samples and its flag plane kept, which a decoder that flags
     /// saturation gives most frames, and the decoder's bytes on the way.
     pub(crate) const fn decoded(self) -> Footprint {
-        let frame = self.dimensions.decoded_bytes();
+        let frame = frame_desc::decoded_byte_len(self.dimensions);
         Footprint {
             kept: frame,
             peak: self.decoder.peak(frame),
@@ -84,7 +86,7 @@ impl FrameInfo {
             .cfa_type
             .mosaic()
             .map_or(0, |_| DilationScratch::heap_bytes(size, workers));
-        let flags = self.dimensions.flag_plane_bytes();
+        let flags = frame_desc::flag_plane_byte_len(self.dimensions);
         let demosaic = Demosaic::of(self.cfa_type, passes).footprint(self.dimensions, workers);
         way.beside(noise).beside(dilation).then(Footprint {
             kept: demosaic.kept + flags,

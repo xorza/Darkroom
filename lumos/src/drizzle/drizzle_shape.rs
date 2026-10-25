@@ -1,5 +1,7 @@
 //! [`DrizzleShape`]: what a drizzle run holds, and the tier its drizzled frames live in.
 
+use imaginarium::PlanarDesc;
+
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
 use crate::combine::stack_config::StackConfig;
@@ -9,7 +11,7 @@ use crate::frame::frame_peek::FramePeek;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::frame_info::DecoderBytes;
 use crate::memory::footprint::Footprint;
@@ -35,8 +37,8 @@ pub(crate) enum FrameOrigin {
 /// What a drizzle run holds, which decides the [`StorageTier`] it keeps its drizzled frames in.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DrizzleShape {
-    pub(crate) input: ImageDimensions,
-    pub(crate) output: ImageDimensions,
+    pub(crate) input: PlanarDesc,
+    pub(crate) output: PlanarDesc,
     pub(crate) deposit: Deposit,
     pub(crate) frame_count: usize,
     pub(crate) origin: FrameOrigin,
@@ -63,7 +65,7 @@ impl DrizzleShape {
             FrameOrigin::Memory => 0,
         };
         let writes = RunWrites {
-            kept: (self.input.decoded_bytes() as u64)
+            kept: (frame_desc::decoded_byte_len(self.input) as u64)
                 .saturating_mul(uncached as u64)
                 .saturating_add(self.gain_bytes() as u64),
             spilled: (self.drizzled().heap_bytes(self.output) as u64)
@@ -79,10 +81,10 @@ impl DrizzleShape {
     /// every drizzled frame, as lights are divided by a flat as a rule.
     const fn drizzled(&self) -> StoredLayout {
         StoredLayout {
-            channels: self.output.channels(),
+            channels: self.output.channel_count(),
             quality_planes: 2 * self.deposit.weight_planes(),
             flags: true,
-            gain_channels: self.output.channels(),
+            gain_channels: self.output.channel_count(),
         }
     }
 
@@ -122,7 +124,7 @@ impl DrizzleShape {
         } = *self;
         let drizzled = self.drizzled();
         let drizzled_bytes = drizzled.heap_bytes(output);
-        let input_bytes = input.decoded_bytes();
+        let input_bytes = frame_desc::decoded_byte_len(input);
         let decoder = match origin {
             FrameOrigin::Files { decoder, .. } => decoder,
             FrameOrigin::Memory => DecoderBytes::default(),
@@ -155,7 +157,7 @@ impl DrizzleShape {
                 count: frame_count,
                 dimensions: output,
                 layout: drizzled,
-                slots: Slots::new(None, output.channels()),
+                slots: Slots::new(None, output.channel_count()),
                 coverage: deposit.set_coverage(),
                 workers,
             },
@@ -180,12 +182,12 @@ impl DrizzleShape {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::{ChannelLayout, PlanarDesc};
+
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::io::frame_info::DecoderBytes;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
@@ -216,8 +218,8 @@ mod tests {
         };
         for gains in [0, 16] {
             let shape = DrizzleShape {
-                input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
-                output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+                input: PlanarDesc::new((2, 2), ChannelLayout::Mono),
+                output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
                 deposit: Deposit::Channels(ChannelLayout::Mono),
                 frame_count: 3,
                 origin: FrameOrigin::Files {
@@ -254,8 +256,8 @@ mod tests {
         // A decoder that holds 1000 B beside the frame it makes peaks the way at 20 + 1000 B,
         // past the statistics' 408: 1020 − 224 = 796 past the drizzled frame.
         let decoding = DrizzleShape {
-            input: ImageDimensions::new((2, 2), ChannelLayout::Mono),
-            output: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+            input: PlanarDesc::new((2, 2), ChannelLayout::Mono),
+            output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
             deposit: Deposit::Channels(ChannelLayout::Mono),
             frame_count: 3,
             origin: FrameOrigin::Files {

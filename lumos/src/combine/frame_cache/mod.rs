@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::{Buffer2, CancelToken, par};
+use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -38,15 +39,12 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::flag_counts::AtomicFlagCounts;
 use crate::image::flat_gain::{GainGrid, GainRows};
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::observation_header::ObservationHeader;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
@@ -71,16 +69,16 @@ use common::Vec2us;
 /// ask for it.
 #[derive(Debug)]
 pub(crate) struct CombineOutput {
-    pub(super) pixels: LinearPixels,
+    pub(super) pixels: PlanarImage,
     /// The share of frames gathered at each pixel, when coverage was asked for and some frame
     /// carries frame quality; every pixel is wholly covered otherwise. One plane, or one per
     /// channel when a frame is gathered by each channel's own rule.
-    coverage: Option<LinearPixels>,
-    weight: Option<LinearPixels>,
+    coverage: Option<PlanarImage>,
+    weight: Option<PlanarImage>,
     /// What the frame weights summed in `weight` were.
     weight_kind: WeightKind,
-    inverse_variance: Option<LinearPixels>,
-    dispersion: Option<LinearPixels>,
+    inverse_variance: Option<PlanarImage>,
+    dispersion: Option<PlanarImage>,
     /// The stack's flags, for a frame set where a frame carries flags or is not gathered at every
     /// pixel — see [`FrameCache::flag_plane`]: [`QualityFlags::NO_DATA`] where no frame reached a
     /// pixel, [`QualityFlags::SATURATED`] where a kept sample was.
@@ -161,13 +159,13 @@ impl FrameCache {
     ) -> Result<Self, StackError> {
         debug_assert!(!frames.is_empty(), "`combine_cached` refuses an empty set");
         Cancelled::check(&monitor.cancel)?;
-        let dimensions = frames[0].image.dimensions();
+        let dimensions = frames[0].image.desc();
         let metadata = frames[0].image.metadata.clone();
 
         // Width and height before the shared check, which a stored plane can only compare by
         // sample count: a 4×2 frame in a 2×4 set has the right count and the wrong shape.
         for (idx, frame) in frames.iter().enumerate() {
-            FrameDimensionMismatch::check(idx, dimensions, frame.image.dimensions())?;
+            FrameDimensionMismatch::check(idx, dimensions, frame.image.desc())?;
             for (kind, plane) in frame.quality.present() {
                 let actual = plane.size();
                 if actual != dimensions.size() {
@@ -336,16 +334,16 @@ impl FrameCache {
         let frame_norms = self.frame_norms.as_deref();
         let dimensions = self.core.dimensions;
         let chunking = self.core.chunk_rows(self.combine_stage(planes));
-        let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
+        let mut output_weight = planes.weight.then(|| PlanarImage::new_zeroed(dimensions));
         let mut output_inverse_variance = planes
             .inverse_variance
-            .then(|| LinearPixels::new_zeroed(dimensions));
+            .then(|| PlanarImage::new_zeroed(dimensions));
         let mut output_dispersion = planes
             .dispersion
-            .then(|| LinearPixels::new_zeroed(dimensions));
-        let mut output_coverage = self.coverage_layout(planes).map(|layout| {
-            LinearPixels::new_zeroed(ImageDimensions::new(dimensions.size(), layout))
-        });
+            .then(|| PlanarImage::new_zeroed(dimensions));
+        let mut output_coverage = self
+            .coverage_layout(planes)
+            .map(|layout| PlanarImage::new_zeroed(PlanarDesc::new(dimensions.size(), layout)));
         let inverse_frame_count = 1.0 / self.frames.len() as f32;
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
         let mut output_flags = self
@@ -739,7 +737,7 @@ pub(crate) mod internals {
             images: Vec<I>,
             normalization: Normalization,
         ) -> Self {
-            let mut core = CacheCore::plain(StorageTier::UNPLANNED, images[0].dimensions());
+            let mut core = CacheCore::plain(StorageTier::UNPLANNED, images[0].desc());
             core.metadata = images[0].metadata().clone();
             let frames = images
                 .into_iter()

@@ -7,8 +7,8 @@ use common::{Buffer2, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Image as FitsImage, Scaling};
-use lumos::ChannelLayout;
-use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage, Mosaic};
+use imaginarium::{ChannelLayout, PlanarDesc};
+use lumos::{CfaImage, CfaPattern, CfaType, ImageMetadata, LinearImage, Mosaic};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -73,7 +73,7 @@ impl StarField {
     /// Exposure `idx` as a mono frame in memory, as [`Self::expose`] writes it.
     pub(crate) fn frame(&self, idx: usize) -> LinearImage {
         LinearImage::from_planar_channels(
-            ImageDimensions::new((self.side, self.side), ChannelLayout::Mono),
+            PlanarDesc::new((self.side, self.side), ChannelLayout::Mono),
             [self.render(idx)],
         )
     }

@@ -1,9 +1,10 @@
 //! [`Slots`]: how the combine indexes a frame's per-channel figures.
 
+use imaginarium::PlanarDesc;
+
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::image_dimensions::ImageDimensions;
 use common::Vec2us;
 
 /// The slots of a frame's noise and weights: one per channel, or one per color of a mosaic, whose
@@ -23,10 +24,10 @@ impl Slots {
     }
 
     /// The slots of `frames`, whose sources the set's facts agreed on, at `dimensions`.
-    pub(crate) fn of_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Self {
+    pub(crate) fn of_frames(frames: &[StoredFrame], dimensions: PlanarDesc) -> Self {
         Self::new(
             frames[0].facts.cfa_type.and_then(CfaType::mosaic),
-            dimensions.channels(),
+            dimensions.channel_count(),
         )
     }
 

@@ -11,6 +11,7 @@ use std::slice::ChunksMut;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
+use imaginarium::PlanarDesc;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -24,7 +25,6 @@ use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::DropPlanes;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
@@ -56,7 +56,7 @@ struct PlaneSpan<'a> {
 /// kernel's constants and the scratch every frame's scatter reuses.
 #[derive(Debug)]
 pub(crate) struct Drizzler {
-    input_dims: ImageDimensions,
+    input_dims: PlanarDesc,
     deposit: Deposit,
     grid: OutputGrid,
     plan: KernelPlan,
@@ -104,7 +104,7 @@ impl Drizzler {
     /// The drizzle of frames shaped as `image` — of its dimensions, and its samples reaching the
     /// output as its own do — onto `grid` by `plan`.
     pub(crate) fn new(image: &impl StackableImage, plan: KernelPlan, grid: OutputGrid) -> Self {
-        let input_dims = image.dimensions();
+        let input_dims = image.desc();
         Self {
             input_dims,
             deposit: Deposit::of(image),
@@ -243,7 +243,7 @@ impl Drizzler {
         // Admitted before it reached here, as every frame of a drizzle is: of the set's shape and
         // pattern, its samples finite.
         debug_assert_eq!(
-            frame.source.dimensions(),
+            frame.source.desc(),
             self.input_dims,
             "drizzle frame {idx} reached the accumulator unadmitted: another shape"
         );
@@ -253,7 +253,7 @@ impl Drizzler {
             "drizzle frame {idx} reached the accumulator unadmitted: another pattern"
         );
         debug_assert!(
-            (0..self.input_dims.channels()).all(|channel| frame
+            (0..self.input_dims.channel_count()).all(|channel| frame
                 .source
                 .channel(channel)
                 .iter()
@@ -411,7 +411,7 @@ pub(crate) mod internals {
             first_frame: usize,
         ) -> Result<Self, DrizzleError> {
             config.validate()?;
-            let grid = OutputGrid::new(config.scale, image.dimensions().size());
+            let grid = OutputGrid::new(config.scale, image.desc().size());
             let plan = KernelPlan::new(config.kernel, config.pixfrac, config.scale);
             let drizzler = Drizzler::new(image, plan, grid);
             let sums = drizzler.sums();
@@ -531,7 +531,7 @@ pub(crate) mod internals {
                     }
                 }
             }
-            let dimensions = ImageDimensions::new(output, deposit.output_layout());
+            let dimensions = PlanarDesc::new(output, deposit.output_layout());
             let weight = match deposit {
                 Deposit::Mosaic(_) => QualityMap::PerChannel(
                     weight

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, FileIdentity, ScratchFile, TempDir, fs};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::frame::admitted::Admitted;
@@ -19,12 +20,10 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
@@ -52,7 +51,7 @@ fn reuse_image<I: StackableImage>(spill: &FrameSpill<'_>) -> Option<I> {
 fn a_parked_image_reads_back_and_leaves_no_file() {
     let dir = TempDir::new("frame_store_image");
     let scratch = RunScratch::create(dir.path()).unwrap();
-    let dimensions = ImageDimensions::new((3, 2), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((3, 2), ChannelLayout::Mono);
     let mut image = LinearImage::from_interleaved(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.header.exposure_time = Some(30.0);
 
@@ -130,7 +129,7 @@ fn runs_scratch_privately_beside_a_shared_decode_cache() {
 
 #[test]
 fn light_frame_keeps_quality_with_its_planes() {
-    let dimensions = ImageDimensions::new((2, 2), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     // The last pixel has no support, so its confidence is zero too — the pairing every consumer of
     // a frame-quality pair relies on.
@@ -159,7 +158,7 @@ fn light_frame_keeps_quality_with_its_planes() {
 
 #[test]
 fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
-    let dimensions = ImageDimensions::new((2, 2), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let mut image = LinearImage::from_interleaved(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
 
     // A frame whose source declared nothing undefined carries no planes at all — the case that
@@ -196,7 +195,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let dir = TempDir::new("frame_store_cached_quality");
-    let dimensions = ImageDimensions::new((2, 2), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let identity = FileIdentity {
         len: 16,
         mtime_ns: 1,
@@ -222,7 +221,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     assert!(written.samples.is_none());
     drop(written);
     let reused = reuse(&spill).unwrap();
-    assert_eq!(reused.dimensions(), dimensions);
+    assert_eq!(reused.desc(), dimensions);
     let frame = reused.into_frame();
     assert_eq!(frame.channels[0].chunk(0..4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(frame.quality.mask(), Some(QualityFlags::NO_DATA));
@@ -472,7 +471,7 @@ fn a_flat_gain_of_another_image_is_refused() {
         ));
         catch_unwind(move || {
             let mut image = LinearImage::from_interleaved(
-                ImageDimensions::new((8, 8), ChannelLayout::try_from(channels).unwrap()),
+                PlanarDesc::new((8, 8), ChannelLayout::try_from(channels).unwrap()),
                 vec![0.5; 64 * channels],
             );
             image.set_flat_gain(Some(FrameGain::Shared(gain)));

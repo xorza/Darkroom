@@ -1,4 +1,5 @@
 use common::SystemMemory;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -7,8 +8,6 @@ use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::memory;
 use crate::memory::budget::Budget;
@@ -596,7 +595,7 @@ fn plane(mib: u64) -> usize {
 /// accounting, on a one-row frame and four workers.
 fn demosaic(cfa_type: CfaType, plane_bytes: usize) -> Footprint {
     Demosaic::of(cfa_type, MarkesteijnPasses::One).footprint(
-        ImageDimensions::new((plane_bytes / size_of::<f32>(), 1), ChannelLayout::Mono),
+        PlanarDesc::new((plane_bytes / size_of::<f32>(), 1), ChannelLayout::Mono),
         4,
     )
 }

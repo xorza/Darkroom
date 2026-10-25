@@ -2,8 +2,10 @@
 
 Interleaved images in nine pixel formats, with **CPU (SIMD: SSE/AVX2/NEON)
 and GPU (wgpu compute) backends**: the codecs (PNG, JPEG, TIFF) and the ops
-(blend, contrast and brightness, affine resample, preview). lens runs its ops
-as nodes; lumos reads rasters through its codecs.
+(blend, contrast and brightness, affine resample, preview); and `f32` planes,
+one or three, with the lossless conversions between the two layouts. lens runs
+its ops as nodes; lumos holds its frames' planes and reads rasters through its
+codecs.
 
 - **GPU is optional**, behind the `wgpu` feature (off by default). CPU paths
   compile and pass without it.

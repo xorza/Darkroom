@@ -4,15 +4,14 @@ use std::slice;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
+use imaginarium::{PlanarDesc, PlanarImage};
 use rayon::prelude::*;
 
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::quality_flags::QualityFlags;
 use crate::registration::resample::flagged_sources::FlagScratch;
 use crate::registration::resample::frame_sampler::{
@@ -139,10 +138,10 @@ pub(crate) struct Warp<'a> {
 
 impl WarpResult {
     /// A set for frames of `dimensions`, every plane zeroed.
-    pub(crate) fn new(dimensions: ImageDimensions) -> Self {
+    pub(crate) fn new(dimensions: PlanarDesc) -> Self {
         Self {
             image: LinearImage::new(
-                LinearPixels::new_zeroed(dimensions),
+                PlanarImage::new_zeroed(dimensions),
                 None,
                 ImageMetadata::default(),
             ),
@@ -177,7 +176,7 @@ impl WarpResult {
         );
         let dimensions = image.dimensions;
         assert_eq!(
-            self.image.dimensions(),
+            self.image.desc(),
             dimensions,
             "warp buffers were sized for a different frame"
         );

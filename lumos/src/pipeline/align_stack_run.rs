@@ -5,10 +5,10 @@ use std::mem;
 use std::path::Path;
 
 use common::{CancelToken, par};
+use imaginarium::PlanarDesc;
 
 use crate::frame_store::file_set::Loaded;
 use crate::frame_store::run_storage::RunStorage;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
@@ -217,7 +217,7 @@ impl AlignStackRun<'_> {
         debug_assert!(
             lights
                 .iter()
-                .all(|light| light.frame.image.dimensions() == lights[0].frame.image.dimensions()),
+                .all(|light| light.frame.image.desc() == lights[0].frame.image.desc()),
             "every entry checks the dimensions before detection"
         );
         let (mut frames, detection): (Vec<_>, Vec<_>) = lights
@@ -238,7 +238,7 @@ impl AlignStackRun<'_> {
             .reference
             .select(&candidates, self.required_stars())?;
         let metadata = frames[reference].image.metadata().clone();
-        let dimensions = frames[reference].image.dimensions();
+        let dimensions = frames[reference].image.desc();
         let registrar = FrameRegistrar::new(
             self,
             &parking,
@@ -338,7 +338,7 @@ impl AlignStackRun<'_> {
         }
         .check(reference, self.required_stars())?;
         let metadata = first.image.metadata.clone();
-        let dimensions = first.image.dimensions();
+        let dimensions = first.image.desc();
         let registrar = FrameRegistrar::new(
             self,
             &parking,
@@ -392,7 +392,7 @@ impl AlignStackRun<'_> {
     }
 
     /// The intake of `count` lights of `dimensions`, `slots` of them decoded at once.
-    fn intake(&self, dimensions: ImageDimensions, count: usize, slots: usize) -> LightIntake<'_> {
+    fn intake(&self, dimensions: PlanarDesc, count: usize, slots: usize) -> LightIntake<'_> {
         LightIntake {
             intake: FrameIntake::new(
                 IntakePlan {

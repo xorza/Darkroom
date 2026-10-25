@@ -3,12 +3,12 @@
 use std::sync::OnceLock;
 
 use common::CancelToken;
+use imaginarium::PlanarDesc;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::{FrameStats, Spreads};
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_check::FrameCheck;
@@ -25,7 +25,7 @@ use crate::ingest::set_facts::SetFacts;
 /// frame is in (`SetFacts::admit`).
 #[derive(Debug)]
 pub(crate) struct FrameAdmission<'a> {
-    dimensions: ImageDimensions,
+    dimensions: PlanarDesc,
     cancel: &'a CancelToken,
     first_facts: OnceLock<SetFacts>,
     /// Whether each frame's spread is measured too: see [`FrameStats::measure_as`].
@@ -33,7 +33,7 @@ pub(crate) struct FrameAdmission<'a> {
 }
 
 impl<'a> FrameAdmission<'a> {
-    pub(crate) const fn new(dimensions: ImageDimensions, cancel: &'a CancelToken) -> Self {
+    pub(crate) const fn new(dimensions: PlanarDesc, cancel: &'a CancelToken) -> Self {
         Self {
             dimensions,
             cancel,
@@ -48,7 +48,7 @@ impl<'a> FrameAdmission<'a> {
         self
     }
 
-    pub(crate) const fn dimensions(&self) -> ImageDimensions {
+    pub(crate) const fn desc(&self) -> PlanarDesc {
         self.dimensions
     }
 
@@ -58,7 +58,7 @@ impl<'a> FrameAdmission<'a> {
         idx: usize,
         image: &impl StackableImage,
     ) -> Result<Admitted, AdmissionError> {
-        FrameDimensionMismatch::check(idx, self.dimensions, image.dimensions())?;
+        FrameDimensionMismatch::check(idx, self.dimensions, image.desc())?;
         let facts = FrameFacts::of(image);
         self.check_facts(idx, &facts)?;
         FrameCheck {

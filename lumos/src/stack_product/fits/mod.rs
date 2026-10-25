@@ -87,8 +87,8 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     let flags = flags_extension::encode(image.flags(), None, 1)?;
     let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
     let described = DescribedImage {
-        size: image.dimensions().size(),
-        channels: image.channels(),
+        size: image.desc().size(),
+        channels: image.channel_count(),
         scale: image_scale(image),
         weight_units: product.weight_kind.units(),
     };
@@ -210,8 +210,8 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
         }
     }
     let described = DescribedImage {
-        size: image.dimensions().size(),
-        channels: image.channels(),
+        size: image.desc().size(),
+        channels: image.channel_count(),
         scale: image_scale(&image),
         weight_units: weight_kind.units(),
     };
@@ -236,7 +236,7 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
         }
     }
     check_mask(mask, &image).map_err(ReadFailure::Refused)?;
-    let size = image.dimensions().size();
+    let size = image.desc().size();
     let map = |stored: Option<StoredPlanes<f32>>| stored.map(|stored| quality_map(stored, size));
     let coverage = match (uniform_coverage, map(planes.coverage)) {
         (Some(_), Some(_)) => return Err(ReadFailure::Refused(ProductRefusal::CoverageTwice)),

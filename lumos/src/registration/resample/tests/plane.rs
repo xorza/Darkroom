@@ -5,9 +5,8 @@
 
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
@@ -88,7 +87,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
     const BORDER: f32 = -0.25;
 
     let input = LinearImage::from_interleaved(
-        ImageDimensions::new((WIDTH, HEIGHT), ChannelLayout::Mono),
+        PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono),
         vec![0.75; WIDTH * HEIGHT],
     );
     for horizon_scale in [1.0, 1.0 - 1e-12] {

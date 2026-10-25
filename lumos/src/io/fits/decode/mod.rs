@@ -17,6 +17,7 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
+use imaginarium::PlanarImage;
 use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
@@ -27,7 +28,6 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::io::decoder::Peek;
 use crate::io::error::{ImageError, ScientificRefusal};
@@ -47,7 +47,7 @@ mod selection;
 #[derive(Debug)]
 pub(crate) struct DecodedFitsImage {
     metadata: ImageMetadata,
-    pixels: LinearPixels,
+    pixels: PlanarImage,
     /// Where the HDU declared no measurement, or `None` when it declared none anywhere. Absent
     /// whenever [`NullPolicy::Reject`](crate::NullPolicy::Reject) is in force, which fails the load
     /// instead of reaching here.
@@ -60,7 +60,7 @@ impl DecodedFitsImage {
     pub(crate) fn into_linear(self) -> Result<LinearImage, FitsLoadError> {
         check_gain_channels(
             self.flat_gain.as_deref(),
-            self.pixels.dimensions().channels(),
+            self.pixels.desc().channel_count(),
         )?;
         let mut image = LinearImage::new(self.pixels, self.flags, self.metadata);
         image.set_flat_gain(self.flat_gain);

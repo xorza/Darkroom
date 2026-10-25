@@ -2,13 +2,12 @@ use std::sync::Arc;
 
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
@@ -40,7 +39,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
     const HEIGHT: usize = 6;
     const BORDER: f32 = -7.0;
     const CONSTANT: f32 = 3.25;
-    let dimensions = ImageDimensions::new((WIDTH, HEIGHT), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono);
     let fixtures = [
         ("constant", vec![CONSTANT; WIDTH * HEIGHT]),
         (
@@ -105,7 +104,7 @@ struct NullFixture {
 }
 
 impl NullFixture {
-    fn new(dimensions: ImageDimensions, null_idx: usize) -> Self {
+    fn new(dimensions: PlanarDesc, null_idx: usize) -> Self {
         const FILL: f32 = 999.0;
         let mut pixels = vec![3.25f32; dimensions.pixel_count()];
         pixels[null_idx] = FILL;
@@ -128,7 +127,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     // nothing would spread at all.
     const CONSTANT: f32 = 3.25;
     const BORDER: f32 = -7.0;
-    let dimensions = ImageDimensions::new((16, 16), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
@@ -185,7 +184,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // Nearest takes one tap, so a null costs exactly the pixel it lands on. Lanczos4 takes 8 per
     // axis, so the same null costs a 64-pixel block. The parameter has to change the answer, or the
     // resampler is not composing the mask through its kernel at all.
-    let dimensions = ImageDimensions::new((16, 16), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((16, 16), ChannelLayout::Mono);
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
@@ -219,7 +218,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     // Where every tap of the window is missing there is nothing to reconstruct from, and the pixel
     // has to read as uncovered rather than as a confident reading of the fill.
     const BORDER: f32 = -7.0;
-    let dimensions = ImageDimensions::new((24, 24), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((24, 24), ChannelLayout::Mono);
     let mut nulls = vec![0.0f32; dimensions.pixel_count()];
     for y in 6..18 {
         for x in 6..18 {
@@ -257,10 +256,8 @@ fn warp_refuses_a_non_finite_border() {
     // `WarpConfig::validate` is only reached through `RegistrationConfig::validate`, so a direct
     // caller of the public `warp` could fill every out-of-footprint pixel with NaN and have it
     // noticed only by a debug assert deep in the combine.
-    let image = LinearImage::from_interleaved(
-        ImageDimensions::new((4, 4), ChannelLayout::Mono),
-        vec![0.5; 16],
-    );
+    let image =
+        LinearImage::from_interleaved(PlanarDesc::new((4, 4), ChannelLayout::Mono), vec![0.5; 16]);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
     WarpConfig {
         border_value: f32::NAN,
@@ -287,7 +284,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
     nulls[9 * size.width + 13] = f32::NAN;
     let scratch = WarpScratch::default();
     for channels in [1, 3] {
-        let dimensions = ImageDimensions::new(
+        let dimensions = PlanarDesc::new(
             (size.width, size.height),
             ChannelLayout::try_from(channels).unwrap(),
         );
@@ -375,7 +372,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
 fn an_rgb_warp_is_three_mono_warps() {
     let size = Size2us::new(20, 14);
     let rgb = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         signed_pixels(size, 3),
     );
     let transform = WarpTransform::new(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
@@ -388,7 +385,7 @@ fn an_rgb_warp_is_three_mono_warps() {
         let warped = params.warp(&rgb, &transform);
         for channel in 0..3 {
             let mono = LinearImage::from_interleaved(
-                ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+                PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
                 rgb.channel(channel).pixels().to_vec(),
             );
             let alone = params.warp(&mono, &transform);

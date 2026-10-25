@@ -123,7 +123,7 @@ impl WarpConfig {
     /// # }
     /// ```
     pub fn warp(self, image: &LinearImage, transform: &WarpTransform) -> WarpResult {
-        let mut result = WarpResult::new(image.dimensions());
+        let mut result = WarpResult::new(image.desc());
         let warp = Warp {
             transform,
             params: self,
@@ -141,9 +141,8 @@ impl WarpConfig {
 #[cfg(test)]
 pub(crate) mod internals {
     use common::Buffer2;
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
     use crate::registration::warp_transform::WarpTransform;
@@ -157,7 +156,7 @@ pub(crate) mod internals {
             transform: &WarpTransform,
         ) -> Buffer2<f32> {
             let image = LinearImage::from_interleaved(
-                ImageDimensions::new(input.size(), ChannelLayout::Mono),
+                PlanarDesc::new(input.size(), ChannelLayout::Mono),
                 input.pixels().to_vec(),
             );
             let warped = self.warp(&image, transform);

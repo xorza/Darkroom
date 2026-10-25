@@ -4,10 +4,10 @@
 use std::borrow::Cow;
 
 use common::TempDir;
-use imaginarium::RasterFormat;
+use imaginarium::{ChannelLayout, PlanarDesc, RasterFormat};
 use lumos::{
-    ChannelLayout, Denoise, ExtractBg, Hdr, ImageDimensions, LinearImage, LocalContrast,
-    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS, SigmaThreshold, SourceProvenance,
+    Denoise, ExtractBg, Hdr, LinearImage, LocalContrast, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
+    SigmaThreshold, SourceProvenance,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
@@ -53,7 +53,7 @@ fn load_astro_image_node_is_registered() {
 async fn load_astro_image_keeps_the_decoded_metadata() {
     let dir = TempDir::new("lens-load-astro-image");
     let mut image = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), ChannelLayout::Mono),
+        PlanarDesc::new((2, 1), ChannelLayout::Mono),
         [vec![0.25, 0.5]],
     );
     image.metadata.header.object = Some("M31".to_owned());

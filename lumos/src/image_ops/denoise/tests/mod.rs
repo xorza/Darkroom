@@ -2,9 +2,8 @@
 mod real_data;
 
 use common::Buffer2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
 use crate::image_ops::denoise::{Denoise, Threshold};
@@ -305,7 +304,7 @@ fn a_zero_variance_plane_leaves_the_image() {
     );
     for threshold in [Threshold::Hard, Threshold::Soft] {
         let mut image = LinearImage::from_interleaved(
-            ImageDimensions::new(size, ChannelLayout::Mono),
+            PlanarDesc::new(size, ChannelLayout::Mono),
             pixels.clone(),
         );
         let variance = QualityMap::Shared(Buffer2::new_default(size));
@@ -339,7 +338,7 @@ fn the_variance_threshold_scales_with_the_data() {
     };
     let run = |scale: f32| {
         let mut image = LinearImage::from_interleaved(
-            ImageDimensions::new(size, ChannelLayout::Mono),
+            PlanarDesc::new(size, ChannelLayout::Mono),
             pixels.iter().map(|&value| value * scale).collect(),
         );
         let variance = QualityMap::Shared(Buffer2::new_filled(size, 0.03 * 0.03 * scale * scale));
@@ -370,10 +369,8 @@ fn structure_filling_the_frame_survives() {
             0.5 + 0.05 * (phase * x).sin() * (phase * y).sin() + 0.001 * rng.next_gaussian_f32()
         })
         .collect();
-    let mut image = LinearImage::from_interleaved(
-        ImageDimensions::new(size, ChannelLayout::Mono),
-        pixels.clone(),
-    );
+    let mut image =
+        LinearImage::from_interleaved(PlanarDesc::new(size, ChannelLayout::Mono), pixels.clone());
     Denoise {
         scales: 4,
         k: 3.0,

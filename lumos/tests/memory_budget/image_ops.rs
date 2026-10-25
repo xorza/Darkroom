@@ -1,12 +1,12 @@
 //! The operations on a stacked master, which plan nothing: each must give back its working set
 //! before the next one starts.
 
-use lumos::{Denoise, ExtractBg, ImageDimensions, LinearImage, Stretch};
+use imaginarium::{ChannelLayout, PlanarDesc};
+use lumos::{Denoise, ExtractBg, LinearImage, Stretch};
 
 use crate::alone::alone;
 use crate::session::Session;
 use crate::star_field::StarField;
-use lumos::ChannelLayout;
 
 const SIDE: usize = 256;
 
@@ -20,7 +20,7 @@ fn each_operation_gives_back_its_working_set() {
         let field = StarField::new(SIDE, 40, 0x0B5);
         let channels = (0..3).map(|idx| field.frame(idx).channel(0).to_vec());
         let mut master = LinearImage::from_planar_channels(
-            ImageDimensions::new((SIDE, SIDE), ChannelLayout::Rgb),
+            PlanarDesc::new((SIDE, SIDE), ChannelLayout::Rgb),
             channels,
         );
         let mut apply = |label: &str, op: fn(&mut LinearImage)| {

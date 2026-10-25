@@ -1,12 +1,13 @@
 //! [`LightShape`]: what a run of lights holds, and the stages it is planned over.
 
+use imaginarium::PlanarDesc;
+
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::planned_normalization::SetCoverage;
 use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
 use crate::frame::frame_peek::FramePeek;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
@@ -24,7 +25,7 @@ use crate::star_detection::resources::DetectionResources;
 #[derive(Debug)]
 pub(super) struct LightShape {
     pub(super) count: usize,
-    pub(super) dimensions: ImageDimensions,
+    pub(super) dimensions: PlanarDesc,
     pub(super) prepared: Footprint,
     pub(super) held: usize,
     pub(super) peeked: usize,
@@ -168,7 +169,7 @@ impl LightShape {
                 count: self.count,
                 dimensions,
                 layout: StoredLayout::warped(dimensions),
-                slots: Slots::new(None, dimensions.channels()),
+                slots: Slots::new(None, dimensions.channel_count()),
                 coverage: SetCoverage::Common,
                 workers,
             },
@@ -183,11 +184,11 @@ impl LightShape {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::{ChannelLayout, PlanarDesc};
+
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
     use crate::frame::frame_peek::FramePeek;
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::io::frame_info::DecoderBytes;
     use crate::memory::stage::{Stage, Units};
     use crate::pipeline::align_stack_config::AlignStackConfig;
@@ -218,7 +219,7 @@ mod tests {
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
         let peek = FramePeek {
-            dimensions: ImageDimensions::new((4, 4), ChannelLayout::Mono),
+            dimensions: PlanarDesc::new((4, 4), ChannelLayout::Mono),
             decoder: DecoderBytes::default(),
             mosaic: None,
         };

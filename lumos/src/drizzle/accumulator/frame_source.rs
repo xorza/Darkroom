@@ -109,9 +109,9 @@ impl<'a> FrameSource<'a> {
         grid: OutputGrid,
     ) -> Self {
         let image = &frame.source;
-        let dimensions = image.dimensions();
+        let dimensions = image.desc();
         Self {
-            planes: (0..dimensions.channels())
+            planes: (0..dimensions.channel_count())
                 .map(|channel| image.channel(channel).pixels())
                 .collect(),
             mosaic: deposit.mosaic(),
@@ -273,7 +273,7 @@ pub(crate) mod internals {
         output_width: usize,
         reach: DropReach,
     ) -> impl Iterator<Item = (usize, Range<usize>)> {
-        let grid = OutputGrid::new(1.0, frame.source.dimensions().size());
+        let grid = OutputGrid::new(1.0, frame.source.desc().size());
         let scan = FrameSource::new(frame, Deposit::of(&frame.source), grid).band_scan(
             &(0..4),
             output_width,

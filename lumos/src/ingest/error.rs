@@ -18,7 +18,7 @@ pub enum AdmissionError {
 
     /// A frame already in the frame store does not match the geometry the cache was built for.
     /// Reported as a plane count and sample counts rather than as
-    /// [`ImageDimensions`](crate::ImageDimensions) because a stored plane knows only its length —
+    /// [`PlanarDesc`](imaginarium::PlanarDesc) because a stored plane knows only its length —
     /// it has no width or height to report.
     #[error("stored frame {idx} has {actual} channel planes, expected {expected}")]
     StoredFrameChannels {

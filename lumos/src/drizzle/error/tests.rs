@@ -1,10 +1,9 @@
+use imaginarium::{ChannelLayout, PlanarDesc};
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::drizzle::error::*;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::image_dimensions::ImageDimensions;
 
 /// The shared failures read the same from a drizzle as from a stack, their wording kept with
 /// the payload that owns it.
@@ -16,8 +15,8 @@ fn shared_failures_report_through_the_stack_error() {
     );
     let mismatch = FrameDimensionMismatch::check(
         2,
-        ImageDimensions::new((100, 100), ChannelLayout::Rgb),
-        ImageDimensions::new((200, 100), ChannelLayout::Rgb),
+        PlanarDesc::new((100, 100), ChannelLayout::Rgb),
+        PlanarDesc::new((200, 100), ChannelLayout::Rgb),
     )
     .unwrap_err();
     assert_eq!(

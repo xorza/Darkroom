@@ -9,13 +9,12 @@ mod unpacked_raw;
 use std::path::Path;
 
 use common::fs;
+use imaginarium::{ChannelLayout, PlanarDesc};
 use libraw::{Libraw, SensorLayout};
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::io::decoder::Peek;
 use crate::io::error::ImageError;
@@ -155,7 +154,7 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     let layout = libraw.layout()?;
     let cfa_type = libraw_filters::cfa_type(&libraw.image_data())?.ok_or(RawError::NotACfaFrame)?;
     Ok(FrameInfo {
-        dimensions: ImageDimensions::new(layout.active, ChannelLayout::Mono),
+        dimensions: PlanarDesc::new(layout.active, ChannelLayout::Mono),
         cfa_type,
         decoder: decoder_bytes(libraw, &layout),
         gain_bytes: 0,

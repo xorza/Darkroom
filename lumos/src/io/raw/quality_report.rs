@@ -11,8 +11,8 @@ use std::path::Path;
 use common::fs;
 
 use common::Buffer2;
+use imaginarium::PlanarDesc;
 
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
@@ -37,8 +37,8 @@ fn markesteijn_quality_vs_libraw() {
     let ours = raw::load_preview(&path, &LoadCtx::default()).unwrap();
     let one_pass = load_raw_libraw_demosaic(&path, 1).unwrap();
     let three_pass = load_raw_libraw_demosaic(&path, 3).unwrap();
-    assert_eq!(ours.dimensions(), one_pass.dimensions());
-    assert_eq!(ours.dimensions().channels(), 3);
+    assert_eq!(ours.desc(), one_pass.desc());
+    assert_eq!(ours.desc().channel_count(), 3);
 
     println!("--- Ours vs libraw 1-pass (linear regression normalized) ---");
     let ours_vs_one = Compared {
@@ -101,7 +101,7 @@ fn bayer_rcd_quality_vs_libraw() {
     let ours = raw::load_preview(&path, &LoadCtx::default()).unwrap();
     for (qual, label) in [(3, "AHD"), (2, "PPG"), (11, "DHT")] {
         let reference = load_raw_libraw_demosaic(&path, qual).unwrap();
-        assert_eq!(ours.dimensions(), reference.dimensions(), "{label}");
+        assert_eq!(ours.desc(), reference.desc(), "{label}");
         let compared = Compared {
             a: &ours,
             b: &reference,
@@ -277,7 +277,7 @@ fn compare_channels(a: &Buffer2<f32>, b: &Buffer2<f32>, border: usize) -> Channe
 
 mod tests {
     use super::*;
-    use crate::image::channel_layout::ChannelLayout;
+    use imaginarium::ChannelLayout;
 
     #[test]
     fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(channel.max_abs, 0.0);
         assert!((channel.correlation - 1.0).abs() < 1e-12);
 
-        let dimensions = ImageDimensions::new((1, 1), ChannelLayout::Rgb);
+        let dimensions = PlanarDesc::new((1, 1), ChannelLayout::Rgb);
         let black = LinearImage::from_interleaved(dimensions, vec![0.0; 3]);
         let colored = LinearImage::from_interleaved(dimensions, vec![3.0, 1.0, 5.0]);
         let transforms = array::from_fn(|_| ChannelCompareStats {

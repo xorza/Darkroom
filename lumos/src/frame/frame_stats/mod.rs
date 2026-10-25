@@ -2,13 +2,13 @@
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
+use imaginarium::PlanarDesc;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::math::statistics;
@@ -67,7 +67,7 @@ impl FrameStats {
     /// [`NoisePlane`] one channel at a time — then the samples its levels sort, a plane's worth at
     /// most: a mosaic's colors at once, which share its one plane, or a channel at a time.
     pub(crate) fn heap_bytes(
-        dimensions: ImageDimensions,
+        dimensions: PlanarDesc,
         mosaic: Option<Mosaic>,
         threads: usize,
     ) -> usize {
@@ -82,7 +82,7 @@ impl FrameStats {
     /// [`Self::measure`], and with [`Spreads::Measured`] each slot's [`spread`](Self::spread) from
     /// the samples its median already took.
     pub(crate) fn measure_as(image: &impl StackableImage, spreads: Spreads) -> Self {
-        let dimensions = image.dimensions();
+        let dimensions = image.desc();
         let metadata = image.metadata();
         let flags = image.flags();
         let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
@@ -100,7 +100,7 @@ impl FrameStats {
             ),
             None => metadata.derived.mosaic_noise().inspect(|_| {
                 assert_eq!(
-                    dimensions.channels(),
+                    dimensions.channel_count(),
                     3,
                     "a frame's mosaic noise names its three channels"
                 );
@@ -110,7 +110,7 @@ impl FrameStats {
             Some(mosaic_noise) => ArrayVec::from(mosaic_noise.bg),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
-            None => (0..dimensions.channels())
+            None => (0..dimensions.channel_count())
                 .map(|channel| {
                     let size = dimensions.size();
                     NoisePlane {
@@ -143,7 +143,7 @@ impl FrameStats {
                 .collect(),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
-            None => (0..dimensions.channels())
+            None => (0..dimensions.channel_count())
                 .map(|channel| {
                     SlotLevel::of(image.channel(channel), spreads, |idx, _| measured(idx))
                 })

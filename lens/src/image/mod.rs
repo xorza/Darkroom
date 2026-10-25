@@ -13,7 +13,8 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use common::Size2us;
-use lumos::{ChannelLayout, ImageDimensions, ImageMetadata, LinearImage, PreviewImage};
+use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
+use lumos::{ImageMetadata, LinearImage, PreviewImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -65,7 +66,7 @@ impl Image {
         let planes: Vec<Vec<f32>> = planes.into_iter().collect();
         let layout =
             ChannelLayout::try_from(planes.len()).expect("an image has one plane or three");
-        let dimensions = ImageDimensions::new(size, layout);
+        let dimensions = PlanarDesc::new(size, layout);
         Self::from(LinearImage::from_planar_channels(dimensions, planes))
     }
 
@@ -109,7 +110,10 @@ impl Image {
     fn into_planar(self) -> LinearImage {
         match self.pixels {
             Pixels::PlanarCpu(planar) => planar,
-            Pixels::InterleavedCpu { image, metadata } => planes_of(image, metadata),
+            Pixels::InterleavedCpu { image, metadata } => {
+                let planes = PlanarImage::try_from(image.without_alpha());
+                planes_of(planes.expect("an image without alpha has planes"), metadata)
+            }
         }
     }
 
@@ -130,7 +134,15 @@ impl Image {
         match &self.pixels {
             Pixels::PlanarCpu(planar) => Cow::Borrowed(planar),
             Pixels::InterleavedCpu { image, metadata } => {
-                Cow::Owned(planes_of(image, metadata.clone()))
+                // The alpha drop takes the image, so one with alpha is copied first; one without
+                // converts straight from the borrow.
+                let planes = if image.desc().color_format.has_alpha() {
+                    PlanarImage::try_from(image.clone().without_alpha())
+                } else {
+                    PlanarImage::try_from(image)
+                };
+                let planes = planes.expect("an image without alpha has planes");
+                Cow::Owned(planes_of(planes, metadata.clone()))
             }
         }
     }
@@ -139,16 +151,14 @@ impl Image {
     pub(crate) fn desc(&self) -> imaginarium::InterleavedDesc {
         match &self.pixels {
             Pixels::InterleavedCpu { image, .. } => image.desc(),
-            Pixels::PlanarCpu(planar) => {
-                imaginarium::InterleavedDesc::new(planar.dimensions().size(), planar.color_format())
-            }
+            Pixels::PlanarCpu(planar) => imaginarium::InterleavedDesc::from(planar.desc()),
         }
     }
 }
 
-/// The planes of `image`, carrying `metadata`.
-fn planes_of(image: impl Into<LinearImage>, metadata: ImageMetadata) -> LinearImage {
-    let mut planar = image.into();
+/// The image of `planes`, carrying `metadata`.
+fn planes_of(planes: PlanarImage, metadata: ImageMetadata) -> LinearImage {
+    let mut planar = LinearImage::from(planes);
     planar.metadata = metadata;
     planar
 }

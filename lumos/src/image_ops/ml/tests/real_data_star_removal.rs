@@ -39,7 +39,7 @@ fn starnet_removes_stars() {
     let result = remove.split(img).expect("star removal succeeds");
     visual::save_linear(&result.starless, "star_removal/starless");
     visual::save_linear(&result.stars, "star_removal/stars");
-    for channel in 0..starless_only.channels() {
+    for channel in 0..starless_only.channel_count() {
         assert_eq!(
             starless_only.channel(channel).pixels(),
             result.starless.channel(channel).pixels()

@@ -1,8 +1,8 @@
 use glam::DVec2;
 
 use super::*;
-use crate::image::channel_layout::ChannelLayout;
 use common::Vec2us;
+use imaginarium::ChannelLayout;
 
 /// A value in [0, 1) for each index, spread with no structure a kernel could resonate with.
 fn hash_unit(idx: usize) -> f32 {
@@ -48,10 +48,7 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
             fill_value: -1.0,
             ..usual_config(kernel)
         };
-        let mut acc = accumulator(
-            ImageDimensions::new(size, ChannelLayout::Mono),
-            config.clone(),
-        );
+        let mut acc = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), config.clone());
         for (image, transform) in images.iter().zip(&transforms) {
             acc.add_image(image.clone(), transform, None);
         }
@@ -62,8 +59,8 @@ fn the_unrejected_combine_is_the_single_pass_drizzle() {
         } else {
             1.0
         };
-        let out = single.image.dimensions().size();
-        assert_eq!(combined.image.dimensions().size(), out, "{kernel:?}");
+        let out = single.image.desc().size();
+        assert_eq!(combined.image.desc().size(), out, "{kernel:?}");
         for y in MARGIN..out.height - MARGIN {
             for x in MARGIN..out.width - MARGIN {
                 let expected = single.image.channel(0)[(x, y)];

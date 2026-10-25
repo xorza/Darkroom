@@ -1,8 +1,9 @@
 //! [`FrameRegistrar`]: each light's registration to the reference, its warp, and where it parks.
 
+use imaginarium::PlanarDesc;
+
 use crate::frame_store::storage_tier::Stored;
 use crate::frame_store::stored_frame::{SetKind, StoredFrame};
-use crate::image::image_dimensions::ImageDimensions;
 use crate::pipeline::align_stack_run::AlignStackRun;
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
@@ -24,7 +25,7 @@ pub(super) struct FrameRegistrar<'a> {
     parking: &'a FrameParking,
     count: usize,
     /// The dimensions of every light, and so of the sets they warp into.
-    dimensions: ImageDimensions,
+    dimensions: PlanarDesc,
     /// What each warp works in beside its result.
     scratch: WarpScratch,
 }
@@ -34,7 +35,7 @@ pub(super) struct FrameRegistrar<'a> {
 #[derive(Debug)]
 pub(super) struct LightSet {
     pub(super) count: usize,
-    pub(super) dimensions: ImageDimensions,
+    pub(super) dimensions: PlanarDesc,
     pub(super) reference: usize,
     pub(super) reference_stars: Vec<Star>,
 }

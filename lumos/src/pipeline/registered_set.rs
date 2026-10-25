@@ -1,7 +1,8 @@
 //! [`RegisteredSet`]: every light's registration outcome, and the combine of the survivors.
 
+use imaginarium::PlanarDesc;
+
 use crate::combine::frame_cache::core::CacheCore;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::pipeline::align_stack_result::{AlignStackResult, LightOutcome};
 use crate::pipeline::align_stack_run::AlignStackRun;
@@ -19,7 +20,7 @@ pub(super) struct RegisteredSet {
     /// The reference's: the master follows the alignment anchor, not whichever frame reaches the
     /// combine first.
     pub(super) metadata: ImageMetadata,
-    pub(super) dimensions: ImageDimensions,
+    pub(super) dimensions: PlanarDesc,
     pub(super) parking: FrameParking,
 }
 

@@ -142,7 +142,7 @@ impl StackProduct {
         empty: impl Fn(usize, usize) -> bool + Sync,
         fill_value: f32,
     ) {
-        let channels = self.image.channels();
+        let channels = self.image.channel_count();
         let fill = |plane: &mut [f32], channel: Option<usize>, value: f32| {
             par::iter_mut(plane).enumerate().for_each(|(idx, sample)| {
                 let filled = match channel {
@@ -194,10 +194,10 @@ impl StackProduct {
     /// second channel and no loader produces one.
     pub(crate) fn into_cfa_master(self) -> CfaImage {
         assert_eq!(
-            self.image.channels(),
+            self.image.channel_count(),
             1,
             "a CFA master must be single-channel; got {} channels",
-            self.image.channels()
+            self.image.channel_count()
         );
         let cfa_type = self
             .cfa_type
@@ -214,12 +214,11 @@ impl StackProduct {
 #[cfg(test)]
 mod tests {
     use common::Buffer2;
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::quality_map::QualityMap;
     use crate::stack_product::StackProduct;
@@ -229,7 +228,7 @@ mod tests {
     use common::Size2us;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
-        let dimensions = ImageDimensions::new((2, 1), ChannelLayout::try_from(channels).unwrap());
+        let dimensions = PlanarDesc::new((2, 1), ChannelLayout::try_from(channels).unwrap());
         let mut image = LinearImage::from_interleaved(
             dimensions,
             (0..dimensions.sample_count()).map(|i| i as f32).collect(),
@@ -321,10 +320,7 @@ mod tests {
             value: 0.5,
             size: Size2us::new(3, 2),
         });
-        assert_eq!(
-            image.dimensions(),
-            ImageDimensions::new((3, 2), ChannelLayout::Mono)
-        );
+        assert_eq!(image.desc(), PlanarDesc::new((3, 2), ChannelLayout::Mono));
         assert_eq!(image.channel(0).pixels(), &[0.5; 6]);
     }
 }

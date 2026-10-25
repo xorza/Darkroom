@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::{io, result};
 
+use common::Size2us;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -27,6 +28,19 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
+
+/// Why a size and a channel layout describe no planar image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DescError {
+    #[error("width must be positive")]
+    ZeroWidth,
+    #[error("height must be positive")]
+    ZeroHeight,
+    #[error("only 1 (mono) or 3 (RGB) planes supported, got {count}")]
+    Channels { count: usize },
+    #[error("{size}x{channel_count} samples overflow usize")]
+    SampleCount { size: Size2us, channel_count: usize },
+}
 
 #[cfg(test)]
 mod tests;

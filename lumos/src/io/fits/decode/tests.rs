@@ -7,13 +7,13 @@ use fits_well::header::Header;
 use fits_well::image::{Bitpix, Image, Scaling};
 use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus};
 use fits_well::{FitsReader, FitsWriter};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::fits_checksum_provenance::FitsChecksumState;
 use crate::image::fits_transfer_provenance::FitsTransferProvenance;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::image::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
 use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
@@ -111,7 +111,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
 
     // A side past the limit is refused before any count is formed from it; at the limit it is
     // accepted.
-    let side = ImageDimensions::MAX_SIDE;
+    let side = MAX_SIDE;
     for shape in [[side + 1, 2], [2, side + 1], [usize::MAX, 2]] {
         let reason = fits_refusal(
             plan::dimensions_from_shape(&shape, FitsCubeInterpretation::Reject).unwrap_err(),
@@ -331,10 +331,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         None,
     );
     let loaded = load_linear(&rgb_path, &rgb_load_ctx()).unwrap();
-    assert_eq!(
-        loaded.dimensions(),
-        ImageDimensions::new((2, 2), ChannelLayout::Rgb)
-    );
+    assert_eq!(loaded.desc(), PlanarDesc::new((2, 2), ChannelLayout::Rgb));
     // The decode reads the two rows of the three planes at once: 12 samples of 4 bytes, swapped
     // into 48 B of words, beside the frame, the reader's section shape, 8 B for each of the
     // three axes, and the staging the checksum finish reads a stream's unit through, its
@@ -342,7 +339,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let peek = linear_peek(&rgb_path, &rgb_load_ctx()).unwrap().info;
     assert_eq!(
         peek.dimensions,
-        loaded.dimensions(),
+        loaded.desc(),
         "the header gives what the decode makes"
     );
     assert_eq!(
@@ -423,11 +420,8 @@ fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
         )
         .unwrap();
         for loaded in [from_peek, load_linear(&path, &rgb_load_ctx()).unwrap()] {
-            assert_eq!(loaded.dimensions(), info.dimensions, "{tiles:?}");
-            assert_eq!(
-                loaded.dimensions(),
-                ImageDimensions::new((2, 2), ChannelLayout::Rgb)
-            );
+            assert_eq!(loaded.desc(), info.dimensions, "{tiles:?}");
+            assert_eq!(loaded.desc(), PlanarDesc::new((2, 2), ChannelLayout::Rgb));
             assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
             assert_eq!(loaded.channel(1).pixels(), &[10.0, 20.0, 30.0, 40.0]);
             assert_eq!(loaded.channel(2).pixels(), &[100.0, 200.0, 300.0, 400.0]);

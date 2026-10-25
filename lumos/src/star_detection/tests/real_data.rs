@@ -9,10 +9,8 @@ use std::time::Instant;
 use crate::internals::visual::drawing::{self, draw_circle};
 use common::internals;
 use glam::Vec2;
-use imaginarium::ColorFormat;
+use imaginarium::{ChannelLayout, ColorFormat, PlanarDesc};
 
-use crate::ImageDimensions;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
@@ -35,7 +33,7 @@ pub(crate) fn rho_opiuchi() -> LinearImage {
         .expect("Failed to load image")
         .convert(ColorFormat::MONO_F32);
     LinearImage::from_interleaved(
-        ImageDimensions::new(
+        PlanarDesc::new(
             (image.desc().size.width, image.desc().size.height),
             ChannelLayout::Mono,
         ),

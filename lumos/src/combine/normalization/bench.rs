@@ -7,6 +7,7 @@
 use common::bench::{Kind, Scale};
 use common::{Buffer2, CancelToken};
 use criterion::{BenchmarkId, Criterion, Throughput};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_read::slots::Slots;
@@ -15,8 +16,6 @@ use crate::combine::normalization::{FrameNorm, Normalization};
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 
 /// The dither between the two lights, in pixels: the margin the second leaves uncovered.
 const DITHER: [usize; 2] = [11, 7];
@@ -41,7 +40,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 StoredFrame::from_memory(image, quality, stats)
             })
             .collect();
-        let dimensions = ImageDimensions::new(FRAME, ChannelLayout::Mono);
+        let dimensions = PlanarDesc::new(FRAME, ChannelLayout::Mono);
         b.iter(|| {
             FrameNorm::measure(
                 SlotPlanes {

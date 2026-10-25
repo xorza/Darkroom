@@ -103,6 +103,14 @@ impl InterleavedImage {
         self.convert_to(color_format)
     }
 
+    /// This image with its alpha channel dropped, in the same sample type: the one layout change
+    /// that loses data, which a caller names. An image with no alpha is itself.
+    #[must_use]
+    pub fn without_alpha(self) -> Self {
+        let format = self.desc().color_format.without_alpha();
+        self.convert(format)
+    }
+
     /// Borrowing counterpart of [`convert`](Self::convert): converts into a freshly
     /// allocated image, leaving `self` alone — a caller that only holds a view (e.g.
     /// a CPU borrow of an `ImageBuffer`) skips the source deep-copy that `convert`'s
@@ -138,14 +146,14 @@ impl InterleavedImage {
     }
 
     /// The `N` channel planes of an image whose format is `N` channels of `T`.
-    fn planes<T: Stored<N>, const N: usize>(&self) -> Result<[Buffer2<T>; N]> {
+    pub(crate) fn planes<T: Stored<N>, const N: usize>(&self) -> Result<[Buffer2<T>; N]> {
         T::unwrap(&self.pixels)
             .map(Buffer2::deinterleave)
             .ok_or_else(|| planes_refused::<T, N>(self.desc()))
     }
 
     /// [`Self::planes`], taking the image: a one-channel image keeps its allocation.
-    fn into_planes<T: Stored<N>, const N: usize>(self) -> Result<[Buffer2<T>; N]> {
+    pub(crate) fn into_planes<T: Stored<N>, const N: usize>(self) -> Result<[Buffer2<T>; N]> {
         let desc = self.desc();
         T::unwrap_owned(self.pixels)
             .map(Buffer2::into_planes)

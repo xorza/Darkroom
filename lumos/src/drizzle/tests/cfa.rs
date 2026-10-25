@@ -203,7 +203,7 @@ fn the_light_preset_combines_a_cfa_drizzle() {
     )
     .unwrap();
     let bound = 6.0 * SIGMA + 0.5 * SQRT_2 / 256.0;
-    let output = product.image.dimensions().size();
+    let output = product.image.desc().size();
     let mut checked = 0;
     for c in 0..3 {
         let plane = product.image.channel(c);

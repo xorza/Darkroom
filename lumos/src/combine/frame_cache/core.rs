@@ -9,13 +9,12 @@
 use std::mem;
 
 use common::thread;
+use imaginarium::{PlanarDesc, PlanarImage};
 
 use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
-use crate::image::linear_pixels::LinearPixels;
 use crate::memory::stage::{Placement, Stage, Width};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
@@ -28,7 +27,7 @@ use crate::recycled::Recycled;
 pub(crate) struct CacheCore {
     pub(crate) tier: StorageTier,
     /// Image dimensions (same for all frames).
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     /// Metadata from the first frame.
     pub(crate) metadata: ImageMetadata,
     /// Where the combine reports, and the cancel token polled during validation and normalization
@@ -99,14 +98,14 @@ impl CacheCore {
         frames: &[StoredFrame],
         chunk_rows: usize,
         mut process: Process,
-    ) -> LinearPixels
+    ) -> PlanarImage
     where
         Process: FnMut(&mut [f32], ChunkCtx<'_>),
     {
         let dims = self.dimensions;
         let width = dims.width();
         let height = dims.height();
-        let mut output = LinearPixels::new_zeroed(dims);
+        let mut output = PlanarImage::new_zeroed(dims);
         let chunk_count = height.div_ceil(chunk_rows);
         let range = |chunk: usize| {
             let start_row = chunk * chunk_rows;
@@ -198,16 +197,17 @@ impl CacheCore {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use imaginarium::PlanarDesc;
+
     use crate::combine::frame_cache::core::CacheCore;
     use crate::frame_store::storage_tier::StorageTier;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::image_metadata::ImageMetadata;
     use crate::progress::progress_monitor::ProgressMonitor;
 
     impl CacheCore {
         /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
         /// reported and no cancel.
-        pub(crate) fn plain(tier: StorageTier, dimensions: ImageDimensions) -> Self {
+        pub(crate) fn plain(tier: StorageTier, dimensions: PlanarDesc) -> Self {
             Self {
                 tier,
                 dimensions,

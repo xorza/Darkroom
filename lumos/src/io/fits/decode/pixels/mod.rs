@@ -7,6 +7,7 @@ use fits_well::ImageReader;
 use fits_well::header::{Header, keywords};
 use fits_well::image::{Scaling, View as FitsView};
 use fits_well::io::StreamSource;
+use imaginarium::PlanarImage;
 use rayon::prelude::*;
 
 use crate::error::Cancelled;
@@ -16,7 +17,6 @@ use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProv
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, SourceProvenance,
 };
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::image::sample_domain::SampleDomain;
@@ -130,7 +130,7 @@ impl HduDecode<'_> {
         let saturation_flagged =
             saturation.is_some() || domain_keywords::read_saturation_flagged(header)?;
         let flags = self.resolve_flags(&mut planes, saturation)?;
-        let pixels = LinearPixels::from_planar_channels(
+        let pixels = PlanarImage::from_planar_channels(
             plan.dimensions,
             planes.into_iter().map(|plane| plane.samples),
         );
@@ -264,7 +264,7 @@ impl HduDecode<'_> {
         let plan = self.plan;
         let ctx = self.ctx;
         let width = plan.dimensions.width();
-        let channels = plan.dimensions.channels();
+        let channels = plan.dimensions.channel_count();
         let mut planes: ArrayVec<DecodedPlane, 3> = (0..channels)
             .map(|_| DecodedPlane {
                 samples: zeroed_plane(plan.dimensions.pixel_count()),

@@ -1,9 +1,10 @@
 //! [`Deposit`]: which output channels a drizzled frame's samples reach, and under which weights.
 
+use imaginarium::ChannelLayout;
+
 use crate::combine::normalization::planned_normalization::SetCoverage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::stackable_image::StackableImage;
 
 /// How a frame's samples reach the output channels.
@@ -23,7 +24,7 @@ impl Deposit {
     pub(crate) fn of(image: &impl StackableImage) -> Self {
         match image.cfa_type().and_then(CfaType::mosaic) {
             Some(mosaic) => Self::Mosaic(mosaic),
-            None => Self::Channels(image.dimensions().layout()),
+            None => Self::Channels(image.desc().layout()),
         }
     }
 

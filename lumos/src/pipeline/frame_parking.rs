@@ -115,6 +115,8 @@ impl FrameParking {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::{ChannelLayout, PlanarDesc};
+
     use crate::frame_store::storage_tier::CombineBudget;
     use crate::memory::budget::Budget;
     use common::TempDir;
@@ -124,8 +126,6 @@ mod tests {
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::storage_tier::StorageTier;
     use crate::frame_store::stored_image::StoredImage;
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
@@ -158,7 +158,7 @@ mod tests {
                 combine: CombineBudget::new(Budget::of_memory(1 << 20, 1)),
             })
         };
-        let dims = ImageDimensions::new((4, 1), ChannelLayout::Mono);
+        let dims = PlanarDesc::new((4, 1), ChannelLayout::Mono);
         let kept_scratch = RunScratch::create(dir.path()).unwrap();
         for saturated in [false, true] {
             let mut image = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);

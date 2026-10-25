@@ -1,18 +1,17 @@
-use std::borrow::Borrow;
 use std::path::Path;
 use std::{array, slice};
 
+use arrayvec::ArrayVec;
 use common::{Buffer2, Size2us, par};
-use imaginarium::{ChannelCount, ColorFormat, InterleavedImage};
+use imaginarium::{InterleavedImage, PlanarDesc, PlanarImage};
 use rayon::prelude::*;
 
 use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::intensity::Intensity;
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::rgb::Rgb;
 use crate::image::stackable_image::{ImageParts, StackableImage};
@@ -23,7 +22,7 @@ use crate::io::{fits, raster};
 #[derive(Debug, Clone)]
 pub struct LinearImage {
     pub metadata: ImageMetadata,
-    pixels: LinearPixels,
+    pixels: PlanarImage,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
     /// [`QualityFlags::NO_DATA`](crate::image::quality_flags::QualityFlags::NO_DATA) are a finite
     /// fill, not data.
@@ -47,11 +46,15 @@ impl LinearImage {
     }
 
     /// The image of `pixels`, its `flags` and `metadata`, with no flat gain.
+    ///
+    /// # Panics
+    /// When `pixels` have a side past [`MAX_SIDE`](crate::frame_desc::MAX_SIDE).
     pub(crate) fn new(
-        pixels: LinearPixels,
+        pixels: PlanarImage,
         flags: Option<PixelFlags>,
         metadata: ImageMetadata,
     ) -> Self {
+        frame_desc::assert_frame(pixels.desc());
         let mut image = Self {
             metadata,
             pixels,
@@ -62,86 +65,71 @@ impl LinearImage {
         image
     }
 
-    /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
-    pub fn from_interleaved(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
-        Self::new(
-            LinearPixels::from_interleaved(dimensions, pixels),
-            None,
-            ImageMetadata::default(),
-        )
+    /// The image of `desc` over interleaved samples (RGBRGB…), with default metadata: see
+    /// [`PlanarImage::from_interleaved`].
+    pub fn from_interleaved(desc: PlanarDesc, samples: Vec<f32>) -> Self {
+        Self::from(PlanarImage::from_interleaved(desc, samples))
     }
 
-    /// Create from planar channel data ([R, G, B] or single channel).
+    /// The image of `desc` over one plane per channel, with default metadata: see
+    /// [`PlanarImage::from_planar_channels`].
     pub fn from_planar_channels(
-        dimensions: ImageDimensions,
-        channels: impl IntoIterator<Item = Vec<f32>>,
+        desc: PlanarDesc,
+        planes: impl IntoIterator<Item = Vec<f32>>,
     ) -> Self {
-        Self::new(
-            LinearPixels::from_planar_channels(dimensions, channels),
-            None,
-            ImageMetadata::default(),
-        )
+        Self::from(PlanarImage::from_planar_channels(desc, planes))
     }
 
     pub fn size(&self) -> Size2us {
-        self.dimensions().size()
+        self.desc().size()
     }
 
     pub fn width(&self) -> usize {
-        self.dimensions().width()
+        self.desc().width()
     }
 
     pub fn height(&self) -> usize {
-        self.dimensions().height()
+        self.desc().height()
     }
 
-    pub const fn channels(&self) -> usize {
+    pub const fn channel_count(&self) -> usize {
         self.pixels.channel_count()
     }
 
-    pub fn dimensions(&self) -> ImageDimensions {
-        self.pixels.dimensions()
+    pub fn desc(&self) -> PlanarDesc {
+        self.pixels.desc()
     }
 
     pub fn pixel_count(&self) -> usize {
-        self.dimensions().pixel_count()
+        self.desc().pixel_count()
     }
 
     pub fn sample_count(&self) -> usize {
-        self.dimensions().sample_count()
+        self.desc().sample_count()
     }
 
     pub const fn is_mono(&self) -> bool {
-        matches!(self.pixels, LinearPixels::Mono(_))
+        self.pixels.is_mono()
     }
 
     pub const fn is_rgb(&self) -> bool {
-        matches!(self.pixels, LinearPixels::Rgb(_))
-    }
-
-    /// The interleaved format these planes repack to: `RGB_F32` or `MONO_F32`.
-    pub const fn color_format(&self) -> ColorFormat {
-        if self.is_rgb() {
-            ColorFormat::RGB_F32
-        } else {
-            ColorFormat::MONO_F32
-        }
+        self.pixels.is_rgb()
     }
 
     /// Get channel as Buffer2 reference (0=mono or R, 1=G, 2=B).
-    pub fn channel(&self, c: usize) -> &Buffer2<f32> {
+    pub const fn channel(&self, c: usize) -> &Buffer2<f32> {
         self.pixels.channel(c)
     }
 
     /// Get channel as mutable Buffer2 reference. The metadata's quantization σ and mosaic noise
     /// are dropped: they describe the samples as they were.
-    pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
+    pub const fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         self.samples_mut().channel_mut(c)
     }
 
     /// The samples, mutably, with the noise facts that described them dropped. Every mutable path
     /// to the samples comes through here, so no change to them keeps a stale noise.
-    const fn samples_mut(&mut self) -> &mut LinearPixels {
+    const fn samples_mut(&mut self) -> &mut PlanarImage {
         self.metadata.derived.after_edit();
         &mut self.pixels
     }
@@ -153,7 +141,7 @@ impl LinearImage {
             Some(FrameGain::Own(gain)) => gain.ram_bytes(),
             Some(FrameGain::Shared(_)) | None => 0,
         };
-        self.sample_count() * size_of::<f32>()
+        self.desc().byte_len()
             + self.flags.as_ref().map_or(0, |flags| flags.bytes().len())
             + own_gain
     }
@@ -171,7 +159,7 @@ impl LinearImage {
         assert!(
             flags
                 .as_ref()
-                .is_none_or(|flags| flags.size() == self.dimensions().size()),
+                .is_none_or(|flags| flags.size() == self.desc().size()),
             "flags for another geometry"
         );
         self.flags = flags;
@@ -194,20 +182,20 @@ impl LinearImage {
     pub fn set_flat_gain(&mut self, gain: Option<FrameGain>) {
         assert!(
             gain.as_ref()
-                .is_none_or(|gain| gain.covers(self.dimensions().size(), self.channels())),
+                .is_none_or(|gain| gain.covers(self.desc().size(), self.channel_count())),
             "an image's flat gain covers another image's pixels"
         );
         self.flat_gain = gain;
     }
 
     /// The pixels, moved out.
-    pub(crate) fn into_pixels(self) -> LinearPixels {
+    pub(crate) fn into_pixels(self) -> PlanarImage {
         self.pixels
     }
 
     /// Iterate the channel planes in channel order: one for mono, three for RGB.
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
-        self.samples_mut().planes_mut()
+        self.samples_mut().planes_mut().iter_mut()
     }
 
     /// The channel planes to edit, in channel order, beside the flags of their pixels: a split
@@ -215,7 +203,7 @@ impl LinearImage {
     pub(crate) fn planes_mut_with_flags(&mut self) -> PlanesWithFlags<'_> {
         self.metadata.derived.after_edit();
         PlanesWithFlags {
-            planes: self.pixels.planes_mut(),
+            planes: self.pixels.planes_mut().iter_mut(),
             flags: self.flags.as_ref(),
         }
     }
@@ -227,24 +215,6 @@ impl LinearImage {
     /// On a mono image; callers gate on [`Self::is_rgb`].
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
         self.samples_mut().rgb_planes_mut()
-    }
-
-    /// Deinterleave an already-`f32` (`MONO_F32` / `RGB_F32`) imaginarium image into planes.
-    ///
-    /// # Panics
-    /// If `image` is not one of those two formats. Callers check the format themselves — the
-    /// ops live on `LinearImage`, so there is no shared gate to name.
-    fn from_f32_image<I>(image: I) -> Self
-    where
-        I: Borrow<InterleavedImage>,
-        [Buffer2<f32>; 1]: TryFrom<I, Error = imaginarium::Error>,
-        [Buffer2<f32>; 3]: TryFrom<I, Error = imaginarium::Error>,
-    {
-        Self::new(
-            LinearPixels::from_f32_image(image),
-            None,
-            ImageMetadata::default(),
-        )
     }
 
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
@@ -276,7 +246,7 @@ impl LinearImage {
     /// The per-pixel combined intensity, read from the channels where it is needed: the channel
     /// itself for mono, `(r+g+b)/3` for RGB.
     pub(crate) fn intensity(&self) -> Intensity<'_> {
-        let size = self.dimensions().size();
+        let size = self.desc().size();
         if self.is_rgb() {
             Intensity::rgb(size, array::from_fn(|c| self.channel(c).pixels()))
         } else {
@@ -331,8 +301,8 @@ pub(crate) struct PlanesWithFlags<'a> {
 }
 
 impl StackableImage for LinearImage {
-    fn dimensions(&self) -> ImageDimensions {
-        self.dimensions()
+    fn desc(&self) -> PlanarDesc {
+        self.desc()
     }
 
     fn flags(&self) -> Option<&PixelFlags> {
@@ -353,7 +323,11 @@ impl StackableImage for LinearImage {
 
     fn into_parts(self) -> ImageParts {
         ImageParts {
-            planes: self.pixels.into_planes(),
+            planes: if self.pixels.is_mono() {
+                ArrayVec::from_iter([self.pixels.into_mono()])
+            } else {
+                ArrayVec::from(self.pixels.into_rgb())
+            },
             flags: self.flags,
             flat_gain: self.flat_gain,
         }
@@ -365,7 +339,15 @@ impl StackableImage for LinearImage {
             flags,
             flat_gain,
         } = parts;
-        let mut image = Self::new(LinearPixels::from(planes), flags, metadata);
+        let pixels = match planes.into_inner() {
+            Ok(rgb) => PlanarImage::from(rgb),
+            Err(mut mono) => {
+                let plane = mono.pop().expect("an image has one plane or three");
+                assert!(mono.is_empty(), "an image has one plane or three");
+                PlanarImage::from(plane)
+            }
+        };
+        let mut image = Self::new(pixels, flags, metadata);
         image.set_flat_gain(flat_gain);
         image
     }
@@ -393,45 +375,16 @@ impl From<&LinearImage> for InterleavedImage {
     }
 }
 
-/// Deinterleave an imaginarium image into planes, converting to `f32` first when it is not already.
-///
-/// The inbound half of the boundary whose outbound half is `impl From<&LinearImage> for
-/// InterleavedImage`: what a caller holding interleaved pixels goes through to reach the ops, which
-/// take planes.
-impl From<&InterleavedImage> for LinearImage {
-    /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
-    /// source is not already in one, rather than asking the caller to arrive with one.
-    fn from(image: &InterleavedImage) -> Self {
-        let target = f32_target_format(image.desc().color_format);
-        if image.desc().color_format == target {
-            Self::from_f32_image(image)
-        } else {
-            Self::from_f32_image(image.convert_to(target))
-        }
-    }
-}
-
-impl From<InterleavedImage> for LinearImage {
-    /// The borrowing conversion, taking the image: a mono `f32` image keeps its allocation as
-    /// its plane.
-    fn from(image: InterleavedImage) -> Self {
-        let target = f32_target_format(image.desc().color_format);
-        Self::from_f32_image(image.convert(target))
+/// The planes as an image, with no metadata, flags or flat gain.
+impl From<PlanarImage> for LinearImage {
+    fn from(pixels: PlanarImage) -> Self {
+        Self::new(pixels, None, ImageMetadata::default())
     }
 }
 
 impl From<LinearImage> for InterleavedImage {
     fn from(linear: LinearImage) -> Self {
         Self::from(&linear)
-    }
-}
-
-/// The `f32` format an image of `format` deinterleaves into: `MONO_F32` for mono, `RGB_F32` for
-/// color, an alpha channel dropped.
-pub(crate) const fn f32_target_format(format: ColorFormat) -> ColorFormat {
-    match format.channel_count {
-        ChannelCount::Mono => ColorFormat::MONO_F32,
-        ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }
 }
 

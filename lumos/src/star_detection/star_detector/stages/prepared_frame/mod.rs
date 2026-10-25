@@ -284,7 +284,7 @@ fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
         return;
     }
     let level = image.metadata.header.saturation_level();
-    let channels: ArrayVec<&[f32], 3> = (0..image.channels())
+    let channels: ArrayVec<&[f32], 3> = (0..image.channel_count())
         .map(|channel| image.channel(channel).pixels())
         .collect();
     mask.fill_from_predicate(|idx| channels.iter().any(|channel| channel[idx] >= level));

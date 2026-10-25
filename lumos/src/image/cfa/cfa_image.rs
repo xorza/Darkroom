@@ -6,6 +6,7 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, CancelToken, par};
+use imaginarium::{ChannelLayout, PlanarDesc};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -15,9 +16,8 @@ use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
@@ -49,8 +49,8 @@ pub struct CfaImage {
 }
 
 impl StackableImage for CfaImage {
-    fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new(self.size(), ChannelLayout::Mono)
+    fn desc(&self) -> PlanarDesc {
+        PlanarDesc::new(self.size(), ChannelLayout::Mono)
     }
 
     fn flags(&self) -> Option<&PixelFlags> {
@@ -155,11 +155,11 @@ impl CfaImage {
     }
 
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
-    pub const fn from_plane(
-        data: Buffer2<f32>,
-        cfa_type: CfaType,
-        metadata: ImageMetadata,
-    ) -> Self {
+    ///
+    /// # Panics
+    /// When `data` holds no pixel, or has a side past [`MAX_SIDE`](crate::frame_desc::MAX_SIDE).
+    pub fn from_plane(data: Buffer2<f32>, cfa_type: CfaType, metadata: ImageMetadata) -> Self {
+        frame_desc::assert_frame(PlanarDesc::new(data.size(), ChannelLayout::Mono));
         Self {
             data,
             cfa_type,
@@ -364,7 +364,7 @@ impl CfaImage {
     pub fn green_proxy(&self) -> LinearImage {
         const GREEN: usize = CfaColor::Green.idx();
         let size = self.size();
-        let dimensions = ImageDimensions::new(size, ChannelLayout::Mono);
+        let dimensions = PlanarDesc::new(size, ChannelLayout::Mono);
         if self.cfa_type == CfaType::Mono {
             let mut image = LinearImage::from_interleaved(dimensions, self.data.pixels().to_vec());
             image.metadata = self.metadata.clone();

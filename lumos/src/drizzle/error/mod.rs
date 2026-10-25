@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::combine::error::StackError;
 use crate::error::InvalidConfigField;
 use crate::frame_store::error::{FrameStoreError, LoadError};
-use crate::image::error::DimensionsError;
+use crate::image::error::FrameDescError;
 use crate::ingest::error::AdmissionError;
 use crate::io::error::ImageError;
 
@@ -35,7 +35,7 @@ pub enum DrizzleError {
 
     /// The output grid the scale makes of the input frames is no image's.
     #[error("drizzle output grid: {0}")]
-    OutputSize(#[from] DimensionsError),
+    OutputSize(#[from] FrameDescError),
 }
 
 impl DrizzleError {

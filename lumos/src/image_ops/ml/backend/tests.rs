@@ -127,9 +127,9 @@ fn an_identity_model_reproduces_the_input() {
             },
         )
         .unwrap();
-        assert_eq!(output.channels(), image.channels());
+        assert_eq!(output.channel_count(), image.channel_count());
         assert_eq!(output.metadata.header.exposure_time, Some(30.0));
-        for c in 0..image.channels() {
+        for c in 0..image.channel_count() {
             for (i, (&got, &expected)) in output
                 .channel(c)
                 .pixels()

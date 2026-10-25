@@ -41,7 +41,7 @@ use crate::frame_store::run_storage::RunStorage;
 use crate::frame_store::stored_frame::SetKind;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
@@ -157,14 +157,14 @@ impl DrizzleRun<'_> {
         let cancel = &run.ctx.cancel;
 
         let first = frames.next().expect("frame_count is non-zero")?;
-        let input_dims = first.source.dimensions();
+        let input_dims = first.source.desc();
         let deposit = Deposit::of(&first.source);
         tracing::info!(
             ?origin,
             frame_count,
             input_width = input_dims.width(),
             input_height = input_dims.height(),
-            channels = input_dims.channels(),
+            channels = input_dims.channel_count(),
             mosaic = ?deposit.mosaic(),
             output_scale = drizzle.scale,
             pixfrac = drizzle.pixfrac,
@@ -172,7 +172,7 @@ impl DrizzleRun<'_> {
             "Starting drizzle stacking"
         );
         let grid = OutputGrid::new(drizzle.scale, input_dims.size());
-        let output = ImageDimensions::checked(grid.size(), deposit.output_layout())?;
+        let output = frame_desc::checked(grid.size(), deposit.output_layout())?;
         let mut drizzler = Drizzler::new(
             &first.source,
             KernelPlan::new(drizzle.kernel, drizzle.pixfrac, drizzle.scale),

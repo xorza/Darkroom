@@ -7,7 +7,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, FlatGainRecord};
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 use common::{Size2us, Vec2us};
@@ -118,12 +118,7 @@ fn a_record_of_no_image_size_is_refused() {
         nodes: vec![vec![1.5; nodes]],
         bins: vec![GainBins::of(&mut [1.5])],
     };
-    for (width, height) in [
-        (0, 5),
-        (5, 0),
-        (usize::MAX, 2),
-        (ImageDimensions::MAX_SIDE + 1, 1),
-    ] {
+    for (width, height) in [(0, 5), (5, 0), (usize::MAX, 2), (MAX_SIDE + 1, 1)] {
         assert!(
             FlatGain::try_from(record(width, height, 4)).is_err(),
             "{width}×{height}"

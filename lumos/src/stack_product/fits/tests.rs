@@ -2,6 +2,7 @@ use common::{Buffer2, TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Scaling};
+use imaginarium::PlanarImage;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -10,7 +11,6 @@ use crate::image::dark_comparison::DarkComparison;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::quality_map::QualityMap;
@@ -52,7 +52,7 @@ fn domain() -> SampleDomain {
     }
 }
 
-fn image(pixels: LinearPixels, flags: Option<PixelFlags>) -> LinearImage {
+fn image(pixels: PlanarImage, flags: Option<PixelFlags>) -> LinearImage {
     let mut image = LinearImage::new(pixels, flags, ImageMetadata::default());
     image.metadata.derived.set_domain(Some(domain()));
     image
@@ -78,7 +78,7 @@ fn rgb_product() -> StackProduct {
     kept_flagged_samples[QualityFlags::DEFECT.idx()] = 3;
     StackProduct {
         image: image(
-            LinearPixels::Rgb([plane(0.0), plane(1.0), plane(2.0)]),
+            PlanarImage::from([plane(0.0), plane(1.0), plane(2.0)]),
             flags,
         ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(plane(30.0)))),
@@ -259,7 +259,7 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let path = dir.join("product.fits");
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg));
     let written = StackProduct {
-        image: image(LinearPixels::Mono(plane(0.0)), None),
+        image: image(PlanarImage::from(plane(0.0)), None),
         coverage: Some(Coverage::Uniform {
             value: 0.75,
             size: SIZE,

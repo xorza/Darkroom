@@ -20,8 +20,8 @@ fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     let cfa = ctx.cfa(path).unwrap();
     assert_eq!(cfa.data().size(), declared.size());
     let image = cfa.demosaic_measured(MarkesteijnPasses::One);
-    assert_eq!(image.dimensions().size(), declared.size());
-    assert_eq!(image.channels(), 3);
+    assert_eq!(image.desc().size(), declared.size());
+    assert_eq!(image.channel_count(), 3);
 
     if let Some(path) = internals::debug_output_path("light_from_raw.tiff") {
         raster::write_image(&path, &imaginarium::InterleavedImage::from(image)).unwrap();

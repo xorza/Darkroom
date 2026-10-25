@@ -1,9 +1,9 @@
 //! A stacked master's ancillary quality plane: one shared, or one per channel.
 
 use common::Buffer2;
+use imaginarium::PlanarImage;
 
 use crate::image::linear_image::LinearImage;
-use crate::image::linear_pixels::LinearPixels;
 
 /// A quality map that is either common to every image channel or channel-specific.
 #[derive(Debug)]
@@ -24,11 +24,12 @@ impl QualityMap {
     }
 }
 
-impl From<LinearPixels> for QualityMap {
-    fn from(pixels: LinearPixels) -> Self {
-        match pixels {
-            LinearPixels::Mono(plane) => Self::Shared(plane),
-            LinearPixels::Rgb(planes) => Self::PerChannel(planes),
+impl From<PlanarImage> for QualityMap {
+    fn from(pixels: PlanarImage) -> Self {
+        if pixels.is_mono() {
+            Self::Shared(pixels.into_mono())
+        } else {
+            Self::PerChannel(pixels.into_rgb())
         }
     }
 }

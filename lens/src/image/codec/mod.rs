@@ -6,10 +6,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
-use imaginarium::{ChannelCount, ColorFormat, InterleavedDesc, SampleType};
+use imaginarium::{ChannelCount, ChannelLayout, ColorFormat, InterleavedDesc, SampleType};
 use lumos::{
-    ChannelLayout, DimensionsError, FlatGain, FrameGain, ImageDimensions, ImageMetadata,
-    LinearImage, PixelFlags,
+    FlatGain, FrameDescError, FrameGain, ImageMetadata, LinearImage, PixelFlags, frame_desc,
 };
 use scenarium::{CodecError, CustomValue, CustomValueCodec, TypeEntry};
 use serde::{Deserialize, Serialize};
@@ -71,7 +70,7 @@ enum DecodeError {
     #[error("invalid cached image: {0}")]
     InvalidImage(#[from] imaginarium::Error),
     #[error("invalid cached planes: {0}")]
-    InvalidPlanes(#[from] DimensionsError),
+    InvalidPlanes(#[from] FrameDescError),
     #[error("image cache record does not read: {0}")]
     Record(#[from] DeserializeError),
     #[error("image cache payload is flagged, and its flag plane holds no flag")]
@@ -117,7 +116,7 @@ impl CustomValueCodec for ImageCodec {
             Pixels::InterleavedCpu { image, .. } => writer.write_all(image.bytes()).await?,
             Pixels::PlanarCpu(planar) => {
                 let mut chunk = vec![0_u8; PLANE_CHUNK];
-                for channel in 0..planar.channels() {
+                for channel in 0..planar.channel_count() {
                     write_plane(writer, planar.channel(channel).pixels(), &mut chunk).await?;
                 }
                 if let Some(flags) = planar.flags() {
@@ -203,7 +202,7 @@ impl CustomValueCodec for ImageCodec {
                 let mut planar = read_planar(reader, color_format, width, height, flagged).await?;
                 if let Some(gain) = flat_gain {
                     let gain = gain.into_owned();
-                    if !gain.covers(planar.dimensions().size(), planar.channels()) {
+                    if !gain.covers(planar.desc().size(), planar.channel_count()) {
                         return Err(DecodeError::GainMismatch.into());
                     }
                     planar.set_flat_gain(Some(FrameGain::Own(Box::new(gain))));
@@ -231,7 +230,7 @@ async fn read_planar(
         _ => return Err(DecodeError::PlanarFormat(color_format).into()),
     };
     let dimensions =
-        ImageDimensions::checked((width, height).into(), layout).map_err(DecodeError::from)?;
+        frame_desc::checked((width, height).into(), layout).map_err(DecodeError::from)?;
     let mut chunk = vec![0_u8; PLANE_CHUNK];
     let mut planes = Vec::with_capacity(layout.count());
     for _ in 0..layout.count() {

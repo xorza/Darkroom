@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
 use crate::image::flat_gain::{self, GainGrid};
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::io::fits::cfa::{CFA_FITS_FORMAT, CFA_FITS_VERSION};
 use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
@@ -329,8 +329,7 @@ impl Display for FitsRefusal {
             Self::AxisCount { axes } => write!(f, "unsupported number of dimensions: {axes}"),
             Self::SideTooLong { width, height } => write!(
                 f,
-                "FITS image {width}x{height} has a side past {} px",
-                ImageDimensions::MAX_SIDE
+                "FITS image {width}x{height} has a side past {MAX_SIDE} px"
             ),
             Self::SampleCountOverflow { shape } => {
                 write!(f, "FITS sample count overflows: {shape:?}")

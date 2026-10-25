@@ -1,11 +1,12 @@
 //! [`PlannedCombine`]: a combine as a memory plan prices it, before its frames exist.
 
+use imaginarium::PlanarDesc;
+
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::Normalization;
 use crate::combine::normalization::planned_normalization::{PlannedNormalization, SetCoverage};
 use crate::combine::stack::combine_cost::CombineCost;
 use crate::frame_store::stored_layout::StoredLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::stage::{Stage, Units};
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -22,7 +23,7 @@ pub(crate) struct PlannedCombine {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlannedFrames {
     pub(crate) count: usize,
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) layout: StoredLayout,
     pub(crate) slots: Slots,
     pub(crate) coverage: SetCoverage,
@@ -48,7 +49,7 @@ impl PlannedCombine {
         let coverage_planes = usize::from(self.quality.coverage)
             * match coverage {
                 SetCoverage::Common => 1,
-                SetCoverage::PerChannel => dimensions.channels(),
+                SetCoverage::PerChannel => dimensions.channel_count(),
             };
         [
             Stage {
