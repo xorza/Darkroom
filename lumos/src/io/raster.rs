@@ -189,3 +189,30 @@ pub(crate) mod internals {
         raster::read(path, format)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use common::Size2us;
+
+    use crate::image::frame_desc::MAX_SIDE;
+    use crate::io::error::ImageError;
+    use crate::io::raster::check_side;
+
+    /// A side of `MAX_SIDE` is a frame's, one more on either side is not, and the error names the
+    /// file and its size.
+    #[test]
+    fn a_raster_side_past_the_frame_limit_is_refused() {
+        let path = Path::new("wide.tiff");
+        assert!(check_side(path, Size2us::new(MAX_SIDE, MAX_SIDE)).is_ok());
+        for size in [Size2us::new(MAX_SIDE + 1, 1), Size2us::new(1, MAX_SIDE + 1)] {
+            let error = check_side(path, size).unwrap_err();
+            assert!(
+                matches!(&error, ImageError::RasterSideTooLong { path: at, size: refused }
+                    if at == path && *refused == size),
+                "{error:?}"
+            );
+        }
+    }
+}

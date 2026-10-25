@@ -76,7 +76,8 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
             matches!(loaded.planar(), Cow::Borrowed(_)),
             "{path:?} decodes to planes"
         );
-        let metadata = &loaded.planar().metadata;
+        let planar = Image::take_planar(outputs[0].clone()).unwrap();
+        let metadata = &planar.metadata;
         assert_eq!(metadata.header.object.as_deref(), object, "{path:?}");
         let source = metadata
             .derived

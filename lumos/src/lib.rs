@@ -83,7 +83,7 @@ pub use image::flags::quality_flags::QualityFlags;
 pub use image::flat_gain::FlatGain;
 pub use image::flat_gain::frame_gain::FrameGain;
 pub use image::frame_desc;
-pub use image::linear_image::LinearImage;
+pub use image::linear_image::{LinearImage, LinearParts};
 pub use image::metadata::bg_split::BgSplit;
 pub use image::metadata::calibration_state::CalibrationState;
 pub use image::metadata::dark_comparison::DarkComparison;

@@ -39,7 +39,7 @@ The `Image` API, by layout:
 | Operation | Planar | Interleaved |
 |---|---|---|
 | Borrow the samples | `planar() -> Cow<PlanarImage>` | `interleaved() -> Cow<InterleavedImage>` |
-| Take from a wire | `take_planar(value) -> InvokeResult<LinearImage>` | `take_interleaved(value) -> InterleavedImage` |
+| Take from a wire | `take_planar(value) -> Result<LinearImage, FrameDescError>` | `take_interleaved(value) -> InterleavedImage` |
 | Build | `From<LinearImage>`, `from_planes` | `From<InterleavedImage>` |
 
 `desc()`, `ram_bytes()` and `Display` read either arm the same way. The
@@ -102,8 +102,9 @@ type whose layout is known only at run time. `PreviewImage` is deleted.
   both layouts. Refused: the record enum of two arms, which is the asymmetry
   again on disk.
 - **A side past `frame_desc::MAX_SIDE` is the graph's error, not a panic.**
-  `take_planar` of an interleaved input checks the side limit first and
-  returns `InvokeError::invalid_input`. An interleaved image comes from a file
+  `take_planar` checks the side limit first and returns the
+  `FrameDescError`; `run_on_planes` reports it as `InvokeError::invalid_input`
+  of input 0, the image every planar node takes. An interleaved image comes from a file
   or a node, which is not a contract that lumos's `assert_frame` can state.
   The raster preview checks the same limit before it builds a `LinearImage`,
   with `ImageError::RasterSideTooLong`, which the science load shares: the
@@ -129,61 +130,7 @@ type whose layout is known only at run time. `PreviewImage` is deleted.
 
 Each batch leaves `cargo drive check` and `cargo drive test` green.
 
-### 1. The metadata, flags and flat gain beside the layout
-
-Files: `lumos/src/image/linear_image.rs`,
-`lumos/src/image/flat_gain/frame_gain.rs`, `lumos/src/lib.rs`,
-`lens/src/image/mod.rs`, `lens/src/image/tests.rs`,
-`lens/src/image/codec/mod.rs`, `lens/src/image/codec/tests.rs`,
-`lens/src/astro/nodes/runtime.rs`.
-
-- [ ] `lumos/src/image/linear_image.rs`: add `LinearParts`, with
-  `From<LinearImage> for LinearParts` and `From<LinearParts> for LinearImage`;
-  export it from `lumos/src/lib.rs`. Test: a round trip keeps the plane
-  allocation (pointer equal), the metadata, the flags and the gain, and a
-  flag plane of another size panics.
-- [ ] `lumos/src/image/flat_gain/frame_gain.rs`: add a public
-  `FrameGain::own_ram_bytes` (the grid of `Own`, 0 for `Shared`, whose owner
-  counts it), and use it in `LinearImage::ram_bytes`, so that lens does not
-  copy the rule. Extend
-  `ram_bytes_counts_the_planes_the_flags_and_an_own_gain` with it.
-- [ ] `lens/src/image/mod.rs`: `Image` and `Pixels` as in the target shape.
-  `From<LinearImage>` moves the parts in. `into_planar` builds the
-  `LinearImage` from the planes and the three others, with no copy for a
-  planar image. `into_interleaved` keeps the samples alone. `planar()`
-  returns `Cow<PlanarImage>`, borrowed for a planar image, the alpha copy kept
-  for an interleaved one. A private `to_planar` copies the planes and the
-  three others for a shared input. `ram_bytes` is the samples plus the flag
-  plane plus `own_ram_bytes`, the same sum in both layouts. A private
-  constructor `debug_assert!`s that the flags and the gain cover the image.
-  Delete `planes_of`. Rewrite the `Image` and `Pixels` docs for the new shape.
-- [ ] `lens/src/image/mod.rs` `take_planar`: panics in `LinearImage::new` for
-  an interleaved input with a side past `MAX_SIDE`. Target:
-  `InvokeResult<LinearImage>`, checked with `frame_desc::checked` before the
-  deinterleave; `lens/src/astro/nodes/runtime.rs` `run_on_planes` returns the
-  error with `?`. Put the check in a private fn over the `InterleavedDesc`,
-  and test it there: a `(MAX_SIDE + 1) × 1` descriptor returns the error, and
-  a `MAX_SIDE × 1` one passes. No test builds the 1 GiB image.
-- [ ] `lens/src/image/tests.rs`: the pointer tests (`into_planar` moves the
-  planes, `take_planar` moves a unique input and copies a shared one) hold as
-  they are. Extend
-  `a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned`: the
-  input has a header object and a flag plane, and `take_planar` returns both,
-  for the unique input and for the shared one.
-- [ ] `lens/src/image/codec/mod.rs`: `ImageRecord` becomes one struct (a
-  `SampleOrder` of `Planar` or `Interleaved`, the metadata, the flat gain,
-  `flagged`), with no `large_enum_variant` expect. Encode writes the header,
-  the record, the samples in their order, then the flag plane in either order.
-  Decode checks the gain against the size and the channel count without alpha
-  in both orders, and `PlanarFormat` and `frame_desc::checked` in the planar
-  order. `VERSION` becomes 6.
-- [ ] `lens/src/image/codec/tests.rs`: `a_planar_image_round_trips_whole`
-  reads the new fields. Add an interleaved image with a flag plane and a
-  gain to `every_interleaved_format_round_trips_pixel_exact`, and assert the
-  flag plane follows the samples. Move the pin of `record_layout_is_pinned`
-  to the new digest.
-
-### 2. Fold the decisions into the documents
+### 1. Fold the decisions into the documents
 
 Files: `AGENTS.md`, `imaginarium/AGENTS.md`, `lumos/AGENTS.md`,
 `.notes/TODO.md`, `PLAN.md`.
@@ -200,3 +147,10 @@ Files: `AGENTS.md`, `imaginarium/AGENTS.md`, `lumos/AGENTS.md`,
   planes", with the refused `PreviewImage`.
 - [ ] Delete the "make symmetric enum Pixels" item in `.notes/TODO.md`, then
   delete `PLAN.md`.
+
+## Changed
+
+- **No private `Image` constructor that asserts coverage.** `From<LinearImage>`
+  gets parts a `LinearImage` checked, `From<InterleavedImage>` carries none,
+  and the codec refuses a flag plane or a gain of other pixels with a
+  `DecodeError`: no path is left for an assert to guard.

@@ -7,7 +7,7 @@ use scenarium::{DynamicValue, InvokeError, InvokeResult};
 use crate::image::Image;
 use std::error;
 
-/// An in-place `lumos` op over the planes of a required image input, on the
+/// An in-place `lumos` op over the planes of the required image at input 0, on the
 /// blocking pool, handing back the image it leaves.
 pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<DynamicValue>
 where
@@ -20,14 +20,16 @@ where
     .await
 }
 
-/// `op` over the planes of a required image input, on the blocking pool.
+/// `op` over the planes of the required image at input 0, on the blocking pool.
 pub(crate) async fn run_on_planes<R, E, F>(value: DynamicValue, op: F) -> InvokeResult<R>
 where
     F: FnOnce(LinearImage) -> Result<R, E> + Send + 'static,
     E: error::Error + Send + Sync + 'static,
     R: Send + 'static,
 {
-    let planar = Image::take_planar(value);
+    let planar = Image::take_planar(value).map_err(|error| {
+        InvokeError::invalid_input(0, "an image with no side past 2^30 px", error)
+    })?;
     task::spawn_blocking(move || op(planar))
         .await
         .map_err(InvokeError::external)?

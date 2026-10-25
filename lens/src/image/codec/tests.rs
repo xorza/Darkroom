@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use common::{Buffer2, SerdeFormat, Size2us};
 use imaginarium::{ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc};
 use lumos::{FlatGain, FrameGain, ImageMetadata, LinearImage, PixelFlags};
 use scenarium::{CustomValue, CustomValueCodec, Library};
 
-use crate::image::codec::{HEADER_LEN, ImageCodec, ImageRecord, image_type_entry};
+use crate::image::codec::{HEADER_LEN, ImageCodec, ImageRecord, SampleOrder, image_type_entry};
 use crate::image::{IMAGE_TYPE_ID, Image, Pixels};
 
 fn header_len() -> usize {
@@ -29,17 +30,22 @@ async fn decoded(bytes: Vec<u8>) -> Image {
         .await
         .expect("image decodes");
     let image = value
-        .as_any()
-        .downcast_ref::<Image>()
+        .into_any()
+        .downcast::<Image>()
         .expect("decoded back into a lens Image");
-    let pixels = match &image.pixels {
-        Pixels::InterleavedCpu { image, metadata } => Pixels::InterleavedCpu {
-            image: image.clone(),
-            metadata: metadata.clone(),
-        },
-        Pixels::PlanarCpu(planar) => Pixels::PlanarCpu(planar.clone()),
-    };
-    Image { pixels }
+    Arc::try_unwrap(image).expect("the decode holds the only reference")
+}
+
+/// The record of an image whose samples follow in `order`.
+fn record(order: SampleOrder, flat_gain: Option<FlatGain>, flagged: bool) -> Vec<u8> {
+    SerdeFormat::Bitcode
+        .serialize(&ImageRecord {
+            order,
+            metadata: Cow::Owned(ImageMetadata::default()),
+            flat_gain: flat_gain.map(Cow::Owned),
+            flagged,
+        })
+        .unwrap()
 }
 
 /// The record's length, from the header's last `u64`.
@@ -67,7 +73,8 @@ fn gain() -> FlatGain {
 
 /// Every interleaved format comes back with its descriptor, bytes and metadata, still
 /// interleaved; the header is two format bytes, then the width, the height and the record's length
-/// as little-endian `u64`s.
+/// as little-endian `u64`s. An interleaved image keeps its flags and its flat gain too, the flag
+/// plane after the samples.
 #[tokio::test]
 async fn every_interleaved_format_round_trips_pixel_exact() {
     for format in ColorFormat::ALL {
@@ -76,19 +83,56 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
             .map(|i| u8::try_from(i * 37 % 251).unwrap())
             .collect();
         let image = Image {
-            pixels: Pixels::InterleavedCpu {
-                image: InterleavedImage::new_with_data(desc, pixels.clone()).unwrap(),
-                metadata: named("M31"),
-            },
+            pixels: Pixels::Interleaved(
+                InterleavedImage::new_with_data(desc, pixels.clone()).unwrap(),
+            ),
+            metadata: named("M31"),
+            flags: None,
+            flat_gain: None,
         };
         let image = decoded(encoded(image).await).await;
-        let Pixels::InterleavedCpu { image, metadata } = &image.pixels else {
+        let Pixels::Interleaved(samples) = &image.pixels else {
             panic!("{format} came back planar");
         };
-        assert_eq!(image.desc(), desc, "{format}");
-        assert_eq!(image.bytes(), pixels, "{format}");
-        assert_eq!(metadata.header.object.as_deref(), Some("M31"), "{format}");
+        assert_eq!(samples.desc(), desc, "{format}");
+        assert_eq!(samples.bytes(), pixels, "{format}");
+        assert_eq!(
+            image.metadata.header.object.as_deref(),
+            Some("M31"),
+            "{format}"
+        );
     }
+
+    // A 2×1 mono u16 image: 4 sample bytes, then the 2 flag bytes.
+    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::MONO_U16);
+    let samples = vec![1, 2, 3, 4];
+    let image = Image {
+        pixels: Pixels::Interleaved(
+            InterleavedImage::new_with_data(desc, samples.clone()).unwrap(),
+        ),
+        metadata: ImageMetadata::default(),
+        flags: PixelFlags::from_bytes(Buffer2::new((2, 1), vec![0, 5])),
+        flat_gain: Some(FrameGain::Own(Box::new(gain()))),
+    };
+    let bytes = encoded(image).await;
+    let body = &bytes[header_len() + record_len(&bytes)..];
+    assert_eq!(body, [1, 2, 3, 4, 0, 5], "the samples, then the flag plane");
+    let image = decoded(bytes).await;
+    let Pixels::Interleaved(read) = &image.pixels else {
+        panic!("the samples came back planar");
+    };
+    assert_eq!(read.bytes(), samples);
+    assert_eq!(
+        image.flags.as_ref().map(PixelFlags::bytes),
+        Some(&[0, 5][..])
+    );
+    assert_eq!(
+        image
+            .flat_gain
+            .as_ref()
+            .map(|gain| SerdeFormat::Ron.serialize(&**gain).unwrap()),
+        Some(SerdeFormat::Ron.serialize(&gain()).unwrap())
+    );
 
     let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
@@ -132,13 +176,13 @@ async fn a_planar_image_round_trips_whole() {
     );
 
     let image = decoded(bytes).await;
-    let Pixels::PlanarCpu(planar) = &image.pixels else {
+    let Pixels::Planar(planar) = &image.pixels else {
         panic!("the planes came back interleaved");
     };
     for (channel, plane) in planes.iter().enumerate() {
         assert_eq!(planar.channel(channel).pixels(), plane);
     }
-    assert!(planar.flags().is_none() && planar.flat_gain().is_none());
+    assert!(image.flags.is_none() && image.flat_gain.is_none());
 
     let mut mono = LinearImage::from_planar_channels(
         PlanarDesc::new((2, 1), ChannelLayout::Mono),
@@ -162,14 +206,19 @@ async fn a_planar_image_round_trips_whole() {
         8 + 2 + 8,
         "the read-back gain is the image's own"
     );
-    let Pixels::PlanarCpu(mono) = &decoded.pixels else {
+    let Pixels::Planar(mono) = &decoded.pixels else {
         panic!("the plane came back interleaved");
     };
     assert_eq!(mono.channel(0).pixels(), &[0.5, 1.0]);
-    assert_eq!(mono.metadata.header.object.as_deref(), Some("NGC 7000"));
-    assert_eq!(mono.flags().map(PixelFlags::bytes), Some(&[0, 5][..]));
+    assert_eq!(decoded.metadata.header.object.as_deref(), Some("NGC 7000"));
     assert_eq!(
-        mono.flat_gain()
+        decoded.flags.as_ref().map(PixelFlags::bytes),
+        Some(&[0, 5][..])
+    );
+    assert_eq!(
+        decoded
+            .flat_gain
+            .as_ref()
             .map(|gain| SerdeFormat::Ron.serialize(&**gain).unwrap()),
         Some(SerdeFormat::Ron.serialize(&gain()).unwrap())
     );
@@ -187,20 +236,8 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
             .expect_err("the payload is refused")
             .to_string()
     }
-    let raster = SerdeFormat::Bitcode
-        .serialize(&ImageRecord::Interleaved {
-            metadata: Cow::Owned(ImageMetadata::default()),
-        })
-        .unwrap();
-    let planes = |flat_gain: Option<FlatGain>, flagged: bool| {
-        SerdeFormat::Bitcode
-            .serialize(&ImageRecord::Planar {
-                metadata: Cow::Owned(ImageMetadata::default()),
-                flat_gain: flat_gain.map(Cow::Owned),
-                flagged,
-            })
-            .unwrap()
-    };
+    let raster = record(SampleOrder::Interleaved, None, false);
+    let planes = |flat_gain, flagged| record(SampleOrder::Planar, flat_gain, flagged);
     let payload = |format: [u8; 2], width: u64, height: u64, record: &[u8]| {
         let mut payload = format.to_vec();
         payload.extend(width.to_le_bytes());
@@ -271,6 +308,18 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
         error(other_gain).await,
         "image cache flat gain covers another image"
     );
+    // An RGBA image has three planes, its alpha left out, and the gain covers one.
+    let mut interleaved_gain = payload(
+        [4, 0],
+        2,
+        1,
+        &record(SampleOrder::Interleaved, Some(gain()), false),
+    );
+    interleaved_gain.extend([0; 8]);
+    assert_eq!(
+        error(interleaved_gain).await,
+        "image cache flat gain covers another image"
+    );
     let zero_side = payload([1, 2], 0, 1, &planes(None, false));
     assert_eq!(
         error(zero_side).await,
@@ -283,7 +332,8 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
 #[test]
 fn record_layout_is_pinned() {
     let bytes = SerdeFormat::Bitcode
-        .serialize(&ImageRecord::Planar {
+        .serialize(&ImageRecord {
+            order: SampleOrder::Planar,
             metadata: Cow::Owned(named("M31")),
             flat_gain: Some(Cow::Owned(gain())),
             flagged: true,
@@ -291,7 +341,7 @@ fn record_layout_is_pinned() {
         .unwrap();
     assert_eq!(
         &blake3::hash(&bytes).to_hex()[..16],
-        "53694879ac395f3a",
+        "accb0a9019dde9ca",
         "the record layout moved: bump VERSION and set this pin to the digest"
     );
 }

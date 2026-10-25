@@ -1,3 +1,5 @@
+use common::Buffer2;
+
 use super::*;
 
 /// The planes of a 2x1 RGB image: (0.125, 0.5), (0.25, 0.625), (0.375, 0.75) — dyadic, so the
@@ -25,7 +27,7 @@ fn to_planar_moves_the_planes_of_an_already_planar_image() {
     // rather than repacking at each one.
     let planar = planar_master();
     let planes = planar.channel(0).pixels().as_ptr();
-    let out = Image::from(planar).into_planar();
+    let out = Image::from(planar).into_planar().unwrap();
     assert_eq!(out.channel(0).pixels().as_ptr(), planes);
 }
 
@@ -66,31 +68,45 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
 /// An input already produced by another astro node is planar, so `Image::take_planar` hands its
 /// planes straight on — no repack between astro nodes, which is the whole point of the graph
 /// carrying planar frames. A shared one still has to be copied, and pointer identity of the
-/// plane allocation tells the two apart.
+/// plane allocation tells the two apart. Either way the metadata and the flags come along.
 #[test]
 fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
     let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let master = || {
+        let mut planar = LinearImage::from_planar_channels(desc, [vec![0.25f32; 12]]);
+        planar.metadata.header.object = Some("M31".to_owned());
+        let mut flags = vec![0; 12];
+        flags[5] = 1;
+        planar.set_flags(PixelFlags::from_bytes(Buffer2::new((4, 3), flags)));
+        planar
+    };
+    let carried = |out: &LinearImage| {
+        assert_eq!(out.metadata.header.object.as_deref(), Some("M31"));
+        assert_eq!(out.flags().map(|flags| flags.bytes()[5]), Some(1));
+    };
 
-    let planar = LinearImage::from_planar_channels(desc, [vec![0.25f32; 12]]);
+    let planar = master();
     let planes = planar.channel(0).pixels().as_ptr();
     let unique = DynamicValue::from_custom(Image::from(planar));
-    let out = Image::take_planar(unique);
+    let out = Image::take_planar(unique).unwrap();
     assert_eq!(
         out.channel(0).pixels().as_ptr(),
         planes,
         "unique planar input: the planes are moved, not repacked"
     );
+    carried(&out);
 
-    let planar = LinearImage::from_planar_channels(desc, [vec![0.25f32; 12]]);
+    let planar = master();
     let planes = planar.channel(0).pixels().as_ptr();
     let shared = DynamicValue::from_custom(Image::from(planar));
     let second_holder = shared.clone();
-    let out = Image::take_planar(shared);
+    let out = Image::take_planar(shared).unwrap();
     assert_ne!(
         out.channel(0).pixels().as_ptr(),
         planes,
         "shared planar input: the planes are deep-cloned"
     );
+    carried(&out);
     assert_eq!(out.desc(), desc);
     let original = second_holder.as_custom::<Image>().unwrap();
     assert_eq!(
@@ -112,7 +128,7 @@ fn an_interleaved_input_deinterleaves_at_the_domain_boundary() {
     )
     .unwrap();
     let bytes = raw.bytes().as_ptr();
-    let out = Image::take_planar(DynamicValue::from_custom(Image::from(raw.clone())));
+    let out = Image::take_planar(DynamicValue::from_custom(Image::from(raw.clone()))).unwrap();
     assert_eq!(out.channel(0).pixels(), &[0.125, 0.5]);
     assert_eq!(out.channel(1).pixels(), &[0.25, 0.625]);
     assert_eq!(out.channel(2).pixels(), &[0.375, 0.75]);
@@ -120,4 +136,25 @@ fn an_interleaved_input_deinterleaves_at_the_domain_boundary() {
     // Staying in the interleaved domain moves a last holder's samples too.
     let kept = Image::take_interleaved(DynamicValue::from_custom(Image::from(raw)));
     assert_eq!(kept.bytes().as_ptr(), bytes, "moved, not copied");
+}
+
+/// A `lumos` frame has no side past `MAX_SIDE`, so neither has an image taken planar; an alpha
+/// channel is left out of the frame's planes.
+#[test]
+fn an_image_makes_a_frame_up_to_the_side_limit() {
+    let desc = |width| {
+        imaginarium::InterleavedDesc::new(Size2us::new(width, 1), imaginarium::ColorFormat::RGBA_U8)
+    };
+    assert_eq!(
+        frame_desc_of(desc(frame_desc::MAX_SIDE)),
+        Ok(PlanarDesc::new(
+            (frame_desc::MAX_SIDE, 1),
+            ChannelLayout::Rgb
+        ))
+    );
+    let size = Size2us::new(frame_desc::MAX_SIDE + 1, 1);
+    assert_eq!(
+        frame_desc_of(desc(size.width)),
+        Err(FrameDescError::SidePastMax { size })
+    );
 }
