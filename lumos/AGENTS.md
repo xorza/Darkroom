@@ -28,6 +28,12 @@ source extraction, error bars.
   lumos's metadata, flags and flat gain. lumos keeps its own side limit,
   `frame_desc::MAX_SIDE`, which its `i32` pixel lanes set: `LinearImage` and
   `CfaImage` assert it, and every reader of an untrusted size checks it.
+- **A lumos decode hands back planes.** `LoadCtx::preview` returns a
+  `LinearImage` for every format: lumos's pixels are planar, and a preview is
+  told from a science load by the method and the provenance it records.
+  Refused: `PreviewImage` of a planar or an interleaved arm, a second copy of
+  lens's wire type. Cost: a raster preview is interleaved again for an
+  imaginarium op or the previewer, as a FITS or RAW one is, without loss.
 - **`image/` groups by subject**: `metadata/` for what a frame carries beside
   its samples, `flags/` for the quality flags, `cfa/` and `flat_gain/`, and
   the frame types at the top.

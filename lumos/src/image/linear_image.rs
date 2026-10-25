@@ -297,7 +297,8 @@ pub(crate) struct PlanesWithFlags<'a> {
 }
 
 /// A [`LinearImage`] taken apart: its planes and what it carries beside them, each moved, not
-/// copied.
+/// copied. `From` both ways, not inherent `into_parts` and `from_parts`, which would shadow the
+/// `StackableImage` methods of those names.
 #[derive(Debug)]
 pub struct LinearParts {
     pub pixels: PlanarImage,

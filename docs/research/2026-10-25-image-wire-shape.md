@@ -1,7 +1,7 @@
 # The image on a wire (2026-10-25)
 
-Facts gathered for `PLAN.md`, the plan that gives lens's `Image` one shape.
-Workspace at `e9ea505c0`.
+Facts gathered for the plan that gave lens's `Image` one shape; its decisions
+are in `AGENTS.md` and `lumos/AGENTS.md`. Workspace at `e9ea505c0`.
 
 ## The types
 
