@@ -16,6 +16,24 @@ codecs.
   ties to even, and saturates (`color::sample::Sample`); SIMD kernels and
   WGSL (`gpu/packed.wgsl`) follow it, and every GPU test compares with the
   CPU result.
+- **Pixels alone.** `InterleavedImage` and `PlanarImage` hold samples; lumos
+  wraps the planes with its metadata, flags and flat gain. Refused: an image
+  with a metadata field, which would carry FITS keywords into the raster ops.
+- **`From` and `TryFrom` are lossless.** The one layout change that loses
+  data is a named method, `InterleavedImage::without_alpha`, which each caller
+  names; an image with alpha refuses planes.
+- **Errors are cases, each in its domain**: `CodecError`, `DescError`,
+  `PlanesError`, `ByteLenError`, `GpuError`, a foreign error kept as its own
+  type. Both descriptors are valid by construction: `new` panics, `checked`
+  returns the `DescError`. Refused: one `Error` of messages, which no caller
+  can match on.
+- **Readers and writers, not paths.** `decode` takes a reader and `encode` a
+  writer; the caller opens through `common::fs`. `RasterFormat` is the one
+  raster-format enum, with serde, as lumos's provenance records it.
+- **The GPU backend stays**, though no workspace crate turns `wgpu` on: lens's
+  `Image` reserves a device variant for it, and the root lints and benches it.
+  Refused: deleting some 1 500 lines with their tests, which a device path
+  would write again.
 
 ## Verification
 

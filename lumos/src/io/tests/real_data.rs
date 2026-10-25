@@ -16,7 +16,7 @@ use crate::io::raster;
 fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     let path = &raw_frames("Lights")[0];
     let ctx = LoadCtx::default();
-    let declared = ctx.cfa_peek(path).unwrap().info.dimensions;
+    let declared = ctx.cfa_peek(path).unwrap().info.desc;
     let cfa = ctx.cfa(path).unwrap();
     assert_eq!(cfa.data().size(), declared.size());
     let image = cfa.demosaic_measured(MarkesteijnPasses::One);

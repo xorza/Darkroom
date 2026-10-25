@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::dark_scale::DarkScaleSource;
-use crate::image::temperature_source::TemperatureSource;
+use crate::image::metadata::temperature_source::TemperatureSource;
 use crate::stack_product::run_report::RunReport;
 
 /// What calibrating the lights could not check, counted across the workers.

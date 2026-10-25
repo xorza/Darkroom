@@ -9,7 +9,7 @@ use crate::error::Cancelled;
 use crate::frame::error::ConditionMismatch;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::sample_domain::SampleDomain;
+use crate::image::metadata::sample_domain::SampleDomain;
 use common::Size2us;
 
 /// A calibration master does not describe the same measurement as the light it is applied to.

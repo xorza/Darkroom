@@ -126,9 +126,9 @@ mod tests {
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::storage_tier::StorageTier;
     use crate::frame_store::stored_image::StoredImage;
+    use crate::image::flags::pixel_flags::PixelFlags;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::image::linear_image::LinearImage;
-    use crate::image::pixel_flags::PixelFlags;
-    use crate::image::quality_flags::QualityFlags;
     use crate::pipeline::frame_parking::FrameParking;
     use crate::pipeline::pipeline_frame::PipelineFrame;
 
@@ -158,11 +158,11 @@ mod tests {
                 combine: CombineBudget::new(Budget::of_memory(1 << 20, 1)),
             })
         };
-        let dims = PlanarDesc::new((4, 1), ChannelLayout::Mono);
+        let desc = PlanarDesc::new((4, 1), ChannelLayout::Mono);
         let kept_scratch = RunScratch::create(dir.path()).unwrap();
         for saturated in [false, true] {
-            let mut image = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
-            image.set_flags(PixelFlags::from_fn(dims.size(), |idx| match idx {
+            let mut image = LinearImage::from_interleaved(desc, vec![0.5, 0.25, 0.75, 1.0]);
+            image.set_flags(PixelFlags::from_fn(desc.size(), |idx| match idx {
                 0 if saturated => QualityFlags::SATURATED,
                 1 => QualityFlags::COSMIC_RAY,
                 _ => QualityFlags::default(),
@@ -209,7 +209,7 @@ mod tests {
                 assert!(stored.samples.is_none(), "{label} {saturated}");
             }
         }
-        let plain = LinearImage::from_interleaved(dims, vec![0.5, 0.25, 0.75, 1.0]);
+        let plain = LinearImage::from_interleaved(desc, vec![0.5, 0.25, 0.75, 1.0]);
         let stored = spill()
             .store_reference(
                 PipelineFrame::Resident(plain.clone()),

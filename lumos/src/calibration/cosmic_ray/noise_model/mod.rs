@@ -4,7 +4,7 @@ use crate::bg_mesh::color_mesh::{ColorMesh, LocalBg};
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;
 use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::image::flat_gain::FlatGain;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::math::statistics::spread::Spread;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::ccd_noise::NoiseAt;

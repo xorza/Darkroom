@@ -91,7 +91,7 @@ impl DetectionResources {
     }
 
     /// The dimensions every plane is leased at.
-    pub(crate) fn dimensions(&self) -> Size2us {
+    pub(crate) fn size(&self) -> Size2us {
         self.floats.shape()
     }
 
@@ -103,16 +103,16 @@ impl DetectionResources {
         self.bitmasks.acquire()
     }
 
-    /// Serve frames of `dimensions`. A change drops the planes, and the workspaces whose size
+    /// Serve frames of `size`. A change drops the planes, and the workspaces whose size
     /// follows the frame's: the labeler, the background mesh, the surfaces and their readers' rows,
     /// the filters' bands and the deblenders. The per-tile and per-star vectors, the duplicate
     /// scratch and the filter kernels follow the star and tile counts, and stay.
-    pub(crate) fn reshape(&mut self, dimensions: Size2us) {
-        if self.dimensions() == dimensions {
+    pub(crate) fn reshape(&mut self, size: Size2us) {
+        if self.size() == size {
             return;
         }
-        self.floats.reshape(dimensions);
-        self.bitmasks.reshape(dimensions);
+        self.floats.reshape(size);
+        self.bitmasks.reshape(size);
         self.labeler = Labeler::default();
         self.bg.clear();
         self.surfaces.clear();
@@ -136,12 +136,12 @@ pub(crate) mod internals {
     }
 
     impl DetectionResources {
-        /// Resources for frames of `dimensions`, for a stage a test or a bench runs on its own; a
+        /// Resources for frames of `size`, for a stage a test or a bench runs on its own; a
         /// detector reshapes its own per frame.
-        pub(crate) fn new(dimensions: Size2us) -> Self {
+        pub(crate) fn new(size: Size2us) -> Self {
             Self {
-                floats: ScratchPool::new(dimensions),
-                bitmasks: ScratchPool::new(dimensions),
+                floats: ScratchPool::new(size),
+                bitmasks: ScratchPool::new(size),
                 ..Self::default()
             }
         }
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn planes_lease_at_the_frame_dimensions_from_one_pool_per_kind() {
         let resources = DetectionResources::new(Size2us::new(64, 32));
-        assert_eq!(resources.dimensions(), Size2us::new(64, 32));
+        assert_eq!(resources.size(), Size2us::new(64, 32));
         assert_eq!(resources.buffer_counts(), counts(0, 0));
 
         let plane = resources.acquire_f32();
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(resources.bands.pooled(), 1);
 
         resources.reshape(Size2us::new(128, 64));
-        assert_eq!(resources.dimensions(), Size2us::new(128, 64));
+        assert_eq!(resources.size(), Size2us::new(128, 64));
         assert_eq!(resources.buffer_counts(), counts(0, 0));
         assert_eq!(resources.bands.pooled(), 0);
         drop(outstanding);

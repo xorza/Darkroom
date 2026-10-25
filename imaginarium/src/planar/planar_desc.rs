@@ -6,7 +6,7 @@ use common::Size2us;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::error::DescError;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::planar::channel_layout::ChannelLayout;
 
 /// A planar image's size and channel layout: at least one pixel, and a byte count a `usize`
@@ -129,7 +129,7 @@ mod tests {
 
     use crate::color::color_format::ColorFormat;
     use crate::error::DescError;
-    use crate::image::image_desc::InterleavedDesc;
+    use crate::interleaved::interleaved_desc::InterleavedDesc;
     use crate::planar::channel_layout::ChannelLayout;
     use crate::planar::planar_desc::PlanarDesc;
 

@@ -1,8 +1,8 @@
 use crate::calibration::calibration_pass::{CalibrationPass, Saturation, Subtracted};
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::DomainMap;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::metadata::sample_domain::DomainMap;
 use crate::internals::cfa::make_cfa;
 use crate::internals::test_rng::TestRng;
 use common::Size2us;

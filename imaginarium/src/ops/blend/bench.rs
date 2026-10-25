@@ -16,8 +16,8 @@ use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 use crate::ops::blend::{Blend, BlendMode, cpu};

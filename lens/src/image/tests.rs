@@ -69,9 +69,9 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
 /// plane allocation tells the two apart.
 #[test]
 fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
-    let dimensions = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
 
-    let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
+    let planar = LinearImage::from_planar_channels(desc, [vec![0.25f32; 12]]);
     let planes = planar.channel(0).pixels().as_ptr();
     let unique = DynamicValue::from_custom(Image::from(planar));
     let out = Image::take_planar(unique);
@@ -81,7 +81,7 @@ fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
         "unique planar input: the planes are moved, not repacked"
     );
 
-    let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
+    let planar = LinearImage::from_planar_channels(desc, [vec![0.25f32; 12]]);
     let planes = planar.channel(0).pixels().as_ptr();
     let shared = DynamicValue::from_custom(Image::from(planar));
     let second_holder = shared.clone();
@@ -91,7 +91,7 @@ fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
         planes,
         "shared planar input: the planes are deep-cloned"
     );
-    assert_eq!(out.desc(), dimensions);
+    assert_eq!(out.desc(), desc);
     let original = second_holder.as_custom::<Image>().unwrap();
     assert_eq!(
         original.desc(),

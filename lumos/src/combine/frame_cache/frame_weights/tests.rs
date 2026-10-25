@@ -7,7 +7,7 @@ use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::{FrameNorm, SlotNorm};
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::stack_product::weight_kind::WeightKind;
 
 fn stats(noise: &[f32]) -> FrameStats {

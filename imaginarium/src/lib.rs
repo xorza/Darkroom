@@ -1,10 +1,11 @@
 #[cfg(feature = "internals")]
 pub mod bench;
+mod codec;
 mod color;
 mod error;
 #[cfg(feature = "wgpu")]
 mod gpu;
-mod image;
+mod interleaved;
 #[cfg(test)]
 mod internals;
 mod ops;
@@ -13,9 +14,9 @@ mod planar;
 pub use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 pub use crate::error::{ByteLenError, CodecError, DescError, PlanesError, TiffSampleType};
 
-pub use crate::image::InterleavedImage;
-pub use crate::image::image_desc::InterleavedDesc;
-pub use crate::image::raster_format::{RasterFormat, SUPPORTED_EXTENSIONS};
+pub use crate::codec::raster_format::{RasterFormat, SUPPORTED_EXTENSIONS};
+pub use crate::interleaved::interleaved_desc::InterleavedDesc;
+pub use crate::interleaved::interleaved_image::InterleavedImage;
 
 pub use crate::planar::channel_layout::ChannelLayout;
 pub use crate::planar::planar_desc::PlanarDesc;

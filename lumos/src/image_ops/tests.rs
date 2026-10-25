@@ -1,8 +1,8 @@
 use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::bg_split::BgSplit;
 use crate::image::linear_image::LinearImage;
-use crate::image::mosaic_noise::MosaicNoise;
+use crate::image::metadata::bg_split::BgSplit;
+use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
 use crate::image_ops::color_calibration::scnr::Scnr;
 use crate::image_ops::denoise::Denoise;
@@ -23,11 +23,11 @@ type Op = fn(&mut LinearImage) -> Result<(), OpError>;
 /// 64 of them and its gradient is there to remove.
 #[test]
 fn every_op_drops_the_noise_of_the_samples_it_changed() {
-    let dimensions = PlanarDesc::new((128, 128), ChannelLayout::Rgb);
+    let desc = PlanarDesc::new((128, 128), ChannelLayout::Rgb);
     let frame = || {
         let mut image = LinearImage::from_interleaved(
-            dimensions,
-            (0..dimensions.sample_count())
+            desc,
+            (0..desc.sample_count())
                 .map(|idx| {
                     let (pixel, channel) = (idx / 3, idx % 3);
                     let (x, y) = (pixel % 128, pixel / 128);

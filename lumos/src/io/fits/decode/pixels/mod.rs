@@ -12,14 +12,14 @@ use rayon::prelude::*;
 
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
-use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
-use crate::image::image_provenance::{
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
+use crate::image::metadata::fits_checksum_provenance::FitsChecksumProvenance;
+use crate::image::metadata::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
+use crate::image::metadata::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, SourceProvenance,
 };
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
-use crate::image::sample_domain::SampleDomain;
+use crate::image::metadata::sample_domain::SampleDomain;
 use crate::io::fits::decode::DecodedFitsImage;
 use crate::io::fits::decode::plan::{self, FitsDecodePlan};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
@@ -131,7 +131,7 @@ impl HduDecode<'_> {
             saturation.is_some() || domain_keywords::read_saturation_flagged(header)?;
         let flags = self.resolve_flags(&mut planes, saturation)?;
         let pixels = PlanarImage::from_planar_channels(
-            plan.dimensions,
+            plan.desc,
             planes.into_iter().map(|plane| plane.samples),
         );
         let provenance = ImageProvenance {
@@ -143,7 +143,7 @@ impl HduDecode<'_> {
             }),
             color: if cfa_type.and_then(CfaType::mosaic).is_some() {
                 ColorProvenance::SensorCfa
-            } else if plan.dimensions.is_mono() {
+            } else if plan.desc.is_mono() {
                 ColorProvenance::Monochrome
             } else {
                 ColorProvenance::Unspecified
@@ -188,7 +188,7 @@ impl HduDecode<'_> {
         planes: &mut [DecodedPlane],
         saturation: Option<f32>,
     ) -> Result<Option<PixelFlags>, FitsLoadError> {
-        let dimensions = self.plan.dimensions;
+        let desc = self.plan.desc;
         let policy = self.ctx.nulls;
         let count: usize = planes
             .iter()
@@ -206,7 +206,7 @@ impl HduDecode<'_> {
                 .find_map(|(channel, plane)| {
                     plane
                         .nulls
-                        .map(|nulls| channel * dimensions.pixel_count() + nulls.first_idx)
+                        .map(|nulls| channel * desc.pixel_count() + nulls.first_idx)
                 })
                 .expect("a nonzero count means at least one plane reported a null");
             // Samples, not pixels: this counts each channel's nulls separately, and the index is in
@@ -222,7 +222,7 @@ impl HduDecode<'_> {
                 .iter()
                 .map(|plane| plane.samples.as_slice())
                 .collect::<ArrayVec<&[f32], 3>>();
-            PixelFlags::from_fn(dimensions.size(), |idx| {
+            PixelFlags::from_fn(desc.size(), |idx| {
                 if samples.iter().any(|plane| !plane[idx].is_finite()) {
                     QualityFlags::NO_DATA
                 } else if saturation
@@ -248,7 +248,7 @@ impl HduDecode<'_> {
         // fill with nothing in the frame itself to say so.
         tracing::info!(
             pixels = flags.count(QualityFlags::NO_DATA),
-            of = dimensions.pixel_count(),
+            of = desc.pixel_count(),
             "FITS image declares pixels with no measurement"
         );
         Ok(Some(flags))
@@ -263,11 +263,11 @@ impl HduDecode<'_> {
     ) -> Result<ArrayVec<DecodedPlane, 3>, FitsLoadError> {
         let plan = self.plan;
         let ctx = self.ctx;
-        let width = plan.dimensions.width();
-        let channels = plan.dimensions.channel_count();
+        let width = plan.desc.width();
+        let channels = plan.desc.channel_count();
         let mut planes: ArrayVec<DecodedPlane, 3> = (0..channels)
             .map(|_| DecodedPlane {
-                samples: zeroed_plane(plan.dimensions.pixel_count()),
+                samples: zeroed_plane(plan.desc.pixel_count()),
                 nulls: None,
                 scan: SampleScan::EMPTY,
             })

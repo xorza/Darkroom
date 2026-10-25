@@ -5,10 +5,10 @@ use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::flag_counts::FlagCounts;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::DomainMap;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::metadata::sample_domain::DomainMap;
 
 /// A master subtracted from a frame: its samples, carried into the frame's domain by `map`, its
 /// signal scaled by `scale` — a bias-removed dark to the frame's exposure, 1 otherwise. The map's

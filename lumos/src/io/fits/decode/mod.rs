@@ -22,13 +22,13 @@ use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::ColorProvenance;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::ColorProvenance;
 use crate::io::decoder::Peek;
 use crate::io::error::{ImageError, ScientificRefusal};
 use crate::io::fits::decode::fits_file::FitsFile;

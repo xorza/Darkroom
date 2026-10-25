@@ -106,10 +106,10 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 fn drizzle_output_grid_is_the_input_scaled() {
     let config = DrizzleConfig::default();
     let acc = accumulator(PlanarDesc::new((100, 80), ChannelLayout::Rgb), config);
-    let dims = acc.finalize().image.desc();
-    assert_eq!(dims.width(), 200);
-    assert_eq!(dims.height(), 160);
-    assert_eq!(dims.channel_count(), 3);
+    let desc = acc.finalize().image.desc();
+    assert_eq!(desc.width(), 200);
+    assert_eq!(desc.height(), 160);
+    assert_eq!(desc.channel_count(), 3);
 }
 
 /// A scale is refused before any output plane is allocated: one whose grid passes

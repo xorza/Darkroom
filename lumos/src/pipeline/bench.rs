@@ -98,7 +98,7 @@ fn park(c: &mut Criterion) {
             let light = field.render(FRAME).image;
             let parked = StoredImage::write(&light, light.flags(), &scratch).unwrap();
             let source = SourceImage {
-                dimensions: parked.dimensions,
+                desc: parked.desc,
                 metadata: &light.metadata,
                 planes: parked
                     .planes()
@@ -111,7 +111,7 @@ fn park(c: &mut Criterion) {
                 flat_gain: None,
             };
             let warp = Pair::typical().similarity_warp();
-            let mut buffers = WarpResult::new(parked.dimensions);
+            let mut buffers = WarpResult::new(parked.desc);
             let scratch = WarpScratch::default();
             let mut warp_parked = || {
                 let job = Warp {

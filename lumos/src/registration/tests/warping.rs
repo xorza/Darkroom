@@ -236,9 +236,9 @@ fn interpolation_quality_ordering() {
 fn warp_preserves_output_metadata() {
     use imaginarium::ChannelLayout;
 
-    use crate::image::derived_facts::DerivedFacts;
-    use crate::image::image_metadata::ImageMetadata;
-    use crate::image::observation_header::ObservationHeader;
+    use crate::image::metadata::derived_facts::DerivedFacts;
+    use crate::image::metadata::image_metadata::ImageMetadata;
+    use crate::image::metadata::observation_header::ObservationHeader;
 
     let pixels = star_field(Size2us::new(256, 256), 30, 11111)
         .image

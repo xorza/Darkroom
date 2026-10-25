@@ -2,8 +2,8 @@
 
 use common::Buffer2;
 
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_map::QualityMap;
 use common::Size2us;
 
 /// The share of frames that reached each pixel, in `[0, 1]`.
@@ -55,7 +55,7 @@ pub(crate) mod internals {
 
     use common::Buffer2;
 
-    use crate::image::quality_map::QualityMap;
+    use crate::image::flags::quality_map::QualityMap;
     use crate::stack_product::coverage::Coverage;
 
     impl Coverage {

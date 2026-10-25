@@ -34,7 +34,7 @@ impl MeshSpline {
             .extend(mesh.stats.pixels().iter().map(|tile| tile.get(component)));
         surface.centers_x.clone_from(&mesh.centers_x);
         surface.centers_y.clone_from(&mesh.centers_y);
-        surface.size = mesh.dimensions;
+        surface.size = mesh.size;
         surface.clip = match component {
             TileComponent::Sky => None,
             TileComponent::Sigma => Some(mesh.sigma_range()),

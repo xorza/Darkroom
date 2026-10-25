@@ -4,8 +4,8 @@ use arrayvec::ArrayVec;
 
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 
 /// What a pass imposes from the `masters` it applies and the `flat` it divides by: `NO_DATA`
 /// wherever one of them holds no measurement — a fill, or a saturated bound — as the value it

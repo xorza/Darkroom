@@ -35,7 +35,7 @@ pub(crate) struct FrameIntake<'a> {
 /// decode at once, and the stage their progress reports under.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IntakePlan {
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) frame_count: usize,
     pub(crate) decode_slots: usize,
     pub(crate) stage: StackingStage,
@@ -45,7 +45,7 @@ impl<'a> FrameIntake<'a> {
     /// The intake of `plan`'s frames under `run`.
     pub(crate) fn new(plan: IntakePlan, run: &'a IngestRun) -> Self {
         Self {
-            admission: FrameAdmission::new(plan.dimensions, &run.ctx.cancel),
+            admission: FrameAdmission::new(plan.desc, &run.ctx.cancel),
             ctx: run.ctx.for_decode_slots(plan.decode_slots.max(1)),
             done: StageCounter::new(&run.progress, plan.stage, plan.frame_count),
         }

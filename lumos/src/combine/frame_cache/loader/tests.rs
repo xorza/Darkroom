@@ -29,22 +29,18 @@ use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::memory::budget::Budget;
 use crate::stack_product::quality_planes::QualityPlanes;
 
-/// Frame `idx` of a set of `dimensions`, decoded from `source`.
+/// Frame `idx` of a set of `desc`, decoded from `source`.
 #[derive(Debug, Clone, Copy)]
 struct SetFrame<'a> {
     source: &'a Path,
-    dimensions: PlanarDesc,
+    desc: PlanarDesc,
     idx: usize,
 }
 
 impl SetFrame<'_> {
     /// The frame loaded as an `I` through the decode cache under `cache_dir` into a spilled tier.
     fn load<D: Decoder>(self, cache_dir: &Path) -> Result<StoredFrame, StackError> {
-        let Self {
-            source,
-            dimensions,
-            idx,
-        } = self;
+        let Self { source, desc, idx } = self;
         // A fresh intake per call: these tests are about one frame's cache files, not the set it
         // belongs to, so no frame 0 is admitted before it.
         let run = IngestRun::planned(
@@ -56,7 +52,7 @@ impl SetFrame<'_> {
         );
         let intake = FrameIntake::new(
             IntakePlan {
-                dimensions,
+                desc,
                 frame_count: idx + 1,
                 decode_slots: 1,
                 stage: StackingStage::Loading,
@@ -121,17 +117,17 @@ fn set_mtime(path: &Path, nanos_past_epoch: u64) {
 #[test]
 fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let temp_dir = TempDir::new("lumos_cache_frame_reuse");
-    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     // [0, 1, …, 11]: median 5.5, absolute deviations 0.5, 0.5, 1.5, 1.5, …, 5.5, 5.5 → MAD 3.0.
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let source = temp_dir.join("source.tiff");
-    LinearImage::from_interleaved(dims, pixels.clone())
+    LinearImage::from_interleaved(desc, pixels.clone())
         .write_raster(&source)
         .unwrap();
     set_mtime(&source, 1_700_000_000_000_000_100);
     let frame = SetFrame {
         source: &source,
-        dimensions: dims,
+        desc,
         idx: 0,
     };
 
@@ -191,7 +187,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     settle();
     let restored: Vec<f32> = (100..112).map(|i| i as f32).collect();
-    LinearImage::from_interleaved(dims, restored.clone())
+    LinearImage::from_interleaved(desc, restored.clone())
         .write_raster(&source)
         .unwrap();
     set_mtime(&source, 1_700_000_000_000_000_100);
@@ -205,7 +201,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();
     let original_len = fs::metadata(&source).unwrap().len();
-    LinearImage::from_interleaved(dims, rewritten.clone())
+    LinearImage::from_interleaved(desc, rewritten.clone())
         .write_raster(&source)
         .unwrap();
     assert_eq!(
@@ -222,14 +218,14 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 #[test]
 fn cache_frame_validates_a_reused_frame() {
     let temp_dir = TempDir::new("lumos_cache_frame_validates");
-    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("source.tiff");
-    LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32).collect())
+    LinearImage::from_interleaved(desc, (0..12).map(|i| i as f32).collect())
         .write_raster(&source)
         .unwrap();
     let frame = SetFrame {
         source: &source,
-        dimensions: dims,
+        desc,
         idx: 1,
     };
     drop(frame.load::<LinearDecoder>(temp_dir.path()).unwrap());
@@ -259,14 +255,14 @@ fn cache_frame_validates_a_reused_frame() {
 #[test]
 fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
     let temp_dir = TempDir::new("lumos_cache_frame_decoders");
-    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("light.tiff");
-    LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32 / 16.0).collect())
+    LinearImage::from_interleaved(desc, (0..12).map(|i| i as f32 / 16.0).collect())
         .write_raster(&source)
         .unwrap();
     let frame = SetFrame {
         source: &source,
-        dimensions: dims,
+        desc,
         idx: 0,
     };
 
@@ -309,7 +305,7 @@ impl FrameStep<LinearImage> for AddOne {
 #[test]
 fn a_kept_cache_is_reused_by_the_next_run() {
     let temp_dir = TempDir::new("lumos_cache_kept_run");
-    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let config = StackConfig {
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -337,7 +333,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
                         None,
                     );
                 } else {
-                    LinearImage::from_interleaved(dims, pixels)
+                    LinearImage::from_interleaved(desc, pixels)
                         .write_raster(&path)
                         .unwrap();
                 }
@@ -418,16 +414,16 @@ fn a_kept_cache_is_reused_by_the_next_run() {
 #[test]
 fn cache_frame_dimension_mismatch() {
     let temp_dir = TempDir::new("lumos_load_cache_mismatch_test");
-    let actual_dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let actual_desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = LinearImage::from_interleaved(actual_dims, pixels);
+    let image = LinearImage::from_interleaved(actual_desc, pixels);
 
     let source_path = temp_dir.join("source.tiff");
     image.write_raster(&source_path).unwrap();
-    let expected_dims = PlanarDesc::new((8, 6), ChannelLayout::Mono);
+    let expected_desc = PlanarDesc::new((8, 6), ChannelLayout::Mono);
     let result = SetFrame {
         source: &source_path,
-        dimensions: expected_dims,
+        desc: expected_desc,
         idx: 5,
     }
     .load::<LinearDecoder>(temp_dir.path());
@@ -438,7 +434,7 @@ fn cache_frame_dimension_mismatch() {
             idx: 5,
             expected,
             actual,
-        })) if expected == expected_dims && actual == actual_dims
+        })) if expected == expected_desc && actual == actual_desc
     ));
 }
 
@@ -459,7 +455,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
     let peek = SetPeek {
         idx: 0,
         info: FrameInfo {
-            dimensions: PlanarDesc::new((100, 100), ChannelLayout::Mono),
+            desc: PlanarDesc::new((100, 100), ChannelLayout::Mono),
             cfa_type: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             decoder: DecoderBytes::default(),
             gain_bytes: 8112,

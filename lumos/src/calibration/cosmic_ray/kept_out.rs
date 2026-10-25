@@ -4,8 +4,8 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::bayer_phase::BayerPhase;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics;
 use crate::math::statistics::radix_median::RadixMedian;
 use common::Vec2us;

@@ -1,6 +1,6 @@
 //! [`CcdNoise`]: the CCD equation for one frame's channel or color.
 
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 
 /// The noise variance of a sample at value `x` where a flat multiplied it by `g`, in the frame's
 /// own units (Merline & Howell 1995, carried through the flat):

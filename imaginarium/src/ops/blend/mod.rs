@@ -10,7 +10,7 @@ use strum::{EnumIter, EnumString, VariantNames};
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 

@@ -25,8 +25,8 @@ use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::DropPlanes;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::recycled::Recycled;
@@ -56,7 +56,7 @@ struct PlaneSpan<'a> {
 /// kernel's constants and the scratch every frame's scatter reuses.
 #[derive(Debug)]
 pub(crate) struct Drizzler {
-    input_dims: PlanarDesc,
+    input_desc: PlanarDesc,
     deposit: Deposit,
     grid: OutputGrid,
     plan: KernelPlan,
@@ -104,16 +104,16 @@ impl Drizzler {
     /// The drizzle of frames shaped as `image` — of its dimensions, and its samples reaching the
     /// output as its own do — onto `grid` by `plan`.
     pub(crate) fn new(image: &impl StackableImage, plan: KernelPlan, grid: OutputGrid) -> Self {
-        let input_dims = image.desc();
+        let input_desc = image.desc();
         Self {
-            input_dims,
+            input_desc,
             deposit: Deposit::of(image),
             grid,
             plan,
             scans: Vec::new(),
             bands: Recycled::default(),
             radial: ScratchPool::default(),
-            lattice: ScratchPool::new(input_dims.width()),
+            lattice: ScratchPool::new(input_desc.width()),
         }
     }
 
@@ -244,7 +244,7 @@ impl Drizzler {
         // pattern, its samples finite.
         debug_assert_eq!(
             frame.source.desc(),
-            self.input_dims,
+            self.input_desc,
             "drizzle frame {idx} reached the accumulator unadmitted: another shape"
         );
         debug_assert_eq!(
@@ -253,7 +253,7 @@ impl Drizzler {
             "drizzle frame {idx} reached the accumulator unadmitted: another pattern"
         );
         debug_assert!(
-            (0..self.input_dims.channel_count()).all(|channel| frame
+            (0..self.input_desc.channel_count()).all(|channel| frame
                 .source
                 .channel(channel)
                 .iter()
@@ -265,11 +265,11 @@ impl Drizzler {
             return Ok(());
         };
         let actual = pixel_weights.size();
-        if actual != self.input_dims.size() {
+        if actual != self.input_desc.size() {
             return Err(StackError::PlaneDimensionMismatch {
                 idx,
                 plane: FramePlane::PixelWeight,
-                expected: self.input_dims.size(),
+                expected: self.input_desc.size(),
                 actual,
             }
             .into());
@@ -378,8 +378,8 @@ pub(crate) mod bench;
 pub(crate) mod internals {
     use crate::drizzle::accumulator::*;
     use crate::drizzle::drizzle_config::DrizzleConfig;
+    use crate::image::flags::quality_map::QualityMap;
     use crate::image::linear_image::LinearImage;
-    use crate::image::quality_map::QualityMap;
     use crate::registration::transform::Transform;
     use crate::registration::warp_transform::WarpTransform;
     use crate::stack_product::StackProduct;
@@ -531,7 +531,7 @@ pub(crate) mod internals {
                     }
                 }
             }
-            let dimensions = PlanarDesc::new(output, deposit.output_layout());
+            let desc = PlanarDesc::new(output, deposit.output_layout());
             let weight = match deposit {
                 Deposit::Mosaic(_) => QualityMap::PerChannel(
                     weight
@@ -544,7 +544,7 @@ pub(crate) mod internals {
             };
             StackProduct {
                 image: LinearImage::from_planar_channels(
-                    dimensions,
+                    desc,
                     data.into_iter().map(Buffer2::into_vec),
                 ),
                 coverage: None,

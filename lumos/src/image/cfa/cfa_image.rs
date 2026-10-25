@@ -16,15 +16,15 @@ use crate::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::frame_desc;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
 use crate::image::masked_plane::MaskedPlane;
-use crate::image::mosaic_noise::MosaicNoise;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::DemosaicProvenance;
+use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::io::error::WriteError;
 use crate::io::fits;
@@ -364,9 +364,9 @@ impl CfaImage {
     pub fn green_proxy(&self) -> LinearImage {
         const GREEN: usize = CfaColor::Green.idx();
         let size = self.size();
-        let dimensions = PlanarDesc::new(size, ChannelLayout::Mono);
+        let desc = PlanarDesc::new(size, ChannelLayout::Mono);
         if self.cfa_type == CfaType::Mono {
-            let mut image = LinearImage::from_interleaved(dimensions, self.data.pixels().to_vec());
+            let mut image = LinearImage::from_interleaved(desc, self.data.pixels().to_vec());
             image.metadata = self.metadata.clone();
             image.set_flags(self.flags.clone());
             image.set_flat_gain(self.flat_gain.clone());
@@ -436,7 +436,7 @@ impl CfaImage {
                 .for_each(|((y, row), row_flags)| fill_row(y, row, Some(row_flags))),
             None => rows.for_each(|(y, row)| fill_row(y, row, None)),
         }
-        let mut image = LinearImage::from_interleaved(dimensions, pixels);
+        let mut image = LinearImage::from_interleaved(desc, pixels);
         image.metadata = metadata;
         image.set_flags(
             proxy_flags.and_then(|bytes| PixelFlags::from_bytes(Buffer2::new(size, bytes))),

@@ -5,7 +5,7 @@ use rayon::prelude::*;
 
 use crate::color::color_format::SampleType;
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// The largest per-channel difference between two images: normalized to `[0, 1]`
 /// for the integer formats, absolute for float.

@@ -16,10 +16,10 @@ use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::frame_store::stored_frame::{FrameWrite, SetKind};
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::ingest::error::AdmissionError;
 use crate::internals::cfa::make_cfa;
 use crate::math::statistics;
@@ -52,11 +52,11 @@ fn with_unit_noise(mut cache: FrameCache) -> FrameCache {
 fn unrequested_quality_planes_are_never_allocated() {
     // A plane the request declines is never built by the reducer, which only the combine's own
     // output shows, before `finish_product` shapes it.
-    let dims = PlanarDesc::new((4, 2), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 2), ChannelLayout::Mono);
     let cache = FrameCache::from_images(
         vec![
-            LinearImage::from_interleaved(dims, vec![1.0; 8]),
-            LinearImage::from_interleaved(dims, vec![3.0; 8]),
+            LinearImage::from_interleaved(desc, vec![1.0; 8]),
+            LinearImage::from_interleaved(desc, vec![3.0; 8]),
         ],
         Normalization::None,
     );
@@ -171,14 +171,14 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 }
 
 /// Every frame of `frames` through the per-frame checks, in order.
-fn validate_frames(frames: &[StoredFrame], dimensions: PlanarDesc) -> Result<(), StackError> {
+fn validate_frames(frames: &[StoredFrame], desc: PlanarDesc) -> Result<(), StackError> {
     SetFacts::check_set(frames.iter().map(|frame| &frame.facts))?;
     for (idx, frame) in frames.iter().enumerate() {
         FrameCheck {
             idx,
             cancel: &CancelToken::never(),
         }
-        .stored(frame, dimensions)?;
+        .stored(frame, desc)?;
     }
     Ok(())
 }
@@ -190,8 +190,8 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // Every read of a stored plane slices it to the cache's pixel count, so a frame that does not
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
-    let dimensions = PlanarDesc::new((4, 2), ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
+    let desc = PlanarDesc::new((4, 2), ChannelLayout::Mono);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, desc);
     let frame = |pixels: usize| {
         let image = LinearImage::from_interleaved(
             PlanarDesc::new((pixels, 1), ChannelLayout::Mono),
@@ -202,7 +202,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     };
 
     // Short channel plane: 4 samples where the cache wants 8.
-    let error = validate_frames(&[frame(8), frame(4)], dimensions).unwrap_err();
+    let error = validate_frames(&[frame(8), frame(4)], desc).unwrap_err();
     assert!(
         matches!(
             error,
@@ -217,14 +217,14 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     );
 
     // A quality plane of the wrong length is caught the same way.
-    let image = LinearImage::from_interleaved(dimensions, vec![1.0; 8]);
+    let image = LinearImage::from_interleaved(desc, vec![1.0; 8]);
     let stats = Admitted::measure(&image);
     let short_coverage = StoredFrame::from_memory(
         image,
         FrameQuality::from_coverage(Buffer2::new((2, 1), vec![1.0; 2])),
         stats,
     );
-    let error = validate_frames(&[short_coverage], dimensions).unwrap_err();
+    let error = validate_frames(&[short_coverage], desc).unwrap_err();
     assert!(
         matches!(
             error,
@@ -239,7 +239,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     );
 
     // A correctly shaped set passes, and builds.
-    assert!(validate_frames(&[frame(8), frame(8)], dimensions).is_ok());
+    assert!(validate_frames(&[frame(8), frame(8)], desc).is_ok());
     assert!(
         FrameCache::from_stored_frames(vec![frame(8), frame(8)], core(), Normalization::None)
             .is_ok()
@@ -271,15 +271,15 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 #[test]
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
-    let dimensions = PlanarDesc::new(size, ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
+    let desc = PlanarDesc::new(size, ChannelLayout::Mono);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, desc);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
         let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
     let linear = || {
-        let image = LinearImage::from_interleaved(dimensions, vec![1.0; size.pixel_count()]);
+        let image = LinearImage::from_interleaved(desc, vec![1.0; size.pixel_count()]);
         let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
@@ -330,8 +330,8 @@ fn stored_frames_must_share_one_cfa_pattern() {
 /// alike, and a drop weight is never negative.
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
-    let dimensions = PlanarDesc::new((4, 1), ChannelLayout::Mono);
-    let core = || CacheCore::plain(StorageTier::UNPLANNED, dimensions);
+    let desc = PlanarDesc::new((4, 1), ChannelLayout::Mono);
+    let core = || CacheCore::plain(StorageTier::UNPLANNED, desc);
     let warped: fn(Vec<f32>, Vec<f32>) -> FrameQuality<Buffer2<f32>> =
         |support, confidence| FrameQuality::Planes {
             coverage: Buffer2::new((4, 1), support),
@@ -347,7 +347,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
             .collect(),
         };
     let frame = |quality: FrameQuality<Buffer2<f32>>| {
-        let image = LinearImage::from_interleaved(dimensions, vec![1.0; 4]);
+        let image = LinearImage::from_interleaved(desc, vec![1.0; 4]);
         let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, quality, stats)
     };
@@ -361,7 +361,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
                 vec![1.0, 1.0, 1.0, 1.0],
                 vec![1.0, 1.0, 0.0, 1.0],
             ))],
-            dimensions,
+            desc,
         )
         .unwrap_err();
         assert!(
@@ -398,7 +398,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
             vec![1.0, -0.5, 1.0, 1.0],
             vec![1.0, 1.0, 1.0, 1.0],
         ))],
-        dimensions,
+        desc,
     )
     .unwrap_err();
     assert!(
@@ -417,7 +417,7 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
 
 /// The plain weighted mean of `cache` with every plane, under manual `weights` or equal ones.
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let slots = Slots::new(None, cache.core.dimensions.channel_count());
+    let slots = Slots::new(None, cache.core.desc.channel_count());
     let weights = weights.map(|weights| {
         FrameWeights::resolve(
             &Weighting::Manual(weights.to_vec()),
@@ -456,8 +456,8 @@ fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
 
 #[test]
 fn the_combine_stage_counts_active_inputs_and_full_outputs() {
-    let dimensions = PlanarDesc::new((2, 1), ChannelLayout::Rgb);
-    let image = || LinearImage::from_interleaved(dimensions, vec![1.0; 6]);
+    let desc = PlanarDesc::new((2, 1), ChannelLayout::Rgb);
+    let image = || LinearImage::from_interleaved(desc, vec![1.0; 6]);
     let plane = || Buffer2::new((2, 1), vec![1.0; 2]);
     let frames = |flagged: bool| {
         let mut frames = vec![
@@ -551,9 +551,9 @@ fn finish_product_uniform_equal_weights() {
     // 4 frames, no coverage maps → fast path. Equal weights and unit noise: every pixel sees all 4
     // frames at weight 1, so weight = Σw = 4, inverse variance = (Σw)²/Σw² = 16/4 = 4,
     // coverage = 1.
-    let dims = PlanarDesc::new((3, 2), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((3, 2), ChannelLayout::Mono);
     let images: Vec<LinearImage> = (0..4)
-        .map(|i| LinearImage::from_interleaved(dims, vec![i as f32; 6]))
+        .map(|i| LinearImage::from_interleaved(desc, vec![i as f32; 6]))
         .collect();
     let product = mean_product(
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
@@ -593,9 +593,9 @@ fn finish_product_uniform_equal_weights() {
 fn finish_product_uniform_manual_weights() {
     // Weights [1,2,3,4] and unit noise, full coverage: weight = 10, Σw² = 1+4+9+16 = 30, inverse
     // variance = 100/30, rounded once.
-    let dims = PlanarDesc::new((2, 1), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((2, 1), ChannelLayout::Mono);
     let images: Vec<LinearImage> = (0..4)
-        .map(|_| LinearImage::from_interleaved(dims, vec![0.5; 2]))
+        .map(|_| LinearImage::from_interleaved(desc, vec![0.5; 2]))
         .collect();
     let product = mean_product(
         &with_unit_noise(FrameCache::from_images(images, Normalization::None)),
@@ -619,7 +619,7 @@ fn finish_product_partial_coverage() {
     //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, inverse variance 4
     //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, inverse variance 3
     //   px2: count 3, as px1
-    let dims = PlanarDesc::new((3, 1), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((3, 1), ChannelLayout::Mono);
     let cov = [
         [1.0_f32, 1.0, 1.0],
         [1.0, 0.5, PixelCoverage::MIN_CONTRIBUTING],
@@ -629,7 +629,7 @@ fn finish_product_partial_coverage() {
     let frames: Vec<StackFrame> = cov
         .iter()
         .map(|c| {
-            let mut frame = StackFrame::from(LinearImage::from_interleaved(dims, vec![0.5; 3]));
+            let mut frame = StackFrame::from(LinearImage::from_interleaved(desc, vec![0.5; 3]));
             frame.quality = FrameQuality::from_coverage(Buffer2::new((3, 1), c.to_vec()));
             frame
         })
@@ -662,19 +662,19 @@ fn finish_product_partial_coverage() {
 /// reach the reducer unscaled. An RGB set combines per channel: (1 + 5)/2, (2 + 6)/2, (3 + 7)/2.
 #[test]
 fn light_and_calibration_frames_combine_through_one_engine() {
-    let dims = PlanarDesc::new((2, 2), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((2, 2), ChannelLayout::Mono);
     let caches = |values: &[f32]| {
         let linear = FrameCache::from_images(
             values
                 .iter()
-                .map(|&value| LinearImage::from_interleaved(dims, vec![value; 4]))
+                .map(|&value| LinearImage::from_interleaved(desc, vec![value; 4]))
                 .collect(),
             Normalization::None,
         );
         let mosaic = FrameCache::from_images(
             values
                 .iter()
-                .map(|&value| make_cfa(dims.size(), vec![value; 4], CfaType::Mono))
+                .map(|&value| make_cfa(desc.size(), vec![value; 4], CfaType::Mono))
                 .collect(),
             Normalization::None,
         );
@@ -747,9 +747,9 @@ fn light_and_calibration_frames_combine_through_one_engine() {
 fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
     let scratch = RunScratch::create(temp_dir.path()).unwrap();
-    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = LinearImage::from_interleaved(dims, ramp.clone());
+    let image = LinearImage::from_interleaved(desc, ramp.clone());
 
     let resident = FrameCache::from_images(vec![image.clone()], Normalization::None);
     let budget = Budget::new(10, 1);
@@ -772,7 +772,7 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
         ],
         CacheCore::plain(
             StorageTier::for_plan(&RunPlan::of(1, &[frame], budget), temp_dir.path()).unwrap(),
-            dims,
+            desc,
         ),
         Normalization::None,
     )

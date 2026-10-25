@@ -171,7 +171,7 @@ impl Lights {
                 frames,
                 CacheCore {
                     tier,
-                    dimensions: PlanarDesc::new(FRAME, ChannelLayout::Mono),
+                    desc: PlanarDesc::new(FRAME, ChannelLayout::Mono),
                     metadata: self.images[0].metadata.clone(),
                     monitor: ProgressMonitor::unattended(),
                 },

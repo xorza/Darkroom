@@ -1,7 +1,7 @@
 use fits_well::header::keywords;
 use fits_well::io::{Hdu, HduSelector};
 
-use crate::image::fits_transfer_provenance::FitsHduProvenance;
+use crate::image::metadata::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::extension_claims::ExtensionClaims;
 use crate::io::fits::fits_load_config::FitsHduSelector;

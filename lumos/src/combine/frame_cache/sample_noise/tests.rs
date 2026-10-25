@@ -8,9 +8,9 @@ use crate::combine::reducer::pixel_samples::NoiseCols;
 use crate::combine::rejection::pass::SampleBand;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::ccd_noise::CcdNoise;
 use common::Vec2us;
 

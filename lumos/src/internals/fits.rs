@@ -8,9 +8,9 @@ use fits_well::header::Header;
 use fits_well::image::Borrowed;
 use fits_well::{FitsReader, FitsWriter};
 
-use crate::image::fits_transfer_provenance::FitsTransferProvenance;
-use crate::image::image_provenance::SourceProvenance;
 use crate::image::linear_image::LinearImage;
+use crate::image::metadata::fits_transfer_provenance::FitsTransferProvenance;
+use crate::image::metadata::image_provenance::SourceProvenance;
 use crate::io::error::ImageError;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 

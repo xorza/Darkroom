@@ -26,8 +26,8 @@ use crate::calibration::defect_map::{DefectMap, HotPixels};
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::flat_gain::shared_gains::SharedGains;
+use crate::image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::error::{ImageError, WriteError};
 use crate::io::fits::cfa::{self, CfaFitsHduMetadata};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
@@ -261,7 +261,7 @@ impl BundleReader<'_> {
         {
             return Err(DefectTableError::Format.into());
         }
-        let Some(dimensions) = read_defect_dimensions(header)? else {
+        let Some(size) = read_defect_size(header)? else {
             return Err(DefectTableError::Extent.into());
         };
         let table = tile_parallel::read_table(&mut self.reader, idx)?;
@@ -277,7 +277,7 @@ impl BundleReader<'_> {
         for (row, ((kind, idx), excess)) in kinds.into_iter().zip(idxs).zip(excess).enumerate() {
             let Some(idx) = usize::try_from(idx)
                 .ok()
-                .filter(|&idx| idx < dimensions.pixel_count())
+                .filter(|&idx| idx < size.pixel_count())
             else {
                 return Err(DefectTableError::Idx { row }.into());
             };
@@ -291,7 +291,7 @@ impl BundleReader<'_> {
                 kind => return Err(DefectTableError::Kind { row, kind }.into()),
             }
         }
-        Ok(DefectMap::from_lists(dimensions, hot, cold).expect("every index lies on the sensor"))
+        Ok(DefectMap::from_lists(size, hot, cold).expect("every index lies on the sensor"))
     }
 }
 
@@ -343,12 +343,9 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
         .set("EXTNAME", CalibrationComponent::Defects.extname())?
         .set(FORMAT_KEYWORD, DEFECT_FORMAT)?
         .set(VERSION_KEYWORD, BUNDLE_VERSION)?;
-    let dimensions = map.dimensions();
-    let (Ok(width), Ok(height)) = (
-        i64::try_from(dimensions.width),
-        i64::try_from(dimensions.height),
-    ) else {
-        return Err(BundleError::DefectExtentOutOfRange { size: dimensions });
+    let size = map.size();
+    let (Ok(width), Ok(height)) = (i64::try_from(size.width), i64::try_from(size.height)) else {
+        return Err(BundleError::DefectExtentOutOfRange { size });
     };
     header.set("LUMWID", width)?.set("LUMHEI", height)?;
     Ok(EncodedDefectMap { table, header })
@@ -356,7 +353,7 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
 
 /// The sensor extent the table states; `None` when an extent is missing, not positive, or the two
 /// overflow.
-fn read_defect_dimensions(header: &Header) -> Result<Option<Size2us>, BundleError> {
+fn read_defect_size(header: &Header) -> Result<Option<Size2us>, BundleError> {
     let extent = |name: &str| -> Result<Option<usize>, BundleError> {
         Ok(header
             .get_integer(name)?

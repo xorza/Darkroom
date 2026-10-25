@@ -29,10 +29,10 @@ use crate::drizzle::error::DrizzleError;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::{DomainMap, ScaleOrigin};
+use crate::image::metadata::sample_domain::{DomainMap, ScaleOrigin};
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::ingest::ingest_run::IngestRun;
@@ -885,7 +885,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(
         Some(info),
         Some(FrameInfo {
-            dimensions: PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
+            desc: PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
             cfa_type: pattern,
             decoder: DecoderBytes {
                 source: 0,

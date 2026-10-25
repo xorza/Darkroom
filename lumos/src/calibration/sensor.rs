@@ -31,7 +31,7 @@ impl Sensor {
     pub(super) const fn of_defects(map: &DefectMap) -> Self {
         Self {
             cfa_type: None,
-            size: map.dimensions(),
+            size: map.size(),
         }
     }
 

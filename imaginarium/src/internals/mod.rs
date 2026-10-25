@@ -6,10 +6,10 @@ use std::io::BufReader;
 
 use common::{Size2us, fs};
 
+use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::{ColorFormat, SampleType};
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
-use crate::image::raster_format::RasterFormat;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// A test image with a deterministic pattern based on seed: integer formats get a byte
 /// pattern that reaches every byte value, float formats values on `[0, 1)`.

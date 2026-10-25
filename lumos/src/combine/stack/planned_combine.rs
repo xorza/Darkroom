@@ -18,12 +18,12 @@ pub(crate) struct PlannedCombine {
     pub(crate) quality: QualityPlanes,
 }
 
-/// The frames a planned combine reads: `count` frames of `dimensions` stored in `layout`, read in
+/// The frames a planned combine reads: `count` frames of `desc` stored in `layout`, read in
 /// `slots`, covering the pixels as `coverage` says, on `workers`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlannedFrames {
     pub(crate) count: usize,
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) layout: StoredLayout,
     pub(crate) slots: Slots,
     pub(crate) coverage: SetCoverage,
@@ -40,7 +40,7 @@ impl PlannedCombine {
     pub(crate) fn stages(self, frames: PlannedFrames, kept: usize) -> [Stage; 2] {
         let PlannedFrames {
             count,
-            dimensions,
+            desc,
             layout,
             slots,
             coverage,
@@ -49,14 +49,14 @@ impl PlannedCombine {
         let coverage_planes = usize::from(self.quality.coverage)
             * match coverage {
                 SetCoverage::Common => 1,
-                SetCoverage::PerChannel => dimensions.channel_count(),
+                SetCoverage::PerChannel => desc.channel_count(),
             };
         [
             Stage {
                 kept,
                 held: PlannedNormalization {
                     frame_count: count,
-                    dimensions,
+                    desc,
                     slots,
                     normalization: self.normalization,
                     coverage,
@@ -67,7 +67,7 @@ impl PlannedCombine {
                 units: Units::Whole,
             },
             CombineCost {
-                dimensions,
+                desc,
                 quality: self.quality,
                 coverage_planes,
                 flag_planes: 1,

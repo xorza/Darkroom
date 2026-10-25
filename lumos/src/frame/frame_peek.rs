@@ -13,7 +13,7 @@ use crate::memory::footprint::Footprint;
 /// and what its decoder holds while it makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FramePeek {
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     /// What the decoder holds while it makes the frame.
     pub(crate) decoder: DecoderBytes,
     /// The pattern of a mosaic frame, whose statistics measure its noise per color; `None` for
@@ -26,7 +26,7 @@ impl FramePeek {
     /// every frame, since a decoder that flags saturation gives one to most, and which also holds
     /// the mask of a frame with pixels it has no measurement for.
     pub(crate) const fn resident_bytes(self) -> usize {
-        frame_desc::decoded_byte_len(self.dimensions)
+        frame_desc::decoded_byte_len(self.desc)
     }
 
     /// What one such frame's way into a stack holds on `workers`: its decode, the decoder's own
@@ -36,11 +36,7 @@ impl FramePeek {
             kept: self.resident_bytes(),
             peak: self.decoder.peak(self.resident_bytes()),
         }
-        .beside(FrameStats::heap_bytes(
-            self.dimensions,
-            self.mosaic,
-            workers,
-        ))
+        .beside(FrameStats::heap_bytes(self.desc, self.mosaic, workers))
     }
 }
 
@@ -49,7 +45,7 @@ impl From<FrameInfo> for FramePeek {
     /// estimate reads.
     fn from(info: FrameInfo) -> Self {
         Self {
-            dimensions: info.dimensions,
+            desc: info.desc,
             decoder: info.decoder,
             mosaic: info.cfa_type.mosaic(),
         }
@@ -78,7 +74,7 @@ mod tests {
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
         let rggb = Some(Mosaic::Bayer(CfaPattern::Rggb));
         let peek = |mosaic, decoder| FramePeek {
-            dimensions: PlanarDesc::new((100, 100), ChannelLayout::Mono),
+            desc: PlanarDesc::new((100, 100), ChannelLayout::Mono),
             decoder,
             mosaic,
         };

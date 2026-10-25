@@ -1,4 +1,4 @@
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::bg_split;
 use crate::noise::binned_samples::GainBin;
 

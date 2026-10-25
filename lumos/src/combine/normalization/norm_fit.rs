@@ -87,7 +87,7 @@ impl NormFit<'_> {
                         ChannelCoverage {
                             frames: &all,
                             channel: 0,
-                            pixel_count: planes.dimensions.pixel_count(),
+                            pixel_count: planes.desc.pixel_count(),
                         },
                         planes.cancel,
                     )
@@ -162,7 +162,7 @@ impl NormFit<'_> {
                 let coverage = ChannelCoverage {
                     frames: &pair,
                     channel: planes.slots.channel(slot),
-                    pixel_count: planes.dimensions.pixel_count(),
+                    pixel_count: planes.desc.pixel_count(),
                 };
                 let domain = match CommonDomain::build_in_job(coverage, cancel) {
                     Ok(domain) => domain,

@@ -10,8 +10,8 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 

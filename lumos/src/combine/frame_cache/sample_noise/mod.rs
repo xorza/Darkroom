@@ -4,7 +4,7 @@
 use crate::combine::frame_cache::normalized_stats::NormalizedStats;
 use crate::combine::frame_read::slots::Slots;
 use crate::frame::frame_stats::FrameStats;
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::ccd_noise::CcdNoise;
 
 /// Each frame's [`CcdNoise`] per slot, carried through its normalization into the units the frames

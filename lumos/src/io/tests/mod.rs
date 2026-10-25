@@ -8,12 +8,12 @@ use imaginarium::{
     ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc, RasterFormat,
 };
 
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::linear_image::LinearImage;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::preview_image::PreviewImage;
-use crate::image::quality_flags::QualityFlags;
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;

@@ -13,7 +13,7 @@ use crate::calibration::cosmic_ray::mono::internals::median_window;
 use crate::calibration::cosmic_ray::mono::{PixelRepair, WindowScratch};
 use crate::calibration::cosmic_ray::noise_model::PixelBg;
 use crate::calibration::cosmic_ray::*;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane};
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};

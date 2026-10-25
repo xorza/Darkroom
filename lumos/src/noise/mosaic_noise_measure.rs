@@ -4,9 +4,9 @@ use common::Buffer2;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
-use crate::image::mosaic_noise::MosaicNoise;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::math::statistics;
 use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
 use crate::noise::mosaic_sampling::MosaicSampling;

@@ -180,9 +180,9 @@ fn invariant_types_expose_validated_state_from_the_crate_root() {
         derived: DerivedFacts::default(),
     };
 
-    let dimensions = PlanarDesc::new((12, 8), ChannelLayout::Rgb);
-    assert_eq!(dimensions.pixel_count(), 96);
-    assert_eq!(dimensions.sample_count(), 288);
+    let desc = PlanarDesc::new((12, 8), ChannelLayout::Rgb);
+    assert_eq!(desc.pixel_count(), 96);
+    assert_eq!(desc.sample_count(), 288);
 
     let transform = Transform::similarity(glam::DVec2::new(3.0, -2.0), 0.25, 1.1);
     assert_eq!(transform.transform_type(), TransformType::Similarity);

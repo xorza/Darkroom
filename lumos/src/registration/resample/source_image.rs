@@ -3,17 +3,17 @@
 use arrayvec::ArrayVec;
 use imaginarium::PlanarDesc;
 
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use common::Size2us;
 
 /// A frame as the warp reads it: its planes, its flags and its metadata, borrowed from a
 /// `LinearImage` in memory.
 #[derive(Debug)]
 pub(crate) struct SourceImage<'a> {
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) metadata: &'a ImageMetadata,
     pub(crate) planes: ArrayVec<SourcePlane<'a>, 3>,
     pub(crate) flags: Option<&'a PixelFlags>,
@@ -31,7 +31,7 @@ impl<'a> SourceImage<'a> {
     pub(crate) fn of(image: &'a LinearImage) -> Self {
         let width = image.width();
         Self {
-            dimensions: image.desc(),
+            desc: image.desc(),
             metadata: &image.metadata,
             planes: (0..image.channel_count())
                 .map(|channel| SourcePlane {
@@ -45,6 +45,6 @@ impl<'a> SourceImage<'a> {
     }
 
     pub(crate) const fn size(&self) -> Size2us {
-        self.dimensions.size()
+        self.desc.size()
     }
 }

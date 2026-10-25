@@ -25,7 +25,7 @@ use crate::ingest::set_facts::SetFacts;
 /// frame is in (`SetFacts::admit`).
 #[derive(Debug)]
 pub(crate) struct FrameAdmission<'a> {
-    dimensions: PlanarDesc,
+    desc: PlanarDesc,
     cancel: &'a CancelToken,
     first_facts: OnceLock<SetFacts>,
     /// Whether each frame's spread is measured too: see [`FrameStats::measure_as`].
@@ -33,9 +33,9 @@ pub(crate) struct FrameAdmission<'a> {
 }
 
 impl<'a> FrameAdmission<'a> {
-    pub(crate) const fn new(dimensions: PlanarDesc, cancel: &'a CancelToken) -> Self {
+    pub(crate) const fn new(desc: PlanarDesc, cancel: &'a CancelToken) -> Self {
         Self {
-            dimensions,
+            desc,
             cancel,
             first_facts: OnceLock::new(),
             spreads: Spreads::Skipped,
@@ -49,7 +49,7 @@ impl<'a> FrameAdmission<'a> {
     }
 
     pub(crate) const fn desc(&self) -> PlanarDesc {
-        self.dimensions
+        self.desc
     }
 
     /// Check frame `idx` and measure it.
@@ -58,7 +58,7 @@ impl<'a> FrameAdmission<'a> {
         idx: usize,
         image: &impl StackableImage,
     ) -> Result<Admitted, AdmissionError> {
-        FrameDimensionMismatch::check(idx, self.dimensions, image.desc())?;
+        FrameDimensionMismatch::check(idx, self.desc, image.desc())?;
         let facts = FrameFacts::of(image);
         self.check_facts(idx, &facts)?;
         FrameCheck {

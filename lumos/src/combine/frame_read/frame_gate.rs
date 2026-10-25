@@ -7,7 +7,7 @@ use crate::combine::frame_read::frame_chunk::FrameChunk;
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 
 /// One frame's quality over a chunk of pixels: whether its sample at each is gathered, the
 /// confidence that divides the sample's noise there, and the weight that multiplies its frame's.

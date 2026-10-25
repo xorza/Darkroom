@@ -2,9 +2,9 @@
 
 use fits_well::header::Header;
 
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::temperature_difference::TemperatureDifference;
-use crate::image::temperature_source::TemperatureSource;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::temperature_difference::TemperatureDifference;
+use crate::image::metadata::temperature_source::TemperatureSource;
 use crate::io::fits::metadata::optional;
 
 /// The keywords one comparison is written under: an image's own, or the flat-dark's a stack

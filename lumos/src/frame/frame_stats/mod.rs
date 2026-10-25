@@ -6,10 +6,10 @@ use imaginarium::PlanarDesc;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::image::stackable_image::StackableImage;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
@@ -39,14 +39,14 @@ pub(crate) struct FrameStats {
     pub(crate) quantization_sigma: Option<f32>,
     /// From [`ImageMetadata::electrons_per_unit`], when the source states its gain.
     ///
-    /// [`ImageMetadata::electrons_per_unit`]: crate::image::image_metadata::ImageMetadata::electrons_per_unit
+    /// [`ImageMetadata::electrons_per_unit`]: crate::image::metadata::image_metadata::ImageMetadata::electrons_per_unit
     pub(crate) electrons_per_unit: Option<f32>,
 }
 
 impl FrameStats {
     /// Measure each slot's median on `image`, and its white noise before any interpolation: on a
     /// mosaic, per color; on a demosaiced frame, the
-    /// [`MosaicNoise`](crate::image::mosaic_noise::MosaicNoise) its demosaic measured, because the
+    /// [`MosaicNoise`](crate::image::metadata::mosaic_noise::MosaicNoise) its demosaic measured, because the
     /// frame's own correlated pixels would understate it; elsewhere, per channel.
     ///
     /// Pixels the source declared no measurement for are left out: the decoder fills a null with
@@ -62,27 +62,23 @@ impl FrameStats {
         Self::measure_as(image, Spreads::Skipped)
     }
 
-    /// The most bytes [`Self::measure`] holds beside a frame of `dimensions` with `threads`
+    /// The most bytes [`Self::measure`] holds beside a frame of `desc` with `threads`
     /// workers: its noise first — a mosaic's by [`MosaicNoiseMeasure`], any other frame's by
     /// [`NoisePlane`] one channel at a time — then the samples its levels sort, a plane's worth at
     /// most: a mosaic's colors at once, which share its one plane, or a channel at a time.
-    pub(crate) fn heap_bytes(
-        dimensions: PlanarDesc,
-        mosaic: Option<Mosaic>,
-        threads: usize,
-    ) -> usize {
-        let size = dimensions.size();
+    pub(crate) fn heap_bytes(desc: PlanarDesc, mosaic: Option<Mosaic>, threads: usize) -> usize {
+        let size = desc.size();
         let noise = match mosaic {
             Some(mosaic) => MosaicNoiseMeasure::heap_bytes(size, mosaic),
             None => mrs_noise::heap_bytes(size, threads),
         };
-        noise.max(dimensions.pixel_count() * size_of::<f32>())
+        noise.max(desc.pixel_count() * size_of::<f32>())
     }
 
     /// [`Self::measure`], and with [`Spreads::Measured`] each slot's [`spread`](Self::spread) from
     /// the samples its median already took.
     pub(crate) fn measure_as(image: &impl StackableImage, spreads: Spreads) -> Self {
-        let dimensions = image.desc();
+        let desc = image.desc();
         let metadata = image.metadata();
         let flags = image.flags();
         let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
@@ -100,7 +96,7 @@ impl FrameStats {
             ),
             None => metadata.derived.mosaic_noise().inspect(|_| {
                 assert_eq!(
-                    dimensions.channel_count(),
+                    desc.channel_count(),
                     3,
                     "a frame's mosaic noise names its three channels"
                 );
@@ -110,9 +106,9 @@ impl FrameStats {
             Some(mosaic_noise) => ArrayVec::from(mosaic_noise.bg),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
-            None => (0..dimensions.channel_count())
+            None => (0..desc.channel_count())
                 .map(|channel| {
-                    let size = dimensions.size();
+                    let size = desc.size();
                     NoisePlane {
                         samples: image.channel(channel),
                         excluded,
@@ -143,7 +139,7 @@ impl FrameStats {
                 .collect(),
             // One channel at a time: each estimate spreads its tiles over the workers already, and
             // the plan charges one estimate's coefficients.
-            None => (0..dimensions.channel_count())
+            None => (0..desc.channel_count())
                 .map(|channel| {
                     SlotLevel::of(image.channel(channel), spreads, |idx, _| measured(idx))
                 })

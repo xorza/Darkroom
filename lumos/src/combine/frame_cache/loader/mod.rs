@@ -21,7 +21,7 @@ use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::error::FrameDimensionMismatch;
 use crate::image::frame_desc;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_check::FrameCheck;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
@@ -55,14 +55,14 @@ fn stages(
     workers: usize,
 ) -> [Stage; 3] {
     let frame = FramePeek::from(peek.info);
-    let dimensions = frame.dimensions;
+    let desc = frame.desc;
     let decoded = frame.footprint(workers);
     let [normalize, combine] = combine.stages(
         PlannedFrames {
             count: frame_count,
-            dimensions,
-            layout: StoredLayout::decoded(dimensions),
-            slots: Slots::new(frame.mosaic, dimensions.channel_count()),
+            desc,
+            layout: StoredLayout::decoded(desc),
+            slots: Slots::new(frame.mosaic, desc.channel_count()),
             coverage: SetCoverage::Common,
             workers,
         },
@@ -112,7 +112,7 @@ where
     // where the format allows it, so the in-memory path decodes every frame in parallel; otherwise
     // one frame is decoded first, and its decode is the one its turn takes.
     let peek = stack(files.peek(&run.ctx))?;
-    let dimensions = peek.info.dimensions;
+    let desc = peek.info.desc;
     // Frames of a set share a source, so one frame stands for all of them — including whether
     // they carry the two quality planes a masked frame does, which `FramePeek::resident_bytes`
     // charges for.
@@ -124,14 +124,14 @@ where
     );
     tracing::info!(
         frame_count = paths.len(),
-        sample_count = dimensions.sample_count(),
+        sample_count = desc.sample_count(),
         budget_mb = budget.usable() / (1024 * 1024),
         resident = plan.resident,
         "Image cache storage decision"
     );
 
     // A kept frame writes its gain too, a spilled one only its planes: its gain is the run's.
-    let frame_bytes = frame_desc::decoded_byte_len(dimensions) as u64;
+    let frame_bytes = frame_desc::decoded_byte_len(desc) as u64;
     let writes = RunWrites {
         kept: (files.uncached() as u64)
             .saturating_mul(frame_bytes.saturating_add(peek.info.gain_bytes as u64)),
@@ -144,7 +144,7 @@ where
     let tier = stack(files.storage().tier(&plan, writes))?.holding_beside(peek.gains);
     let intake = FrameIntake::new(
         IntakePlan {
-            dimensions,
+            desc,
             frame_count: paths.len(),
             decode_slots: plan.width(DECODE),
             stage: StackingStage::Loading,
@@ -180,7 +180,7 @@ where
         frames,
         core: CacheCore {
             tier,
-            dimensions,
+            desc,
             metadata: metadata.expect("frame 0 provides metadata"),
             monitor: run.into_monitor(),
         },
@@ -260,8 +260,8 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
     /// Frame `idx` as a run before kept it, held to the set's shape and facts and to the planes'
     /// checks, as a decode is on admission.
     fn reused(&self, idx: usize, reused: KeptFrame) -> Result<LoadedFrame, StackError> {
-        let dimensions = self.intake.desc();
-        FrameDimensionMismatch::check(idx, dimensions, reused.desc())?;
+        let desc = self.intake.desc();
+        FrameDimensionMismatch::check(idx, desc, reused.desc())?;
         self.intake.check_facts(idx, &reused.admitted.facts)?;
         let metadata = (idx == 0).then(|| reused.image.metadata.clone());
         let frame = reused.into_frame();
@@ -269,9 +269,9 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
             idx,
             cancel: &self.ctx.cancel,
         };
-        check.stored_samples(&frame.channels, dimensions.pixel_count())?;
+        check.stored_samples(&frame.channels, desc.pixel_count())?;
         // Mapped from disk, so held to the pairing the combine divides by like any other planes.
-        check.stored_quality(&frame, dimensions)?;
+        check.stored_quality(&frame, desc)?;
         self.intake.complete_one();
         Ok(LoadedFrame { frame, metadata })
     }

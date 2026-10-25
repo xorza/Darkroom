@@ -42,9 +42,9 @@ use crate::frame_store::stored_frame::SetKind;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::frame_desc;
-use crate::image::image_metadata::ImageMetadata;
-use crate::image::image_provenance::DemosaicProvenance;
 use crate::image::linear_image::LinearImage;
+use crate::image::metadata::image_metadata::ImageMetadata;
+use crate::image::metadata::image_provenance::DemosaicProvenance;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_intake::{FrameIntake, IntakePlan};
 use crate::ingest::ingest_run::IngestRun;
@@ -157,21 +157,21 @@ impl DrizzleRun<'_> {
         let cancel = &run.ctx.cancel;
 
         let first = frames.next().expect("frame_count is non-zero")?;
-        let input_dims = first.source.desc();
+        let input_desc = first.source.desc();
         let deposit = Deposit::of(&first.source);
         tracing::info!(
             ?origin,
             frame_count,
-            input_width = input_dims.width(),
-            input_height = input_dims.height(),
-            channels = input_dims.channel_count(),
+            input_width = input_desc.width(),
+            input_height = input_desc.height(),
+            channels = input_desc.channel_count(),
             mosaic = ?deposit.mosaic(),
             output_scale = drizzle.scale,
             pixfrac = drizzle.pixfrac,
             kernel = ?drizzle.kernel,
             "Starting drizzle stacking"
         );
-        let grid = OutputGrid::new(drizzle.scale, input_dims.size());
+        let grid = OutputGrid::new(drizzle.scale, input_desc.size());
         let output = frame_desc::checked(grid.size(), deposit.output_layout())?;
         let mut drizzler = Drizzler::new(
             &first.source,
@@ -179,7 +179,7 @@ impl DrizzleRun<'_> {
             grid,
         );
         let tier = DrizzleShape {
-            input: input_dims,
+            input: input_desc,
             output,
             deposit,
             frame_count,
@@ -191,7 +191,7 @@ impl DrizzleRun<'_> {
         // drizzle makes the channels, with the spread its per-frame normalization scales by.
         let intake = FrameIntake::new(
             IntakePlan {
-                dimensions: input_dims,
+                desc: input_desc,
                 frame_count,
                 decode_slots: 1,
                 stage: StackingStage::Drizzling,
@@ -267,7 +267,7 @@ impl DrizzleRun<'_> {
             stored,
             CacheCore {
                 tier,
-                dimensions: output,
+                desc: output,
                 metadata: metadata.expect("a frame was drizzled"),
                 monitor: run.monitor(),
             },

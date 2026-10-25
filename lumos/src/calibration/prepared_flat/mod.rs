@@ -9,12 +9,12 @@ use common::par;
 use rayon::prelude::*;
 
 use crate::calibration::error::CalibrationError;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::metadata::calibration_state::CalibrationState;
 use common::Vec2us;
 
 /// Bounds amplification at dead and near-zero photosites while keeping every pixel calibrated.

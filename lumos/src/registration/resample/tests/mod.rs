@@ -4,14 +4,14 @@ use common::Buffer2;
 use glam::DVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::linear_image::LinearImage;
-use crate::image::mosaic_noise::MosaicNoise;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::metadata::bg_split::BgSplit;
+use crate::image::metadata::mosaic_noise::MosaicNoise;
 use crate::internals::images::mono_image;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
@@ -39,7 +39,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
     const HEIGHT: usize = 6;
     const BORDER: f32 = -7.0;
     const CONSTANT: f32 = 3.25;
-    let dimensions = PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono);
+    let desc = PlanarDesc::new((WIDTH, HEIGHT), ChannelLayout::Mono);
     let fixtures = [
         ("constant", vec![CONSTANT; WIDTH * HEIGHT]),
         (
@@ -51,7 +51,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
     ];
 
     for (fixture_name, pixels) in fixtures {
-        let image = LinearImage::from_interleaved(dimensions, pixels);
+        let image = LinearImage::from_interleaved(desc, pixels);
         for (translation, outside_x, inside_x) in [(-0.75, 0, 1), (0.75, WIDTH - 1, WIDTH - 2)] {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
@@ -104,18 +104,18 @@ struct NullFixture {
 }
 
 impl NullFixture {
-    fn new(dimensions: PlanarDesc, null_idx: usize) -> Self {
+    fn new(desc: PlanarDesc, null_idx: usize) -> Self {
         const FILL: f32 = 999.0;
-        let mut pixels = vec![3.25f32; dimensions.pixel_count()];
+        let mut pixels = vec![3.25f32; desc.pixel_count()];
         pixels[null_idx] = FILL;
-        let mut nulls = vec![0.0f32; dimensions.pixel_count()];
+        let mut nulls = vec![0.0f32; desc.pixel_count()];
         nulls[null_idx] = f32::NAN;
 
-        let mut declared = LinearImage::from_interleaved(dimensions, pixels.clone());
-        declared.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
+        let mut declared = LinearImage::from_interleaved(desc, pixels.clone());
+        declared.set_flags(PixelFlags::of_non_finite(desc.size(), &[&nulls]));
         Self {
             declared,
-            undeclared: LinearImage::from_interleaved(dimensions, pixels),
+            undeclared: LinearImage::from_interleaved(desc, pixels),
         }
     }
 }
@@ -127,8 +127,8 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     // nothing would spread at all.
     const CONSTANT: f32 = 3.25;
     const BORDER: f32 = -7.0;
-    let dimensions = PlanarDesc::new((16, 16), ChannelLayout::Mono);
-    let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
+    let desc = PlanarDesc::new((16, 16), ChannelLayout::Mono);
+    let fixture = NullFixture::new(desc, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
     // Without the clamp, which would hide the control's fill under a negative lobe: the
@@ -147,7 +147,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
         // flat field over whichever taps survived is that field, so the fill never reaches the
         // result no matter how much of the window it took up.
         let mut reduced = 0;
-        for idx in 0..dimensions.pixel_count() {
+        for idx in 0..desc.pixel_count() {
             let value = masked.image.channel(0).pixels()[idx];
             let coverage = masked.coverage.pixels()[idx];
             if coverage > 0.0 {
@@ -165,7 +165,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
 
         // The control frame smears instead: with nothing marking that sample as missing, the 999
         // lands in every output pixel whose window reached it.
-        let smeared = (0..dimensions.pixel_count())
+        let smeared = (0..desc.pixel_count())
             .filter(|&idx| (plain.image.channel(0).pixels()[idx] - CONSTANT).abs() > tolerance)
             .count();
         assert!(smeared > 0, "{method:?}: the control must smear");
@@ -184,8 +184,8 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // Nearest takes one tap, so a null costs exactly the pixel it lands on. Lanczos4 takes 8 per
     // axis, so the same null costs a 64-pixel block. The parameter has to change the answer, or the
     // resampler is not composing the mask through its kernel at all.
-    let dimensions = PlanarDesc::new((16, 16), ChannelLayout::Mono);
-    let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
+    let desc = PlanarDesc::new((16, 16), ChannelLayout::Mono);
+    let fixture = NullFixture::new(desc, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
     // Against the same frame without the null, so the frame's own edge band — where a half-pixel
@@ -198,7 +198,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
         };
         let masked = params.warp(&fixture.declared, &transform);
         let plain = params.warp(&fixture.undeclared, &transform);
-        (0..dimensions.pixel_count())
+        (0..desc.pixel_count())
             .filter(|&idx| masked.coverage.pixels()[idx] < plain.coverage.pixels()[idx])
             .count()
     };
@@ -218,15 +218,15 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     // Where every tap of the window is missing there is nothing to reconstruct from, and the pixel
     // has to read as uncovered rather than as a confident reading of the fill.
     const BORDER: f32 = -7.0;
-    let dimensions = PlanarDesc::new((24, 24), ChannelLayout::Mono);
-    let mut nulls = vec![0.0f32; dimensions.pixel_count()];
+    let desc = PlanarDesc::new((24, 24), ChannelLayout::Mono);
+    let mut nulls = vec![0.0f32; desc.pixel_count()];
     for y in 6..18 {
         for x in 6..18 {
             nulls[y * 24 + x] = f32::NAN;
         }
     }
-    let mut image = LinearImage::from_interleaved(dimensions, vec![3.25; dimensions.pixel_count()]);
-    image.set_flags(PixelFlags::of_non_finite(dimensions.size(), &[&nulls]));
+    let mut image = LinearImage::from_interleaved(desc, vec![3.25; desc.pixel_count()]);
+    image.set_flags(PixelFlags::of_non_finite(desc.size(), &[&nulls]));
 
     let result = WarpConfig {
         method: InterpolationMethod::Bilinear,
@@ -284,15 +284,15 @@ fn warp_into_overwrites_dirty_buffers_completely() {
     nulls[9 * size.width + 13] = f32::NAN;
     let scratch = WarpScratch::default();
     for channels in [1, 3] {
-        let dimensions = PlanarDesc::new(
+        let desc = PlanarDesc::new(
             (size.width, size.height),
             ChannelLayout::try_from(channels).unwrap(),
         );
-        let plain = LinearImage::from_interleaved(dimensions, signed_pixels(size, channels));
+        let plain = LinearImage::from_interleaved(desc, signed_pixels(size, channels));
         let mut masked = plain.clone();
         masked.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
         let mut prev = LinearImage::from_interleaved(
-            dimensions,
+            desc,
             signed_pixels(size, channels)
                 .into_iter()
                 .map(|value| value * -3.0)
@@ -313,7 +313,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     };
                     let fresh = params.warp(image, transform);
 
-                    let mut sentinel = WarpResult::new(dimensions);
+                    let mut sentinel = WarpResult::new(desc);
                     for plane in sentinel.image.planes_mut() {
                         plane.pixels_mut().fill(f32::NAN);
                     }
@@ -325,7 +325,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                         &scratch,
                     );
 
-                    let mut reused = WarpResult::new(dimensions);
+                    let mut reused = WarpResult::new(desc);
                     reused.warp_into(
                         &SourceImage::of(&prev),
                         Warp {

@@ -14,7 +14,7 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::affine_warp::cpu::packed_source::PackedSource;
 use crate::ops::affine_warp::{AffineWarp, FilterMode};
 

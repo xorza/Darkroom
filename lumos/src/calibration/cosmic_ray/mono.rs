@@ -655,7 +655,7 @@ pub(crate) mod internals {
         MonoDetector, MonoScratch, OutputBand, Recompute, WindowMedian, WindowScratch,
     };
     use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBg};
-    use crate::image::image_metadata::ImageMetadata;
+    use crate::image::metadata::image_metadata::ImageMetadata;
 
     /// The `(2r+1)²` window median of `data`, into a fresh plane.
     pub(crate) fn median_window(data: &Buffer2<f32>, r: usize) -> Buffer2<f32> {

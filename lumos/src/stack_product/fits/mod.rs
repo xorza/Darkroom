@@ -18,10 +18,10 @@ use fits_well::header::{Header, Keyword};
 use fits_well::io::StreamReader;
 
 use crate::error::Cancelled;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::quality_map::QualityMap;
 use crate::io::error::{ImageError, WriteError};
 use crate::io::fits::decode::selected_fits::{self, Checksum, SelectedFits};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};

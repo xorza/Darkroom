@@ -6,8 +6,8 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::preview::Preview;
 
 /// Area-averages `input` to `params`' target size, fused with the conversion to

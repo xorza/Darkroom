@@ -1,6 +1,6 @@
 //! [`fit`]: a frame's [`BgSplit`] from its noise measured over bins of flat gain.
 
-use crate::image::bg_split::BgSplit;
+use crate::image::metadata::bg_split::BgSplit;
 use crate::noise::binned_samples::GainBin;
 
 /// The weighted least-squares fit of `A·g² + S·g` to `bins`, both terms at least 0, each bin

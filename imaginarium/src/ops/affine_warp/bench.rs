@@ -17,8 +17,8 @@ use crate::bench::scene::{self, FRAME, TILE};
 use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 #[cfg(feature = "wgpu")]
 use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 use crate::ops::affine_warp::{AffineWarp, FilterMode, cpu};

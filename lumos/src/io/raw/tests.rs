@@ -4,7 +4,7 @@ use libraw::{LibrawCode, LibrawError, ProcessedSamples};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::quality_flags::{QualityFlags, SATURATION_FRACTION};
+use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::raw::unpacked_raw::{instrument, planes, saturation_level};
 use crate::io::raw::*;
@@ -467,10 +467,7 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
     let samples = Buffer2::new_filled((24, 24), 2000u16);
     let libraw = Libraw::open_bayer(&samples, BayerDump::default(), &CancelToken::never()).unwrap();
     let info = frame_info(&libraw).unwrap();
-    assert_eq!(
-        info.dimensions,
-        PlanarDesc::new((22, 22), ChannelLayout::Mono)
-    );
+    assert_eq!(info.desc, PlanarDesc::new((22, 22), ChannelLayout::Mono));
     assert_eq!(
         info.decoder,
         DecoderBytes {

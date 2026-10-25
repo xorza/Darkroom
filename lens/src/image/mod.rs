@@ -66,8 +66,8 @@ impl Image {
         let planes: Vec<Vec<f32>> = planes.into_iter().collect();
         let layout =
             ChannelLayout::try_from(planes.len()).expect("an image has one plane or three");
-        let dimensions = PlanarDesc::new(size, layout);
-        Self::from(LinearImage::from_planar_channels(dimensions, planes))
+        let desc = PlanarDesc::new(size, layout);
+        Self::from(LinearImage::from_planar_channels(desc, planes))
     }
 
     /// A required image input to process, named `name`.

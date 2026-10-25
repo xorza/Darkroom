@@ -105,7 +105,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             held,
             gains,
         } = files.peek(&run.ctx)?;
-        let size = info.dimensions.size();
+        let size = info.desc.size();
         // Refused here, before any light is prepared, when the pass cannot run on this sensor.
         let cosmic_ray = match mosaic.cosmic_ray {
             Some(_) => cosmic_ray::heap_bytes(&info.cfa_type, size).map_err(|source| {
@@ -116,7 +116,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             })?,
             None => 0,
         };
-        let dimensions = PlanarDesc::new(size, info.cfa_type.color_layout());
+        let desc = PlanarDesc::new(size, info.cfa_type.color_layout());
         // The decode; the cosmic-ray pass over the mosaic; the demosaic; the statistics, or the
         // detection's noise estimate, beside the demosaiced frame.
         let prepared = info
@@ -125,10 +125,10 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 run.ctx.xtrans_passes,
                 workers,
             )
-            .beside(FrameStats::heap_bytes(dimensions, None, workers));
+            .beside(FrameStats::heap_bytes(desc, None, workers));
         Ok(LightShape {
             count: files.len(),
-            dimensions,
+            desc,
             prepared,
             held: 0,
             peeked: held,

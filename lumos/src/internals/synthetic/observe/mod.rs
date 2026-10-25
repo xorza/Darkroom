@@ -154,8 +154,8 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         *p = p.clamp(0.0, camera.saturation);
     }
 
-    let dims = PlanarDesc::new((width, height), ChannelLayout::Mono);
-    let mut image = LinearImage::from_planar_channels(dims, [raw]);
+    let desc = PlanarDesc::new((width, height), ChannelLayout::Mono);
+    let mut image = LinearImage::from_planar_channels(desc, [raw]);
     image.metadata.header.image_type = Some("Light".to_string());
     image.metadata.header.exposure_time = Some(f64::from(obs.exposure_s));
 

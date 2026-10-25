@@ -8,11 +8,11 @@ use rayon::prelude::*;
 
 use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::frame_desc;
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::intensity::Intensity;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::rgb::Rgb;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use crate::io::error::WriteError;
@@ -24,7 +24,7 @@ pub struct LinearImage {
     pub metadata: ImageMetadata,
     pixels: PlanarImage,
     /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
-    /// [`QualityFlags::NO_DATA`](crate::image::quality_flags::QualityFlags::NO_DATA) are a finite
+    /// [`QualityFlags::NO_DATA`](crate::image::flags::quality_flags::QualityFlags::NO_DATA) are a finite
     /// fill, not data.
     flags: Option<PixelFlags>,
     /// The gain a flat applied to each pixel's value and noise, in this image's own pixels — see
@@ -416,9 +416,9 @@ mod tests {
     use arrayvec::ArrayVec;
     use common::Buffer2;
 
+    use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
-    use crate::image::pixel_flags::PixelFlags;
     use crate::internals::images::{mono_image, rgb_image};
     use common::Size2us;
 

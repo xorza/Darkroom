@@ -60,14 +60,14 @@ impl MeshWorkspace {
     /// Measure every tile of `input` into the grid, rebuilding the grid when the frame or the tile
     /// size changed.
     fn fill_tile_stats(&mut self, input: &TileInput<'_>, params: MeshParams) {
-        let dimensions = input.pixels.size();
+        let size = input.pixels.size();
         let tile_size = params.tile_size;
         if self
             .grid
             .as_ref()
-            .is_none_or(|grid| !grid.matches_layout(dimensions, tile_size))
+            .is_none_or(|grid| !grid.matches_layout(size, tile_size))
         {
-            self.grid = Some(BgMesh::new_uninit(dimensions, tile_size));
+            self.grid = Some(BgMesh::new_uninit(size, tile_size));
             self.median_filter_scratch = None;
         }
 

@@ -290,9 +290,9 @@ mod tests {
         assert_eq!(channel.max_abs, 0.0);
         assert!((channel.correlation - 1.0).abs() < 1e-12);
 
-        let dimensions = PlanarDesc::new((1, 1), ChannelLayout::Rgb);
-        let black = LinearImage::from_interleaved(dimensions, vec![0.0; 3]);
-        let colored = LinearImage::from_interleaved(dimensions, vec![3.0, 1.0, 5.0]);
+        let desc = PlanarDesc::new((1, 1), ChannelLayout::Rgb);
+        let black = LinearImage::from_interleaved(desc, vec![0.0; 3]);
+        let colored = LinearImage::from_interleaved(desc, vec![3.0, 1.0, 5.0]);
         let transforms = array::from_fn(|_| ChannelCompareStats {
             mae: 0.0,
             max_abs: 0.0,

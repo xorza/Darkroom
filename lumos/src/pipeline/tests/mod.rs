@@ -197,11 +197,11 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 #[test]
 fn drops_unregisterable_frame_and_stacks_the_rest() {
     let base = base_field();
-    let dims = base.desc();
+    let desc = base.desc();
     // A flat frame has no stars → registration fails → it is dropped, not fatal. Two of them, at
     // non-adjacent indices, so `dropped` also pins its documented ascending order — no sort
     // produces that, only rayon's order-preserving indexed `collect`.
-    let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let blank = || LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     let frames = vec![
         base.clone(),
         blank(),
@@ -386,8 +386,8 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     // report `AllFramesDropped` and never mention the config at all. Validating up front means
     // the config is blamed, and nothing upstream is paid for.
     let base = base_field();
-    let dims = base.desc();
-    let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let desc = base.desc();
+    let blank = || LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     let frames = vec![base, blank(), blank()];
 
     let config = AlignStackConfig {
@@ -428,8 +428,8 @@ fn all_non_reference_frames_dropped_errors() {
     // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
     let base = base_field();
-    let dims = base.desc();
-    let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let desc = base.desc();
+    let blank = || LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
     let frames = vec![base, blank(), blank()];
 
@@ -455,8 +455,8 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
     let base = base_field();
     // Frame 0 is a near-blank with fewer stars than registration needs, so Auto chooses among the
     // other two, whatever its FWHM.
-    let dims = base.desc();
-    let sparse = LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let desc = base.desc();
+    let sparse = LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
 
     let result = AlignStackConfig::default()
@@ -484,10 +484,10 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
 #[test]
 fn a_combine_error_names_the_input_light() {
     let base = base_field();
-    let dims = base.desc();
-    let blank = LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let desc = base.desc();
+    let blank = LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     let lowered = LinearImage::from_interleaved(
-        dims,
+        desc,
         shifted(&base, -3.0, 2.0)
             .channel(0)
             .pixels()
@@ -557,8 +557,8 @@ fn public_input_errors() {
 
     // Checked at entry, before any frame is worked: a weight count that does not match the
     // lights, a cosmic-ray config the detector cannot run, and a light with a non-finite sample.
-    let dims = PlanarDesc::new((4, 4), ChannelLayout::Mono);
-    let flat = || LinearImage::from_interleaved(dims, vec![0.1; 16]);
+    let desc = PlanarDesc::new((4, 4), ChannelLayout::Mono);
+    let flat = || LinearImage::from_interleaved(desc, vec![0.1; 16]);
     let run = |lights: Vec<LinearImage>, config: &AlignStackConfig| {
         config
             .align_stack_images(
@@ -593,7 +593,7 @@ fn public_input_errors() {
     let mut pixels = vec![0.1; 16];
     pixels[5] = f32::NAN;
     let error = run(
-        vec![flat(), LinearImage::from_interleaved(dims, pixels)],
+        vec![flat(), LinearImage::from_interleaved(desc, pixels)],
         &AlignStackConfig::default(),
     );
     assert!(
@@ -1117,8 +1117,8 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // that the comparison would silently skip one of the four output planes. Two starless frames
     // at non-adjacent indices fail registration on both tiers, so the drop bookkeeping and its
     // ascending order are compared too.
-    let dims = base.desc();
-    let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
+    let desc = base.desc();
+    let blank = || LinearImage::from_interleaved(desc, vec![0.1; desc.pixel_count()]);
     let frames = [
         base.clone(),
         shifted(&base, 6.0, -4.0),

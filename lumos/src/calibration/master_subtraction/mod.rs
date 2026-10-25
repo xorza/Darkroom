@@ -8,9 +8,9 @@ use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
 use crate::combine::frame_cache::frame_step::FrameStep;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::pixel_flags::PixelFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::metadata::calibration_state::CalibrationState;
 
 /// The additive masters taken from each frame of a calibration stack, in order — a flat's bias,
 /// then the dark signal of its flat-dark matched to the flat's own exposure and temperature, so the

@@ -15,8 +15,8 @@ use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::output_grid::OutputGrid;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use common::{Size2us, Vec2us};
 
@@ -109,13 +109,13 @@ impl<'a> FrameSource<'a> {
         grid: OutputGrid,
     ) -> Self {
         let image = &frame.source;
-        let dimensions = image.desc();
+        let desc = image.desc();
         Self {
-            planes: (0..dimensions.channel_count())
+            planes: (0..desc.channel_count())
                 .map(|channel| image.channel(channel).pixels())
                 .collect(),
             mosaic: deposit.mosaic(),
-            size: dimensions.size(),
+            size: desc.size(),
             map: InputMap::new(&frame.warp, grid.reference_map()),
             pixel_weights: frame.pixel_weight_map.as_ref().map(Buffer2::pixels),
             flags: image.flags(),

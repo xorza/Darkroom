@@ -1,7 +1,7 @@
 //! [`CalibrationOutcome`]: what calibrating one light checked, and what it could not.
 
 use crate::calibration::dark_scale::DarkScale;
-use crate::image::dark_comparison::DarkComparison;
+use crate::image::metadata::dark_comparison::DarkComparison;
 
 /// What calibrating one light compared, and what it scaled.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

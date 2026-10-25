@@ -8,8 +8,8 @@ use crate::calibration::calibration_pass::Subtracted;
 use crate::calibration::defect_map::HotPixels;
 use crate::calibration::defect_map::ring_reference::{RingFrame, RingReference};
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics::median_mad::MedianMad;
 
 /// The fewest hot pixels the fit keeps for its factor to stand; with fewer the exposure ratio does.

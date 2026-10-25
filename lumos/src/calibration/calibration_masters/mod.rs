@@ -27,9 +27,9 @@ use crate::calibration::sensor::Sensor;
 use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::sample_domain::Pedestal;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::sample_domain::Pedestal;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -314,7 +314,7 @@ impl CalibrationMasters {
         }
         // Before any of the work below, all of which combines the masters by flat pixel index and
         // asserts on only the pair it touches.
-        let dimensions = Sensor::shared(
+        let desc = Sensor::shared(
             images
                 .iter()
                 .filter_map(|(role, master)| Some((role.into(), Sensor::of(master.as_ref()?)))),
@@ -386,7 +386,7 @@ impl CalibrationMasters {
         // exists. Detection must precede normalization's near-zero floor.
         let defect_map = if dark.is_some() || subtracted_flat.is_some() {
             let mut map =
-                DefectMap::new(dimensions.expect("a present master gives the set its dimensions"));
+                DefectMap::new(desc.expect("a present master gives the set its dimensions"));
             if let Some(dark) = dark.as_ref() {
                 map = map.detect_hot(dark, sigma_threshold, cancel)?;
             }

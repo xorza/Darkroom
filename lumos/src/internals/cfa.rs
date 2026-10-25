@@ -5,7 +5,7 @@ use common::Buffer2;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use common::Size2us;
 
 /// A Fujifilm X-Trans color layout: 8 red, 20 green and 8 blue, every green with as many red as

@@ -14,7 +14,7 @@ use imaginarium::{PlanarDesc, PlanarImage};
 use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::image_metadata::ImageMetadata;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::memory::stage::{Placement, Stage, Width};
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::progress::stacking_progress::StackingStage;
@@ -26,8 +26,8 @@ use crate::recycled::Recycled;
 #[derive(Debug)]
 pub(crate) struct CacheCore {
     pub(crate) tier: StorageTier,
-    /// Image dimensions (same for all frames).
-    pub(crate) dimensions: PlanarDesc,
+    /// The frames' descriptor, the same for all.
+    pub(crate) desc: PlanarDesc,
     /// Metadata from the first frame.
     pub(crate) metadata: ImageMetadata,
     /// Where the combine reports, and the cancel token polled during validation and normalization
@@ -64,7 +64,7 @@ impl CacheCore {
     pub(super) fn chunk_rows(&self, stage: Stage) -> Width {
         let Some(combine) = self.tier.combine_budget() else {
             return Width {
-                units: self.dimensions.height(),
+                units: self.desc.height(),
                 overcommit_bytes: 0,
             };
         };
@@ -102,10 +102,10 @@ impl CacheCore {
     where
         Process: FnMut(&mut [f32], ChunkCtx<'_>),
     {
-        let dims = self.dimensions;
-        let width = dims.width();
-        let height = dims.height();
-        let mut output = PlanarImage::new_zeroed(dims);
+        let desc = self.desc;
+        let width = desc.width();
+        let height = desc.height();
+        let mut output = PlanarImage::new_zeroed(desc);
         let chunk_count = height.div_ceil(chunk_rows);
         let range = |chunk: usize| {
             let start_row = chunk * chunk_rows;
@@ -201,16 +201,16 @@ pub(crate) mod internals {
 
     use crate::combine::frame_cache::core::CacheCore;
     use crate::frame_store::storage_tier::StorageTier;
-    use crate::image::image_metadata::ImageMetadata;
+    use crate::image::metadata::image_metadata::ImageMetadata;
     use crate::progress::progress_monitor::ProgressMonitor;
 
     impl CacheCore {
-        /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
+        /// A core over frames of `desc` on `tier`, with default metadata, no progress
         /// reported and no cancel.
-        pub(crate) fn plain(tier: StorageTier, dimensions: PlanarDesc) -> Self {
+        pub(crate) fn plain(tier: StorageTier, desc: PlanarDesc) -> Self {
             Self {
                 tier,
-                dimensions,
+                desc,
                 metadata: ImageMetadata::default(),
                 monitor: ProgressMonitor::unattended(),
             }

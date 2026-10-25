@@ -4,8 +4,8 @@ use tokio::sync::oneshot;
 
 use crate::error::GpuError;
 use crate::gpu::Gpu;
-use crate::image::InterleavedImage;
-use crate::image::image_desc::InterleavedDesc;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// Image data stored on the GPU as a buffer.
 ///

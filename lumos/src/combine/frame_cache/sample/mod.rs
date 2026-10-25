@@ -1,8 +1,8 @@
 //! What one reduced pixel carries out of the combine, and the buffers that get it there.
 
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::image::flag_counts::FlagCounts;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::scratch_pool::Scratch;
 
 /// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says

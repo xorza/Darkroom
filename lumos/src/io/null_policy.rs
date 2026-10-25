@@ -3,8 +3,8 @@
 
 use serde::Serialize;
 
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::math::statistics;
 use crate::math::statistics::subsample::Subsample;
 use common::Size2us;
@@ -159,8 +159,8 @@ fn fill_where(samples: &mut [f32], missing: impl Fn(usize, f32) -> bool, missing
 
 #[cfg(test)]
 mod tests {
-    use crate::image::pixel_flags::PixelFlags;
-    use crate::image::quality_flags::QualityFlags;
+    use crate::image::flags::pixel_flags::PixelFlags;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::io::null_policy::{self, FILL_MEDIAN_SAMPLES, NullPolicy, NullSamples};
     use common::Size2us;
 

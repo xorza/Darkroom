@@ -1,7 +1,7 @@
 //! [`RunReport`]: what a run decided without failing, so that no decision is silent.
 
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::flag_counts::FlagCounts;
+use crate::image::flags::flag_counts::FlagCounts;
+use crate::image::metadata::dark_comparison::DarkComparison;
 
 /// The decisions a run took on its own and did not fail over, returned with its result.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

@@ -9,10 +9,10 @@ use rayon::prelude::*;
 
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::registration::resample::flagged_sources::FlagScratch;
 use crate::registration::resample::frame_sampler::{
     FrameSampler, RowOutput, SampleMethod, SampleRule, WindowAxes,
@@ -137,16 +137,16 @@ pub(crate) struct Warp<'a> {
 }
 
 impl WarpResult {
-    /// A set for frames of `dimensions`, every plane zeroed.
-    pub(crate) fn new(dimensions: PlanarDesc) -> Self {
+    /// A set for frames of `desc`, every plane zeroed.
+    pub(crate) fn new(desc: PlanarDesc) -> Self {
         Self {
             image: LinearImage::new(
-                PlanarImage::new_zeroed(dimensions),
+                PlanarImage::new_zeroed(desc),
                 None,
                 ImageMetadata::default(),
             ),
-            coverage: Buffer2::new_default(dimensions.size()),
-            confidence: Buffer2::new_default(dimensions.size()),
+            coverage: Buffer2::new_default(desc.size()),
+            confidence: Buffer2::new_default(desc.size()),
         }
     }
 
@@ -174,13 +174,13 @@ impl WarpResult {
             "warp border_value must be finite, got {}",
             config.border_value
         );
-        let dimensions = image.dimensions;
+        let desc = image.desc;
         assert_eq!(
             self.image.desc(),
-            dimensions,
+            desc,
             "warp buffers were sized for a different frame"
         );
-        let size = dimensions.size();
+        let size = desc.size();
         let width = size.width;
         let method = SampleMethod::for_frame(config, warp_transform, size);
         let Self {

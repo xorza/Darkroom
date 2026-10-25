@@ -13,8 +13,8 @@ use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
-use crate::image::quality_map::QualityMap;
 use crate::io::error::WriteError;
 use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::coverage::Coverage;
@@ -219,8 +219,8 @@ mod tests {
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
+    use crate::image::flags::quality_map::QualityMap;
     use crate::image::linear_image::LinearImage;
-    use crate::image::quality_map::QualityMap;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
     use crate::stack_product::run_report::RunReport;
@@ -228,10 +228,10 @@ mod tests {
     use common::Size2us;
 
     fn product(channels: usize, cfa_type: Option<CfaType>) -> StackProduct {
-        let dimensions = PlanarDesc::new((2, 1), ChannelLayout::try_from(channels).unwrap());
+        let desc = PlanarDesc::new((2, 1), ChannelLayout::try_from(channels).unwrap());
         let mut image = LinearImage::from_interleaved(
-            dimensions,
-            (0..dimensions.sample_count()).map(|i| i as f32).collect(),
+            desc,
+            (0..desc.sample_count()).map(|i| i as f32).collect(),
         );
         image.metadata.header.exposure_time = Some(30.0);
         image.metadata.derived.set_quantization_sigma(Some(0.25));

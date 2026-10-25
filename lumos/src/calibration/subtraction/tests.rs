@@ -3,12 +3,12 @@ use crate::calibration::error::{DarkMismatch, SubtractionFault};
 use crate::calibration::master_role::MasterRole;
 use crate::calibration::subtraction::{self, Subtraction};
 use crate::calibration::subtractor::Subtractor;
-use crate::image::calibration_state::CalibrationState;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
-use crate::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::metadata::calibration_state::CalibrationState;
+use crate::image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::make_cfa;
 use common::Size2us;
 

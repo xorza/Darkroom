@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::image_provenance::RowOrder;
-use crate::image::sample_domain::SampleDomain;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::image_provenance::RowOrder;
+use crate::image::metadata::sample_domain::SampleDomain;
 use crate::image::stackable_image::StackableImage;
 
 /// What a frame's source said about it. The domain, row order and pattern every frame of a set has

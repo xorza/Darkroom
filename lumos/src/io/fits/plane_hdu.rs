@@ -10,8 +10,8 @@ use fits_well::header::Header;
 use fits_well::image::{Bitpix, Metadata, Scaling, View};
 use rayon::prelude::*;
 
-use crate::image::pixel_flags::PixelFlags;
-use crate::image::quality_flags::QualityFlags;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::io::error::WriteError;
 use crate::io::fits::CHUNK_BYTES;
 
@@ -220,8 +220,8 @@ mod tests {
     use fits_well::header::Header;
     use fits_well::image::{Image, Scaling};
 
-    use crate::image::pixel_flags::PixelFlags;
-    use crate::image::quality_flags::QualityFlags;
+    use crate::image::flags::pixel_flags::PixelFlags;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::io::fits::plane_hdu::{FlagBytes, FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
     use common::Size2us;
 

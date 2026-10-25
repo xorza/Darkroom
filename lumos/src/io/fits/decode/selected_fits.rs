@@ -12,10 +12,10 @@ use fits_well::{FitsError, FitsReader};
 
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::fits_checksum_provenance::FitsChecksumProvenance;
-use crate::image::fits_transfer_provenance::FitsHduProvenance;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
+use crate::image::metadata::fits_checksum_provenance::FitsChecksumProvenance;
+use crate::image::metadata::fits_transfer_provenance::FitsHduProvenance;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::decode::extension_chunks::ExtensionChunks;
 use crate::io::fits::decode::pixels::HduDecode;
@@ -142,19 +142,19 @@ impl SelectedFits {
         let held_bytes = usize::try_from(image.view_bytes(std::iter::empty())?.kept)
             .expect("a tile index read fits the address space");
         let hdu = &reader.hdus()[selected.idx];
-        let cfa_type = if plan.dimensions.is_mono() {
+        let cfa_type = if plan.desc.is_mono() {
             metadata::read_cfa(
                 &hdu.header,
-                plan.dimensions.height(),
+                plan.desc.height(),
                 ctx.fits.unstated_bayer_pattern,
             )?
         } else {
             None
         };
-        let size = plan.dimensions.size();
+        let size = plan.desc.size();
         let described = DescribedImage {
             size,
-            channels: plan.dimensions.channel_count(),
+            channels: plan.desc.channel_count(),
             scale: Some(plan.sample_scale.divisor),
             weight_units: WeightUnits::Unitless,
         };
@@ -202,10 +202,10 @@ impl SelectedFits {
     /// The pattern of a sensor frame, which a CFA load requires: one plane, and a pattern its
     /// header declares.
     pub(crate) fn require_cfa(&self) -> Result<CfaType, FitsLoadError> {
-        let dimensions = self.plan.dimensions;
-        if !dimensions.is_mono() {
+        let desc = self.plan.desc;
+        if !desc.is_mono() {
             return Err(FitsRefusal::CfaPlanes {
-                planes: dimensions.channel_count(),
+                planes: desc.channel_count(),
             }
             .into());
         }
@@ -228,7 +228,7 @@ impl SelectedFits {
     /// extensions — see [`FitsDecodePlan::beside_frame_bytes`] — and the gain it reads.
     fn frame_info(&self, cfa_type: CfaType) -> FrameInfo {
         FrameInfo {
-            dimensions: self.plan.dimensions,
+            desc: self.plan.desc,
             cfa_type,
             decoder: DecoderBytes {
                 source: 0,
@@ -250,7 +250,7 @@ impl SelectedFits {
         checksum: Checksum,
         gains: &SharedGains,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
-        let size = self.plan.dimensions.size();
+        let size = self.plan.desc.size();
         let image = reader.image(self.selected.idx)?;
         let decode = HduDecode {
             hdu: self.selected,

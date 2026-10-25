@@ -15,12 +15,12 @@ use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::math::statistics::radix_median::RadixMedian;
 
-/// The frames a normalization measures, read by slot: every one of `dimensions`, under the run's
+/// The frames a normalization measures, read by slot: every one of `desc`, under the run's
 /// `cancel`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SlotPlanes<'a> {
     pub(crate) frames: &'a [StoredFrame],
-    pub(crate) dimensions: PlanarDesc,
+    pub(crate) desc: PlanarDesc,
     pub(crate) slots: Slots,
     pub(crate) cancel: &'a CancelToken,
 }
@@ -28,8 +28,7 @@ pub(crate) struct SlotPlanes<'a> {
 impl<'a> SlotPlanes<'a> {
     /// Every value of `slot`'s plane in frame `frame`.
     pub(super) fn values(&self, frame: usize, slot: usize) -> &'a [f32] {
-        self.frames[frame].channels[self.slots.channel(slot)]
-            .chunk(0..self.dimensions.pixel_count())
+        self.frames[frame].channels[self.slots.channel(slot)].chunk(0..self.desc.pixel_count())
     }
 
     /// Every frame's slot medians over the pixels the frames share, one pass per slot.
@@ -76,7 +75,7 @@ impl<'a> SlotPlanes<'a> {
         let Some(confidence) = frame.quality.confidence(self.slots.channel(slot)) else {
             return Ok(sigma * sigma);
         };
-        let values = confidence.chunk(0..self.dimensions.pixel_count());
+        let values = confidence.chunk(0..self.desc.pixel_count());
         let mut inverse_confidence = 0.0;
         for chunk in idxs.chunks(CancelToken::POLL_CHUNK) {
             Cancelled::check(self.cancel)?;

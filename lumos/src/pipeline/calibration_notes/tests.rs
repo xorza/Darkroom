@@ -1,7 +1,7 @@
 use super::*;
 use crate::calibration::dark_scale::DarkScale;
-use crate::image::dark_comparison::DarkComparison;
-use crate::image::temperature_difference::TemperatureDifference;
+use crate::image::metadata::dark_comparison::DarkComparison;
+use crate::image::metadata::temperature_difference::TemperatureDifference;
 
 /// A dark compared on the exposure as `exposure_compared` says, on the `temperature` reading, and
 /// found apart by `difference`.

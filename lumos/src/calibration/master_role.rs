@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use crate::combine::stack_config::StackConfig;
-use crate::image::calibration_state::CalibrationState;
+use crate::image::metadata::calibration_state::CalibrationState;
 
 /// One of the four master frames a bundle can carry.
 ///

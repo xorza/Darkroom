@@ -6,8 +6,8 @@ use crate::error::Cancelled;
 use crate::frame::frame_plane::FramePlane;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::image_provenance::RowOrder;
-use crate::image::sample_domain::SampleDomain;
+use crate::image::metadata::image_provenance::RowOrder;
+use crate::image::metadata::sample_domain::SampleDomain;
 
 /// Why frame `idx` of a set failed the checks every frame passes before it is combined: its
 /// geometry, the facts it must state alike with the others, its samples and its quality planes.
