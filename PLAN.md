@@ -180,13 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 6. `libraw`
-
-- [ ] A workspace crate `libraw` takes `io/raw/libraw.rs`, the codec facts,
-  the sensor layout, LibRaw's error codes and the raw color data, with their
-  tests. lumos depends on it, and on `libraw-sys` only through it. Proof: the
-  RAW tests pass; `rg 'unsafe' lumos/src/io/raw` finds nothing.
-
 ### 7. Names
 
 - [ ] `drawing` moves to `lumos::internals::visual`; `Color` goes, and `Rgb`
@@ -292,4 +285,13 @@ with every other edit.
   product file alone. They are `ProductRefusal` beside the product file, as
   the bundle has `BundleError`, and `StackProduct::read_fits` returns a
   `ProductError`: a frame-layer `ImageError`, or a refusal with its path.
+- Batch 6, the crate's surface: `libraw` gives LibRaw's state as its own
+  value types (`SensorLayout`, `ImageData`, `ColorData`, `Capture`,
+  `CodecFacts`), where lumos read `libraw_data_t` itself, and takes
+  `ProcessParams`, where lumos wrote `libraw_output_params_t`. Its
+  `LibrawError` holds what LibRaw refuses; lumos's `RawError` wraps it and
+  keeps the science refusals, and checks the raw pitch and the processed
+  colors itself. `RawDecoder::classify` stays in lumos: which codecs are lossy
+  is lumos's reading of LibRaw's facts. `LibrawCode` is `libraw`'s, and lumos
+  no longer exports it.
 

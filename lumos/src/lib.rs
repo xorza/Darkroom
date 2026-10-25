@@ -112,7 +112,7 @@ pub use io::fits::lumos_extension::LumosExtension;
 pub use io::input_format::{PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 pub use io::load_ctx::LoadCtx;
 pub use io::null_policy::NullPolicy;
-pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
+pub use io::raw::error::{BlackLevelError, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
 pub use stack_product::fits::error::{ProductError, ProductRefusal};
 

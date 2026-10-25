@@ -14,6 +14,8 @@ Workspace members, each after the crates it uses:
   compile → plan → execute pipeline.
 - **`imaginarium`** — interleaved images in nine pixel formats: their codecs,
   SIMD and GPU ops. GPU work is behind its `wgpu` feature.
+- **`libraw`** — a safe wrapper over LibRaw: every `unsafe` call into
+  `libraw-sys`, and LibRaw's state read as plain Rust values.
 - **`lumos`** — the astronomical image-processing pipeline.
 - **`lens`** — the node-function library: application nodes (filesystem
   watching, random generation) and adapters from `imaginarium` and `lumos`.

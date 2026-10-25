@@ -1,18 +1,15 @@
 mod black_level;
 pub(crate) mod error;
-mod libraw;
 pub(crate) mod libraw_filters;
 mod raw_decoder;
 pub(crate) mod raw_file;
 pub(crate) mod raw_files;
-mod sensor_layout;
 mod unpacked_raw;
 
-use std::ffi;
 use std::path::Path;
 
 use common::fs;
-use libraw_sys as sys;
+use libraw::{Libraw, SensorLayout};
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
@@ -25,11 +22,8 @@ use crate::io::error::ImageError;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::error::RawError;
-use crate::io::raw::libraw::Libraw;
-use crate::io::raw::libraw_filters::LibrawFilters;
 use crate::io::raw::raw_decoder::RawDecoder;
 use crate::io::raw::raw_file::RawFile;
-use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::raw::unpacked_raw::UnpackedRaw;
 
 /// The balance left to apply to a file's samples, normalized so its smallest multiplier is 1:
@@ -40,12 +34,12 @@ use crate::io::raw::unpacked_raw::UnpackedRaw;
 fn camera_white_balance(
     cfa_type: Option<CfaType>,
     cam_mul: [f32; 4],
-    as_shot_wb_applied: i32,
+    as_shot_wb_applied: bool,
 ) -> Option<[f32; 4]> {
     if cfa_type == Some(CfaType::Mono) {
         return None;
     }
-    if as_shot_wb_applied & 1 != 0 {
+    if as_shot_wb_applied {
         return Some([1.0; 4]);
     }
 
@@ -74,29 +68,6 @@ pub(crate) const fn filter_color(filters: u32, row: usize, col: usize) -> usize 
     ((filters >> ((((row << 1) & 0xE) | (col & 1)) << 1)) & 3) as usize
 }
 
-/// `c_char` is `i8` on some targets and `u8` on others; the byte value is what LibRaw stores.
-fn xtrans_pattern_from_libraw(pattern: [[ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
-    pattern.map(|row| row.map(|color| u8::from_ne_bytes(color.to_ne_bytes())))
-}
-
-/// The colors LibRaw's `cdesc` names, one letter each, its terminator left off.
-fn color_description(cdesc: [ffi::c_char; 5]) -> [u8; 4] {
-    let [a, b, c, d, _] = cdesc.map(|letter| u8::from_ne_bytes(letter.to_ne_bytes()));
-    [a, b, c, d]
-}
-
-/// The sensor pattern LibRaw's state `data` describes — see [`LibrawFilters::cfa_type`].
-fn sensor_cfa_type(data: &sys::libraw_data_t) -> Result<Option<CfaType>, RawError> {
-    let idata = &data.idata;
-    Ok(LibrawFilters {
-        filters: idata.filters,
-        colors: idata.colors,
-        cdesc: color_description(idata.cdesc),
-        xtrans: xtrans_pattern_from_libraw(idata.xtrans),
-    }
-    .cfa_type()?)
-}
-
 /// Read `path` whole, for LibRaw to parse in place. One input path on every system: LibRaw's
 /// memory datastream is its simplest, and a path never meets a narrow or wide file API.
 fn read(path: &Path, ctx: &LoadCtx) -> Result<RawFile, ImageError> {
@@ -110,7 +81,7 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<RawFile, ImageError> {
 
 /// `file`, read from `path`, opened in LibRaw, polling the cancel token of `ctx`.
 fn open(file: RawFile, path: &Path, ctx: &LoadCtx) -> Result<Libraw, ImageError> {
-    Libraw::open(file.bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source))
+    Libraw::open(file.bytes, &ctx.cancel).map_err(|source| ImageError::raw(path, source.into()))
 }
 
 /// Open and unpack `file`, read from `path`.
@@ -164,7 +135,7 @@ fn identified(libraw: &Libraw) -> Result<RawDecoder, RawError> {
     if libraw.super_ccd() {
         return Err(RawError::SuperCcd);
     }
-    match libraw.decoder() {
+    match RawDecoder::classify(libraw.codec_facts()) {
         RawDecoder::PhaseOne => Err(RawError::PhaseOne),
         RawDecoder::FloatingPoint => Err(RawError::FloatingPoint),
         decoder => Ok(decoder),
@@ -181,8 +152,8 @@ fn frame_info(libraw: &Libraw) -> Result<FrameInfo, RawError> {
     if identified(libraw)? == RawDecoder::FiltersAtDecode {
         return Err(RawError::MosaicSetAtDecode);
     }
-    let layout = SensorLayout::of(&libraw.data().sizes)?;
-    let cfa_type = sensor_cfa_type(libraw.data())?.ok_or(RawError::NotACfaFrame)?;
+    let layout = libraw.layout()?;
+    let cfa_type = libraw_filters::cfa_type(&libraw.image_data())?.ok_or(RawError::NotACfaFrame)?;
     Ok(FrameInfo {
         dimensions: ImageDimensions::new(layout.active, ChannelLayout::Mono),
         cfa_type,
@@ -227,9 +198,8 @@ pub(crate) mod internals {
         user_qual: i32,
     ) -> Result<LinearImage, ImageError> {
         let ctx = LoadCtx::default();
-        let mut raw = open_raw(read(path, &ctx)?, path, &ctx)?;
-        raw.libraw.params_mut().user_qual = user_qual;
-        raw.processed_by_libraw()
+        let raw = open_raw(read(path, &ctx)?, path, &ctx)?;
+        raw.processed_by_libraw(Some(user_qual))
             .map_err(|source| ImageError::raw(path, source))
     }
 }

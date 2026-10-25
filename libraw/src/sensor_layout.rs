@@ -1,21 +1,20 @@
-//! Where a RAW file's visible window sits inside LibRaw's raw buffer.
+//! [`SensorLayout`]: where a RAW file's visible window sits inside LibRaw's raw buffer.
 
+use common::{Size2us, Vec2us};
 use libraw_sys as sys;
 
-use crate::io::raw::error::RawError;
-use common::{Size2us, Vec2us};
+use crate::error::LibrawError;
 
-/// The visible window inside a raw frame: where it starts, how big it is, and the
-/// stride of the buffer it sits in. The reader crops to the window as it normalizes, so nothing
-/// downstream sees the masked margins.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SensorLayout {
+/// The visible window inside a raw frame: where it starts, how big it is, and the extent of the
+/// buffer it sits in, which spans the masked margins as well.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SensorLayout {
     /// Extent of the source buffer, which spans the masked margins as well as `active`.
-    pub(crate) raw: Size2us,
+    pub raw: Size2us,
     /// Extent of the visible window.
-    pub(crate) active: Size2us,
+    pub active: Size2us,
     /// Top-left corner of the window within the source buffer.
-    pub(crate) margin: Vec2us,
+    pub margin: Vec2us,
 }
 
 impl SensorLayout {
@@ -23,9 +22,9 @@ impl SensorLayout {
     ///
     /// # Errors
     ///
-    /// [`RawError::Geometry`] when either area is empty or the visible one does not lie inside
+    /// [`LibrawError::Geometry`] when either area is empty or the visible one does not lie inside
     /// the raw one.
-    pub(crate) fn of(sizes: &sys::libraw_image_sizes_t) -> Result<Self, RawError> {
+    pub(crate) fn of(sizes: &sys::libraw_image_sizes_t) -> Result<Self, LibrawError> {
         let raw = Size2us::new(usize::from(sizes.raw_width), usize::from(sizes.raw_height));
         let active = Size2us::new(usize::from(sizes.width), usize::from(sizes.height));
         let margin = Vec2us::new(
@@ -37,7 +36,7 @@ impl SensorLayout {
             || margin.x + active.width > raw.width
             || margin.y + active.height > raw.height
         {
-            return Err(RawError::Geometry {
+            return Err(LibrawError::Geometry {
                 raw,
                 active,
                 margin,

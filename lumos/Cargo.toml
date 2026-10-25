@@ -26,7 +26,7 @@ ort = { workspace = true, optional = true, features = [
 ] }
 
 fits-well = { workspace = true }
-libraw-sys = { workspace = true }
+libraw = { workspace = true }
 
 thiserror = { workspace = true }
 bytemuck = { workspace = true, features = ["derive", "extern_crate_alloc"] }
@@ -43,6 +43,7 @@ blake3 = { workspace = true, features = ["std"] }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
+libraw = { workspace = true, features = ["internals"] }
 imaginarium = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }
 image = { workspace = true, features = ["png"] }

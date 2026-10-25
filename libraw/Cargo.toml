@@ -1,0 +1,23 @@
+[package]
+name = "libraw"
+version.workspace = true
+edition.workspace = true
+description = "A safe wrapper over LibRaw: a camera RAW file opened from memory, its sensor data unpacked, what LibRaw states of it, and LibRaw's own processing."
+exclude = ["AGENTS.md", "CLAUDE.md"]
+
+[lints]
+workspace = true
+
+[features]
+# Sensor dumps LibRaw opens as a camera's file, and the state a test sets, for the tests of the
+# crates that decode through this one.
+internals = []
+
+[dependencies]
+common = { workspace = true }
+libraw-sys = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals"] }
+libraw = { workspace = true, features = ["internals"] }

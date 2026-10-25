@@ -10,8 +10,8 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::io::raw;
 use crate::io::raw::black_level::{BlackLevel, DecodedRaw, FlagRule, LibrawBlack, Photosites};
-use crate::io::raw::sensor_layout::SensorLayout;
 use common::{Size2us, Vec2us};
+use libraw::SensorLayout;
 
 /// RGGB as LibRaw's `filters` word spells it.
 const RGGB: u32 = 0x9494_9494;
@@ -63,11 +63,10 @@ impl RawSensor {
             margin: Vec2us::new(16, 12),
         };
         // LibRaw's `cblack` is 16 KiB, too large for the stack.
-        let mut cblack: Box<[u32; libraw_sys::LIBRAW_CBLACK_SIZE as usize]> =
-            vec![0u32; libraw_sys::LIBRAW_CBLACK_SIZE as usize]
-                .into_boxed_slice()
-                .try_into()
-                .unwrap();
+        let mut cblack: Box<[u32; libraw::CBLACK_LEN]> = vec![0u32; libraw::CBLACK_LEN]
+            .into_boxed_slice()
+            .try_into()
+            .unwrap();
         cblack[..4].copy_from_slice(&CHANNEL_BLACK);
         let black = BlackLevel::from_libraw(&LibrawBlack {
             black: BLACK,

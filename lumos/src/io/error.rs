@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::null_policy::NullSamples;
-use crate::io::raw::error::{LibrawCode, RawError};
+use crate::io::raw::error::RawError;
 
 /// Errors that can occur when loading an astronomical image from disk.
 #[derive(Debug, Error)]
@@ -64,10 +64,8 @@ impl ImageError {
     /// stopped because the load's cancel token asked it to.
     pub(crate) fn raw(path: &Path, source: RawError) -> Self {
         match source {
-            RawError::Open(LibrawCode::Cancelled)
-            | RawError::Unpack(LibrawCode::Cancelled)
-            | RawError::Process(LibrawCode::Cancelled)
-            | RawError::Cancelled => Self::cancelled(path),
+            RawError::Cancelled => Self::cancelled(path),
+            RawError::Libraw(error) if error.is_cancelled() => Self::cancelled(path),
             source => Self::Raw {
                 path: path.to_path_buf(),
                 source,

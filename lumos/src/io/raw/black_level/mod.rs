@@ -9,12 +9,9 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::io::raw;
 use crate::io::raw::error::BlackLevelError;
-use crate::io::raw::sensor_layout::SensorLayout;
 use common::Size2us;
+use libraw::{CBLACK_LEN, SensorLayout};
 
-/// The length of LibRaw's `cblack` table: four channel values, the spatial pattern's height and
-/// width, and the pattern.
-const CBLACK_LEN: usize = libraw_sys::LIBRAW_CBLACK_SIZE as usize;
 /// Where the spatial pattern starts in `cblack`.
 const PATTERN: usize = 6;
 

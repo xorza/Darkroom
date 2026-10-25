@@ -1,15 +1,18 @@
 //! [`UnpackedRaw`]: a camera RAW file LibRaw unpacked, and what lumos reads of it.
 
 use std::time::Instant;
-use std::{array, ffi, mem};
+use std::{array, mem};
 
 use common::{Buffer2, par};
+use libraw::{Libraw, ProcessParams, ProcessedSamples, SensorLayout};
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
+use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
@@ -23,9 +26,8 @@ use crate::io::raw::black_level::{
     BlackLevel, DecodedRaw, DngLevels, FlagRule, LibrawBlack, Photosites,
 };
 use crate::io::raw::error::RawError;
-use crate::io::raw::libraw::{Libraw, ProcessedSamples};
+use crate::io::raw::libraw_filters;
 use crate::io::raw::raw_decoder::RawDecoder;
-use crate::io::raw::sensor_layout::SensorLayout;
 use crate::io::{null_policy, raw};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -94,40 +96,38 @@ impl UnpackedRaw {
     pub(super) fn unpack(mut libraw: Libraw, threads: usize) -> Result<Self, RawError> {
         let decoder = raw::identified(&libraw)?;
         libraw.unpack(threads)?;
-        let data = libraw.data();
-        let sizes = &data.sizes;
-        let layout = SensorLayout::of(sizes)?;
+        let layout = libraw.layout()?;
         // The raw buffer is read as rows of `raw_width` samples: any other pitch would shear it.
-        let pitch = sizes.raw_pitch as usize;
+        let pitch = libraw.raw_pitch();
         if pitch != 2 * layout.raw.width {
             return Err(RawError::RawPitch {
                 pitch,
                 width: layout.raw.width,
             });
         }
-        // `unpack` copies LibRaw's internal output parameters here.
-        let zero_is_bad = data.rawdata.ioparams.zero_is_bad != 0;
+        let zero_is_bad = libraw.zero_is_bad();
 
-        let visible_filters = data.idata.filters;
-        let cfa_type = raw::sensor_cfa_type(data)?;
+        let idata = libraw.image_data();
+        let visible_filters = idata.filters;
+        let cfa_type = libraw_filters::cfa_type(&idata)?;
         tracing::debug!(
             "libraw: filters=0x{:08x}, cfa_type={:?}",
             visible_filters,
             cfa_type
         );
 
-        let color = &data.color;
+        let color = libraw.color();
         // The exact level, from the unrounded values LibRaw keeps where they round to its own;
         // `exact` false is LibRaw's integers alone, the level its own processing subtracts.
         let black = |exact: bool| {
             BlackLevel::from_libraw(&LibrawBlack {
                 black: color.black,
-                cblack: &color.cblack,
+                cblack: color.cblack,
                 maximum: color.maximum,
                 filters: visible_filters,
-                dng: (exact && data.idata.dng_version != 0).then_some(DngLevels {
-                    black: color.dng_levels.dng_fblack,
-                    cblack: &color.dng_levels.dng_fcblack,
+                dng: (exact && idata.dng_version != 0).then_some(DngLevels {
+                    black: color.dng_black,
+                    cblack: color.dng_cblack,
                 }),
                 masked: if exact { color.black_stat } else { [0; 8] },
             })
@@ -137,16 +137,17 @@ impl UnpackedRaw {
 
         let camera_white_balance =
             raw::camera_white_balance(cfa_type, color.cam_mul, color.as_shot_wb_applied);
-        let iso = iso(data.other.iso_speed);
-        let shutter = data.other.shutter;
+        let capture = libraw.capture();
+        let iso = iso(capture.iso_speed);
+        let shutter = capture.shutter;
         let exposure_time = (shutter > 0.0).then_some(f64::from(shutter));
         // LibRaw leaves -1000 where the makernotes state no temperature.
         let temperature = |celsius: f32| (celsius > -273.15).then_some(f64::from(celsius));
-        let ccd_temp = temperature(data.makernotes.common.SensorTemperature);
-        let camera_temp = temperature(data.makernotes.common.CameraTemperature);
-        let instrument = instrument(&data.idata.normalized_make, &data.idata.normalized_model);
+        let ccd_temp = temperature(capture.sensor_temperature);
+        let camera_temp = temperature(capture.camera_temperature);
+        let instrument = instrument(&idata.make, &idata.model);
         let date_local = libraw.camera_clock();
-        let focal_length = (data.other.focal_len > 0.0).then_some(f64::from(data.other.focal_len));
+        let focal_length = (capture.focal_len > 0.0).then_some(f64::from(capture.focal_len));
         let saturation = array::from_fn(|channel| {
             saturation_level(
                 black_level.of_channel(channel),
@@ -318,14 +319,13 @@ impl UnpackedRaw {
     /// [`raw::load_preview`] past the open: the CFA path and a clamp, or LibRaw's own processing.
     pub(super) fn into_linear_image(self, ctx: &LoadCtx) -> Result<LinearImage, RawError> {
         if self.cfa_type.is_none() {
-            let idata = &self.libraw.data().idata;
+            let idata = self.libraw.image_data();
             if idata.colors == 4 {
-                let colors =
-                    String::from_utf8_lossy(&raw::color_description(idata.cdesc)).into_owned();
+                let colors = String::from_utf8_lossy(&idata.cdesc).into_owned();
                 return Err(RawError::FourColorSensor { colors });
             }
             tracing::info!("no mosaic lumos demosaics; LibRaw processes the image");
-            return self.processed_by_libraw();
+            return self.processed_by_libraw(None);
         }
         let cfa = self.into_cfa_image()?;
         let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
@@ -345,41 +345,52 @@ impl UnpackedRaw {
     }
 
     /// The image through LibRaw's own processing, linear, unbalanced and unturned: the path for a
-    /// sensor lumos does not demosaic, slower but correct for exotic patterns. Its samples are
-    /// LibRaw's 16-bit output over 65535, which LibRaw scaled by its integer span.
+    /// sensor lumos does not demosaic, slower but correct for exotic patterns, demosaiced at
+    /// `quality`, or LibRaw's default for `None`. Its samples are LibRaw's 16-bit output over
+    /// 65535, which LibRaw scaled by its integer span.
     ///
     /// # Errors
     ///
-    /// [`RawError::Process`] when LibRaw fails, and the shape errors of
-    /// [`ProcessedImage::samples`](crate::io::raw::libraw::ProcessedImage::samples).
-    pub(super) fn processed_by_libraw(mut self) -> Result<LinearImage, RawError> {
+    /// [`RawError::Libraw`] when LibRaw fails or reports an unusable shape, and
+    /// [`RawError::ProcessedColors`] for other than one color or three.
+    pub(super) fn processed_by_libraw(
+        mut self,
+        quality: Option<i32>,
+    ) -> Result<LinearImage, RawError> {
         let start = Instant::now();
-        let params = self.libraw.params_mut();
-        // Linear output: no gamma curve and no brightness change.
-        params.gamm[0] = 1.0;
-        params.gamm[1] = 1.0;
-        params.bright = 1.0;
-        params.no_auto_bright = 1;
-        // LibRaw otherwise falls back to daylight WB when camera and auto WB are disabled.
-        params.user_mul = [1.0; 4];
-        params.use_auto_wb = 0;
-        params.use_camera_wb = 0;
-        params.output_bps = 16;
-        // The sensor's own colors: no conversion, which would also fold a four-color sensor to
-        // RGB.
-        params.output_color = 0;
-        // Scale by `maximum` as LibRaw read it, the span the domain records, not by a frame's own
-        // brightest pixel when that lies within 25% of it.
-        params.adjust_maximum_thr = 0.0;
-        // The sensor's rows and columns as they are: no turn by the EXIF orientation, which would
-        // make a portrait frame H×W here alone, and no stretch by pixel aspect.
-        params.user_flip = 0;
-        params.use_fuji_rotate = 0;
-
+        let params = ProcessParams {
+            // Linear output: no gamma curve and no brightness change.
+            gamma: [1.0, 1.0],
+            bright: 1.0,
+            auto_bright: false,
+            // LibRaw otherwise falls back to daylight WB when camera and auto WB are disabled.
+            user_mul: [1.0; 4],
+            auto_wb: false,
+            camera_wb: false,
+            output_bps: 16,
+            // The sensor's own colors: no conversion, which would also fold a four-color sensor to
+            // RGB.
+            output_color: 0,
+            // Scale by `maximum` as LibRaw read it, the span the domain records, not by a frame's
+            // own brightest pixel when that lies within 25% of it.
+            adjust_maximum_thr: 0.0,
+            // The sensor's rows and columns as they are: no turn by the EXIF orientation, which
+            // would make a portrait frame H×W here alone, and no stretch by pixel aspect.
+            user_flip: 0,
+            fuji_rotate: false,
+            quality,
+        };
         let mut image = {
-            let processed = self.libraw.process()?;
+            let processed = self.libraw.process(&params)?;
             let samples = processed.samples()?;
-            LinearImage::from_planar_channels(samples.dimensions, planes(&samples))
+            let layout =
+                ChannelLayout::try_from(samples.colors).map_err(|_| RawError::ProcessedColors {
+                    colors: samples.colors,
+                })?;
+            LinearImage::from_planar_channels(
+                ImageDimensions::new(samples.size, layout),
+                planes(&samples),
+            )
         };
         tracing::info!(
             "LibRaw processed {}x{}x{} in {:.2}ms",
@@ -417,16 +428,11 @@ pub(super) fn saturation_level(black: f64, linear_max: u32, maximum: u32) -> f64
 }
 
 /// The camera LibRaw names by its normalized `make` and `model`, joined by a space; `None` when it
-/// names neither. Each is a NUL-terminated field, read up to its terminator.
-pub(super) fn instrument(make: &[ffi::c_char], model: &[ffi::c_char]) -> Option<String> {
-    let text = |field: &[ffi::c_char]| {
-        let bytes: Vec<u8> = field
-            .iter()
-            .map(|&letter| u8::from_ne_bytes(letter.to_ne_bytes()))
-            .take_while(|&byte| byte != 0)
-            .collect();
-        let text = String::from_utf8_lossy(&bytes).trim().to_owned();
-        (!text.is_empty()).then_some(text)
+/// names neither.
+pub(super) fn instrument(make: &str, model: &str) -> Option<String> {
+    let text = |field: &str| {
+        let text = field.trim();
+        (!text.is_empty()).then(|| text.to_owned())
     };
     match (text(make), text(model)) {
         (Some(make), Some(model)) => Some(format!("{make} {model}")),
@@ -446,8 +452,8 @@ fn iso(speed: f32) -> Option<u32> {
 /// `samples`' interleaved colors as one plane each, over 65535, each plane written once as it is
 /// made.
 pub(super) fn planes<'a>(samples: &'a ProcessedSamples<'_>) -> impl Iterator<Item = Vec<f32>> + 'a {
-    let colors = samples.dimensions.channels();
-    let pixels = samples.dimensions.pixel_count();
+    let colors = samples.colors;
+    let pixels = samples.size.pixel_count();
     (0..colors).map(move |channel| {
         par::into_iter(0..pixels)
             .map(|pixel| f32::from(samples.samples[pixel * colors + channel]) / 65535.0)
