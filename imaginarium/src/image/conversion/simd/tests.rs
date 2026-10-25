@@ -1,7 +1,8 @@
+use common::SimdTier;
+
 use crate::color::color_format::{ALL_FORMATS, SampleType};
 use crate::image::conversion::scalar;
 use crate::image::conversion::simd::tier_converter;
-use crate::simd_tier::SimdTier;
 
 /// Every `u8` and every `u16`; for `f32`, the values on both sides of every rounding tie of both
 /// integer scales — `(k + ½) / 255` and `(k + ½) / 65535`, two ulps either way — plus the

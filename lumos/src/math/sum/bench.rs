@@ -4,9 +4,10 @@
 
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{scalar, sum_f32, weighted_sums};
 use crate::simd::isa_tier::IsaTier;
@@ -17,7 +18,7 @@ const LENGTHS: [usize; 13] = [1, 4, 6, 8, 10, 12, 16, 24, 32, 64, 256, 1_024, 10
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let tiers: Vec<IsaTier> = IsaTier::supported().collect();
-    let mut group = Kind::Atomic.group(c, "math/sum", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/sum", Scale::Micros);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
         group.bench_function(BenchmarkId::new("sum_f32/scalar", len), |b| {

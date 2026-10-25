@@ -8,7 +8,7 @@ mod sse;
 
 mod packed_source;
 
-use common::par;
+use common::{SimdTier, par};
 use glam::Vec2;
 use rayon::prelude::*;
 
@@ -17,7 +17,6 @@ use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::cpu::packed_source::PackedSource;
 use crate::ops::transform::{FilterMode, Transform};
-use crate::simd_tier::SimdTier;
 
 /// A SIMD kernel: the packed RGB/RGBA bilinear specialization of [`apply_typed`]
 /// for one storage type and channel count.

@@ -4,9 +4,10 @@
 use std::hint::black_box;
 
 use common::Buffer2;
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::noise::binned_samples::BinnedSamples;
 use crate::noise::mrs_noise::{NoisePlane, PixelGains};
@@ -19,7 +20,7 @@ const SAMPLES: usize = 1_000_000;
 const GAINS: usize = 4_096;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "noise", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "noise", Scale::Micros);
     group.throughput(Throughput::Elements(GAINS as u64));
     group.bench_function(BenchmarkId::new("gain_bin", GAINS), |b| {
         let bins = GainBins::of(&mut vignette(GAINS));
@@ -33,7 +34,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     });
     group.finish();
 
-    let mut group = Kind::Atomic.group(c, "noise/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "noise/frame", Scale::Millis);
     group.throughput(Throughput::Elements(SAMPLES as u64));
     group.bench_function(BenchmarkId::new("binned_measure", SAMPLES), |b| {
         let samples = fixture::sky(SAMPLES, 4);
@@ -48,7 +49,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 binned
             },
             |binned| binned.measure(|run| run.iter().map(|&v| f64::from(v * v)).sum::<f64>()),
-            fixture::fresh_copies(SAMPLES * (size_of::<f32>() + size_of::<u8>())),
+            bench::fresh_copies(SAMPLES * (size_of::<f32>() + size_of::<u8>())),
         );
     });
     for side in SIDES {

@@ -5,9 +5,9 @@
 //! `integration`, one pipeline stage on a 24 MP frame or a set of them, or a public entry point
 //! run end to end from the files of a session (`integration/pipeline/…`).
 //!
-//! Every bench has one shape. A group is one module at one `fixture::Scale`, named
+//! Every bench has one shape. A group is one module at one `common::bench::Scale`, named
 //! `<kind>/<area>/<module>`, with `/frame` added for a frame-sized atomic group. A group over a
-//! set of frames takes `Scale::Set` with its slowest bench's measured iteration. A bench is one
+//! set of frames takes `Scale::Slow` with its slowest bench's measured iteration. A bench is one
 //! operation, its id `<operation>/<variant>` and its parameter the input (a length, a side, a
 //! count, a matrix shape or a scene), and its throughput the elements one iteration processes. A
 //! bench builds its input inside its `bench_function` closure, so a filter that skips it skips its

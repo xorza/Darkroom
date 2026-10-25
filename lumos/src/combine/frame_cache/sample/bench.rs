@@ -4,9 +4,9 @@
 
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::STACKED_LIGHTS;
 use crate::combine::reducer::combined_sample::CombinedSample;
 use crate::combine::reducer::pixel_samples::PixelSamples;
@@ -15,7 +15,7 @@ use crate::math::sum;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let frames = STACKED_LIGHTS;
-    let mut group = Kind::Atomic.group(c, "combine/sample", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "combine/sample", Scale::Micros);
     group.throughput(Throughput::Elements((BLOCK.pixel_count() * frames) as u64));
     group.bench_function(BenchmarkId::new("from_survivors", frames), |b| {
         let block = Block::of(frames);

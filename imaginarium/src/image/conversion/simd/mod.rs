@@ -35,9 +35,10 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
+use common::SimdTier;
+
 use crate::color::color_format::ColorFormat;
 use crate::color::sample::Sample;
-use crate::simd_tier::SimdTier;
 
 /// A row conversion kernel: converts one packed source row of `width` pixels
 /// into one packed destination row.

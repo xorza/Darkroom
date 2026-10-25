@@ -5,10 +5,10 @@
 use std::cell::OnceCell;
 use std::hint::black_box;
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::Field;
 use crate::registration::bench::Pair;
 use crate::registration::kd_tree::KdTree;
@@ -17,14 +17,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
     let pair = || pair.get_or_init(Pair::typical);
     let count = Field::Typical.stars();
-    let mut group = Kind::Atomic.group(c, "registration/kd_tree", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/kd_tree", Scale::Micros);
     group.throughput(Throughput::Elements(count as u64));
     group.bench_function(BenchmarkId::new("kd_tree/build", count), |b| {
         let points: Vec<DVec2> = pair().target.iter().map(|star| star.pos).collect();
         b.iter_batched(
             || points.clone(),
             KdTree::build,
-            fixture::fresh_copies(size_of_val(points.as_slice())),
+            bench::fresh_copies(size_of_val(points.as_slice())),
         );
     });
     group.bench_function(BenchmarkId::new("kd_tree/nearest", count), |b| {

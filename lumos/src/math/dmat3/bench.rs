@@ -2,16 +2,16 @@
 
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::math::dmat3::DMat3;
 
 const POINTS: usize = 4_096;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/dmat3", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/dmat3", Scale::Micros);
     group.throughput(Throughput::Elements(POINTS as u64));
     for (variant, matrix) in [
         (

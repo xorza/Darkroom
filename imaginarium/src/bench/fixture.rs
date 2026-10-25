@@ -1,105 +1,17 @@
-//! The policy every case follows: its kind and sampling, the variants an atomic case times, the
-//! backends an integration case runs on.
+//! What this crate's cases add to the shared policy of `common::bench`: their throughput and id
+//! parts, the variants an atomic case times, and the backends an integration case runs on.
 
+#[cfg(feature = "wgpu")]
+use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::iter;
-use std::time::Duration;
 
-use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode, Throughput};
+use common::SimdTier;
+use criterion::Throughput;
 
 use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
-use std::cell::OnceCell;
-
-#[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
-use crate::simd_tier::SimdTier;
-
-/// What a case times, the first part of its id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    /// One kernel on the unit dispatch hands it.
-    Atomic,
-    /// A public entry point on the standard frame.
-    Integration,
-}
-
-impl Kind {
-    /// The group `name` of this kind, sampled as `scale` says.
-    pub(crate) fn group<'a>(
-        self,
-        c: &'a mut Criterion,
-        name: &str,
-        scale: Scale,
-    ) -> BenchmarkGroup<'a, WallTime> {
-        let kind = match self {
-            Self::Atomic => "atomic",
-            Self::Integration => "integration",
-        };
-        let mut group = c.benchmark_group(format!("{kind}/{name}"));
-        scale.apply(&mut group);
-        group
-    }
-}
-
-/// How long one iteration of a case takes, which sets how criterion samples it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Scale {
-    /// A row or a few: microseconds an iteration.
-    Sample,
-    /// A tile or a frame, up to 300 ms an iteration, so fewer and longer samples.
-    Frame,
-    /// Past 300 ms an iteration: sampled flat at the fewest samples criterion takes, two
-    /// iterations each. `iteration` is the slowest case's as measured, which sets the
-    /// measurement time.
-    Set { iteration: Duration },
-}
-
-impl Scale {
-    /// The samples of a [`Scale::Set`] case: the fewest criterion takes.
-    const SET_SAMPLES: u32 = 10;
-
-    /// The iterations each sample of a [`Scale::Set`] case takes at the measured iteration.
-    /// Criterion's flat sampling warns of a sample of one iteration, which it takes wherever the
-    /// measurement time is at most the samples times the iteration: at two, only a case that
-    /// runs at twice the measured iteration or slower takes one.
-    const SET_ITERATIONS: u32 = 2;
-
-    /// Sets the sampling of the cases `group` registers from here on.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "`Scale::apply` is the one place a group's sampling is set"
-    )]
-    pub(crate) fn apply(self, group: &mut BenchmarkGroup<'_, WallTime>) {
-        match self {
-            Self::Sample => group
-                .sample_size(50)
-                .sampling_mode(SamplingMode::Auto)
-                .warm_up_time(Duration::from_millis(500))
-                .measurement_time(Duration::from_secs(1)),
-            Self::Frame => group
-                .sample_size(10)
-                .sampling_mode(SamplingMode::Auto)
-                .warm_up_time(Duration::from_secs(1))
-                .measurement_time(Duration::from_secs(3)),
-            Self::Set { iteration } => group
-                .sample_size(Self::SET_SAMPLES as usize)
-                .sampling_mode(SamplingMode::Flat)
-                .warm_up_time(Duration::from_secs(1))
-                .measurement_time(iteration * Self::SET_SAMPLES * Self::SET_ITERATIONS),
-        };
-    }
-}
-
-/// The batch for a routine that changes an input of `bytes` in place, so takes a fresh copy each
-/// iteration: as many copies as fit in 128 KiB, at least one. Criterion builds a batch's copies
-/// before it times them, so a batch that outgrows the cache times the routine on inputs memory
-/// has to bring back.
-pub(crate) const fn fresh_copies(bytes: usize) -> BatchSize {
-    let copies = (128 * 1024) / if bytes == 0 { 1 } else { bytes };
-    BatchSize::NumIterations(if copies == 0 { 1 } else { copies as u64 })
-}
 
 /// The throughput of a case over `elements` pixels that reads `element_bytes` bytes for each.
 pub(crate) const fn throughput(elements: usize, element_bytes: usize) -> Throughput {

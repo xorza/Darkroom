@@ -4,10 +4,10 @@
 
 use std::slice;
 
+use common::bench::{Kind, Scale};
 use common::{Buffer2, MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_read::frame_chunk::ChunkCopy;
 use crate::frame::admitted::Admitted;
@@ -23,7 +23,7 @@ const CHUNK_ROWS: usize = (1 << 30) / (2 * 30 * 12 * FRAME.width);
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = Kind::Atomic.group(c, "frame_store/spill/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "frame_store/spill/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // Each write takes new files, whose disk space returns as the frame drops after it.
     group.bench_function(BenchmarkId::new("write", field.name()), |b| {

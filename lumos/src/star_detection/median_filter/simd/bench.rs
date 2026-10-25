@@ -5,9 +5,9 @@
 use std::cell::OnceCell;
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::simd::Kernel;
 use crate::simd::isa_tier::IsaTier;
@@ -27,7 +27,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         [row(y - 1), row(y), row(y + 1)]
     };
     let tiers: Vec<IsaTier> = IsaTier::supported().collect();
-    let mut group = Kind::Atomic.group(c, "detection/median_filter", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/median_filter", Scale::Micros);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {

@@ -6,9 +6,9 @@
 
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{Field, STACKED_LIGHTS};
 use crate::combine::reducer::pixel_samples::{NoiseCols, PixelSamples};
 use crate::combine::reducer::sample_quality::SampleQuality;
@@ -47,7 +47,7 @@ pub(crate) fn rejections() -> [(&'static str, Rejection); 6] {
 }
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "combine/rejection", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "combine/rejection", Scale::Micros);
     for frames in [STACKED_LIGHTS, 300] {
         group.throughput(Throughput::Elements((BLOCK.pixel_count() * frames) as u64));
         for (name, rejection) in rejections() {

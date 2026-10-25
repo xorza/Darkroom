@@ -1,9 +1,9 @@
 //! The decode of a raw buffer into normalized samples and flags: what a RAW load does past
 //! LibRaw's unpack.
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{BIAS, FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -31,7 +31,7 @@ const SATURATION: f64 = 16_000.0;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = Kind::Atomic.group(c, "io/raw/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "io/raw/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // The decode of the standard frame's RGGB light from its raw buffer, masked margins included.
     group.bench_function(BenchmarkId::new("decode/rggb", field.name()), |b| {

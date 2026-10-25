@@ -10,8 +10,9 @@ use criterion::{BenchmarkId, Criterion};
 use glam::Vec2;
 
 use common::Size2us;
+use common::bench::{Kind, Scale};
 
-use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
+use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME, TILE};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 #[cfg(feature = "wgpu")]
@@ -33,7 +34,7 @@ const FILTERS: [FilterMode; 2] = [FilterMode::Nearest, FilterMode::Bilinear];
 /// reference and each tier's kernel. The kernel takes the image and fans its rows out on rayon,
 /// as dispatch hands it. Per output pixel, reading the tile.
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "transform", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "transform", Scale::Millis);
     for format in ALL_FORMATS {
         let mut tile = None;
         let mut output =
@@ -66,7 +67,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// into a caller's output; on the GPU the upload, the op and the readback. Per output pixel,
 /// reading the frame.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
-    let mut group = Kind::Integration.group(c, "transform", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "transform", Scale::Millis);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
     for format in ALL_FORMATS {
@@ -77,9 +78,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
             let transform = rotation(FRAME, filter);
             for backend in backends.all() {
                 match backend {
-                    Backend::Cpu => Scale::Frame,
+                    Backend::Cpu => Scale::Millis,
                     #[cfg(feature = "wgpu")]
-                    Backend::Gpu => Scale::Set {
+                    Backend::Gpu => Scale::Slow {
                         iteration: GPU_ITERATION,
                     },
                 }

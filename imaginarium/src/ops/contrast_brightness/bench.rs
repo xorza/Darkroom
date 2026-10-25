@@ -8,8 +8,9 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion};
 
 use common::Size2us;
+use common::bench::{self, Kind, Scale};
 
-use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
+use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ALL_FORMATS;
 #[cfg(feature = "wgpu")]
@@ -35,7 +36,7 @@ const GPU_ITERATION: Duration = Duration::from_millis(320);
 /// through the scalar reference and each tier's kernel, on a fresh copy each iteration. Per
 /// pixel, reading the row.
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "contrast_brightness", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "contrast_brightness", Scale::Micros);
     for format in ALL_FORMATS {
         let mut source = None;
         let affine = ChannelAffine::new(OP, format);
@@ -51,13 +52,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
                     b.iter_batched_ref(
                         || row.clone(),
                         |row| unsafe { kernel(black_box(row.bytes_mut()), count, affine) },
-                        fixture::fresh_copies(bytes),
+                        bench::fresh_copies(bytes),
                     );
                 } else {
                     b.iter_batched_ref(
                         || row.clone(),
                         |row| cpu::scalar_row(affine, format, black_box(row.bytes_mut())),
-                        fixture::fresh_copies(bytes),
+                        bench::fresh_copies(bytes),
                     );
                 }
             });
@@ -70,7 +71,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// CPU in place on a fresh copy each iteration; on the GPU the upload, the op and the readback.
 /// Per pixel, reading the frame.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
-    let mut group = Kind::Integration.group(c, "contrast_brightness", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "contrast_brightness", Scale::Millis);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
     for format in ALL_FORMATS {
@@ -82,9 +83,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
         ));
         for backend in backends.all() {
             match backend {
-                Backend::Cpu => Scale::Frame,
+                Backend::Cpu => Scale::Millis,
                 #[cfg(feature = "wgpu")]
-                Backend::Gpu => Scale::Set {
+                Backend::Gpu => Scale::Slow {
                     iteration: GPU_ITERATION,
                 },
             }
@@ -96,7 +97,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     Backend::Cpu => b.iter_batched_ref(
                         || frame.clone(),
                         |frame| OP.apply_cpu(black_box(frame)),
-                        fixture::fresh_copies(bytes),
+                        bench::fresh_copies(bytes),
                     ),
                     #[cfg(feature = "wgpu")]
                     Backend::Gpu => {

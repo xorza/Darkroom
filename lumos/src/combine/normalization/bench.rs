@@ -4,10 +4,10 @@
 //! `multiplicative` over frames that cover every pixel divides the medians their statistics
 //! already hold, and has no work of its own to measure.
 
+use common::bench::{Kind, Scale};
 use common::{Buffer2, CancelToken};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::slot_planes::SlotPlanes;
@@ -22,7 +22,7 @@ use crate::image::image_dimensions::ImageDimensions;
 const DITHER: [usize; 2] = [11, 7];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "combine/normalization/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "combine/normalization/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     let field = Field::Typical;
     group.bench_function(BenchmarkId::new("global", field.name()), |b| {

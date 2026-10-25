@@ -180,18 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 4. One CPU detection, one bench policy
-
-- [ ] `SimdTier` moves to `common`, with `dispatch` and `at_or_below` public
-  for imaginarium. lumos's `Avx2Fma::detect` imports it from `common`.
-  `common`'s crate doc names CPU features. Proof: its test passes in
-  `common`.
-- [ ] `common::bench` holds `Kind`, `Scale` and `fresh_copies` behind
-  `internals`, which turns on an optional `criterion`. The fixtures of
-  imaginarium and lumos keep only their own parts. The reason of the root's
-  `criterion` bans names `common::bench::Scale`. Proof: each crate's bench
-  target lists the ids it had, and runs each case once.
-
 ### 5. lumos's cycles
 
 - [ ] The calibration bundle moves to `calibration`, and the product file to
@@ -294,4 +282,11 @@ with every other edit.
   that carried a width and a height (`DimensionsError::SidePastMax` and
   `SampleCount`, `BundleError::DefectExtentOutOfRange`,
   `DrawablePreviewError::EdgeTooLong`) now take a `Size2us`.
+- Batch 4, the bench policy: `Scale`'s variants are named for the time one
+  iteration takes, `Micros`, `Millis` and `Slow { iteration }`, where they were
+  `Sample`, `Frame` and `Set`. In `common`, which knows nothing of images,
+  "frame" and "set" named nothing, and "frame" means an exposure in lumos and
+  a pass of the render loop in the editor. The proof listed each crate's bench
+  ids in the test profile: the bench profile's fat-LTO link has no measured
+  peak, which a bench build needs before it starts.
 

@@ -5,9 +5,9 @@
 use std::cell::OnceCell;
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::simd::Kernel;
 use crate::simd::isa_tier::IsaTier;
@@ -31,7 +31,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         }
     };
     let tiers: Vec<IsaTier> = IsaTier::supported().collect();
-    let mut group = Kind::Atomic.group(c, "detection/threshold_mask", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/threshold_mask", Scale::Micros);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut words = vec![0; FRAME.width.div_ceil(WORD_PIXELS)];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {

@@ -1,10 +1,10 @@
 //! The registration benches: the entry `crate::bench` runs them by, and the input they share, a
 //! typical field's star catalogue in two exposures.
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::test_rng::TestRng;
@@ -29,7 +29,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 
 fn pair(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = Kind::Integration.group(c, "register", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "register", Scale::Millis);
     group.throughput(Throughput::Elements(field.stars() as u64));
     group.bench_function(BenchmarkId::new("pair", field.name()), |b| {
         let pair = Pair::typical();

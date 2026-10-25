@@ -1,8 +1,8 @@
 //! A session's flat made into the divisor calibration applies: normalized per color and floored.
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::prepared_flat::PreparedFlat;
@@ -13,7 +13,7 @@ use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let mut group = Kind::Atomic.group(c, "calibration/prepared_flat/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "calibration/prepared_flat/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // The flat with its bias taken out, as `CalibrationMasters::from_images` prepares it.
     group.bench_function(BenchmarkId::new("prepare/rggb", "masters"), |b| {
@@ -23,7 +23,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         b.iter_batched(
             || flat.clone(),
             |flat| PreparedFlat::new(flat).unwrap(),
-            fixture::fresh_copies(size_of_val(flat.data().pixels())),
+            bench::fresh_copies(size_of_val(flat.data().pixels())),
         );
     });
 }

@@ -2,4 +2,5 @@
 - stacking frames (outer, inner, reference)
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
-- image buffer and lens image interleaved/planar formats
+- wire zips
+- simd consolidation

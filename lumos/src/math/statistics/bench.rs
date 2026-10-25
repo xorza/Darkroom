@@ -4,9 +4,10 @@
 
 use std::hint::black_box;
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::statistics;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::math::statistics::median_mad::MedianMad;
@@ -19,7 +20,7 @@ const LENGTHS: [usize; 3] = [16, 256, 4_096];
 const PLANE: usize = 24_000_000;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/statistics", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/statistics", Scale::Micros);
     for len in LENGTHS {
         group.throughput(Throughput::Elements(len as u64));
         group.bench_function(BenchmarkId::new("statistics::median_mut", len), |b| {
@@ -27,7 +28,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| statistics::median_mut(black_box(values)),
-                fixture::fresh_copies(len * size_of::<f32>()),
+                bench::fresh_copies(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("median_mad", len), |b| {
@@ -35,7 +36,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| MedianMad::of_mut(black_box(values)),
-                fixture::fresh_copies(len * size_of::<f32>()),
+                bench::fresh_copies(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("statistics::mad_with_scratch", len), |b| {
@@ -49,7 +50,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter_batched_ref(
                 || values.clone(),
                 |values| MedianMad::of_mut(black_box(values)),
-                fixture::fresh_copies(len * size_of::<f64>()),
+                bench::fresh_copies(len * size_of::<f64>()),
             );
         });
         group.bench_function(BenchmarkId::new("sigma_clipped", len), |b| {
@@ -67,7 +68,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         },
                     )
                 },
-                fixture::fresh_copies(len * size_of::<f32>()),
+                bench::fresh_copies(len * size_of::<f32>()),
             );
         });
         group.bench_function(BenchmarkId::new("spread", len), |b| {
@@ -78,7 +79,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     }
     group.finish();
 
-    let mut group = Kind::Atomic.group(c, "math/statistics/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "math/statistics/frame", Scale::Millis);
     group.throughput(Throughput::Elements(PLANE as u64));
     group.bench_function(BenchmarkId::new("plane_median/radix", PLANE), |b| {
         let plane = fixture::sky(PLANE, 3);

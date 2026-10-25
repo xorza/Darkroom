@@ -3,14 +3,13 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
 
-use common::par;
+use common::{SimdTier, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
-use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are
 /// exactly one packed row, so a kernel's pixel count is its slice length and it

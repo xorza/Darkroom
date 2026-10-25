@@ -3,17 +3,18 @@
 
 use std::hint::black_box;
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use nalgebra::DMatrix;
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::lstsq::Lstsq;
 
 /// Points and polynomial degree: 500 stars of a cubic, 10 terms; 2000 tiles of a quartic, 15.
 const SHAPES: [(usize, usize); 2] = [(500, 3), (2_000, 4)];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/lstsq", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/lstsq", Scale::Micros);
     group.throughput(Throughput::Elements(1));
     for (points, degree) in SHAPES {
         let design = design(points, degree);
@@ -22,7 +23,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter_batched(
                 || design.clone(),
                 |design| Lstsq::new(black_box(design)),
-                fixture::fresh_copies(design.len() * size_of::<f64>()),
+                bench::fresh_copies(design.len() * size_of::<f64>()),
             );
         });
         group.bench_function(BenchmarkId::new("solve", &shape), |b| {

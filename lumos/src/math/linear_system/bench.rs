@@ -3,15 +3,16 @@
 
 use std::hint::black_box;
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::linear_system::Lu;
 
 const SIZES: [usize; 3] = [6, 18, 67];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/linear_system", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/linear_system", Scale::Micros);
     group.throughput(Throughput::Elements(1));
     for n in SIZES {
         group.bench_function(BenchmarkId::new("factor_and_solve", n), |b| {
@@ -34,7 +35,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         lu.solve(black_box(rhs));
                     }
                 },
-                fixture::fresh_copies((n * n + n) * size_of::<f64>()),
+                bench::fresh_copies((n * n + n) * size_of::<f64>()),
             );
         });
     }

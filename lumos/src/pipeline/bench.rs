@@ -5,11 +5,11 @@ use std::cell::OnceCell;
 use std::path::Path;
 use std::time::Duration;
 
+use common::bench::{self, Kind, Scale};
 use common::{CancelToken, MappedFile, TempDir};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
@@ -44,7 +44,7 @@ fn prepare(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     let masters = OnceCell::new();
-    let mut group = Kind::Integration.group(c, "prepare", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "prepare", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (variant, cosmic_ray) in [
         ("light/rggb", AlignStackConfig::default().cosmic_ray),
@@ -74,7 +74,7 @@ fn prepare(c: &mut Criterion) {
                         .prepare(light, Path::new("light.fits"), &ctx)
                         .unwrap()
                 },
-                fixture::fresh_copies(size_of_val(light.data().pixels())),
+                bench::fresh_copies(size_of_val(light.data().pixels())),
             );
         });
     }
@@ -86,7 +86,7 @@ fn prepare(c: &mut Criterion) {
 /// can drop a file's pages, every page on the disk, as when the parked lights outgrow the memory.
 fn park(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = Kind::Integration.group(c, "park", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "park", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (variant, cold) in [("warp_from_map/warm", false), ("warp_from_map/cold", true)] {
         if cold && !MappedFile::EVICTS {
@@ -150,7 +150,7 @@ fn end_to_end(c: &mut Criterion) {
     let mut group = Kind::Integration.group(
         c,
         "pipeline/calibrate_align_stack",
-        Scale::Set { iteration },
+        Scale::Slow { iteration },
     );
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());

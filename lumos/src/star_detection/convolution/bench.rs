@@ -6,9 +6,9 @@
 use std::cell::OnceCell;
 
 use common::Buffer2;
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::scratch_pool::ScratchPool;
 use crate::star_detection::bench::Stages;
@@ -20,7 +20,7 @@ use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let stages = OnceCell::new();
-    let mut group = Kind::Atomic.group(c, "detection/convolution/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "detection/convolution/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (shape, axis_ratio, angle) in [("circular", 1.0, 0.0), ("elliptical", 0.7, 0.5)] {
         let id = BenchmarkId::new(format!("matched_filter/{shape}"), field.name());

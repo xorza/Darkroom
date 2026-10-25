@@ -6,8 +6,9 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion};
 
 use common::Size2us;
+use common::bench::{Kind, Scale};
 
-use crate::bench::fixture::{self, Backend, Kind, Scale, Variant};
+use crate::bench::fixture::{self, Backend, Variant};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::image::Image;
@@ -17,7 +18,7 @@ use crate::image::image_desc::ImageDesc;
 /// `atomic/convert/cpu/<variant>/<from>/<to>`: one row of the standard frame through the scalar
 /// reference and each tier's kernel. Per pixel, reading the source row.
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "convert", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "convert", Scale::Micros);
     for from in ALL_FORMATS {
         let mut source = None;
         for to in pairs_from(from) {
@@ -49,7 +50,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// `integration/convert/cpu/<from>/<to>`: `Image::convert_to` on the standard frame, the
 /// allocation of the result included. Per pixel, reading the source frame.
 pub(crate) fn integration(c: &mut Criterion) {
-    let mut group = Kind::Integration.group(c, "convert", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "convert", Scale::Millis);
     for from in ALL_FORMATS {
         let mut source = None;
         for to in pairs_from(from) {
