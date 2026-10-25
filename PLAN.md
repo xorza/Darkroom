@@ -2,9 +2,7 @@
 
 imaginarium stops being a submodule and becomes a member crate, as lumos is.
 The 2D primitives that two crates keep in copies move to `common`, and the
-crate's names and errors follow the workspace's rules. This plan holds item
-5.2 of `.notes/proposal-parallel-work.md` ("imaginarium a workspace member"),
-which is checked when batch 1 lands. Facts and counts:
+crate's names and errors follow the workspace's rules. Facts and counts:
 `docs/research/2026-10-25-imaginarium-merge.md`. When the plan lands, each
 lasting decision moves into `AGENTS.md`, `imaginarium/AGENTS.md` or the doc
 comments of the code it governs, and this file is deleted.
