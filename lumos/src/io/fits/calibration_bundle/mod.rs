@@ -300,10 +300,12 @@ fn defect_column<T>(table: &Table, name: &'static str) -> Result<Vec<T>, DefectT
 where
     Vec<T>: TryFrom<ColumnData>,
 {
-    let values = table.column(name).and_then(|col| col.raw());
-    values
+    let mut values = ColumnData::U8(Vec::new());
+    table
+        .column(name)
+        .and_then(|col| col.raw_into(&mut values))
         .ok()
-        .and_then(|values| Vec::try_from(values).ok())
+        .and_then(|()| Vec::try_from(values).ok())
         .ok_or(DefectTableError::Col { col: name })
 }
 
