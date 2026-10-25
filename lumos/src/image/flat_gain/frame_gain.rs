@@ -28,3 +28,14 @@ impl Deref for FrameGain {
         }
     }
 }
+
+impl FrameGain {
+    /// Resident RAM the gain adds to the image that carries it: the grid of a gain it holds
+    /// alone. A shared gain's owner counts it.
+    pub fn own_ram_bytes(&self) -> usize {
+        match self {
+            Self::Own(gain) => gain.ram_bytes(),
+            Self::Shared(_) => 0,
+        }
+    }
+}

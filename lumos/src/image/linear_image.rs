@@ -137,13 +137,9 @@ impl LinearImage {
     /// Resident RAM held by this image: its `f32` planes, its flag plane, and a flat gain it holds
     /// alone. A shared gain's owner counts it. Metadata is negligible against a plane.
     pub fn ram_bytes(&self) -> usize {
-        let own_gain = match &self.flat_gain {
-            Some(FrameGain::Own(gain)) => gain.ram_bytes(),
-            Some(FrameGain::Shared(_)) | None => 0,
-        };
         self.desc().byte_len()
             + self.flags.as_ref().map_or(0, |flags| flags.bytes().len())
-            + own_gain
+            + self.flat_gain.as_ref().map_or(0, FrameGain::own_ram_bytes)
     }
 
     /// The data-quality flags of the pixels; `None` when no pixel carries one.
@@ -300,6 +296,52 @@ pub(crate) struct PlanesWithFlags<'a> {
     pub(crate) flags: Option<&'a PixelFlags>,
 }
 
+/// A [`LinearImage`] taken apart: its planes and what it carries beside them, each moved, not
+/// copied.
+#[derive(Debug)]
+pub struct LinearParts {
+    pub pixels: PlanarImage,
+    pub metadata: ImageMetadata,
+    pub flags: Option<PixelFlags>,
+    pub flat_gain: Option<FrameGain>,
+}
+
+impl From<LinearImage> for LinearParts {
+    fn from(image: LinearImage) -> Self {
+        let LinearImage {
+            metadata,
+            pixels,
+            flags,
+            flat_gain,
+        } = image;
+        Self {
+            pixels,
+            metadata,
+            flags,
+            flat_gain,
+        }
+    }
+}
+
+/// The image `parts` make.
+///
+/// # Panics
+/// When the pixels have a side past [`MAX_SIDE`](crate::frame_desc::MAX_SIDE), or the flags or
+/// the flat gain cover other pixels.
+impl From<LinearParts> for LinearImage {
+    fn from(parts: LinearParts) -> Self {
+        let LinearParts {
+            pixels,
+            metadata,
+            flags,
+            flat_gain,
+        } = parts;
+        let mut image = Self::new(pixels, flags, metadata);
+        image.set_flat_gain(flat_gain);
+        image
+    }
+}
+
 impl StackableImage for LinearImage {
     fn desc(&self) -> PlanarDesc {
         self.desc()
@@ -347,9 +389,12 @@ impl StackableImage for LinearImage {
                 PlanarImage::from(plane)
             }
         };
-        let mut image = Self::new(pixels, flags, metadata);
-        image.set_flat_gain(flat_gain);
-        image
+        Self::from(LinearParts {
+            pixels,
+            metadata,
+            flags,
+            flat_gain,
+        })
     }
 
     fn flat_gain(&self) -> Option<&FrameGain> {
@@ -419,6 +464,7 @@ mod tests {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
+    use crate::image::linear_image::{LinearImage, LinearParts};
     use crate::internals::images::{mono_image, rgb_image};
     use common::Size2us;
 
@@ -438,10 +484,48 @@ mod tests {
                 .map(|_| Buffer2::new((2, 1), vec![1.5, 2.0]))
                 .collect::<ArrayVec<_, 3>>(),
         );
-        image.set_flat_gain(Some(FrameGain::Own(Box::new(gain.clone()))));
+        let own = FrameGain::Own(Box::new(gain.clone()));
+        assert_eq!(own.own_ram_bytes(), 24);
+        image.set_flat_gain(Some(own));
         assert_eq!(image.ram_bytes(), 50);
-        image.set_flat_gain(Some(FrameGain::Shared(Arc::new(gain))));
+        let shared = FrameGain::Shared(Arc::new(gain));
+        assert_eq!(shared.own_ram_bytes(), 0);
+        image.set_flat_gain(Some(shared));
         assert_eq!(image.ram_bytes(), 26);
+    }
+
+    /// Taking an image apart and putting it back moves each part: the plane keeps its allocation,
+    /// and the metadata, the flags and the gain come back as they went in.
+    #[test]
+    fn parts_round_trip_without_a_copy() {
+        let size = Size2us::new(2, 1);
+        let mut image = mono_image(size, vec![0.25, 0.5]);
+        image.metadata.header.object = Some("M31".to_owned());
+        image.set_flags(PixelFlags::from_bytes(Buffer2::new((2, 1), vec![0, 5])));
+        let gain = FlatGain::from_nodes(
+            size,
+            [Buffer2::new((2, 1), vec![1.5, 2.0])]
+                .into_iter()
+                .collect::<ArrayVec<_, 3>>(),
+        );
+        image.set_flat_gain(Some(FrameGain::Shared(Arc::new(gain))));
+        let plane = image.channel(0).pixels().as_ptr();
+
+        let parts = LinearParts::from(image);
+        assert_eq!(parts.pixels.channel(0).pixels().as_ptr(), plane);
+        let image = LinearImage::from(parts);
+        assert_eq!(image.channel(0).pixels().as_ptr(), plane);
+        assert_eq!(image.metadata.header.object.as_deref(), Some("M31"));
+        assert_eq!(image.flags().map(PixelFlags::bytes), Some(&[0, 5][..]));
+        assert!(matches!(image.flat_gain(), Some(FrameGain::Shared(_))));
+    }
+
+    #[test]
+    #[should_panic(expected = "flags for another geometry")]
+    fn parts_refuse_flags_of_another_size() {
+        let mut parts = LinearParts::from(mono_image(Size2us::new(2, 1), vec![0.25, 0.5]));
+        parts.flags = PixelFlags::from_bytes(Buffer2::new((3, 1), vec![0, 5, 0]));
+        let _ = LinearImage::from(parts);
     }
 
     #[test]

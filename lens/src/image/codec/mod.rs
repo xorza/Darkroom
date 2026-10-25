@@ -7,20 +7,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
 use imaginarium::{
-    ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, SampleType,
+    ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, PlanarImage, SampleType,
 };
-use lumos::{
-    FlatGain, FrameDescError, FrameGain, ImageMetadata, LinearImage, PixelFlags, frame_desc,
-};
+use lumos::{FlatGain, FrameDescError, FrameGain, ImageMetadata, PixelFlags, frame_desc};
 use scenarium::{CodecError, CustomValue, CustomValueCodec, TypeEntry};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
+use crate::image;
 use crate::image::{Image, Pixels};
 
 /// The version of the layout `encode` writes: a cache of another version is rebuilt rather than
 /// misread.
-const VERSION: u32 = 5;
+const VERSION: u32 = 6;
 /// Channel count and sample type, then the width, the height and the record's length as
 /// little-endian `u64`s.
 const HEADER_LEN: u64 = 2 + 8 + 8 + 8;
@@ -30,22 +29,23 @@ const PLANE_CHUNK: usize = 16 * 1024;
 #[derive(Debug)]
 struct ImageCodec;
 
-/// What an image carries beside its samples, in the layout that holds them, as bitcode.
+/// What an image carries beside its samples, and the order the samples follow in, as bitcode.
 #[derive(Debug, Serialize, Deserialize)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one per encode or decode, beside the pixels; boxing the gain would buy an allocation"
-)]
-enum ImageRecord<'a> {
-    /// The samples follow interleaved.
-    Interleaved { metadata: Cow<'a, ImageMetadata> },
-    /// The planes follow one after another as little-endian `f32`s, then the flag plane when
-    /// `flagged`.
-    Planar {
-        metadata: Cow<'a, ImageMetadata>,
-        flat_gain: Option<Cow<'a, FlatGain>>,
-        flagged: bool,
-    },
+struct ImageRecord<'a> {
+    order: SampleOrder,
+    metadata: Cow<'a, ImageMetadata>,
+    flat_gain: Option<Cow<'a, FlatGain>>,
+    /// Whether the flag plane follows the samples.
+    flagged: bool,
+}
+
+/// How the samples follow the record.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum SampleOrder {
+    /// One plane after another, as little-endian `f32`s.
+    Planar,
+    /// Interleaved, in the bytes the image holds.
+    Interleaved,
 }
 
 /// Why a cached image payload does not read back.
@@ -87,7 +87,7 @@ impl CustomValueCodec for ImageCodec {
         VERSION
     }
 
-    /// The header, the record, then the samples in the layout the record names.
+    /// The header, the record, the samples in the order the record names, then the flag plane.
     async fn encode(
         &self,
         value: &dyn CustomValue,
@@ -97,15 +97,14 @@ impl CustomValueCodec for ImageCodec {
             .as_any()
             .downcast_ref::<Image>()
             .expect("ImageCodec is only registered for the Image type");
-        let record = match &image.pixels {
-            Pixels::InterleavedCpu { metadata, .. } => ImageRecord::Interleaved {
-                metadata: Cow::Borrowed(metadata),
+        let record = ImageRecord {
+            order: match &image.pixels {
+                Pixels::Planar(_) => SampleOrder::Planar,
+                Pixels::Interleaved(_) => SampleOrder::Interleaved,
             },
-            Pixels::PlanarCpu(planar) => ImageRecord::Planar {
-                metadata: Cow::Borrowed(&planar.metadata),
-                flat_gain: planar.flat_gain().map(|gain| Cow::Borrowed(&**gain)),
-                flagged: planar.flags().is_some(),
-            },
+            metadata: Cow::Borrowed(&image.metadata),
+            flat_gain: image.flat_gain.as_ref().map(|gain| Cow::Borrowed(&**gain)),
+            flagged: image.flags.is_some(),
         };
         let record = SerdeFormat::Bitcode.serialize(&record)?;
         writer
@@ -113,16 +112,16 @@ impl CustomValueCodec for ImageCodec {
             .await?;
         writer.write_all(&record).await?;
         match &image.pixels {
-            Pixels::InterleavedCpu { image, .. } => writer.write_all(image.bytes()).await?,
-            Pixels::PlanarCpu(planar) => {
+            Pixels::Interleaved(samples) => writer.write_all(samples.bytes()).await?,
+            Pixels::Planar(planes) => {
                 let mut chunk = vec![0_u8; PLANE_CHUNK];
-                for channel in 0..planar.channel_count() {
-                    write_plane(writer, planar.channel(channel).pixels(), &mut chunk).await?;
-                }
-                if let Some(flags) = planar.flags() {
-                    writer.write_all(flags.bytes()).await?;
+                for plane in planes.planes() {
+                    write_plane(writer, plane.pixels(), &mut chunk).await?;
                 }
             }
+        }
+        if let Some(flags) = &image.flags {
+            writer.write_all(flags.bytes()).await?;
         }
         Ok(())
     }
@@ -158,10 +157,7 @@ impl CustomValueCodec for ImageCodec {
             .map_err(DecodeError::from)?;
         let pixel_count = desc.size().pixel_count();
         let pixel_len = desc.byte_len();
-        let flag_len = match record {
-            ImageRecord::Planar { flagged: true, .. } => pixel_count,
-            ImageRecord::Interleaved { .. } | ImageRecord::Planar { .. } => 0,
-        };
+        let flag_len = if record.flagged { pixel_count } else { 0 };
         let expected_len = u64::try_from(pixel_len)
             .ok()
             .zip(u64::try_from(flag_len).ok())
@@ -179,45 +175,52 @@ impl CustomValueCodec for ImageCodec {
             }
             .into());
         }
-        let image = match record {
-            ImageRecord::Interleaved { metadata } => {
+        // The record alone refuses a gain of other pixels, before the samples are read.
+        let flat_gain = match record.flat_gain {
+            Some(gain) => {
+                let gain = gain.into_owned();
+                let channels = image::plane_layout(desc.color_format()).count();
+                if !gain.covers(desc.size(), channels) {
+                    return Err(DecodeError::GainMismatch.into());
+                }
+                Some(FrameGain::Own(Box::new(gain)))
+            }
+            None => None,
+        };
+        let pixels = match record.order {
+            SampleOrder::Interleaved => {
                 let mut bytes = vec![0; pixel_len];
                 reader.read_exact(&mut bytes).await?;
-                Image {
-                    pixels: Pixels::InterleavedCpu {
-                        image: imaginarium::InterleavedImage::new_with_data(desc, bytes)
-                            .expect("the payload's length is the descriptor's"),
-                        metadata: metadata.into_owned(),
-                    },
-                }
+                Pixels::Interleaved(
+                    imaginarium::InterleavedImage::new_with_data(desc, bytes)
+                        .expect("the payload's length is the descriptor's"),
+                )
             }
-            ImageRecord::Planar {
-                metadata,
-                flat_gain,
-                flagged,
-            } => {
-                let mut planar = read_planar(reader, desc, flagged).await?;
-                if let Some(gain) = flat_gain {
-                    let gain = gain.into_owned();
-                    if !gain.covers(planar.desc().size(), planar.channel_count()) {
-                        return Err(DecodeError::GainMismatch.into());
-                    }
-                    planar.set_flat_gain(Some(FrameGain::Own(Box::new(gain))));
-                }
-                planar.metadata = metadata.into_owned();
-                Image::from(planar)
-            }
+            SampleOrder::Planar => Pixels::Planar(read_planes(reader, desc).await?),
         };
-        Ok(Arc::new(image))
+        let flags = if record.flagged {
+            let mut bytes = vec![0; pixel_count];
+            reader.read_exact(&mut bytes).await?;
+            let flags = PixelFlags::from_bytes(Buffer2::new(desc.size(), bytes))
+                .ok_or(DecodeError::EmptyFlags)?;
+            Some(flags)
+        } else {
+            None
+        };
+        Ok(Arc::new(Image {
+            pixels,
+            metadata: record.metadata.into_owned(),
+            flags,
+            flat_gain,
+        }))
     }
 }
 
-/// The planes of an image of `desc`, and its flag plane when `flagged`, read from `reader`.
-async fn read_planar(
+/// The planes of an image of `desc`, read from `reader`.
+async fn read_planes(
     reader: &mut (dyn AsyncRead + Unpin + Send),
     desc: InterleavedDesc,
-    flagged: bool,
-) -> Result<LinearImage, CodecError> {
+) -> Result<PlanarImage, CodecError> {
     let layout = match desc.color_format() {
         ColorFormat::MONO_F32 => ChannelLayout::Mono,
         ColorFormat::RGB_F32 => ChannelLayout::Rgb,
@@ -229,15 +232,7 @@ async fn read_planar(
     for _ in 0..layout.count() {
         planes.push(read_plane(reader, planar_desc.pixel_count(), &mut chunk).await?);
     }
-    let mut planar = LinearImage::from_planar_channels(planar_desc, planes);
-    if flagged {
-        let mut bytes = vec![0; planar_desc.pixel_count()];
-        reader.read_exact(&mut bytes).await?;
-        let flags = PixelFlags::from_bytes(Buffer2::new(desc.size(), bytes))
-            .ok_or(DecodeError::EmptyFlags)?;
-        planar.set_flags(Some(flags));
-    }
-    Ok(planar)
+    Ok(PlanarImage::from_planar_channels(planar_desc, planes))
 }
 
 /// The header for an image of `desc`, whose record is `record_len` bytes.
