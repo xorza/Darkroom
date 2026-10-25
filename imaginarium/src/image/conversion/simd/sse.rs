@@ -11,7 +11,7 @@ use std::arch::x86_64::{
     _mm_unpackhi_epi16, _mm_unpacklo_epi8, _mm_unpacklo_epi16, _mm_unpacklo_epi64,
 };
 
-use crate::common::luma;
+use crate::color::luma;
 use crate::image::conversion::scalar;
 use crate::image::conversion::simd::ElementRow;
 
@@ -286,7 +286,7 @@ pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], widt
 /// the product in `f64`, clamped to `[0, full_scale]` — `maxpd` returns its second operand for
 /// a NaN, so NaN goes to zero — and converted under the default round-to-nearest-even mode.
 ///
-/// [`Sample::from_unit`]: crate::common::sample::Sample::from_unit
+/// [`Sample::from_unit`]: crate::color::sample::Sample::from_unit
 #[inline]
 #[target_feature(enable = "sse2")]
 fn narrow4(values: __m128, full_scale: __m128d) -> __m128i {

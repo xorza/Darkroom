@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion};
 
 use crate::bench::fixture::{self, Backend, Kind, Scale};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
-use crate::common::color_format::ALL_FORMATS;
+use crate::color::color_format::ALL_FORMATS;
 use crate::ops::preview::Preview;
 
 /// The preview's longer side, darkroom's preview texture.

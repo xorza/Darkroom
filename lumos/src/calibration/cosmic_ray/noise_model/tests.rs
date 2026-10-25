@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::calibration::cosmic_ray::noise_model::*;
 use crate::image::cfa::cfa_type::CfaType;

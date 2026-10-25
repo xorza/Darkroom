@@ -8,12 +8,11 @@ use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use common::{CancelToken, TempDir, fs};
+use common::{Buffer2, CancelToken, TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
-use imaginarium::Buffer2;
 
 use crate::calibration::calibration_masters::MasterBuild;
 use crate::calibration::calibration_outcome::CalibrationOutcome;

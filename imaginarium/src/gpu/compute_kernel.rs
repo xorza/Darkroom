@@ -168,9 +168,9 @@ fn workgroups(invocations: u32, row_length: u32) -> [u32; 2] {
 mod tests {
     use wgpu::util::DeviceExt;
 
-    use crate::common::internals::gpu::test_gpu;
     use crate::gpu::compute_kernel::{ComputeKernel, KernelJob, OutputStart, workgroups};
     use crate::gpu::gpu_image;
+    use crate::internals::gpu::test_gpu;
 
     /// 24 MP of `RGB_F32` is 72 M words: 281 250 groups of 256, which one row of at most
     /// 65 535 cannot hold — five rows can (5 · 65 535 = 327 675).

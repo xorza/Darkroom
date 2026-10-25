@@ -1,20 +1,22 @@
 #[cfg(feature = "internals")]
 pub mod bench;
-mod common;
+mod color;
 pub mod drawing;
+mod error;
 #[cfg(feature = "wgpu")]
 mod gpu;
 mod image;
+#[cfg(test)]
+mod internals;
 mod ops;
 mod simd_tier;
 
 pub use glam::{Affine2, Vec2};
 
-pub use crate::common::color::Color;
-pub use crate::common::color_format::{ALL_FORMATS, ChannelCount, ColorFormat, SampleType};
-pub use crate::common::error::{Error, Result};
+pub use crate::color::color_format::{ALL_FORMATS, ChannelCount, ColorFormat, SampleType};
+pub use crate::drawing::color::Color;
+pub use crate::error::{Error, Result};
 
-pub use crate::common::buffer2::Buffer2;
 pub use crate::image::Image;
 pub use crate::image::file_format::{FileFormat, SUPPORTED_EXTENSIONS};
 pub use crate::image::image_desc::ImageDesc;

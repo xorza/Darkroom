@@ -1,8 +1,7 @@
 use std::slice;
 
-use common::{CancelToken, TempDir};
+use common::{Buffer2, CancelToken, TempDir};
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_read::slots::Slots;

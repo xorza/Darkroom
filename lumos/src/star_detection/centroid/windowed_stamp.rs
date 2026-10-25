@@ -1,7 +1,7 @@
 //! [`WindowedStamp`]: a stamp under a circular Gaussian window, and the moments it weighs.
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::stamp::{MAX_STAMP_SIZE, StampAt};

@@ -1,8 +1,7 @@
 //! [`masters`]: a flat and the bias its lights' offset needs, so each light a run calibrates
 //! carries the flat's gain.
 
-use common::CancelToken;
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken};
 use lumos::{
     CalibrationMasters, CalibrationSet, CfaImage, CfaPattern, CfaType, ImageMetadata, Mosaic,
     SigmaThreshold,

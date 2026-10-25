@@ -16,10 +16,11 @@
 
 use std::arch::x86_64::*;
 
+use common::par;
 use glam::{Affine2, Vec2};
 use rayon::prelude::*;
 
-use crate::common::sample::Sample;
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::Transform;
 use crate::ops::transform::cpu::packed_source::PackedSource;
@@ -217,9 +218,7 @@ pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
         inverse: transform.inverse(),
     };
 
-    output
-        .bytes_mut()
-        .par_chunks_mut(out_stride)
+    par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
         .for_each(|(y, out_row_bytes)| {
             let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);

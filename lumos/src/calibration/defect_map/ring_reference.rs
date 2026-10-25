@@ -1,7 +1,7 @@
 //! [`RingReference`]: the dark level a hot-pixel candidate is held to, from the photosites of its
 //! color around it.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::math::size2us::Size2us;

@@ -7,7 +7,7 @@
 //! in every sampled row.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::color_mesh::ColorMesh;
 use crate::calibration::defect_map::MAX_MEDIAN_SAMPLES;
@@ -143,7 +143,7 @@ const fn stratified_center(part: usize, part_count: usize, length: usize) -> usi
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::calibration::defect_map::sampling;
     use crate::image::cfa::cfa_type::CfaType;

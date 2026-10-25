@@ -1,6 +1,6 @@
 use std::array;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image_ops::ml::backend::*;
 use crate::math::size2us::Size2us;

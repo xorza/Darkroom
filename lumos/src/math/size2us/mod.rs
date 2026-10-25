@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::math::vec2us::Vec2us;
 

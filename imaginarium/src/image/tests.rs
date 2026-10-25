@@ -1,13 +1,13 @@
 use std::io::Cursor;
-use std::path::Path;
 
-use crate::common::buffer2::Buffer2;
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
-use crate::common::error::Error;
-use crate::common::internals::{create_test_image, lena};
+use crate::color::color_format::{ALL_FORMATS, ColorFormat};
+use crate::error::Error;
 use crate::image::Image;
 use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::{create_test_image, lena};
+use common::{Buffer2, par};
+use rayon::iter::ParallelIterator;
 
 #[test]
 fn lena_reads_as_packed_rgba() {
@@ -17,85 +17,50 @@ fn lena_reads_as_packed_rgba() {
     assert_eq!(img.bytes().len(), 895 * 4 * 551);
 }
 
-/// The extension picks the codec, case-insensitively; a missing or unknown one is refused
-/// before any I/O, and a known one reads the file first, so a missing file is an I/O error
-/// whatever its format.
-#[test]
-fn read_file_dispatches_on_the_extension() {
-    assert!(matches!(
-        Image::read_file("/nonexistent/file.xyz"),
-        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file.xyz")
-    ));
-    assert!(matches!(
-        Image::read_file("/nonexistent/file"),
-        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file")
-    ));
-    assert!(matches!(
-        Image::read_file("/nonexistent/does_not_exist.PNG"),
-        Err(Error::Io(_))
-    ));
-    assert!(matches!(
-        Image::read_file("/nonexistent/does_not_exist.TIF"),
-        Err(Error::Io(_))
-    ));
+/// `image` encoded as `format` and decoded back.
+fn round_trip(image: &Image, format: FileFormat) -> Result<Image, Error> {
+    let mut encoded = Cursor::new(Vec::new());
+    image.encode(&mut encoded, format)?;
+    encoded.set_position(0);
+    Image::decode(encoded, format)
 }
 
 /// TIFF stores all nine formats; each one reads back byte for byte.
 #[test]
 fn every_format_round_trips_through_tiff() {
-    let dir = tempfile::tempdir().unwrap();
     for format in ALL_FORMATS {
         let image = create_test_image(format, 17, 5, 3);
-        let path = dir.path().join(format!("{format}.tiff"));
-        image.save_file(&path).unwrap();
-        let reloaded = Image::read_file(&path).unwrap();
+        let reloaded = round_trip(&image, FileFormat::Tiff).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
-        assert_bytes_match_the_file(&image, FileFormat::Tiff, &path);
     }
-}
-
-/// `encode` writes what `save_file` puts in the file, and `decode` reads it back as `read_file`
-/// does: the file calls are the bytes calls plus the file.
-fn assert_bytes_match_the_file(image: &Image, format: FileFormat, path: &Path) {
-    let mut encoded = Cursor::new(Vec::new());
-    image.encode(&mut encoded, format).unwrap();
-    let on_disk = std::fs::read(path).unwrap();
-    assert_eq!(encoded.get_ref(), &on_disk, "{format:?} {}", image.desc());
-    let decoded = Image::decode(Cursor::new(&on_disk), format).unwrap();
-    assert_eq!(decoded.desc(), image.desc(), "{format:?}");
-    assert_eq!(decoded.bytes(), image.bytes(), "{format:?}");
 }
 
 /// PNG stores the integer formats and reads them back byte for byte; it has no float.
 #[test]
 fn integer_formats_round_trip_through_png() {
-    let dir = tempfile::tempdir().unwrap();
     for format in ALL_FORMATS {
         let image = create_test_image(format, 17, 5, 3);
-        let path = dir.path().join(format!("{format}.png"));
+        let result = round_trip(&image, FileFormat::Png);
         if format.sample_type.is_float() {
             assert!(
-                matches!(image.save_file(&path), Err(Error::UnsupportedFormat(message)) if message == format!("PNG cannot store {format}")),
+                matches!(result, Err(Error::UnsupportedFormat(message)) if message == format!("PNG cannot store {format}")),
                 "{format}"
             );
             continue;
         }
-        image.save_file(&path).unwrap();
-        let reloaded = Image::read_file(&path).unwrap();
+        let reloaded = result.unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
-        assert_bytes_match_the_file(&image, FileFormat::Png, &path);
     }
 }
 
 /// JPEG takes 8-bit grey and RGB only.
 #[test]
 fn jpeg_refuses_what_it_cannot_store() {
-    let dir = tempfile::tempdir().unwrap();
     for format in ALL_FORMATS {
         let image = create_test_image(format, 8, 8, 0);
-        let result = image.save_file(dir.path().join(format!("{format}.jpg")));
+        let result = image.encode(Cursor::new(Vec::new()), FileFormat::Jpeg);
         if format == ColorFormat::L_U8 || format == ColorFormat::RGB_U8 {
             result.unwrap();
         } else {
@@ -110,10 +75,18 @@ fn jpeg_refuses_what_it_cannot_store() {
 /// A grey-with-alpha PNG has no format of its own; it reads as RGBA with its alpha.
 #[test]
 fn grey_alpha_png_widens_to_rgba() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("la.png");
-    image::save_buffer(&path, &[10, 200, 30, 40], 2, 1, image::ColorType::La8).unwrap();
-    let reloaded = Image::read_file(&path).unwrap();
+    let mut png = Cursor::new(Vec::new());
+    image::write_buffer_with_format(
+        &mut png,
+        &[10, 200, 30, 40],
+        2,
+        1,
+        image::ColorType::La8,
+        image::ImageFormat::Png,
+    )
+    .unwrap();
+    png.set_position(0);
+    let reloaded = Image::decode(png, FileFormat::Png).unwrap();
     assert_eq!(reloaded.desc(), ImageDesc::new(2, 1, ColorFormat::RGBA_U8));
     assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
 }
@@ -205,6 +178,20 @@ fn planes_interleave_into_the_format_they_spell() {
     let [plane]: [Buffer2<u16>; 1] = grey.try_into().unwrap();
     assert_eq!(plane.pixels(), &[10, 20, 30]);
     assert_eq!(plane.pixels().as_ptr().cast::<u8>(), pointer);
+}
+
+/// Interleaving planes is parallel work, so a parallel loop's body that converts them panics, as
+/// `common::par` refuses nested work; at top level the same conversion returns the image.
+#[test]
+#[should_panic(expected = "a parallel loop's body starts no parallel work")]
+fn planes_converted_in_a_parallel_body_panic() {
+    let plane = Buffer2::new(2, 1, vec![1.0f32, 2.0]);
+    let convert = || {
+        let image = Image::from([&plane, &plane, &plane]);
+        assert_eq!(image.desc(), ImageDesc::new(2, 1, ColorFormat::RGB_F32));
+    };
+    convert();
+    par::into_iter(0..2).for_each(|_| convert());
 }
 
 #[test]

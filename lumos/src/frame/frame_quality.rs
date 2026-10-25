@@ -270,7 +270,7 @@ impl<P> FrameQuality<P> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::frame::frame_quality::FrameQuality;
 

@@ -1,6 +1,6 @@
 //! [`Perturbation`]: what a fit test adds to its rendered stamp.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::synthetic::patterns;
 

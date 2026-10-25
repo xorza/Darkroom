@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion};
 
 use crate::bench::fixture::{self, Backend, Kind, Scale, Variant};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::image::Image;
 use crate::image::conversion::{scalar, simd};
 use crate::image::image_desc::ImageDesc;

@@ -1,7 +1,7 @@
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
-use crate::common::internals::create_test_image;
+use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::create_test_image;
 use crate::ops::preview::Preview;
 
 fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {

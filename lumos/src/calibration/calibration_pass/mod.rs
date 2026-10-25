@@ -1,8 +1,7 @@
 //! [`CalibrationPass`]: the masters a frame is calibrated by, applied in one pass.
 
 use arrayvec::ArrayVec;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;

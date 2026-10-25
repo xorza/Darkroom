@@ -4,8 +4,7 @@
 use std::mem;
 use std::ops::Range;
 
-use common::{PerWorker, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::image::bg_split::BgSplit;

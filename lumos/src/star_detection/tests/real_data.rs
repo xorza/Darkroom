@@ -139,7 +139,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::star_detector::stages::detect::Candidates;
     use crate::star_detection::star_detector::stages::prepared_frame::PreparedFrame;
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     init_tracing();
 

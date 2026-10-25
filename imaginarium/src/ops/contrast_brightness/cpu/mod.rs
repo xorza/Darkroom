@@ -5,10 +5,11 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
 
+use common::par;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::contrast_brightness::ContrastBrightness;
@@ -121,10 +122,7 @@ pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut Image) {
     let affine = ChannelAffine::new(params, format);
     let stride = image.desc().row_bytes();
 
-    image
-        .bytes_mut()
-        .par_chunks_mut(stride)
-        .for_each(|row| scalar_row(affine, format, row));
+    par::chunks_mut(image.bytes_mut(), stride).for_each(|row| scalar_row(affine, format, row));
 }
 
 /// The scalar reference over one packed row of `format` in place, through
@@ -167,7 +165,7 @@ unsafe fn apply_kernel(kernel: RowKernel, params: ContrastBrightness, image: &mu
     let count = kernel_count(image.desc());
     let stride = image.desc().row_bytes();
 
-    image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
+    par::chunks_mut(image.bytes_mut(), stride).for_each(|row| {
         unsafe { kernel(row, count, affine) };
     });
 }

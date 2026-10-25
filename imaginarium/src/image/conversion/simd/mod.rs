@@ -35,8 +35,8 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
-use crate::common::color_format::ColorFormat;
-use crate::common::sample::Sample;
+use crate::color::color_format::ColorFormat;
+use crate::color::sample::Sample;
 use crate::simd_tier::SimdTier;
 
 /// A row conversion kernel: converts one packed source row of `width` pixels
@@ -124,7 +124,7 @@ pub(crate) fn tier_converter(
 /// unchanged channel count, which is per-sample and so channel-agnostic.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn element_converter(tier: SimdTier, from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
-    use crate::common::color_format::SampleType::{F32, U8, U16};
+    use crate::color::color_format::SampleType::{F32, U8, U16};
 
     if from.channel_count != to.channel_count {
         return None;

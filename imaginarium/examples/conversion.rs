@@ -1,11 +1,9 @@
-mod common;
+mod shared;
 
-use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
 use imaginarium::ColorFormat;
+use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
-    ensure_output_dir();
-
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 

@@ -12,8 +12,7 @@ use std::convert::Infallible;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use common::{CancelToken, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken, par};
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;

@@ -6,8 +6,8 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::observe::SimFrame;

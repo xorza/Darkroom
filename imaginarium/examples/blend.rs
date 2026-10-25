@@ -6,14 +6,12 @@
     )
 )]
 
-mod common;
+mod shared;
 
-use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
 use imaginarium::{Blend, BlendMode, Image};
+use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
-    ensure_output_dir();
-
     let src = load_lena_rgba_u8();
     let dst = load_lena_rgba_u8();
     print_image_info("Source", &src);

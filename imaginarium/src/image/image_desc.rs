@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::common::color_format::ColorFormat;
-use crate::common::error::{Error, Result};
+use crate::color::color_format::ColorFormat;
+use crate::error::{Error, Result};
 
 /// Image dimensions + pixel format. Pixel data is **always tightly packed**
 /// (`row_bytes == width * bytes_per_pixel`, no inter-row padding) — any row

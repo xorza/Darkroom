@@ -1,6 +1,6 @@
 //! [`MaskedPlane`]: a plane, less the pixels a mask names.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 

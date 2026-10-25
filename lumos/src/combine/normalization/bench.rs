@@ -4,9 +4,8 @@
 //! `multiplicative` over frames that cover every pixel divides the medians their statistics
 //! already hold, and has no work of its own to measure.
 
-use common::CancelToken;
+use common::{Buffer2, CancelToken};
 use criterion::{BenchmarkId, Criterion, Throughput};
-use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};

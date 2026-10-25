@@ -3,7 +3,7 @@
 use std::f32::consts::SQRT_2;
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;
@@ -187,7 +187,7 @@ fn sigma(differences: &mut [f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::mosaic::Mosaic;

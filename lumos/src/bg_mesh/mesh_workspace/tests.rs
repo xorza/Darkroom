@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::mesh_workspace::{MedianFilter, MeshParams, MeshWorkspace};
 use crate::bg_mesh::tile_stats::MAX_TILE_SAMPLES;

@@ -10,8 +10,7 @@
 use std::mem;
 use std::ops::Range;
 
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};

@@ -331,8 +331,7 @@ unsafe extern "C" fn poll_cancel(
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::CancelToken;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, CancelToken};
     use libraw_sys as sys;
 
     use crate::io::raw::error::{LibrawCode, RawError};

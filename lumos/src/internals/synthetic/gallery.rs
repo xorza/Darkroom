@@ -14,10 +14,9 @@
 use std::f32::consts::FRAC_PI_4;
 use std::path::PathBuf;
 
-use common::internals;
 use common::internals::DEBUG_OUTPUT_VAR;
+use common::{Buffer2, internals};
 use glam::{DVec2, Vec2};
-use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::artifacts::CosmicRays;

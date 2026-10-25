@@ -8,8 +8,8 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-use common::fs;
-use imaginarium::{Buffer2, ChannelCount, FileFormat, Image};
+use common::{Buffer2, fs};
+use imaginarium::{ChannelCount, FileFormat, Image};
 
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_dimensions::ImageDimensions;

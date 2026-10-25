@@ -2,12 +2,14 @@
 //! single-channel image a color is written as its luminance; every entry point panics on any
 //! other format.
 
+pub(crate) mod color;
+
 use std::ops::RangeInclusive;
 
 use glam::Vec2;
 
-use crate::common::color::Color;
-use crate::common::color_format::ColorFormat;
+use crate::color::color_format::ColorFormat;
+use crate::drawing::color::Color;
 use crate::image::Image;
 
 /// The `f32` pixels of an `L_F32` or `RGB_F32` image, with its geometry.
@@ -144,8 +146,8 @@ fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Color, thic
 mod tests {
     use glam::Vec2;
 
-    use crate::common::color::Color;
-    use crate::common::color_format::ColorFormat;
+    use crate::color::color_format::ColorFormat;
+    use crate::drawing::color::Color;
     use crate::drawing::{draw_circle, draw_cross};
     use crate::image::Image;
     use crate::image::image_desc::ImageDesc;

@@ -1,4 +1,4 @@
-use crate::common::color_format::{ALL_FORMATS, SampleType};
+use crate::color::color_format::{ALL_FORMATS, SampleType};
 use crate::image::conversion::scalar;
 use crate::image::conversion::simd::tier_converter;
 use crate::simd_tier::SimdTier;

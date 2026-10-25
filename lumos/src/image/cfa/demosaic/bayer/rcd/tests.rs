@@ -1,5 +1,4 @@
-use common::CancelToken;
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;

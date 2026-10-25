@@ -7,8 +7,7 @@ pub(crate) mod mosaic_view;
 pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
-use common::CancelToken;
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken};
 
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_pattern::CfaPattern;

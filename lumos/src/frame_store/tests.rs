@@ -3,8 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
-use common::{FileIdentity, ScratchFile, TempDir, fs};
-use imaginarium::Buffer2;
+use common::{Buffer2, FileIdentity, ScratchFile, TempDir, fs};
 
 use crate::combine::frame_read::frame_gate::FrameGate;
 use crate::decode::decoder_kind::DecoderKind;

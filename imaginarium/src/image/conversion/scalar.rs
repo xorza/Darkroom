@@ -1,8 +1,8 @@
 //! The scalar reference every conversion kernel is checked against.
 
-use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::common::luma;
-use crate::common::sample::Sample;
+use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::luma;
+use crate::color::sample::Sample;
 
 /// A storage type's Rec. 709 luminance of one RGB triple, in that type.
 pub(crate) trait Luminance: Sample {

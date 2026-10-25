@@ -2,7 +2,7 @@
 //!
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::bit_buffer2::BitBuffer2;

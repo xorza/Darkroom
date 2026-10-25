@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
 use std::ops::AddAssign;
 
+use common::par;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::preview::Preview;
@@ -107,8 +108,7 @@ fn typed<T: PreviewSample, const N: usize>(input: &Image, dst_w: usize, dst_h: u
     let mut out = Image::new_black(ImageDesc::new(dst_w, dst_h, ColorFormat::RGBA_U8))
         .expect("RGBA_U8 preview dims are valid");
 
-    out.bytes_mut()
-        .par_chunks_mut(dst_w * 4)
+    par::chunks_mut(out.bytes_mut(), dst_w * 4)
         .enumerate()
         .for_each(|(oy, out_row)| {
             // Source-row band for this output row; the `.max(+1)` guards the

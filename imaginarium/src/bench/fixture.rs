@@ -1,15 +1,14 @@
 //! The policy every case follows: its kind and sampling, the variants an atomic case times, the
-//! backends an integration case runs on, and the directory its files go to.
+//! backends an integration case runs on.
 
 use std::fmt::Debug;
-use std::path::PathBuf;
+use std::iter;
 use std::time::Duration;
-use std::{env, fs, iter, process, thread};
 
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode, Throughput};
 
-use crate::common::color_format::ColorFormat;
+use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use std::cell::OnceCell;
 
@@ -245,34 +244,5 @@ impl Backend {
     /// `rest` under this backend: `cpu/avx2`.
     pub(crate) fn case(self, rest: &str) -> String {
         format!("{}/{rest}", self.id())
-    }
-}
-
-/// A directory for the files the cases write, removed with them when dropped.
-#[derive(Debug)]
-pub(crate) struct ScratchDir {
-    path: PathBuf,
-}
-
-impl ScratchDir {
-    /// A new directory `name` under the system's temporary directory, unique to this process.
-    pub(crate) fn new(name: &str) -> Self {
-        let path = env::temp_dir().join(format!("imaginarium-bench-{}-{name}", process::id()));
-        fs::create_dir_all(&path).expect("the bench scratch directory is created");
-        Self { path }
-    }
-
-    /// The path of the file `name` in this directory.
-    pub(crate) fn file(&self, name: &str) -> PathBuf {
-        self.path.join(name)
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        let removed = fs::remove_dir_all(&self.path);
-        if !thread::panicking() {
-            removed.expect("the bench scratch directory is removed");
-        }
     }
 }

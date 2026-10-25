@@ -1,6 +1,6 @@
 //! CFA frame builders for tests: a raw plane wrapped as a [`CfaImage`] of a given pattern.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;

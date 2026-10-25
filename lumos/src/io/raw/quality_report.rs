@@ -10,7 +10,7 @@ use std::path::Path;
 
 use common::fs;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;

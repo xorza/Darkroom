@@ -13,9 +13,10 @@ use crate::star_detection::star_detection_config::extraction_config::ExtractionC
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
+use common::Buffer2;
 use glam::DVec2;
+use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
-use imaginarium::{Buffer2, Color};
 
 /// How far from a star's centre its candidate's peak pixel can lie. Noiseless, the peak is the
 /// nearest pixel, within √2/2; noise can lift a neighbour over it, but every pixel past 2 px holds

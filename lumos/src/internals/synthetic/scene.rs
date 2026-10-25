@@ -5,7 +5,7 @@
 //! [`Observation`](crate::internals::synthetic::observe::Observation) render it forward into a
 //! frame; a lumos stage runs backward and is graded against this truth.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::synthetic::bgs::{Gradient, NebulaConfig, Vignette, add_uniform_bg};
 use crate::internals::test_rng::TestRng;

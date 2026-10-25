@@ -10,7 +10,7 @@ use strum::IntoEnumIterator;
 
 use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
 use crate::bench::scene::{self, HEIGHT, WIDTH};
-use crate::common::color_format::ALL_FORMATS;
+use crate::color::color_format::ALL_FORMATS;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;

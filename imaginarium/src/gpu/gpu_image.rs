@@ -2,7 +2,7 @@ use std::{iter, result};
 
 use tokio::sync::oneshot;
 
-use crate::common::error::{Error, Result};
+use crate::error::{Error, Result};
 use crate::gpu::Gpu;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
@@ -207,13 +207,13 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use common::thread;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::thread;
 
-    use crate::common::color_format::ALL_FORMATS;
-    use crate::common::internals::create_test_image;
-    use crate::common::internals::gpu::test_gpu;
+    use crate::color::color_format::ALL_FORMATS;
     use crate::gpu::gpu_image::GpuImage;
+    use crate::internals::create_test_image;
+    use crate::internals::gpu::test_gpu;
 
     /// Every format, at a width whose packed size is not a whole number of words, comes
     /// back byte for byte — through both download paths and a buffer copy.
@@ -234,7 +234,7 @@ mod tests {
             let copy = uploaded.clone_buffer(&gpu).unwrap();
             let done = AtomicBool::new(false);
             let downloaded = thread::scope(|scope| {
-                scope.spawn(|| {
+                scope.spawn("gpu-poll", || {
                     while !done.load(Ordering::Acquire) {
                         gpu.device.poll(wgpu::PollType::Poll).unwrap();
                     }

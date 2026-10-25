@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};

@@ -11,7 +11,7 @@ use std::arch::aarch64::{
     vst1q_u16, vst3q_u8, vst4q_u8,
 };
 
-use crate::common::luma;
+use crate::color::luma;
 use crate::image::conversion::scalar;
 use crate::image::conversion::simd::ElementRow;
 
@@ -174,7 +174,7 @@ pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width
 /// the product in `f64`, clamped above, and converted by `fcvtnu`, which rounds to nearest with
 /// ties to even, saturates below at zero and takes NaN to zero.
 ///
-/// [`Sample::from_unit`]: crate::common::sample::Sample::from_unit
+/// [`Sample::from_unit`]: crate::color::sample::Sample::from_unit
 #[inline]
 #[target_feature(enable = "neon")]
 fn narrow4(values: float32x4_t, full_scale: float64x2_t) -> uint32x4_t {

@@ -1,6 +1,6 @@
 //! [`MosaicNoiseMeasure`]: a mosaic's noise, measured before its demosaic.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::mosaic::Mosaic;
@@ -93,7 +93,7 @@ fn color_medians(
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::mosaic::Mosaic;

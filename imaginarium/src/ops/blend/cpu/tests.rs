@@ -1,10 +1,10 @@
 use strum::IntoEnumIterator;
 
-use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::common::image_diff::{max_pixel_diff, pixels_equal};
-use crate::common::internals::create_test_image;
+use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::create_test_image;
+use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::blend::cpu;
 use crate::ops::blend::{Blend, BlendMode};
 

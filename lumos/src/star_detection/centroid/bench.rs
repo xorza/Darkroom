@@ -6,9 +6,9 @@
 use std::f64::consts::TAU;
 use std::hint::black_box;
 
+use common::Buffer2;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::image::masked_plane::MaskedPlane;

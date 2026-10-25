@@ -130,8 +130,7 @@ fn median6(v: &mut [f32]) -> f32 {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::par;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, par};
     use rayon::prelude::*;
 
     use crate::math::size2us::Size2us;

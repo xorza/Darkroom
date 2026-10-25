@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flag_counts::FlagCounts;

@@ -1,8 +1,7 @@
 //! [`PreparedFrame`]: a frame reduced to the planes detection and measurement read.
 
 use arrayvec::ArrayVec;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;

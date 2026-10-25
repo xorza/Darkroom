@@ -1,8 +1,8 @@
-use crate::common::color_format::ALL_FORMATS;
-use crate::common::image_diff::assert_matches_cpu;
-use crate::common::internals::create_test_image;
-use crate::common::internals::gpu::test_gpu;
+use crate::color::color_format::ALL_FORMATS;
 use crate::gpu::gpu_image::GpuImage;
+use crate::internals::create_test_image;
+use crate::internals::gpu::test_gpu;
+use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 

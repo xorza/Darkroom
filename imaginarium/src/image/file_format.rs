@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::common::error::{Error, Result};
+use crate::error::{Error, Result};
 
 /// An image file format imaginarium reads and writes, named by the file's extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,7 @@ const fn extension_count() -> usize {
 mod tests {
     use std::path::Path;
 
-    use crate::common::error::Error;
+    use crate::error::Error;
     use crate::image::file_format::{FileFormat, SUPPORTED_EXTENSIONS};
 
     #[test]

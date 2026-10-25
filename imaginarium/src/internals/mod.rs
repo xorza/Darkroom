@@ -1,5 +1,14 @@
-use crate::common::color_format::{ColorFormat, SampleType};
+//! What the crate's own tests share: test images and image comparisons.
+
+pub(crate) mod image_diff;
+
+use std::io::BufReader;
+
+use common::fs;
+
+use crate::color::color_format::{ColorFormat, SampleType};
 use crate::image::Image;
+use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 
 /// A test image with a deterministic pattern based on seed: integer formats get a byte
@@ -37,7 +46,7 @@ pub(crate) fn lena(format: ColorFormat) -> Image {
             env!("CARGO_MANIFEST_DIR"),
             "/test_resources/lena_895x551.tiff"
         );
-        Image::read_file(path).unwrap()
+        Image::decode(BufReader::new(fs::open(path).unwrap()), FileFormat::Tiff).unwrap()
     })
     .convert_to(format)
 }

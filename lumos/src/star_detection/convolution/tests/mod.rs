@@ -7,8 +7,8 @@
 
 mod matched_filter;
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::synthetic::patterns;
 use std::f32::consts::FRAC_PI_2;

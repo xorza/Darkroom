@@ -7,6 +7,7 @@
 pub(crate) mod scalar;
 pub(crate) mod simd;
 
+use common::par;
 use rayon::prelude::*;
 
 use crate::image::Image;
@@ -32,7 +33,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) {
     let from_stride = from_desc.row_bytes();
     let to_stride = to_desc.row_bytes();
     let from_bytes = from.bytes();
-    let rows = to.bytes_mut().par_chunks_mut(to_stride).enumerate();
+    let rows = par::chunks_mut(to.bytes_mut(), to_stride).enumerate();
 
     if let Some(kernel) = simd::row_converter(from_desc.color_format, to_desc.color_format) {
         rows.for_each(|(y, to_row)| {

@@ -4,7 +4,7 @@ use std::array;
 
 use glam::Vec2;
 
-use crate::common::sample::Sample;
+use crate::color::sample::Sample;
 use crate::image::Image;
 
 /// The input image a transform samples: `width × height` pixels in row-major order, each its `N`
