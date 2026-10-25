@@ -2,18 +2,23 @@
 //! per-pixel planes that let a downstream tool measure the result rather than only view it.
 
 pub(crate) mod coverage;
+pub(crate) mod fits;
 pub(crate) mod quality_planes;
 pub(crate) mod run_report;
 pub(crate) mod weight_kind;
 
 use common::par;
 use rayon::prelude::*;
+use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
+use crate::io::error::WriteError;
+use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::coverage::Coverage;
+use crate::stack_product::fits::error::ProductError;
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
 
@@ -112,6 +117,22 @@ impl PixelQuality {
 }
 
 impl StackProduct {
+    /// The product a FITS file at `path` holds, as [`Self::write_fits`] wrote it: its image,
+    /// every quality plane it holds, and its run report.
+    pub fn read_fits(path: impl AsRef<Path>, ctx: &LoadCtx) -> Result<Self, ProductError> {
+        let path = path.as_ref();
+        ctx.check_cancelled(path)?;
+        fits::load(path, ctx)
+    }
+
+    /// Write the product to `path` as one checksummed FITS file that astropy's `CCDData.read`
+    /// loads: the image as [`LinearImage::write_fits`] writes it, its `NO_DATA` pixels as `MASK`,
+    /// its inverse variance as `UNCERT`, and its coverage, weight and dispersion as `COVERAGE`,
+    /// `WEIGHT` and `DISPERSION`.
+    pub fn write_fits(&self, path: impl AsRef<Path>) -> Result<(), WriteError> {
+        fits::save(path.as_ref(), self)
+    }
+
     /// Hold every pixel of each channel that `empty(channel, idx)` names at `fill_value`, a value
     /// no frame measured, and each quality plane there at [`PixelQuality::UNMEASURED`], so no plane
     /// claims a measurement there. A plane every channel shares holds none only where no channel

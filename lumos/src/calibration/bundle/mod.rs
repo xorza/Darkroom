@@ -18,6 +18,7 @@ use fits_well::io::{HduKind, StreamReader};
 use fits_well::table::{Builder as TableBuilder, ColumnData, Table, WriteColumn};
 use fits_well::{FitsReader, FitsWriter};
 
+use crate::calibration::bundle::error::{BundleError, DefectTableError};
 use crate::calibration::calibration_component::CalibrationComponent;
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
@@ -28,7 +29,6 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::error::{ImageError, WriteError};
-use crate::io::fits::calibration_bundle::error::{BundleError, DefectTableError};
 use crate::io::fits::cfa::{self, CfaFitsHduMetadata};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
@@ -373,9 +373,9 @@ fn read_defect_dimensions(header: &Header) -> Result<Option<Size2us>, BundleErro
 
 #[cfg(test)]
 mod tests {
+    use crate::calibration::bundle::encode_defect_map;
+    use crate::calibration::bundle::error::BundleError;
     use crate::calibration::defect_map::DefectMap;
-    use crate::io::fits::calibration_bundle::encode_defect_map;
-    use crate::io::fits::calibration_bundle::error::BundleError;
     use common::Size2us;
 
     /// A sensor extent past `i64::MAX` is refused with both edges, not written as a wrapped

@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use common::{FileIdentity, fs};
 
-use crate::decode::decoder_kind::DecoderKind;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::load_ctx::LoadCtx;
 
 /// A source file as the decode cache names and keys it: the path it was read by, its canonical

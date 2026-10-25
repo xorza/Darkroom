@@ -50,7 +50,6 @@ use crate::io::fits::fits_load_config::{FitsCubeInterpretation, FitsFloatScale, 
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
-use crate::io::writer;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
@@ -465,14 +464,12 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     };
     let mosaic = |name: &str, pattern: CfaPattern| {
         let path = dir.join(format!("{name}.fits"));
-        writer::cfa_fits(
-            &make_cfa(
-                Size2us::new(4, 2),
-                vec![0.5; 8],
-                CfaType::Mosaic(Mosaic::Bayer(pattern)),
-            ),
-            &path,
+        make_cfa(
+            Size2us::new(4, 2),
+            vec![0.5; 8],
+            CfaType::Mosaic(Mosaic::Bayer(pattern)),
         )
+        .write_fits(&path)
         .unwrap();
         path
     };

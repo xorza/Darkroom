@@ -8,7 +8,7 @@ use common::{CancelToken, FileIdentity};
 use lumos::{
     CachedMaster, CalibrationMasters, CalibrationSet, CfaImage, IngestConfig, LoadCtx, MasterBuild,
     MasterBuildError, MasterCache, MasterInputs, MasterRole, NoMasterCache, ProgressCallback,
-    ProgressMonitor, SigmaThreshold, WriteError, writer,
+    ProgressMonitor, SigmaThreshold, WriteError,
 };
 use scenarium::{
     DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError, Library,
@@ -288,10 +288,12 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
         CachePlace { paths, key }: CachePlace,
         master: &CfaImage,
     ) -> Result<(), CacheError> {
-        writer::cfa_fits(master, &paths.master).map_err(|source| CacheError::WriteMaster {
-            path: paths.master.clone(),
-            source,
-        })?;
+        master
+            .write_fits(&paths.master)
+            .map_err(|source| CacheError::WriteMaster {
+                path: paths.master.clone(),
+                source,
+            })?;
         fs::publish_bytes(&paths.marker, key.as_bytes(), PublicationMode::Cache).map_err(|source| {
             CacheError::Write {
                 path: paths.marker,

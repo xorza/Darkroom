@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use lumos::{
     CalibrationMasters, CalibrationSet, MasterBuild, NoMasterCache, ProgressMonitor,
-    SigmaThreshold, StackConfig, writer,
+    SigmaThreshold, StackConfig,
 };
 
 use crate::alone::alone;
@@ -53,7 +53,7 @@ fn a_stack_stays_within_its_budget() {
             budget.assert_held(label, run.peak_bytes, report);
             if spilled == 0 {
                 let path = session.scratch().join("product.fits");
-                let save = session.measure(|| writer::product_fits(&run.value, &path).unwrap());
+                let save = session.measure(|| run.value.write_fits(&path).unwrap());
                 let chunks = 2 * (SIDE * SIDE * size_of::<f32>()) as u64;
                 assert!(
                     save.peak_bytes as u64 <= chunks + UNPLANNED_BYTES,

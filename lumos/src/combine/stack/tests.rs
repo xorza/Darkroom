@@ -50,7 +50,6 @@ use crate::internals::assertions::{assert_close, bits};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField};
 use crate::internals::test_rng::TestRng;
-use crate::io::writer;
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use crate::memory::budget::Budget;
@@ -2095,7 +2094,7 @@ fn disk_backed_stack_combines_via_mmap() {
     for (i, &v) in [10.0f32, 20.0, 30.0].iter().enumerate() {
         let image = LinearImage::from_interleaved(dims, vec![v; 16]);
         let path = temp_dir.join(format!("frame{i}.tiff"));
-        writer::raster(&image, &path).unwrap();
+        image.write_raster(&path).unwrap();
         paths.push(path);
     }
 

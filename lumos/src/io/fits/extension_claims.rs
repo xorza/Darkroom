@@ -9,9 +9,9 @@ use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata;
 
 /// The keyword that names the image HDU an extension is for: its `EXTNAME`, or [`PRIMARY`].
-pub(super) const IMAGE_KEYWORD: Keyword = Keyword::new("LUMFOR");
+pub(crate) const IMAGE_KEYWORD: Keyword = Keyword::new("LUMFOR");
 /// The name of a primary HDU without an `EXTNAME`, as astropy and fitsio name it.
-pub(super) const PRIMARY: &str = "PRIMARY";
+pub(crate) const PRIMARY: &str = "PRIMARY";
 
 /// The extensions of one kind in a file, each with the image it names, checked so that each names
 /// an image of the file no other names: one that names none would be dropped unseen.
@@ -68,7 +68,7 @@ impl ExtensionClaims {
     }
 
     /// The extension for the image at HDU `image`; `None` when it has none.
-    pub(super) fn for_image(
+    pub(crate) fn for_image(
         &self,
         hdus: &[Hdu],
         image: usize,

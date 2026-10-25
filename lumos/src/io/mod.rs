@@ -10,7 +10,6 @@ pub(crate) mod load_ctx;
 pub(crate) mod null_policy;
 pub(crate) mod raster;
 pub(crate) mod raw;
-pub mod writer;
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;

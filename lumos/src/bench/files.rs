@@ -14,7 +14,6 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::internals::fits::write_fits;
-use crate::io::writer;
 
 /// The lights of the end-to-end sets: few enough that an iteration stays near ten seconds.
 pub(crate) const LIGHTS: usize = 12;
@@ -44,10 +43,13 @@ impl Files {
     }
 
     /// [`LIGHTS`] dithered exposures of `field` as calibration leaves them, mosaics behind
-    /// `cfa_type`'s filters saved by `writer::cfa_fits`: a set to drizzle.
+    /// `cfa_type`'s filters saved by `CfaImage::write_fits`: a set to drizzle.
     pub(crate) fn calibrated_mosaics(field: Field, cfa_type: CfaType) -> Self {
         Self::write("calibrated", |path, idx| {
-            writer::cfa_fits(&field.mosaic_exposure(FRAME, cfa_type, idx), path).unwrap();
+            field
+                .mosaic_exposure(FRAME, cfa_type, idx)
+                .write_fits(path)
+                .unwrap();
         })
     }
 
@@ -177,7 +179,7 @@ mod tests {
         let calibrated =
             field.mosaic_exposure(size, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)), 1);
         let path = dir.join("calibrated.fits");
-        writer::cfa_fits(&calibrated, &path).unwrap();
+        calibrated.write_fits(&path).unwrap();
         let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
         assert_eq!(loaded.cfa_type(), calibrated.cfa_type());
         assert_eq!(loaded.data().pixels(), calibrated.data().pixels());

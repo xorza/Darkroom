@@ -437,7 +437,6 @@ mod tests {
     use crate::ingest::ingest_run::IngestRun;
     use crate::io::decoder::linear_decoder::LinearDecoder;
     use crate::io::frame_info::{DecoderBytes, FrameInfo};
-    use crate::io::writer;
 
     /// A float TIFF of `width` × 2 RGB at `level` in `dir`, which no header read answers for.
     fn tiff(dir: &Path, name: &str, width: usize, level: f32) -> PathBuf {
@@ -446,7 +445,7 @@ mod tests {
             [level; 3].map(|level| vec![level; width * 2]),
         );
         let path = dir.join(name);
-        writer::raster(&image, &path).unwrap();
+        image.write_raster(&path).unwrap();
         path
     }
 
@@ -599,7 +598,7 @@ mod tests {
             );
             image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
             let path = dir.join(format!("{level}.fits"));
-            writer::linear_fits(&image, &path).unwrap();
+            image.write_fits(&path).unwrap();
             path
         });
         let ctx = run(dir.path(), false).ctx;

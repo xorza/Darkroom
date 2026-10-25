@@ -21,7 +21,6 @@ use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullPolicy;
 use crate::io::raster;
-use crate::io::writer;
 use common::Vec2us;
 
 #[test]
@@ -164,7 +163,7 @@ fn saved_tiff_round_trips_its_samples() {
         ),
     ] {
         let output_path = dir.join(name);
-        writer::raster(&image, &output_path).unwrap();
+        image.write_raster(&output_path).unwrap();
         let loaded = LoadCtx::default().linear(&output_path).unwrap();
         assert_eq!(loaded.dimensions(), image.dimensions(), "{name}");
         for channel in 0..image.channels() {
@@ -322,7 +321,7 @@ fn save_invalid_extension() {
     );
     let output_path = dir.join("astro_save_invalid.xyz");
 
-    let result = writer::raster(&image, &output_path);
+    let result = image.write_raster(&output_path);
     assert!(matches!(result, Err(WriteError::Raster(_))), "{result:?}");
     assert!(!fs::exists(&output_path));
 }

@@ -20,7 +20,7 @@ use std::time::Instant;
 use common::{fs, internals};
 use lumos::{
     AlignStackConfig, CalibratedLights, CalibrationMasters, CalibrationSet, IngestConfig,
-    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold, writer,
+    MasterBuild, NoMasterCache, ProgressMonitor, SigmaThreshold,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -76,7 +76,11 @@ fn main() {
 
     // Save the stacked master.
     let output = internals::output_path("stacked_result.tiff");
-    writer::raster(&result.product.image, &output).expect("save stacked master");
+    result
+        .product
+        .image
+        .write_raster(&output)
+        .expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");
 
     println!(

@@ -10,9 +10,11 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::flags_extension::{FLAGS_EXTNAME, FLAGS_FORMAT, FLAGS_VERSION};
 use crate::io::fits::gain_extension::{GAIN_EXTNAME, GAIN_FORMAT, GAIN_VERSION};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
-use crate::io::fits::product::{QUALITY_FORMAT, QUALITY_VERSION};
-use crate::stack_product::weight_kind::WeightKind;
 use common::Size2us;
+
+/// The `LUMOSFMT` and `LUMOSVER` of a stack product's quality planes.
+pub(crate) const QUALITY_FORMAT: &str = "QUALPLAN";
+pub(crate) const QUALITY_VERSION: i64 = 1;
 
 /// An image extension that describes another image of its file rather than being one; it shows
 /// as its `EXTNAME`.
@@ -102,7 +104,7 @@ impl LumosExtension {
         };
         let bscale = match self {
             Self::Uncertainty => 1.0 / (scale * scale),
-            Self::Weight if image.weight_kind == Some(WeightKind::InverseVariance) => {
+            Self::Weight if image.weight_units == WeightUnits::InverseSquare => {
                 1.0 / (scale * scale)
             }
             Self::Dispersion => scale * scale,
@@ -202,9 +204,18 @@ pub(crate) struct DescribedImage {
     pub(crate) channels: usize,
     /// What a sample of the image is worth in the source's units: its domain's scale.
     pub(crate) scale: Option<f64>,
-    /// What the frame weights of a stack product's weight plane were; `None` for an image that is
-    /// no product.
-    pub(crate) weight_kind: Option<WeightKind>,
+    /// The units of the image's weight plane, which set the scaling it is written at;
+    /// [`WeightUnits::Unitless`] for an image that has none.
+    pub(crate) weight_units: WeightUnits,
+}
+
+/// The units a weight plane is in, as an image's units scale it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WeightUnits {
+    /// No units: counts or relative weights, or no weight plane at all.
+    Unitless,
+    /// The image's units to the power −2: inverse variances.
+    InverseSquare,
 }
 
 impl Display for LumosExtension {

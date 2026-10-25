@@ -6,6 +6,8 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 use common::CancelToken;
 
+use crate::calibration::bundle;
+use crate::calibration::bundle::error::BundleError;
 use crate::calibration::calibration_component::CalibrationComponent;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
 use crate::calibration::calibration_pass::{CalibrationPass, Saturation};
@@ -29,6 +31,7 @@ use crate::image::dark_comparison::DarkComparison;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::sample_domain::Pedestal;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
 
 /// The calibration a light receives: what to subtract, the flat to divide by, and the defects to
@@ -74,6 +77,24 @@ impl<P, C> Clone for MasterBuild<'_, P, C> {
 impl<P, C> Copy for MasterBuild<'_, P, C> {}
 
 impl CalibrationMasters {
+    /// The masters a bundle at `path` holds, as [`Self::write_bundle`] wrote them, without
+    /// rebuilding the prepared flat or the defect map: cancellation through `ctx` reads as
+    /// [`BundleError::Cancelled`]. The file is streamed, never read into RAM whole.
+    ///
+    /// # Errors
+    ///
+    /// [`BundleError`], one variant for each way a file can fail to be a bundle of this version.
+    pub fn read_bundle(path: impl AsRef<Path>, ctx: &LoadCtx) -> Result<Self, BundleError> {
+        bundle::load(path.as_ref(), ctx)
+    }
+
+    /// Write the masters to `path` as a versioned, checksummed multi-extension FITS bundle: the
+    /// flat prepared and the dark with its bias state, so [`Self::read_bundle`] repeats neither the
+    /// flat's preparation nor the defect detection.
+    pub fn write_bundle(&self, path: impl AsRef<Path>) -> Result<(), BundleError> {
+        bundle::save(path.as_ref(), self)
+    }
+
     /// Stack every role of the build's frames into its master under the role's preset, read as
     /// `ingest` says, and assemble the set ([`Self::from_images`]): the bias and the flat-dark
     /// first, then the flats, then the dark. Each flat loses its additive parts before the

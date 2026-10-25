@@ -27,7 +27,6 @@ use crate::internals::fits::write_fits;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
-use crate::io::writer;
 use crate::memory::budget::Budget;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -127,11 +126,9 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     // [0, 1, …, 11]: median 5.5, absolute deviations 0.5, 0.5, 1.5, 1.5, …, 5.5, 5.5 → MAD 3.0.
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let source = temp_dir.join("source.tiff");
-    writer::raster(
-        &LinearImage::from_interleaved(dims, pixels.clone()),
-        &source,
-    )
-    .unwrap();
+    LinearImage::from_interleaved(dims, pixels.clone())
+        .write_raster(&source)
+        .unwrap();
     set_mtime(&source, 1_700_000_000_000_000_100);
     let frame = SetFrame {
         source: &source,
@@ -195,11 +192,9 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     settle();
     let restored: Vec<f32> = (100..112).map(|i| i as f32).collect();
-    writer::raster(
-        &LinearImage::from_interleaved(dims, restored.clone()),
-        &source,
-    )
-    .unwrap();
+    LinearImage::from_interleaved(dims, restored.clone())
+        .write_raster(&source)
+        .unwrap();
     set_mtime(&source, 1_700_000_000_000_000_100);
     let decoded = frame.load::<LinearDecoder>(temp_dir.path()).unwrap();
     assert_eq!(
@@ -211,11 +206,9 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     let rewritten: Vec<f32> = (200..212).map(|i| i as f32).collect();
     let original_len = fs::metadata(&source).unwrap().len();
-    writer::raster(
-        &LinearImage::from_interleaved(dims, rewritten.clone()),
-        &source,
-    )
-    .unwrap();
+    LinearImage::from_interleaved(dims, rewritten.clone())
+        .write_raster(&source)
+        .unwrap();
     assert_eq!(
         fs::metadata(&source).unwrap().len(),
         original_len,
@@ -232,11 +225,9 @@ fn cache_frame_validates_a_reused_frame() {
     let temp_dir = TempDir::new("lumos_cache_frame_validates");
     let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("source.tiff");
-    writer::raster(
-        &LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32).collect()),
-        &source,
-    )
-    .unwrap();
+    LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32).collect())
+        .write_raster(&source)
+        .unwrap();
     let frame = SetFrame {
         source: &source,
         dimensions: dims,
@@ -271,11 +262,9 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
     let temp_dir = TempDir::new("lumos_cache_frame_decoders");
     let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("light.tiff");
-    writer::raster(
-        &LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32 / 16.0).collect()),
-        &source,
-    )
-    .unwrap();
+    LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32 / 16.0).collect())
+        .write_raster(&source)
+        .unwrap();
     let frame = SetFrame {
         source: &source,
         dimensions: dims,
@@ -349,7 +338,9 @@ fn a_kept_cache_is_reused_by_the_next_run() {
                         None,
                     );
                 } else {
-                    writer::raster(&LinearImage::from_interleaved(dims, pixels), &path).unwrap();
+                    LinearImage::from_interleaved(dims, pixels)
+                        .write_raster(&path)
+                        .unwrap();
                 }
                 path
             })
@@ -433,7 +424,7 @@ fn cache_frame_dimension_mismatch() {
     let image = LinearImage::from_interleaved(actual_dims, pixels);
 
     let source_path = temp_dir.join("source.tiff");
-    writer::raster(&image, &source_path).unwrap();
+    image.write_raster(&source_path).unwrap();
     let expected_dims = ImageDimensions::new((8, 6), ChannelLayout::Mono);
     let result = SetFrame {
         source: &source_path,

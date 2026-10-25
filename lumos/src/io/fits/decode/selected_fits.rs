@@ -25,7 +25,7 @@ use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension::{self, LocatedGain};
-use crate::io::fits::lumos_extension::DescribedImage;
+use crate::io::fits::lumos_extension::{DescribedImage, WeightUnits};
 use crate::io::fits::tile_parallel;
 use crate::io::fits::{cfa, linear, metadata};
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
@@ -156,7 +156,7 @@ impl SelectedFits {
             size,
             channels: plan.dimensions.channels(),
             scale: Some(plan.sample_scale.divisor),
-            weight_kind: None,
+            weight_units: WeightUnits::Unitless,
         };
         let flags_hdu = flags_extension::locate(reader.hdus(), selected.idx, &described)?;
         let gain = gain_extension::locate(reader.hdus(), selected.idx, &described)?;

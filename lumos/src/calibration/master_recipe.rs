@@ -4,9 +4,9 @@
 use std::fmt;
 
 use crate::calibration::master_role::MasterRole;
-use crate::decode::decode_pins::DECODE_VERSION;
-use crate::decode::fnv1a;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::io::decoder::decode_pins::DECODE_VERSION;
+use crate::io::decoder::fnv1a;
 
 /// What `master_snapshot` (`internals::characterization`) pins of the master stack: a bias, a dark
 /// and a flat with the bias taken from each frame, stacked from mosaic FITS frames. A change that

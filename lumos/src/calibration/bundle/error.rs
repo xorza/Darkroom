@@ -7,9 +7,9 @@ use crate::calibration::error::CalibrationError;
 use crate::calibration::master_role::MasterRole;
 use crate::io::error::{ImageError, WriteError};
 
-/// Why [`writer::calibration_bundle`](crate::writer::calibration_bundle) could not write a bundle,
-/// or [`LoadCtx::calibration_masters`](crate::LoadCtx::calibration_masters) could not read
-/// one.
+/// Why [`CalibrationMasters::write_bundle`](crate::CalibrationMasters::write_bundle) could not
+/// write a bundle, or
+/// [`CalibrationMasters::read_bundle`](crate::CalibrationMasters::read_bundle) could not read one.
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     /// The file could not be written.

@@ -180,17 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 5. lumos's cycles
-
-- [ ] The calibration bundle moves to `calibration`, and the product file to
-  `stack_product`. Each type reads and writes through its own methods;
-  `lumos::writer`, `LoadCtx::calibration_masters` and `LoadCtx::product` go.
-  Proof: the module graph of the research note, run again, has no edge from
-  `io` to `calibration` or `stack_product`; the bundle and product round-trip
-  tests pass through the methods.
-- [ ] `lumos::decode` moves into `io::decoder`. Proof: the frame-cache tests
-  pass, and the decode version is the same digest as before.
-
 ### 6. `libraw`
 
 - [ ] A workspace crate `libraw` takes `io/raw/libraw.rs`, the codec facts,
@@ -289,4 +278,18 @@ with every other edit.
   a pass of the render loop in the editor. The proof listed each crate's bench
   ids in the test profile: the bench profile's fat-LTO link has no measured
   peak, which a bench build needs before it starts.
+- Batch 5, the third edge: `io::fits::lumos_extension` named the product's
+  `WeightKind` and constants. It now holds `WeightUnits`, the units a weight
+  plane is in, which `WeightKind::units` gives; the quality-plane format tags
+  moved there from the product file; and the product's two error cases carry
+  the value they expected. So no `io` module names `stack_product`. The
+  `io::fits` items the moved files read are `pub(crate)`. The frame types'
+  write methods make `image` depend on `io`, beside `io` on `image`: a cycle
+  inside the frame layer, which a split of lumos keeps in one crate. Refused:
+  the `impl` blocks in `io`'s files, which breaks one struct per file with all
+  its impls; free functions, which `lumos::writer` was.
+- Batch 5, the product's failures: `io`'s `FitsRefusal` held five cases of the
+  product file alone. They are `ProductRefusal` beside the product file, as
+  the bundle has `BundleError`, and `StackProduct::read_fits` returns a
+  `ProductError`: a frame-layer `ImageError`, or a refusal with its path.
 

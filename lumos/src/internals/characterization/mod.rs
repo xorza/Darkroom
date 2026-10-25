@@ -25,7 +25,6 @@ use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::combine::stack_frame::StackFrame;
-use crate::decode::decode_pins::DECODE_PINS;
 use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -41,9 +40,9 @@ use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::test_rng::TestRng;
+use crate::io::decoder::decode_pins::DECODE_PINS;
 use crate::io::fits::cfa;
 use crate::io::load_ctx::LoadCtx;
-use crate::io::writer;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::resample::WarpResult;
@@ -148,7 +147,7 @@ fn decode_snapshot() {
             .map(|image| image.channel(0).pixels().to_vec()),
     );
     let tiff = scratch.join("field.tiff");
-    writer::raster(&rgb, &tiff).unwrap();
+    rgb.write_raster(&tiff).unwrap();
     let image = LoadCtx::default().linear(&tiff).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);

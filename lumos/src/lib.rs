@@ -42,7 +42,6 @@ mod bit_buffer2;
 mod calibration;
 mod combine;
 mod config_field;
-mod decode;
 mod drizzle;
 mod error;
 mod frame;
@@ -64,6 +63,7 @@ mod stack_product;
 mod star_detection;
 mod unsafe_send_ptr;
 
+pub use calibration::bundle::error::{BundleError, DefectTableError};
 pub use calibration::cosmic_ray::cosmic_ray_config::{CosmicRayConfig, NoiseEstimation};
 pub use calibration::cosmic_ray::error::CosmicRayError;
 pub use calibration::error::{
@@ -104,7 +104,6 @@ pub use image::temperature_difference::TemperatureDifference;
 pub use image::temperature_source::TemperatureSource;
 pub use image::unverified_conditions::UnverifiedConditions;
 pub use io::error::{ImageError, ScientificRefusal, WriteError};
-pub use io::fits::calibration_bundle::error::{BundleError, DefectTableError};
 pub use io::fits::error::{FitsAllocation, FitsRefusal};
 pub use io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
@@ -115,7 +114,7 @@ pub use io::load_ctx::LoadCtx;
 pub use io::null_policy::NullPolicy;
 pub use io::raw::error::{BlackLevelError, LibrawCode, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
-pub use io::writer;
+pub use stack_product::fits::error::{ProductError, ProductRefusal};
 
 pub use calibration::calibration_component::CalibrationComponent;
 pub use calibration::calibration_masters::{CalibrationMasters, MasterBuild};

@@ -6,7 +6,6 @@ use arrayvec::ArrayVec;
 use common::{Buffer2, FileIdentity, ScratchFile, TempDir, fs};
 
 use crate::combine::frame_read::frame_gate::FrameGate;
-use crate::decode::decoder_kind::DecoderKind;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::decode_cache::DecodeCache;
@@ -31,6 +30,7 @@ use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::StackableImage;
 use crate::internals::panic_message;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::fits::fits_load_config::{FitsHduSelector, FitsLoadConfig};
 use crate::io::load_ctx::LoadCtx;
 

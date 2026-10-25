@@ -17,7 +17,6 @@ use crate::io::fits::cfa::{CFA_FITS_FORMAT, CFA_FITS_VERSION};
 use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::domain_keywords::{PEDESTAL, PEDESTAL_LEVEL, SCALE_ORIGIN};
-use crate::io::fits::product::{INVERSE_VARIANCE, PRODUCT_VERSION};
 use crate::io::null_policy::NullSamples;
 use common::{Size2us, Vec2us};
 
@@ -158,29 +157,10 @@ pub enum FitsRefusal {
     LinearVersion {
         version: Option<i64>,
     },
-    /// A file read as a stack product whose primary HDU is not a Lumos linear image that states a
-    /// product version.
-    NotAProduct,
-    /// A stack product of another version than this reader's.
-    ProductVersion {
-        version: i64,
-    },
     /// A keyword a Lumos format requires, absent.
     MissingKeyword {
         keyword: String,
     },
-    /// An `UNCERT` extension whose `UTYPE` is not `InverseVariance`.
-    UncertaintyType {
-        utype: Option<String>,
-    },
-    /// A `MASK` sample, at `idx` of its channel-major space, that is not the image's `NO_DATA`
-    /// at its pixel: set where the pixel holds data, clear where it holds none, or other than 0
-    /// and 1.
-    MaskDisagrees {
-        idx: usize,
-    },
-    /// A stack product that states a uniform coverage and holds a `COVERAGE` extension too.
-    CoverageTwice,
     /// An extension of another `LUMOSFMT` or `LUMOSVER` than this reader's.
     ExtensionFormat {
         extension: LumosExtension,
@@ -410,30 +390,7 @@ impl Display for FitsRefusal {
                 "unsupported Lumos linear FITS version {}; expected {LINEAR_FITS_VERSION}",
                 Stated(version.as_ref())
             ),
-            Self::NotAProduct => {
-                write!(f, "the primary HDU is not a Lumos stack product")
-            }
-            Self::ProductVersion { version } => write!(
-                f,
-                "unsupported Lumos stack product version {version}; expected {PRODUCT_VERSION}"
-            ),
             Self::MissingKeyword { keyword } => write!(f, "the keyword {keyword} is missing"),
-            Self::UncertaintyType { utype } => write!(
-                f,
-                "{}: uncertainty type {}; expected {INVERSE_VARIANCE}",
-                LumosExtension::Uncertainty,
-                Stated(utype.as_ref())
-            ),
-            Self::MaskDisagrees { idx } => write!(
-                f,
-                "{} sample {idx} is not the image's NO_DATA at its pixel",
-                LumosExtension::Mask
-            ),
-            Self::CoverageTwice => write!(
-                f,
-                "the product states a uniform coverage and holds a {} extension",
-                LumosExtension::Coverage
-            ),
             Self::ExtensionFormat {
                 extension,
                 format,

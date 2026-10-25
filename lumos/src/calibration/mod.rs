@@ -1,6 +1,7 @@
 //! The calibration stage: the masters a session's darks, flats and biases stack into, and what
 //! they take from each light — the dark signal, the vignetting, the defects and the cosmic rays.
 
+pub(crate) mod bundle;
 pub(crate) mod calibration_component;
 pub(crate) mod calibration_masters;
 pub(crate) mod calibration_outcome;

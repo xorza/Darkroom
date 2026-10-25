@@ -2,8 +2,8 @@
 
 use common::SerdeFormat;
 
-use crate::decode::fnv1a;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::io::decoder::fnv1a;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::null_policy::NullPolicy;
 
