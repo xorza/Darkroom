@@ -6,7 +6,7 @@ use std::array;
 use common::Buffer2;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::error::{Error, Result};
+use crate::error::PlanesError;
 use crate::image::InterleavedImage;
 use crate::planar::channel_layout::ChannelLayout;
 use crate::planar::planar_desc::PlanarDesc;
@@ -173,14 +173,14 @@ impl PlanarImage {
 
 /// The `f32` format an image of `format` deinterleaves into, or why it has none: planes hold no
 /// alpha.
-fn planar_format(format: ColorFormat) -> Result<ColorFormat> {
+const fn planar_format(format: ColorFormat) -> Result<ColorFormat, PlanesError> {
     match format.channel_count {
         ChannelCount::Mono | ChannelCount::Rgb => {
             Ok(ColorFormat::new(format.channel_count, SampleType::F32))
         }
-        ChannelCount::Rgba => Err(Error::InvalidColorFormat(format!(
-            "a {format} image has an alpha channel, which planes do not hold"
-        ))),
+        ChannelCount::Rgba => Err(PlanesError::Alpha {
+            color_format: format,
+        }),
     }
 }
 
@@ -232,18 +232,18 @@ impl From<&PlanarImage> for InterleavedImage {
 /// already, which every `u8` and `u16` value survives exactly. An image with alpha is refused:
 /// [`InterleavedImage::without_alpha`] names the drop.
 impl TryFrom<&InterleavedImage> for PlanarImage {
-    type Error = Error;
+    type Error = PlanesError;
 
-    fn try_from(image: &InterleavedImage) -> Result<Self> {
-        let target = planar_format(image.desc().color_format)?;
-        if image.desc().color_format != target {
+    fn try_from(image: &InterleavedImage) -> Result<Self, PlanesError> {
+        let target = planar_format(image.desc().color_format())?;
+        if image.desc().color_format() != target {
             return Self::try_from(image.convert_to(target));
         }
         Ok(if target.channel_count == ChannelCount::Mono {
-            let [plane] = image.planes::<f32, 1>()?;
+            let [plane] = image.planes::<f32, 1>().expect("a MONO_F32 image");
             plane.into()
         } else {
-            Self::from(image.planes::<f32, 3>()?)
+            Self::from(image.planes::<f32, 3>().expect("an RGB_F32 image"))
         })
     }
 }
@@ -251,16 +251,16 @@ impl TryFrom<&InterleavedImage> for PlanarImage {
 /// The borrowing conversion, taking the image: a `MONO_F32` image keeps its allocation as its
 /// plane.
 impl TryFrom<InterleavedImage> for PlanarImage {
-    type Error = Error;
+    type Error = PlanesError;
 
-    fn try_from(image: InterleavedImage) -> Result<Self> {
-        let target = planar_format(image.desc().color_format)?;
+    fn try_from(image: InterleavedImage) -> Result<Self, PlanesError> {
+        let target = planar_format(image.desc().color_format())?;
         let image = image.convert(target);
         Ok(if target.channel_count == ChannelCount::Mono {
-            let [plane] = image.into_planes::<f32, 1>()?;
+            let [plane] = image.into_planes::<f32, 1>().expect("a MONO_F32 image");
             plane.into()
         } else {
-            Self::from(image.into_planes::<f32, 3>()?)
+            Self::from(image.into_planes::<f32, 3>().expect("an RGB_F32 image"))
         })
     }
 }

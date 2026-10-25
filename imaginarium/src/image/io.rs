@@ -11,7 +11,7 @@ use tiff::encoder::{TiffEncoder, TiffValue};
 use common::Size2us;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::error::{Error, Result};
+use crate::error::{CodecError, TiffSampleType};
 use crate::image::InterleavedImage;
 use crate::image::image_desc::InterleavedDesc;
 use crate::image::raster_format::RasterFormat;
@@ -26,7 +26,10 @@ pub(super) trait BufReadSeek: BufRead + Seek {}
 
 impl<T: BufRead + Seek> BufReadSeek for T {}
 
-pub(super) fn load(input: &mut dyn BufReadSeek, format: RasterFormat) -> Result<InterleavedImage> {
+pub(super) fn load(
+    input: &mut dyn BufReadSeek,
+    format: RasterFormat,
+) -> Result<InterleavedImage, CodecError> {
     match format {
         RasterFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png),
         RasterFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg),
@@ -38,7 +41,7 @@ pub(super) fn save(
     image: &InterleavedImage,
     format: RasterFormat,
     out: &mut dyn WriteSeek,
-) -> Result<()> {
+) -> Result<(), CodecError> {
     match format {
         RasterFormat::Png => save_png(image, out),
         RasterFormat::Jpeg => save_jpg(image, out),
@@ -49,7 +52,7 @@ pub(super) fn save(
 fn load_png_jpeg(
     input: &mut dyn BufReadSeek,
     format: image_lib::ImageFormat,
-) -> Result<InterleavedImage> {
+) -> Result<InterleavedImage, CodecError> {
     use image_lib::DynamicImage;
 
     let mut reader = image_lib::ImageReader::with_format(input, format);
@@ -57,47 +60,56 @@ fn load_png_jpeg(
     // 512 MiB would refuse a large image the machine can hold.
     reader.no_limits();
     let img = reader.decode()?;
-    let (width, height) = (img.width() as usize, img.height() as usize);
-    let desc = |format| InterleavedDesc::new(Size2us::new(width, height), format);
+    let size = Size2us::new(img.width() as usize, img.height() as usize);
+    let desc = |format| InterleavedDesc::checked(size, format);
     // Each decoded buffer is handed over whole. Mono with alpha has no format of its own here;
     // it widens to RGBA, which keeps the alpha.
     match img {
-        DynamicImage::ImageLuma8(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::MONO_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageLuma16(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::MONO_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb8(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGB_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb16(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGB_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgb32F(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGB_F32), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba8(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGBA_U8), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba16(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGBA_U16), buffer.into_raw())
-        }
-        DynamicImage::ImageRgba32F(buffer) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGBA_F32), buffer.into_raw())
-        }
-        DynamicImage::ImageLumaA8(_) => {
-            InterleavedImage::from_samples(desc(ColorFormat::RGBA_U8), img.into_rgba8().into_raw())
-        }
-        DynamicImage::ImageLumaA16(_) => InterleavedImage::from_samples(
-            desc(ColorFormat::RGBA_U16),
+        DynamicImage::ImageLuma8(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::MONO_U8)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageLuma16(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::MONO_U16)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgb8(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGB_U8)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgb16(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGB_U16)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgb32F(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGB_F32)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgba8(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGBA_U8)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgba16(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGBA_U16)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageRgba32F(buffer) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGBA_F32)?,
+            buffer.into_raw(),
+        )),
+        DynamicImage::ImageLumaA8(_) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGBA_U8)?,
+            img.into_rgba8().into_raw(),
+        )),
+        DynamicImage::ImageLumaA16(_) => Ok(InterleavedImage::from_samples(
+            desc(ColorFormat::RGBA_U16)?,
             img.into_rgba16().into_raw(),
-        ),
-        img => Err(Error::UnsupportedColorType(format!("{:?}", img.color()))),
+        )),
+        img => Err(CodecError::ImageColor(img.color())),
     }
 }
 
-fn load_tiff(input: &mut dyn BufReadSeek) -> Result<InterleavedImage> {
+fn load_tiff(input: &mut dyn BufReadSeek) -> Result<InterleavedImage, CodecError> {
     // Use unlimited to support large astrophotography images
     let limits = Limits::unlimited();
     let mut decoder = Decoder::new(input)?.with_limits(limits);
@@ -106,71 +118,55 @@ fn load_tiff(input: &mut dyn BufReadSeek) -> Result<InterleavedImage> {
         tiff::ColorType::Gray(_) => ChannelCount::Mono,
         tiff::ColorType::RGB(_) => ChannelCount::Rgb,
         tiff::ColorType::RGBA(_) => ChannelCount::Rgba,
-        color => return Err(Error::UnsupportedColorType(format!("{color:?}"))),
+        color => return Err(CodecError::TiffColor(color)),
     };
     let (width, height) = decoder.dimensions()?;
-    let desc = |sample_type| {
-        InterleavedDesc::new(
-            Size2us::new(width as usize, height as usize),
-            ColorFormat::new(channel_count, sample_type),
-        )
-    };
+    let size = Size2us::new(width as usize, height as usize);
+    let desc =
+        |sample_type| InterleavedDesc::checked(size, ColorFormat::new(channel_count, sample_type));
 
     // The decoded samples are handed over whole.
     match decoder.read_image()? {
-        DecodingResult::U8(samples) => {
-            InterleavedImage::from_samples(desc(SampleType::U8), samples)
-        }
-        DecodingResult::U16(samples) => {
-            InterleavedImage::from_samples(desc(SampleType::U16), samples)
-        }
-        DecodingResult::F32(samples) => {
-            InterleavedImage::from_samples(desc(SampleType::F32), samples)
-        }
-        result => Err(Error::UnsupportedFormat(format!(
-            "TIFF sample format not supported: {}",
-            sample_format_name(&result)
-        ))),
-    }
-}
-
-/// The sample type a TIFF decoded to, without the samples.
-const fn sample_format_name(result: &DecodingResult) -> &'static str {
-    match result {
-        DecodingResult::U8(_) => "u8",
-        DecodingResult::U16(_) => "u16",
-        DecodingResult::U32(_) => "u32",
-        DecodingResult::U64(_) => "u64",
-        DecodingResult::I8(_) => "i8",
-        DecodingResult::I16(_) => "i16",
-        DecodingResult::I32(_) => "i32",
-        DecodingResult::I64(_) => "i64",
-        DecodingResult::F16(_) => "f16",
-        DecodingResult::F32(_) => "f32",
-        DecodingResult::F64(_) => "f64",
+        DecodingResult::U8(samples) => Ok(InterleavedImage::from_samples(
+            desc(SampleType::U8)?,
+            samples,
+        )),
+        DecodingResult::U16(samples) => Ok(InterleavedImage::from_samples(
+            desc(SampleType::U16)?,
+            samples,
+        )),
+        DecodingResult::F32(samples) => Ok(InterleavedImage::from_samples(
+            desc(SampleType::F32)?,
+            samples,
+        )),
+        DecodingResult::U32(_) => Err(CodecError::TiffSamples(TiffSampleType::U32)),
+        DecodingResult::U64(_) => Err(CodecError::TiffSamples(TiffSampleType::U64)),
+        DecodingResult::I8(_) => Err(CodecError::TiffSamples(TiffSampleType::I8)),
+        DecodingResult::I16(_) => Err(CodecError::TiffSamples(TiffSampleType::I16)),
+        DecodingResult::I32(_) => Err(CodecError::TiffSamples(TiffSampleType::I32)),
+        DecodingResult::I64(_) => Err(CodecError::TiffSamples(TiffSampleType::I64)),
+        DecodingResult::F16(_) => Err(CodecError::TiffSamples(TiffSampleType::F16)),
+        DecodingResult::F64(_) => Err(CodecError::TiffSamples(TiffSampleType::F64)),
     }
 }
 
 /// The dimensions as the `u32` the encoders take.
-fn encoder_dimensions(image: &InterleavedImage) -> Result<[u32; 2]> {
+fn encoder_dimensions(image: &InterleavedImage) -> Result<[u32; 2], CodecError> {
     let desc = image.desc();
-    let fit = |extent: usize| {
-        u32::try_from(extent).map_err(|_| {
-            Error::UnsupportedFormat(format!("{desc} is larger than an image file can hold"))
-        })
-    };
-    Ok([fit(desc.size.width)?, fit(desc.size.height)?])
+    let fit = |extent: usize| u32::try_from(extent).map_err(|_| CodecError::TooLarge { desc });
+    Ok([fit(desc.size().width)?, fit(desc.size().height)?])
 }
 
-fn save_jpg(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<()> {
-    let format = image.desc().color_format;
+fn save_jpg(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<(), CodecError> {
+    let format = image.desc().color_format();
     let color_type = match format {
         ColorFormat::MONO_U8 => image_lib::ColorType::L8,
         ColorFormat::RGB_U8 => image_lib::ColorType::Rgb8,
         _ => {
-            return Err(Error::UnsupportedFormat(format!(
-                "JPEG cannot store {format}"
-            )));
+            return Err(CodecError::Unstorable {
+                format: RasterFormat::Jpeg,
+                color_format: format,
+            });
         }
     };
     let [width, height] = encoder_dimensions(image)?;
@@ -185,8 +181,8 @@ fn save_jpg(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<()>
     Ok(())
 }
 
-fn save_png(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<()> {
-    let format = image.desc().color_format;
+fn save_png(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<(), CodecError> {
+    let format = image.desc().color_format();
     let color_type = match (format.channel_count, format.sample_type) {
         (ChannelCount::Mono, SampleType::U8) => image_lib::ColorType::L8,
         (ChannelCount::Rgb, SampleType::U8) => image_lib::ColorType::Rgb8,
@@ -195,9 +191,10 @@ fn save_png(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<()>
         (ChannelCount::Rgb, SampleType::U16) => image_lib::ColorType::Rgb16,
         (ChannelCount::Rgba, SampleType::U16) => image_lib::ColorType::Rgba16,
         (_, SampleType::F32) => {
-            return Err(Error::UnsupportedFormat(format!(
-                "PNG cannot store {format}"
-            )));
+            return Err(CodecError::Unstorable {
+                format: RasterFormat::Png,
+                color_format: format,
+            });
         }
     };
     let [width, height] = encoder_dimensions(image)?;
@@ -212,8 +209,8 @@ fn save_png(image: &InterleavedImage, mut out: &mut dyn WriteSeek) -> Result<()>
     Ok(())
 }
 
-fn save_tiff(image: &InterleavedImage, out: &mut dyn WriteSeek) -> Result<()> {
-    let format = image.desc().color_format;
+fn save_tiff(image: &InterleavedImage, out: &mut dyn WriteSeek) -> Result<(), CodecError> {
+    let format = image.desc().color_format();
     match (format.channel_count, format.sample_type) {
         (ChannelCount::Mono, SampleType::U8) => write_tiff::<Gray8>(image, out),
         (ChannelCount::Mono, SampleType::U16) => write_tiff::<Gray16>(image, out),
@@ -229,7 +226,7 @@ fn save_tiff(image: &InterleavedImage, out: &mut dyn WriteSeek) -> Result<()> {
 
 /// Writes `image` as the TIFF color type `C`, whose sample type the caller matched to the
 /// image's format — so the cast of the image's own aligned storage cannot fail.
-fn write_tiff<C>(image: &InterleavedImage, out: &mut dyn WriteSeek) -> Result<()>
+fn write_tiff<C>(image: &InterleavedImage, out: &mut dyn WriteSeek) -> Result<(), CodecError>
 where
     C: ColorType,
     C::Inner: Pod,

@@ -23,8 +23,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let mut source = None;
         for to in pairs_from(from) {
             let mut row =
-                InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), to))
-                    .unwrap();
+                InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), to));
             group.throughput(fixture::throughput(FRAME.width, from.byte_len()));
             for variant in Variant::all(|tier| simd::tier_converter(tier, from, to)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.name), pair_id(from, to));

@@ -80,13 +80,9 @@ async fn load_and_save_round_trip_exact_pixels() {
 async fn blend_refuses_a_destination_of_another_size_or_format() {
     let library = image_library();
     let image = |width, format| {
-        DynamicValue::from_custom(Image::from(
-            imaginarium::InterleavedImage::new_black(imaginarium::InterleavedDesc::new(
-                Size2us::new(width, 2),
-                format,
-            ))
-            .unwrap(),
-        ))
+        DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_black(
+            imaginarium::InterleavedDesc::new(Size2us::new(width, 2), format),
+        )))
     };
     let blend = |source: DynamicValue, destination: DynamicValue| {
         let inputs = [
@@ -122,13 +118,10 @@ async fn transform_refuses_a_transform_with_no_inverse() {
     let library = image_library();
     let transform = library.by_name("Transform").unwrap();
     let run = |values: [f64; 5]| {
-        let image = DynamicValue::from_custom(Image::from(
-            imaginarium::InterleavedImage::new_black(imaginarium::InterleavedDesc::new(
-                Size2us::new(2, 2),
-                ColorFormat::MONO_U8,
-            ))
-            .unwrap(),
-        ));
+        let image =
+            DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_black(
+                imaginarium::InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_U8),
+            )));
         let inputs = [image]
             .into_iter()
             .chain(values.map(|value| ConstValue::Float(value).into()))

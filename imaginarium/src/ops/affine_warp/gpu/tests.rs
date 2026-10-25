@@ -52,7 +52,7 @@ fn gpu_matches_cpu() {
                 let mut output = GpuImage::new_empty(&gpu, desc).unwrap();
                 warp.apply_gpu(&gpu, &pipeline, &input, &mut output);
 
-                let mut expected = InterleavedImage::new_black(desc).unwrap();
+                let mut expected = InterleavedImage::new_black(desc);
                 warp.apply_cpu(&image, &mut expected);
                 assert_matches_cpu(
                     &output.to_image(&gpu).unwrap(),

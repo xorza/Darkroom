@@ -180,23 +180,18 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 9. Errors
-
-- [ ] `Error` splits into `CodecError`, `DescError`, `PlanesError` and
-  `GpuError`. Each case holds fields, not a message, and a foreign error as
-  its own type. `InterleavedDesc` and `PlanarDesc` have private fields, `new`
-  and `checked`. `InterleavedImage::new_black` returns the image.
-  `RasterFormat::from_path` returns an `Option`. lumos's `ImageError` and
-  lens's `DecodeError::InvalidImage` take the new types. Proof: a test for
-  each case that the code can return, with its fields; the descriptor tests
-  take zero sides and an overflowing size.
-
 ### 10. Layouts
 
 - [ ] lumos's `image/metadata/` and `image/flags/`. Proof: `cargo drive check`;
   no file moves without its tests.
 - [ ] imaginarium's `interleaved/`, `planar/`, `color/` and `codec/`. Proof:
   `cargo drive check`; no file moves without its tests.
+- [ ] "dimensions" leaves lumos's names. A name that holds a `PlanarDesc`
+  (`dimensions`, `dims`, `input_dims`, a field or a parameter) becomes `desc`,
+  as `PlanarDesc` and `desc()` say; one that holds a `Size2us`
+  (`DefectMap::dimensions`, `DetectionResources`, `bg_mesh`) becomes `size`.
+  Each file goes by the type of each name, not by text. Proof:
+  `cargo drive vocabulary` lists no `dimensions` in a workspace crate.
 
 ## Changed
 
@@ -308,3 +303,26 @@ with every other edit.
   `without_alpha`; lens's borrowed crossing of an image with alpha copies it
   first, as the drop takes the image. The linear decode refuses alpha, as it
   did.
+- Batch 9, a fifth error: `ByteLenError` is what `new_with_data` returns for
+  bytes of another length, which is none of a codec, a descriptor, planes or
+  the device. `from_samples`, which only the decoders call, asserts its
+  samples: the codecs promise them.
+- Batch 9, `DescError`: `TooLarge { size, pixel_byte_len }` is the overflow
+  case of both descriptors, and `PlanarDesc` now checks its byte count, where
+  batch 8 checked its samples and left `byte_len` able to overflow.
+  `InterleavedDesc::new` stays `const` and panics with a fixed message per
+  rule.
+- Batch 9, `CodecError`: a color type no format holds keeps its foreign type
+  (`image::ColorType`, `tiff::ColorType`); a TIFF sample type no format holds
+  is a `TiffSampleType`, a closed set; `RasterFormat` displays its name for
+  `Unstorable`.
+- Batch 9, the callers: lumos's `WriteError::RasterExtension` and lens's
+  `RasterFileError` take the case `from_path` no longer returns. lens's cache
+  checks its header through `InterleavedDesc::checked`: `InvalidDesc`
+  replaces `DimensionsOverflow` and `InvalidImage`. darkroom's
+  `DrawablePreviewError::Empty` went, as no descriptor is empty.
+- Batch 9, the proof: each `DescError`, `ByteLenError` and `PlanesError` case
+  and the TIFF refusals have tests with their fields; `GpuError` has none, as
+  no test can make a device fail, and neither have `ImageColor` and an
+  encoder's `TooLarge`, which need a file no encoder here writes or a
+  4-GB image.

@@ -21,7 +21,7 @@ pub(crate) fn max_pixel_diff(first: &InterleavedImage, second: &InterleavedImage
     // Pixel data is tightly packed, so the two buffers are one flat channel
     // array each — there is no per-row padding to step over.
     let (a, b) = (first.bytes(), second.bytes());
-    match first.desc().color_format.sample_type {
+    match first.desc().color_format().sample_type {
         SampleType::U8 => max_diff::<u8>(a, b),
         SampleType::U16 => max_diff::<u16>(a, b),
         SampleType::F32 => max_diff::<f32>(a, b),
@@ -50,7 +50,7 @@ where
 /// Panics unless the two images share a descriptor.
 pub(crate) fn pixels_equal(first: &InterleavedImage, second: &InterleavedImage) -> bool {
     first.desc().assert_same(second.desc(), "img1/img2");
-    if !first.desc().color_format.sample_type.is_float() {
+    if !first.desc().color_format().sample_type.is_float() {
         return first.bytes() == second.bytes();
     }
     let a: &[f32] = bytemuck::cast_slice(first.bytes());
@@ -68,7 +68,7 @@ pub(crate) fn pixels_equal(first: &InterleavedImage, second: &InterleavedImage) 
 /// and one lying within those few ULP of a tie can land one step away.
 #[cfg(feature = "wgpu")]
 pub(crate) fn assert_matches_cpu(gpu: &InterleavedImage, cpu: &InterleavedImage, label: &str) {
-    let tolerance = match cpu.desc().color_format.sample_type {
+    let tolerance = match cpu.desc().color_format().sample_type {
         SampleType::U8 => 1.0 / 255.0,
         SampleType::U16 => 1.0 / 65535.0,
         SampleType::F32 => 1e-6,

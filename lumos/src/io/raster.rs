@@ -74,29 +74,27 @@ pub(crate) fn linear(
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
     let desc = decoded.desc();
-    if desc.size.width > MAX_SIDE || desc.size.height > MAX_SIDE {
+    let size = desc.size();
+    if size.width > MAX_SIDE || size.height > MAX_SIDE {
         return Err(ImageError::scientific_rejection(
             path,
-            ScientificRefusal::RasterSideTooLong {
-                width: desc.size.width,
-                height: desc.size.height,
-            },
+            ScientificRefusal::RasterSideTooLong { size },
         ));
     }
-    if !desc.color_format.sample_type.is_float() {
+    if !desc.color_format().sample_type.is_float() {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::IntegerRaster,
         ));
     }
-    if desc.color_format.channel_count == ChannelCount::Rgba {
+    if desc.color_format().channel_count == ChannelCount::Rgba {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::AlphaChannel,
         ));
     }
 
-    let color = if desc.color_format.channel_count == ChannelCount::Mono {
+    let color = if desc.color_format().channel_count == ChannelCount::Mono {
         ColorProvenance::Monochrome
     } else {
         ColorProvenance::Unspecified
@@ -140,9 +138,9 @@ pub(crate) fn preview(
 ) -> Result<PreviewImage, ImageError> {
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
-    let alpha_dropped = decoded.desc().color_format.has_alpha();
+    let alpha_dropped = decoded.desc().color_format().has_alpha();
     let decoded = decoded.without_alpha();
-    let target = ColorFormat::new(decoded.desc().color_format.channel_count, SampleType::F32);
+    let target = ColorFormat::new(decoded.desc().color_format().channel_count, SampleType::F32);
     let metadata = ImageMetadata {
         header: ObservationHeader::default(),
         derived: DerivedFacts::builder()
@@ -167,7 +165,9 @@ pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
 
 /// Write `image` to `path` as the raster format its extension names, published durably.
 pub(crate) fn write_image(path: &Path, image: &InterleavedImage) -> Result<(), WriteError> {
-    let format = RasterFormat::from_path(path)?;
+    let format = RasterFormat::from_path(path).ok_or_else(|| WriteError::RasterExtension {
+        path: path.to_path_buf(),
+    })?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
         image.encode(&mut out, format)?;

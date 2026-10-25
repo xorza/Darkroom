@@ -37,8 +37,8 @@ pub(crate) fn print_image_info(name: &str, image: &InterleavedImage) {
     println!(
         "{}: {}x{} {}",
         name,
-        image.desc().size.width,
-        image.desc().size.height,
-        image.desc().color_format
+        image.desc().size().width,
+        image.desc().size().height,
+        image.desc().color_format()
     );
 }

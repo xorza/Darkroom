@@ -15,8 +15,6 @@ pub(crate) enum DrawablePreviewError {
     /// has nothing else to show, reports it.
     #[error("value is not an image")]
     NotAnImage,
-    #[error("image is empty")]
-    Empty,
     /// An edge longer than `u32::MAX` pixels, which no texture can hold.
     #[error("image is {size}, past the longest texture edge")]
     EdgeTooLong { size: Size2us },

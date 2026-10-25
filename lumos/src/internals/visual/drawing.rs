@@ -33,13 +33,13 @@ impl<'a> Canvas<'a> {
     fn new(image: &'a mut InterleavedImage) -> Self {
         let desc = image.desc();
         assert_eq!(
-            desc.color_format,
+            desc.color_format(),
             ColorFormat::RGB_F32,
             "drawing requires an RGB_F32 image"
         );
         Self {
             pixels: bytemuck::cast_slice_mut(image.bytes_mut()),
-            size: desc.size,
+            size: desc.size(),
         }
     }
 
@@ -160,12 +160,12 @@ mod tests {
     use crate::internals::visual::drawing::{GREEN, draw_circle, draw_cross, rgb};
 
     fn canvas(format: ColorFormat, side: usize) -> InterleavedImage {
-        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(side, side), format)).unwrap()
+        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(side, side), format))
     }
 
     /// The `(x, y)` of every pixel whose green channel was drawn.
     fn drawn(image: &InterleavedImage) -> Vec<(usize, usize)> {
-        let width = image.desc().size.width;
+        let width = image.desc().size().width;
         let pixels: &[[f32; 3]] = bytemuck::cast_slice(image.bytes());
         (0..pixels.len())
             .filter(|&idx| pixels[idx][1] != 0.0)

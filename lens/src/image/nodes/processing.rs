@@ -78,7 +78,7 @@ fn register_convert(library: &mut Library) {
                 let converted = {
                     let image = value.required_custom::<Image>();
                     format
-                        .target(image.desc().color_format)
+                        .target(image.desc().color_format())
                         .map(|target| image.interleaved().convert_to(target))
                 };
                 outputs[0] = match converted {
@@ -125,8 +125,7 @@ fn register_blend(library: &mut Library) {
                         destination.desc(),
                     ));
                 }
-                let mut output = imaginarium::InterleavedImage::new_black(source.desc())
-                    .map_err(InvokeError::external)?;
+                let mut output = imaginarium::InterleavedImage::new_black(source.desc());
                 Blend::new(mode, alpha).apply_cpu(
                     &source.interleaved(),
                     &destination.interleaved(),
@@ -177,8 +176,8 @@ fn register_transform(library: &mut Library) {
                 let image = inputs[0].required_custom::<Image>();
                 let scalar = |idx: usize| inputs[idx].required_f64() as f32;
                 let center = Vec2::new(
-                    image.desc().size.width as f32 / 2.0,
-                    image.desc().size.height as f32 / 2.0,
+                    image.desc().size().width as f32 / 2.0,
+                    image.desc().size().height as f32 / 2.0,
                 );
                 let scale = Vec2::new(scalar(1), scalar(2));
                 let warp = AffineWarp::new()
@@ -192,8 +191,7 @@ fn register_transform(library: &mut Library) {
                         (1..6).map(scalar).collect::<Vec<f32>>(),
                     ));
                 }
-                let mut output = imaginarium::InterleavedImage::new_black(image.desc())
-                    .map_err(InvokeError::external)?;
+                let mut output = imaginarium::InterleavedImage::new_black(image.desc());
                 warp.apply_cpu(&image.interleaved(), &mut output);
                 outputs[0] = DynamicValue::from_custom(Image::from(output));
                 Ok(())
@@ -258,7 +256,7 @@ mod tests {
             .map(|idx| u8::try_from(idx % 251).unwrap())
             .collect();
         let patterned_image = || {
-            let mut image = imaginarium::InterleavedImage::new_black(desc).unwrap();
+            let mut image = imaginarium::InterleavedImage::new_black(desc);
             image.bytes_mut().copy_from_slice(&pattern);
             image
         };

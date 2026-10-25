@@ -34,7 +34,7 @@ pub(crate) fn rho_opiuchi() -> LinearImage {
         .convert(ColorFormat::MONO_F32);
     LinearImage::from_interleaved(
         PlanarDesc::new(
-            (image.desc().size.width, image.desc().size.height),
+            (image.desc().size().width, image.desc().size().height),
             ChannelLayout::Mono,
         ),
         bytemuck::cast_slice(image.bytes()).to_vec(),

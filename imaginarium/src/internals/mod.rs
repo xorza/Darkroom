@@ -18,7 +18,7 @@ pub(crate) fn create_test_image(
     size: Size2us,
     seed: usize,
 ) -> InterleavedImage {
-    let mut img = InterleavedImage::new_black(InterleavedDesc::new(size, format)).unwrap();
+    let mut img = InterleavedImage::new_black(InterleavedDesc::new(size, format));
     match format.sample_type {
         SampleType::F32 => {
             let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());

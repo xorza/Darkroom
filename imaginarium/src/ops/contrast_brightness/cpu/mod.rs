@@ -104,7 +104,7 @@ fn neon_kernel(format: ColorFormat) -> RowKernel {
 /// correct too, but they measure slower: on a hybrid core CPU the small jobs are
 /// what lets work-stealing keep the efficiency cores from holding up a frame.
 pub(super) fn apply(params: ContrastBrightness, image: &mut InterleavedImage) {
-    let format = image.desc().color_format;
+    let format = image.desc().color_format();
 
     if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
         unsafe { apply_kernel(kernel, params, image) };
@@ -117,7 +117,7 @@ pub(super) fn apply(params: ContrastBrightness, image: &mut InterleavedImage) {
 /// The scalar path, one row at a time through [`scalar_row`]. Split out so the
 /// tests can reach the reference past the SIMD dispatch.
 pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut InterleavedImage) {
-    let format = image.desc().color_format;
+    let format = image.desc().color_format();
     let affine = ChannelAffine::new(params, format);
     let stride = image.desc().row_byte_len();
 
@@ -147,10 +147,10 @@ fn typed_row<T: Sample>(affine: ChannelAffine, format: ColorFormat, row: &mut [u
 /// How many items a kernel is asked to walk per row: channel values for the
 /// contiguous kernels, whole pixels for the alpha-preserving ones.
 pub(super) const fn kernel_count(desc: InterleavedDesc) -> usize {
-    if desc.color_format.has_alpha() {
-        desc.size.width
+    if desc.color_format().has_alpha() {
+        desc.size().width
     } else {
-        desc.size.width * desc.color_format.channel_count.count()
+        desc.size().width * desc.color_format().channel_count.count()
     }
 }
 
@@ -163,7 +163,7 @@ unsafe fn apply_kernel(
     params: ContrastBrightness,
     image: &mut InterleavedImage,
 ) {
-    let format = image.desc().color_format;
+    let format = image.desc().color_format();
     let affine = ChannelAffine::new(params, format);
     let count = kernel_count(image.desc());
     let stride = image.desc().row_byte_len();

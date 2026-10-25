@@ -13,6 +13,7 @@ use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, In
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
+use crate::image::nodes::error::RasterFileError;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 
@@ -25,19 +26,29 @@ pub(super) fn register(library: &mut Library) {
 }
 
 /// The image in the file at `path`, in the format its extension names.
-fn read(path: &Path) -> Result<imaginarium::InterleavedImage, imaginarium::Error> {
-    let format = RasterFormat::from_path(path)?;
-    imaginarium::InterleavedImage::decode(BufReader::new(fs::open(path)?), format)
+fn read(path: &Path) -> Result<imaginarium::InterleavedImage, RasterFileError> {
+    let format = raster_format(path)?;
+    Ok(imaginarium::InterleavedImage::decode(
+        BufReader::new(fs::open(path)?),
+        format,
+    )?)
 }
 
 /// `image` written to `path` in the format its extension names, published durably: a reader sees
 /// the old file or the new one.
-fn save(image: &imaginarium::InterleavedImage, path: &Path) -> Result<(), imaginarium::Error> {
-    let format = RasterFormat::from_path(path)?;
+fn save(image: &imaginarium::InterleavedImage, path: &Path) -> Result<(), RasterFileError> {
+    let format = raster_format(path)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
         image.encode(&mut out, format)?;
-        Ok::<_, imaginarium::Error>(out.flush()?)
+        Ok::<_, RasterFileError>(out.flush()?)
+    })
+}
+
+/// The format the extension of `path` names.
+fn raster_format(path: &Path) -> Result<RasterFormat, RasterFileError> {
+    RasterFormat::from_path(path).ok_or_else(|| RasterFileError::Extension {
+        path: path.to_path_buf(),
     })
 }
 
@@ -86,7 +97,7 @@ fn register_save(library: &mut Library) {
                     // holder and copy only when it is not.
                     let cpu_image = Image::take_interleaved(value);
                     task::spawn_blocking(move || {
-                        match format.target(cpu_image.desc().color_format) {
+                        match format.target(cpu_image.desc().color_format()) {
                             Some(target) => save(&cpu_image.convert_to(target), &path),
                             None => save(&cpu_image, &path),
                         }

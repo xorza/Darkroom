@@ -1,10 +1,9 @@
 //! [`RasterFormat`]: the image file formats imaginarium reads and writes.
 
+use std::fmt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-
-use crate::error::{Error, Result};
 
 /// An image file format imaginarium reads and writes, named by the file's extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,12 +35,22 @@ impl RasterFormat {
         })
     }
 
-    /// The format the extension of `path` names.
-    pub fn from_path(path: &Path) -> Result<Self> {
+    /// The format the extension of `path` names, in any case.
+    pub fn from_path(path: &Path) -> Option<Self> {
         path.extension()
             .and_then(|extension| extension.to_str())
             .and_then(Self::from_extension)
-            .ok_or_else(|| Error::InvalidExtension(path.to_path_buf()))
+    }
+}
+
+/// The format's own name, as `PNG`.
+impl fmt::Display for RasterFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+            Self::Tiff => "TIFF",
+        })
     }
 }
 
@@ -77,7 +86,6 @@ const fn extension_count() -> usize {
 mod tests {
     use std::path::Path;
 
-    use crate::error::Error;
     use crate::image::raster_format::{RasterFormat, SUPPORTED_EXTENSIONS};
 
     #[test]
@@ -93,17 +101,13 @@ mod tests {
         assert_eq!(RasterFormat::from_extension("fits"), None);
         assert_eq!(RasterFormat::from_extension(""), None);
         assert_eq!(
-            RasterFormat::from_path(Path::new("dir.png/frame.Tif")).unwrap(),
-            RasterFormat::Tiff
+            RasterFormat::from_path(Path::new("dir.png/frame.Tif")),
+            Some(RasterFormat::Tiff)
         );
         for path in ["frame", "frame.xyz", "png"] {
-            assert!(
-                matches!(
-                    RasterFormat::from_path(Path::new(path)),
-                    Err(Error::InvalidExtension(refused)) if refused == Path::new(path)
-                ),
-                "{path}"
-            );
+            assert_eq!(RasterFormat::from_path(Path::new(path)), None, "{path}");
         }
+        let names = RasterFormat::ALL.map(|format| format.to_string());
+        assert_eq!(names, ["PNG", "JPEG", "TIFF"]);
     }
 }

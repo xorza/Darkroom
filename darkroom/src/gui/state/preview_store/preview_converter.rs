@@ -182,7 +182,7 @@ fn card(value: DynamicValue) -> Card {
             Ok(native_size) => Thumbnail {
                 raster: rgba8_raster(&cpu, capped_target(native_size, Some(PREVIEW_TEXTURE_DIM))),
                 native_size,
-                native_format: desc.color_format,
+                native_format: desc.color_format(),
             },
             Err(error) => return Card::Failed(error),
         }

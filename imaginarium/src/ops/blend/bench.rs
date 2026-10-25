@@ -37,8 +37,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for format in ColorFormat::ALL {
         let mut layers = None;
         let mut out =
-            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), format))
-                .unwrap();
+            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), format));
         group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
         for mode in BlendMode::iter() {
             let params = Blend::new(mode, ALPHA);
@@ -111,7 +110,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     .get_or_insert_with(|| [1, 2].map(|seed| scene::sky(format, FRAME, seed)));
                 match backend {
                     Backend::Cpu => {
-                        let mut output = InterleavedImage::new_black(src.desc()).unwrap();
+                        let mut output = InterleavedImage::new_black(src.desc());
                         b.iter(|| params.apply_cpu(black_box(src), black_box(dst), &mut output));
                     }
                     #[cfg(feature = "wgpu")]

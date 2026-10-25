@@ -136,7 +136,7 @@ impl Image {
             Pixels::InterleavedCpu { image, metadata } => {
                 // The alpha drop takes the image, so one with alpha is copied first; one without
                 // converts straight from the borrow.
-                let planes = if image.desc().color_format.has_alpha() {
+                let planes = if image.desc().color_format().has_alpha() {
                     PlanarImage::try_from(image.clone().without_alpha())
                 } else {
                     PlanarImage::try_from(image)

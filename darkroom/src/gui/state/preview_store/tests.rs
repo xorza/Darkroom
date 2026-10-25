@@ -108,7 +108,6 @@ fn native_size_refuses_an_edge_no_texture_holds() {
             "{width}×{height}",
         );
     }
-    assert!(matches!(size(0, 3), Err(DrawablePreviewError::Empty)));
 }
 
 /// An image's source becomes a full-resolution texture only when a viewer

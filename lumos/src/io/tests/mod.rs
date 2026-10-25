@@ -41,9 +41,9 @@ fn convert_fits_to_imaginarium_image() {
     let image: InterleavedImage = astro.into();
 
     let desc = image.desc();
-    assert_eq!(desc.size.width, 100);
-    assert_eq!(desc.size.height, 100);
-    assert_eq!(desc.color_format, ColorFormat::MONO_F32);
+    assert_eq!(desc.size().width, 100);
+    assert_eq!(desc.size().height, 100);
+    assert_eq!(desc.color_format(), ColorFormat::MONO_F32);
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         "a raster decode stays interleaved"
     );
     let preview: InterleavedImage = LoadCtx::default().preview(&float_path).unwrap().into();
-    assert_eq!(preview.desc().color_format, ColorFormat::MONO_F32);
+    assert_eq!(preview.desc().color_format(), ColorFormat::MONO_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
         float_pixels
@@ -257,7 +257,10 @@ fn save_invalid_extension() {
     let output_path = dir.join("astro_save_invalid.xyz");
 
     let result = image.write_raster(&output_path);
-    assert!(matches!(result, Err(WriteError::Raster(_))), "{result:?}");
+    assert!(
+        matches!(&result, Err(WriteError::RasterExtension { path }) if *path == output_path),
+        "{result:?}"
+    );
     assert!(!fs::exists(&output_path));
 }
 

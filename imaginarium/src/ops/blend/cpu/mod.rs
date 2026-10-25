@@ -67,7 +67,7 @@ pub(super) fn apply(
     src.desc().assert_same(dst.desc(), "src/dst");
     src.desc().assert_same(output.desc(), "src/output");
 
-    let format = src.desc().color_format;
+    let format = src.desc().color_format();
 
     if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
         unsafe { apply_kernel(kernel, params, src, dst, output) };
@@ -85,7 +85,7 @@ fn apply_scalar(
     dst: &InterleavedImage,
     output: &mut InterleavedImage,
 ) {
-    let format = src.desc().color_format;
+    let format = src.desc().color_format();
     let stride = src.desc().row_byte_len();
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 

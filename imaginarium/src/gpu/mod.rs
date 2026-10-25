@@ -5,7 +5,7 @@ pub(crate) mod packed_layout;
 
 use std::sync::Arc;
 
-use crate::error::{Error, Result};
+use crate::error::GpuError;
 
 /// GPU context holding wgpu device and queue for compute operations.
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ impl Gpu {
     /// meets, raised to the adapter's own buffer limits: an astrophotography frame
     /// (24 MP of `RGBA_F32` is 384 MB) needs every byte of buffer the adapter allows,
     /// and asking for more than it has would fail the device outright.
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, GpuError> {
         let instance = Self::instance();
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -29,8 +29,7 @@ impl Gpu {
             compatible_surface: None,
             force_fallback_adapter: false,
             apply_limit_buckets: false,
-        }))
-        .map_err(|e| Error::Gpu(format!("failed to find suitable GPU adapter: {e}")))?;
+        }))?;
 
         let supported = adapter.limits();
         let limits = wgpu::Limits {
@@ -39,11 +38,11 @@ impl Gpu {
             ..wgpu::Limits::downlevel_defaults()
         };
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_limits: limits,
-            ..Default::default()
-        }))
-        .map_err(|e| Error::Gpu(format!("failed to create device: {e}")))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                required_limits: limits,
+                ..Default::default()
+            }))?;
 
         Ok(Self {
             device: Arc::new(device),
@@ -67,7 +66,7 @@ impl Gpu {
     }
 
     /// The largest buffer this device binds as storage — the largest image it can process.
-    pub(crate) fn max_buffer_bytes(&self) -> u64 {
+    pub(crate) fn max_buffer_byte_len(&self) -> u64 {
         let limits = self.device.limits();
         limits
             .max_buffer_size
@@ -101,9 +100,9 @@ mod tests {
             return;
         };
         assert!(
-            gpu.max_buffer_bytes() >= 128 << 20,
+            gpu.max_buffer_byte_len() >= 128 << 20,
             "{}",
-            gpu.max_buffer_bytes()
+            gpu.max_buffer_byte_len()
         );
     }
 }

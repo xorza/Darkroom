@@ -16,7 +16,7 @@ fn main() {
     let dst = load_lena_rgba_u8();
     print_image_info("Source", &src);
 
-    let mut output = InterleavedImage::new_black(src.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(src.desc());
     Blend::new(BlendMode::Screen, 0.5).apply_cpu(&src, &dst, &mut output);
     save_image(&output, "blend_cpu.png");
 
