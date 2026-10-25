@@ -98,8 +98,7 @@ pub enum FitsRefusal {
         axes: usize,
     },
     SideTooLong {
-        width: usize,
-        height: usize,
+        size: Size2us,
     },
     SampleCountOverflow {
         shape: Vec<usize>,
@@ -327,10 +326,9 @@ impl Display for FitsRefusal {
                 write!(f, "unsupported channel count (NAXIS3): {planes}")
             }
             Self::AxisCount { axes } => write!(f, "unsupported number of dimensions: {axes}"),
-            Self::SideTooLong { width, height } => write!(
-                f,
-                "FITS image {width}x{height} has a side past {MAX_SIDE} px"
-            ),
+            Self::SideTooLong { size } => {
+                write!(f, "FITS image {size} has a side past {MAX_SIDE} px")
+            }
             Self::SampleCountOverflow { shape } => {
                 write!(f, "FITS sample count overflows: {shape:?}")
             }
