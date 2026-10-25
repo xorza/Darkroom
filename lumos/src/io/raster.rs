@@ -1,5 +1,5 @@
-//! The raster formats imaginarium reads — TIFF, PNG, JPEG — decoded into a linear or a preview
-//! image, and a linear image written back as one.
+//! The raster formats imaginarium reads — TIFF, PNG, JPEG — decoded into a linear image, for
+//! science or for a preview, and a linear image written back as one.
 //!
 //! FITS and RAW have their own decoders under `fits/` and `raw/`; a raster is read through
 //! imaginarium in one call, so what is left here is what each product makes of it.
@@ -8,10 +8,8 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, fs};
-use imaginarium::{
-    ChannelCount, ColorFormat, InterleavedImage, PlanarImage, RasterFormat, SampleType,
-};
+use common::{Buffer2, Size2us, fs};
+use imaginarium::{ChannelCount, InterleavedImage, PlanarImage, RasterFormat};
 
 use crate::image::frame_desc::MAX_SIDE;
 use crate::image::linear_image::LinearImage;
@@ -23,7 +21,6 @@ use crate::image::metadata::image_provenance::{
 };
 use crate::image::metadata::observation_header::ObservationHeader;
 use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::image::preview_image::PreviewImage;
 use crate::io::error::{ImageError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullSamples;
@@ -74,13 +71,7 @@ pub(crate) fn linear(
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
     let desc = decoded.desc();
-    let size = desc.size();
-    if size.width > MAX_SIDE || size.height > MAX_SIDE {
-        return Err(ImageError::scientific_rejection(
-            path,
-            ScientificRefusal::RasterSideTooLong { size },
-        ));
-    }
+    check_side(path, desc.size())?;
     if !desc.color_format().sample_type.is_float() {
         return Err(ImageError::scientific_rejection(
             path,
@@ -129,19 +120,20 @@ pub(crate) fn linear(
     Ok(image)
 }
 
-/// The `format` raster at `path` as a preview, in `f32` and interleaved as it decoded, an alpha
-/// channel dropped.
+/// The `format` raster at `path` as a preview, in `f32` planes, an alpha channel dropped.
 pub(crate) fn preview(
     path: &Path,
     format: RasterFormat,
     ctx: &LoadCtx,
-) -> Result<PreviewImage, ImageError> {
+) -> Result<LinearImage, ImageError> {
     let decoded = read(path, format)?;
     ctx.check_cancelled(path)?;
+    check_side(path, decoded.desc().size())?;
     let alpha_dropped = decoded.desc().color_format().has_alpha();
-    let decoded = decoded.without_alpha();
-    let target = ColorFormat::new(decoded.desc().color_format().channel_count, SampleType::F32);
-    let metadata = ImageMetadata {
+    let planes =
+        PlanarImage::try_from(decoded.without_alpha()).expect("a raster without alpha has planes");
+    let mut image = LinearImage::from(planes);
+    image.metadata = ImageMetadata {
         header: ObservationHeader::default(),
         derived: DerivedFacts::builder()
             .provenance(provenance(
@@ -151,10 +143,18 @@ pub(crate) fn preview(
             ))
             .build(),
     };
-    Ok(PreviewImage::Interleaved {
-        image: decoded.convert(target),
-        metadata,
-    })
+    Ok(image)
+}
+
+/// A raster of `size` refused when a side is past [`MAX_SIDE`], the longest a frame has.
+fn check_side(path: &Path, size: Size2us) -> Result<(), ImageError> {
+    if size.width > MAX_SIDE || size.height > MAX_SIDE {
+        return Err(ImageError::RasterSideTooLong {
+            path: path.to_path_buf(),
+            size,
+        });
+    }
+    Ok(())
 }
 
 /// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF,

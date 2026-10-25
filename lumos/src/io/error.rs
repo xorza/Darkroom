@@ -40,6 +40,9 @@ pub enum ImageError {
     #[error("no decoder reads the extension of '{path}'")]
     UnsupportedFormat { path: PathBuf },
 
+    #[error("raster '{path}' is {size}, which has a side past {max} px", max = MAX_SIDE)]
+    RasterSideTooLong { path: PathBuf, size: Size2us },
+
     #[error("scientific image input '{path}' was rejected: {reason}")]
     ScientificInputRejected {
         path: PathBuf,
@@ -172,10 +175,6 @@ pub enum ScientificRefusal {
     PreviewOnlyRaster {
         format: RasterFormat,
     },
-    /// A raster with a side past [`MAX_SIDE`].
-    RasterSideTooLong {
-        size: Size2us,
-    },
     /// A TIFF of integer samples.
     IntegerRaster,
     AlphaChannel,
@@ -198,9 +197,6 @@ impl Display for ScientificRefusal {
                 "PNG and JPEG are preview-only because their transfer and color transforms are \
                  not decoded"
             ),
-            Self::RasterSideTooLong { size } => {
-                write!(f, "{size} has a side past {MAX_SIDE} px")
-            }
             Self::IntegerRaster => {
                 write!(f, "scientific raster input must be a floating-point TIFF")
             }

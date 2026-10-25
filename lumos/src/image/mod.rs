@@ -1,5 +1,5 @@
-//! What an image is: the linear image the pipeline works on, the sensor mosaic it starts from, the
-//! display preview, and what each carries beside its samples.
+//! What an image is: the linear image the pipeline works on, the sensor mosaic it starts from,
+//! and what each carries beside its samples.
 
 pub(crate) mod cfa;
 pub(crate) mod error;
@@ -10,7 +10,6 @@ pub(crate) mod intensity;
 pub(crate) mod linear_image;
 pub(crate) mod masked_plane;
 pub(crate) mod metadata;
-pub(crate) mod preview_image;
 pub(crate) mod rgb;
 pub(crate) mod stackable_image;
 

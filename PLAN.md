@@ -105,6 +105,10 @@ type whose layout is known only at run time. `PreviewImage` is deleted.
   `take_planar` of an interleaved input checks the side limit first and
   returns `InvokeError::invalid_input`. An interleaved image comes from a file
   or a node, which is not a contract that lumos's `assert_frame` can state.
+  The raster preview checks the same limit before it builds a `LinearImage`,
+  with `ImageError::RasterSideTooLong`, which the science load shares: the
+  limit is a frame's, not a refusal of science input, so it left
+  `ScientificRefusal`.
 - **`LinearImage` keeps its name.** It names what its samples are, as
   `CfaImage` does, which is a different axis from the layout names of the
   pixel types. A rename changes 116 files and no shape.
@@ -125,36 +129,7 @@ type whose layout is known only at run time. `PreviewImage` is deleted.
 
 Each batch leaves `cargo drive check` and `cargo drive test` green.
 
-### 1. A lumos decode hands back planes
-
-Files: `lumos/src/io/raster.rs`, `lumos/src/io/load_ctx.rs`,
-`lumos/src/image/preview_image.rs`, `lumos/src/image/mod.rs`,
-`lumos/src/lib.rs`, `lumos/src/io/tests/mod.rs`,
-`lumos/src/io/tests/synthetic.rs`, `lens/src/image/mod.rs`,
-`lens/src/astro/nodes/tests.rs`.
-
-- [ ] `lumos/src/io/raster.rs` `preview`: returns
-  `PreviewImage::Interleaved`, the one interleaved decode in lumos. Target:
-  `Result<LinearImage, ImageError>`, the planes of `decoded.without_alpha()`
-  (`PlanarImage::try_from` converts to `f32` and deinterleaves in one call),
-  with the metadata it builds now.
-- [ ] `lumos/src/io/load_ctx.rs` `LoadCtx::preview`: returns `LinearImage`;
-  the FITS and RAW arms return their image as it is, with no `Into`.
-- [ ] Delete `lumos/src/image/preview_image.rs`, its `mod` line, its
-  `pub use` in `lumos/src/lib.rs`, and "the display preview" in the
-  `lumos/src/image/mod.rs` module doc.
-- [ ] `lumos/src/io/tests/mod.rs:168` and `lumos/src/io/tests/synthetic.rs:926`
-  assert the `PreviewImage` arm. Target: assert the planes' exact samples; the
-  interleaved comparisons read `InterleavedImage::from(&preview)`.
-- [ ] `lens/src/image/mod.rs`: delete `From<PreviewImage> for Image`. Load
-  Astro Image (`lens/src/astro/nodes/io.rs:54`) then takes
-  `From<LinearImage>`, with no change at the call.
-- [ ] `lens/src/astro/nodes/tests.rs`
-  `load_astro_image_keeps_the_decoded_metadata` asserts that a TIFF stays
-  interleaved. Target: both files decode to planes, and each keeps its header
-  and provenance.
-
-### 2. The metadata, flags and flat gain beside the layout
+### 1. The metadata, flags and flat gain beside the layout
 
 Files: `lumos/src/image/linear_image.rs`,
 `lumos/src/image/flat_gain/frame_gain.rs`, `lumos/src/lib.rs`,
@@ -208,7 +183,7 @@ Files: `lumos/src/image/linear_image.rs`,
   flag plane follows the samples. Move the pin of `record_layout_is_pinned`
   to the new digest.
 
-### 3. Fold the decisions into the documents
+### 2. Fold the decisions into the documents
 
 Files: `AGENTS.md`, `imaginarium/AGENTS.md`, `lumos/AGENTS.md`,
 `.notes/TODO.md`, `PLAN.md`.

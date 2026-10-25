@@ -101,7 +101,6 @@ pub use image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, Scal
 pub use image::metadata::temperature_difference::TemperatureDifference;
 pub use image::metadata::temperature_source::TemperatureSource;
 pub use image::metadata::unverified_conditions::UnverifiedConditions;
-pub use image::preview_image::PreviewImage;
 pub use io::error::{ImageError, ScientificRefusal, WriteError};
 pub use io::fits::error::{FitsAllocation, FitsRefusal};
 pub use io::fits::fits_load_config::{

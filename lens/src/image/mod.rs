@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use common::Size2us;
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
-use lumos::{ImageMetadata, LinearImage, PreviewImage};
+use lumos::{ImageMetadata, LinearImage};
 use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
@@ -199,19 +199,6 @@ impl From<imaginarium::InterleavedImage> for Image {
                 metadata: ImageMetadata::default(),
             },
         }
-    }
-}
-
-/// A decode's image, in the layout it decoded to, with its metadata.
-impl From<PreviewImage> for Image {
-    fn from(preview: PreviewImage) -> Self {
-        let pixels = match preview {
-            PreviewImage::Planes(planar) => Pixels::PlanarCpu(planar),
-            PreviewImage::Interleaved { image, metadata } => {
-                Pixels::InterleavedCpu { image, metadata }
-            }
-        };
-        Self { pixels }
     }
 }
 
