@@ -6,8 +6,8 @@
 //! calibrated frame is a light as calibration leaves it: the filters' color balance and the hot
 //! pixels stay, the bias, the dark current and the vignette are gone.
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;

@@ -12,8 +12,7 @@
 
 use std::mem;
 
-use common::{Introspect, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, Introspect, par};
 use rayon::prelude::*;
 
 use crate::config_field::ConfigField;

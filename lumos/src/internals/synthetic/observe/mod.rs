@@ -7,8 +7,8 @@
 //! the bias and the read noise like any other at readout. A noiseless [`Camera::ideal`] collapses
 //! this to the clean image, so the *same* code path produces both the stimulus and its truth.
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;

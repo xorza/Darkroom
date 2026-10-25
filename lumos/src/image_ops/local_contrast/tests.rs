@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::intensity::Intensity;
 use crate::image_ops::local_contrast::{

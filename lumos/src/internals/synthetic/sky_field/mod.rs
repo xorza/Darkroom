@@ -13,8 +13,8 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 /// The sky a field is drawn on.
 #[derive(Debug, Clone, Copy)]

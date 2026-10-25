@@ -2,7 +2,7 @@
 //!
 //! Provides utilities to create `BgEstimate` instances for benchmarks and tests.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
 use crate::math::size2us::Size2us;

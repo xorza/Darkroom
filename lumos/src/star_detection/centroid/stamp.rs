@@ -7,8 +7,8 @@
 //! implies.
 
 use arrayvec::ArrayVec;
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::math::lm_controller::LmFit;
 use crate::math::vec2us::Vec2us;

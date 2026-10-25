@@ -1,6 +1,6 @@
 //! [`DetectionPlane`]: the plane detection thresholds and deblends, with the noise measured on it.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;

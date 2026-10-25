@@ -1,6 +1,6 @@
 //! [`FrameBuffers`]: a frame in RAM on its way to its tier, and [`NewFrame`], the plain one.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::frame_quality::FrameQuality;
 use crate::image::stackable_image::StackableImage;

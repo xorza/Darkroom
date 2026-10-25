@@ -422,8 +422,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use common::{TempDir, fs};
-    use imaginarium::Buffer2;
+    use common::{Buffer2, TempDir, fs};
 
     use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
     use crate::image::cfa::cfa_pattern::CfaPattern;

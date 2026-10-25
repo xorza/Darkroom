@@ -8,7 +8,7 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::synthetic::bg_map;
 use crate::internals::visual::{ToneMap, save};

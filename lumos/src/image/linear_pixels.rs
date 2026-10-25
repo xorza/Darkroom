@@ -4,7 +4,8 @@ use std::borrow::Borrow;
 use std::{array, slice};
 
 use arrayvec::ArrayVec;
-use imaginarium::{Buffer2, ChannelCount, Image};
+use common::Buffer2;
+use imaginarium::{ChannelCount, Image};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;

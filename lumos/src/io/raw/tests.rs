@@ -1,5 +1,4 @@
-use common::{CancelToken, TempDir};
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken, TempDir};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;

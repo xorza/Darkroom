@@ -1,5 +1,5 @@
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};

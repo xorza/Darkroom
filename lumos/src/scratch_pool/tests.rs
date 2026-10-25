@@ -1,7 +1,7 @@
 use std::panic;
 use std::panic::AssertUnwindSafe;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals;
 use crate::math::size2us::Size2us;

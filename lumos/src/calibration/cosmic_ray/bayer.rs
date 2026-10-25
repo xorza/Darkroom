@@ -5,7 +5,7 @@
 //! problem back into four mono detections, whose dense neighbours really are same-color in the
 //! mosaic. Pattern-independent: phase alone fixes the color, so no `CfaPattern` is needed.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;

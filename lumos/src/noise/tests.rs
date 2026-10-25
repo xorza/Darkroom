@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::assertions::assert_close;
 use crate::internals::test_rng::TestRng;

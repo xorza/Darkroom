@@ -13,9 +13,7 @@
 //! stretch.
 
 use arrayvec::ArrayVec;
-use common::par;
-use common::{Introspect, IntrospectEnum};
-use imaginarium::Buffer2;
+use common::{Buffer2, Introspect, IntrospectEnum, par};
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 

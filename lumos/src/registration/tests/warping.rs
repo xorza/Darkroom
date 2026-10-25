@@ -1,8 +1,8 @@
 //! Warps of synthetic star fields: roundtrips through every `TransformType`, the quality order of
 //! the kernels, SIP, and the quality maps at the border.
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;

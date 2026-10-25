@@ -7,8 +7,8 @@
 
 use std::f32::consts::PI;
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::synthetic::bgs::Vignette;

@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
 use std::{array, slice};
 
-use common::par;
-use imaginarium::{Buffer2, ChannelCount, ColorFormat, Image};
+use common::{Buffer2, par};
+use imaginarium::{ChannelCount, ColorFormat, Image};
 use rayon::prelude::*;
 
 use crate::image::SAMPLES_PER_BLOCK;
@@ -399,7 +399,7 @@ pub(crate) const fn f32_target_format(format: ColorFormat) -> ColorFormat {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::linear_image::LinearImage;
 
@@ -421,7 +421,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::internals::images::{gray_image, rgb_image};
     use crate::math::size2us::Size2us;

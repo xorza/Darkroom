@@ -1,5 +1,4 @@
-use common::CancelToken;
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken};
 
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;

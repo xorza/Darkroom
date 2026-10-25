@@ -18,7 +18,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::math::size2us::Size2us;
 

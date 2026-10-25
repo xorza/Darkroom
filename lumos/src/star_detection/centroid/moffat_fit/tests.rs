@@ -2,8 +2,8 @@
 
 use std::f64::consts::PI;
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::math::size2us::Size2us;

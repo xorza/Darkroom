@@ -165,7 +165,7 @@ pub(crate) struct Gathered {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use super::*;
     use crate::bit_buffer2::BitBuffer2;

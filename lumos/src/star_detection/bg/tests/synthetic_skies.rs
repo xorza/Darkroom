@@ -1,8 +1,8 @@
 //! Background estimation on rendered skies under stars and camera noise, each saved as its input,
 //! background and residual images for inspection.
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::init_tracing;
 use crate::internals::synthetic::bg_map;

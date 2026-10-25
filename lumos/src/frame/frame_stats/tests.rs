@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::frame_stats::FrameStats;
 use crate::image::bg_split::BgSplit;

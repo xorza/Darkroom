@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use arrayvec::ArrayVec;
 use bytemuck::Pod;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;

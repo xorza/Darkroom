@@ -1,7 +1,9 @@
 # Parallel work, the API surface and the compressed read (2026-10-24)
 
-Facts gathered for `.notes/proposal-parallel-work.md`. Workspace at `584c868d3`,
-rayon 1.12.0, rayon-core 1.13.0, cargo-drive at xorza/drive `58666cd`.
+Facts gathered for the parallel-work proposal, which landed: its decisions are
+in the doc comments of `common::par` and of the code they govern. Workspace at
+`584c868d3`, rayon 1.12.0, rayon-core 1.13.0, cargo-drive at xorza/drive
+`58666cd`.
 
 ## Rayon nests jobs on one stack
 
@@ -71,6 +73,15 @@ The same probe at `2cdbead6b` with the fits-well wrappers uncommitted, over the
 rayon directly to prove a callback may. The production nestings of the table
 above are gone; the tests that prove a nested start panics stop at the check,
 before their inner loop starts.
+
+### Rerun after imaginarium moves into the workspace
+
+The same probe, rebuilt as written above, at the batch that made imaginarium a
+member (see `docs/research/2026-10-25-imaginarium-merge.md`), over every
+member's test targets with `lumos/ml`, `imaginarium/wgpu` and `internals`:
+2243 tests passed. The one nesting recorded is again
+`stage_counter::a_callback_that_uses_rayon_completes`. None was recorded in
+imaginarium's ops or in a body that converts its planes.
 
 ## MRS tile scratch
 

@@ -1,6 +1,6 @@
 //! Tests for 3x3 median filter.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::test_rng::TestRng;
 use crate::math::vec2us::Vec2us;

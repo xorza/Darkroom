@@ -1,7 +1,6 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
-use common::{CancelToken, WorkerPool};
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken, WorkerPool};
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;

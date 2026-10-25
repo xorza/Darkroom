@@ -12,6 +12,10 @@ use crate::pipeline::light_shape::LightShape;
 
 /// Where a registered stack's lights come from.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per run; boxing the files would buy an indirection and save nothing"
+)]
 pub(super) enum LightSource<'a, P> {
     /// Frames the caller decoded and handed over. They were in memory before the run read the
     /// machine, so the plan charges them only what the run adds, and they stay resident whatever

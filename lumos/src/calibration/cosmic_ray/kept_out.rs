@@ -1,6 +1,6 @@
 //! [`KeptOut`]: the pixels a cosmic-ray pass flags none of, and those it in-paints from none of.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::bayer_phase::BayerPhase;

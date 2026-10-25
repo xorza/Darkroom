@@ -11,11 +11,10 @@ use std::fs::File;
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-use common::fs;
+use common::{Buffer2, fs};
 use fits_well::FitsWriter;
 use fits_well::header::{Header, Keyword};
 use fits_well::io::StreamReader;
-use imaginarium::Buffer2;
 
 use crate::error::Cancelled;
 use crate::image::flat_gain::shared_gains::SharedGains;

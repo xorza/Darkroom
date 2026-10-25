@@ -3,8 +3,8 @@
 
 use std::hint::black_box;
 
+use common::Buffer2;
 use criterion::{BenchmarkId, Criterion, Throughput};
-use imaginarium::Buffer2;
 
 use crate::bench::fixture::{self, Kind, Scale};
 use crate::image::flat_gain::gain_bins::GainBins;

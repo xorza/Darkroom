@@ -13,6 +13,11 @@
 //! where a parallel loop passes: that thread is no worker, so it waits on the loop without taking
 //! other jobs. The entry points return rayon's own iterators, which every adapter after them
 //! keeps.
+//!
+//! A check at run time, not a token: a `Par` value that every function on a path to a loop takes
+//! would refuse nesting at compile time, but it threads a parameter through every signature and
+//! the public API. A second pool does not isolate either: a worker that waits on another pool
+//! still runs its own pool's jobs.
 
 pub(super) mod per_worker;
 #[cfg(feature = "internals")]

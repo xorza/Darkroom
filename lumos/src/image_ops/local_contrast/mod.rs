@@ -5,9 +5,7 @@
 //! per-tile mappings. Brings out medium-scale structure (dust lanes, nebula filaments). Runs on the
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
-use common::Introspect;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, Introspect, par};
 use rayon::prelude::*;
 
 use crate::config_field::ConfigField;

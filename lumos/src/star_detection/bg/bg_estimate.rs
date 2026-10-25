@@ -1,7 +1,6 @@
 //! Per-pixel background and noise estimates.
 
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_surface::MeshSurface;
@@ -65,7 +64,7 @@ impl BgEstimate {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::scratch_pool::Pooled;
     use crate::star_detection::bg::bg_estimate::BgEstimate;

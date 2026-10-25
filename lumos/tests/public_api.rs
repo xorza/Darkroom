@@ -1,7 +1,6 @@
 use std::io::{Error, ErrorKind};
 
-use common::CancelToken;
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken};
 use lumos::ChannelLayout;
 use lumos::{
     AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BgConfig,

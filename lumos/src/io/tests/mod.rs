@@ -2,9 +2,8 @@
 mod real_data;
 mod synthetic;
 
-use common::{TempDir, fs};
+use common::{Buffer2, TempDir, fs};
 use fits_well::image::SampleType;
-use imaginarium::Buffer2;
 use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
 
 use crate::image::channel_layout::ChannelLayout;

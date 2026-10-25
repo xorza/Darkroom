@@ -5,8 +5,8 @@
 
 use std::cell::OnceCell;
 
+use common::Buffer2;
 use criterion::{BenchmarkId, Criterion, Throughput};
-use imaginarium::Buffer2;
 
 use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};

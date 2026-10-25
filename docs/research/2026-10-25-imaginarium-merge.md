@@ -14,8 +14,12 @@ arm64, with the `x86_64-apple-darwin` target installed.
 - Its drive table: `lint = ["--all-features", ""]` (the second set is the CPU
   build), `bench = "--features wgpu"`, `docs = true`. The workspace table has
   none of these keys. It has no doc tests.
-- `strum`, `strum_macros` and `tokio` are declared and unused; `strum` is on
-  the `cargo-machete` ignore list.
+- `strum` and `strum_macros` give `BlendMode` its derives and iteration;
+  `tokio` gives the GPU readback its `oneshot`. `strum` is on the
+  `cargo-machete` ignore list.
+- Its `glam` dependency took the default features, which unified the `f64`
+  types into lumos's build: lumos names `DVec2` and `DMat2` and asked only
+  for `serde` and `std`.
 - `README.md` names `processing_context/`, `rust-toolchain.toml` and
   `#[ignore]` benches. None of them exist.
 - `src/lib.rs` re-exports `glam::{Affine2, Vec2}`. `lens` takes `Vec2` from

@@ -2,11 +2,10 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use std::path::Path;
 use std::sync::Arc;
 
-use common::{TempDir, fs};
+use common::{Buffer2, TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::io::{ChecksumReport, ChecksumStatus};
-use imaginarium::Buffer2;
 
 use crate::frame::frame_stats::FrameStats;
 use crate::image::calibration_state::CalibrationState;
