@@ -143,7 +143,7 @@ impl HduDecode<'_> {
             }),
             color: if cfa_type.and_then(CfaType::mosaic).is_some() {
                 ColorProvenance::SensorCfa
-            } else if plan.dimensions.is_grayscale() {
+            } else if plan.dimensions.is_mono() {
                 ColorProvenance::Monochrome
             } else {
                 ColorProvenance::Unspecified

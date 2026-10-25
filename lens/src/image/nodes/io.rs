@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use common::{fs, task};
-use imaginarium::{FileFormat, SUPPORTED_EXTENSIONS};
+use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
@@ -25,15 +25,15 @@ pub(super) fn register(library: &mut Library) {
 }
 
 /// The image in the file at `path`, in the format its extension names.
-fn read(path: &Path) -> Result<imaginarium::Image, imaginarium::Error> {
-    let format = FileFormat::from_path(path)?;
-    imaginarium::Image::decode(BufReader::new(fs::open(path)?), format)
+fn read(path: &Path) -> Result<imaginarium::InterleavedImage, imaginarium::Error> {
+    let format = RasterFormat::from_path(path)?;
+    imaginarium::InterleavedImage::decode(BufReader::new(fs::open(path)?), format)
 }
 
 /// `image` written to `path` in the format its extension names, published durably: a reader sees
 /// the old file or the new one.
-fn save(image: &imaginarium::Image, path: &Path) -> Result<(), imaginarium::Error> {
-    let format = FileFormat::from_path(path)?;
+fn save(image: &imaginarium::InterleavedImage, path: &Path) -> Result<(), imaginarium::Error> {
+    let format = RasterFormat::from_path(path)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
         image.encode(&mut out, format)?;

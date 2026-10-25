@@ -14,14 +14,14 @@ use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME, TILE};
-use crate::color::color_format::{ALL_FORMATS, ColorFormat};
+use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 #[cfg(feature = "wgpu")]
-use crate::ops::transform::pipeline::GpuTransformPipeline;
-use crate::ops::transform::{FilterMode, Transform, cpu};
+use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
+use crate::ops::affine_warp::{AffineWarp, FilterMode, cpu};
 
 /// The slowest GPU case's iteration as measured on a Radeon 680M (bilinear RGBA f32, 326 ms):
 /// the round trip copies the frame to the device and back.
@@ -30,18 +30,19 @@ const GPU_ITERATION: Duration = Duration::from_millis(330);
 
 const FILTERS: [FilterMode; 2] = [FilterMode::Nearest, FilterMode::Bilinear];
 
-/// `atomic/transform/cpu/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
+/// `atomic/affine_warp/cpu/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
 /// reference and each tier's kernel. The kernel takes the image and fans its rows out on rayon,
 /// as dispatch hands it. Per output pixel, reading the tile.
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "transform", Scale::Millis);
-    for format in ALL_FORMATS {
+    let mut group = Kind::Atomic.group(c, "affine_warp", Scale::Millis);
+    for format in ColorFormat::ALL {
         let mut tile = None;
         let mut output =
-            Image::new_black(ImageDesc::new(Size2us::new(TILE, TILE), format)).unwrap();
-        group.throughput(fixture::throughput(TILE * TILE, format.byte_count()));
+            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(TILE, TILE), format))
+                .unwrap();
+        group.throughput(fixture::throughput(TILE * TILE, format.byte_len()));
         for filter in FILTERS {
-            let transform = rotation(Size2us::new(TILE, TILE), filter);
+            let warp = rotation(Size2us::new(TILE, TILE), filter);
             for variant in Variant::all(|tier| cpu::packed_kernel(tier, format, filter)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.name), case_id(filter, format));
                 group.bench_function(id, |b| {
@@ -49,11 +50,11 @@ pub(crate) fn atomic(c: &mut Criterion) {
                         tile.get_or_insert_with(|| scene::sky(format, Size2us::new(TILE, TILE), 1));
                     if let Some(kernel) = variant.kernel {
                         b.iter(|| unsafe {
-                            kernel(&transform, black_box(tile), black_box(&mut output));
+                            kernel(&warp, black_box(tile), black_box(&mut output));
                         });
                     } else {
                         b.iter(|| {
-                            cpu::apply_scalar(&transform, black_box(tile), black_box(&mut output));
+                            cpu::apply_scalar(&warp, black_box(tile), black_box(&mut output));
                         });
                     }
                 });
@@ -63,19 +64,19 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.finish();
 }
 
-/// `integration/transform/<backend>/<filter>/<format>`: the op on the standard frame. On the CPU
+/// `integration/affine_warp/<backend>/<filter>/<format>`: the op on the standard frame. On the CPU
 /// into a caller's output; on the GPU the upload, the op and the readback. Per output pixel,
 /// reading the frame.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
-    let mut group = Kind::Integration.group(c, "transform", Scale::Millis);
+    let mut group = Kind::Integration.group(c, "affine_warp", Scale::Millis);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let mut source = None;
         let pixels = FRAME.pixel_count();
-        group.throughput(fixture::throughput(pixels, format.byte_count()));
+        group.throughput(fixture::throughput(pixels, format.byte_len()));
         for filter in FILTERS {
-            let transform = rotation(FRAME, filter);
+            let warp = rotation(FRAME, filter);
             for backend in backends.all() {
                 match backend {
                     Backend::Cpu => Scale::Millis,
@@ -90,18 +91,18 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                     match backend {
                         Backend::Cpu => {
-                            let mut output = Image::new_black(frame.desc()).unwrap();
-                            b.iter(|| transform.apply_cpu(black_box(frame), &mut output));
+                            let mut output = InterleavedImage::new_black(frame.desc()).unwrap();
+                            b.iter(|| warp.apply_cpu(black_box(frame), &mut output));
                         }
                         #[cfg(feature = "wgpu")]
                         Backend::Gpu => {
                             let gpu = backends.gpu();
                             let pipeline =
-                                pipeline.get_or_insert_with(|| GpuTransformPipeline::new(gpu));
+                                pipeline.get_or_insert_with(|| GpuAffineWarpPipeline::new(gpu));
                             b.iter_with_large_drop(|| {
                                 let input = GpuImage::from_image(gpu, frame).unwrap();
                                 let mut output = GpuImage::new_empty(gpu, frame.desc()).unwrap();
-                                transform.apply_gpu(gpu, pipeline, &input, &mut output);
+                                warp.apply_gpu(gpu, pipeline, &input, &mut output);
                                 output.to_image(gpu).unwrap()
                             });
                         }
@@ -114,9 +115,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
 }
 
 /// A rotation by π/6 about the centre of an image of `size`, sampled by `filter`.
-fn rotation(size: Size2us, filter: FilterMode) -> Transform {
+fn rotation(size: Size2us, filter: FilterMode) -> AffineWarp {
     let centre = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
-    Transform::new()
+    AffineWarp::new()
         .rotate_around(PI / 6.0, centre)
         .filter(filter)
 }

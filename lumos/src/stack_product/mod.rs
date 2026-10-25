@@ -205,7 +205,7 @@ impl StackProduct {
         let mut image = self.image;
         let flags = image.take_flags();
         let metadata = std::mem::take(&mut image.metadata);
-        let mut master = CfaImage::from_plane(image.into_pixels().into_l(), cfa_type, metadata);
+        let mut master = CfaImage::from_plane(image.into_pixels().into_mono(), cfa_type, metadata);
         master.set_flags(flags);
         master
     }

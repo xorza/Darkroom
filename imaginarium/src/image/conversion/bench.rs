@@ -1,5 +1,5 @@
 //! The conversion cases, over every ordered pair of distinct formats: each row kernel on one row,
-//! and `Image::convert_to` on the standard frame.
+//! and `InterleavedImage::convert_to` on the standard frame.
 
 use std::hint::black_box;
 
@@ -10,21 +10,22 @@ use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Variant};
 use crate::bench::scene::{self, FRAME};
-use crate::color::color_format::{ALL_FORMATS, ColorFormat};
-use crate::image::Image;
+use crate::color::color_format::ColorFormat;
+use crate::image::InterleavedImage;
 use crate::image::conversion::{scalar, simd};
-use crate::image::image_desc::ImageDesc;
+use crate::image::image_desc::InterleavedDesc;
 
 /// `atomic/convert/cpu/<variant>/<from>/<to>`: one row of the standard frame through the scalar
 /// reference and each tier's kernel. Per pixel, reading the source row.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "convert", Scale::Micros);
-    for from in ALL_FORMATS {
+    for from in ColorFormat::ALL {
         let mut source = None;
         for to in pairs_from(from) {
             let mut row =
-                Image::new_black(ImageDesc::new(Size2us::new(FRAME.width, 1), to)).unwrap();
-            group.throughput(fixture::throughput(FRAME.width, from.byte_count()));
+                InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), to))
+                    .unwrap();
+            group.throughput(fixture::throughput(FRAME.width, from.byte_len()));
             for variant in Variant::all(|tier| simd::tier_converter(tier, from, to)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.name), pair_id(from, to));
                 group.bench_function(id, |b| {
@@ -47,14 +48,14 @@ pub(crate) fn atomic(c: &mut Criterion) {
     group.finish();
 }
 
-/// `integration/convert/cpu/<from>/<to>`: `Image::convert_to` on the standard frame, the
+/// `integration/convert/cpu/<from>/<to>`: `InterleavedImage::convert_to` on the standard frame, the
 /// allocation of the result included. Per pixel, reading the source frame.
 pub(crate) fn integration(c: &mut Criterion) {
     let mut group = Kind::Integration.group(c, "convert", Scale::Millis);
-    for from in ALL_FORMATS {
+    for from in ColorFormat::ALL {
         let mut source = None;
         for to in pairs_from(from) {
-            group.throughput(fixture::throughput(FRAME.pixel_count(), from.byte_count()));
+            group.throughput(fixture::throughput(FRAME.pixel_count(), from.byte_len()));
             group.bench_function(
                 BenchmarkId::new(Backend::Cpu.id(), pair_id(from, to)),
                 |b| {
@@ -69,7 +70,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 
 /// Every format but `from`.
 fn pairs_from(from: ColorFormat) -> impl Iterator<Item = ColorFormat> {
-    ALL_FORMATS.into_iter().filter(move |&to| to != from)
+    ColorFormat::ALL.into_iter().filter(move |&to| to != from)
 }
 
 fn pair_id(from: ColorFormat, to: ColorFormat) -> String {

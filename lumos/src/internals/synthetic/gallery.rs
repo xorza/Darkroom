@@ -30,7 +30,7 @@ use crate::internals::visual::{self, ToneMap};
 use crate::registration::transform::Transform;
 use common::{Size2us, Vec2us};
 
-/// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
+/// Save a mono frame to `synthetic_gallery/<name>.png`, returning the path.
 fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) -> PathBuf {
     let name = format!("synthetic_gallery/{name}");
     let path = visual::debug_file(&name)

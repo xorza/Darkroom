@@ -10,9 +10,9 @@ use glam::{Affine2, Vec2};
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 #[cfg(feature = "wgpu")]
-use crate::ops::transform::pipeline::GpuTransformPipeline;
+use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 
 /// Filter mode for image sampling during transformation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -24,16 +24,16 @@ pub enum FilterMode {
     Bilinear,
 }
 
-/// Image transformation parameters.
+/// A resample of an image through an affine transform.
 #[derive(Debug, Clone, Copy)]
-pub struct Transform {
-    /// The affine transformation to apply.
+pub struct AffineWarp {
+    /// The transform from input pixels to output pixels.
     pub transform: Affine2,
     /// The filter mode for sampling.
     pub filter: FilterMode,
 }
 
-impl Default for Transform {
+impl Default for AffineWarp {
     fn default() -> Self {
         Self {
             transform: Affine2::IDENTITY,
@@ -42,7 +42,7 @@ impl Default for Transform {
     }
 }
 
-impl Transform {
+impl AffineWarp {
     /// Creates a new identity transform.
     pub fn new() -> Self {
         Self::default()
@@ -117,7 +117,7 @@ impl Transform {
     /// # Panics
     /// Panics if input and output have different color formats, or if the
     /// transform is not invertible.
-    pub fn apply_cpu(&self, input: &Image, output: &mut Image) {
+    pub fn apply_cpu(&self, input: &InterleavedImage, output: &mut InterleavedImage) {
         cpu::apply(self, input, output);
     }
 
@@ -131,7 +131,7 @@ impl Transform {
     pub fn apply_gpu(
         &self,
         ctx: &Gpu,
-        pipeline: &GpuTransformPipeline,
+        pipeline: &GpuAffineWarpPipeline,
         input: &GpuImage,
         output: &mut GpuImage,
     ) {

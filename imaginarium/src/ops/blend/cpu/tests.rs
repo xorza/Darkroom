@@ -1,9 +1,9 @@
 use common::Size2us;
 use strum::IntoEnumIterator;
 
-use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::blend::cpu;
@@ -11,8 +11,8 @@ use crate::ops::blend::{Blend, BlendMode};
 
 /// Blends `src` over `dst` into a fresh image through the public CPU entry
 /// point, i.e. through whatever SIMD kernel this CPU dispatches to.
-fn blend(params: Blend, src: &Image, dst: &Image) -> Image {
-    let mut output = Image::new_black(dst.desc()).unwrap();
+fn blend(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
+    let mut output = InterleavedImage::new_black(dst.desc()).unwrap();
     params.apply_cpu(src, dst, &mut output);
     output
 }
@@ -68,15 +68,18 @@ fn blending_a_value_over_itself_keeps_it() {
     let words: Vec<u16> = (0..=u16::MAX).collect();
     for (format, width, data) in [
         (ColorFormat::RGBA_U8, 64, bytes.clone()),
-        (ColorFormat::L_U8, 256, bytes),
+        (ColorFormat::MONO_U8, 256, bytes),
         (
             ColorFormat::RGBA_U16,
             16384,
             bytemuck::cast_slice(&words).to_vec(),
         ),
     ] {
-        let image =
-            Image::new_with_data(ImageDesc::new(Size2us::new(width, 1), format), data).unwrap();
+        let image = InterleavedImage::new_with_data(
+            InterleavedDesc::new(Size2us::new(width, 1), format),
+            data,
+        )
+        .unwrap();
         let output = blend(Blend::new(BlendMode::Normal, 0.3), &image, &image);
         assert!(
             pixels_equal(&image, &output),
@@ -88,7 +91,7 @@ fn blending_a_value_over_itself_keeps_it() {
 
 #[test]
 fn alpha_zero_returns_dst() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(8, 4), 0);
         let dst = create_test_image(format, Size2us::new(8, 4), 100);
 
@@ -106,7 +109,7 @@ fn alpha_zero_returns_dst() {
 
 #[test]
 fn alpha_one_normal_returns_src() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(8, 4), 0);
         let dst = create_test_image(format, Size2us::new(8, 4), 100);
 
@@ -169,7 +172,7 @@ fn multiply_by_black_zeroes_color() {
 /// the reference does, and a NaN alpha reaches the integer paths.
 #[test]
 fn simd_matches_scalar_reference() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         for width in [3, 17, 64] {
             let src = create_test_image(format, Size2us::new(width, 3), 0);
             let mut dst = create_test_image(format, Size2us::new(width, 3), 100);
@@ -186,7 +189,7 @@ fn simd_matches_scalar_reference() {
                 for alpha in [0.0, 0.35, 1.0, f32::NAN] {
                     let params = Blend::new(mode, alpha);
                     let dispatched = blend(params, &src, &dst);
-                    let mut reference = Image::new_black(dst.desc()).unwrap();
+                    let mut reference = InterleavedImage::new_black(dst.desc()).unwrap();
                     cpu::apply_scalar(params, &src, &dst, &mut reference);
 
                     assert!(

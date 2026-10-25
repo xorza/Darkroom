@@ -18,7 +18,7 @@ use std::fmt;
 use std::num::NonZeroU32;
 
 use glam::UVec2;
-use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, Preview};
+use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage, Preview};
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
 
@@ -422,7 +422,7 @@ impl DrawablePreview {
 }
 
 /// The texel size of an image `desc` describes, or why no texture holds it.
-fn native_size(desc: ImageDesc) -> Result<UVec2, DrawablePreviewError> {
+fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
     let (Ok(x), Ok(y)) = (
         u32::try_from(desc.size.width),
         u32::try_from(desc.size.height),
@@ -437,12 +437,12 @@ fn native_size(desc: ImageDesc) -> Result<UVec2, DrawablePreviewError> {
 
 /// Downscale to `target` and convert to RGBA8 — the one place pixels are
 /// produced, and so the seam a test asserts exact output on.
-fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
+fn rgba8_raster(cpu: &InterleavedImage, target: UVec2) -> Raster {
     let rgba = Preview::new(Size2us::new(target.x as usize, target.y as usize)).to_rgba8(cpu);
     let desc = rgba.desc();
     debug_assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
-    debug_assert_eq!(pixels.len(), desc.row_bytes() * desc.size.height);
+    debug_assert_eq!(pixels.len(), desc.row_byte_len() * desc.size.height);
     Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
 }
 
@@ -467,9 +467,7 @@ fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
-    use imaginarium::Image as RawImage;
-    #[cfg(test)]
-    use lens::Image as LensImage;
+    use lens::Image;
 
     use super::*;
 
@@ -574,8 +572,8 @@ pub(crate) mod internals {
     /// A black image of `size` in `format`, as a node would publish it.
     #[cfg(test)]
     pub(crate) fn image_value(size: Size2us, format: ColorFormat) -> DynamicValue {
-        let raw = RawImage::new_black(ImageDesc::new(size, format)).unwrap();
-        DynamicValue::from_custom(LensImage::from(raw))
+        let raw = InterleavedImage::new_black(InterleavedDesc::new(size, format)).unwrap();
+        DynamicValue::from_custom(Image::from(raw))
     }
 
     /// The smallest opaque image a preview card will render — 2×1 RGB8, which

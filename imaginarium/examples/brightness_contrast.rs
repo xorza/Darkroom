@@ -10,7 +10,7 @@ mod shared;
 
 use imaginarium::ContrastBrightness;
 #[cfg(feature = "wgpu")]
-use imaginarium::Image;
+use imaginarium::InterleavedImage;
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
@@ -26,17 +26,17 @@ fn main() {
     save_image(&output, "contrast_brightness_cpu.png");
 }
 
-/// Residency is the caller's to manage: upload, run, download. The shader reads and writes through
+/// Residency is the caller's to manage: upload, run, read back. The shader reads and writes through
 /// separate bindings, so the op needs a distinct output image.
 #[cfg(feature = "wgpu")]
-fn on_gpu(input: &Image) {
-    use imaginarium::{Gpu, GpuContext, GpuContrastBrightnessPipeline, GpuImage};
+fn on_gpu(input: &InterleavedImage) {
+    use imaginarium::{Gpu, GpuContrastBrightnessPipeline, GpuCtx, GpuImage};
 
     let Ok(gpu) = Gpu::new() else {
         println!("no GPU available, skipping the GPU example");
         return;
     };
-    let mut context = GpuContext::new(gpu.clone());
+    let mut context = GpuCtx::new(gpu.clone());
     let pipeline = context.get_or_create(GpuContrastBrightnessPipeline::new);
 
     let uploaded = GpuImage::from_image(&gpu, input).expect("upload");

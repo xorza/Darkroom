@@ -4,7 +4,7 @@ use crate::image::rgb::Rgb;
 use common::Size2us;
 
 /// An image's combined intensity, read a pixel at a time from its channels: the channel itself for
-/// a grayscale image, [`Rgb::intensity`] of the three for RGB. Bit for bit the plane it replaces,
+/// a mono image, [`Rgb::intensity`] of the three for RGB. Bit for bit the plane it replaces,
 /// with no plane made.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Intensity<'a> {
@@ -20,7 +20,7 @@ enum Channels<'a> {
 }
 
 impl<'a> Intensity<'a> {
-    /// The intensity of a grayscale image of `size`: its one channel.
+    /// The intensity of a mono image of `size`: its one channel.
     pub(crate) fn mono(size: Size2us, pixels: &'a [f32]) -> Self {
         debug_assert_eq!(pixels.len(), size.pixel_count());
         Self {

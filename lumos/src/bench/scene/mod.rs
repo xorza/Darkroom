@@ -459,7 +459,7 @@ fn mosaic(frame: SimFrame, cfa_type: CfaType) -> CfaImage {
     if cfa_type != CfaType::Mono {
         metadata.header.camera_white_balance = Some(WHITE_BALANCE);
     }
-    CfaImage::from_plane(image.into_pixels().into_l(), cfa_type, metadata)
+    CfaImage::from_plane(image.into_pixels().into_mono(), cfa_type, metadata)
 }
 
 /// `count` of something the standard frame holds, at the same density on a frame of `size`, and

@@ -11,7 +11,7 @@ use crate::image_ops::extract_bg::ExtractBg;
 use crate::image_ops::hdr::Hdr;
 use crate::image_ops::local_contrast::LocalContrast;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use common::Size2us;
 
 /// An op under test, applied in place.
@@ -91,7 +91,7 @@ fn every_op_drops_the_noise_of_the_samples_it_changed() {
 #[test]
 fn every_op_apply_rejects_an_invalid_config() {
     fn rejects(field: &str, apply: impl Fn(&mut LinearImage) -> Result<(), OpError>) {
-        let mut image = gray_image(Size2us::new(4, 4), vec![0.0; 16]);
+        let mut image = mono_image(Size2us::new(4, 4), vec![0.0; 16]);
         let error = apply(&mut image).unwrap_err();
         assert!(
             matches!(&error, OpError::Config(invalid) if invalid.field == field),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use common::{Buffer2, CancelToken, TempDir, par};
 use glam::{DVec2, Vec2};
+use imaginarium::RasterFormat;
 
 use crate::combine::error::StackConfigError;
 use crate::combine::frame_cache::core::CacheCore;
@@ -33,7 +34,7 @@ use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
-    ColorProvenance, DemosaicProvenance, ImageProvenance, RasterFormat, RasterTransfer, RowOrder,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer, RowOrder,
     SourceProvenance,
 };
 use crate::image::linear_image::LinearImage;

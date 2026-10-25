@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use imaginarium::FileFormat;
+use imaginarium::RasterFormat;
 use thiserror::Error;
 
 use crate::image::image_dimensions::ImageDimensions;
@@ -167,7 +167,7 @@ pub enum ScientificRefusal {
     RasterCfa,
     /// A raster whose transfer and color transforms are not decoded.
     PreviewOnlyRaster {
-        format: FileFormat,
+        format: RasterFormat,
     },
     RasterSideTooLong {
         width: usize,

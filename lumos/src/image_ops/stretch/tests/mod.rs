@@ -3,7 +3,7 @@ mod real_data;
 
 use crate::image_ops::stretch::*;
 use crate::internals::assertions::assert_close;
-use crate::internals::images::{gray_image, rgb_image};
+use crate::internals::images::{mono_image, rgb_image};
 use crate::math::statistics;
 use common::Size2us;
 use std::f32::consts::LN_10;
@@ -205,7 +205,7 @@ fn auto_stretches_report_an_unreachable_background() {
 
     // Through `apply`: the image is left as it was.
     let original = vec![-0.001f32, 0.0, 0.001, -0.002];
-    let mut image = gray_image(Size2us::new(2, 2), original.clone());
+    let mut image = mono_image(Size2us::new(2, 2), original.clone());
     assert!(matches!(
         Stretch::auto_asinh().apply(&mut image),
         Err(OpError::UnreachableBg { .. })
@@ -589,7 +589,7 @@ fn ghs_d_controls_strength() {
 fn ghs_end_to_end_lifts_the_background() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(iter::repeat_n(0.8f32, 10));
-    let mut img = gray_image(Size2us::new(10, 10), px.clone());
+    let mut img = mono_image(Size2us::new(10, 10), px.clone());
     Stretch {
         method: StretchMethod::Ghs {
             black_point: 0.0,
@@ -678,7 +678,7 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
 }
 
 #[test]
-fn end_to_end_gray_auto_stf_brightens_background_to_target() {
+fn end_to_end_mono_auto_stf_brightens_background_to_target() {
     // Background ~0.05 with spread (MAD > 0) plus bright stars.
     let mut px = Vec::new();
     for i in 0..90 {
@@ -687,7 +687,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     px.extend(iter::repeat_n(0.6f32, 10));
     let input_median = median_of(&px);
 
-    let mut img = gray_image(Size2us::new(10, 10), px);
+    let mut img = mono_image(Size2us::new(10, 10), px);
     let stretch = Stretch::auto_stf();
     let StretchMethod::AutoStf { target_bg, .. } = stretch.method else {
         unreachable!("auto_stf is an auto STF")

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
-use imaginarium::{ChannelCount, ColorFormat, ImageDesc, SampleType};
+use imaginarium::{ChannelCount, ColorFormat, InterleavedDesc, SampleType};
 use lumos::{
     ChannelLayout, DimensionsError, FlatGain, FrameGain, ImageDimensions, ImageMetadata,
     LinearImage, PixelFlags,
@@ -159,7 +159,7 @@ impl CustomValueCodec for ImageCodec {
             .checked_mul(height)
             .ok_or(DecodeError::DimensionsOverflow)?;
         let pixel_len = pixel_count
-            .checked_mul(color_format.byte_count())
+            .checked_mul(color_format.byte_len())
             .ok_or(DecodeError::DimensionsOverflow)?;
         let flag_len = match record {
             ImageRecord::Planar { flagged: true, .. } => pixel_count,
@@ -186,10 +186,10 @@ impl CustomValueCodec for ImageCodec {
             ImageRecord::Interleaved { metadata } => {
                 let mut bytes = vec![0; pixel_len];
                 reader.read_exact(&mut bytes).await?;
-                let desc = ImageDesc::new(Size2us::new(width, height), color_format);
+                let desc = InterleavedDesc::new(Size2us::new(width, height), color_format);
                 Image {
                     pixels: Pixels::InterleavedCpu {
-                        image: imaginarium::Image::new_with_data(desc, bytes)
+                        image: imaginarium::InterleavedImage::new_with_data(desc, bytes)
                             .map_err(DecodeError::from)?,
                         metadata: metadata.into_owned(),
                     },
@@ -226,7 +226,7 @@ async fn read_planar(
     flagged: bool,
 ) -> Result<LinearImage, CodecError> {
     let layout = match color_format {
-        ColorFormat::L_F32 => ChannelLayout::Mono,
+        ColorFormat::MONO_F32 => ChannelLayout::Mono,
         ColorFormat::RGB_F32 => ChannelLayout::Rgb,
         _ => return Err(DecodeError::PlanarFormat(color_format).into()),
     };
@@ -249,7 +249,7 @@ async fn read_planar(
 }
 
 /// The header for an image of `desc`, whose record is `record_len` bytes.
-fn header(desc: ImageDesc, record_len: usize) -> [u8; HEADER_LEN as usize] {
+fn header(desc: InterleavedDesc, record_len: usize) -> [u8; HEADER_LEN as usize] {
     let mut header = [0; HEADER_LEN as usize];
     header[0..2].copy_from_slice(&format_bytes(desc.color_format));
     header[2..10].copy_from_slice(&extent(desc.size.width).to_le_bytes());
@@ -314,7 +314,7 @@ const fn format_bytes(format: ColorFormat) -> [u8; 2] {
 
 const fn format_from_bytes(bytes: [u8; 2]) -> Option<ColorFormat> {
     let channel_count = match bytes[0] {
-        1 => ChannelCount::L,
+        1 => ChannelCount::Mono,
         3 => ChannelCount::Rgb,
         4 => ChannelCount::Rgba,
         _ => return None,

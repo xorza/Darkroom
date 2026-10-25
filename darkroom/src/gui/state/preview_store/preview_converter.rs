@@ -6,7 +6,7 @@ use common::thread;
 
 use glam::UVec2;
 use imaginarium::ColorFormat;
-use lens::Image as LensImage;
+use lens::Image;
 use palantir::Image as Raster;
 use scenarium::{DynamicValue, NodeId};
 
@@ -156,7 +156,7 @@ impl Job {
             Work::Thumbnail(value) => Outcome::Card(card(value)),
             Work::Full { source, texels } => {
                 let image = source
-                    .as_custom::<LensImage>()
+                    .as_custom::<Image>()
                     .expect("a full raster is only asked of an image value");
                 Outcome::Full(rgba8_raster(&image.interleaved(), texels))
             }
@@ -173,7 +173,7 @@ impl Job {
 /// card only after the pixels are read, since the image borrows it.
 fn card(value: DynamicValue) -> Card {
     let thumbnail = {
-        let Some(image) = value.as_custom::<LensImage>() else {
+        let Some(image) = value.as_custom::<Image>() else {
             return Card::Text(value.to_string());
         };
         let cpu = image.interleaved();

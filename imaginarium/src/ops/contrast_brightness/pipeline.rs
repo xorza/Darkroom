@@ -1,6 +1,6 @@
 use crate::gpu::Gpu;
 use crate::gpu::compute_kernel::ComputeKernel;
-use crate::gpu::context::GpuPipeline;
+use crate::gpu::gpu_ctx::GpuPipeline;
 
 /// Cached GPU pipeline for contrast/brightness operations.
 /// Create once and reuse for multiple executions.

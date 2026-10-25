@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 use crate::ops::blend::{Blend, BlendMode};
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are
@@ -32,7 +32,7 @@ pub(super) fn row_kernel(tier: SimdTier, _format: ColorFormat) -> Option<RowKern
 ///
 /// Only RGBA is specialized: its four channels fill a vector register exactly,
 /// which is what lets one register hold a pixel and the blend stay branch-free
-/// across channels. L and RGB fall to the scalar path.
+/// across channels. Mono and RGB fall to the scalar path.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "aarch64")]
@@ -58,7 +58,12 @@ pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKerne
 }
 
 /// Blends `src` over `dst` into `output`, all three sharing a descriptor.
-pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
+pub(super) fn apply(
+    params: Blend,
+    src: &InterleavedImage,
+    dst: &InterleavedImage,
+    output: &mut InterleavedImage,
+) {
     src.desc().assert_same(dst.desc(), "src/dst");
     src.desc().assert_same(output.desc(), "src/output");
 
@@ -74,9 +79,14 @@ pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image)
 
 /// The scalar path, one row pair at a time through [`scalar_row`]. Split out so
 /// the tests can reach the reference past the SIMD dispatch.
-fn apply_scalar(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
+fn apply_scalar(
+    params: Blend,
+    src: &InterleavedImage,
+    dst: &InterleavedImage,
+    output: &mut InterleavedImage,
+) {
     let format = src.desc().color_format;
-    let stride = src.desc().row_bytes();
+    let stride = src.desc().row_byte_len();
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 
     par::chunks_mut(output.bytes_mut(), stride)
@@ -95,11 +105,11 @@ fn apply_scalar(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
 unsafe fn apply_kernel(
     kernel: RowKernel,
     params: Blend,
-    src: &Image,
-    dst: &Image,
-    output: &mut Image,
+    src: &InterleavedImage,
+    dst: &InterleavedImage,
+    output: &mut InterleavedImage,
 ) {
-    let stride = src.desc().row_bytes();
+    let stride = src.desc().row_byte_len();
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 
     par::chunks_mut(output.bytes_mut(), stride)
@@ -120,23 +130,23 @@ fn blend_value<T: Sample>(src: T, dst: T, mode: BlendMode, alpha: f32) -> T {
     T::from_f32((blended * T::FULL_SCALE_F32).clamp(0.0, T::FULL_SCALE_F32))
 }
 
-/// Blends one pixel in place: `params.mode` over the leading `color` channels,
-/// and — where the format carries alpha, so `color` is one short of the pixel —
+/// Blends one pixel in place: `params.mode` over the leading `color_count` channels,
+/// and — where the format carries alpha, so `color_count` is one short of the pixel —
 /// a plain alpha mix over the last one, which carries no mode of its own.
 #[inline]
-fn blend_pixel<T: Sample>(params: Blend, src: &[T], dst: &[T], out: &mut [T], color: usize) {
+fn blend_pixel<T: Sample>(params: Blend, src: &[T], dst: &[T], out: &mut [T], color_count: usize) {
     let Blend { mode, alpha } = params;
-    for ((&s, &d), o) in src[..color]
+    for ((&s, &d), o) in src[..color_count]
         .iter()
-        .zip(&dst[..color])
-        .zip(out[..color].iter_mut())
+        .zip(&dst[..color_count])
+        .zip(out[..color_count].iter_mut())
     {
         *o = blend_value(s, d, mode, alpha);
     }
-    for ((&s, &d), o) in src[color..]
+    for ((&s, &d), o) in src[color_count..]
         .iter()
-        .zip(&dst[color..])
-        .zip(out[color..].iter_mut())
+        .zip(&dst[color_count..])
+        .zip(out[color_count..].iter_mut())
     {
         *o = blend_value(s, d, BlendMode::Normal, alpha);
     }
@@ -185,17 +195,19 @@ fn typed_row<T: Sample>(
     dst: &[u8],
     out: &mut [u8],
 ) {
-    let channels = format.channel_count.count();
+    let channel_count = format.channel_count.count();
     // Channels the blend mode applies to; alpha, where the format has one, is
     // the last channel and is left to the mix alone.
-    let color = channels - usize::from(format.has_alpha());
+    let color_count = channel_count - usize::from(format.has_alpha());
     let src: &[T] = bytemuck::cast_slice(src);
     let dst: &[T] = bytemuck::cast_slice(dst);
     let out: &mut [T] = bytemuck::cast_slice_mut(out);
 
-    let inputs = src.chunks_exact(channels).zip(dst.chunks_exact(channels));
-    for ((src_px, dst_px), out_px) in inputs.zip(out.chunks_exact_mut(channels)) {
-        blend_pixel(params, src_px, dst_px, out_px, color);
+    let inputs = src
+        .chunks_exact(channel_count)
+        .zip(dst.chunks_exact(channel_count));
+    for ((src_px, dst_px), out_px) in inputs.zip(out.chunks_exact_mut(channel_count)) {
+        blend_pixel(params, src_px, dst_px, out_px, color_count);
     }
 }
 

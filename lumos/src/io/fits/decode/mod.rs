@@ -79,7 +79,7 @@ impl DecodedFitsImage {
         if let Some(provenance) = metadata.derived.provenance_mut() {
             provenance.color = ColorProvenance::SensorCfa;
         }
-        let mut image = CfaImage::from_plane(pixels.into_l(), cfa_type, metadata);
+        let mut image = CfaImage::from_plane(pixels.into_mono(), cfa_type, metadata);
         image.set_flags(flags);
         image.set_flat_gain(flat_gain);
         Ok(image)

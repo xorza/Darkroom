@@ -10,7 +10,7 @@ use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend};
 use crate::bench::scene::{self, FRAME};
-use crate::color::color_format::ALL_FORMATS;
+use crate::color::color_format::ColorFormat;
 use crate::ops::preview::Preview;
 
 /// The preview's longer side, darkroom's preview texture.
@@ -25,9 +25,9 @@ pub(crate) fn integration(c: &mut Criterion) {
         (FRAME.height * PREVIEW + FRAME.width / 2) / FRAME.width,
     ));
     let mut group = Kind::Integration.group(c, "preview", Scale::Millis);
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let pixels = FRAME.pixel_count();
-        group.throughput(fixture::throughput(pixels, format.byte_count()));
+        group.throughput(fixture::throughput(pixels, format.byte_len()));
         let mut source = None;
         group.bench_function(
             BenchmarkId::new(Backend::Cpu.id(), fixture::format_id(format)),

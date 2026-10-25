@@ -259,7 +259,7 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let path = dir.join("product.fits");
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg));
     let written = StackProduct {
-        image: image(LinearPixels::L(plane(0.0)), None),
+        image: image(LinearPixels::Mono(plane(0.0)), None),
         coverage: Some(Coverage::Uniform {
             value: 0.75,
             size: SIZE,

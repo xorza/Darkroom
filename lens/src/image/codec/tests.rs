@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io::Cursor;
 
 use common::{Buffer2, SerdeFormat, Size2us};
-use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
+use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage};
 use lumos::{
     ChannelLayout, FlatGain, FrameGain, ImageDimensions, ImageMetadata, LinearImage, PixelFlags,
 };
@@ -72,14 +72,14 @@ fn gain() -> FlatGain {
 /// as little-endian `u64`s.
 #[tokio::test]
 async fn every_interleaved_format_round_trips_pixel_exact() {
-    for format in ALL_FORMATS {
-        let desc = ImageDesc::new(Size2us::new(3, 2), format);
-        let pixels: Vec<u8> = (0..desc.size_in_bytes())
+    for format in ColorFormat::ALL {
+        let desc = InterleavedDesc::new(Size2us::new(3, 2), format);
+        let pixels: Vec<u8> = (0..desc.byte_len())
             .map(|i| u8::try_from(i * 37 % 251).unwrap())
             .collect();
         let image = Image {
             pixels: Pixels::InterleavedCpu {
-                image: CpuImage::new_with_data(desc, pixels.clone()).unwrap(),
+                image: InterleavedImage::new_with_data(desc, pixels.clone()).unwrap(),
                 metadata: named("M31"),
             },
         };
@@ -92,10 +92,10 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
         assert_eq!(metadata.header.object.as_deref(), Some("M31"), "{format}");
     }
 
-    let desc = ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
+    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let bytes = encoded(Image::from(
-        CpuImage::new_with_data(desc, pixels.clone()).unwrap(),
+        InterleavedImage::new_with_data(desc, pixels.clone()).unwrap(),
     ))
     .await;
     assert_eq!(
@@ -252,7 +252,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     planar_u8.push(0);
     assert_eq!(
         error(planar_u8).await,
-        "planar image cache payload has format L u8"
+        "planar image cache payload has format Mono u8"
     );
     let mut empty_flags = payload([1, 2], 2, 1, &planes(None, true));
     empty_flags.extend([0; 8]);

@@ -133,17 +133,17 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
 /// middle pair, 4, 50 and 2.5.
 #[test]
 fn frame_statistics_are_a_median_per_channel() {
-    let gray = ImageDimensions::new((3, 3), ChannelLayout::Mono);
+    let mono = ImageDimensions::new((3, 3), ChannelLayout::Mono);
     let rgb = ImageDimensions::new((2, 2), ChannelLayout::Rgb);
     let cases: [(LinearImage, &[f32]); 4] = [
-        (LinearImage::from_interleaved(gray, vec![5.0; 9]), &[5.0]),
+        (LinearImage::from_interleaved(mono, vec![5.0; 9]), &[5.0]),
         (
-            LinearImage::from_interleaved(gray, (1..=9).map(|i| i as f32).collect()),
+            LinearImage::from_interleaved(mono, (1..=9).map(|i| i as f32).collect()),
             &[5.0],
         ),
         (
             LinearImage::from_interleaved(
-                gray,
+                mono,
                 vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
             ),
             &[20.0],

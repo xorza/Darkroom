@@ -4,7 +4,7 @@ use common::Buffer2;
 
 use crate::image_ops::hdr::Hdr;
 use crate::internals::assertions::assert_close_slice;
-use crate::internals::images::{gray_image, rgb_image};
+use crate::internals::images::{mono_image, rgb_image};
 use crate::math::wavelet;
 use common::{Size2us, Vec2us};
 
@@ -29,7 +29,7 @@ fn dome(size: Size2us) -> Vec<f32> {
 #[test]
 fn hdr_amount_zero_is_identity() {
     let px = dome(Size2us::new(64, 64));
-    let mut img = gray_image(Size2us::new(64, 64), px.clone());
+    let mut img = mono_image(Size2us::new(64, 64), px.clone());
     Hdr {
         scales: 3,
         amount: 0.0,
@@ -51,7 +51,7 @@ fn hdr_compresses_large_scale_contrast() {
     let px = dome(size);
     let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
     let in_contrast = px[ci] - px[0];
-    let mut img = gray_image(size, px);
+    let mut img = mono_image(size, px);
     Hdr {
         scales: 3,
         amount: 0.5,
@@ -73,7 +73,7 @@ fn hdr_amount_controls_compression() {
     let px = dome(size);
     let ci = size.idx_of(Vec2us::new(size.width / 2, size.height / 2));
     let contrast_at = |amount: f32| {
-        let mut img = gray_image(size, px.clone());
+        let mut img = mono_image(size, px.clone());
         Hdr { scales: 3, amount }.apply(&mut img).unwrap();
         let o = img.channel(0).to_vec();
         o[ci] - o[0]
@@ -97,7 +97,7 @@ fn hdr_preserves_fine_detail() {
             -0.03
         };
     }
-    let mut img = gray_image(size, px.clone());
+    let mut img = mono_image(size, px.clone());
     Hdr {
         scales: 3,
         amount: 0.6,
@@ -174,7 +174,7 @@ fn reference_hdr(px: &Buffer2<f32>, scales: usize, amount: f32) -> Vec<f32> {
 fn hdr_matches_explicit_pyramid_reference() {
     let size = Size2us::new(64, 48);
     let (scales, amount) = (3, 0.6);
-    let mut img = gray_image(size, dome(size));
+    let mut img = mono_image(size, dome(size));
     let expected = reference_hdr(img.channel(0), scales, amount);
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = img.channel(0);
@@ -200,7 +200,7 @@ fn hdr_matches_explicit_pyramid_reference() {
 #[test]
 fn a_flat_plane_comes_back_as_itself() {
     let size = Size2us::new(512, 512);
-    let mut img = gray_image(size, vec![0.2; size.pixel_count()]);
+    let mut img = mono_image(size, vec![0.2; size.pixel_count()]);
     Hdr {
         scales: 5,
         amount: 0.9,
@@ -235,7 +235,7 @@ fn hdr_keeps_color_in_range() {
 fn scales_change_the_output_up_to_the_frame_limit() {
     let size = Size2us::new(48, 48);
     let run = |scales| {
-        let mut img = gray_image(size, dome(size));
+        let mut img = mono_image(size, dome(size));
         Hdr {
             scales,
             amount: 0.6,
@@ -266,7 +266,7 @@ fn a_halo_pixel_stays_above_black() {
         .collect();
     let (scales, amount) = (4, 0.8);
     let halo = size.idx_of(Vec2us::new(40, 32));
-    let mut img = gray_image(size, px);
+    let mut img = mono_image(size, px);
     assert!(
         linear_hdr(img.channel(0), scales, amount)[halo] < 0.0,
         "the control: subtraction takes the halo below black"
@@ -318,23 +318,23 @@ fn near_black_pixels_keep_their_ratio() {
     assert!((ratio - 10.0).abs() <= 0.1, "{ratio}");
 }
 
-/// A pixel with no positive intensity is black on grey and on color alike.
+/// A pixel with no positive intensity is black on mono and on color alike.
 #[test]
-fn no_positive_intensity_is_black_on_grey_and_color() {
+fn no_positive_intensity_is_black_on_mono_and_color() {
     let size = Size2us::new(16, 16);
     let mut px = vec![0.3f32; size.pixel_count()];
     px[0] = -0.01;
     px[1] = 0.0;
-    let mut grey = gray_image(size, px.clone());
+    let mut mono = mono_image(size, px.clone());
     let mut color = rgb_image(size, [px.clone(), px.clone(), px]);
     let hdr = Hdr {
         scales: 2,
         amount: 0.5,
     };
-    hdr.apply(&mut grey).unwrap();
+    hdr.apply(&mut mono).unwrap();
     hdr.apply(&mut color).unwrap();
     for idx in [0, 1] {
-        assert_eq!(grey.channel(0).pixels()[idx], 0.0);
+        assert_eq!(mono.channel(0).pixels()[idx], 0.0);
         for channel in 0..3 {
             assert_eq!(color.channel(channel).pixels()[idx], 0.0);
         }

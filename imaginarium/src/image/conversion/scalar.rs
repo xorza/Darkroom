@@ -4,32 +4,32 @@ use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::luma;
 use crate::color::sample::Sample;
 
-/// A storage type's Rec. 709 luminance of one RGB triple, in that type.
-pub(crate) trait Luminance: Sample {
-    fn luminance(r: Self, g: Self, b: Self) -> Self;
+/// A storage type's Rec. 709 luma of one RGB triple, in that type.
+pub(crate) trait Luma: Sample {
+    fn luma(r: Self, g: Self, b: Self) -> Self;
 }
 
-impl Luminance for u8 {
+impl Luma for u8 {
     #[inline]
-    fn luminance(r: Self, g: Self, b: Self) -> Self {
+    fn luma(r: Self, g: Self, b: Self) -> Self {
         let [wr, wg, wb] = luma::WEIGHTS_Q16;
         let sum = u32::from(r) * wr + u32::from(g) * wg + u32::from(b) * wb;
         luma::round_q16(u64::from(sum)) as Self
     }
 }
 
-impl Luminance for u16 {
+impl Luma for u16 {
     #[inline]
-    fn luminance(r: Self, g: Self, b: Self) -> Self {
+    fn luma(r: Self, g: Self, b: Self) -> Self {
         let [wr, wg, wb] = luma::WEIGHTS_Q16.map(u64::from);
         let sum = u64::from(r) * wr + u64::from(g) * wg + u64::from(b) * wb;
         luma::round_q16(sum) as Self
     }
 }
 
-impl Luminance for f32 {
+impl Luma for f32 {
     #[inline]
-    fn luminance(r: Self, g: Self, b: Self) -> Self {
+    fn luma(r: Self, g: Self, b: Self) -> Self {
         let [wr, wg, wb] = luma::WEIGHTS_F32;
         wr * r + wg * g + wb * b
     }
@@ -47,7 +47,7 @@ pub(crate) const fn row_converter(from: ColorFormat, to: ColorFormat) -> ScalarR
     }
 }
 
-const fn row_converter_from<S: Luminance>(from: ChannelCount, to: ColorFormat) -> ScalarRowFn {
+const fn row_converter_from<S: Luma>(from: ChannelCount, to: ColorFormat) -> ScalarRowFn {
     match to.sample_type {
         SampleType::U8 => row_converter_between::<S, u8>(from, to.channel_count),
         SampleType::U16 => row_converter_between::<S, u16>(from, to.channel_count),
@@ -55,27 +55,27 @@ const fn row_converter_from<S: Luminance>(from: ChannelCount, to: ColorFormat) -
     }
 }
 
-const fn row_converter_between<S: Luminance, D: Sample>(
+const fn row_converter_between<S: Luma, D: Sample>(
     from: ChannelCount,
     to: ChannelCount,
 ) -> ScalarRowFn {
     match (from, to) {
-        (ChannelCount::L, ChannelCount::L) => convert_row::<S, D, 1, 1>,
-        (ChannelCount::L, ChannelCount::Rgb) => convert_row::<S, D, 1, 3>,
-        (ChannelCount::L, ChannelCount::Rgba) => convert_row::<S, D, 1, 4>,
-        (ChannelCount::Rgb, ChannelCount::L) => convert_row::<S, D, 3, 1>,
+        (ChannelCount::Mono, ChannelCount::Mono) => convert_row::<S, D, 1, 1>,
+        (ChannelCount::Mono, ChannelCount::Rgb) => convert_row::<S, D, 1, 3>,
+        (ChannelCount::Mono, ChannelCount::Rgba) => convert_row::<S, D, 1, 4>,
+        (ChannelCount::Rgb, ChannelCount::Mono) => convert_row::<S, D, 3, 1>,
         (ChannelCount::Rgb, ChannelCount::Rgb) => convert_row::<S, D, 3, 3>,
         (ChannelCount::Rgb, ChannelCount::Rgba) => convert_row::<S, D, 3, 4>,
-        (ChannelCount::Rgba, ChannelCount::L) => convert_row::<S, D, 4, 1>,
+        (ChannelCount::Rgba, ChannelCount::Mono) => convert_row::<S, D, 4, 1>,
         (ChannelCount::Rgba, ChannelCount::Rgb) => convert_row::<S, D, 4, 3>,
         (ChannelCount::Rgba, ChannelCount::Rgba) => convert_row::<S, D, 4, 4>,
     }
 }
 
-/// One row, pixel by pixel. A source with fewer channels broadcasts grey and adds an opaque
-/// alpha; a source with more drops alpha, and reduces color to luminance in the source type
+/// One row, pixel by pixel. A source with fewer channels broadcasts its mono value and adds an
+/// opaque alpha; a source with more drops alpha, and reduces color to luma in the source type
 /// before the sample type changes.
-pub(crate) fn convert_row<S: Luminance, D: Sample, const FROM: usize, const TO: usize>(
+pub(crate) fn convert_row<S: Luma, D: Sample, const FROM: usize, const TO: usize>(
     src: &[u8],
     dst: &mut [u8],
     width: usize,
@@ -90,16 +90,16 @@ pub(crate) fn convert_row<S: Luminance, D: Sample, const FROM: usize, const TO: 
 }
 
 #[inline]
-fn convert_pixel<S: Luminance, D: Sample, const FROM: usize, const TO: usize>(
+fn convert_pixel<S: Luma, D: Sample, const FROM: usize, const TO: usize>(
     src: &[S; FROM],
     dst: &mut [D; TO],
 ) {
     match (FROM, TO) {
         (1, _) => {
-            let grey = src[0].convert();
-            dst[..TO.min(3)].fill(grey);
+            let mono = src[0].convert();
+            dst[..TO.min(3)].fill(mono);
         }
-        (_, 1) => dst[0] = S::luminance(src[0], src[1], src[2]).convert(),
+        (_, 1) => dst[0] = S::luma(src[0], src[1], src[2]).convert(),
         _ => {
             for (dst, &src) in dst.iter_mut().zip(&src[..3]) {
                 *dst = src.convert();

@@ -85,7 +85,7 @@ impl ImageDimensions {
         self.size.pixel_count()
     }
 
-    pub const fn is_grayscale(&self) -> bool {
+    pub const fn is_mono(&self) -> bool {
         matches!(self.layout, ChannelLayout::Mono)
     }
 
@@ -136,7 +136,7 @@ mod tests {
             assert_eq!(dimensions.layout(), layout);
             assert_eq!(dimensions.pixel_count(), 12);
             assert_eq!(dimensions.sample_count(), 12 * channels);
-            assert_eq!(dimensions.is_grayscale(), layout == ChannelLayout::Mono);
+            assert_eq!(dimensions.is_mono(), layout == ChannelLayout::Mono);
             assert_eq!(dimensions.is_rgb(), layout == ChannelLayout::Rgb);
         }
 

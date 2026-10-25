@@ -159,7 +159,7 @@ impl LumaWeights {
         }
     }
 
-    /// The luminance of the four pixels `quad` holds from byte zero, one per
+    /// The luma of the four pixels `quad` holds from byte zero, one per
     /// `i32` lane, rounded as [`luma::round_q16`] rounds.
     #[inline]
     #[target_feature(enable = "ssse3")]
@@ -173,7 +173,7 @@ impl LumaWeights {
     }
 }
 
-/// Sixteen luminance values, four `i32` lanes at a time, packed into 16 bytes.
+/// Sixteen luma values, four `i32` lanes at a time, packed into 16 bytes.
 /// Every value is already in `0..=255`, so neither saturating pack can bite.
 #[inline]
 #[target_feature(enable = "sse2")]
@@ -187,7 +187,7 @@ fn pack_quads(lum: [__m128i; 4]) -> __m128i {
 /// Sixteen `RGBA_U8` pixels per iteration: four 16-byte loads, each already a
 /// four-pixel quad, and one 16-byte store.
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_rgba_to_mono_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     let weights = LumaWeights::rgba();
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels * 4].as_chunks::<64>();
@@ -207,7 +207,7 @@ pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], wid
 /// Sixteen `RGB_U8` pixels per iteration: three 16-byte loads spanning the
 /// group's 48 bytes exactly, realigned into four-pixel quads, one 16-byte store.
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_rgb_to_mono_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     let weights = LumaWeights::rgb();
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels * 3].as_chunks::<48>();
@@ -230,9 +230,9 @@ pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], widt
     scalar::convert_row::<u8, u8, 3, 1>(&src[pixels * 3..], &mut dst[pixels..], width - pixels);
 }
 
-/// Sixteen `L_U8` pixels per iteration: one load, four stores.
+/// Sixteen `MONO_U8` pixels per iteration: one load, four stores.
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_mono_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     let shuffles = [
         _mm_setr_epi8(0, 0, 0, -1, 1, 1, 1, -1, 2, 2, 2, -1, 3, 3, 3, -1),
         _mm_setr_epi8(4, 4, 4, -1, 5, 5, 5, -1, 6, 6, 6, -1, 7, 7, 7, -1),
@@ -247,19 +247,19 @@ pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], wid
     let (out_groups, _) = dst[..pixels * 4].as_chunks_mut::<64>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        let grey = load(group);
+        let mono = load(group);
         let (out, _) = out.as_chunks_mut::<16>();
         for (out, shuffle) in out.iter_mut().zip(shuffles) {
-            store(out, _mm_or_si128(_mm_shuffle_epi8(grey, shuffle), alpha));
+            store(out, _mm_or_si128(_mm_shuffle_epi8(mono, shuffle), alpha));
         }
     }
 
     scalar::convert_row::<u8, u8, 1, 4>(&src[pixels..], &mut dst[pixels * 4..], width - pixels);
 }
 
-/// Sixteen `L_U8` pixels per iteration: one load, three stores.
+/// Sixteen `MONO_U8` pixels per iteration: one load, three stores.
 #[target_feature(enable = "ssse3")]
-pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_mono_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     let shuffles = [
         _mm_setr_epi8(0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5),
         _mm_setr_epi8(5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10),
@@ -272,10 +272,10 @@ pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], widt
     let (out_groups, _) = dst[..pixels * 3].as_chunks_mut::<48>();
 
     for (group, out) in groups.iter().zip(out_groups) {
-        let grey = load(group);
+        let mono = load(group);
         let (out, _) = out.as_chunks_mut::<16>();
         for (out, shuffle) in out.iter_mut().zip(shuffles) {
-            store(out, _mm_shuffle_epi8(grey, shuffle));
+            store(out, _mm_shuffle_epi8(mono, shuffle));
         }
     }
 

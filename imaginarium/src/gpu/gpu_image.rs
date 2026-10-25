@@ -4,8 +4,8 @@ use tokio::sync::oneshot;
 
 use crate::error::{Error, Result};
 use crate::gpu::Gpu;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 
 /// Image data stored on the GPU as a buffer.
 ///
@@ -18,12 +18,12 @@ use crate::image::image_desc::ImageDesc;
 #[derive(Debug)]
 pub struct GpuImage {
     buffer: wgpu::Buffer,
-    pub(crate) desc: ImageDesc,
+    pub(crate) desc: InterleavedDesc,
 }
 
 impl GpuImage {
     /// Uploads a CPU image: the bytes go straight into the mapped buffer, one copy.
-    pub fn from_image(ctx: &Gpu, image: &Image) -> Result<Self> {
+    pub fn from_image(ctx: &Gpu, image: &InterleavedImage) -> Result<Self> {
         let desc = image.desc();
         let buffer = Self::buffer(ctx, desc, true)?;
         {
@@ -31,7 +31,7 @@ impl GpuImage {
                 .slice(..)
                 .get_mapped_range_mut()
                 .expect("a buffer mapped at creation maps whole");
-            let size = desc.size_in_bytes();
+            let size = desc.byte_len();
             let padding = mapped.len() - size;
             mapped.slice(..size).copy_from_slice(image.bytes());
             mapped.slice(size..).copy_from_slice(&[0; 3][..padding]);
@@ -41,7 +41,7 @@ impl GpuImage {
     }
 
     /// Creates an empty GPU image with the given (packed) descriptor.
-    pub fn new_empty(ctx: &Gpu, desc: ImageDesc) -> Result<Self> {
+    pub fn new_empty(ctx: &Gpu, desc: InterleavedDesc) -> Result<Self> {
         Ok(Self {
             buffer: Self::buffer(ctx, desc, false)?,
             desc,
@@ -49,7 +49,7 @@ impl GpuImage {
     }
 
     /// A storage buffer for `desc`, or an error when the device cannot bind one that large.
-    fn buffer(ctx: &Gpu, desc: ImageDesc, mapped_at_creation: bool) -> Result<wgpu::Buffer> {
+    fn buffer(ctx: &Gpu, desc: InterleavedDesc, mapped_at_creation: bool) -> Result<wgpu::Buffer> {
         let size = buffer_size(desc);
         if size > ctx.max_buffer_bytes() {
             return Err(Error::Gpu(format!(
@@ -67,34 +67,34 @@ impl GpuImage {
         }))
     }
 
-    /// Downloads GPU image data to CPU, blocking until the device has run it.
-    pub fn to_image(&self, ctx: &Gpu) -> Result<Image> {
-        let staging = self.start_download(ctx).wait(ctx)?;
-        self.finish_download(&staging)
+    /// Reads the image back to the CPU, blocking until the device has run it.
+    pub fn to_image(&self, ctx: &Gpu) -> Result<InterleavedImage> {
+        let staging = self.start_readback(ctx).wait(ctx)?;
+        self.finish_readback(&staging)
     }
 
-    /// Downloads GPU image data to CPU asynchronously.
+    /// Reads the image back to the CPU asynchronously.
     ///
-    /// The download completes when the device is polled; the polling can happen
+    /// The readback completes when the device is polled; the polling can happen
     /// from another thread, and the callback then wakes this future.
-    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
-        let download = self.start_download(ctx);
-        download
+    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<InterleavedImage> {
+        let readback = self.start_readback(ctx);
+        readback
             .mapped
             .await
             .expect("the map callback runs once")
             .map_err(|error| Error::Gpu(error.to_string()))?;
-        self.finish_download(&download.staging)
+        self.finish_readback(&readback.staging)
     }
 
     /// Copies the image into a staging buffer and asks for it mapped.
-    fn start_download(&self, ctx: &Gpu) -> Download {
-        Download::start(ctx, &self.buffer, buffer_size(self.desc))
+    fn start_readback(&self, ctx: &Gpu) -> Readback {
+        Readback::start(ctx, &self.buffer, buffer_size(self.desc))
     }
 
     /// Copies the mapped staging buffer into a CPU image, the round-to-4 padding dropped.
-    fn finish_download(&self, staging: &wgpu::Buffer) -> Result<Image> {
-        let mut image = Image::new_black(self.desc)?;
+    fn finish_readback(&self, staging: &wgpu::Buffer) -> Result<InterleavedImage> {
+        let mut image = InterleavedImage::new_black(self.desc)?;
         {
             let mapped = staging
                 .slice(..)
@@ -102,7 +102,7 @@ impl GpuImage {
                 .expect("the map callback reported success");
             image
                 .bytes_mut()
-                .copy_from_slice(&mapped[..self.desc.size_in_bytes()]);
+                .copy_from_slice(&mapped[..self.desc.byte_len()]);
         }
         staging.unmap();
         Ok(image)
@@ -136,14 +136,14 @@ impl GpuImage {
     }
 }
 
-/// A download in flight: the staging buffer and the signal that it is mapped.
+/// A readback in flight: the staging buffer and the signal that it is mapped.
 #[derive(Debug)]
-struct Download {
+struct Readback {
     staging: wgpu::Buffer,
     mapped: oneshot::Receiver<result::Result<(), wgpu::BufferAsyncError>>,
 }
 
-impl Download {
+impl Readback {
     /// Copies the first `size` bytes of `buffer` into a staging buffer and asks for it mapped.
     fn start(ctx: &Gpu, buffer: &wgpu::Buffer, size: u64) -> Self {
         let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -155,7 +155,7 @@ impl Download {
         let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("gpu_image_download_encoder"),
+                label: Some("gpu_image_readback_encoder"),
             });
         encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
         ctx.queue.submit(iter::once(encoder.finish()));
@@ -185,18 +185,18 @@ impl Download {
 /// `COPY_BUFFER_ALIGNMENT`, i.e. a whole number of `u32` words. The only
 /// "padding" a packed GPU buffer needs (1-3 trailing bytes on the whole buffer,
 /// never per row).
-const fn buffer_size(desc: ImageDesc) -> u64 {
-    desc.size_in_bytes().next_multiple_of(4) as u64
+const fn buffer_size(desc: InterleavedDesc) -> u64 {
+    desc.byte_len().next_multiple_of(4) as u64
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::gpu::Gpu;
-    use crate::gpu::gpu_image::Download;
+    use crate::gpu::gpu_image::Readback;
 
     /// The first `count` words of a storage buffer, read back through a staging copy.
-    pub(crate) fn download_words(gpu: &Gpu, buffer: &wgpu::Buffer, count: u32) -> Vec<u32> {
-        let staging = Download::start(gpu, buffer, u64::from(count) * 4)
+    pub(crate) fn read_back_words(gpu: &Gpu, buffer: &wgpu::Buffer, count: u32) -> Vec<u32> {
+        let staging = Readback::start(gpu, buffer, u64::from(count) * 4)
             .wait(gpu)
             .unwrap();
         let words = bytemuck::cast_slice(&staging.slice(..).get_mapped_range().unwrap()).to_vec();
@@ -210,19 +210,19 @@ mod tests {
     use common::{Size2us, thread};
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use crate::color::color_format::ALL_FORMATS;
+    use crate::color::color_format::ColorFormat;
     use crate::gpu::gpu_image::GpuImage;
     use crate::internals::create_test_image;
     use crate::internals::gpu::test_gpu;
 
     /// Every format, at a width whose packed size is not a whole number of words, comes
-    /// back byte for byte — through both download paths and a buffer copy.
+    /// back byte for byte — through both readback paths and a buffer copy.
     #[test]
-    fn upload_and_download_round_trip() {
+    fn upload_and_read_back_round_trip() {
         let Some(gpu) = test_gpu() else {
             return;
         };
-        for format in ALL_FORMATS {
+        for format in ColorFormat::ALL {
             let image = create_test_image(format, Size2us::new(7, 3), 11);
             let uploaded = GpuImage::from_image(&gpu, &image).unwrap();
             assert_eq!(
@@ -233,17 +233,17 @@ mod tests {
 
             let copy = uploaded.clone_buffer(&gpu).unwrap();
             let done = AtomicBool::new(false);
-            let downloaded = thread::scope(|scope| {
+            let read_back = thread::scope(|scope| {
                 scope.spawn("gpu-poll", || {
                     while !done.load(Ordering::Acquire) {
                         gpu.device.poll(wgpu::PollType::Poll).unwrap();
                     }
                 });
-                let downloaded = pollster::block_on(copy.to_image_async(&gpu)).unwrap();
+                let read_back = pollster::block_on(copy.to_image_async(&gpu)).unwrap();
                 done.store(true, Ordering::Release);
-                downloaded
+                read_back
             });
-            assert_eq!(downloaded.bytes(), image.bytes(), "{format}, async");
+            assert_eq!(read_back.bytes(), image.bytes(), "{format}, async");
         }
     }
 }

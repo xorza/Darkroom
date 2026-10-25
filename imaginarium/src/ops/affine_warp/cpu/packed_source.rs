@@ -6,7 +6,7 @@ use common::{Size2us, Vec2us};
 use glam::Vec2;
 
 use crate::color::sample::Sample;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 
 /// The input image a transform samples: its pixels in row-major order, each its `N` channels of
 /// `T` side by side.
@@ -19,7 +19,7 @@ pub(super) struct PackedSource<'a, T> {
 
 impl<'a, T: Sample> PackedSource<'a, T> {
     /// `image`'s pixels as samples of `T`.
-    pub(super) fn of(image: &'a Image) -> Self {
+    pub(super) fn of(image: &'a InterleavedImage) -> Self {
         Self {
             pixels: bytemuck::cast_slice(image.bytes()),
             size: image.desc().size,

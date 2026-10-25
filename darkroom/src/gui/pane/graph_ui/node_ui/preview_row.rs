@@ -169,8 +169,8 @@ mod tests {
             "RGB \u{b7} 16-bit"
         );
         assert_eq!(
-            FormatLabel(ColorFormat::L_F32).to_string(),
-            "L \u{b7} 32-bit"
+            FormatLabel(ColorFormat::MONO_F32).to_string(),
+            "Mono \u{b7} 32-bit"
         );
     }
 }

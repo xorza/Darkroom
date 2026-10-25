@@ -33,7 +33,7 @@ use crate::recycled::Recycled;
 use crate::scratch_pool::ScratchPool;
 use common::Size2us;
 
-/// A frame is grayscale or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
+/// A frame is mono or RGB — the two shapes `LinearImage` has — or a mosaic of at most three
 /// colors, so it never carries more planes, and the output never more channels.
 pub(super) const MAX_CHANNELS: usize = 3;
 /// Output bands per rayon worker — enough for work-stealing to even out bands that different

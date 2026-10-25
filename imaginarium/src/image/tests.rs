@@ -1,10 +1,10 @@
 use std::io::Cursor;
 
-use crate::color::color_format::{ALL_FORMATS, ColorFormat};
+use crate::color::color_format::ColorFormat;
 use crate::error::Error;
-use crate::image::Image;
-use crate::image::file_format::FileFormat;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
+use crate::image::raster_format::RasterFormat;
 use crate::internals::{create_test_image, lena};
 use common::{Buffer2, Size2us, par};
 use rayon::iter::ParallelIterator;
@@ -14,26 +14,26 @@ fn lena_reads_as_packed_rgba() {
     let img = lena(ColorFormat::RGBA_U8);
     assert_eq!(
         img.desc(),
-        ImageDesc::new(Size2us::new(895, 551), ColorFormat::RGBA_U8)
+        InterleavedDesc::new(Size2us::new(895, 551), ColorFormat::RGBA_U8)
     );
-    assert_eq!(img.desc().row_bytes(), 895 * 4);
+    assert_eq!(img.desc().row_byte_len(), 895 * 4);
     assert_eq!(img.bytes().len(), 895 * 4 * 551);
 }
 
 /// `image` encoded as `format` and decoded back.
-fn round_trip(image: &Image, format: FileFormat) -> Result<Image, Error> {
+fn round_trip(image: &InterleavedImage, format: RasterFormat) -> Result<InterleavedImage, Error> {
     let mut encoded = Cursor::new(Vec::new());
     image.encode(&mut encoded, format)?;
     encoded.set_position(0);
-    Image::decode(encoded, format)
+    InterleavedImage::decode(encoded, format)
 }
 
 /// TIFF stores all nine formats; each one reads back byte for byte.
 #[test]
 fn every_format_round_trips_through_tiff() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(17, 5), 3);
-        let reloaded = round_trip(&image, FileFormat::Tiff).unwrap();
+        let reloaded = round_trip(&image, RasterFormat::Tiff).unwrap();
         assert_eq!(reloaded.desc(), image.desc(), "{format}");
         assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
     }
@@ -42,9 +42,9 @@ fn every_format_round_trips_through_tiff() {
 /// PNG stores the integer formats and reads them back byte for byte; it has no float.
 #[test]
 fn integer_formats_round_trip_through_png() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(17, 5), 3);
-        let result = round_trip(&image, FileFormat::Png);
+        let result = round_trip(&image, RasterFormat::Png);
         if format.sample_type.is_float() {
             assert!(
                 matches!(result, Err(Error::UnsupportedFormat(message)) if message == format!("PNG cannot store {format}")),
@@ -58,13 +58,13 @@ fn integer_formats_round_trip_through_png() {
     }
 }
 
-/// JPEG takes 8-bit grey and RGB only.
+/// JPEG takes 8-bit mono and RGB only.
 #[test]
 fn jpeg_refuses_what_it_cannot_store() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(8, 8), 0);
-        let result = image.encode(Cursor::new(Vec::new()), FileFormat::Jpeg);
-        if format == ColorFormat::L_U8 || format == ColorFormat::RGB_U8 {
+        let result = image.encode(Cursor::new(Vec::new()), RasterFormat::Jpeg);
+        if format == ColorFormat::MONO_U8 || format == ColorFormat::RGB_U8 {
             result.unwrap();
         } else {
             assert!(
@@ -75,9 +75,9 @@ fn jpeg_refuses_what_it_cannot_store() {
     }
 }
 
-/// A grey-with-alpha PNG has no format of its own; it reads as RGBA with its alpha.
+/// A mono-with-alpha PNG has no format of its own; it reads as RGBA with its alpha.
 #[test]
-fn grey_alpha_png_widens_to_rgba() {
+fn mono_alpha_png_widens_to_rgba() {
     let mut png = Cursor::new(Vec::new());
     image::write_buffer_with_format(
         &mut png,
@@ -89,10 +89,10 @@ fn grey_alpha_png_widens_to_rgba() {
     )
     .unwrap();
     png.set_position(0);
-    let reloaded = Image::decode(png, FileFormat::Png).unwrap();
+    let reloaded = InterleavedImage::decode(png, RasterFormat::Png).unwrap();
     assert_eq!(
         reloaded.desc(),
-        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8)
+        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8)
     );
     assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
 }
@@ -100,15 +100,15 @@ fn grey_alpha_png_widens_to_rgba() {
 #[test]
 fn construction_checks_dimensions_and_length() {
     assert!(matches!(
-        Image::new_with_data(ImageDesc::new(Size2us::new(1, 1), ColorFormat::L_U16), vec![0; 3]),
+        InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_U16), vec![0; 3]),
         Err(Error::SizeMismatch(message)) if message == "bytes length 3 does not match expected size 2"
     ));
     assert!(matches!(
-        Image::new_black(ImageDesc::new(Size2us::new(0, 4), ColorFormat::L_U8)),
+        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(0, 4), ColorFormat::MONO_U8)),
         Err(Error::SizeMismatch(message)) if message == "image dimensions must be non-zero, got 0x4"
     ));
     assert!(matches!(
-        Image::new_black(ImageDesc::new(
+        InterleavedImage::new_black(InterleavedDesc::new(
             Size2us::new(usize::MAX / 2, 3),
             ColorFormat::RGBA_F32
         )),
@@ -120,23 +120,21 @@ fn construction_checks_dimensions_and_length() {
 /// aligned for their type, which a `Vec<u8>` does not promise.
 #[test]
 fn byte_vectors_are_reused_where_the_layout_allows() {
-    for format in ALL_FORMATS {
-        let desc = ImageDesc::new(Size2us::new(6, 2), format);
-        let bytes: Vec<u8> = (0..desc.size_in_bytes())
-            .map(|i| (i * 7 % 251) as u8)
-            .collect();
+    for format in ColorFormat::ALL {
+        let desc = InterleavedDesc::new(Size2us::new(6, 2), format);
+        let bytes: Vec<u8> = (0..desc.byte_len()).map(|i| (i * 7 % 251) as u8).collect();
         let given = bytes.clone();
         let pointer = given.as_ptr();
-        let image = Image::new_with_data(desc, given).unwrap();
+        let image = InterleavedImage::new_with_data(desc, given).unwrap();
         assert_eq!(image.bytes(), bytes, "{format}");
         assert_eq!(
-            image.bytes().as_ptr() as usize % format.sample_type.size(),
+            image.bytes().as_ptr() as usize % format.sample_type.byte_len(),
             0,
             "{format}: storage is aligned for its sample type"
         );
         assert_eq!(
             image.bytes().as_ptr() == pointer,
-            format.sample_type.size() == 1,
+            format.sample_type.byte_len() == 1,
             "{format}"
         );
 
@@ -145,7 +143,7 @@ fn byte_vectors_are_reused_where_the_layout_allows() {
         assert_eq!(back, bytes, "{format}");
         assert_eq!(
             back.as_ptr() == pointer,
-            format.sample_type.size() == 1,
+            format.sample_type.byte_len() == 1,
             "{format}"
         );
     }
@@ -170,10 +168,10 @@ fn planes_interleave_into_the_format_they_spell() {
         Buffer2::new((2, 1), vec![2u8, 5]),
         Buffer2::new((2, 1), vec![3u8, 6]),
     ];
-    let image = Image::from(planes.each_ref());
+    let image = InterleavedImage::from(planes.each_ref());
     assert_eq!(
         image.desc(),
-        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8)
+        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_U8)
     );
     assert_eq!(image.bytes(), &[1, 2, 3, 4, 5, 6]);
 
@@ -182,12 +180,12 @@ fn planes_interleave_into_the_format_they_spell() {
     let taken: [Buffer2<u8>; 3] = image.try_into().unwrap();
     assert_eq!(taken, planes);
 
-    let grey = Image::from([&Buffer2::new((3, 1), vec![10u16, 20, 30])]);
-    assert_eq!(grey.desc().color_format, ColorFormat::L_U16);
-    assert_eq!(grey.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
-    // A grey image taken is its one plane, in the same allocation.
-    let pointer = grey.bytes().as_ptr();
-    let [plane]: [Buffer2<u16>; 1] = grey.try_into().unwrap();
+    let mono = InterleavedImage::from([&Buffer2::new((3, 1), vec![10u16, 20, 30])]);
+    assert_eq!(mono.desc().color_format, ColorFormat::MONO_U16);
+    assert_eq!(mono.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
+    // A mono image taken is its one plane, in the same allocation.
+    let pointer = mono.bytes().as_ptr();
+    let [plane]: [Buffer2<u16>; 1] = mono.try_into().unwrap();
     assert_eq!(plane.pixels(), &[10, 20, 30]);
     assert_eq!(plane.pixels().as_ptr().cast::<u8>(), pointer);
 }
@@ -199,10 +197,10 @@ fn planes_interleave_into_the_format_they_spell() {
 fn planes_converted_in_a_parallel_body_panic() {
     let plane = Buffer2::new((2, 1), vec![1.0f32, 2.0]);
     let convert = || {
-        let image = Image::from([&plane, &plane, &plane]);
+        let image = InterleavedImage::from([&plane, &plane, &plane]);
         assert_eq!(
             image.desc(),
-            ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGB_F32)
+            InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGB_F32)
         );
     };
     convert();
@@ -211,7 +209,11 @@ fn planes_converted_in_a_parallel_body_panic() {
 
 #[test]
 fn deinterleaving_into_another_format_is_refused() {
-    let image = Image::new_black(ImageDesc::new(Size2us::new(2, 2), ColorFormat::RGB_U8)).unwrap();
+    let image = InterleavedImage::new_black(InterleavedDesc::new(
+        Size2us::new(2, 2),
+        ColorFormat::RGB_U8,
+    ))
+    .unwrap();
     let result: Result<[Buffer2<f32>; 1], Error> = (&image).try_into();
     assert!(matches!(
         result,
@@ -228,5 +230,5 @@ fn deinterleaving_into_another_format_is_refused() {
 #[should_panic(expected = "an image needs at least one pixel")]
 fn empty_planes_are_refused() {
     let empty: Buffer2<f32> = Buffer2::new((0, 3), Vec::new());
-    drop(Image::from([&empty]));
+    drop(InterleavedImage::from([&empty]));
 }

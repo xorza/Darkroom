@@ -5,7 +5,7 @@ use rayon::prelude::*;
 
 use crate::color::color_format::SampleType;
 use crate::color::sample::Sample;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 
 /// The largest per-channel difference between two images: normalized to `[0, 1]`
 /// for the integer formats, absolute for float.
@@ -15,13 +15,13 @@ use crate::image::Image;
 ///
 /// # Panics
 /// Panics unless the two images share a descriptor.
-pub(crate) fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
-    img1.desc().assert_same(img2.desc(), "img1/img2");
+pub(crate) fn max_pixel_diff(first: &InterleavedImage, second: &InterleavedImage) -> f64 {
+    first.desc().assert_same(second.desc(), "img1/img2");
 
     // Pixel data is tightly packed, so the two buffers are one flat channel
     // array each — there is no per-row padding to step over.
-    let (a, b) = (img1.bytes(), img2.bytes());
-    match img1.desc().color_format.sample_type {
+    let (a, b) = (first.bytes(), second.bytes());
+    match first.desc().color_format.sample_type {
         SampleType::U8 => max_diff::<u8>(a, b),
         SampleType::U16 => max_diff::<u16>(a, b),
         SampleType::F32 => max_diff::<f32>(a, b),
@@ -48,13 +48,13 @@ where
 ///
 /// # Panics
 /// Panics unless the two images share a descriptor.
-pub(crate) fn pixels_equal(img1: &Image, img2: &Image) -> bool {
-    img1.desc().assert_same(img2.desc(), "img1/img2");
-    if !img1.desc().color_format.sample_type.is_float() {
-        return img1.bytes() == img2.bytes();
+pub(crate) fn pixels_equal(first: &InterleavedImage, second: &InterleavedImage) -> bool {
+    first.desc().assert_same(second.desc(), "img1/img2");
+    if !first.desc().color_format.sample_type.is_float() {
+        return first.bytes() == second.bytes();
     }
-    let a: &[f32] = bytemuck::cast_slice(img1.bytes());
-    let b: &[f32] = bytemuck::cast_slice(img2.bytes());
+    let a: &[f32] = bytemuck::cast_slice(first.bytes());
+    let b: &[f32] = bytemuck::cast_slice(second.bytes());
     a.iter()
         .zip(b)
         .all(|(a, b)| a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan()))
@@ -67,7 +67,7 @@ pub(crate) fn pixels_equal(img1: &Image, img2: &Image) -> bool {
 /// 8 ULP at one, the top of the range the ops produce. An integer result rounds such a value,
 /// and one lying within those few ULP of a tie can land one step away.
 #[cfg(feature = "wgpu")]
-pub(crate) fn assert_matches_cpu(gpu: &Image, cpu: &Image, label: &str) {
+pub(crate) fn assert_matches_cpu(gpu: &InterleavedImage, cpu: &InterleavedImage, label: &str) {
     let tolerance = match cpu.desc().color_format.sample_type {
         SampleType::U8 => 1.0 / 255.0,
         SampleType::U16 => 1.0 / 65535.0,

@@ -2,7 +2,6 @@ use super::*;
 use palantir::internals::ui_harness::UiHarness;
 use std::sync::Arc;
 
-use imaginarium::Image as RawImage;
 use scenarium::{ConstValue, Node, SpecialNode};
 
 use crate::core::document::internals::DocumentFixture;
@@ -66,8 +65,8 @@ fn capped_target_preserves_aspect_without_upscaling() {
 #[test]
 fn conversion_produces_opaque_rgba8_at_the_target_size() {
     let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
-    let rgba = RawImage::new_with_data(
-        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8),
+    let rgba = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_U8),
         bytes.clone(),
     )
     .unwrap();
@@ -76,8 +75,8 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
         Raster::from_srgba8(UVec2::new(2, 1), bytes).expect("2×1 RGBA8 is 8 bytes")
     );
 
-    let rgb = RawImage::new_with_data(
-        ImageDesc::new(Size2us::new(1, 1), ColorFormat::RGB_F32),
+    let rgb = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::RGB_F32),
         vec![0; 12],
     )
     .unwrap();
@@ -93,7 +92,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
 #[test]
 fn native_size_refuses_an_edge_no_texture_holds() {
     let size = |width, height| {
-        native_size(ImageDesc::new(
+        native_size(InterleavedDesc::new(
             Size2us::new(width, height),
             ColorFormat::RGB_U8,
         ))

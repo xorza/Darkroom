@@ -13,11 +13,11 @@ use common::bench::{Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME};
-use crate::color::color_format::ALL_FORMATS;
+use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 use crate::ops::blend::{Blend, BlendMode, cpu};
@@ -34,11 +34,12 @@ const GPU_ITERATION: Duration = Duration::from_millis(470);
 /// through the scalar reference and each tier's kernel. Per pixel, reading both rows.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Micros);
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let mut layers = None;
         let mut out =
-            Image::new_black(ImageDesc::new(Size2us::new(FRAME.width, 1), format)).unwrap();
-        group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_count()));
+            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), format))
+                .unwrap();
+        group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
         for mode in BlendMode::iter() {
             let params = Blend::new(mode, ALPHA);
             for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
@@ -91,10 +92,10 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let params = Blend::new(BlendMode::default(), ALPHA);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let mut layers = None;
         let pixels = FRAME.pixel_count();
-        group.throughput(fixture::throughput(pixels, 2 * format.byte_count()));
+        group.throughput(fixture::throughput(pixels, 2 * format.byte_len()));
         for backend in backends.all() {
             match backend {
                 Backend::Cpu => Scale::Millis,
@@ -110,7 +111,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     .get_or_insert_with(|| [1, 2].map(|seed| scene::sky(format, FRAME, seed)));
                 match backend {
                     Backend::Cpu => {
-                        let mut output = Image::new_black(src.desc()).unwrap();
+                        let mut output = InterleavedImage::new_black(src.desc()).unwrap();
                         b.iter(|| params.apply_cpu(black_box(src), black_box(dst), &mut output));
                     }
                     #[cfg(feature = "wgpu")]

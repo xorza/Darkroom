@@ -3,7 +3,7 @@ use std::path::Path;
 use std::{array, slice};
 
 use common::{Buffer2, Size2us, par};
-use imaginarium::{ChannelCount, ColorFormat, Image};
+use imaginarium::{ChannelCount, ColorFormat, InterleavedImage};
 use rayon::prelude::*;
 
 use crate::image::SAMPLES_PER_BLOCK;
@@ -111,24 +111,24 @@ impl LinearImage {
         self.dimensions().sample_count()
     }
 
-    pub const fn is_grayscale(&self) -> bool {
-        matches!(self.pixels, LinearPixels::L(_))
+    pub const fn is_mono(&self) -> bool {
+        matches!(self.pixels, LinearPixels::Mono(_))
     }
 
     pub const fn is_rgb(&self) -> bool {
         matches!(self.pixels, LinearPixels::Rgb(_))
     }
 
-    /// The interleaved format these planes repack to: `RGB_F32` or `L_F32`.
+    /// The interleaved format these planes repack to: `RGB_F32` or `MONO_F32`.
     pub const fn color_format(&self) -> ColorFormat {
         if self.is_rgb() {
             ColorFormat::RGB_F32
         } else {
-            ColorFormat::L_F32
+            ColorFormat::MONO_F32
         }
     }
 
-    /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).
+    /// Get channel as Buffer2 reference (0=mono or R, 1=G, 2=B).
     pub fn channel(&self, c: usize) -> &Buffer2<f32> {
         self.pixels.channel(c)
     }
@@ -205,7 +205,7 @@ impl LinearImage {
         self.pixels
     }
 
-    /// Iterate the channel planes in channel order: one for grayscale, three for RGB.
+    /// Iterate the channel planes in channel order: one for mono, three for RGB.
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
         self.samples_mut().planes_mut()
     }
@@ -224,19 +224,19 @@ impl LinearImage {
     /// needs to walk R, G and B in step.
     ///
     /// # Panics
-    /// On a grayscale image; callers gate on [`Self::is_rgb`].
+    /// On a mono image; callers gate on [`Self::is_rgb`].
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
         self.samples_mut().rgb_planes_mut()
     }
 
-    /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.
+    /// Deinterleave an already-`f32` (`MONO_F32` / `RGB_F32`) imaginarium image into planes.
     ///
     /// # Panics
     /// If `image` is not one of those two formats. Callers check the format themselves — the
     /// ops live on `LinearImage`, so there is no shared gate to name.
     fn from_f32_image<I>(image: I) -> Self
     where
-        I: Borrow<Image>,
+        I: Borrow<InterleavedImage>,
         [Buffer2<f32>; 1]: TryFrom<I, Error = imaginarium::Error>,
         [Buffer2<f32>; 3]: TryFrom<I, Error = imaginarium::Error>,
     {
@@ -248,7 +248,7 @@ impl LinearImage {
     }
 
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
-    /// grayscale image, which has no cross-channel relationship for `rgb` to act on — every caller
+    /// mono image, which has no cross-channel relationship for `rgb` to act on — every caller
     /// (SCNR, background neutralization, the color-preserving stretch) is meaningless in mono and
     /// returned early on it when the storage was interleaved.
     pub(crate) fn map_rgb(&mut self, rgb: impl Fn(Rgb) -> Rgb + Sync) {
@@ -274,7 +274,7 @@ impl LinearImage {
     }
 
     /// The per-pixel combined intensity, read from the channels where it is needed: the channel
-    /// itself for L, `(r+g+b)/3` for RGB.
+    /// itself for mono, `(r+g+b)/3` for RGB.
     pub(crate) fn intensity(&self) -> Intensity<'_> {
         let size = self.dimensions().size();
         if self.is_rgb() {
@@ -286,8 +286,8 @@ impl LinearImage {
 
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
     /// `map`, then move every pixel to its new intensity with its hue kept
-    /// ([`Rgb::with_intensity`]); L takes the new intensity clamped to `[0, 1]`. The shape shared
-    /// by the display enhancers (`image_ops::hdr`, `image_ops::local_contrast`).
+    /// ([`Rgb::with_intensity`]); mono takes the new intensity clamped to `[0, 1]`. The shape
+    /// shared by the display enhancers (`image_ops::hdr`, `image_ops::local_contrast`).
     pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(Intensity<'_>) -> Buffer2<f32>) {
         let mapped = map(self.intensity());
         if !self.is_rgb() {
@@ -387,7 +387,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
     }
 }
 
-impl From<&LinearImage> for Image {
+impl From<&LinearImage> for InterleavedImage {
     fn from(linear: &LinearImage) -> Self {
         Self::from(&linear.pixels)
     }
@@ -395,12 +395,13 @@ impl From<&LinearImage> for Image {
 
 /// Deinterleave an imaginarium image into planes, converting to `f32` first when it is not already.
 ///
-/// The inbound half of the boundary whose outbound half is `impl From<&LinearImage> for Image`:
-/// what a caller holding interleaved pixels goes through to reach the ops, which take planes.
-impl From<&Image> for LinearImage {
+/// The inbound half of the boundary whose outbound half is `impl From<&LinearImage> for
+/// InterleavedImage`: what a caller holding interleaved pixels goes through to reach the ops, which
+/// take planes.
+impl From<&InterleavedImage> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
     /// source is not already in one, rather than asking the caller to arrive with one.
-    fn from(image: &Image) -> Self {
+    fn from(image: &InterleavedImage) -> Self {
         let target = f32_target_format(image.desc().color_format);
         if image.desc().color_format == target {
             Self::from_f32_image(image)
@@ -410,26 +411,26 @@ impl From<&Image> for LinearImage {
     }
 }
 
-impl From<Image> for LinearImage {
-    /// The borrowing conversion, taking the image: a grayscale `f32` image keeps its allocation as
+impl From<InterleavedImage> for LinearImage {
+    /// The borrowing conversion, taking the image: a mono `f32` image keeps its allocation as
     /// its plane.
-    fn from(image: Image) -> Self {
+    fn from(image: InterleavedImage) -> Self {
         let target = f32_target_format(image.desc().color_format);
         Self::from_f32_image(image.convert(target))
     }
 }
 
-impl From<LinearImage> for Image {
+impl From<LinearImage> for InterleavedImage {
     fn from(linear: LinearImage) -> Self {
         Self::from(&linear)
     }
 }
 
-/// The `f32` format an image of `format` deinterleaves into: `L_F32` for grayscale, `RGB_F32` for
+/// The `f32` format an image of `format` deinterleaves into: `MONO_F32` for mono, `RGB_F32` for
 /// color, an alpha channel dropped.
 pub(crate) const fn f32_target_format(format: ColorFormat) -> ColorFormat {
     match format.channel_count {
-        ChannelCount::L => ColorFormat::L_F32,
+        ChannelCount::Mono => ColorFormat::MONO_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
     }
 }
@@ -465,7 +466,7 @@ mod tests {
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
     use crate::image::pixel_flags::PixelFlags;
-    use crate::internals::images::{gray_image, rgb_image};
+    use crate::internals::images::{mono_image, rgb_image};
     use common::Size2us;
 
     /// A 2×1 RGB image holds 6 `f32` samples, 24 bytes; its flag plane adds a byte a pixel, 2; a
@@ -491,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn map_rgb_maps_every_channel_of_a_pixel_and_skips_grayscale() {
+    fn map_rgb_maps_every_channel_of_a_pixel_and_skips_mono() {
         // 2x1 RGB: pixels (0.1,0.2,0.3) and (0.4,0.5,0.6).
         let mut image = rgb_image(
             Size2us::new(2, 1),
@@ -502,18 +503,18 @@ mod tests {
         assert_eq!(image.channel(1).pixels(), &[0.4, 1.0]);
         assert_eq!(image.channel(2).pixels(), &[0.6, 1.2]);
 
-        // Grayscale has no cross-channel relationship for `rgb` to act on, so it is left alone
+        // Mono has no cross-channel relationship for `rgb` to act on, so it is left alone
         // rather than having the closure applied to (l, l, l).
-        let mut gray = gray_image(Size2us::new(3, 1), vec![0.25, 0.5, 0.75]);
-        gray.map_rgb(|px| px.scale(2.0));
-        assert_eq!(gray.channel(0).pixels(), &[0.25, 0.5, 0.75]);
+        let mut mono = mono_image(Size2us::new(3, 1), vec![0.25, 0.5, 0.75]);
+        mono.map_rgb(|px| px.scale(2.0));
+        assert_eq!(mono.channel(0).pixels(), &[0.25, 0.5, 0.75]);
     }
 
     /// The channel mean as f32 rounds it, the sum times the f32 `1/3`: (0.3, 0, 0) gives
     /// `0.3·⅓`, which rounds one ulp above `0.1f32`, to `0x3dcc_ccce`; (0.6, 0.6, 0.6) sums to
     /// `1.8000001` and its third rounds back onto `0.6f32`. Mono is its own intensity.
     #[test]
-    fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
+    fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_mono() {
         let rgb = rgb_image(
             Size2us::new(2, 1),
             [vec![0.3, 0.6], vec![0.0, 0.6], vec![0.0, 0.6]],
@@ -523,7 +524,7 @@ mod tests {
             &[f32::from_bits(0x3dcc_ccce), 0.6]
         );
 
-        let l = gray_image(Size2us::new(2, 1), vec![0.2, 0.7]);
+        let l = mono_image(Size2us::new(2, 1), vec![0.2, 0.7]);
         assert_eq!(l.intensity_plane().pixels(), &[0.2, 0.7]);
     }
 
@@ -537,8 +538,8 @@ mod tests {
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);
 
-        let mut gray = gray_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
-        gray.remap_intensity(|_| Buffer2::new((3, 1), vec![-0.5, 0.25, 1.5]));
-        assert_eq!(gray.channel(0).pixels(), &[0.0, 0.25, 1.0]);
+        let mut mono = mono_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
+        mono.remap_intensity(|_| Buffer2::new((3, 1), vec![-0.5, 0.25, 1.5]));
+        assert_eq!(mono.channel(0).pixels(), &[0.0, 0.25, 1.0]);
     }
 }

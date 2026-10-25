@@ -1,17 +1,17 @@
 use std::str::FromStr;
 
-use imaginarium::{ALL_FORMATS, ColorFormat};
+use imaginarium::ColorFormat;
 use scenarium::{DataType, EnumVariants, TypeId};
 
 /// The `Format` variant that keeps the image's color format.
 pub(super) const AS_IS: &str = "As Is";
 
 /// The `Format` port's variants: [`AS_IS`], then every color format by name.
-const VARIANTS: [&str; ALL_FORMATS.len() + 1] = {
-    let mut variants = [AS_IS; ALL_FORMATS.len() + 1];
+const VARIANTS: [&str; ColorFormat::ALL.len() + 1] = {
+    let mut variants = [AS_IS; ColorFormat::ALL.len() + 1];
     let mut idx = 0;
-    while idx < ALL_FORMATS.len() {
-        variants[idx + 1] = ALL_FORMATS[idx].name();
+    while idx < ColorFormat::ALL.len() {
+        variants[idx + 1] = ColorFormat::ALL[idx].name();
         idx += 1;
     }
     variants
@@ -49,7 +49,7 @@ impl FromStr for ConversionFormat {
         if name == AS_IS {
             return Ok(Self::AsIs);
         }
-        ALL_FORMATS
+        ColorFormat::ALL
             .into_iter()
             .find(|format| format.name() == name)
             .map(Self::To)
@@ -70,7 +70,7 @@ pub(super) const CONVERSION_FORMAT_DATATYPE: DataType = DataType::Enum(CONVERSIO
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::{ALL_FORMATS, ColorFormat};
+    use imaginarium::ColorFormat;
     use scenarium::EnumVariants;
 
     use crate::image::format::{AS_IS, ConversionFormat, UnknownConversionFormat};
@@ -84,7 +84,7 @@ mod tests {
         assert_eq!(names[0], "As Is");
         assert_eq!(names.len(), 10);
         assert_eq!(names[0].parse(), Ok(ConversionFormat::AsIs));
-        for (name, format) in names[1..].iter().zip(ALL_FORMATS) {
+        for (name, format) in names[1..].iter().zip(ColorFormat::ALL) {
             assert_eq!(name, &format.to_string());
             assert_eq!(name.parse(), Ok(ConversionFormat::To(format)));
         }

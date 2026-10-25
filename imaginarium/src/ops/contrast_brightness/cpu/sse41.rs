@@ -49,7 +49,7 @@ impl Splat {
 
 /// 16 `u8` channel values per iteration.
 #[target_feature(enable = "sse4.1")]
-pub(super) unsafe fn u8_flat(row: &mut [u8], count: usize, affine: ChannelAffine) {
+pub(super) unsafe fn u8_contiguous(row: &mut [u8], count: usize, affine: ChannelAffine) {
     let splat = Splat::new(affine);
     let row = &mut row[..count];
     let zero = _mm_setzero_si128();
@@ -106,7 +106,7 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
 
 /// Eight `u16` channel values per iteration.
 #[target_feature(enable = "sse4.1")]
-pub(super) unsafe fn u16_flat(row: &mut [u8], count: usize, affine: ChannelAffine) {
+pub(super) unsafe fn u16_contiguous(row: &mut [u8], count: usize, affine: ChannelAffine) {
     let splat = Splat::new(affine);
     let row: &mut [u16] = bytemuck::cast_slice_mut(&mut row[..count * 2]);
     let zero = _mm_setzero_si128();
@@ -150,7 +150,7 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
 /// Four `f32` channel values per iteration.
 #[target_feature(enable = "sse4.1")]
-pub(super) unsafe fn f32_flat(row: &mut [u8], count: usize, affine: ChannelAffine) {
+pub(super) unsafe fn f32_contiguous(row: &mut [u8], count: usize, affine: ChannelAffine) {
     let splat = Splat::new(affine);
     let row: &mut [f32] = bytemuck::cast_slice_mut(&mut row[..count * 4]);
 

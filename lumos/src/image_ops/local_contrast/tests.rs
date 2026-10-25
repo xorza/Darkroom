@@ -4,7 +4,7 @@ use crate::image::intensity::Intensity;
 use crate::image_ops::local_contrast::{
     BIN_COUNT, LocalContrast, TileAxis, TileGrid, clip_histogram,
 };
-use crate::internals::images::{gray_image, rgb_image};
+use crate::internals::images::{mono_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
 use common::Size2us;
@@ -17,7 +17,7 @@ fn low_contrast(size: Size2us) -> Vec<f32> {
 #[test]
 fn clahe_strength_zero_is_identity() {
     let px = low_contrast(Size2us::new(64, 64));
-    let mut img = gray_image(Size2us::new(64, 64), px.clone());
+    let mut img = mono_image(Size2us::new(64, 64), px.clone());
     LocalContrast {
         strength: 0.0,
         ..Default::default()
@@ -54,7 +54,7 @@ fn clahe_keeps_color_in_range() {
 /// 128 bins below put the bin's lower edge at 128 · 4 / 1024 = 0.5 — where 0.5 maps, exactly.
 #[test]
 fn clahe_flat_region_not_blown_up() {
-    let mut img = gray_image(Size2us::new(64, 64), vec![0.5; 64 * 64]);
+    let mut img = mono_image(Size2us::new(64, 64), vec![0.5; 64 * 64]);
     LocalContrast::default().apply(&mut img).unwrap();
     assert!(img.channel(0).pixels().iter().all(|&v| v == 0.5));
 }
@@ -68,7 +68,7 @@ fn clahe_increases_low_contrast_and_every_knob_matters() {
     let px = low_contrast(size);
     let in_std = pixel_stats(&px).std;
     let run = |tiles, clip_limit| {
-        let mut img = gray_image(size, px.clone());
+        let mut img = mono_image(size, px.clone());
         LocalContrast {
             tiles,
             clip_limit,
@@ -166,7 +166,7 @@ fn clipping_spreads_the_excess_across_the_range() {
 fn a_flat_histogram_maps_to_the_identity() {
     let size = Size2us::new(64, 64);
     let px: Vec<f32> = (0..4096).map(|i| (i as f32 + 0.5) / 4096.0).collect();
-    let mut img = gray_image(size, px.clone());
+    let mut img = mono_image(size, px.clone());
     LocalContrast {
         tiles: 1,
         clip_limit: 2.0,
@@ -185,7 +185,7 @@ fn a_flat_histogram_maps_to_the_identity() {
 fn distinct_values_stay_distinct() {
     let size = Size2us::new(64, 64);
     let px: Vec<f32> = (0..4096).map(|i| (i as f32 / 4095.0).powi(2)).collect();
-    let mut img = gray_image(size, px);
+    let mut img = mono_image(size, px);
     LocalContrast {
         tiles: 1,
         clip_limit: 3.0,

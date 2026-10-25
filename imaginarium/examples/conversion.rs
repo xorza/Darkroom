@@ -7,8 +7,8 @@ fn main() {
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 
-    let gray = input.convert_to(ColorFormat::L_U8);
-    save_image(&gray, "gray_u8.png");
+    let mono = input.convert_to(ColorFormat::MONO_U8);
+    save_image(&mono, "mono_u8.png");
 
     let u16_img = input.convert_to(ColorFormat::RGBA_U16);
     print_image_info("Unsigned 16-bit", &u16_img);
@@ -27,8 +27,8 @@ fn main() {
         .convert(ColorFormat::RGBA_U8);
     save_image(&roundtrip, "roundtrip_f32_u8.png");
 
-    let gray_to_rgb = gray.convert(ColorFormat::RGB_U8);
-    save_image(&gray_to_rgb, "gray_to_rgb.png");
+    let mono_to_rgb = mono.convert(ColorFormat::RGB_U8);
+    save_image(&mono_to_rgb, "mono_to_rgb.png");
 
     let back_to_u8 = u16_img.convert(ColorFormat::RGBA_U8);
     save_image(&back_to_u8, "u16_to_u8.png");

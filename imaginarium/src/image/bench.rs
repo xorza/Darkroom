@@ -12,10 +12,10 @@ use criterion::{BenchmarkId, Criterion};
 
 use crate::bench::fixture::{self, Backend};
 use crate::bench::scene::{self, FRAME};
-use crate::color::color_format::{ALL_FORMATS, ColorFormat};
+use crate::color::color_format::ColorFormat;
 use crate::error::Error;
-use crate::image::Image;
-use crate::image::file_format::FileFormat;
+use crate::image::InterleavedImage;
+use crate::image::raster_format::RasterFormat;
 
 /// `integration/read_file/cpu/<file>/<format>` and `integration/save_file/cpu/<file>/<format>`:
 /// the standard frame decoded from a file and encoded into one, as a caller does through
@@ -28,7 +28,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let mut group = Kind::Integration.group(c, "save_file", Scale::Millis);
     for (file, format) in cases() {
         scale(file).apply(&mut group);
-        group.throughput(fixture::throughput(pixels, format.byte_count()));
+        group.throughput(fixture::throughput(pixels, format.byte_len()));
         let path = dir.join(format!("save.{}", extension(file)));
         let mut source = None;
         group.bench_function(
@@ -47,7 +47,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let mut group = Kind::Integration.group(c, "read_file", Scale::Millis);
     for (file, format) in cases() {
         scale(file).apply(&mut group);
-        group.throughput(fixture::throughput(pixels, format.byte_count()));
+        group.throughput(fixture::throughput(pixels, format.byte_len()));
         let mut path = None;
         group.bench_function(
             BenchmarkId::new(
@@ -69,22 +69,22 @@ pub(crate) fn integration(c: &mut Criterion) {
 }
 
 /// `image` encoded as `file` into a new file at `path`.
-fn save(image: &Image, path: &Path, file: FileFormat) {
+fn save(image: &InterleavedImage, path: &Path, file: RasterFormat) {
     let mut out = BufWriter::new(fs::create(path).unwrap());
     image.encode(&mut out, file).unwrap();
     out.flush().unwrap();
 }
 
 /// The `file` image at `path`.
-fn read(path: &Path, file: FileFormat) -> Image {
-    Image::decode(BufReader::new(fs::open(path).unwrap()), file).unwrap()
+fn read(path: &Path, file: RasterFormat) -> InterleavedImage {
+    InterleavedImage::decode(BufReader::new(fs::open(path).unwrap()), file).unwrap()
 }
 
 /// Every file format with each color format it stores, found by encoding one pixel.
-fn cases() -> Vec<(FileFormat, ColorFormat)> {
-    let pairs = FileFormat::ALL
+fn cases() -> Vec<(RasterFormat, ColorFormat)> {
+    let pairs = RasterFormat::ALL
         .into_iter()
-        .flat_map(|file| ALL_FORMATS.map(|format| (file, format)));
+        .flat_map(|file| ColorFormat::ALL.map(|format| (file, format)));
     pairs
         .filter(|&(file, format)| {
             match scene::sky(format, Size2us::new(1, 1), 0).encode(Cursor::new(Vec::new()), file) {
@@ -96,20 +96,20 @@ fn cases() -> Vec<(FileFormat, ColorFormat)> {
         .collect()
 }
 
-const fn extension(file: FileFormat) -> &'static str {
+const fn extension(file: RasterFormat) -> &'static str {
     file.extensions()[0]
 }
 
 /// The sampling of a file format's cases, from the slowest iteration of its saves and reads as
 /// measured on a Ryzen 7 6800U: PNG 468 ms (RGBA u16), JPEG 336 ms (RGB u8), TIFF 201 ms.
-const fn scale(file: FileFormat) -> Scale {
+const fn scale(file: RasterFormat) -> Scale {
     match file {
-        FileFormat::Png => Scale::Slow {
+        RasterFormat::Png => Scale::Slow {
             iteration: Duration::from_millis(470),
         },
-        FileFormat::Jpeg => Scale::Slow {
+        RasterFormat::Jpeg => Scale::Slow {
             iteration: Duration::from_millis(340),
         },
-        FileFormat::Tiff => Scale::Millis,
+        RasterFormat::Tiff => Scale::Millis,
     }
 }

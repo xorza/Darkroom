@@ -1,4 +1,5 @@
-//! Runtime-format interleaved storage owned by [`Image`](crate::image::Image).
+//! Runtime-format interleaved storage owned by
+//! [`InterleavedImage`](crate::image::InterleavedImage).
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
@@ -11,9 +12,9 @@ use common::{Buffer2, Size2us};
     reason = "each variant is named for the `ColorFormat` constant it stores"
 )]
 pub(crate) enum ImagePixels {
-    L_U8(Buffer2<[u8; 1]>),
-    L_U16(Buffer2<[u16; 1]>),
-    L_F32(Buffer2<[f32; 1]>),
+    MONO_U8(Buffer2<[u8; 1]>),
+    MONO_U16(Buffer2<[u16; 1]>),
+    MONO_F32(Buffer2<[f32; 1]>),
     RGB_U8(Buffer2<[u8; 3]>),
     RGB_U16(Buffer2<[u16; 3]>),
     RGB_F32(Buffer2<[f32; 3]>),
@@ -54,9 +55,9 @@ macro_rules! stored {
     };
 }
 
-stored!(1, u8, L_U8);
-stored!(1, u16, L_U16);
-stored!(1, f32, L_F32);
+stored!(1, u8, MONO_U8);
+stored!(1, u16, MONO_U16);
+stored!(1, f32, MONO_F32);
 stored!(3, u8, RGB_U8);
 stored!(3, u16, RGB_U16);
 stored!(3, f32, RGB_F32);
@@ -68,9 +69,9 @@ stored!(4, f32, RGBA_F32);
 macro_rules! with_pixels {
     ($self:expr, $pixels:ident => $body:expr) => {
         match $self {
-            ImagePixels::L_U8($pixels) => $body,
-            ImagePixels::L_U16($pixels) => $body,
-            ImagePixels::L_F32($pixels) => $body,
+            ImagePixels::MONO_U8($pixels) => $body,
+            ImagePixels::MONO_U16($pixels) => $body,
+            ImagePixels::MONO_F32($pixels) => $body,
             ImagePixels::RGB_U8($pixels) => $body,
             ImagePixels::RGB_U16($pixels) => $body,
             ImagePixels::RGB_F32($pixels) => $body,
@@ -88,9 +89,9 @@ trait Build {
 
 fn build_for(format: ColorFormat, builder: impl Build) -> ImagePixels {
     match (format.channel_count, format.sample_type) {
-        (ChannelCount::L, SampleType::U8) => builder.build::<u8, 1>(),
-        (ChannelCount::L, SampleType::U16) => builder.build::<u16, 1>(),
-        (ChannelCount::L, SampleType::F32) => builder.build::<f32, 1>(),
+        (ChannelCount::Mono, SampleType::U8) => builder.build::<u8, 1>(),
+        (ChannelCount::Mono, SampleType::U16) => builder.build::<u16, 1>(),
+        (ChannelCount::Mono, SampleType::F32) => builder.build::<f32, 1>(),
         (ChannelCount::Rgb, SampleType::U8) => builder.build::<u8, 3>(),
         (ChannelCount::Rgb, SampleType::U16) => builder.build::<u16, 3>(),
         (ChannelCount::Rgb, SampleType::F32) => builder.build::<f32, 3>(),
@@ -171,9 +172,9 @@ impl ImagePixels {
 
     pub(crate) const fn format(&self) -> ColorFormat {
         match self {
-            Self::L_U8(_) => ColorFormat::L_U8,
-            Self::L_U16(_) => ColorFormat::L_U16,
-            Self::L_F32(_) => ColorFormat::L_F32,
+            Self::MONO_U8(_) => ColorFormat::MONO_U8,
+            Self::MONO_U16(_) => ColorFormat::MONO_U16,
+            Self::MONO_F32(_) => ColorFormat::MONO_F32,
             Self::RGB_U8(_) => ColorFormat::RGB_U8,
             Self::RGB_U16(_) => ColorFormat::RGB_U16,
             Self::RGB_F32(_) => ColorFormat::RGB_F32,

@@ -16,12 +16,12 @@ const BG_ITERATIONS: usize = 5;
 /// channel to the darkest channel's level: `IN_x = I_x − BI_x + min(BI_R, BI_G, BI_B)`. A
 /// linear-domain operation — run after gradient/background extraction and before the stretch.
 /// Additive, so it preserves signal *above* the background (and may push faint pixels slightly
-/// negative, which the stretch's black point absorbs). No-op on grayscale.
+/// negative, which the stretch's black point absorbs). No-op on mono.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NeutralizeBg;
 
 impl NeutralizeBg {
-    /// Neutralize `image`'s background in place. A no-op on grayscale, which has no channels to
+    /// Neutralize `image`'s background in place. A no-op on mono, which has no channels to
     /// bring to a common level.
     ///
     /// # Errors

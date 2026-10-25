@@ -1,8 +1,8 @@
 pub(crate) mod conversion;
-pub(crate) mod file_format;
 pub(crate) mod image_desc;
 pub(crate) mod image_pixels;
 mod io;
+pub(crate) mod raster_format;
 
 use std::io::{BufRead, Seek, Write};
 
@@ -10,22 +10,22 @@ use crate::color::color_format::ColorFormat;
 use crate::color::sample::Sample;
 use crate::error::{Error, Result};
 use crate::image::conversion::convert_image;
-use crate::image::file_format::FileFormat;
-use crate::image::image_desc::ImageDesc;
+use crate::image::image_desc::InterleavedDesc;
 use crate::image::image_pixels::{ImagePixels, Stored};
+use crate::image::raster_format::RasterFormat;
 use common::Buffer2;
 
 /// A runtime-format image backed by tightly packed, typed interleaved pixels.
 #[derive(Clone, Debug)]
-pub struct Image {
+pub struct InterleavedImage {
     pixels: ImagePixels,
 }
 
-impl Image {
+impl InterleavedImage {
     /// Dimensions and format derived from the owned typed storage.
     #[inline]
-    pub const fn desc(&self) -> ImageDesc {
-        ImageDesc::new(self.pixels.size(), self.pixels.format())
+    pub const fn desc(&self) -> InterleavedDesc {
+        InterleavedDesc::new(self.pixels.size(), self.pixels.format())
     }
 
     /// The interleaved pixel bytes — a zero-copy `&[u8]` view of the typed buffer.
@@ -44,7 +44,7 @@ impl Image {
         self.pixels.bytes_mut()
     }
 
-    pub fn new_black(desc: ImageDesc) -> Result<Self> {
+    pub fn new_black(desc: InterleavedDesc) -> Result<Self> {
         desc.validate()?;
         let pixels = ImagePixels::new_zeroed(desc.color_format, desc.size);
         Ok(Self { pixels })
@@ -52,13 +52,13 @@ impl Image {
 
     /// An image over `bytes`, which must hold exactly the descriptor's pixels. A `u8` format
     /// keeps the allocation.
-    pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> Result<Self> {
+    pub fn new_with_data(desc: InterleavedDesc, bytes: Vec<u8>) -> Result<Self> {
         desc.validate()?;
-        if bytes.len() != desc.size_in_bytes() {
+        if bytes.len() != desc.byte_len() {
             return Err(Error::SizeMismatch(format!(
                 "bytes length {} does not match expected size {}",
                 bytes.len(),
-                desc.size_in_bytes()
+                desc.byte_len()
             )));
         }
         let pixels = ImagePixels::from_bytes(desc.color_format, desc.size, bytes);
@@ -70,7 +70,7 @@ impl Image {
     ///
     /// # Panics
     /// If `T` is not the format's sample type.
-    pub(crate) fn from_samples<T: Sample>(desc: ImageDesc, samples: Vec<T>) -> Result<Self> {
+    pub(crate) fn from_samples<T: Sample>(desc: InterleavedDesc, samples: Vec<T>) -> Result<Self> {
         desc.validate()?;
         let expected = desc.size.pixel_count() * desc.color_format.channel_count.count();
         if samples.len() != expected {
@@ -85,12 +85,12 @@ impl Image {
 
     /// The image `input` holds, in `format`, decoded as it is read: a file whoever owns the
     /// reading opened, or bytes in a [`Cursor`](std::io::Cursor).
-    pub fn decode(mut input: impl BufRead + Seek, format: FileFormat) -> Result<Self> {
+    pub fn decode(mut input: impl BufRead + Seek, format: RasterFormat) -> Result<Self> {
         io::load(&mut input, format)
     }
 
     /// This image in `format`, written into `out`, which the encoder may seek back over.
-    pub fn encode(&self, mut out: impl Write + Seek, format: FileFormat) -> Result<()> {
+    pub fn encode(&self, mut out: impl Write + Seek, format: RasterFormat) -> Result<()> {
         io::save(self, format, &mut out)
     }
 
@@ -121,7 +121,7 @@ impl Image {
     }
 }
 
-impl Image {
+impl InterleavedImage {
     /// Interleaves `N` channel planes into an image of the format they spell.
     ///
     /// # Panics
@@ -154,7 +154,7 @@ impl Image {
 }
 
 /// Why an image of `desc` has no `N` planes of `T`.
-fn planes_refused<T: Stored<N>, const N: usize>(desc: ImageDesc) -> Error {
+fn planes_refused<T: Stored<N>, const N: usize>(desc: InterleavedDesc) -> Error {
     Error::InvalidColorFormat(format!(
         "cannot deinterleave a {} image into {N} {} planes",
         desc.color_format,
@@ -162,29 +162,30 @@ fn planes_refused<T: Stored<N>, const N: usize>(desc: ImageDesc) -> Error {
     ))
 }
 
-/// The public face of [`Image::from_planes`], [`Image::planes`] and [`Image::into_planes`] for one
-/// format, spelled per type because the bound that unifies them names crate-private storage.
+/// The public face of [`InterleavedImage::from_planes`], [`InterleavedImage::planes`] and
+/// [`InterleavedImage::into_planes`] for one format, spelled per type because the bound that
+/// unifies them names crate-private storage.
 macro_rules! planar_conversions {
     ($($n:literal $t:ty),+ $(,)?) => {
         $(
-            impl From<[&Buffer2<$t>; $n]> for Image {
+            impl From<[&Buffer2<$t>; $n]> for InterleavedImage {
                 fn from(planes: [&Buffer2<$t>; $n]) -> Self {
-                    Image::from_planes(planes)
+                    InterleavedImage::from_planes(planes)
                 }
             }
 
-            impl TryFrom<&Image> for [Buffer2<$t>; $n] {
+            impl TryFrom<&InterleavedImage> for [Buffer2<$t>; $n] {
                 type Error = Error;
 
-                fn try_from(image: &Image) -> Result<Self> {
+                fn try_from(image: &InterleavedImage) -> Result<Self> {
                     image.planes()
                 }
             }
 
-            impl TryFrom<Image> for [Buffer2<$t>; $n] {
+            impl TryFrom<InterleavedImage> for [Buffer2<$t>; $n] {
                 type Error = Error;
 
-                fn try_from(image: Image) -> Result<Self> {
+                fn try_from(image: InterleavedImage) -> Result<Self> {
                     image.into_planes()
                 }
             }

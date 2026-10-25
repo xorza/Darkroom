@@ -14,9 +14,9 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::ops::transform::cpu::packed_source::PackedSource;
-use crate::ops::transform::{FilterMode, Transform};
+use crate::image::InterleavedImage;
+use crate::ops::affine_warp::cpu::packed_source::PackedSource;
+use crate::ops::affine_warp::{AffineWarp, FilterMode};
 
 /// A SIMD kernel: the packed RGB/RGBA bilinear specialization of [`apply_typed`]
 /// for one storage type and channel count.
@@ -24,7 +24,7 @@ use crate::ops::transform::{FilterMode, Transform};
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
 /// [`packed_kernel`] at a supported [`SimdTier`] is what establishes that.
-pub(super) type PackedKernel = unsafe fn(&Transform, &Image, &mut Image);
+pub(super) type PackedKernel = unsafe fn(&AffineWarp, &InterleavedImage, &mut InterleavedImage);
 
 /// No arch kernels: [`SimdTier`] has no value here.
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -41,7 +41,7 @@ pub(super) fn packed_kernel(
 /// take the scalar reference.
 ///
 /// RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
-/// (cross-checked). L stays scalar (gather-bound — SIMD measured slower), and
+/// (cross-checked). Mono stays scalar (gather-bound — SIMD measured slower), and
 /// nearest is a near-memcpy the scalar path already nails.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub(super) fn packed_kernel(
@@ -50,9 +50,9 @@ pub(super) fn packed_kernel(
     filter: FilterMode,
 ) -> Option<PackedKernel> {
     #[cfg(target_arch = "aarch64")]
-    use crate::ops::transform::cpu::neon as simd;
+    use crate::ops::affine_warp::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
-    use crate::ops::transform::cpu::sse as simd;
+    use crate::ops::affine_warp::cpu::sse as simd;
 
     if filter != FilterMode::Bilinear {
         return None;
@@ -66,7 +66,7 @@ pub(super) fn packed_kernel(
     let SimdTier::Neon = tier;
 
     Some(match (format.sample_type, format.channel_count) {
-        (_, ChannelCount::L) => return None,
+        (_, ChannelCount::Mono) => return None,
         (SampleType::U8, ChannelCount::Rgb) => simd::apply_packed::<u8, 3>,
         (SampleType::U8, ChannelCount::Rgba) => simd::apply_packed::<u8, 4>,
         (SampleType::U16, ChannelCount::Rgb) => simd::apply_packed::<u16, 3>,
@@ -86,7 +86,7 @@ pub(super) fn packed_kernel(
 /// # Panics
 /// Panics unless `input` and `output` share a color format. Their dimensions
 /// need not match — that is what makes this a resample.
-pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
+pub(super) fn apply(warp: &AffineWarp, input: &InterleavedImage, output: &mut InterleavedImage) {
     let format = input.desc().color_format;
     assert_eq!(
         format,
@@ -94,28 +94,32 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
         "input/output color format mismatch"
     );
 
-    if let Some(kernel) = SimdTier::dispatch(|tier| packed_kernel(tier, format, transform.filter)) {
-        unsafe { kernel(transform, input, output) };
+    if let Some(kernel) = SimdTier::dispatch(|tier| packed_kernel(tier, format, warp.filter)) {
+        unsafe { kernel(warp, input, output) };
         return;
     }
 
-    apply_scalar(transform, input, output);
+    apply_scalar(warp, input, output);
 }
 
 /// The scalar reference, picking the storage type and channel count the format
 /// stores pixels in. Split out so the tests can reach it past SIMD dispatch.
-pub(super) fn apply_scalar(transform: &Transform, input: &Image, output: &mut Image) {
+pub(super) fn apply_scalar(
+    warp: &AffineWarp,
+    input: &InterleavedImage,
+    output: &mut InterleavedImage,
+) {
     let format = input.desc().color_format;
     match (format.sample_type, format.channel_count) {
-        (SampleType::U8, ChannelCount::L) => apply_typed::<u8, 1>(transform, input, output),
-        (SampleType::U8, ChannelCount::Rgb) => apply_typed::<u8, 3>(transform, input, output),
-        (SampleType::U8, ChannelCount::Rgba) => apply_typed::<u8, 4>(transform, input, output),
-        (SampleType::U16, ChannelCount::L) => apply_typed::<u16, 1>(transform, input, output),
-        (SampleType::U16, ChannelCount::Rgb) => apply_typed::<u16, 3>(transform, input, output),
-        (SampleType::U16, ChannelCount::Rgba) => apply_typed::<u16, 4>(transform, input, output),
-        (SampleType::F32, ChannelCount::L) => apply_typed::<f32, 1>(transform, input, output),
-        (SampleType::F32, ChannelCount::Rgb) => apply_typed::<f32, 3>(transform, input, output),
-        (SampleType::F32, ChannelCount::Rgba) => apply_typed::<f32, 4>(transform, input, output),
+        (SampleType::U8, ChannelCount::Mono) => apply_typed::<u8, 1>(warp, input, output),
+        (SampleType::U8, ChannelCount::Rgb) => apply_typed::<u8, 3>(warp, input, output),
+        (SampleType::U8, ChannelCount::Rgba) => apply_typed::<u8, 4>(warp, input, output),
+        (SampleType::U16, ChannelCount::Mono) => apply_typed::<u16, 1>(warp, input, output),
+        (SampleType::U16, ChannelCount::Rgb) => apply_typed::<u16, 3>(warp, input, output),
+        (SampleType::U16, ChannelCount::Rgba) => apply_typed::<u16, 4>(warp, input, output),
+        (SampleType::F32, ChannelCount::Mono) => apply_typed::<f32, 1>(warp, input, output),
+        (SampleType::F32, ChannelCount::Rgb) => apply_typed::<f32, 3>(warp, input, output),
+        (SampleType::F32, ChannelCount::Rgba) => apply_typed::<f32, 4>(warp, input, output),
     }
 }
 
@@ -125,21 +129,24 @@ pub(super) fn apply_scalar(transform: &Transform, input: &Image, output: &mut Im
 /// `round` follows on the GPU. Interpolation is linear, so normalizing to `[0, 1]`
 /// first would only add a divide and a multiply per channel per tap, and a second
 /// rounding. Float output is written unclamped.
-fn apply_typed<T, const N: usize>(transform: &Transform, input: &Image, output: &mut Image)
-where
+fn apply_typed<T, const N: usize>(
+    warp: &AffineWarp,
+    input: &InterleavedImage,
+    output: &mut InterleavedImage,
+) where
     T: Sample,
 {
     let source = PackedSource::<T>::of(input);
     let out_w = output.desc().size.width;
-    let out_stride = output.desc().row_bytes();
+    let out_stride = output.desc().row_byte_len();
 
-    let inv = transform.inverse();
-    let filter = transform.filter;
+    let inv = warp.inverse();
+    let filter = warp.filter;
 
     par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
-        .for_each(|(y, out_row_bytes)| {
-            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);
+        .for_each(|(y, out_row_byte_len)| {
+            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_byte_len);
             for x in 0..out_w {
                 let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 let src = inv.transform_point2(out_pos) - Vec2::splat(0.5);

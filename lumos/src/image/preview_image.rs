@@ -1,6 +1,6 @@
 //! A decoded display or inspection product, outside the scientific pipeline.
 
-use imaginarium::Image;
+use imaginarium::InterleavedImage;
 
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::linear_image::LinearImage;
@@ -14,7 +14,7 @@ pub enum PreviewImage {
     Planes(LinearImage),
     /// Interleaved `f32` samples, and what the decoder stated of them: a raster decode.
     Interleaved {
-        image: Image,
+        image: InterleavedImage,
         metadata: ImageMetadata,
     },
 }
@@ -36,7 +36,7 @@ impl From<LinearImage> for PreviewImage {
 }
 
 /// The interleaved form, repacking a planar preview.
-impl From<PreviewImage> for Image {
+impl From<PreviewImage> for InterleavedImage {
     fn from(preview: PreviewImage) -> Self {
         match preview {
             PreviewImage::Planes(linear) => Self::from(&linear),

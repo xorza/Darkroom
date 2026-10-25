@@ -1,50 +1,50 @@
-//! Drawing primitives — circles and crosses — over `L_F32` and `RGB_F32` images. On a
-//! single-channel image a color is written as its luminance; every entry point panics on any
-//! other format.
-
-pub(crate) mod color;
+//! Circles and crosses over an `RGB_F32` image, the overlays of the visual tests.
 
 use std::ops::RangeInclusive;
 
 use common::Size2us;
 use glam::Vec2;
+use imaginarium::{ColorFormat, InterleavedImage};
 
-use crate::color::color_format::ColorFormat;
-use crate::drawing::color::Color;
-use crate::image::Image;
+use crate::image::rgb::Rgb;
 
-/// The `f32` pixels of an `L_F32` or `RGB_F32` image, with its geometry.
+/// The overlay palette.
+pub(crate) const GREEN: Rgb = rgb(0.0, 1.0, 0.0);
+pub(crate) const RED: Rgb = rgb(1.0, 0.2, 0.2);
+pub(crate) const BLUE: Rgb = rgb(0.3, 0.3, 1.0);
+pub(crate) const YELLOW: Rgb = rgb(1.0, 1.0, 0.0);
+pub(crate) const CYAN: Rgb = rgb(0.0, 1.0, 1.0);
+pub(crate) const MAGENTA: Rgb = rgb(1.0, 0.0, 1.0);
+
+const fn rgb(r: f32, g: f32, b: f32) -> Rgb {
+    Rgb { r, g, b }
+}
+
+/// The `f32` triples of an `RGB_F32` image, with its size.
 #[derive(Debug)]
 struct Canvas<'a> {
-    pixels: &'a mut [f32],
+    pixels: &'a mut [[f32; 3]],
     size: Size2us,
-    channels: usize,
 }
 
 impl<'a> Canvas<'a> {
     /// # Panics
-    /// Unless `image` is `L_F32` or `RGB_F32`.
-    fn new(image: &'a mut Image) -> Self {
+    /// Unless `image` is `RGB_F32`.
+    fn new(image: &'a mut InterleavedImage) -> Self {
         let desc = image.desc();
-        assert!(
-            desc.color_format == ColorFormat::L_F32 || desc.color_format == ColorFormat::RGB_F32,
-            "drawing requires an L_F32 or RGB_F32 image, got {}",
-            desc.color_format
+        assert_eq!(
+            desc.color_format,
+            ColorFormat::RGB_F32,
+            "drawing requires an RGB_F32 image"
         );
         Self {
             pixels: bytemuck::cast_slice_mut(image.bytes_mut()),
             size: desc.size,
-            channels: desc.color_format.channel_count.count(),
         }
     }
 
-    fn set(&mut self, x: usize, y: usize, color: Color) {
-        let pixel = &mut self.pixels[(y * self.size.width + x) * self.channels..][..self.channels];
-        match pixel {
-            [grey] => *grey = color.luminance(),
-            [r, g, b] => [*r, *g, *b] = [color.r, color.g, color.b],
-            _ => unreachable!("a canvas has one or three channels"),
-        }
+    fn set(&mut self, x: usize, y: usize, color: Rgb) {
+        self.pixels[y * self.size.width + x] = [color.r, color.g, color.b];
     }
 
     /// Every pixel whose bounding box `[lo, hi]` reaches, as column and row ranges, or `None`
@@ -72,8 +72,14 @@ fn span(lo: f32, hi: f32, extent: usize) -> Option<RangeInclusive<usize>> {
 /// `radius + thickness / 2` from `center`.
 ///
 /// # Panics
-/// Panics unless `image` is `L_F32` or `RGB_F32`.
-pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, thickness: f32) {
+/// Unless `image` is `RGB_F32`.
+pub(crate) fn draw_circle(
+    image: &mut InterleavedImage,
+    center: Vec2,
+    radius: f32,
+    color: Rgb,
+    thickness: f32,
+) {
     let mut canvas = Canvas::new(image);
     let inner = (radius - thickness / 2.0).max(0.0);
     let outer = radius + thickness / 2.0;
@@ -90,12 +96,17 @@ pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, t
     }
 }
 
-/// Draws an upright cross marker: two lines through `center`, each arm
-/// `arm_length` pixels long.
+/// Draws an upright cross marker: two lines through `center`, each arm `arm_length` pixels long.
 ///
 /// # Panics
-/// Panics unless `image` is `L_F32` or `RGB_F32`.
-pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color, thickness: f32) {
+/// Unless `image` is `RGB_F32`.
+pub(crate) fn draw_cross(
+    image: &mut InterleavedImage,
+    center: Vec2,
+    arm_length: f32,
+    color: Rgb,
+    thickness: f32,
+) {
     let mut canvas = Canvas::new(image);
     let horizontal = Vec2::new(arm_length, 0.0);
     let vertical = Vec2::new(0.0, arm_length);
@@ -118,7 +129,7 @@ pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color
 /// Draws every pixel whose centre lies within `thickness / 2` of the segment — and, for a line
 /// thinner than a pixel, within half a pixel, which keeps one pixel per column of a shallow line
 /// and one per row of a steep one, so a hairline stays connected.
-fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Color, thickness: f32) {
+fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Rgb, thickness: f32) {
     let reach = (thickness / 2.0).max(0.5);
     let Some([columns, rows]) = canvas.covered(start.min(end) - reach, start.max(end) + reach)
     else {
@@ -141,29 +152,24 @@ fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Color, thic
     }
 }
 
-#[cfg(test)]
 mod tests {
     use common::Size2us;
     use glam::Vec2;
+    use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage};
 
-    use crate::color::color_format::ColorFormat;
-    use crate::drawing::color::Color;
-    use crate::drawing::{draw_circle, draw_cross};
-    use crate::image::Image;
-    use crate::image::image_desc::ImageDesc;
+    use crate::internals::visual::drawing::{GREEN, draw_circle, draw_cross, rgb};
 
-    fn canvas(format: ColorFormat, size: usize) -> Image {
-        Image::new_black(ImageDesc::new(Size2us::new(size, size), format)).unwrap()
+    fn canvas(format: ColorFormat, side: usize) -> InterleavedImage {
+        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(side, side), format)).unwrap()
     }
 
-    /// The `(x, y)` of every pixel whose first channel was drawn.
-    fn drawn(image: &Image) -> Vec<(usize, usize)> {
-        let desc = image.desc();
-        let channels = desc.color_format.channel_count.count();
-        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-        (0..desc.size.height)
-            .flat_map(|y| (0..desc.size.width).map(move |x| (x, y)))
-            .filter(|&(x, y)| pixels[(y * desc.size.width + x) * channels] != 0.0)
+    /// The `(x, y)` of every pixel whose green channel was drawn.
+    fn drawn(image: &InterleavedImage) -> Vec<(usize, usize)> {
+        let width = image.desc().size.width;
+        let pixels: &[[f32; 3]] = bytemuck::cast_slice(image.bytes());
+        (0..pixels.len())
+            .filter(|&idx| pixels[idx][1] != 0.0)
+            .map(|idx| (idx % width, idx / width))
             .collect()
     }
 
@@ -176,52 +182,47 @@ mod tests {
             &mut image,
             Vec2::new(2.0, 2.0),
             2.0,
-            Color::rgb(1.0, 0.5, 0.25),
+            rgb(1.0, 0.5, 0.25),
             0.0,
         );
         assert_eq!(drawn(&image), [(2, 0), (0, 2), (4, 2), (2, 4)]);
-        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-        assert_eq!(&pixels[..3 * 3][2 * 3..], &[1.0, 0.5, 0.25]);
+        let pixels: &[[f32; 3]] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(pixels[2], [1.0, 0.5, 0.25]);
     }
 
     /// Clipped at the top-left corner, and off the image entirely: no pixel of the image is
     /// drawn, and the bounding box does not wrap.
     #[test]
     fn a_circle_off_the_edge_is_clipped() {
-        let mut image = canvas(ColorFormat::L_F32, 3);
-        draw_circle(&mut image, Vec2::ZERO, 1.0, Color::GREEN, 0.0);
+        let mut image = canvas(ColorFormat::RGB_F32, 3);
+        draw_circle(&mut image, Vec2::ZERO, 1.0, GREEN, 0.0);
         assert_eq!(drawn(&image), [(1, 0), (0, 1)]);
 
         for center in [
             Vec2::new(-50.0, 1.0),
             Vec2::new(1.0, -50.0),
             Vec2::new(60.0, 1.0),
+            Vec2::NAN,
         ] {
-            let mut image = canvas(ColorFormat::L_F32, 3);
-            draw_circle(&mut image, center, 3.0, Color::GREEN, 2.0);
+            let mut image = canvas(ColorFormat::RGB_F32, 3);
+            draw_circle(&mut image, center, 3.0, GREEN, 2.0);
             assert_eq!(drawn(&image), [], "{center}");
         }
-        let mut image = canvas(ColorFormat::L_F32, 3);
-        draw_circle(&mut image, Vec2::NAN, 3.0, Color::GREEN, 2.0);
-        assert_eq!(drawn(&image), []);
     }
 
-    /// A one-pixel cross is one row and one column; a three-pixel one, three of each. Grey
-    /// takes the color's luminance: green's weight, 0.7152.
+    /// A one-pixel cross is one row and one column; a three-pixel one, three of each.
     #[test]
     fn a_cross_is_as_thick_as_asked() {
-        let mut image = canvas(ColorFormat::L_F32, 5);
-        draw_cross(&mut image, Vec2::new(2.0, 2.0), 2.0, Color::GREEN, 1.0);
-        let row: Vec<_> = (0..5).map(|x| (x, 2)).collect();
-        let mut expected: Vec<_> = (0..5).map(|y| (2, y)).chain(row).collect();
-        expected.sort_by_key(|&(x, y)| (y, x));
-        expected.dedup();
+        let mut image = canvas(ColorFormat::RGB_F32, 5);
+        draw_cross(&mut image, Vec2::new(2.0, 2.0), 2.0, GREEN, 1.0);
+        let expected: Vec<_> = (0..5)
+            .flat_map(|y| (0..5).map(move |x| (x, y)))
+            .filter(|&(x, y)| x == 2 || y == 2)
+            .collect();
         assert_eq!(drawn(&image), expected);
-        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-        assert_eq!(pixels[2 * 5 + 2], 0.7152);
 
-        let mut image = canvas(ColorFormat::L_F32, 7);
-        draw_cross(&mut image, Vec2::new(3.0, 3.0), 3.0, Color::GREEN, 3.0);
+        let mut image = canvas(ColorFormat::RGB_F32, 7);
+        draw_cross(&mut image, Vec2::new(3.0, 3.0), 3.0, GREEN, 3.0);
         let bands = |x: usize, y: usize| (2..=4).contains(&x) || (2..=4).contains(&y);
         let expected: Vec<_> = (0..7)
             .flat_map(|y| (0..7).map(move |x| (x, y)))
@@ -231,9 +232,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "drawing requires an L_F32 or RGB_F32 image, got RGBA f32")]
-    fn rgba_is_refused() {
-        let mut image = canvas(ColorFormat::RGBA_F32, 3);
-        draw_circle(&mut image, Vec2::ONE, 1.0, Color::GREEN, 1.0);
+    #[should_panic(expected = "drawing requires an RGB_F32 image")]
+    fn other_formats_are_refused() {
+        let mut image = canvas(ColorFormat::MONO_F32, 3);
+        draw_circle(&mut image, Vec2::ONE, 1.0, GREEN, 1.0);
     }
 }

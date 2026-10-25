@@ -93,7 +93,7 @@ fn a_magnified_frame_weighs_less_per_output_pixel() {
 fn a_linear_ramp_reads_back_at_each_preimage() {
     let size = Size2us::new(24, 24);
     let ramp = |x: f64, y: f64| 1.0 + 0.1 * x + 0.05 * y;
-    let image = gray_image(
+    let image = mono_image(
         size,
         (0..size.pixel_count())
             .map(|i| ramp((i % 24) as f64, (i / 24) as f64) as f32)

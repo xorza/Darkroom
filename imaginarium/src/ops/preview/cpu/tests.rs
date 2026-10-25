@@ -1,12 +1,12 @@
-use crate::color::color_format::{ALL_FORMATS, ColorFormat};
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::color::color_format::ColorFormat;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 use crate::internals::create_test_image;
 use crate::ops::preview::Preview;
 use common::Size2us;
 
-fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
-    Image::new_with_data(ImageDesc::new(Size2us::new(w, h), fmt), bytes).unwrap()
+fn img(w: usize, h: usize, fmt: ColorFormat, bytes: Vec<u8>) -> InterleavedImage {
+    InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(w, h), fmt), bytes).unwrap()
 }
 
 /// Same-size "downscale" is a per-pixel convert: each footprint is one pixel,
@@ -44,11 +44,11 @@ fn test_box_average_2x_to_1x() {
     assert_eq!(out.bytes(), &[85, 85, 85, 255]);
 }
 
-/// Grayscale broadcasts to RGB with an opaque alpha. L8 [0,100,200,40] → 1×1
-/// gray 85 → (85,85,85,255).
+/// Mono broadcasts to RGB with an opaque alpha. `MONO_U8` [0,100,200,40] → 1×1
+/// mono 85 → (85,85,85,255).
 #[test]
 fn test_l8_broadcasts_with_opaque_alpha() {
-    let src = img(2, 2, ColorFormat::L_U8, vec![0, 100, 200, 40]);
+    let src = img(2, 2, ColorFormat::MONO_U8, vec![0, 100, 200, 40]);
     let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[85, 85, 85, 255]);
 }
@@ -92,7 +92,7 @@ fn test_f32_scaled_to_u8() {
 /// footprints {0} and {1,2}: out0 = 0, out1 = avg(60,120) = 90.
 #[test]
 fn test_non_integer_downscale_footprints() {
-    let src = img(3, 1, ColorFormat::L_U8, vec![0, 60, 120]);
+    let src = img(3, 1, ColorFormat::MONO_U8, vec![0, 60, 120]);
     let out = Preview::new(Size2us::new(2, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[0, 0, 0, 255, 90, 90, 90, 255]);
 }
@@ -101,12 +101,12 @@ fn test_non_integer_downscale_footprints() {
 /// (2 + 3) / 2 = 2.5 → 2. In `u16`, (257 + 514) / 2 / 257 = 1.5 → 2 as well.
 #[test]
 fn test_footprint_mean_ties_to_even() {
-    let src = img(4, 1, ColorFormat::L_U8, vec![1, 2, 2, 3]);
+    let src = img(4, 1, ColorFormat::MONO_U8, vec![1, 2, 2, 3]);
     let out = Preview::new(Size2us::new(2, 1)).to_rgba8(&src);
     assert_eq!(out.bytes(), &[2, 2, 2, 255, 2, 2, 2, 255]);
 
     let words: Vec<u8> = [257u16, 514].iter().flat_map(|v| v.to_le_bytes()).collect();
-    let src = img(2, 1, ColorFormat::L_U16, words);
+    let src = img(2, 1, ColorFormat::MONO_U16, words);
     assert_eq!(
         Preview::new(Size2us::new(1, 1)).to_rgba8(&src).bytes(),
         &[2, 2, 2, 255]
@@ -116,7 +116,7 @@ fn test_footprint_mean_ties_to_even() {
 /// A one-pixel footprint is the format conversion to `RGBA_U8`, for every format.
 #[test]
 fn test_same_size_is_the_conversion() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(7, 3), 5);
         let out = Preview::new(Size2us::new(7, 3)).to_rgba8(&src);
         assert_eq!(
@@ -130,7 +130,7 @@ fn test_same_size_is_the_conversion() {
 /// Every format reduces to a valid, correctly-sized `RGBA_U8` preview.
 #[test]
 fn test_all_formats_to_rgba8() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(17, 11), 3);
         let out = Preview::new(Size2us::new(8, 5)).to_rgba8(&src);
         assert_eq!(out.desc().color_format, ColorFormat::RGBA_U8);

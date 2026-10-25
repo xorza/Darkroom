@@ -6,6 +6,7 @@
 //! [`metrics`](crate::internals::synthetic::metrics).
 
 pub(crate) mod comparison;
+pub(crate) mod drawing;
 pub(crate) mod report;
 
 use std::io::Cursor;
@@ -13,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use common::{Buffer2, fs, internals};
 use image::GrayImage;
-use imaginarium::{ColorFormat, Image, ImageDesc};
+use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage};
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
@@ -26,10 +27,8 @@ const TEST_OUTPUT_IMAGE_EXT: &str = "png";
 
 /// How an f32 plane is mapped into `[0, 1]` before being written as 8-bit.
 ///
-/// Named `ToneMap` rather than `Stretch` because [`crate::Stretch`] is a published pipeline type
-/// — this is display-only, and nothing here feeds the pipeline. It replaces plain/stretched
-/// function pairs that were duplicated at three levels (`GrayImage`, imaginarium `Image`, and the
-/// gallery's own byte writer), where adding a mapping meant editing three places.
+/// Named `ToneMap` rather than `Stretch` because [`crate::Stretch`] is a published pipeline type —
+/// this is display-only, and nothing here feeds the pipeline.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ToneMap {
     /// Clamp `[0,1]`; shows true pixel levels.
@@ -97,20 +96,20 @@ pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
     internals::debug_output_path(name).map(|path| path.with_extension(TEST_OUTPUT_IMAGE_EXT))
 }
 
-/// Convert an f32 grayscale plane to an imaginarium `RGB_F32` image under `tone`.
-pub(crate) fn gray_to_rgb(pixels: &Buffer2<f32>, tone: ToneMap) -> Image {
-    let desc = ImageDesc::new(pixels.size(), ColorFormat::RGB_F32);
+/// Convert an f32 mono plane to an imaginarium `RGB_F32` image under `tone`.
+pub(crate) fn mono_to_rgb(pixels: &Buffer2<f32>, tone: ToneMap) -> InterleavedImage {
+    let desc = InterleavedDesc::new(pixels.size(), ColorFormat::RGB_F32);
     let rgb: Vec<f32> = tone
         .apply(pixels)
         .into_iter()
         .flat_map(|v| [v, v, v])
         .collect();
-    Image::new_with_data(desc, bytemuck::cast_slice(&rgb).to_vec()).unwrap()
+    InterleavedImage::new_with_data(desc, bytemuck::cast_slice(&rgb).to_vec()).unwrap()
 }
 
-/// Save imaginarium Image to file using the configured test output format.
+/// Save imaginarium InterleavedImage to file using the configured test output format.
 /// Converts to `RGB_U8` if needed since some formats don't support float data.
-pub(crate) fn save_image(image: Image, name: &str) {
+pub(crate) fn save_image(image: InterleavedImage, name: &str) {
     let Some(out) = debug_file(name) else {
         return;
     };
@@ -122,9 +121,9 @@ pub(crate) fn save_image(image: Image, name: &str) {
     raster::write_image(&out, &image_u8).expect("Failed to save image");
 }
 
-/// Convert an f32 plane to an 8-bit grayscale image under `tone`.
+/// Convert an f32 plane to an 8-bit mono image under `tone`.
 #[expect(clippy::cast_sign_loss, reason = "a tone-mapped value lies in [0, 1]")]
-fn to_gray(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
+fn to_mono(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
     let bytes: Vec<u8> = tone
         .apply(pixels)
         .into_iter()
@@ -133,9 +132,9 @@ fn to_gray(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
     GrayImage::from_raw(pixels.width() as u32, pixels.height() as u32, bytes).unwrap()
 }
 
-/// Convert boolean mask to grayscale image.
+/// Convert boolean mask to mono image.
 #[cfg(feature = "real-data")]
-fn mask_to_gray(mask: &BitBuffer2) -> GrayImage {
+fn mask_to_mono(mask: &BitBuffer2) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|b| if b { 255 } else { 0 }).collect();
     GrayImage::from_raw(mask.size.width as u32, mask.size.height as u32, bytes).unwrap()
 }
@@ -204,7 +203,11 @@ pub(crate) fn save_linear(image: &LinearImage, name: &str) {
     let Some(path) = debug_file(name) else {
         return;
     };
-    raster::write_image(&path, &Image::from(image).convert(ColorFormat::RGB_U8)).expect("save png");
+    raster::write_image(
+        &path,
+        &InterleavedImage::from(image).convert(ColorFormat::RGB_U8),
+    )
+    .expect("save png");
     eprintln!("wrote {}", path.display());
 }
 
@@ -221,7 +224,7 @@ where
 /// Write an f32 plane as an 8-bit image under `tone`, with the configured extension.
 pub(crate) fn save(pixels: &Buffer2<f32>, name: &str, tone: ToneMap) {
     if let Some(path) = debug_file(name) {
-        write_png(&to_gray(pixels, tone), &path).expect("write debug image");
+        write_png(&to_mono(pixels, tone), &path).expect("write debug image");
     }
 }
 
@@ -237,7 +240,7 @@ pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
 #[cfg(feature = "real-data")]
 pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
     if let Some(out) = debug_file(name) {
-        write_png(&mask_to_gray(mask), &out).expect("Failed to save mask image");
+        write_png(&mask_to_mono(mask), &out).expect("Failed to save mask image");
     }
 }
 
@@ -250,7 +253,7 @@ mod tests {
         let plane = |pixels: [f32; 4]| Buffer2::new((2, 2), pixels.to_vec());
 
         // Clamp: value x 255, truncated. 0.5 -> 127, 0.25 -> 63.
-        let img = to_gray(&plane([0.0, 0.5, 1.0, 0.25]), ToneMap::Clamp);
+        let img = to_mono(&plane([0.0, 0.5, 1.0, 0.25]), ToneMap::Clamp);
         assert_eq!(img.get_pixel(0, 0).0[0], 0);
         assert_eq!(img.get_pixel(1, 0).0[0], 127);
         assert_eq!(img.get_pixel(0, 1).0[0], 255);
@@ -259,7 +262,7 @@ mod tests {
         // AutoRange: 0.2..0.8 rescaled onto 0..255, so the ends pin exactly and 0.4 lands a
         // third of the way up. That is 255/3 = 85 in exact arithmetic, but f32 puts the ratio a
         // hair under 1/3 and the cast truncates, so 84.
-        let img = to_gray(&plane([0.2, 0.4, 0.6, 0.8]), ToneMap::AutoRange);
+        let img = to_mono(&plane([0.2, 0.4, 0.6, 0.8]), ToneMap::AutoRange);
         assert_eq!(img.get_pixel(0, 0).0[0], 0);
         assert_eq!(img.get_pixel(1, 0).0[0], 84);
         assert_eq!(img.get_pixel(1, 1).0[0], 255);
@@ -267,7 +270,7 @@ mod tests {
         // Asinh: same endpoints, and the knee lifts the midtones. 0.4 and 0.6 sit a third and two
         // thirds up the range, and asinh(x/0.1)/asinh(10) maps them to 0.6400 and 0.8658: 163.2
         // and 220.8 of 255, truncated.
-        let img = to_gray(&plane([0.2, 0.4, 0.6, 0.8]), ToneMap::Asinh);
+        let img = to_mono(&plane([0.2, 0.4, 0.6, 0.8]), ToneMap::Asinh);
         let row = |y| [img.get_pixel(0, y).0[0], img.get_pixel(1, y).0[0]];
         assert_eq!([row(0), row(1)], [[0, 163], [220, 255]]);
     }
@@ -275,7 +278,7 @@ mod tests {
     /// A flat plane has no range to stretch; the guarded span must not divide by zero.
     #[test]
     fn auto_range_survives_a_flat_plane() {
-        let img = to_gray(&Buffer2::new_filled((2, 2), 0.5), ToneMap::AutoRange);
+        let img = to_mono(&Buffer2::new_filled((2, 2), 0.5), ToneMap::AutoRange);
         assert_eq!(img.get_pixel(0, 0).0[0], 0);
     }
 }

@@ -6,14 +6,13 @@
 )]
 
 use crate::internals::init_tracing;
-use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
+use crate::internals::visual::drawing::{self, draw_circle, draw_cross};
+use crate::internals::visual::{ToneMap, mono_to_rgb, save_image};
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use glam::DVec2;
-use imaginarium::Color;
-use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// The sharpness cut rejects a cosmic ray on its own. A ray is one pixel, or one with 15% bled to
 /// each side: its peak holds ≥ 1/1.3 = 0.77 of its 3×3 core, past the 0.7 cut, where a 4-px-FWHM
@@ -84,27 +83,15 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     for (leg, config, rays_kept) in legs {
         let found = detect(config);
         if leg == "defaults" {
-            let mut overlay = gray_to_rgb(pixels, ToneMap::AutoRange);
+            let mut overlay = mono_to_rgb(pixels, ToneMap::AutoRange);
             for ray in &rays {
-                draw_cross(
-                    &mut overlay,
-                    ray.as_vec2(),
-                    3.0,
-                    Color::rgb(1.0, 0.2, 0.2),
-                    1.0,
-                );
+                draw_cross(&mut overlay, ray.as_vec2(), 3.0, drawing::RED, 1.0);
             }
             for star in &stars {
-                draw_circle(
-                    &mut overlay,
-                    star.as_vec2(),
-                    8.0,
-                    Color::rgb(0.3, 0.3, 1.0),
-                    1.0,
-                );
+                draw_circle(&mut overlay, star.as_vec2(), 8.0, drawing::BLUE, 1.0);
             }
             for star in &found {
-                draw_circle(&mut overlay, star.as_vec2(), 5.0, Color::GREEN, 1.0);
+                draw_circle(&mut overlay, star.as_vec2(), 5.0, drawing::GREEN, 1.0);
             }
             save_image(overlay, "synthetic_starfield/stage_cr_rejection_overlay");
         }

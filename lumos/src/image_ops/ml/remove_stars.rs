@@ -100,7 +100,7 @@ fn build_stars(image: &mut LinearImage, starless: &LinearImage) {
 #[cfg(test)]
 mod tests {
     use crate::image_ops::ml::remove_stars::*;
-    use crate::internals::images::{gray_image, rgb_image};
+    use crate::internals::images::{mono_image, rgb_image};
     use common::Size2us;
 
     #[test]
@@ -109,9 +109,9 @@ mod tests {
         // (0.75, 0.5) -> 1 - 0.25/0.5 = 0.5
         // (1.0, 0.0)  -> 1 - 0.0/1.0  = 1.0
         // (0.5, 1.0)  -> denominator floors at 1e-4 -> huge negative -> clamps to 0.0
-        let mut orig = gray_image(Size2us::new(3, 1), vec![0.75, 1.0, 0.5]);
+        let mut orig = mono_image(Size2us::new(3, 1), vec![0.75, 1.0, 0.5]);
         let dimensions = orig.dimensions();
-        let starless = gray_image(Size2us::new(3, 1), vec![0.5, 0.0, 1.0]);
+        let starless = mono_image(Size2us::new(3, 1), vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         assert_eq!(orig.channel(0).pixels(), &[0.5, 1.0, 0.0]);
         assert_eq!(orig.dimensions(), dimensions);
@@ -138,11 +138,11 @@ mod tests {
         let n = SAMPLES_PER_BLOCK * 2 + SAMPLES_PER_BLOCK / 2;
         let s = |i: usize| (i % 7) as f32 / 8.0;
         let t = |i: usize| (i % 5) as f32 / 8.0;
-        let mut orig = gray_image(
+        let mut orig = mono_image(
             Size2us::new(n, 1),
             (0..n).map(|i| 1.0 - (1.0 - s(i)) * t(i)).collect(),
         );
-        let starless = gray_image(Size2us::new(n, 1), (0..n).map(s).collect());
+        let starless = mono_image(Size2us::new(n, 1), (0..n).map(s).collect());
         build_stars(&mut orig, &starless);
         for (i, &v) in orig.channel(0).pixels().iter().enumerate() {
             assert_eq!(v, 1.0 - t(i), "sample {i}");

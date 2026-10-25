@@ -210,7 +210,7 @@ pub(crate) struct MeasureRequest<'a> {
 /// Reduce `image` to one plane in `output`: its only channel, or the inverse-variance combination
 /// of its three (see [`inverse_variance_weights`]).
 fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
-    if image.is_grayscale() {
+    if image.is_mono() {
         output
             .pixels_mut()
             .copy_from_slice(image.channel(0).pixels());

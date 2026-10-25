@@ -1,7 +1,7 @@
 use super::{apply_kernel, row_kernel};
-use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
@@ -9,19 +9,19 @@ use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 use common::{SimdTier, Size2us};
 
 /// Builds a single-row image from raw channel bytes.
-fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Image {
-    let desc = ImageDesc::new(Size2us::new(width, 1), format);
+fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> InterleavedImage {
+    let desc = InterleavedDesc::new(Size2us::new(width, 1), format);
     assert_eq!(
         bytes.len(),
-        desc.row_bytes(),
+        desc.row_byte_len(),
         "row size mismatch for {format}"
     );
-    Image::new_with_data(desc, bytes).unwrap()
+    InterleavedImage::new_with_data(desc, bytes).unwrap()
 }
 
-/// Long enough that every kernel the dispatch can pick runs at least one full vector body and
-/// then a tail. The widest flat body is 32 `u8` on AVX2, so 37 leaves 5 over; every other body,
-/// flat or alpha-preserving, is 16, 8 or 4 items wide, and 37 is one past a multiple of each.
+/// Long enough that every kernel the dispatch can pick runs at least one full vector body and then
+/// a tail. The widest contiguous body is 32 `u8` on AVX2, so 37 leaves 5 over; every other body,
+/// contiguous or alpha-preserving, is 16, 8 or 4 items wide, and 37 is one past a multiple of each.
 const SWEEP_LEN: usize = 37;
 
 /// `contrast = 2.0, brightness = 0.0` folds to `value * 2 - mid`, whose ties
@@ -45,7 +45,7 @@ fn contrast_two_maps_hand_computed_values_u8() {
     let bytes: Vec<u8> = (0..SWEEP_LEN).map(|i| inputs[i % 5]).collect();
     let want: Vec<u8> = (0..SWEEP_LEN).map(|i| expected[i % 5]).collect();
 
-    let mut image = image_from_channels(ColorFormat::L_U8, SWEEP_LEN, bytes);
+    let mut image = image_from_channels(ColorFormat::MONO_U8, SWEEP_LEN, bytes);
     CONTRAST_TWO.apply_cpu(&mut image);
 
     assert_eq!(image.bytes(), want.as_slice());
@@ -66,7 +66,7 @@ fn contrast_two_maps_hand_computed_values_u16() {
     let want: Vec<u16> = (0..SWEEP_LEN).map(|i| expected[i % 5]).collect();
 
     let mut image = image_from_channels(
-        ColorFormat::L_U16,
+        ColorFormat::MONO_U16,
         SWEEP_LEN,
         bytemuck::cast_slice(&values).to_vec(),
     );
@@ -90,7 +90,7 @@ fn contrast_two_maps_hand_computed_values_f32() {
     let want: Vec<f32> = (0..SWEEP_LEN).map(|i| expected[i % 5]).collect();
 
     let mut image = image_from_channels(
-        ColorFormat::L_F32,
+        ColorFormat::MONO_F32,
         SWEEP_LEN,
         bytemuck::cast_slice(&values).to_vec(),
     );
@@ -105,12 +105,12 @@ fn contrast_two_maps_hand_computed_values_f32() {
 #[test]
 fn brightness_adds_its_share_of_the_full_scale() {
     let params = ContrastBrightness::new(1.0, 0.2);
-    let mut image = image_from_channels(ColorFormat::L_U8, 1, vec![100]);
+    let mut image = image_from_channels(ColorFormat::MONO_U8, 1, vec![100]);
     params.apply_cpu(&mut image);
     assert_eq!(image.bytes(), &[151]);
 
     let mut image = image_from_channels(
-        ColorFormat::L_U16,
+        ColorFormat::MONO_U16,
         1,
         bytemuck::cast_slice(&[1000u16]).to_vec(),
     );
@@ -118,7 +118,7 @@ fn brightness_adds_its_share_of_the_full_scale() {
     assert_eq!(image.bytes(), bytemuck::cast_slice::<u16, u8>(&[14107]));
 
     let mut image = image_from_channels(
-        ColorFormat::L_F32,
+        ColorFormat::MONO_F32,
         1,
         bytemuck::cast_slice(&[0.25f32]).to_vec(),
     );
@@ -131,7 +131,7 @@ fn brightness_adds_its_share_of_the_full_scale() {
 
 #[test]
 fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
-    // Same mapping as the flat u8 case, but laid out as RGBA pixels: the three
+    // Same mapping as the contiguous u8 case, but laid out as RGBA pixels: the three
     // color channels move, the fourth is copied through even where it would
     // otherwise have clamped.
     let rgb: [u8; 3] = [64, 65, 128];
@@ -157,7 +157,7 @@ fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
 fn identity_params_leave_every_format_bit_identical() {
     // contrast 1.0 / brightness 0.0 folds to `value * 1.0 + 0.0`, which is
     // exact for floats too — so this is an equality check, not an epsilon one.
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let input = create_test_image(format, Size2us::new(17, 5), 0);
         let mut output = input.clone();
 
@@ -172,24 +172,27 @@ fn identity_params_leave_every_format_bit_identical() {
 
 #[test]
 fn alpha_survives_every_alpha_format() {
-    for format in ALL_FORMATS.into_iter().filter(|format| format.has_alpha()) {
+    for format in ColorFormat::ALL
+        .into_iter()
+        .filter(|format| format.has_alpha())
+    {
         let input = create_test_image(format, Size2us::new(16, 4), 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(2.0, 0.3).apply_cpu(&mut output);
 
-        let channels = format.channel_count.count();
-        let channel_size = format.sample_type.size();
-        let alpha_offset = (channels - 1) * channel_size;
-        let pixel_size = channels * channel_size;
+        let channel_count = format.channel_count.count();
+        let sample_byte_len = format.sample_type.byte_len();
+        let alpha_offset = (channel_count - 1) * sample_byte_len;
+        let pixel_byte_len = channel_count * sample_byte_len;
 
         for row in 0..4 {
-            let row_start = row * input.desc().row_bytes();
+            let row_start = row * input.desc().row_byte_len();
             for x in 0..16 {
-                let pixel_start = row_start + x * pixel_size;
+                let pixel_start = row_start + x * pixel_byte_len;
                 let alpha_start = pixel_start + alpha_offset;
-                let in_alpha = &input.bytes()[alpha_start..alpha_start + channel_size];
-                let out_alpha = &output.bytes()[alpha_start..alpha_start + channel_size];
+                let in_alpha = &input.bytes()[alpha_start..alpha_start + sample_byte_len];
+                let out_alpha = &output.bytes()[alpha_start..alpha_start + sample_byte_len];
                 assert_eq!(
                     in_alpha, out_alpha,
                     "alpha mismatch for format {format} at pixel ({x}, {row})"
@@ -213,7 +216,7 @@ fn every_knob_direction_changes_every_format() {
     ];
 
     for (label, params, width, height) in cases {
-        for format in ALL_FORMATS {
+        for format in ColorFormat::ALL {
             let input = create_test_image(format, Size2us::new(width, height), 0);
             let mut output = input.clone();
 
@@ -229,7 +232,7 @@ fn every_knob_direction_changes_every_format() {
 
 #[test]
 fn extreme_brightness_clamps_to_the_range_ends() {
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let input = create_test_image(format, Size2us::new(4, 2), 0);
         let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
 
@@ -239,10 +242,10 @@ fn extreme_brightness_clamps_to_the_range_ends() {
             let mut output = input.clone();
             ContrastBrightness::new(1.0, brightness).apply_cpu(&mut output);
 
-            let channels = format.channel_count.count();
-            let color_channels = channels - usize::from(format.has_alpha());
+            let channel_count = format.channel_count.count();
+            let color_count = channel_count - usize::from(format.has_alpha());
             for (index, value) in channel_values(&output).iter().enumerate() {
-                if index % channels >= color_channels {
+                if index % channel_count >= color_count {
                     continue;
                 }
                 assert_eq!(
@@ -255,7 +258,7 @@ fn extreme_brightness_clamps_to_the_range_ends() {
 }
 
 /// Every color channel of `image` as an `f32`, in its own units.
-fn channel_values(image: &Image) -> Vec<f32> {
+fn channel_values(image: &InterleavedImage) -> Vec<f32> {
     let format = image.desc().color_format;
     match format.sample_type {
         SampleType::U8 => image.bytes().iter().map(|v| f32::from(*v)).collect(),
@@ -282,7 +285,7 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
             eprintln!("SKIPPED: this CPU has no {tier}, so its kernels are not checked");
             continue;
         }
-        for format in ALL_FORMATS {
+        for format in ColorFormat::ALL {
             let Some(kernel) = row_kernel(tier, format) else {
                 continue;
             };

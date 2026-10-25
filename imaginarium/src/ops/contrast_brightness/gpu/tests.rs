@@ -1,4 +1,4 @@
-use crate::color::color_format::ALL_FORMATS;
+use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
 use crate::internals::create_test_image;
 use crate::internals::gpu::test_gpu;
@@ -15,7 +15,7 @@ fn gpu_matches_cpu() {
         return;
     };
     let pipeline = GpuContrastBrightnessPipeline::new(&gpu);
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(13, 5), 7);
         let input = GpuImage::from_image(&gpu, &image).unwrap();
         for params in [

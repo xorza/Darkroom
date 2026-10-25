@@ -1,9 +1,9 @@
 use common::Size2us;
 use strum::IntoEnumIterator;
 
-use crate::color::color_format::ALL_FORMATS;
+use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 use crate::internals::create_test_image;
 use crate::internals::gpu::test_gpu;
 use crate::internals::image_diff::assert_matches_cpu;
@@ -19,7 +19,7 @@ fn gpu_matches_cpu() {
         return;
     };
     let pipeline = GpuBlendPipeline::new(&gpu);
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let src_cpu = create_test_image(format, Size2us::new(13, 5), 0);
         let dst_cpu = create_test_image(format, Size2us::new(13, 5), 100);
         let src = GpuImage::from_image(&gpu, &src_cpu).unwrap();
@@ -30,7 +30,7 @@ fn gpu_matches_cpu() {
                 let mut output = GpuImage::new_empty(&gpu, dst.desc).unwrap();
                 params.apply_gpu(&gpu, &pipeline, &src, &dst, &mut output);
 
-                let mut expected = Image::new_black(dst_cpu.desc()).unwrap();
+                let mut expected = InterleavedImage::new_black(dst_cpu.desc()).unwrap();
                 params.apply_cpu(&src_cpu, &dst_cpu, &mut expected);
                 assert_matches_cpu(
                     &output.to_image(&gpu).unwrap(),

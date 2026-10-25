@@ -4,9 +4,10 @@
 use std::borrow::Cow;
 
 use common::TempDir;
+use imaginarium::RasterFormat;
 use lumos::{
     ChannelLayout, Denoise, ExtractBg, Hdr, ImageDimensions, LinearImage, LocalContrast,
-    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS, RasterFormat, SigmaThreshold, SourceProvenance,
+    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS, SigmaThreshold, SourceProvenance,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};

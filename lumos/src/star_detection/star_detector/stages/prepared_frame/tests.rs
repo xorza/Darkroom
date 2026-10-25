@@ -4,7 +4,7 @@ use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use crate::internals::test_rng::TestRng;
 use crate::star_detection::star_detector::stages::detect::DetectionInput;
 use crate::star_detection::star_detector::stages::prepared_frame::*;
@@ -334,7 +334,7 @@ fn pixels_with_no_data_stay_out_of_the_sky_and_the_threshold() {
             if missing(idx) { 0.1 } else { 0.1 + noise }
         })
         .collect();
-    let mut image = gray_image(size, pixels);
+    let mut image = mono_image(size, pixels);
     image.set_flags(PixelFlags::from_fn(size, |idx| {
         if missing(idx) {
             QualityFlags::NO_DATA

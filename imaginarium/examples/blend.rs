@@ -8,7 +8,7 @@
 
 mod shared;
 
-use imaginarium::{Blend, BlendMode, Image};
+use imaginarium::{Blend, BlendMode, InterleavedImage};
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
@@ -16,7 +16,7 @@ fn main() {
     let dst = load_lena_rgba_u8();
     print_image_info("Source", &src);
 
-    let mut output = Image::new_black(src.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(src.desc()).unwrap();
     Blend::new(BlendMode::Screen, 0.5).apply_cpu(&src, &dst, &mut output);
     save_image(&output, "blend_cpu.png");
 
@@ -24,16 +24,16 @@ fn main() {
     on_gpu(&src, &dst);
 }
 
-/// Upload both inputs, allocate the output on the device, run, download.
+/// Upload both inputs, allocate the output on the device, run, read back.
 #[cfg(feature = "wgpu")]
-fn on_gpu(src: &Image, dst: &Image) {
-    use imaginarium::{Gpu, GpuBlendPipeline, GpuContext, GpuImage};
+fn on_gpu(src: &InterleavedImage, dst: &InterleavedImage) {
+    use imaginarium::{Gpu, GpuBlendPipeline, GpuCtx, GpuImage};
 
     let Ok(gpu) = Gpu::new() else {
         println!("no GPU available, skipping the GPU example");
         return;
     };
-    let mut context = GpuContext::new(gpu.clone());
+    let mut context = GpuCtx::new(gpu.clone());
     let pipeline = context.get_or_create(GpuBlendPipeline::new);
 
     let src_gpu = GpuImage::from_image(&gpu, src).expect("upload");
