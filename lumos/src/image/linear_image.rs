@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::path::Path;
 use std::{array, slice};
 
 use common::{Buffer2, Size2us, par};
@@ -15,6 +16,8 @@ use crate::image::linear_pixels::LinearPixels;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::rgb::Rgb;
 use crate::image::stackable_image::{ImageParts, StackableImage};
+use crate::io::error::WriteError;
+use crate::io::{fits, raster};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -31,6 +34,18 @@ pub struct LinearImage {
 }
 
 impl LinearImage {
+    /// Write the image to `path` as a checksummed floating-point FITS file: a plane or an RGB
+    /// cube, with its flags and flat gain in `LUMFLAGS` and `LUMGAIN` extensions beside it;
+    /// [`LoadCtx::linear`](crate::LoadCtx::linear) reads it back.
+    pub fn write_fits(&self, path: impl AsRef<Path>) -> Result<(), WriteError> {
+        fits::linear::save(path.as_ref(), self)
+    }
+
+    /// Write the image to `path` as the raster format its extension names: PNG, JPEG or TIFF.
+    pub fn write_raster(&self, path: impl AsRef<Path>) -> Result<(), WriteError> {
+        raster::save(path.as_ref(), self)
+    }
+
     /// The image of `pixels`, its `flags` and `metadata`, with no flat gain.
     pub(crate) fn new(
         pixels: LinearPixels,

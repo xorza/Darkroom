@@ -2,6 +2,7 @@
 //! file says about it.
 
 use std::f64::consts::FRAC_1_SQRT_2;
+use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, CancelToken, par};
@@ -25,6 +26,8 @@ use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
+use crate::io::error::WriteError;
+use crate::io::fits;
 use common::{Size2us, Vec2us};
 
 /// Raw CFA image - single channel with color filter pattern metadata.
@@ -101,6 +104,13 @@ impl StackableImage for CfaImage {
 }
 
 impl CfaImage {
+    /// Write the image, a sensor-domain image, to `path` as a checksummed floating-point FITS
+    /// file, with its flags in a `LUMFLAGS` extension when they hold more than the NaN of a sample
+    /// with no data; [`LoadCtx::cfa`](crate::LoadCtx::cfa) reads it back.
+    pub fn write_fits(&self, path: impl AsRef<Path>) -> Result<(), WriteError> {
+        fits::cfa::save(path.as_ref(), self)
+    }
+
     /// The sensor extent the samples cover.
     pub(crate) const fn size(&self) -> Size2us {
         self.data.size()

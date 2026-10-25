@@ -24,7 +24,7 @@ use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FlagBytes, PlaneHdu};
 use common::{Size2us, Vec2us};
 
-pub(super) const FLAGS_EXTNAME: &str = "LUMFLAGS";
+pub(crate) const FLAGS_EXTNAME: &str = "LUMFLAGS";
 pub(super) const FLAGS_FORMAT: &str = "PIXFLAGS";
 pub(super) const FLAGS_VERSION: i64 = 1;
 
@@ -79,7 +79,7 @@ pub(crate) fn locate(
 
 /// Each flags extension of the file and the image it is for, refused unless each names an
 /// image of the file that no other names: one that names none would be dropped unseen.
-pub(super) fn check_claims(file: &[Hdu]) -> Result<ExtensionClaims, FitsLoadError> {
+pub(crate) fn check_claims(file: &[Hdu]) -> Result<ExtensionClaims, FitsLoadError> {
     ExtensionClaims::of(file, LumosExtension::Flags)
 }
 

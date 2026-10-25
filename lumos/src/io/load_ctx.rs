@@ -4,7 +4,6 @@ use std::path::Path;
 
 use common::{CancelToken, par};
 
-use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flat_gain::shared_gains::SharedGains;
@@ -13,14 +12,12 @@ use crate::image::preview_image::PreviewImage;
 use crate::io::decoder::Peek;
 use crate::io::decoder::cfa_decoder::CfaRead;
 use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::calibration_bundle::error::BundleError;
+use crate::io::fits::decode as fits_decode;
 use crate::io::fits::decode::fits_file::FitsFile;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
-use crate::io::fits::{calibration_bundle, decode as fits_decode, product as fits_product};
 use crate::io::input_format::InputFormat;
 use crate::io::null_policy::NullPolicy;
 use crate::io::{raster, raw};
-use crate::stack_product::StackProduct;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
 #[derive(Debug, Clone)]
@@ -132,29 +129,6 @@ impl LoadCtx {
         }
     }
 
-    /// Load a stack product that [`writer::product_fits`](crate::writer::product_fits) wrote:
-    /// its image, every quality plane it holds, and its run report.
-    pub fn product(&self, path: impl AsRef<Path>) -> Result<StackProduct, ImageError> {
-        let path = path.as_ref();
-        self.check_cancelled(path)?;
-        fits_product::load(path, self)
-    }
-
-    /// Load a calibration bundle that
-    /// [`writer::calibration_bundle`](crate::writer::calibration_bundle) wrote, without rebuilding
-    /// its prepared flat or defect map: cancellation reads as [`BundleError::Cancelled`]. The file
-    /// is streamed, never read into RAM whole.
-    ///
-    /// # Errors
-    ///
-    /// [`BundleError`], one variant for each way a file can fail to be a bundle of this version.
-    pub fn calibration_masters(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<CalibrationMasters, BundleError> {
-        calibration_bundle::load(path.as_ref(), self)
-    }
-
     /// What the CFA frame at `path` is, read from its header without decoding it, with what the
     /// header read leaves for [`Self::cfa_read`].
     pub(crate) fn cfa_peek(&self, path: &Path) -> Result<Peek<CfaRead>, ImageError> {
@@ -185,7 +159,7 @@ impl LoadCtx {
         }
     }
 
-    pub(super) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
+    pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
         if self.cancel.is_cancelled() {
             return Err(ImageError::cancelled(path));
         }

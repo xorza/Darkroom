@@ -34,7 +34,7 @@ use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::fits::metadata::VERSION_KEYWORD;
 use crate::io::load_ctx::LoadCtx;
-use crate::io::{raw, writer};
+use crate::io::raw;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use common::{Size2us, Vec2us};
 
@@ -127,7 +127,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
         FitsReader::from_bytes(&bytes).unwrap().hdus().len()
     };
 
-    writer::cfa_fits(&cfa(bytes), &path).unwrap();
+    cfa(bytes).write_fits(&path).unwrap();
     assert_eq!(hdu_count(&path), 2);
     let loaded = LoadCtx::default().cfa(&path).unwrap();
     assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 6, 0, 24, 32]);
@@ -141,7 +141,7 @@ fn a_masters_flags_survive_the_fits_round_trip() {
     );
 
     let nulls_path = dir.join("nulls.fits");
-    writer::cfa_fits(&cfa([0u8, 17, 0, 0, 0, 0]), &nulls_path).unwrap();
+    cfa([0u8, 17, 0, 0, 0, 0]).write_fits(&nulls_path).unwrap();
     assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
     let loaded = LoadCtx::default().cfa(&nulls_path).unwrap();
     assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 0, 0, 0, 0]);
@@ -173,7 +173,7 @@ fn a_flat_gain_survives_the_fits_round_trip() {
             ImageMetadata::default(),
         );
         image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
-        writer::cfa_fits(&image, &path).unwrap();
+        image.write_fits(&path).unwrap();
     };
 
     write();
@@ -348,7 +348,7 @@ fn a_gain_the_run_holds_is_not_read_again() {
             ImageMetadata::default(),
         );
         image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
-        writer::cfa_fits(&image, &path).unwrap();
+        image.write_fits(&path).unwrap();
         path
     });
     rewrite_fits(&paths[1], |idx, _, data| {
@@ -402,7 +402,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             }));
             image
         };
-        writer::cfa_fits(&image, &path).unwrap();
+        image.write_fits(&path).unwrap();
     };
     let extension = LumosExtension::Flags;
     let cases: [(&str, Edit, FitsRefusal); 6] = [
@@ -593,7 +593,7 @@ fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
                     .derived
                     .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 15_360.0));
                 let path = dir.path().join(format!("master_{case}.fits"));
-                writer::cfa_fits(&master, &path).unwrap();
+                master.write_fits(&path).unwrap();
                 let bytes = fs::read(&path).unwrap();
                 let reader = FitsReader::from_bytes(&bytes).unwrap();
                 let header = &reader.hdus()[0].header;
@@ -644,7 +644,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     );
     let dir = TempDir::new("lumos-cfa-roundtrip");
     let path = dir.join("master.fits");
-    writer::cfa_fits(&cfa, &path).unwrap();
+    cfa.write_fits(&path).unwrap();
     let info = LoadCtx::default().cfa_peek(&path).unwrap().info;
     assert_eq!(
         info.dimensions,
@@ -721,7 +721,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
         );
         let path = dir.join(format!("master_{name}.fits"));
 
-        writer::cfa_fits(&image, &path).unwrap();
+        image.write_fits(&path).unwrap();
         let loaded = LoadCtx::default().cfa(path).unwrap();
 
         assert_eq!(loaded.cfa_type(), cfa_type, "{name}");

@@ -76,7 +76,7 @@ impl ImageError {
     }
 
     /// The FITS load of `path` that failed for `error`.
-    pub(super) fn fits_load(path: &Path, error: FitsLoadError) -> Self {
+    pub(crate) fn fits_load(path: &Path, error: FitsLoadError) -> Self {
         match error {
             FitsLoadError::Io(source) => Self::Io {
                 path: path.to_path_buf(),

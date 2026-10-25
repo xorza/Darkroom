@@ -79,7 +79,7 @@ pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
 }
 
 /// Whether `image` is a Lumos linear image's header, refused when it is one of another version.
-pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
+pub(crate) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadError> {
     let is_lumos_linear = image
         .get_text(FORMAT_KEYWORD)?
         .is_some_and(|format| format == LINEAR_FITS_FORMAT);

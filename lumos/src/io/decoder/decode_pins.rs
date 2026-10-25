@@ -1,7 +1,7 @@
 //! [`DecodePins`]: the digests every decode a frame cache can hold is pinned to, and the decode
 //! version derived from them.
 
-use crate::decode::fnv1a;
+use crate::io::decoder::fnv1a;
 
 /// The digest the characterization tests pin for each decode a frame cache can hold, and for the
 /// statistics it keeps beside the planes — see `internals::characterization`. They are bit

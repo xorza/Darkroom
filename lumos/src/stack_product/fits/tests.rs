@@ -21,9 +21,9 @@ use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::lumos_extension::LumosExtension;
 use crate::io::load_ctx::LoadCtx;
-use crate::io::writer;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
+use crate::stack_product::fits::error::{ProductError, ProductRefusal};
 use crate::stack_product::run_report::RunReport;
 use crate::stack_product::weight_kind::WeightKind;
 use common::Size2us;
@@ -157,9 +157,9 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
     let dir = TempDir::new("product-round-trip");
     let path = dir.join("product.fits");
     let written = rgb_product();
-    writer::product_fits(&written, &path).unwrap();
+    written.write_fits(&path).unwrap();
 
-    let read = LoadCtx::default().product(&path).unwrap();
+    let read = StackProduct::read_fits(&path, &LoadCtx::default()).unwrap();
     for channel in 0..3 {
         let (read, written) = (read.image.channel(channel), written.image.channel(channel));
         for (pixel, (read, written)) in read.pixels().iter().zip(written.pixels()).enumerate() {
@@ -271,8 +271,8 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
         cfa_type: Some(cfa_type),
         report: RunReport::default(),
     };
-    writer::product_fits(&written, &path).unwrap();
-    let read = LoadCtx::default().product(&path).unwrap();
+    written.write_fits(&path).unwrap();
+    let read = StackProduct::read_fits(&path, &LoadCtx::default()).unwrap();
     assert_eq!(read.cfa_type, Some(cfa_type));
     assert!(matches!(
         read.coverage,
@@ -296,7 +296,7 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
 
     let rgb = rgb_product().image;
     let linear_path = dir.join("linear.fits");
-    writer::linear_fits(&rgb, &linear_path).unwrap();
+    rgb.write_fits(&linear_path).unwrap();
     let reloaded = LoadCtx::default().linear(&linear_path).unwrap();
     assert!(reloaded.is_rgb());
     assert_eq!(bits(reloaded.channel(2)).len(), SIZE.pixel_count());
@@ -311,15 +311,44 @@ fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     assert_eq!(reloaded.metadata.derived.domain(), Some(&domain()));
 }
 
+/// What a product read refused: the frame layer's FITS format, or the product's own.
+#[derive(Debug, PartialEq)]
+enum Refused {
+    Fits(FitsRefusal),
+    Product(ProductRefusal),
+}
+
+impl Refused {
+    /// The refusal `error` holds; panics on any other error.
+    fn of(error: ProductError) -> Self {
+        match error {
+            ProductError::Refused { refusal, .. } => Self::Product(refusal),
+            ProductError::Image(error) => Self::Fits(fits_refusal(error)),
+        }
+    }
+}
+
+impl From<FitsRefusal> for Refused {
+    fn from(refusal: FitsRefusal) -> Self {
+        Self::Fits(refusal)
+    }
+}
+
+impl From<ProductRefusal> for Refused {
+    fn from(refusal: ProductRefusal) -> Self {
+        Self::Product(refusal)
+    }
+}
+
 /// What the reader refuses of a product file a hand or a tool edited: each edit, its checksums
 /// made valid again, against the refusal it meets.
 #[test]
 fn a_product_edited_out_of_its_format_is_refused() {
     let dir = TempDir::new("product-refusals");
     let source = dir.join("product.fits");
-    writer::product_fits(&rgb_product(), &source).unwrap();
+    rgb_product().write_fits(&source).unwrap();
     let pixel_count = SIZE.pixel_count();
-    let cases: Vec<(&str, Edit, FitsRefusal)> = vec![
+    let cases: Vec<(&str, Edit, Refused)> = vec![
         (
             "no product version",
             Box::new(|idx, header, _| {
@@ -328,7 +357,7 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::NotAProduct,
+            Refused::from(ProductRefusal::NotAProduct),
         ),
         (
             "another product version",
@@ -338,7 +367,10 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::ProductVersion { version: 3 },
+            Refused::from(ProductRefusal::Version {
+                version: 3,
+                expected: 2,
+            }),
         ),
         (
             "no weight kind",
@@ -348,9 +380,9 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::MissingKeyword {
+            Refused::from(FitsRefusal::MissingKeyword {
                 keyword: "LUMWGTK".to_owned(),
-            },
+            }),
         ),
         (
             "a weight kind no product names",
@@ -360,9 +392,9 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::KeywordOutOfRange {
+            Refused::from(FitsRefusal::KeywordOutOfRange {
                 keyword: "LUMWGTK".to_owned(),
-            },
+            }),
         ),
         (
             "inverse-variance weights named a count",
@@ -372,14 +404,14 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::ExtensionSamples {
+            Refused::from(FitsRefusal::ExtensionSamples {
                 extension: LumosExtension::Weight,
                 bitpix: Bitpix::F32,
                 scaling: Scaling {
                     bscale: 1.0 / (SCALE * SCALE),
                     ..Scaling::IDENTITY
                 },
-            },
+            }),
         ),
         (
             "a report field missing",
@@ -389,9 +421,9 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::MissingKeyword {
+            Refused::from(FitsRefusal::MissingKeyword {
                 keyword: "LUMSPIL".to_owned(),
-            },
+            }),
         ),
         (
             "a negative count",
@@ -401,9 +433,9 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::KeywordOutOfRange {
+            Refused::from(FitsRefusal::KeywordOutOfRange {
                 keyword: "LUMEXC1".to_owned(),
-            },
+            }),
         ),
         (
             "an uncertainty of another kind",
@@ -413,9 +445,10 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::UncertaintyType {
+            Refused::from(ProductRefusal::UncertaintyType {
                 utype: Some("StdDevUncertainty".to_owned()),
-            },
+                expected: "InverseVariance",
+            }),
         ),
         (
             "a mask set where the image holds data",
@@ -425,12 +458,12 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::MaskDisagrees { idx: pixel_count },
+            Refused::from(ProductRefusal::MaskDisagrees { idx: pixel_count }),
         ),
         (
             "no mask for a pixel of no data",
             Box::new(|idx, _, _| idx != 2),
-            FitsRefusal::MaskDisagrees { idx: NO_DATA_PIXEL },
+            Refused::from(ProductRefusal::MaskDisagrees { idx: NO_DATA_PIXEL }),
         ),
         (
             "a uniform coverage beside its plane",
@@ -440,19 +473,19 @@ fn a_product_edited_out_of_its_format_is_refused() {
                 }
                 true
             }),
-            FitsRefusal::CoverageTwice,
+            Refused::from(ProductRefusal::CoverageTwice),
         ),
     ];
     for (name, edit, refusal) in cases {
         let path = dir.join("edited.fits");
         fs::copy(&source, &path).unwrap();
         rewrite_fits(&path, edit);
-        let error = LoadCtx::default().product(&path).unwrap_err();
-        assert_eq!(fits_refusal(error), refusal, "{name}");
+        let error = StackProduct::read_fits(&path, &LoadCtx::default()).unwrap_err();
+        assert_eq!(Refused::of(error), refusal, "{name}");
     }
 
     let linear = dir.join("linear.fits");
-    writer::linear_fits(&rgb_product().image, &linear).unwrap();
-    let error = LoadCtx::default().product(&linear).unwrap_err();
-    assert_eq!(fits_refusal(error), FitsRefusal::NotAProduct);
+    (rgb_product().image).write_fits(&linear).unwrap();
+    let error = StackProduct::read_fits(&linear, &LoadCtx::default()).unwrap_err();
+    assert_eq!(Refused::of(error), ProductRefusal::NotAProduct.into());
 }

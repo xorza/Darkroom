@@ -16,7 +16,6 @@ use crate::image::channel_layout::ChannelLayout;
 use crate::ingest::error::AdmissionError;
 use crate::internals::images::rgb_image;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::writer;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::distortion::sip::SipModel;
 use crate::registration::distortion::sip::sip_order::SipOrder;
@@ -113,15 +112,13 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     let paths: Vec<PathBuf> = (0..2)
         .map(|k| {
             let path = scratch.join(format!("frame{k}.tiff"));
-            writer::raster(
-                &gray_image(
-                    size,
-                    (0..size.pixel_count())
-                        .map(|i| ((i * 7 + k * 3) % 11) as f32 / 10.0)
-                        .collect(),
-                ),
-                &path,
+            gray_image(
+                size,
+                (0..size.pixel_count())
+                    .map(|i| ((i * 7 + k * 3) % 11) as f32 / 10.0)
+                    .collect(),
             )
+            .write_raster(&path)
             .unwrap();
             path
         })

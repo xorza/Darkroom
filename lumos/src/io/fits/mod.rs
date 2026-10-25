@@ -1,7 +1,6 @@
 //! FITS: decoding an image HDU into the [`image`](crate::image) types, the extensions lumos writes
 //! beside it, and writing them back.
 
-pub(crate) mod calibration_bundle;
 pub(crate) mod cfa;
 pub(crate) mod decode;
 pub(crate) mod error;
@@ -13,7 +12,6 @@ pub(crate) mod linear;
 pub(crate) mod lumos_extension;
 pub(crate) mod metadata;
 pub(crate) mod plane_hdu;
-pub(crate) mod product;
 pub(crate) mod tile_parallel;
 
 /// The bytes of samples a FITS read or write holds at once beside the planes it reads or writes:

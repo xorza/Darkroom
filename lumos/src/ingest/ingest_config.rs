@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use common::{UserCache, env};
 
-use crate::decode::decode_params::DecodeParams;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
+use crate::io::decoder::decode_params::DecodeParams;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::null_policy::NullPolicy;
 

@@ -56,7 +56,6 @@ use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane, constant_cfa, make_c
 use crate::internals::fits::rewrite_fits;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::load_ctx::LoadCtx;
-use crate::io::writer;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -1185,7 +1184,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
     let dir = TempDir::new("lumos-calibration-roundtrip");
     let path = dir.join("masters.fits");
-    writer::calibration_bundle(&masters, &path).unwrap();
+    masters.write_bundle(&path).unwrap();
     // A bundle is no single image, whichever loader is pointed at it.
     let refused = |result: Result<(), ImageError>| {
         matches!(
@@ -1239,7 +1238,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         assert_eq!(report.datasum, ChecksumStatus::Valid);
         assert_eq!(report.checksum, ChecksumStatus::Valid);
     }
-    let loaded = LoadCtx::default().calibration_masters(&path).unwrap();
+    let loaded = CalibrationMasters::read_bundle(&path, &LoadCtx::default()).unwrap();
     // The flat's stack left its flat-dark's temperature uncompared, and the bundle keeps saying so.
     assert_eq!(loaded.flat_dark(), Some(UNSHARED_TEMPERATURE));
     assert_eq!(
@@ -1251,7 +1250,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let orphan = dir.join("orphan.fits");
     fs::write(&orphan, &cache_bytes).unwrap();
     rewrite_fits(&orphan, |idx, _, _| idx != 1);
-    let error = LoadCtx::default().calibration_masters(&orphan).unwrap_err();
+    let error = CalibrationMasters::read_bundle(&orphan, &LoadCtx::default()).unwrap_err();
     assert!(matches!(error, BundleError::Flags(_)), "{error:?}");
     assert!(
         error
@@ -1263,7 +1262,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let cancel = CancelToken::new();
     cancel.cancel();
     assert!(matches!(
-        LoadCtx::new(cancel).calibration_masters(&path),
+        CalibrationMasters::read_bundle(&path, &LoadCtx::new(cancel)),
         Err(BundleError::Cancelled)
     ));
 
@@ -1279,7 +1278,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     invalid_version[version_card + version_digit] = b'4';
     fs::write(&path, invalid_version).unwrap();
     assert!(matches!(
-        LoadCtx::default().calibration_masters(&path),
+        CalibrationMasters::read_bundle(&path, &LoadCtx::default()),
         Err(BundleError::Version {
             found: 4,
             expected: 6
@@ -1305,7 +1304,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .unwrap();
     invalid_data[pixel_offset] ^= 0x01;
     fs::write(&path, invalid_data).unwrap();
-    let error = LoadCtx::default().calibration_masters(&path).unwrap_err();
+    let error = CalibrationMasters::read_bundle(&path, &LoadCtx::default()).unwrap_err();
     assert!(
         matches!(error, BundleError::Checksum { hdu: 4 }),
         "{error:?}"
@@ -1364,9 +1363,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let refused = |edit: &mut dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool| {
         fs::write(&malformed, &cache_bytes).unwrap();
         rewrite_fits(&malformed, edit);
-        LoadCtx::default()
-            .calibration_masters(&malformed)
-            .unwrap_err()
+        CalibrationMasters::read_bundle(&malformed, &LoadCtx::default()).unwrap_err()
     };
     let set = |hdu: usize, key: &'static str, value: &'static str| {
         refused(&mut |idx, header, _| {
@@ -1430,7 +1427,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     let dir = TempDir::new("lumos-empty-masters");
     let path = dir.join("masters.fits");
-    writer::calibration_bundle(&CalibrationMasters::default(), &path).unwrap();
+    CalibrationMasters::default().write_bundle(&path).unwrap();
 
     let bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
@@ -1439,7 +1436,7 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
     assert_eq!(report.datasum, ChecksumStatus::Valid);
     assert_eq!(report.checksum, ChecksumStatus::Valid);
 
-    let loaded = LoadCtx::default().calibration_masters(&path).unwrap();
+    let loaded = CalibrationMasters::read_bundle(&path, &LoadCtx::default()).unwrap();
     assert_eq!(loaded.components().collect::<Vec<_>>(), []);
 }
 
@@ -1729,7 +1726,7 @@ fn calibration_records_saturation_before_it_moves_the_samples() {
 
     let dir = TempDir::new("lumos-calibrated-saturation");
     let path = dir.path().join("light.fits");
-    writer::cfa_fits(&light, &path).unwrap();
+    light.write_fits(&path).unwrap();
     let loaded = LoadCtx::default().cfa(&path).unwrap();
     assert!(loaded.metadata.derived.saturation_flagged());
     assert_eq!(saturated(&loaded), [0]);
@@ -2112,7 +2109,7 @@ fn flats_are_calibrated_before_they_are_combined() {
                 CfaType::Mono,
             );
             let path = dir.join(format!("flat_{idx}.fits"));
-            writer::cfa_fits(&flat, &path).unwrap();
+            flat.write_fits(&path).unwrap();
             path
         })
         .collect();
@@ -2235,7 +2232,7 @@ fn the_builder_calibrates_the_flats_and_keeps_each_master() {
         );
         frame.metadata.header.exposure_time = Some(exposure);
         let path = dir.join(name);
-        writer::cfa_fits(&frame, &path).unwrap();
+        frame.write_fits(&path).unwrap();
         path
     };
     let vignette = |i: usize| {
@@ -2341,11 +2338,9 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
     let bias: Vec<PathBuf> = (0..2)
         .map(|idx| {
             let path = dir.join(format!("bias_{idx}.fits"));
-            writer::cfa_fits(
-                &constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono),
-                &path,
-            )
-            .unwrap();
+            constant_cfa(Size2us::new(8, 8), 1.0 / 32.0, CfaType::Mono)
+                .write_fits(&path)
+                .unwrap();
             path
         })
         .collect();
@@ -2390,7 +2385,7 @@ fn dark_frames_share_one_exposure() {
                 frame.metadata.header.exposure_time = Some(exposure);
                 frame.metadata.header.ccd_temp = temperature;
                 let path = dir.join(format!("{name}_{idx}.fits"));
-                writer::cfa_fits(&frame, &path).unwrap();
+                frame.write_fits(&path).unwrap();
                 path
             })
             .collect()

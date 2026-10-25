@@ -4,7 +4,6 @@ use std::path::Path;
 use common::{FileId, FileIdentity, SerdeFormat, TempDir, fs};
 use fits_well::image::SampleType;
 
-use crate::decode::decoder_kind::DecoderKind;
 use crate::frame::admitted::Admitted;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::frame::frame_facts::FrameFacts;
@@ -38,6 +37,7 @@ use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::image::temperature_difference::TemperatureDifference;
 use crate::image::temperature_source::TemperatureSource;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::math::statistics;
 
 fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {

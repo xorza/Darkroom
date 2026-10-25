@@ -7,7 +7,6 @@ use common::TempDir;
 use lumos::{
     ChannelLayout, Denoise, ExtractBg, Hdr, ImageDimensions, LinearImage, LocalContrast,
     PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS, RasterFormat, SigmaThreshold, SourceProvenance,
-    writer,
 };
 use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
@@ -58,8 +57,8 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
     );
     image.metadata.header.object = Some("M31".to_owned());
     let (fits, tiff) = (dir.join("light.fits"), dir.join("light.tiff"));
-    writer::linear_fits(&image, &fits).unwrap();
-    writer::raster(&image, &tiff).unwrap();
+    image.write_fits(&fits).unwrap();
+    image.write_raster(&tiff).unwrap();
 
     let library = astro_library(&MlModelPaths::default());
     let load = library.by_name("Load Astro Image").unwrap();

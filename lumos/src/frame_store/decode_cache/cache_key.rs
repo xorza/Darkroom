@@ -4,9 +4,9 @@
 use common::FileIdentity;
 use serde::{Deserialize, Serialize};
 
-use crate::decode::decode_params::DecodeParams;
-use crate::decode::decode_pins::DECODE_VERSION;
-use crate::decode::decoder_kind::DecoderKind;
+use crate::io::decoder::decode_params::DecodeParams;
+use crate::io::decoder::decode_pins::DECODE_VERSION;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::load_ctx::LoadCtx;
 
 /// What a cached frame's planes were decoded from and by.

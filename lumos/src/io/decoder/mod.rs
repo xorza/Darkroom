@@ -1,14 +1,20 @@
-//! [`Decoder`]: how the frames of a set are read from their files, as one image type.
+//! [`Decoder`]: how the frames of a set are read from their files, as one image type; and what
+//! identifies a decode: which decoder ran, at which version, under which options — what any record
+//! of a decoded frame is keyed on, the decode cache's and a calibration master's alike.
 
 pub(crate) mod cfa_decoder;
+pub(crate) mod decode_params;
+pub(crate) mod decode_pins;
+pub(crate) mod decoder_kind;
+pub(crate) mod fnv1a;
 pub(crate) mod linear_decoder;
 
 use std::fmt::Debug;
 use std::path::Path;
 
-use crate::decode::decoder_kind::DecoderKind;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::stackable_image::StackableImage;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::error::ImageError;
 use crate::io::frame_info::FrameInfo;
 use crate::io::load_ctx::LoadCtx;

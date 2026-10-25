@@ -5,6 +5,7 @@
 //! `InverseVariance` uncertainty, each plane's `BSCALE` putting it in the units of the image as
 //! astropy scales it. Lumos reads every plane back as it wrote it, bit for bit.
 
+pub(crate) mod error;
 mod report_keywords;
 
 use std::fs::File;
@@ -28,22 +29,23 @@ use crate::io::fits::extension_claims::{ExtensionClaims, IMAGE_KEYWORD, PRIMARY}
 use crate::io::fits::flags_extension;
 use crate::io::fits::gain_extension;
 use crate::io::fits::linear;
-use crate::io::fits::lumos_extension::{DescribedImage, LumosExtension};
+use crate::io::fits::lumos_extension::{
+    DescribedImage, LumosExtension, QUALITY_FORMAT, QUALITY_VERSION,
+};
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::fits::plane_hdu::{FloatPlanes, NoDataMask, PlaneHdu, PlaneSource};
 use crate::io::load_ctx::LoadCtx;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
+use crate::stack_product::fits::error::{ProductError, ProductRefusal};
 use crate::stack_product::weight_kind::WeightKind;
 use common::Size2us;
 
 /// 1: the report in the primary header, the quality planes in `CCDData`'s layout. 2: what the
 /// frame weights of the weight plane were, which a plane of inverse variances is scaled by.
-pub(super) const PRODUCT_VERSION: i64 = 2;
-pub(super) const QUALITY_FORMAT: &str = "QUALPLAN";
-pub(super) const QUALITY_VERSION: i64 = 1;
+const PRODUCT_VERSION: i64 = 2;
 /// The `UTYPE` astropy names an inverse-variance uncertainty by: its class's name.
-pub(super) const INVERSE_VARIANCE: &str = "InverseVariance";
+const INVERSE_VARIANCE: &str = "InverseVariance";
 
 /// The primary header's keyword that names a stack product, and states its version.
 const PRODUCT_KEYWORD: Keyword = Keyword::new("LUMPRODV");
@@ -88,7 +90,7 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
         size: image.dimensions().size(),
         channels: image.channels(),
         scale: image_scale(image),
-        weight_kind: Some(product.weight_kind),
+        weight_units: product.weight_kind.units(),
     };
     let mask = image
         .flags()
@@ -140,21 +142,43 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
 }
 
 /// Read the stack product at `path`, under `ctx`'s options.
-pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ImageError> {
-    read(path, ctx).map_err(|error| ImageError::fits_load(path, error))
+pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ProductError> {
+    read(path, ctx).map_err(|failure| match failure {
+        ReadFailure::Fits(error) => ImageError::fits_load(path, error).into(),
+        ReadFailure::Refused(refusal) => ProductError::Refused {
+            path: path.to_path_buf(),
+            refusal,
+        },
+    })
 }
 
-fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
+/// Why [`read`] stopped, before [`load`] names the file.
+#[derive(Debug)]
+enum ReadFailure {
+    Fits(FitsLoadError),
+    Refused(ProductRefusal),
+}
+
+impl<E: Into<FitsLoadError>> From<E> for ReadFailure {
+    fn from(error: E) -> Self {
+        Self::Fits(error.into())
+    }
+}
+
+fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
     let mut reader = selected_fits::open(path, ctx)?;
     let primary = reader.hdus()[0].header.clone();
     if !linear::validate_image_header(&primary)? {
-        return Err(FitsRefusal::NotAProduct.into());
+        return Err(ReadFailure::Refused(ProductRefusal::NotAProduct));
     }
-    let version = primary
-        .get_integer(PRODUCT_KEYWORD)?
-        .ok_or(FitsRefusal::NotAProduct)?;
+    let Some(version) = primary.get_integer(PRODUCT_KEYWORD)? else {
+        return Err(ReadFailure::Refused(ProductRefusal::NotAProduct));
+    };
     if version != PRODUCT_VERSION {
-        return Err(FitsRefusal::ProductVersion { version }.into());
+        return Err(ReadFailure::Refused(ProductRefusal::Version {
+            version,
+            expected: PRODUCT_VERSION,
+        }));
     }
     let report = report_keywords::read(&primary)?;
     let weight_kind = read_weight_kind(&primary)?;
@@ -189,7 +213,7 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
         size: image.dimensions().size(),
         channels: image.channels(),
         scale: image_scale(&image),
-        weight_kind: Some(weight_kind),
+        weight_units: weight_kind.units(),
     };
     let mut planes = QualityPlanesRead::default();
     let mut mask = None;
@@ -211,11 +235,11 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, FitsLoadError> {
             }
         }
     }
-    check_mask(mask, &image)?;
+    check_mask(mask, &image).map_err(ReadFailure::Refused)?;
     let size = image.dimensions().size();
     let map = |stored: Option<StoredPlanes<f32>>| stored.map(|stored| quality_map(stored, size));
     let coverage = match (uniform_coverage, map(planes.coverage)) {
-        (Some(_), Some(_)) => return Err(FitsRefusal::CoverageTwice.into()),
+        (Some(_), Some(_)) => return Err(ReadFailure::Refused(ProductRefusal::CoverageTwice)),
         (Some(value), None) => Some(Coverage::Uniform { value, size }),
         (None, plane) => plane.map(Coverage::PerPixel),
     };
@@ -340,16 +364,16 @@ fn check_plane(
     idx: usize,
     extension: LumosExtension,
     image: &DescribedImage,
-) -> Result<(), FitsLoadError> {
+) -> Result<(), ReadFailure> {
     let hdu = &reader.hdus()[idx];
     extension.check(hdu, image)?;
     if extension == LumosExtension::Uncertainty {
         let utype = hdu.header.get_text(UNCERTAINTY_TYPE)?;
         if utype != Some(INVERSE_VARIANCE) {
-            return Err(FitsRefusal::UncertaintyType {
+            return Err(ReadFailure::Refused(ProductRefusal::UncertaintyType {
                 utype: utype.map(str::to_owned),
-            }
-            .into());
+                expected: INVERSE_VARIANCE,
+            }));
         }
     }
     Ok(())
@@ -357,7 +381,7 @@ fn check_plane(
 
 /// Refuse a `mask` that is not the image's `NO_DATA` at each of its pixels, in every channel, or
 /// none where the image has such pixels.
-fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(), FitsLoadError> {
+fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(), ProductRefusal> {
     let no_data = |pixel: usize| {
         image
             .flags()
@@ -366,7 +390,7 @@ fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(),
     let pixel_count = image.pixel_count();
     let Some(mask) = mask else {
         return match (0..pixel_count).find(|&pixel| no_data(pixel)) {
-            Some(idx) => Err(FitsRefusal::MaskDisagrees { idx }.into()),
+            Some(idx) => Err(ProductRefusal::MaskDisagrees { idx }),
             None => Ok(()),
         };
     };
@@ -376,7 +400,7 @@ fn check_mask(mask: Option<StoredPlanes<u8>>, image: &LinearImage) -> Result<(),
         .enumerate()
         .position(|(idx, &byte)| byte != u8::from(no_data(idx % pixel_count)))
     {
-        Some(idx) => Err(FitsRefusal::MaskDisagrees { idx }.into()),
+        Some(idx) => Err(ProductRefusal::MaskDisagrees { idx }),
         None => Ok(()),
     }
 }

@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use crate::decode::decoder_kind::DecoderKind;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
+use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::decoder::{Decoder, Peek};
 use crate::io::error::ImageError;
 use crate::io::fits::decode as fits_decode;

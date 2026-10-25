@@ -17,7 +17,6 @@ use common::{SerdeFormat, fs};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::decode::fnv1a;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
 use crate::frame::frame_stats::FrameStats;
@@ -31,6 +30,7 @@ use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, GainGrid};
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
+use crate::io::decoder::fnv1a;
 use common::Size2us;
 
 /// The commit layout pin: the digest of a fixed [`Commit`] as bitcode, which
