@@ -22,13 +22,13 @@ fn main() {
     let input = GpuImage::from_image(&ctx, &input_cpu).expect("upload");
 
     let center = Vec2::new(
-        input_cpu.desc().size.width as f32 / 2.0,
-        input_cpu.desc().size.height as f32 / 2.0,
+        input_cpu.desc().size().width as f32 / 2.0,
+        input_cpu.desc().size().height as f32 / 2.0,
     );
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(256, 256), input_cpu.desc().color_format),
+        InterleavedDesc::new(Size2us::new(256, 256), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -39,7 +39,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(768, 768), input_cpu.desc().color_format),
+        InterleavedDesc::new(Size2us::new(768, 768), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -70,7 +70,7 @@ fn main() {
 
     let mut output = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(800, 600), input_cpu.desc().color_format),
+        InterleavedDesc::new(Size2us::new(800, 600), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -114,7 +114,7 @@ fn main() {
 
     let mut output_nearest = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format),
+        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()
@@ -126,7 +126,7 @@ fn main() {
 
     let mut output_bilinear = GpuImage::new_empty(
         &ctx,
-        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format),
+        InterleavedDesc::new(Size2us::new(1024, 1024), input_cpu.desc().color_format()),
     )
     .expect("allocate");
     AffineWarp::new()

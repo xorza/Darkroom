@@ -1,13 +1,15 @@
 use std::io::Cursor;
 
-use crate::color::color_format::ColorFormat;
-use crate::error::Error;
+use common::{Buffer2, Size2us, par};
+use rayon::iter::ParallelIterator;
+use tiff::encoder::{TiffEncoder, colortype};
+
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::error::{ByteLenError, CodecError, PlanesError, TiffSampleType};
 use crate::image::InterleavedImage;
 use crate::image::image_desc::InterleavedDesc;
 use crate::image::raster_format::RasterFormat;
 use crate::internals::{create_test_image, lena};
-use common::{Buffer2, Size2us, par};
-use rayon::iter::ParallelIterator;
 
 #[test]
 fn lena_reads_as_packed_rgba() {
@@ -21,7 +23,10 @@ fn lena_reads_as_packed_rgba() {
 }
 
 /// `image` encoded as `format` and decoded back.
-fn round_trip(image: &InterleavedImage, format: RasterFormat) -> Result<InterleavedImage, Error> {
+fn round_trip(
+    image: &InterleavedImage,
+    format: RasterFormat,
+) -> Result<InterleavedImage, CodecError> {
     let mut encoded = Cursor::new(Vec::new());
     image.encode(&mut encoded, format)?;
     encoded.set_position(0);
@@ -47,7 +52,7 @@ fn integer_formats_round_trip_through_png() {
         let result = round_trip(&image, RasterFormat::Png);
         if format.sample_type.is_float() {
             assert!(
-                matches!(result, Err(Error::UnsupportedFormat(message)) if message == format!("PNG cannot store {format}")),
+                matches!(result, Err(CodecError::Unstorable { format: RasterFormat::Png, color_format }) if color_format == format),
                 "{format}"
             );
             continue;
@@ -68,7 +73,7 @@ fn jpeg_refuses_what_it_cannot_store() {
             result.unwrap();
         } else {
             assert!(
-                matches!(result, Err(Error::UnsupportedFormat(message)) if message == format!("JPEG cannot store {format}")),
+                matches!(result, Err(CodecError::Unstorable { format: RasterFormat::Jpeg, color_format }) if color_format == format),
                 "{format}"
             );
         }
@@ -97,23 +102,48 @@ fn mono_alpha_png_widens_to_rgba() {
     assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
 }
 
+/// A TIFF of a color type or a sample type no format holds is refused with the one it states: a
+/// CMYK file, and a gray file of `u32` samples.
 #[test]
-fn construction_checks_dimensions_and_length() {
-    assert!(matches!(
-        InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_U16), vec![0; 3]),
-        Err(Error::SizeMismatch(message)) if message == "bytes length 3 does not match expected size 2"
-    ));
-    assert!(matches!(
-        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(0, 4), ColorFormat::MONO_U8)),
-        Err(Error::SizeMismatch(message)) if message == "image dimensions must be non-zero, got 0x4"
-    ));
-    assert!(matches!(
-        InterleavedImage::new_black(InterleavedDesc::new(
-            Size2us::new(usize::MAX / 2, 3),
-            ColorFormat::RGBA_F32
-        )),
-        Err(Error::SizeMismatch(_))
-    ));
+fn a_tiff_no_format_holds_is_refused() {
+    fn tiff(write: impl FnOnce(&mut TiffEncoder<&mut Cursor<Vec<u8>>>)) -> CodecError {
+        let mut file = Cursor::new(Vec::new());
+        write(&mut TiffEncoder::new(&mut file).unwrap());
+        file.set_position(0);
+        InterleavedImage::decode(file, RasterFormat::Tiff).unwrap_err()
+    }
+    let cmyk = tiff(|encoder| {
+        encoder
+            .write_image::<colortype::CMYK8>(1, 1, &[0, 0, 0, 0])
+            .unwrap();
+    });
+    assert!(
+        matches!(cmyk, CodecError::TiffColor(tiff::ColorType::CMYK(8))),
+        "{cmyk}"
+    );
+    let gray32 = tiff(|encoder| {
+        encoder
+            .write_image::<colortype::Gray32>(1, 1, &[7])
+            .unwrap();
+    });
+    assert!(
+        matches!(gray32, CodecError::TiffSamples(TiffSampleType::U32)),
+        "{gray32}"
+    );
+}
+
+/// One `MONO_U16` pixel is 2 bytes: 3 are refused with both lengths, and 2 make the image.
+#[test]
+fn data_of_another_length_is_refused() {
+    let desc = InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_U16);
+    let error = InterleavedImage::new_with_data(desc, vec![0; 3]).unwrap_err();
+    assert_eq!(error, ByteLenError { desc, byte_len: 3 });
+    assert_eq!(
+        error.to_string(),
+        "3 bytes are no 1x1 Mono u16 image, which holds 2"
+    );
+    let image = InterleavedImage::new_with_data(desc, vec![1, 0]).unwrap();
+    assert_eq!(image.bytes(), &[1, 0]);
 }
 
 /// A `u8` format keeps the caller's allocation both ways; `u16` and `f32` copy into storage
@@ -181,7 +211,7 @@ fn planes_interleave_into_the_format_they_spell() {
     assert_eq!(taken, planes);
 
     let mono = InterleavedImage::from([&Buffer2::new((3, 1), vec![10u16, 20, 30])]);
-    assert_eq!(mono.desc().color_format, ColorFormat::MONO_U16);
+    assert_eq!(mono.desc().color_format(), ColorFormat::MONO_U16);
     assert_eq!(mono.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
     // A mono image taken is its one plane, in the same allocation.
     let pointer = mono.bytes().as_ptr();
@@ -212,18 +242,20 @@ fn deinterleaving_into_another_format_is_refused() {
     let image = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(2, 2),
         ColorFormat::RGB_U8,
-    ))
-    .unwrap();
-    let result: Result<[Buffer2<f32>; 1], Error> = (&image).try_into();
-    assert!(matches!(
-        result,
-        Err(Error::InvalidColorFormat(message)) if message == "cannot deinterleave a RGB u8 image into 1 f32 planes"
     ));
-    let result: Result<[Buffer2<f32>; 1], Error> = image.try_into();
-    assert!(matches!(
-        result,
-        Err(Error::InvalidColorFormat(message)) if message == "cannot deinterleave a RGB u8 image into 1 f32 planes"
-    ));
+    let refused = PlanesError::Mismatch {
+        color_format: ColorFormat::RGB_U8,
+        plane_count: 1,
+        sample_type: SampleType::F32,
+    };
+    let result: Result<[Buffer2<f32>; 1], PlanesError> = (&image).try_into();
+    assert_eq!(result.unwrap_err(), refused);
+    let result: Result<[Buffer2<f32>; 1], PlanesError> = image.try_into();
+    assert_eq!(result.unwrap_err(), refused);
+    assert_eq!(
+        refused.to_string(),
+        "cannot deinterleave a RGB u8 image into 1 f32 planes"
+    );
 }
 
 #[test]

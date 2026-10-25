@@ -13,7 +13,7 @@ use criterion::{BenchmarkId, Criterion};
 use crate::bench::fixture::{self, Backend};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ColorFormat;
-use crate::error::Error;
+use crate::error::CodecError;
 use crate::image::InterleavedImage;
 use crate::image::raster_format::RasterFormat;
 
@@ -89,7 +89,7 @@ fn cases() -> Vec<(RasterFormat, ColorFormat)> {
         .filter(|&(file, format)| {
             match scene::sky(format, Size2us::new(1, 1), 0).encode(Cursor::new(Vec::new()), file) {
                 Ok(()) => true,
-                Err(Error::UnsupportedFormat(_)) => false,
+                Err(CodecError::Unstorable { .. }) => false,
                 Err(error) => panic!("probing {file:?} for {format}: {error}"),
             }
         })

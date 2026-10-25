@@ -8,3 +8,6 @@
   it from the link, as no Rust code calls it; without LTO it links. Seen with
   rustc 1.99.1, 1.100.0-beta.5 and 1.101.0-nightly (2026-10-21). `cargo
 drive bench` fails before any case runs.
+- **`FitsRefusal::SideTooLong` carries a `width` and a `height`**
+  (`lumos/src/io/fits/error.rs`), where the other size errors carry a
+  `Size2us`, which a reader cannot transpose.

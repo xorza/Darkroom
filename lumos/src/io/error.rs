@@ -1,3 +1,4 @@
+use common::Size2us;
 use imaginarium::RasterFormat;
 use std::fmt::{self, Display, Formatter};
 use std::io;
@@ -27,7 +28,7 @@ pub enum ImageError {
     #[error("failed to load image '{path}': {source}")]
     Image {
         path: PathBuf,
-        source: imaginarium::Error,
+        source: imaginarium::CodecError,
     },
 
     #[error("failed to load raw file '{path}': {source}")]
@@ -141,7 +142,10 @@ pub enum WriteError {
     Fits(#[source] fits_well::FitsError),
     /// imaginarium could not encode or write the raster format the path names.
     #[error("failed to write the raster image: {0}")]
-    Raster(#[from] imaginarium::Error),
+    Raster(#[from] imaginarium::CodecError),
+    /// No raster format has the extension of the path.
+    #[error("no raster format has the extension of '{}'", path.display())]
+    RasterExtension { path: PathBuf },
 }
 
 /// fits-well's own I/O failure is an I/O failure here too, so a caller finds every one in
@@ -168,9 +172,9 @@ pub enum ScientificRefusal {
     PreviewOnlyRaster {
         format: RasterFormat,
     },
+    /// A raster with a side past [`MAX_SIDE`].
     RasterSideTooLong {
-        width: usize,
-        height: usize,
+        size: Size2us,
     },
     /// A TIFF of integer samples.
     IntegerRaster,
@@ -194,8 +198,8 @@ impl Display for ScientificRefusal {
                 "PNG and JPEG are preview-only because their transfer and color transforms are \
                  not decoded"
             ),
-            Self::RasterSideTooLong { width, height } => {
-                write!(f, "{width}x{height} has a side past {MAX_SIDE} px")
+            Self::RasterSideTooLong { size } => {
+                write!(f, "{size} has a side past {MAX_SIDE} px")
             }
             Self::IntegerRaster => {
                 write!(f, "scientific raster input must be a floating-point TIFF")

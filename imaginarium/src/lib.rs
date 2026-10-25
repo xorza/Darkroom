@@ -11,7 +11,7 @@ mod ops;
 mod planar;
 
 pub use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
-pub use crate::error::{DescError, Error, Result};
+pub use crate::error::{ByteLenError, CodecError, DescError, PlanesError, TiffSampleType};
 
 pub use crate::image::InterleavedImage;
 pub use crate::image::image_desc::InterleavedDesc;
@@ -28,6 +28,7 @@ pub use crate::ops::preview::Preview;
 
 #[cfg(feature = "wgpu")]
 pub use crate::{
+    error::GpuError,
     gpu::Gpu,
     gpu::gpu_ctx::{GpuCtx, GpuPipeline},
     gpu::gpu_image::GpuImage,

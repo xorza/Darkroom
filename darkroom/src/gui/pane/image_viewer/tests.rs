@@ -116,10 +116,14 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     );
     assert_eq!(nothing.hint().unwrap().to_string(), NOTHING_YET_HINT);
 
-    let errored = StoredContent::Error(DrawablePreviewError::Empty);
+    let size = Size2us::new(1 << 33, 1);
+    let errored = StoredContent::Error(DrawablePreviewError::EdgeTooLong { size });
     let resolved = ShownSource::resolve(Some(&errored), h.ui());
     assert!(resolved.image().is_none());
-    assert_eq!(resolved.hint().unwrap().to_string(), "image is empty");
+    assert_eq!(
+        resolved.hint().unwrap().to_string(),
+        "image is 8589934592x1, past the longest texture edge"
+    );
 
     // A good non-image value is not a failure, and reads as one thing a
     // viewer can't show rather than as that value's own formatting.

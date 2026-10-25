@@ -9,7 +9,7 @@ use crate::error::DescError;
 use crate::image::image_desc::InterleavedDesc;
 use crate::planar::channel_layout::ChannelLayout;
 
-/// A planar image's size and channel layout: at least one pixel, and a sample count a `usize`
+/// A planar image's size and channel layout: at least one pixel, and a byte count a `usize`
 /// holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlanarDesc {
@@ -20,14 +20,14 @@ pub struct PlanarDesc {
 impl PlanarDesc {
     /// # Panics
     ///
-    /// When `size` has a zero side, or `size` and `layout` hold more samples than a `usize`
+    /// When `size` has a zero side, or `size` and `layout` hold more bytes than a `usize`
     /// counts.
     pub fn new(size: impl Into<Size2us>, layout: ChannelLayout) -> Self {
         Self::checked(size.into(), layout).unwrap_or_else(|error| panic!("{error}"))
     }
 
     /// The descriptor `size` and `layout` make, or the first rule they break: a zero side, or more
-    /// samples than a `usize` counts.
+    /// bytes than a `usize` counts.
     pub const fn checked(size: Size2us, layout: ChannelLayout) -> Result<Self, DescError> {
         let Size2us { width, height } = size;
         if width == 0 {
@@ -36,17 +36,15 @@ impl PlanarDesc {
         if height == 0 {
             return Err(DescError::ZeroHeight);
         }
-        let channel_count = layout.count();
-        let Some(pixel_count) = width.checked_mul(height) else {
-            return Err(DescError::SampleCount {
-                size,
-                channel_count,
-            });
+        let pixel_byte_len = layout.count() * size_of::<f32>();
+        let byte_len = match width.checked_mul(height) {
+            Some(pixel_count) => pixel_count.checked_mul(pixel_byte_len),
+            None => None,
         };
-        if pixel_count.checked_mul(channel_count).is_none() {
-            return Err(DescError::SampleCount {
+        if byte_len.is_none() {
+            return Err(DescError::TooLarge {
                 size,
-                channel_count,
+                pixel_byte_len,
             });
         }
         Ok(Self { size, layout })
@@ -163,11 +161,12 @@ mod tests {
         );
     }
 
-    /// The first rule broken: a zero side, then a pixel count or a sample count past `usize`.
-    /// `usize::MAX / 2 + 1` pixels in one row fit, and three samples of each do not.
+    /// The first rule broken: a zero side, then a pixel count or a byte count past `usize`.
+    /// `usize::MAX / 8 + 1` pixels in one row fit as mono, 4 bytes each, and as RGB, 12 bytes
+    /// each, do not.
     #[test]
     fn checked_names_the_first_rule_broken() {
-        let wide = Size2us::new(usize::MAX / 2 + 1, 1);
+        let wide = Size2us::new(usize::MAX / 8 + 1, 1);
         let huge = Size2us::new(usize::MAX, 2);
         for (size, layout, expected) in [
             (
@@ -188,17 +187,17 @@ mod tests {
             (
                 huge,
                 ChannelLayout::Mono,
-                DescError::SampleCount {
+                DescError::TooLarge {
                     size: huge,
-                    channel_count: 1,
+                    pixel_byte_len: 4,
                 },
             ),
             (
                 wide,
                 ChannelLayout::Rgb,
-                DescError::SampleCount {
+                DescError::TooLarge {
                     size: wide,
-                    channel_count: 3,
+                    pixel_byte_len: 12,
                 },
             ),
         ] {

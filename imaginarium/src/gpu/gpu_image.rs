@@ -1,8 +1,8 @@
-use std::{iter, result};
+use std::iter;
 
 use tokio::sync::oneshot;
 
-use crate::error::{Error, Result};
+use crate::error::GpuError;
 use crate::gpu::Gpu;
 use crate::image::InterleavedImage;
 use crate::image::image_desc::InterleavedDesc;
@@ -23,7 +23,7 @@ pub struct GpuImage {
 
 impl GpuImage {
     /// Uploads a CPU image: the bytes go straight into the mapped buffer, one copy.
-    pub fn from_image(ctx: &Gpu, image: &InterleavedImage) -> Result<Self> {
+    pub fn from_image(ctx: &Gpu, image: &InterleavedImage) -> Result<Self, GpuError> {
         let desc = image.desc();
         let buffer = Self::buffer(ctx, desc, true)?;
         {
@@ -31,17 +31,17 @@ impl GpuImage {
                 .slice(..)
                 .get_mapped_range_mut()
                 .expect("a buffer mapped at creation maps whole");
-            let size = desc.byte_len();
-            let padding = mapped.len() - size;
-            mapped.slice(..size).copy_from_slice(image.bytes());
-            mapped.slice(size..).copy_from_slice(&[0; 3][..padding]);
+            let byte_len = desc.byte_len();
+            let padding = mapped.len() - byte_len;
+            mapped.slice(..byte_len).copy_from_slice(image.bytes());
+            mapped.slice(byte_len..).copy_from_slice(&[0; 3][..padding]);
         }
         buffer.unmap();
         Ok(Self { buffer, desc })
     }
 
     /// Creates an empty GPU image with the given (packed) descriptor.
-    pub fn new_empty(ctx: &Gpu, desc: InterleavedDesc) -> Result<Self> {
+    pub fn new_empty(ctx: &Gpu, desc: InterleavedDesc) -> Result<Self, GpuError> {
         Ok(Self {
             buffer: Self::buffer(ctx, desc, false)?,
             desc,
@@ -49,17 +49,22 @@ impl GpuImage {
     }
 
     /// A storage buffer for `desc`, or an error when the device cannot bind one that large.
-    fn buffer(ctx: &Gpu, desc: InterleavedDesc, mapped_at_creation: bool) -> Result<wgpu::Buffer> {
-        let size = buffer_size(desc);
-        if size > ctx.max_buffer_bytes() {
-            return Err(Error::Gpu(format!(
-                "a {desc} image needs a {size}-byte buffer; this device binds at most {}",
-                ctx.max_buffer_bytes()
-            )));
+    fn buffer(
+        ctx: &Gpu,
+        desc: InterleavedDesc,
+        mapped_at_creation: bool,
+    ) -> Result<wgpu::Buffer, GpuError> {
+        let byte_len = buffer_byte_len(desc);
+        if byte_len > ctx.max_buffer_byte_len() {
+            return Err(GpuError::BufferTooLarge {
+                desc,
+                byte_len,
+                max: ctx.max_buffer_byte_len(),
+            });
         }
         Ok(ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_buffer"),
-            size,
+            size: byte_len,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
@@ -68,33 +73,29 @@ impl GpuImage {
     }
 
     /// Reads the image back to the CPU, blocking until the device has run it.
-    pub fn to_image(&self, ctx: &Gpu) -> Result<InterleavedImage> {
+    pub fn to_image(&self, ctx: &Gpu) -> Result<InterleavedImage, GpuError> {
         let staging = self.start_readback(ctx).wait(ctx)?;
-        self.finish_readback(&staging)
+        Ok(self.finish_readback(&staging))
     }
 
     /// Reads the image back to the CPU asynchronously.
     ///
     /// The readback completes when the device is polled; the polling can happen
     /// from another thread, and the callback then wakes this future.
-    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<InterleavedImage> {
+    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<InterleavedImage, GpuError> {
         let readback = self.start_readback(ctx);
-        readback
-            .mapped
-            .await
-            .expect("the map callback runs once")
-            .map_err(|error| Error::Gpu(error.to_string()))?;
-        self.finish_readback(&readback.staging)
+        readback.mapped.await.expect("the map callback runs once")?;
+        Ok(self.finish_readback(&readback.staging))
     }
 
     /// Copies the image into a staging buffer and asks for it mapped.
     fn start_readback(&self, ctx: &Gpu) -> Readback {
-        Readback::start(ctx, &self.buffer, buffer_size(self.desc))
+        Readback::start(ctx, &self.buffer, buffer_byte_len(self.desc))
     }
 
     /// Copies the mapped staging buffer into a CPU image, the round-to-4 padding dropped.
-    fn finish_readback(&self, staging: &wgpu::Buffer) -> Result<InterleavedImage> {
-        let mut image = InterleavedImage::new_black(self.desc)?;
+    fn finish_readback(&self, staging: &wgpu::Buffer) -> InterleavedImage {
+        let mut image = InterleavedImage::new_black(self.desc);
         {
             let mapped = staging
                 .slice(..)
@@ -105,18 +106,18 @@ impl GpuImage {
                 .copy_from_slice(&mapped[..self.desc.byte_len()]);
         }
         staging.unmap();
-        Ok(image)
+        image
     }
 
     /// Creates a copy of this GPU image with a new buffer.
-    pub fn clone_buffer(&self, ctx: &Gpu) -> Result<Self> {
+    pub fn clone_buffer(&self, ctx: &Gpu) -> Result<Self, GpuError> {
         let copy = Self::new_empty(ctx, self.desc)?;
         let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gpu_image_clone_encoder"),
             });
-        encoder.copy_buffer_to_buffer(&self.buffer, 0, &copy.buffer, 0, buffer_size(self.desc));
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &copy.buffer, 0, buffer_byte_len(self.desc));
         ctx.queue.submit(iter::once(encoder.finish()));
         Ok(copy)
     }
@@ -140,15 +141,15 @@ impl GpuImage {
 #[derive(Debug)]
 struct Readback {
     staging: wgpu::Buffer,
-    mapped: oneshot::Receiver<result::Result<(), wgpu::BufferAsyncError>>,
+    mapped: oneshot::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
 impl Readback {
-    /// Copies the first `size` bytes of `buffer` into a staging buffer and asks for it mapped.
-    fn start(ctx: &Gpu, buffer: &wgpu::Buffer, size: u64) -> Self {
+    /// Copies the first `byte_len` bytes of `buffer` into a staging buffer and asks for it mapped.
+    fn start(ctx: &Gpu, buffer: &wgpu::Buffer, byte_len: u64) -> Self {
         let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_staging"),
-            size,
+            size: byte_len,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -157,7 +158,7 @@ impl Readback {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gpu_image_readback_encoder"),
             });
-        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
+        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, byte_len);
         ctx.queue.submit(iter::once(encoder.finish()));
 
         let (sender, mapped) = oneshot::channel();
@@ -170,13 +171,11 @@ impl Readback {
     }
 
     /// The mapped staging buffer, blocking until the device has run the copy.
-    fn wait(self, ctx: &Gpu) -> Result<wgpu::Buffer> {
+    fn wait(self, ctx: &Gpu) -> Result<wgpu::Buffer, GpuError> {
         ctx.wait();
         // A concurrent poll on a shared device may claim this callback and fire
         // it just after our wait returns — block on the handoff, not the poll.
-        pollster::block_on(self.mapped)
-            .expect("the map callback runs once")
-            .map_err(|error| Error::Gpu(error.to_string()))?;
+        pollster::block_on(self.mapped).expect("the map callback runs once")?;
         Ok(self.staging)
     }
 }
@@ -185,7 +184,7 @@ impl Readback {
 /// `COPY_BUFFER_ALIGNMENT`, i.e. a whole number of `u32` words. The only
 /// "padding" a packed GPU buffer needs (1-3 trailing bytes on the whole buffer,
 /// never per row).
-const fn buffer_size(desc: InterleavedDesc) -> u64 {
+const fn buffer_byte_len(desc: InterleavedDesc) -> u64 {
     desc.byte_len().next_multiple_of(4) as u64
 }
 

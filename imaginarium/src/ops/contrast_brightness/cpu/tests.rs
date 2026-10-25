@@ -259,7 +259,7 @@ fn extreme_brightness_clamps_to_the_range_ends() {
 
 /// Every color channel of `image` as an `f32`, in its own units.
 fn channel_values(image: &InterleavedImage) -> Vec<f32> {
-    let format = image.desc().color_format;
+    let format = image.desc().color_format();
     match format.sample_type {
         SampleType::U8 => image.bytes().iter().map(|v| f32::from(*v)).collect(),
         SampleType::U16 => bytemuck::cast_slice::<u8, u16>(image.bytes())

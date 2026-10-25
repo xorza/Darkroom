@@ -49,7 +49,7 @@ fn typed_sky<T: Sample>(format: ColorFormat, size: Size2us, seed: u64) -> Interl
                 }
             }
         });
-    InterleavedImage::from_samples(InterleavedDesc::new(size, format), samples).unwrap()
+    InterleavedImage::from_samples(InterleavedDesc::new(size, format), samples)
 }
 
 /// Steele, Lea and Flood's SplitMix64: one 64-bit state, a fresh output per call.

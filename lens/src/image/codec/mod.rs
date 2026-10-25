@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use common::{Buffer2, DeserializeError, SerdeFormat, Size2us};
-use imaginarium::{ChannelCount, ChannelLayout, ColorFormat, InterleavedDesc, SampleType};
+use imaginarium::{
+    ChannelCount, ChannelLayout, ColorFormat, DescError, InterleavedDesc, SampleType,
+};
 use lumos::{
     FlatGain, FrameDescError, FrameGain, ImageMetadata, LinearImage, PixelFlags, frame_desc,
 };
@@ -59,8 +61,6 @@ enum DecodeError {
     HeightOverflow,
     #[error("image cache record length does not fit in memory")]
     RecordLenOverflow,
-    #[error("image cache dimensions overflow memory")]
-    DimensionsOverflow,
     #[error("image byte count does not fit in the cache format")]
     ByteCountOverflow,
     #[error("image cache payload length overflow")]
@@ -68,7 +68,7 @@ enum DecodeError {
     #[error("image cache payload has length {byte_len}, expected {expected}")]
     LenMismatch { byte_len: u64, expected: u64 },
     #[error("invalid cached image: {0}")]
-    InvalidImage(#[from] imaginarium::Error),
+    InvalidDesc(#[from] DescError),
     #[error("invalid cached planes: {0}")]
     InvalidPlanes(#[from] FrameDescError),
     #[error("image cache record does not read: {0}")]
@@ -154,12 +154,10 @@ impl CustomValueCodec for ImageCodec {
             .deserialize(&record)
             .map_err(DecodeError::from)?;
 
-        let pixel_count = width
-            .checked_mul(height)
-            .ok_or(DecodeError::DimensionsOverflow)?;
-        let pixel_len = pixel_count
-            .checked_mul(color_format.byte_len())
-            .ok_or(DecodeError::DimensionsOverflow)?;
+        let desc = InterleavedDesc::checked(Size2us::new(width, height), color_format)
+            .map_err(DecodeError::from)?;
+        let pixel_count = desc.size().pixel_count();
+        let pixel_len = desc.byte_len();
         let flag_len = match record {
             ImageRecord::Planar { flagged: true, .. } => pixel_count,
             ImageRecord::Interleaved { .. } | ImageRecord::Planar { .. } => 0,
@@ -185,11 +183,10 @@ impl CustomValueCodec for ImageCodec {
             ImageRecord::Interleaved { metadata } => {
                 let mut bytes = vec![0; pixel_len];
                 reader.read_exact(&mut bytes).await?;
-                let desc = InterleavedDesc::new(Size2us::new(width, height), color_format);
                 Image {
                     pixels: Pixels::InterleavedCpu {
                         image: imaginarium::InterleavedImage::new_with_data(desc, bytes)
-                            .map_err(DecodeError::from)?,
+                            .expect("the payload's length is the descriptor's"),
                         metadata: metadata.into_owned(),
                     },
                 }
@@ -199,7 +196,7 @@ impl CustomValueCodec for ImageCodec {
                 flat_gain,
                 flagged,
             } => {
-                let mut planar = read_planar(reader, color_format, width, height, flagged).await?;
+                let mut planar = read_planar(reader, desc, flagged).await?;
                 if let Some(gain) = flat_gain {
                     let gain = gain.into_owned();
                     if !gain.covers(planar.desc().size(), planar.channel_count()) {
@@ -215,32 +212,28 @@ impl CustomValueCodec for ImageCodec {
     }
 }
 
-/// The planes of a `width × height` image of `color_format`, and its flag plane when `flagged`,
-/// read from `reader`.
+/// The planes of an image of `desc`, and its flag plane when `flagged`, read from `reader`.
 async fn read_planar(
     reader: &mut (dyn AsyncRead + Unpin + Send),
-    color_format: ColorFormat,
-    width: usize,
-    height: usize,
+    desc: InterleavedDesc,
     flagged: bool,
 ) -> Result<LinearImage, CodecError> {
-    let layout = match color_format {
+    let layout = match desc.color_format() {
         ColorFormat::MONO_F32 => ChannelLayout::Mono,
         ColorFormat::RGB_F32 => ChannelLayout::Rgb,
-        _ => return Err(DecodeError::PlanarFormat(color_format).into()),
+        color_format => return Err(DecodeError::PlanarFormat(color_format).into()),
     };
-    let dimensions =
-        frame_desc::checked((width, height).into(), layout).map_err(DecodeError::from)?;
+    let planar_desc = frame_desc::checked(desc.size(), layout).map_err(DecodeError::from)?;
     let mut chunk = vec![0_u8; PLANE_CHUNK];
     let mut planes = Vec::with_capacity(layout.count());
     for _ in 0..layout.count() {
-        planes.push(read_plane(reader, dimensions.pixel_count(), &mut chunk).await?);
+        planes.push(read_plane(reader, planar_desc.pixel_count(), &mut chunk).await?);
     }
-    let mut planar = LinearImage::from_planar_channels(dimensions, planes);
+    let mut planar = LinearImage::from_planar_channels(planar_desc, planes);
     if flagged {
-        let mut bytes = vec![0; dimensions.pixel_count()];
+        let mut bytes = vec![0; planar_desc.pixel_count()];
         reader.read_exact(&mut bytes).await?;
-        let flags = PixelFlags::from_bytes(Buffer2::new((width, height), bytes))
+        let flags = PixelFlags::from_bytes(Buffer2::new(desc.size(), bytes))
             .ok_or(DecodeError::EmptyFlags)?;
         planar.set_flags(Some(flags));
     }
@@ -250,9 +243,9 @@ async fn read_planar(
 /// The header for an image of `desc`, whose record is `record_len` bytes.
 fn header(desc: InterleavedDesc, record_len: usize) -> [u8; HEADER_LEN as usize] {
     let mut header = [0; HEADER_LEN as usize];
-    header[0..2].copy_from_slice(&format_bytes(desc.color_format));
-    header[2..10].copy_from_slice(&extent(desc.size.width).to_le_bytes());
-    header[10..18].copy_from_slice(&extent(desc.size.height).to_le_bytes());
+    header[0..2].copy_from_slice(&format_bytes(desc.color_format()));
+    header[2..10].copy_from_slice(&extent(desc.size().width).to_le_bytes());
+    header[10..18].copy_from_slice(&extent(desc.size().height).to_le_bytes());
     header[18..26].copy_from_slice(&extent(record_len).to_le_bytes());
     header
 }

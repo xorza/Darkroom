@@ -22,7 +22,7 @@ impl<'a, T: Sample> PackedSource<'a, T> {
     pub(super) fn of(image: &'a InterleavedImage) -> Self {
         Self {
             pixels: bytemuck::cast_slice(image.bytes()),
-            size: image.desc().size,
+            size: image.desc().size(),
         }
     }
 

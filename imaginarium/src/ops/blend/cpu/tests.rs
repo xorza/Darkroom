@@ -12,7 +12,7 @@ use crate::ops::blend::{Blend, BlendMode};
 /// Blends `src` over `dst` into a fresh image through the public CPU entry
 /// point, i.e. through whatever SIMD kernel this CPU dispatches to.
 fn blend(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
-    let mut output = InterleavedImage::new_black(dst.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(dst.desc());
     params.apply_cpu(src, dst, &mut output);
     output
 }
@@ -189,7 +189,7 @@ fn simd_matches_scalar_reference() {
                 for alpha in [0.0, 0.35, 1.0, f32::NAN] {
                     let params = Blend::new(mode, alpha);
                     let dispatched = blend(params, &src, &dst);
-                    let mut reference = InterleavedImage::new_black(dst.desc()).unwrap();
+                    let mut reference = InterleavedImage::new_black(dst.desc());
                     cpu::apply_scalar(params, &src, &dst, &mut reference);
 
                     assert!(

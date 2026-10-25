@@ -87,10 +87,10 @@ pub(super) fn packed_kernel(
 /// Panics unless `input` and `output` share a color format. Their dimensions
 /// need not match — that is what makes this a resample.
 pub(super) fn apply(warp: &AffineWarp, input: &InterleavedImage, output: &mut InterleavedImage) {
-    let format = input.desc().color_format;
+    let format = input.desc().color_format();
     assert_eq!(
         format,
-        output.desc().color_format,
+        output.desc().color_format(),
         "input/output color format mismatch"
     );
 
@@ -109,7 +109,7 @@ pub(super) fn apply_scalar(
     input: &InterleavedImage,
     output: &mut InterleavedImage,
 ) {
-    let format = input.desc().color_format;
+    let format = input.desc().color_format();
     match (format.sample_type, format.channel_count) {
         (SampleType::U8, ChannelCount::Mono) => apply_typed::<u8, 1>(warp, input, output),
         (SampleType::U8, ChannelCount::Rgb) => apply_typed::<u8, 3>(warp, input, output),
@@ -137,7 +137,7 @@ fn apply_typed<T, const N: usize>(
     T: Sample,
 {
     let source = PackedSource::<T>::of(input);
-    let out_w = output.desc().size.width;
+    let out_w = output.desc().size().width;
     let out_stride = output.desc().row_byte_len();
 
     let inv = warp.inverse();

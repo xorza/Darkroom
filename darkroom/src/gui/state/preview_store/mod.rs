@@ -424,14 +424,11 @@ impl DrawablePreview {
 /// The texel size of an image `desc` describes, or why no texture holds it.
 fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
     let (Ok(x), Ok(y)) = (
-        u32::try_from(desc.size.width),
-        u32::try_from(desc.size.height),
+        u32::try_from(desc.size().width),
+        u32::try_from(desc.size().height),
     ) else {
-        return Err(DrawablePreviewError::EdgeTooLong { size: desc.size });
+        return Err(DrawablePreviewError::EdgeTooLong { size: desc.size() });
     };
-    if x == 0 || y == 0 {
-        return Err(DrawablePreviewError::Empty);
-    }
     Ok(UVec2::new(x, y))
 }
 
@@ -440,9 +437,9 @@ fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
 fn rgba8_raster(cpu: &InterleavedImage, target: UVec2) -> Raster {
     let rgba = Preview::new(Size2us::new(target.x as usize, target.y as usize)).to_rgba8(cpu);
     let desc = rgba.desc();
-    debug_assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(desc.color_format(), ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
-    debug_assert_eq!(pixels.len(), desc.row_byte_len() * desc.size.height);
+    debug_assert_eq!(pixels.len(), desc.row_byte_len() * desc.size().height);
     Raster::from_srgba8(target, pixels).expect("a non-zero target the converter filled exactly")
 }
 
@@ -572,7 +569,7 @@ pub(crate) mod internals {
     /// A black image of `size` in `format`, as a node would publish it.
     #[cfg(test)]
     pub(crate) fn image_value(size: Size2us, format: ColorFormat) -> DynamicValue {
-        let raw = InterleavedImage::new_black(InterleavedDesc::new(size, format)).unwrap();
+        let raw = InterleavedImage::new_black(InterleavedDesc::new(size, format));
         DynamicValue::from_custom(Image::from(raw))
     }
 

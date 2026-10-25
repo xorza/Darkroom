@@ -18,7 +18,7 @@ pub(crate) struct PackedLayout {
 
 impl PackedLayout {
     pub(crate) fn new(desc: InterleavedDesc) -> Self {
-        let format = desc.color_format;
+        let format = desc.color_format();
         let channel_count =
             u32::try_from(format.channel_count.count()).expect("at most four channels");
         Self {

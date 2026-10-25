@@ -242,9 +242,15 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
             expected - 1
         )
     );
+    // 2⁶⁴ − 1 square at 3 bytes a pixel, and a zero side: no image has either.
     assert_eq!(
         error(payload([3, 0], u64::MAX, u64::MAX, &raster)).await,
-        "image cache dimensions overflow memory"
+        "invalid cached image: 18446744073709551615x18446744073709551615 pixels of 3 bytes \
+         overflow usize"
+    );
+    assert_eq!(
+        error(payload([3, 0], 0, 1, &raster)).await,
+        "invalid cached image: width must be positive"
     );
     let mut planar_u8 = payload([1, 0], 1, 1, &planes(None, false));
     planar_u8.push(0);
@@ -266,7 +272,10 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
         "image cache flat gain covers another image"
     );
     let zero_side = payload([1, 2], 0, 1, &planes(None, false));
-    assert!(error(zero_side).await.starts_with("invalid cached planes"));
+    assert_eq!(
+        error(zero_side).await,
+        "invalid cached image: width must be positive"
+    );
 }
 
 /// Bitcode is not self-describing, so a record from another layout would decode into plausible

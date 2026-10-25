@@ -20,27 +20,28 @@ use crate::image::InterleavedImage;
 pub(crate) fn convert_image(from: &InterleavedImage, to: &mut InterleavedImage) {
     let (from_desc, to_desc) = (from.desc(), to.desc());
     assert_eq!(
-        (from_desc.size.width, from_desc.size.height),
-        (to_desc.size.width, to_desc.size.height),
+        (from_desc.size().width, from_desc.size().height),
+        (to_desc.size().width, to_desc.size().height),
         "source/target dimensions mismatch"
     );
     assert_ne!(
-        from_desc.color_format, to_desc.color_format,
+        from_desc.color_format(),
+        to_desc.color_format(),
         "a conversion to the same format is a copy"
     );
 
-    let width = from_desc.size.width;
+    let width = from_desc.size().width;
     let from_stride = from_desc.row_byte_len();
     let to_stride = to_desc.row_byte_len();
     let from_bytes = from.bytes();
     let rows = par::chunks_mut(to.bytes_mut(), to_stride).enumerate();
 
-    if let Some(kernel) = simd::row_converter(from_desc.color_format, to_desc.color_format) {
+    if let Some(kernel) = simd::row_converter(from_desc.color_format(), to_desc.color_format()) {
         rows.for_each(|(y, to_row)| {
             unsafe { kernel(&from_bytes[y * from_stride..], to_row, width) };
         });
     } else {
-        let convert_row = scalar::row_converter(from_desc.color_format, to_desc.color_format);
+        let convert_row = scalar::row_converter(from_desc.color_format(), to_desc.color_format());
         rows.for_each(|(y, to_row)| convert_row(&from_bytes[y * from_stride..], to_row, width));
     }
 }

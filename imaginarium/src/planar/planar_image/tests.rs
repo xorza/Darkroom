@@ -1,7 +1,7 @@
 use common::{Buffer2, Size2us};
 
 use crate::color::color_format::ColorFormat;
-use crate::error::Error;
+use crate::error::PlanesError;
 use crate::image::InterleavedImage;
 use crate::image::image_desc::InterleavedDesc;
 use crate::internals::create_test_image;
@@ -42,7 +42,7 @@ fn interleaved_samples_split_into_planes_and_back() {
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
     );
     let interleaved = InterleavedImage::from(&mono);
-    assert_eq!(interleaved.desc().color_format, ColorFormat::MONO_F32);
+    assert_eq!(interleaved.desc().color_format(), ColorFormat::MONO_F32);
     assert_eq!(
         interleaved.bytes(),
         bytemuck::cast_slice::<f32, u8>(&[0.0, 0.25, 0.5, 0.75, 1.0, 0.5])
@@ -121,9 +121,11 @@ fn each_format_round_trips_through_the_planes_or_is_refused() {
                 PlanarImage::try_from(&image),
                 PlanarImage::try_from(image.clone()),
             ] {
-                assert!(
-                    matches!(result, Err(Error::InvalidColorFormat(message))
-                        if message == format!("a {format} image has an alpha channel, which planes do not hold")),
+                assert_eq!(
+                    result.unwrap_err(),
+                    PlanesError::Alpha {
+                        color_format: format
+                    },
                     "{format}"
                 );
             }
@@ -164,7 +166,7 @@ fn without_alpha_keeps_the_color_channels() {
         &[1.0, 0.25, 0.0, 0.5, 0.0, 1.0, 0.75, 1.0],
     );
     let rgb = rgba.without_alpha();
-    assert_eq!(rgb.desc().color_format, ColorFormat::RGB_F32);
+    assert_eq!(rgb.desc().color_format(), ColorFormat::RGB_F32);
     assert_eq!(
         rgb.bytes(),
         bytemuck::cast_slice::<f32, u8>(&[1.0, 0.25, 0.0, 0.0, 1.0, 0.75])
@@ -174,7 +176,7 @@ fn without_alpha_keeps_the_color_channels() {
         let image = create_test_image(format, Size2us::new(4, 2), 1);
         let dropped = image.clone().without_alpha();
         assert_eq!(
-            dropped.desc().color_format,
+            dropped.desc().color_format(),
             format.without_alpha(),
             "{format}"
         );

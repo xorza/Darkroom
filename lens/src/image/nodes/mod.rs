@@ -1,5 +1,6 @@
 //! Assembly for the standard image node library.
 
+mod error;
 mod io;
 mod processing;
 

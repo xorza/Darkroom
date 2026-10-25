@@ -30,7 +30,7 @@ fn gpu_matches_cpu() {
                 let mut output = GpuImage::new_empty(&gpu, dst.desc).unwrap();
                 params.apply_gpu(&gpu, &pipeline, &src, &dst, &mut output);
 
-                let mut expected = InterleavedImage::new_black(dst_cpu.desc()).unwrap();
+                let mut expected = InterleavedImage::new_black(dst_cpu.desc());
                 params.apply_cpu(&src_cpu, &dst_cpu, &mut expected);
                 assert_matches_cpu(
                     &output.to_image(&gpu).unwrap(),

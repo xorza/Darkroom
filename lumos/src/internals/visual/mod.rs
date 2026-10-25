@@ -113,7 +113,7 @@ pub(crate) fn save_image(image: InterleavedImage, name: &str) {
     let Some(out) = debug_file(name) else {
         return;
     };
-    let image_u8 = if image.desc().color_format.sample_type.is_float() {
+    let image_u8 = if image.desc().color_format().sample_type.is_float() {
         image.convert(ColorFormat::RGB_U8)
     } else {
         image

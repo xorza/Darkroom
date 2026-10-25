@@ -38,8 +38,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for format in ColorFormat::ALL {
         let mut tile = None;
         let mut output =
-            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(TILE, TILE), format))
-                .unwrap();
+            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(TILE, TILE), format));
         group.throughput(fixture::throughput(TILE * TILE, format.byte_len()));
         for filter in FILTERS {
             let warp = rotation(Size2us::new(TILE, TILE), filter);
@@ -91,7 +90,7 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                     match backend {
                         Backend::Cpu => {
-                            let mut output = InterleavedImage::new_black(frame.desc()).unwrap();
+                            let mut output = InterleavedImage::new_black(frame.desc());
                             b.iter(|| warp.apply_cpu(black_box(frame), &mut output));
                         }
                         #[cfg(feature = "wgpu")]

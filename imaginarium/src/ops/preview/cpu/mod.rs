@@ -15,7 +15,7 @@ use crate::ops::preview::Preview;
 pub(super) fn generate(params: &Preview, input: &InterleavedImage) -> InterleavedImage {
     let dst_w = params.size.width.max(1);
     let dst_h = params.size.height.max(1);
-    let format = input.desc().color_format;
+    let format = input.desc().color_format();
     match (format.sample_type, format.channel_count) {
         (SampleType::U8, ChannelCount::Mono) => typed::<u8, 1>(input, dst_w, dst_h),
         (SampleType::U8, ChannelCount::Rgb) => typed::<u8, 3>(input, dst_w, dst_h),
@@ -108,14 +108,13 @@ fn typed<T: PreviewSample, const N: usize>(
     let Size2us {
         width: src_w,
         height: src_h,
-    } = input.desc().size;
+    } = input.desc().size();
     let src: &[T] = bytemuck::cast_slice(input.bytes());
 
     let mut out = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(dst_w, dst_h),
         ColorFormat::RGBA_U8,
-    ))
-    .expect("RGBA_U8 preview dims are valid");
+    ));
 
     par::chunks_mut(out.bytes_mut(), dst_w * 4)
         .enumerate()

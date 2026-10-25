@@ -39,8 +39,8 @@ fn test_box_average_2x_to_1x() {
         ],
     );
     let out = Preview::new(Size2us::new(1, 1)).to_rgba8(&src);
-    assert_eq!(out.desc().size.width, 1);
-    assert_eq!(out.desc().size.height, 1);
+    assert_eq!(out.desc().size().width, 1);
+    assert_eq!(out.desc().size().height, 1);
     assert_eq!(out.bytes(), &[85, 85, 85, 255]);
 }
 
@@ -133,9 +133,9 @@ fn test_all_formats_to_rgba8() {
     for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(17, 11), 3);
         let out = Preview::new(Size2us::new(8, 5)).to_rgba8(&src);
-        assert_eq!(out.desc().color_format, ColorFormat::RGBA_U8);
-        assert_eq!(out.desc().size.width, 8);
-        assert_eq!(out.desc().size.height, 5);
+        assert_eq!(out.desc().color_format(), ColorFormat::RGBA_U8);
+        assert_eq!(out.desc().size().width, 8);
+        assert_eq!(out.desc().size().height, 5);
         assert_eq!(out.bytes().len(), 8 * 5 * 4);
     }
 }

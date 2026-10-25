@@ -17,7 +17,7 @@ pub(super) fn apply(
     output: &mut GpuImage,
 ) {
     input.desc.assert_same(output.desc, "input/output");
-    let affine = ChannelAffine::new(params, input.desc.color_format);
+    let affine = ChannelAffine::new(params, input.desc.color_format());
     let uniform = Params {
         scale: affine.scale,
         offset: affine.offset,

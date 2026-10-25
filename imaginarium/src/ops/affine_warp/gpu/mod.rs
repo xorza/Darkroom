@@ -16,10 +16,11 @@ pub(super) fn apply(
 ) {
     let (input_desc, output_desc) = (input.desc, output.desc);
     assert_eq!(
-        input_desc.color_format, output_desc.color_format,
+        input_desc.color_format(),
+        output_desc.color_format(),
         "input/output color format mismatch"
     );
-    let format = input_desc.color_format;
+    let format = input_desc.color_format();
     let inv = params.inverse();
     let extent = |value: usize| u32::try_from(value).expect("a GpuImage extent fits a u32");
 
@@ -27,12 +28,12 @@ pub(super) fn apply(
         inv_matrix: inv.matrix2.to_cols_array(),
         inv_translation: inv.translation.to_array(),
         input_size: [
-            extent(input_desc.size.width),
-            extent(input_desc.size.height),
+            extent(input_desc.size().width),
+            extent(input_desc.size().height),
         ],
         output_size: [
-            extent(output_desc.size.width),
-            extent(output_desc.size.height),
+            extent(output_desc.size().width),
+            extent(output_desc.size().height),
         ],
         channel_count: extent(format.channel_count.count()),
         sample_byte_len: extent(format.sample_type.byte_len()),
@@ -47,7 +48,7 @@ pub(super) fn apply(
         KernelJob {
             params: bytemuck::bytes_of(&uniform),
             buffers: &[input.read_buffer(), output.write_buffer()],
-            invocations: extent(output_desc.size.width * output_desc.size.height),
+            invocations: extent(output_desc.size().width * output_desc.size().height),
             // Sub-word elements are ORed into the output.
             output: if format.sample_type.byte_len() < 4 {
                 OutputStart::Zeroed

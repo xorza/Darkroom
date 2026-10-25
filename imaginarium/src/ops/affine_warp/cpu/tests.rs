@@ -21,7 +21,7 @@ fn test_identity_is_exact_all_formats() {
         for format in ColorFormat::ALL {
             // Non-power-of-two dimensions to exercise edge rows/columns.
             let input = create_test_image(format, Size2us::new(13, 7), 0);
-            let mut output = InterleavedImage::new_black(input.desc()).unwrap();
+            let mut output = InterleavedImage::new_black(input.desc());
 
             AffineWarp::new()
                 .filter(filter)
@@ -44,7 +44,7 @@ fn test_integer_translate_shifts_pixels() {
         ColorFormat::MONO_U8,
         vec![10, 20, 30, 40],
     );
-    let mut output = InterleavedImage::new_black(input.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(input.desc());
 
     AffineWarp::new()
         .translate(Vec2::new(1.0, 0.0))
@@ -66,8 +66,7 @@ fn test_nearest_downscale_picks_even_columns() {
     let mut output = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(2, 1),
         ColorFormat::MONO_U8,
-    ))
-    .unwrap();
+    ));
 
     AffineWarp::new()
         .scale(Vec2::new(0.5, 0.5))
@@ -90,8 +89,7 @@ fn test_bilinear_half_pixel_average() {
     let mut output = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(3, 1),
         ColorFormat::MONO_F32,
-    ))
-    .unwrap();
+    ));
 
     AffineWarp::new()
         .translate(Vec2::new(0.5, 0.0))
@@ -114,8 +112,7 @@ fn test_rgba_alpha_is_interpolated() {
     let mut output = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(2, 1),
         ColorFormat::RGBA_F32,
-    ))
-    .unwrap();
+    ));
 
     AffineWarp::new()
         .translate(Vec2::new(0.5, 0.0))
@@ -133,7 +130,7 @@ fn test_rgba_alpha_is_interpolated() {
 fn test_fully_out_of_bounds_is_zero_all_formats() {
     for format in ColorFormat::ALL {
         let input = create_test_image(format, Size2us::new(3, 3), 0);
-        let mut output = InterleavedImage::new_black(input.desc()).unwrap();
+        let mut output = InterleavedImage::new_black(input.desc());
 
         AffineWarp::new()
             .translate(Vec2::new(1000.0, 1000.0))
@@ -153,13 +150,13 @@ fn test_filter_modes_differ_on_upscale() {
     let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![0, 100]);
     let out_desc = InterleavedDesc::new(Size2us::new(4, 1), ColorFormat::MONO_U8);
 
-    let mut nearest = InterleavedImage::new_black(out_desc).unwrap();
+    let mut nearest = InterleavedImage::new_black(out_desc);
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Nearest)
         .apply_cpu(&input, &mut nearest);
 
-    let mut bilinear = InterleavedImage::new_black(out_desc).unwrap();
+    let mut bilinear = InterleavedImage::new_black(out_desc);
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Bilinear)
@@ -190,8 +187,8 @@ fn simd_matches_scalar_reference() {
             continue;
         };
         let input = create_test_image(format, Size2us::new(37, 19), 7);
-        let mut scalar = InterleavedImage::new_black(input.desc()).unwrap();
-        let mut simd = InterleavedImage::new_black(input.desc()).unwrap();
+        let mut scalar = InterleavedImage::new_black(input.desc());
+        let mut simd = InterleavedImage::new_black(input.desc());
 
         apply_scalar(&warp, &input, &mut scalar);
         unsafe { kernel(&warp, &input, &mut simd) };
@@ -212,7 +209,7 @@ fn bilinear_rounds_ties_to_even() {
         ColorFormat::MONO_U8,
         vec![10, 11, 11, 12],
     );
-    let mut output = InterleavedImage::new_black(input.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(input.desc());
     AffineWarp::new()
         .translate(Vec2::new(0.5, 0.0))
         .filter(FilterMode::Bilinear)
@@ -247,7 +244,7 @@ fn invertibility_needs_a_normal_determinant_and_a_finite_inverse() {
 #[should_panic(expected = "the transform is not invertible")]
 fn a_singular_transform_is_refused() {
     let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![1, 2]);
-    let mut output = InterleavedImage::new_black(input.desc()).unwrap();
+    let mut output = InterleavedImage::new_black(input.desc());
     AffineWarp::new()
         .scale(Vec2::new(0.0, 1.0))
         .apply_cpu(&input, &mut output);
