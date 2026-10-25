@@ -97,7 +97,7 @@ pub use image::linear_image::LinearImage;
 pub use image::mosaic_noise::MosaicNoise;
 pub use image::observation_header::ObservationHeader;
 pub use image::pixel_flags::PixelFlags;
-pub use image::preview_image::{PreviewImage, PreviewPixels};
+pub use image::preview_image::PreviewImage;
 pub use image::quality_flags::QualityFlags;
 pub use image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 pub use image::temperature_difference::TemperatureDifference;

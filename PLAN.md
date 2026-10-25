@@ -180,14 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 2. Preview metadata
-
-- [ ] `PreviewImage` becomes the enum; lens's `Image` keeps a raster's
-  metadata. Proof: a test loads a FITS and a TIFF through "Load Astro Image"
-  and reads the header and the provenance back from its output. The issue
-  "Load Astro Image outputs an image with default metadata" is deleted from
-  `.notes/ISSUES.md`.
-
 ### 3. Geometry and the grid in `common`
 
 - [ ] `Size2us`, `Vec2us` and `URect` (as `Rect2us`) move from
@@ -295,3 +287,15 @@ with every other edit.
   called unused (`BlendMode`'s derives, the GPU readback). `strum`'s `derive`
   replaces `strum_macros`. lumos names `glam`'s `f64`, which imaginarium's
   default features gave it before.
+- Batch 2, the cache codec: lens's disk-cache codec wrote an image's pixels
+  alone, so a cached image lost its metadata, its flags and its flat gain.
+  Version 5 writes a pinned bitcode record, one variant per layout, of the
+  metadata and a planar image's flat gain, and the flag plane after the planes;
+  the record names the layout, so no byte of the header can disagree with it. For it, `PixelFlags::from_bytes`,
+  `LinearImage::set_flags`, `LinearImage::set_flat_gain`, `FlatGain::covers`
+  and `ImageDimensions::checked` are public, with release asserts on the
+  setters. lens's memory figure for a planar image counted its samples alone;
+  `LinearImage::ram_bytes`, as `CfaImage` has, adds the flag plane and a gain
+  the image holds alone, and a gain read back from the cache is the image's
+  own.
+

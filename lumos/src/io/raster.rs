@@ -151,7 +151,10 @@ pub(crate) fn preview(
             ))
             .build(),
     };
-    Ok(PreviewImage::interleaved(decoded.convert(target), metadata))
+    Ok(PreviewImage::Interleaved {
+        image: decoded.convert(target),
+        metadata,
+    })
 }
 
 /// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF,

@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, PreviewPixels, RAW_EXTENSIONS};
+use lumos::{LoadCtx, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
     DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, FuncInput, FuncOutput,
     Invocation, Library, async_lambda,
@@ -51,10 +51,7 @@ pub(crate) fn register(library: &mut Library) {
                 })
                 .await?;
 
-                outputs[0] = DynamicValue::from_custom(match image.into_pixels() {
-                    PreviewPixels::Planes(planes) => Image::from(planes),
-                    PreviewPixels::Interleaved(samples) => Image::from(samples),
-                });
+                outputs[0] = DynamicValue::from_custom(Image::from(image));
                 Ok(())
             }),
         )

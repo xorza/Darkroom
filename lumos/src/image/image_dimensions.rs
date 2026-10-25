@@ -31,10 +31,7 @@ impl ImageDimensions {
 
     /// The dimensions `size` and `layout` describe, or the first rule they break: a zero side, a
     /// side past [`Self::MAX_SIDE`], or more samples than a `usize` counts.
-    pub(crate) const fn checked(
-        size: Size2us,
-        layout: ChannelLayout,
-    ) -> Result<Self, DimensionsError> {
+    pub const fn checked(size: Size2us, layout: ChannelLayout) -> Result<Self, DimensionsError> {
         let Size2us { width, height } = size;
         if width == 0 {
             return Err(DimensionsError::ZeroWidth);
