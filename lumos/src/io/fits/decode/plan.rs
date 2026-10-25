@@ -2,6 +2,7 @@ use std::fs::File;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use common::Size2us;
 use fits_well::header::Header;
 use fits_well::image::{
     Bitpix as FitsBitpix, Metadata as FitsMetadata, Region, SampleType, Scaling,
@@ -394,8 +395,7 @@ pub(super) fn dimensions_from_shape(
     };
     if width > MAX_SIDE || height > MAX_SIDE {
         return Err(FitsLoadError::from(FitsRefusal::SideTooLong {
-            width,
-            height,
+            size: Size2us::new(width, height),
         }));
     }
     width

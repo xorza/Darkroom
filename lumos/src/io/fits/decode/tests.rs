@@ -119,16 +119,14 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         assert_eq!(
             reason,
             FitsRefusal::SideTooLong {
-                width: shape[0],
-                height: shape[1]
+                size: Size2us::new(shape[0], shape[1])
             },
             "{shape:?}"
         );
     }
     assert_eq!(
         FitsRefusal::SideTooLong {
-            width: side + 1,
-            height: 2
+            size: Size2us::new(side + 1, 2)
         }
         .to_string(),
         "FITS image 1073741825x2 has a side past 1073741824 px"
