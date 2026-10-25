@@ -96,7 +96,7 @@ impl ExtractBg {
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         let mut workspace = MeshWorkspace::default();
-        let surfaces = (0..image.channels())
+        let surfaces = (0..image.channel_count())
             .map(|channel| self.fit_plane(image.channel(channel), &mut workspace))
             .collect::<Result<ArrayVec<Surface, 3>, OpError>>()?;
         for (plane, surface) in image.planes_mut().zip(&surfaces) {

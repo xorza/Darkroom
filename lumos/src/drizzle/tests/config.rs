@@ -1,6 +1,7 @@
 use super::*;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::error::DimensionsError;
+use imaginarium::ChannelLayout;
+
+use crate::image::error::FrameDescError;
 
 #[test]
 fn drizzle_config_default() {
@@ -104,15 +105,15 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 #[test]
 fn drizzle_output_grid_is_the_input_scaled() {
     let config = DrizzleConfig::default();
-    let acc = accumulator(ImageDimensions::new((100, 80), ChannelLayout::Rgb), config);
-    let dims = acc.finalize().image.dimensions();
+    let acc = accumulator(PlanarDesc::new((100, 80), ChannelLayout::Rgb), config);
+    let dims = acc.finalize().image.desc();
     assert_eq!(dims.width(), 200);
     assert_eq!(dims.height(), 160);
-    assert_eq!(dims.channels(), 3);
+    assert_eq!(dims.channel_count(), 3);
 }
 
 /// A scale is refused before any output plane is allocated: one whose grid passes
-/// `ImageDimensions::MAX_SIDE` (2 × 10⁹ pixels a side from 2 × 2 at 10⁹) as no image's size.
+/// `MAX_SIDE` (2 × 10⁹ pixels a side from 2 × 2 at 10⁹) as no image's size.
 #[test]
 fn a_scale_past_any_image_is_refused() {
     let frames = || {
@@ -124,7 +125,7 @@ fn a_scale_past_any_image_is_refused() {
     let at = |scale| drizzle_plain(frames(), &kernel_config(DrizzleKernel::Square, scale, 1.0));
     assert!(matches!(
         at(1e9),
-        Err(DrizzleError::OutputSize(DimensionsError::SidePastMax { size }))
+        Err(DrizzleError::OutputSize(FrameDescError::SidePastMax { size }))
             if size == Size2us::new(2_000_000_000, 2_000_000_000)
     ));
 }

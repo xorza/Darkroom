@@ -3,9 +3,8 @@
 
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::internals::synthetic::metrics;
@@ -235,7 +234,8 @@ fn interpolation_quality_ordering() {
 
 #[test]
 fn warp_preserves_output_metadata() {
-    use crate::image::channel_layout::ChannelLayout;
+    use imaginarium::ChannelLayout;
+
     use crate::image::derived_facts::DerivedFacts;
     use crate::image::image_metadata::ImageMetadata;
     use crate::image::observation_header::ObservationHeader;
@@ -247,7 +247,7 @@ fn warp_preserves_output_metadata() {
     let width = pixels.width();
     let height = pixels.height();
     let mut image = LinearImage::from_interleaved(
-        ImageDimensions::new((width, height), ChannelLayout::Mono),
+        PlanarDesc::new((width, height), ChannelLayout::Mono),
         pixels.into_vec(),
     );
     image.metadata = ImageMetadata {
@@ -310,7 +310,6 @@ fn extract_central_region(a: &Buffer2<f32>, b: &Buffer2<f32>, margin: usize) -> 
 /// `WarpTransform`'s tests) — for every method, on a field whose correction reaches past 0.1 px.
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
-    use crate::image::channel_layout::ChannelLayout;
     use crate::internals::synthetic::distortion::{Grid, RadialField, RadialPairs};
     use crate::registration::distortion::sip::SipModel;
     use crate::registration::distortion::sip::sip_order::SipOrder;
@@ -339,7 +338,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
 
     let pixels = star_field(size, 20, 12321).image.channel(0).clone();
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         pixels.pixels().to_vec(),
     );
     for method in InterpolationMethod::ALL {
@@ -365,7 +364,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     const V: f32 = 0.5;
     let size = Size2us::new(16usize, 8usize);
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],
     );
 
@@ -411,7 +410,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
     let size = Size2us::new(32usize, 8usize);
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         vec![V; size.pixel_count()],
     );
 

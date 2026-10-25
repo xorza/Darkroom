@@ -1,11 +1,11 @@
 //! [`CfaType`]: the color filter over a sensor's photosites.
 
 use arrayvec::ArrayVec;
+use imaginarium::ChannelLayout;
 use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::color_raster::ColorRaster;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_provenance::ColorProvenance;
 use common::{Size2us, Vec2us};
 

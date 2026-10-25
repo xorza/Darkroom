@@ -4,15 +4,14 @@ use std::time::Instant;
 use std::{array, mem};
 
 use common::{Buffer2, par};
+use imaginarium::{ChannelLayout, PlanarDesc};
 use libraw::{Libraw, ProcessParams, ProcessedSamples, SensorLayout};
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
@@ -334,7 +333,7 @@ impl UnpackedRaw {
         // Markesteijn at a step edge, and the frame arrives with its noise below black: the
         // preview clamps both, after the demosaic, so the interpolation sees the samples as
         // they are.
-        for channel in 0..image.channels() {
+        for channel in 0..image.channel_count() {
             par::iter_mut(image.channel_mut(channel).pixels_mut())
                 .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
         }
@@ -388,7 +387,7 @@ impl UnpackedRaw {
                     colors: samples.colors,
                 })?;
             LinearImage::from_planar_channels(
-                ImageDimensions::new(samples.size, layout),
+                PlanarDesc::new(samples.size, layout),
                 planes(&samples),
             )
         };
@@ -396,7 +395,7 @@ impl UnpackedRaw {
             "LibRaw processed {}x{}x{} in {:.2}ms",
             image.width(),
             image.height(),
-            image.channels(),
+            image.channel_count(),
             start.elapsed().as_secs_f64() * 1000.0
         );
         image.metadata =

@@ -4,6 +4,7 @@
 use arrayvec::ArrayVec;
 use common::par;
 use common::{CancelToken, PerWorker};
+use imaginarium::PlanarDesc;
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;
@@ -12,7 +13,6 @@ use crate::combine::normalization::common_domain::CommonDomain;
 use crate::combine::normalization::slot_pixels::SlotPixels;
 use crate::error::Cancelled;
 use crate::frame_store::stored_frame::StoredFrame;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::radix_median::RadixMedian;
 
 /// The frames a normalization measures, read by slot: every one of `dimensions`, under the run's
@@ -20,7 +20,7 @@ use crate::math::statistics::radix_median::RadixMedian;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SlotPlanes<'a> {
     pub(crate) frames: &'a [StoredFrame],
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) slots: Slots,
     pub(crate) cancel: &'a CancelToken,
 }

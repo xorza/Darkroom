@@ -6,13 +6,13 @@
 //! sample — the index is only wanted on the error path, where recomputing it is free.
 
 use common::CancelToken;
+use imaginarium::PlanarDesc;
 
 use crate::error::Cancelled;
 use crate::frame::frame_plane::FramePlane;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 
@@ -28,7 +28,7 @@ impl FrameCheck<'_> {
     /// Every sample of a decoded image is finite.
     pub(crate) fn samples(self, image: &impl StackableImage) -> Result<(), AdmissionError> {
         self.sample_channels(
-            (0..image.dimensions().channels()).map(|channel| image.channel(channel).pixels()),
+            (0..image.desc().channel_count()).map(|channel| image.channel(channel).pixels()),
         )
     }
 
@@ -39,7 +39,7 @@ impl FrameCheck<'_> {
     pub(crate) fn stored(
         self,
         frame: &StoredFrame,
-        dimensions: ImageDimensions,
+        dimensions: PlanarDesc,
     ) -> Result<(), AdmissionError> {
         Cancelled::check(self.cancel)?;
         self.geometry(frame, dimensions)?;
@@ -51,7 +51,7 @@ impl FrameCheck<'_> {
     pub(crate) fn stored_quality(
         self,
         frame: &StoredFrame,
-        dimensions: ImageDimensions,
+        dimensions: PlanarDesc,
     ) -> Result<(), AdmissionError> {
         let pixel_count = dimensions.pixel_count();
         match &frame.quality {
@@ -142,25 +142,21 @@ impl FrameCheck<'_> {
     ///
     /// A stored plane carries no width or height, so this compares plane counts and sample counts
     /// — enough to guarantee every `chunk(..)` below is in range.
-    fn geometry(
-        self,
-        frame: &StoredFrame,
-        dimensions: ImageDimensions,
-    ) -> Result<(), AdmissionError> {
+    fn geometry(self, frame: &StoredFrame, dimensions: PlanarDesc) -> Result<(), AdmissionError> {
         let idx = self.idx;
-        if frame.channels.len() != dimensions.channels() {
+        if frame.channels.len() != dimensions.channel_count() {
             return Err(AdmissionError::StoredFrameChannels {
                 idx,
-                expected: dimensions.channels(),
+                expected: dimensions.channel_count(),
                 actual: frame.channels.len(),
             });
         }
         if let FrameQuality::Drizzled { drops } = &frame.quality {
             assert!(
-                drops.len() == 1 || drops.len() == dimensions.channels(),
+                drops.len() == 1 || drops.len() == dimensions.channel_count(),
                 "a drizzled frame's drops are shared or one per channel, not {} for {}",
                 drops.len(),
-                dimensions.channels()
+                dimensions.channel_count()
             );
         }
         let expected = dimensions.pixel_count();

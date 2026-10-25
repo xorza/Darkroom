@@ -152,10 +152,10 @@ fn store_samples(
     image: &impl StackableImage,
     mut sink: impl PlaneSink,
 ) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
-    let size = image.dimensions().size();
+    let size = image.desc().size();
     let mosaic = image.cfa_type().and_then(CfaType::mosaic);
     let slots = mosaic.map_or_else(
-        || image.dimensions().channels(),
+        || image.desc().channel_count(),
         |mosaic| mosaic.color_count(),
     );
     let mut samples = Vec::new();
@@ -211,13 +211,12 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use common::{Buffer2, MappedFile, TempDir};
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::FrameQuality;
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::{FrameWrite, SetKind};
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use common::Size2us;
 
@@ -231,7 +230,7 @@ mod tests {
         let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let size = Size2us::new(512, 512);
         let image = LinearImage::from_planar_channels(
-            ImageDimensions::new(size, ChannelLayout::Rgb),
+            PlanarDesc::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
         );
         let plane = |level| Buffer2::new_filled(size, level);

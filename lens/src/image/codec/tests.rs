@@ -2,10 +2,8 @@ use std::borrow::Cow;
 use std::io::Cursor;
 
 use common::{Buffer2, SerdeFormat, Size2us};
-use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage};
-use lumos::{
-    ChannelLayout, FlatGain, FrameGain, ImageDimensions, ImageMetadata, LinearImage, PixelFlags,
-};
+use imaginarium::{ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc};
+use lumos::{FlatGain, FrameGain, ImageMetadata, LinearImage, PixelFlags};
 use scenarium::{CustomValue, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, ImageRecord, image_type_entry};
@@ -116,7 +114,7 @@ async fn every_interleaved_format_round_trips_pixel_exact() {
 async fn a_planar_image_round_trips_whole() {
     let planes = [vec![0.125_f32, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]];
     let planar = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), ChannelLayout::Rgb),
+        PlanarDesc::new((2, 1), ChannelLayout::Rgb),
         planes.clone(),
     );
     let bytes = encoded(Image::from(planar)).await;
@@ -143,7 +141,7 @@ async fn a_planar_image_round_trips_whole() {
     assert!(planar.flags().is_none() && planar.flat_gain().is_none());
 
     let mut mono = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), ChannelLayout::Mono),
+        PlanarDesc::new((2, 1), ChannelLayout::Mono),
         [vec![0.5, 1.0]],
     );
     mono.metadata = named("NGC 7000");

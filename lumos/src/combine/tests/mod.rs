@@ -9,14 +9,13 @@
 mod tier_equivalence;
 
 use common::Buffer2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::combine::Combine;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::combine::stack_frame::StackFrame;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::metrics::rms_diff;
@@ -79,7 +78,7 @@ fn inject_spike(sim: &mut SimFrame, pos: Vec2us, value: f32) {
     let mut px = sim.image.channel(0).pixels().to_vec();
     px[Size2us::new(W, H).idx_of(pos)] = value;
     sim.image =
-        LinearImage::from_planar_channels(ImageDimensions::new((W, H), ChannelLayout::Mono), [px]);
+        LinearImage::from_planar_channels(PlanarDesc::new((W, H), ChannelLayout::Mono), [px]);
 }
 
 /// A background pixel's noise in one frame of `Camera::realistic`: shot noise on the 0.1 sky over a

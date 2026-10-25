@@ -2,6 +2,7 @@
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
+use imaginarium::PlanarDesc;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
@@ -12,7 +13,6 @@ use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flag_counts::FlagCounts;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
@@ -22,7 +22,7 @@ use crate::image::stackable_image::{ImageParts, StackableImage};
 #[derive(Debug)]
 pub(crate) struct StoredImage {
     pub(crate) metadata: ImageMetadata,
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     /// The image's [`PixelFlags`], for an image that carries any and keeps them. Stored with the
     /// channels: without them the fill under every null reads back as a measurement.
@@ -48,8 +48,8 @@ impl StoredImage {
         flags: Option<&PixelFlags>,
         mut sink: impl PlaneSink,
     ) -> Result<Self, FrameStoreError> {
-        let dimensions = image.dimensions();
-        let channels = (0..dimensions.channels())
+        let dimensions = image.desc();
+        let channels = (0..dimensions.channel_count())
             .map(|channel| sink.write(PlaneRole::Channel(channel), image.channel(channel).pixels()))
             .collect::<Result<_, _>>()?;
         let flags = match flags {
@@ -145,15 +145,14 @@ mod tests {
     use std::sync::Arc;
 
     use glam::DVec2;
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_gain::StoredGain;
     use crate::frame_store::stored_image::StoredImage;
     use crate::image::cfa::cfa_type::CfaType;
-    use crate::image::channel_layout::ChannelLayout;
     use crate::image::flat_gain::FlatGain;
     use crate::image::flat_gain::frame_gain::FrameGain;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use common::Size2us;
@@ -166,7 +165,7 @@ mod tests {
         let scratch = RunScratch::create_evictable(dir.path()).unwrap();
         let size = Size2us::new(512, 512);
         let mut image = LinearImage::from_planar_channels(
-            ImageDimensions::new(size, ChannelLayout::Rgb),
+            PlanarDesc::new(size, ChannelLayout::Rgb),
             [0.25f32, 0.5, 0.75].map(|level| vec![level; size.pixel_count()]),
         );
         let bytes: Vec<u8> = (0..size.pixel_count()).map(|idx| (idx % 2) as u8).collect();
@@ -196,7 +195,7 @@ mod tests {
         let divisor = Buffer2::from_fn((9, 9), |x, y| 0.5 + 0.05 * (x + y) as f32);
         let gain = Arc::new(FlatGain::of_divisor(&divisor, &CfaType::Mono, |_| false));
         let mut image = LinearImage::from_planar_channels(
-            ImageDimensions::new(size, ChannelLayout::Mono),
+            PlanarDesc::new(size, ChannelLayout::Mono),
             [vec![0.5f32; size.pixel_count()]],
         );
         image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));

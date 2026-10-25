@@ -2,7 +2,7 @@
 name = "imaginarium"
 version.workspace = true
 edition.workspace = true
-description = "Image processing with CPU (SIMD) and GPU (wgpu compute) backends: one image buffer, nine pixel formats."
+description = "Image processing with CPU (SIMD) and GPU (wgpu compute) backends: interleaved images in nine pixel formats, and f32 planes."
 license = "MIT OR Apache-2.0"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 

@@ -226,13 +226,12 @@ impl From<Cancelled> for StackError {
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::{ChannelLayout, PlanarDesc};
     use std::error::Error as _;
     use std::io;
     use std::path::PathBuf;
 
     use crate::combine::error::*;
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::image_provenance::RowOrder;
 
     /// Survivors 0, 1 and 2 are inputs 0, 3 and 5: a frame index and a reference index both read
@@ -359,8 +358,8 @@ mod tests {
 
         let mismatch = FrameDimensionMismatch::check(
             5,
-            ImageDimensions::new((100, 100), ChannelLayout::Rgb),
-            ImageDimensions::new((200, 100), ChannelLayout::Rgb),
+            PlanarDesc::new((100, 100), ChannelLayout::Rgb),
+            PlanarDesc::new((200, 100), ChannelLayout::Rgb),
         )
         .unwrap_err();
         assert_eq!(

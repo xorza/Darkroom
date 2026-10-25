@@ -8,6 +8,7 @@ mod square;
 mod synthetic;
 
 use common::Buffer2;
+use imaginarium::PlanarDesc;
 
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
@@ -21,7 +22,6 @@ use crate::drizzle::drizzle_frame::DrizzleFrame;
 use crate::drizzle::drizzle_kernel::DrizzleKernel;
 use crate::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_map::QualityMap;
@@ -46,10 +46,10 @@ const MAX_DEPOSITS: f32 = 49.0;
 const LOBE_EXCESS: f32 = 1.7;
 
 /// An accumulator for frames of `input_dims`, each channel reaching its own.
-fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
+fn accumulator(input_dims: PlanarDesc, config: DrizzleConfig) -> DrizzleAccumulator {
     let blank = LinearImage::from_planar_channels(
         input_dims,
-        (0..input_dims.channels()).map(|_| vec![0.0; input_dims.pixel_count()]),
+        (0..input_dims.channel_count()).map(|_| vec![0.0; input_dims.pixel_count()]),
     );
     DrizzleAccumulator::new(&blank, config, 0).expect("test drizzle config must be valid")
 }

@@ -4,11 +4,11 @@
 use std::ops::Range;
 
 use common::par;
+use imaginarium::PlanarDesc;
 
 use crate::error::Cancelled;
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::frame_admission::FrameAdmission;
@@ -35,7 +35,7 @@ pub(crate) struct FrameIntake<'a> {
 /// decode at once, and the stage their progress reports under.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IntakePlan {
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) frame_count: usize,
     pub(crate) decode_slots: usize,
     pub(crate) stage: StackingStage,
@@ -65,8 +65,8 @@ impl<'a> FrameIntake<'a> {
         &self.ctx
     }
 
-    pub(crate) const fn dimensions(&self) -> ImageDimensions {
-        self.admission.dimensions()
+    pub(crate) const fn desc(&self) -> PlanarDesc {
+        self.admission.desc()
     }
 
     /// Check frame `idx` and measure it — see [`FrameAdmission::admit`].

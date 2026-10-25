@@ -11,15 +11,15 @@ use std::sync::OnceLock;
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
 use glam::DVec2;
+use imaginarium::ChannelLayout;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::InvalidFlatGain;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::flat_gain::gain_key::GainKey;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use common::{Size2us, Vec2us};
 
 /// Pixels between the grid's nodes on each axis.
@@ -79,9 +79,10 @@ impl TryFrom<FlatGainRecord> for FlatGain {
             channels: record.nodes.len(),
             bins: record.bins.len(),
         };
-        // The size first: a zero side has no grid, and an overflowing one no pixel count.
+        // The size first: a zero side has no grid, an overflowing one no pixel count, and one past
+        // the side limit no frame to cover.
         let size = Size2us::new(record.width, record.height);
-        if ImageDimensions::checked(size, ChannelLayout::Mono).is_err() {
+        if frame_desc::checked(size, ChannelLayout::Mono).is_err() {
             return Err(invalid);
         }
         let grid = GainGrid::of(size);

@@ -1,7 +1,7 @@
 use std::io::{Error, ErrorKind};
 
 use common::{Buffer2, CancelToken};
-use lumos::ChannelLayout;
+use imaginarium::{ChannelLayout, PlanarDesc};
 use lumos::{
     AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BgConfig,
     CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern,
@@ -9,16 +9,16 @@ use lumos::{
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig,
     FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadConfig, FitsTransferProvenance,
-    FlagCounts, FrameRegistration, FrameStoreError, FwhmConfig, GesdConfig, ImageDimensions,
-    ImageMetadata, IngestConfig, InterpolationMethod, InvalidConfigField, LightOutcome,
-    LinearFitClipConfig, LinearImage, LinearModel, LoadCtx, MarkesteijnPasses, MasterRole,
-    MatchIdxs, MeasurementConfig, Normalization, NullPolicy, ObservationHeader, Pedestal,
-    ProgressMonitor, QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig,
-    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
-    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SipOrder, SmallN,
-    SourceProvenance, StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig,
-    StarDetector, StarField, StarMatch, Transform, TransformModel, TransformType, TriangleConfig,
-    TrimConfig, WarpConfig, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
+    FlagCounts, FrameRegistration, FrameStoreError, FwhmConfig, GesdConfig, ImageMetadata,
+    IngestConfig, InterpolationMethod, InvalidConfigField, LightOutcome, LinearFitClipConfig,
+    LinearImage, LinearModel, LoadCtx, MarkesteijnPasses, MasterRole, MatchIdxs, MeasurementConfig,
+    Normalization, NullPolicy, ObservationHeader, Pedestal, ProgressMonitor,
+    QualityFilterDiagnostics, QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog,
+    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, RunReport,
+    SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SipOrder, SmallN, SourceProvenance,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionConfig, StarDetector,
+    StarField, StarMatch, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
+    WarpConfig, WarpTransform, WeightKind, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -180,7 +180,7 @@ fn invariant_types_expose_validated_state_from_the_crate_root() {
         derived: DerivedFacts::default(),
     };
 
-    let dimensions = ImageDimensions::new((12, 8), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((12, 8), ChannelLayout::Rgb);
     assert_eq!(dimensions.pixel_count(), 96);
     assert_eq!(dimensions.sample_count(), 288);
 
@@ -191,10 +191,8 @@ fn invariant_types_expose_validated_state_from_the_crate_root() {
 
 #[test]
 fn stacking_configuration_errors_are_available_from_the_crate_root() {
-    let frame = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Mono),
-        vec![0.5; 4],
-    );
+    let frame =
+        LinearImage::from_interleaved(PlanarDesc::new((2, 2), ChannelLayout::Mono), vec![0.5; 4]);
     let operation_error = StackConfig {
         combine: Combine::sigma_clip(0.0),
         weighting: Weighting::Equal,
@@ -347,7 +345,7 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
         image: LinearImage::from_interleaved(
-            ImageDimensions::new((2, 1), ChannelLayout::Mono),
+            PlanarDesc::new((2, 1), ChannelLayout::Mono),
             vec![0.25, 0.75],
         ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(Buffer2::new(
@@ -402,8 +400,8 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     let shared_pixels = shared_plane.pixels().as_ptr();
     let shared_image = LinearImage::from(QualityMap::Shared(shared_plane));
     assert_eq!(
-        shared_image.dimensions(),
-        ImageDimensions::new((2, 1), ChannelLayout::Mono)
+        shared_image.desc(),
+        PlanarDesc::new((2, 1), ChannelLayout::Mono)
     );
     assert_eq!(shared_image.channel(0).pixels(), &[3.0, 4.0]);
     assert_eq!(shared_image.channel(0).pixels().as_ptr(), shared_pixels);
@@ -417,8 +415,8 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     let per_channel_map = QualityMap::PerChannel(per_channel_planes);
     let per_channel_image = LinearImage::from(per_channel_map);
     assert_eq!(
-        per_channel_image.dimensions(),
-        ImageDimensions::new((1, 1), ChannelLayout::Rgb)
+        per_channel_image.desc(),
+        PlanarDesc::new((1, 1), ChannelLayout::Rgb)
     );
     assert_eq!(per_channel_image.channel(0).pixels(), &[5.0]);
     assert_eq!(per_channel_image.channel(1).pixels(), &[6.0]);

@@ -8,11 +8,10 @@
 
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::CosmicRays;
 use crate::internals::synthetic::bgs::{Gradient, Vignette};
@@ -214,7 +213,7 @@ impl Field {
                     .pixels()
                     .to_vec()
             });
-        LinearImage::from_planar_channels(ImageDimensions::new(size, ChannelLayout::Rgb), planes)
+        LinearImage::from_planar_channels(PlanarDesc::new(size, ChannelLayout::Rgb), planes)
     }
 
     /// The field calibrated, on a sensor of `size` behind `cfa_type`'s filters, with cosmic-ray

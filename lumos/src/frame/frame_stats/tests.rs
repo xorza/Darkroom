@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use common::Buffer2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::frame_stats::FrameStats;
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
@@ -109,7 +108,7 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
         let size = Size2us::new(512, 256);
         let (pixels, divisor) = frame(size, read, sky);
         let mut mono =
-            LinearImage::from_interleaved(ImageDimensions::new(size, ChannelLayout::Mono), pixels);
+            LinearImage::from_interleaved(PlanarDesc::new(size, ChannelLayout::Mono), pixels);
         mono.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
             &divisor,
             &CfaType::Mono,
@@ -133,8 +132,8 @@ fn a_flat_divided_frame_splits_its_noise_by_the_flat_gain() {
 /// middle pair, 4, 50 and 2.5.
 #[test]
 fn frame_statistics_are_a_median_per_channel() {
-    let mono = ImageDimensions::new((3, 3), ChannelLayout::Mono);
-    let rgb = ImageDimensions::new((2, 2), ChannelLayout::Rgb);
+    let mono = PlanarDesc::new((3, 3), ChannelLayout::Mono);
+    let rgb = PlanarDesc::new((2, 2), ChannelLayout::Rgb);
     let cases: [(LinearImage, &[f32]); 4] = [
         (LinearImage::from_interleaved(mono, vec![5.0; 9]), &[5.0]),
         (
@@ -169,7 +168,7 @@ fn frame_statistics_are_a_median_per_channel() {
 fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     // Eight pixels: four real samples and four the source declared null, filled at 0. Valid 1, 3,
     // 5, 7 → median (3 + 5) / 2 = 4; all eight → (0 + 1) / 2 = 0.5, the fill's level.
-    let dimensions = ImageDimensions::new((8, 1), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((8, 1), ChannelLayout::Mono);
     let samples = vec![1.0f32, 3.0, 5.0, 7.0, 0.0, 0.0, 0.0, 0.0];
     let mut masked = LinearImage::from_interleaved(dimensions, samples.clone());
     masked.set_flags(PixelFlags::of_non_finite(

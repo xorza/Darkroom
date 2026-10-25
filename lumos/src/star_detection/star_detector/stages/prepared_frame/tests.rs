@@ -1,6 +1,6 @@
+use imaginarium::{ChannelLayout, PlanarDesc};
+
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
 };
@@ -27,7 +27,7 @@ fn channel_with_mad(center: f32, mad: f32) -> Vec<f32> {
 
 #[test]
 fn prepare_uniform() {
-    let dim = ImageDimensions::new((64, 64), ChannelLayout::Mono);
+    let dim = PlanarDesc::new((64, 64), ChannelLayout::Mono);
     let data = vec![0.5f32; 64 * 64];
     let image = LinearImage::from_interleaved(dim, data);
 
@@ -49,7 +49,7 @@ fn prepare_with_star() {
     // Add bright pixel (simulating a star)
     data[32 * width + 32] = 0.9;
 
-    let dim = ImageDimensions::new((width, height), ChannelLayout::Mono);
+    let dim = PlanarDesc::new((width, height), ChannelLayout::Mono);
     let image = LinearImage::from_interleaved(dim, data);
 
     let pool = DetectionResources::new(Size2us::new(width, height));
@@ -102,10 +102,8 @@ fn the_median_filter_follows_interpolation() {
 
     let config = StarDetectionConfig::default();
     for case in cases {
-        let mut image = LinearImage::from_interleaved(
-            ImageDimensions::new(size, ChannelLayout::Mono),
-            data.clone(),
-        );
+        let mut image =
+            LinearImage::from_interleaved(PlanarDesc::new(size, ChannelLayout::Mono), data.clone());
         image
             .metadata
             .derived
@@ -167,7 +165,7 @@ fn detection_weights_ignore_signal() {
             .collect()
     };
     let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((size, size), ChannelLayout::Rgb),
+        PlanarDesc::new((size, size), ChannelLayout::Rgb),
         vec![channel(true), channel(false), channel(false)],
     );
     let weights = inverse_variance_weights(channel_noise(&image));
@@ -180,7 +178,7 @@ fn detection_weights_ignore_signal() {
 fn prepare_rgb_equal_noise_is_mean() {
     // Distinct per-channel levels; a 4 × 4 frame is too small for the noise estimate, which reads
     // 0 in every channel, so the weights are equal and the detection plane is the plain mean.
-    let dims = ImageDimensions::new((4, 4), ChannelLayout::Rgb);
+    let dims = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
     let r = channel_with_mad(0.30, 0.02);
     let g = channel_with_mad(0.50, 0.02);
     let b = channel_with_mad(0.70, 0.02);
@@ -202,7 +200,7 @@ fn prepare_rgb_equal_noise_is_mean() {
 fn prepare_rgb_red_star_survives() {
     // A star bright only in R must remain prominent in the detection plane. With equal weights the
     // star peak lands at 1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
-    let dims = ImageDimensions::new((4, 4), ChannelLayout::Rgb);
+    let dims = PlanarDesc::new((4, 4), ChannelLayout::Rgb);
     let mut r = channel_with_mad(0.10, 0.01);
     r[5] = 0.90; // bright red star, off the symmetric background
     let g = channel_with_mad(0.10, 0.01);

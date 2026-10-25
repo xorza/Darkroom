@@ -196,14 +196,13 @@ impl ChunkCopy {
 mod tests {
     use arrayvec::ArrayVec;
     use common::{Buffer2, TempDir};
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::{DropPlanes, FrameQuality};
     use crate::frame_store::run_scratch::RunScratch;
     use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::image::linear_image::LinearImage;
     use crate::image::pixel_flags::PixelFlags;
     use crate::image::quality_flags::QualityFlags;
@@ -215,7 +214,7 @@ mod tests {
     fn a_copied_chunk_reads_as_the_planes_do() {
         let dir = TempDir::new("frame_chunk_copy");
         let scratch = RunScratch::create(dir.path()).unwrap();
-        let dimensions = ImageDimensions::new((6, 1), ChannelLayout::Rgb);
+        let dimensions = PlanarDesc::new((6, 1), ChannelLayout::Rgb);
         let ramp = |offset: f32| -> Vec<f32> { (0..6).map(|x| offset + x as f32).collect() };
         let mut image =
             LinearImage::from_planar_channels(dimensions, [ramp(0.0), ramp(10.0), ramp(20.0)]);

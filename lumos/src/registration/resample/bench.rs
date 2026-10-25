@@ -88,7 +88,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 /// [`DEFECT_SPACING`] a defect, scattered by a multiplicative hash of its index.
 fn calibration_flags(light: &LinearImage) -> Option<PixelFlags> {
     let pixels = light.channel(0).pixels();
-    PixelFlags::from_fn(light.dimensions().size(), |idx| {
+    PixelFlags::from_fn(light.desc().size(), |idx| {
         if (idx as u64)
             .wrapping_mul(0x9e37_79b9_7f4a_7c15)
             .is_multiple_of(DEFECT_SPACING)
@@ -142,7 +142,7 @@ fn warp(b: &mut Bencher<'_>, case: WarpCase<'_>) {
         },
     };
     let source = SourceImage::of(light);
-    let mut buffers = WarpResult::new(light.dimensions());
+    let mut buffers = WarpResult::new(light.desc());
     let scratch = WarpScratch::default();
     b.iter(|| buffers.warp_into(&source, warp, &scratch));
 }

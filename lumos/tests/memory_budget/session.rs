@@ -4,15 +4,12 @@ use std::sync::OnceLock;
 
 use common::TempDir;
 use glam::DVec2;
-use lumos::{
-    FitsFloatScale, ImageDimensions, IngestConfig, LinearImage, Transform, WarpConfig,
-    WarpTransform,
-};
+use imaginarium::{ChannelLayout, PlanarDesc};
+use lumos::{FitsFloatScale, IngestConfig, LinearImage, Transform, WarpConfig, WarpTransform};
 
 use crate::HEAP;
 use crate::alone;
 use crate::budget::Budget;
-use lumos::ChannelLayout;
 
 /// The workers a run plans for and works on: few, so that the floors of a stage's smallest step,
 /// which grow with the workers, fit below a budget the frames do not, and the same on every
@@ -89,7 +86,7 @@ impl Session {
             "a session runs on the thread that built the pool"
         );
         let image = LinearImage::from_planar_channels(
-            ImageDimensions::new((8, 8), ChannelLayout::Mono),
+            PlanarDesc::new((8, 8), ChannelLayout::Mono),
             [vec![0.0; 64]],
         );
         WarpConfig::default().warp(

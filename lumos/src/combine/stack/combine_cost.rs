@@ -1,7 +1,8 @@
 //! [`CombineCost`]: what a combine holds, priced once for the plan and the frame cache alike.
 
+use imaginarium::PlanarDesc;
+
 use crate::combine::frame_cache::sample::CombineScratch;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::memory::stage::{Stage, Units};
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -16,7 +17,7 @@ const CHUNK_COPIES: usize = 2;
 /// A resident combine reads its frames where they lie, which [`Units::Rows`] charges nothing for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CombineCost {
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) quality: QualityPlanes,
     pub(crate) coverage_planes: usize,
     pub(crate) flag_planes: usize,
@@ -39,7 +40,7 @@ impl CombineCost {
         } = self;
         Stage {
             kept,
-            held: quality.pixel_bytes(dimensions.channels(), coverage_planes, flag_planes)
+            held: quality.pixel_bytes(dimensions.channel_count(), coverage_planes, flag_planes)
                 * dimensions.pixel_count()
                 + workers.saturating_mul(CombineScratch::heap_bytes(frame_count)),
             in_flight: CHUNK_COPIES * frame_pixel_bytes * dimensions.width(),

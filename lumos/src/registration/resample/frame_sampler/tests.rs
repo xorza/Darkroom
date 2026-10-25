@@ -1,8 +1,7 @@
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
@@ -464,7 +463,7 @@ fn every_pixel_follows_the_rules() {
     {
         for flagged in [false, true] {
             let rgb = LinearImage::from_planar_channels(
-                ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
+                PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
                 [
                     planes[0].pixels().to_vec(),
                     planes[1].pixels().to_vec(),
@@ -541,7 +540,7 @@ fn every_pixel_follows_the_rules() {
 fn every_tier_samples_to_portables_bits() {
     let size = Size2us::new(24, 20);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Rgb),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Rgb),
         [
             fixture(size, 0).pixels().to_vec(),
             fixture(size, 3).pixels().to_vec(),
@@ -604,7 +603,7 @@ fn clamped_sample(bright: f32, bg: f32, threshold: Option<f32>) -> f32 {
     pixels[4 * size.width + 7] = bright;
     let pos = DVec2::new(8.5, 4.0);
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, 9), ChannelLayout::Mono),
+        PlanarDesc::new((size.width, 9), ChannelLayout::Mono),
         pixels,
     );
     let method = SampleMethod::Filter(FilterSampling {
@@ -705,7 +704,7 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
     nulls[8 * 18 + 8] = f32::NAN;
     nulls[8 * 18 + 9] = f32::NAN;
     let mut image =
-        LinearImage::from_interleaved(ImageDimensions::new((18, 18), ChannelLayout::Mono), ramp);
+        LinearImage::from_interleaved(PlanarDesc::new((18, 18), ChannelLayout::Mono), ramp);
     image.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
     let method = SampleMethod::Filter(FilterSampling {
         kernel: WarpKernel::new(Filter::Lanczos(LanczosOrder::Three), 1.0),
@@ -750,7 +749,7 @@ fn two_adjacent_nulls_fall_back_to_bilinear() {
 fn coverage_and_confidence_vanish_together() {
     let size = Size2us::new(24, 20);
     let rgb = LinearImage::from_interleaved(
-        ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+        PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
         fixture(size, 1).pixels().to_vec(),
     );
     let poss = poss(size);
@@ -799,7 +798,7 @@ fn a_halved_nyquist_grating_does_not_alias() {
         .map(|i| if (i % 64).is_multiple_of(2) { 2.0 } else { 0.0 })
         .collect();
     let image =
-        LinearImage::from_interleaved(ImageDimensions::new((64, 64), ChannelLayout::Mono), grating);
+        LinearImage::from_interleaved(PlanarDesc::new((64, 64), ChannelLayout::Mono), grating);
     let halving = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.0, 2.0));
     let warped = WarpConfig::with_method(InterpolationMethod::Lanczos3).warp(&image, &halving);
 
@@ -861,7 +860,7 @@ fn filters_reproduce_their_polynomials() {
         |x: f64, y: f64| 0.02 * x * x - 0.03 * x * y + 0.05 * y * y + 0.1 * x - 0.2 * y + 1.0;
     let image = |field: &dyn Fn(f64, f64) -> f64| {
         LinearImage::from_interleaved(
-            ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+            PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
             (0..size.pixel_count())
                 .map(|i| field((i % size.width) as f64, (i / size.width) as f64) as f32)
                 .collect(),

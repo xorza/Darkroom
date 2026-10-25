@@ -8,7 +8,7 @@ fn planes() -> [Vec<f32>; 3] {
 
 /// [`planes`] as a `lumos` image.
 fn planar_master() -> LinearImage {
-    LinearImage::from_planar_channels(ImageDimensions::new((2, 1), ChannelLayout::Rgb), planes())
+    LinearImage::from_planar_channels(PlanarDesc::new((2, 1), ChannelLayout::Rgb), planes())
 }
 
 /// The interleaved samples `planar_master` repacks to, in pixel order.
@@ -69,7 +69,7 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
 /// plane allocation tells the two apart.
 #[test]
 fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
-    let dimensions = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((4, 3), ChannelLayout::Mono);
 
     let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
     let planes = planar.channel(0).pixels().as_ptr();
@@ -91,7 +91,7 @@ fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
         planes,
         "shared planar input: the planes are deep-cloned"
     );
-    assert_eq!(out.dimensions(), dimensions);
+    assert_eq!(out.desc(), dimensions);
     let original = second_holder.as_custom::<Image>().unwrap();
     assert_eq!(
         original.desc(),

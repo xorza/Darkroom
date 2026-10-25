@@ -1,10 +1,10 @@
+use imaginarium::{ChannelLayout, PlanarDesc};
+
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::memory::footprint::Footprint;
 use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
@@ -17,7 +17,7 @@ use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 /// 320 + 80 = 400 B, and its way peaks at the decoder's 500 B.
 #[test]
 fn the_way_to_a_demosaic_holds_the_decode_the_noise_then_the_planes() {
-    let dimensions = ImageDimensions::new((10, 8), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((10, 8), ChannelLayout::Mono);
     let info = |cfa_type| FrameInfo {
         dimensions,
         cfa_type,

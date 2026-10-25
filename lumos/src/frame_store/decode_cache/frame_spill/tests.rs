@@ -3,6 +3,7 @@ use std::path::Path;
 
 use common::{FileId, FileIdentity, SerdeFormat, TempDir, fs};
 use fits_well::image::SampleType;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::admitted::Admitted;
 use crate::frame::capture_conditions::CaptureConditions;
@@ -19,14 +20,12 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::dark_comparison::DarkComparison;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 use crate::image::flag_counts::FlagCounts;
 use crate::image::flat_gain::gain_key::GainKey;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
     ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,
@@ -193,7 +192,7 @@ fn metadata() -> ImageMetadata {
 /// What a decode of 4 × 3 mono left, its flags of `flags`, with [`metadata`].
 fn decoded(flags: Option<FlagCounts>) -> Decoded {
     Decoded {
-        dimensions: ImageDimensions::new((4, 3), ChannelLayout::Mono),
+        dimensions: PlanarDesc::new((4, 3), ChannelLayout::Mono),
         flags,
         gain: None,
         metadata: metadata(),
@@ -282,7 +281,7 @@ fn committed_reads_back_only_a_valid_record_under_its_key() {
         assert_eq!(committed.decoded.flags, flags);
         assert_eq!(
             committed.decoded.dimensions,
-            ImageDimensions::new((4, 3), ChannelLayout::Mono)
+            PlanarDesc::new((4, 3), ChannelLayout::Mono)
         );
         assert_eq!(
             format!("{:?}", committed.decoded.metadata),

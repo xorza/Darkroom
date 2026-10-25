@@ -8,13 +8,18 @@ mod image;
 #[cfg(test)]
 mod internals;
 mod ops;
+mod planar;
 
 pub use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
-pub use crate::error::{Error, Result};
+pub use crate::error::{DescError, Error, Result};
 
 pub use crate::image::InterleavedImage;
 pub use crate::image::image_desc::InterleavedDesc;
 pub use crate::image::raster_format::{RasterFormat, SUPPORTED_EXTENSIONS};
+
+pub use crate::planar::channel_layout::ChannelLayout;
+pub use crate::planar::planar_desc::PlanarDesc;
+pub use crate::planar::planar_image::PlanarImage;
 
 pub use crate::ops::affine_warp::{AffineWarp, FilterMode};
 pub use crate::ops::blend::{Blend, BlendMode};

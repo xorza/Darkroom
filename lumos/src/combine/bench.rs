@@ -10,6 +10,7 @@ use std::time::Duration;
 use common::bench::{Kind, Scale};
 use common::{MappedFile, TempDir, par};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
 use crate::combine::frame_cache::core::CacheCore;
@@ -23,8 +24,6 @@ use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
 use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame};
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::memory::budget::Budget;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -172,7 +171,7 @@ impl Lights {
                 frames,
                 CacheCore {
                     tier,
-                    dimensions: ImageDimensions::new(FRAME, ChannelLayout::Mono),
+                    dimensions: PlanarDesc::new(FRAME, ChannelLayout::Mono),
                     metadata: self.images[0].metadata.clone(),
                     monitor: ProgressMonitor::unattended(),
                 },

@@ -1,7 +1,7 @@
 use glam::DVec2;
 
 use super::*;
-use crate::image::channel_layout::ChannelLayout;
+use imaginarium::ChannelLayout;
 
 /// Two input pixels of different values mixing in one output cell, through the square kernel's
 /// clipped quadrilaterals.
@@ -122,7 +122,7 @@ fn a_rotated_square_drop_keeps_its_flux() {
         }
     }
     let mut acc = accumulator(
-        ImageDimensions::new(size, ChannelLayout::Mono),
+        PlanarDesc::new(size, ChannelLayout::Mono),
         kernel_config(DrizzleKernel::Square, 1.0, 1.0),
     );
     acc.add_image(

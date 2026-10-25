@@ -28,13 +28,13 @@ fn register_two_lights() {
         "Image 1: {}x{} ({} ch)",
         img1.width(),
         img1.height(),
-        img1.channels()
+        img1.channel_count()
     );
     println!(
         "Image 2: {}x{} ({} ch)",
         img2.width(),
         img2.height(),
-        img2.channels()
+        img2.channel_count()
     );
 
     // Detect stars with precise Moffat centroids

@@ -6,6 +6,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use common::{TempDir, fs};
 use fits_well::image::{Image as FitsImage, Scaling};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::frame_cache::loader::*;
 use crate::combine::normalization::Normalization;
@@ -18,8 +19,6 @@ use crate::frame_store::storage_tier::CombineBudget;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
@@ -34,7 +33,7 @@ use crate::stack_product::quality_planes::QualityPlanes;
 #[derive(Debug, Clone, Copy)]
 struct SetFrame<'a> {
     source: &'a Path,
-    dimensions: ImageDimensions,
+    dimensions: PlanarDesc,
     idx: usize,
 }
 
@@ -122,7 +121,7 @@ fn set_mtime(path: &Path, nanos_past_epoch: u64) {
 #[test]
 fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let temp_dir = TempDir::new("lumos_cache_frame_reuse");
-    let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     // [0, 1, …, 11]: median 5.5, absolute deviations 0.5, 0.5, 1.5, 1.5, …, 5.5, 5.5 → MAD 3.0.
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let source = temp_dir.join("source.tiff");
@@ -223,7 +222,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 #[test]
 fn cache_frame_validates_a_reused_frame() {
     let temp_dir = TempDir::new("lumos_cache_frame_validates");
-    let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("source.tiff");
     LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32).collect())
         .write_raster(&source)
@@ -260,7 +259,7 @@ fn cache_frame_validates_a_reused_frame() {
 #[test]
 fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
     let temp_dir = TempDir::new("lumos_cache_frame_decoders");
-    let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let source = temp_dir.join("light.tiff");
     LinearImage::from_interleaved(dims, (0..12).map(|i| i as f32 / 16.0).collect())
         .write_raster(&source)
@@ -310,7 +309,7 @@ impl FrameStep<LinearImage> for AddOne {
 #[test]
 fn a_kept_cache_is_reused_by_the_next_run() {
     let temp_dir = TempDir::new("lumos_cache_kept_run");
-    let dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let config = StackConfig {
         weighting: Weighting::Equal,
         normalization: Normalization::None,
@@ -419,13 +418,13 @@ fn a_kept_cache_is_reused_by_the_next_run() {
 #[test]
 fn cache_frame_dimension_mismatch() {
     let temp_dir = TempDir::new("lumos_load_cache_mismatch_test");
-    let actual_dims = ImageDimensions::new((4, 3), ChannelLayout::Mono);
+    let actual_dims = PlanarDesc::new((4, 3), ChannelLayout::Mono);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_interleaved(actual_dims, pixels);
 
     let source_path = temp_dir.join("source.tiff");
     image.write_raster(&source_path).unwrap();
-    let expected_dims = ImageDimensions::new((8, 6), ChannelLayout::Mono);
+    let expected_dims = PlanarDesc::new((8, 6), ChannelLayout::Mono);
     let result = SetFrame {
         source: &source_path,
         dimensions: expected_dims,
@@ -460,7 +459,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
     let peek = SetPeek {
         idx: 0,
         info: FrameInfo {
-            dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
+            dimensions: PlanarDesc::new((100, 100), ChannelLayout::Mono),
             cfa_type: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
             decoder: DecoderBytes::default(),
             gain_bytes: 8112,

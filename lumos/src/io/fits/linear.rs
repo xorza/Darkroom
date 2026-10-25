@@ -44,14 +44,14 @@ pub(crate) fn hdu(
     }
     let mut shape: ArrayVec<usize, 3> = [linear.width(), linear.height()].into_iter().collect();
     if linear.is_rgb() {
-        shape.push(linear.channels());
+        shape.push(linear.channel_count());
     }
     Ok(PlaneHdu {
         header,
         shape,
         scaling: domain_keywords::scaling(&linear.metadata),
         source: FloatPlanes::blanking(
-            (0..linear.channels())
+            (0..linear.channel_count())
                 .map(|channel| linear.channel(channel).pixels())
                 .collect(),
             linear.flags(),

@@ -1,10 +1,11 @@
 //! What one frame is worth to a memory estimate.
 
+use imaginarium::PlanarDesc;
 use std::fmt::Debug;
 
 use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc;
 use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::memory::footprint::Footprint;
 
@@ -12,7 +13,7 @@ use crate::memory::footprint::Footprint;
 /// and what its decoder holds while it makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FramePeek {
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     /// What the decoder holds while it makes the frame.
     pub(crate) decoder: DecoderBytes,
     /// The pattern of a mosaic frame, whose statistics measure its noise per color; `None` for
@@ -25,7 +26,7 @@ impl FramePeek {
     /// every frame, since a decoder that flags saturation gives one to most, and which also holds
     /// the mask of a frame with pixels it has no measurement for.
     pub(crate) const fn resident_bytes(self) -> usize {
-        self.dimensions.decoded_bytes()
+        frame_desc::decoded_byte_len(self.dimensions)
     }
 
     /// What one such frame's way into a stack holds on `workers`: its decode, the decoder's own
@@ -58,8 +59,9 @@ impl From<FrameInfo> for FramePeek {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use imaginarium::ChannelLayout;
+
     use crate::image::cfa::cfa_pattern::CfaPattern;
-    use crate::image::channel_layout::ChannelLayout;
 
     /// A 100 × 100 one-channel frame resides as 40 000 B of samples and 10 000 B of flags.
     ///
@@ -76,7 +78,7 @@ mod tests {
     fn the_statistics_and_the_decoders_bytes_set_the_decode_peak() {
         let rggb = Some(Mosaic::Bayer(CfaPattern::Rggb));
         let peek = |mosaic, decoder| FramePeek {
-            dimensions: ImageDimensions::new((100, 100), ChannelLayout::Mono),
+            dimensions: PlanarDesc::new((100, 100), ChannelLayout::Mono),
             decoder,
             mosaic,
         };

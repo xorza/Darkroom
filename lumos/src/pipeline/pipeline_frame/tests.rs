@@ -1,9 +1,8 @@
 use common::TempDir;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
@@ -15,7 +14,7 @@ use crate::pipeline::pipeline_frame::PipelineFrame;
 fn a_parked_frame_is_read_back_whole_before_its_warp() {
     let dir = TempDir::new("pipeline_frame_source");
     let scratch = RunScratch::create(dir.path()).unwrap();
-    let dimensions = ImageDimensions::new((3, 2), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((3, 2), ChannelLayout::Rgb);
     let mut image = LinearImage::from_planar_channels(
         dimensions,
         [
@@ -31,7 +30,7 @@ fn a_parked_frame_is_read_back_whole_before_its_warp() {
     let stored = StoredImage::write(&image, image.flags(), &scratch).unwrap();
     let mapped: Vec<*const f32> = stored.planes().map(<[f32]>::as_ptr).collect();
     let resident = PipelineFrame::Spilled(stored).into_resident();
-    assert_eq!(resident.dimensions(), dimensions);
+    assert_eq!(resident.desc(), dimensions);
     for (channel, &pointer) in mapped.iter().enumerate() {
         let plane = resident.channel(channel).pixels();
         assert_ne!(plane.as_ptr(), pointer, "channel {channel} reads the map");

@@ -12,13 +12,13 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use common::fs;
+use imaginarium::PlanarDesc;
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
 
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::MlError;
 use common::Vec2us;
@@ -76,7 +76,7 @@ impl OnnxModel {
         output: &mut LinearImage,
         stride: usize,
     ) -> Result<(), MlError> {
-        debug_assert_eq!(output.dimensions(), input.dimensions());
+        debug_assert_eq!(output.desc(), input.desc());
         run_tiles(Planes::Apart { input, output }, stride, |input, output| {
             self.infer(input, output)
         })
@@ -141,7 +141,7 @@ fn run_tiles(
     mut infer: impl FnMut(&[f32], &mut [f32]) -> Result<(), MlError>,
 ) -> Result<(), MlError> {
     validate_stride(stride)?;
-    let dimensions = planes.input().dimensions();
+    let dimensions = planes.input().desc();
     let size = dimensions.size();
     if size.width < WINDOW || size.height < WINDOW {
         return Err(MlError::TooSmall(size));
@@ -255,7 +255,7 @@ const fn feather(i: usize) -> f32 {
 /// shares a band row, and a row is normalized into the frame's planes and cleared once final.
 #[derive(Debug)]
 struct FeatherBlend {
-    dimensions: ImageDimensions,
+    dimensions: PlanarDesc,
     channels: [Vec<f32>; 3],
     weight: Vec<f32>,
     /// The frame rows written so far: every row above this one.
@@ -264,7 +264,7 @@ struct FeatherBlend {
 
 impl FeatherBlend {
     /// Nothing yet over a frame of `dimensions`, whose channel count the image it makes takes.
-    fn new(dimensions: ImageDimensions) -> Self {
+    fn new(dimensions: PlanarDesc) -> Self {
         let band = WINDOW * dimensions.width();
         Self {
             dimensions,
@@ -302,7 +302,7 @@ impl FeatherBlend {
             weight,
             written,
         } = self;
-        debug_assert_eq!(image.dimensions(), *dimensions);
+        debug_assert_eq!(image.desc(), *dimensions);
         let width = dimensions.width();
         for y in *written..end {
             let band = y % WINDOW * width..(y % WINDOW + 1) * width;

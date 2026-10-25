@@ -137,8 +137,8 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
         .unwrap()
         .demosaic_measured(MarkesteijnPasses::One);
     assert_eq!(
-        dark.dimensions(),
-        ImageDimensions::new((SIDE - 2, SIDE - 2), ChannelLayout::Rgb)
+        dark.desc(),
+        PlanarDesc::new((SIDE - 2, SIDE - 2), ChannelLayout::Rgb)
     );
     let mut outside = 0;
     for channel in 0..3 {
@@ -182,9 +182,9 @@ fn load_valid_file() {
 
     let image = result.unwrap();
 
-    assert!(image.dimensions().width() > 0);
-    assert!(image.dimensions().height() > 0);
-    assert_eq!(image.dimensions().channels(), 3);
+    assert!(image.desc().width() > 0);
+    assert!(image.desc().height() > 0);
+    assert_eq!(image.desc().channel_count(), 3);
 
     // Every channel is inside the light-frame contract. The demosaic kernels overshoot on their
     // own, so this is what catches a decode path that stopped clamping their output.
@@ -197,10 +197,10 @@ fn load_valid_file() {
         }
     }
 
-    let mean = (0..image.channels())
+    let mean = (0..image.channel_count())
         .map(|channel| pixel_stats(image.channel(channel)).mean)
         .sum::<f64>()
-        / image.channels() as f64;
+        / image.channel_count() as f64;
     assert!(mean > 0.0, "Mean is zero, image may be all black");
     assert!(mean < 1.0, "Mean is >= 1.0, image may be overexposed");
 }
@@ -469,7 +469,7 @@ fn the_peek_counts_the_file_and_the_raw_buffer() {
     let info = frame_info(&libraw).unwrap();
     assert_eq!(
         info.dimensions,
-        ImageDimensions::new((22, 22), ChannelLayout::Mono)
+        PlanarDesc::new((22, 22), ChannelLayout::Mono)
     );
     assert_eq!(
         info.decoder,
@@ -506,10 +506,7 @@ fn libraws_processing_declares_its_own_span() {
         .unwrap()
         .processed_by_libraw(None)
         .unwrap();
-    assert_eq!(
-        image.dimensions(),
-        ImageDimensions::new((22, 22), ChannelLayout::Rgb)
-    );
+    assert_eq!(image.desc(), PlanarDesc::new((22, 22), ChannelLayout::Rgb));
     assert_eq!(image.metadata.derived.domain().unwrap().scale, 64_535.0);
     let expected = 1000.0 / 64_535.0;
     for channel in 0..3 {

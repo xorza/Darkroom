@@ -8,6 +8,7 @@ pub(crate) mod tiled;
 pub(crate) mod xtrans;
 
 use common::{Buffer2, CancelToken};
+use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 
 use crate::error::Cancelled;
 use crate::image::cfa::cfa_pattern::CfaPattern;
@@ -18,10 +19,7 @@ use crate::image::cfa::demosaic::xtrans::markesteijn;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_provenance::DemosaicProvenance;
-use crate::image::linear_pixels::LinearPixels;
 use crate::memory::footprint::Footprint;
 
 /// The demosaic of a sensor's frame: none on a mono sensor, whose samples pass through, RCD on a
@@ -53,10 +51,10 @@ impl Demosaic {
         data: Buffer2<f32>,
         gains: [f32; 3],
         cancel: &CancelToken,
-    ) -> Result<LinearPixels, Cancelled> {
-        let dimensions = ImageDimensions::new(data.size(), ChannelLayout::Rgb);
+    ) -> Result<PlanarImage, Cancelled> {
+        let dimensions = PlanarDesc::new(data.size(), ChannelLayout::Rgb);
         let planes = match self {
-            Self::None => return Ok(LinearPixels::from(data)),
+            Self::None => return Ok(PlanarImage::from(data)),
             Self::Rcd(pattern) => {
                 rcd::demosaic(&MosaicView::new(&data, pattern).with_gains(gains), cancel)?
             }
@@ -66,7 +64,7 @@ impl Demosaic {
                 cancel,
             )?,
         };
-        Ok(LinearPixels::from_planar_channels(dimensions, planes))
+        Ok(PlanarImage::from_planar_channels(dimensions, planes))
     }
 
     /// How far the demosaic reads from an output pixel: an input photosite this far away can
@@ -91,7 +89,7 @@ impl Demosaic {
     }
 
     /// What the demosaic of a `dimensions` frame holds on `workers`.
-    pub(crate) const fn footprint(self, dimensions: ImageDimensions, workers: usize) -> Footprint {
+    pub(crate) const fn footprint(self, dimensions: PlanarDesc, workers: usize) -> Footprint {
         match self {
             Self::None => {
                 Footprint::kept(dimensions.pixel_count().saturating_mul(size_of::<f32>()))
@@ -117,6 +115,8 @@ impl Demosaic {
 pub(crate) mod bench;
 #[cfg(test)]
 mod memory_tests {
+    use imaginarium::{ChannelLayout, PlanarDesc};
+
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::demosaic::Demosaic;
@@ -124,8 +124,6 @@ mod memory_tests {
     use crate::image::cfa::demosaic::xtrans::markesteijn;
     use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
     use crate::image::cfa::mosaic::Mosaic;
-    use crate::image::channel_layout::ChannelLayout;
-    use crate::image::image_dimensions::ImageDimensions;
     use crate::internals::cfa::XTRANS_PATTERN;
     use crate::memory::footprint::Footprint;
 
@@ -133,8 +131,8 @@ mod memory_tests {
     /// tile buffers of each of the run's workers, whatever the frame's size: four workers' here.
     #[test]
     fn demosaic_footprint_counts_each_plane_the_kernel_holds() {
-        let even = ImageDimensions::new((10, 8), ChannelLayout::Mono);
-        let odd = ImageDimensions::new((5, 3), ChannelLayout::Mono);
+        let even = PlanarDesc::new((10, 8), ChannelLayout::Mono);
+        let odd = PlanarDesc::new((5, 3), ChannelLayout::Mono);
 
         let mono = Demosaic::of(CfaType::Mono, MarkesteijnPasses::One).footprint(even, 4);
         assert_eq!(mono, Footprint::kept(80 * 4));

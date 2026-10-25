@@ -2,6 +2,7 @@ use std::slice;
 
 use common::{Buffer2, CancelToken, TempDir};
 use glam::Vec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_read::slots::Slots;
@@ -28,8 +29,6 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::cfa::make_cfa;
 use crate::internals::synthetic::patterns;
@@ -74,7 +73,7 @@ fn frame_stats(median: f32, mad: f32) -> Admitted {
 ///   ch1: f0 = [20,30,40], f1 = [2,3,4], f2 = [50,70,90]
 ///   ch2: f0 = [8,9,10], f1 = [200,300,400], f2 = [30,40,50]
 fn affine_rgb_frames(mads: [f32; 3]) -> Vec<StoredFrame> {
-    let dimensions = ImageDimensions::new((5, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((5, 1), ChannelLayout::Rgb);
     let coverage = Buffer2::new((5, 1), vec![0.0, 1.0, 1.0, 1.0, 0.0]);
     let channels = [
         [
@@ -123,7 +122,7 @@ fn reference_selection_uses_lowest_channel_noise_in_one_domain() {
                 let channels = stats.stats.medians.len();
                 StoredFrame::from_memory(
                     LinearImage::from_interleaved(
-                        ImageDimensions::new((1, 1), ChannelLayout::try_from(channels).unwrap()),
+                        PlanarDesc::new((1, 1), ChannelLayout::try_from(channels).unwrap()),
                         vec![0.0; channels],
                     ),
                     FrameQuality::None,
@@ -317,7 +316,7 @@ fn a_multiplicative_norm_refuses_a_non_positive_median() {
         [1.0, 0.0]
             .map(|level| {
                 LinearImage::from_interleaved(
-                    ImageDimensions::new((16, 1), ChannelLayout::Mono),
+                    PlanarDesc::new((16, 1), ChannelLayout::Mono),
                     vec![level; 16],
                 )
             })
@@ -384,7 +383,7 @@ fn frames_related_exactly_normalize_exactly() {
             .iter()
             .map(|&value| {
                 LinearImage::from_interleaved(
-                    ImageDimensions::new((16, 1), ChannelLayout::Mono),
+                    PlanarDesc::new((16, 1), ChannelLayout::Mono),
                     vec![value; 16],
                 )
             })
@@ -392,7 +391,7 @@ fn frames_related_exactly_normalize_exactly() {
     };
     let ramp = |count: usize, start: f32, step: f32| {
         LinearImage::from_interleaved(
-            ImageDimensions::new((count, 1), ChannelLayout::Mono),
+            PlanarDesc::new((count, 1), ChannelLayout::Mono),
             (0..count).map(|i| start + i as f32 * step).collect(),
         )
     };
@@ -446,7 +445,7 @@ fn stacked_frames_land_on_the_reference_level() {
             .iter()
             .map(|rgb| {
                 LinearImage::from_planar_channels(
-                    ImageDimensions::new((4, 1), ChannelLayout::Rgb),
+                    PlanarDesc::new((4, 1), ChannelLayout::Rgb),
                     rgb.map(|value| vec![value; 4]),
                 )
             })
@@ -497,7 +496,7 @@ fn stacked_frames_land_on_the_reference_level() {
 /// separate `confidence > 0` intersection this replaced could never have excluded it.
 #[test]
 fn common_domain_excludes_pixels_covered_only_by_border_fill() {
-    let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((4, 1), ChannelLayout::Mono);
     let coverage = Buffer2::new((4, 1), vec![1.0, 0.5, 1e-4, 0.0]);
     let confidence = Buffer2::new((4, 1), vec![1.0, 2.0, 4.0, 0.0]);
     let image = LinearImage::from_interleaved(dimensions, vec![0.5; 4]);
@@ -532,7 +531,7 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     // A frame gathered in each channel by its own drops narrows each channel's domain by its own:
     // beside a warped frame covering pixels 0 to 2, drops in pixels {0, 1, 3}, {1, 2, 3} and
     // {0, 2, 3} leave {0, 1}, {1, 2} and {0, 2}.
-    let rgb = ImageDimensions::new((4, 1), ChannelLayout::Rgb);
+    let rgb = PlanarDesc::new((4, 1), ChannelLayout::Rgb);
     let warped = StoredFrame::from_memory(
         LinearImage::from_interleaved(rgb, vec![0.5; 12]),
         FrameQuality::from_coverage(Buffer2::new((4, 1), vec![1.0, 1.0, 1.0, 0.0])),
@@ -598,7 +597,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     // Per channel the three frames are affine images of frame 2 over the common domain:
     //   ch0: f0·1 + 6, f1·0.1 + 6;  ch1: f0·10 + 0, f1·100 + 0;  ch2: f0·5 + 5, f1·0.5 + 5.
     // Frame 2 is the least noisy, so `select_reference_frame` picks it.
-    let dimensions = ImageDimensions::new((5, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((5, 1), ChannelLayout::Rgb);
     let frames = affine_rgb_frames([3.0, 2.0, 1.0]);
     assert_eq!(
         select_reference_frame(&frames, &[DomainMap::IDENTITY; 3]),
@@ -644,7 +643,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
 /// window and returns the ratio of spreads, and its offset puts the medians together.
 #[test]
 fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
-    let dimensions = ImageDimensions::new((5, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((5, 1), ChannelLayout::Rgb);
     let frames = affine_rgb_frames([1.0; 3]);
     let norms = |normalization| {
         FrameNorm::measure(
@@ -745,7 +744,7 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
         },
     )
     .pixels;
-    let dimensions = ImageDimensions::new((size.width, size.height), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((size.width, size.height), ChannelLayout::Mono);
     let settings = [
         (1.0f32, 0.0f32, 0.002f32),
         (0.8, 0.02, 0.006),
@@ -864,7 +863,7 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
     let even = Buffer2::from_fn((pixel_count, 1), |x, _| if x % 2 == 0 { 1.0 } else { 0.0 });
     let frame = StoredFrame::from_memory(
         LinearImage::from_interleaved(
-            ImageDimensions::new((pixel_count, 1), ChannelLayout::Mono),
+            PlanarDesc::new((pixel_count, 1), ChannelLayout::Mono),
             vec![0.5; pixel_count],
         ),
         FrameQuality::from_coverage(even),
@@ -912,10 +911,8 @@ fn samples_spread_evenly_by_rank_past_the_limit() {
 #[test]
 fn noise_variance_scales_by_the_mean_inverse_confidence() {
     let cancel = CancelToken::never();
-    let image = LinearImage::from_interleaved(
-        ImageDimensions::new((4, 1), ChannelLayout::Mono),
-        vec![0.5; 4],
-    );
+    let image =
+        LinearImage::from_interleaved(PlanarDesc::new((4, 1), ChannelLayout::Mono), vec![0.5; 4]);
     let stats = frame_stats(0.5, 0.25);
     let sigma = f64::from(statistics::internals::mad_to_sigma(0.25f32));
     let warped = StoredFrame::from_memory(
@@ -932,10 +929,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     assert_eq!(
         SlotPlanes {
             frames: slice::from_ref(&warped),
-            dimensions: ImageDimensions::new(
-                (4, 1),
-                ChannelLayout::try_from(mono.count()).unwrap()
-            ),
+            dimensions: PlanarDesc::new((4, 1), ChannelLayout::try_from(mono.count()).unwrap()),
             slots: mono,
             cancel: &cancel
         }
@@ -946,10 +940,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     assert_eq!(
         SlotPlanes {
             frames: slice::from_ref(&unwarped),
-            dimensions: ImageDimensions::new(
-                (4, 1),
-                ChannelLayout::try_from(mono.count()).unwrap()
-            ),
+            dimensions: PlanarDesc::new((4, 1), ChannelLayout::try_from(mono.count()).unwrap()),
             slots: mono,
             cancel: &cancel
         }
@@ -962,7 +953,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
     // and 1 in green again average an inverse of 2, the red's 1/2 everywhere an inverse of 2 too,
     // and the blue's 1 everywhere keeps σ². The color planes are the frame's channels, so slot
     // `c` is channel `c`.
-    let rgb = ImageDimensions::new((4, 1), ChannelLayout::Rgb);
+    let rgb = PlanarDesc::new((4, 1), ChannelLayout::Rgb);
     let drops = |confidence: [f32; 4]| DropPlanes {
         weight: Buffer2::new((4, 1), vec![1.0; 4]),
         confidence: Buffer2::new((4, 1), confidence.to_vec()),
@@ -985,7 +976,7 @@ fn noise_variance_scales_by_the_mean_inverse_confidence() {
         assert_eq!(
             SlotPlanes {
                 frames: slice::from_ref(&drizzled),
-                dimensions: ImageDimensions::new(
+                dimensions: PlanarDesc::new(
                     (4, 1),
                     ChannelLayout::try_from(colors.count()).unwrap()
                 ),
@@ -1120,7 +1111,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
 
     let rgb = |frame| {
         LinearImage::from_planar_channels(
-            ImageDimensions::new(size, ChannelLayout::Rgb),
+            PlanarDesc::new(size, ChannelLayout::Rgb),
             (0..3).map(|channel| pixels(frame, channel)),
         )
     };
@@ -1140,7 +1131,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.admitted))
             .collect(),
         (0..4).map(|frame| store(&rgb(frame))).collect(),
-        ImageDimensions::new(size, ChannelLayout::Rgb),
+        PlanarDesc::new(size, ChannelLayout::Rgb),
         None,
     );
 
@@ -1166,7 +1157,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
                 .into_frame(Admitted::measure(&image))
             })
             .collect(),
-        ImageDimensions::new(size, ChannelLayout::Mono),
+        PlanarDesc::new(size, ChannelLayout::Mono),
         rggb.mosaic(),
     );
 }
@@ -1184,7 +1175,7 @@ fn spilled_unwarped_frames_normalize_from_their_stored_samples() {
 /// frame has a scale or a level of its own and the pairs stand alone.
 #[test]
 fn per_channel_frames_are_normalized_pair_by_pair() {
-    let dimensions = ImageDimensions::new((8, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((8, 1), ChannelLayout::Rgb);
     let reference = |c: usize, x: usize| ((x + 1) * (c + 1)) as f32;
     let affine = [(2.0f32, 1.0f32), (0.5, -0.25)];
     let reaches = |frame: usize, channel: usize| -> std::ops::Range<usize> {
@@ -1309,7 +1300,7 @@ fn per_channel_frames_are_normalized_pair_by_pair() {
 ///   (2, 1/2).
 #[test]
 fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
-    let dimensions = ImageDimensions::new((6, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((6, 1), ChannelLayout::Rgb);
     let frames = |jitter: [f32; 3]| -> Vec<StoredFrame> {
         let shape = [(1.0f32, 0.0f32, 0..6), (2.0, 1.0, 0..3), (0.5, -0.25, 3..6)];
         let figures = [
@@ -1416,7 +1407,7 @@ fn a_pair_too_thin_to_fit_yields_to_the_per_frame_norms() {
 /// of 1.24) does not clear.
 #[test]
 fn per_channel_frames_sharing_no_pixel_are_normalized_one_by_one() {
-    let dimensions = ImageDimensions::new((4, 1), ChannelLayout::Rgb);
+    let dimensions = PlanarDesc::new((4, 1), ChannelLayout::Rgb);
     let frame = |reached: usize, median: f32, noise: f32, spread: f32| {
         let mut admitted = channel_stats(&[(median, 0.0); 3]);
         let stats = &mut admitted.stats;
@@ -1521,7 +1512,7 @@ fn the_working_set_is_what_the_measurement_holds() {
     use crate::combine::frame_read::slots::Slots;
     use crate::combine::normalization::Normalization;
 
-    let dimensions = ImageDimensions::new((100, 100), ChannelLayout::Mono);
+    let dimensions = PlanarDesc::new((100, 100), ChannelLayout::Mono);
     let mono = Slots::new(None, 1);
     let bytes = |slots, normalization, coverage, threads| {
         PlannedNormalization {

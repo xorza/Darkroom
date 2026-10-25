@@ -86,6 +86,15 @@ impl ColorFormat {
         self.channel_count.count() * self.sample_type.byte_len()
     }
 
+    /// This format with its alpha channel dropped: RGBA is RGB, and any other format is itself.
+    #[must_use]
+    pub const fn without_alpha(self) -> Self {
+        match self.channel_count {
+            ChannelCount::Rgba => Self::new(ChannelCount::Rgb, self.sample_type),
+            ChannelCount::Mono | ChannelCount::Rgb => self,
+        }
+    }
+
     /// Whether the last channel is alpha.
     pub const fn has_alpha(self) -> bool {
         matches!(self.channel_count, ChannelCount::Rgba)

@@ -4,18 +4,18 @@ use std::fmt::Debug;
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
+use imaginarium::PlanarDesc;
 
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flag_counts::FlagCounts;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::pixel_flags::PixelFlags;
 
 /// An image as the frame layer reads it: its planes, flags, metadata and pattern, whatever its
 /// type. Reading one from a file is a [`Decoder`](crate::io::decoder::Decoder)'s.
 pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
-    fn dimensions(&self) -> ImageDimensions;
+    fn desc(&self) -> PlanarDesc;
     fn channel(&self, channel: usize) -> &Buffer2<f32>;
     fn metadata(&self) -> &ImageMetadata;
     /// The sensor pattern of an undemosaiced sensor frame; `None` for any other image.

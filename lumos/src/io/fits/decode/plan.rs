@@ -8,9 +8,9 @@ use fits_well::image::{
 };
 use fits_well::io::StreamSource;
 use fits_well::{FitsError, ImageReader};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::image::sample_domain::ScaleOrigin;
 use crate::io::fits::CHUNK_BYTES;
 use crate::io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
@@ -84,7 +84,7 @@ impl<'a> FitsHduDescription<'a> {
         )?;
         let row_samples = dimensions
             .width()
-            .checked_mul(dimensions.channels())
+            .checked_mul(dimensions.channel_count())
             .ok_or_else(|| overflow(FitsAllocation::OutputRow))?;
         let row_f32_bytes = row_samples
             .checked_mul(size_of::<f32>())
@@ -252,7 +252,7 @@ impl<'a> FitsHduDescription<'a> {
 #[derive(Debug)]
 pub(super) struct FitsDecodePlan {
     pub(super) shape: Vec<usize>,
-    pub(super) dimensions: ImageDimensions,
+    pub(super) dimensions: PlanarDesc,
     pub(super) sample_type: SampleType,
     pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See
@@ -367,7 +367,7 @@ fn checked_bytes(
 pub(super) fn dimensions_from_shape(
     shape: &[usize],
     cube: FitsCubeInterpretation,
-) -> Result<ImageDimensions, FitsLoadError> {
+) -> Result<PlanarDesc, FitsLoadError> {
     if shape.contains(&0) {
         return Err(FitsLoadError::from(FitsRefusal::ZeroAxis {
             shape: shape.to_vec(),
@@ -392,7 +392,7 @@ pub(super) fn dimensions_from_shape(
             }));
         }
     };
-    if width > ImageDimensions::MAX_SIDE || height > ImageDimensions::MAX_SIDE {
+    if width > MAX_SIDE || height > MAX_SIDE {
         return Err(FitsLoadError::from(FitsRefusal::SideTooLong {
             width,
             height,
@@ -406,7 +406,7 @@ pub(super) fn dimensions_from_shape(
                 shape: shape.to_vec(),
             })
         })?;
-    Ok(ImageDimensions::new((width, height), channels))
+    Ok(PlanarDesc::new((width, height), channels))
 }
 
 #[cfg(test)]

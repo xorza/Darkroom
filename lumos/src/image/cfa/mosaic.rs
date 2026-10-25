@@ -1,11 +1,11 @@
 //! [`Mosaic`]: a color filter pattern over a sensor's photosites.
 
+use imaginarium::ChannelLayout;
 use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_provenance::ColorProvenance;
 use common::Vec2us;
 

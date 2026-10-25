@@ -7,6 +7,7 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 use bytemuck::Pod;
 use common::Buffer2;
+use imaginarium::PlanarDesc;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
@@ -22,7 +23,6 @@ use crate::frame_store::stored_plane::{PublishedPlane, StoredPlane};
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::flat_gain::{FlatGain, GainGrid};
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::stackable_image::{ImageParts, StackableImage};
 use common::Size2us;
@@ -152,7 +152,7 @@ impl KeptFrame {
                 },
             digests,
         } = committed;
-        let channels = (0..dimensions.channels())
+        let channels = (0..dimensions.channel_count())
             .map(|channel| FrameSpill::map(&spill.channel_path(channel)))
             .collect::<Option<_>>()?;
         let flags = match flags {
@@ -194,7 +194,7 @@ impl KeptFrame {
         })
     }
 
-    pub(crate) const fn dimensions(&self) -> ImageDimensions {
+    pub(crate) const fn desc(&self) -> PlanarDesc {
         self.image.dimensions
     }
 
@@ -237,7 +237,7 @@ impl KeptFrame {
             digests,
         } = committed;
         let size = dimensions.size();
-        if digests.channels.len() != dimensions.channels() {
+        if digests.channels.len() != dimensions.channel_count() {
             return None;
         }
         let pixels = size.pixel_count();

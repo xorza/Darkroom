@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use common::{CancelToken, TempDir};
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
@@ -31,8 +32,6 @@ use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::stretch::{ColorMode, Stretch, StretchMethod};
 use crate::ingest::ingest_config::IngestConfig;
@@ -82,8 +81,8 @@ fn assert_snapshot(stage: &str, snapshot: &Snapshot, expected: &str) {
 }
 
 fn image_snapshot(snapshot: &mut Snapshot, image: &LinearImage) {
-    snapshot.count(image.channels());
-    for channel in 0..image.channels() {
+    snapshot.count(image.channel_count());
+    for channel in 0..image.channel_count() {
         snapshot.f32s(image.channel(channel).pixels());
     }
 }
@@ -141,7 +140,7 @@ fn decode_snapshot() {
     let size = Size2us::new(48, 40);
     let channels = [0x61, 0x62, 0x63].map(|seed| star_field(size, 10, seed).image);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new(size, ChannelLayout::Rgb),
+        PlanarDesc::new(size, ChannelLayout::Rgb),
         channels
             .iter()
             .map(|image| image.channel(0).pixels().to_vec()),
@@ -444,7 +443,7 @@ fn stretch_snapshot() {
     let size = Size2us::new(96, 96);
     let channels = [0x51, 0x52, 0x53].map(|seed| star_field(size, 20, seed).image);
     let rgb = LinearImage::from_planar_channels(
-        ImageDimensions::new(size, ChannelLayout::Rgb),
+        PlanarDesc::new(size, ChannelLayout::Rgb),
         channels
             .iter()
             .map(|image| image.channel(0).pixels().to_vec()),

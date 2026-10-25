@@ -1,11 +1,10 @@
+use imaginarium::RasterFormat;
 use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::{Path, PathBuf};
-
-use imaginarium::RasterFormat;
 use thiserror::Error;
 
-use crate::image::image_dimensions::ImageDimensions;
+use crate::image::frame_desc::MAX_SIDE;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::null_policy::NullSamples;
 use crate::io::raw::error::RawError;
@@ -195,11 +194,9 @@ impl Display for ScientificRefusal {
                 "PNG and JPEG are preview-only because their transfer and color transforms are \
                  not decoded"
             ),
-            Self::RasterSideTooLong { width, height } => write!(
-                f,
-                "{width}x{height} has a side past {} px",
-                ImageDimensions::MAX_SIDE
-            ),
+            Self::RasterSideTooLong { width, height } => {
+                write!(f, "{width}x{height} has a side past {MAX_SIDE} px")
+            }
             Self::IntegerRaster => {
                 write!(f, "scientific raster input must be a floating-point TIFF")
             }

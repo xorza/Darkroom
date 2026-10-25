@@ -6,6 +6,7 @@ use common::{Buffer2, TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::io::{ChecksumReport, ChecksumStatus};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::frame::frame_stats::FrameStats;
 use crate::image::calibration_state::CalibrationState;
@@ -15,12 +16,10 @@ use crate::image::cfa::cfa_type::*;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::image::observation_header::ObservationHeader;
@@ -648,7 +647,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     let info = LoadCtx::default().cfa_peek(&path).unwrap().info;
     assert_eq!(
         info.dimensions,
-        ImageDimensions::new((2, 2), ChannelLayout::Mono)
+        PlanarDesc::new((2, 2), ChannelLayout::Mono)
     );
     assert_eq!(
         info.cfa_type,

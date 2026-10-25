@@ -1,12 +1,12 @@
 //! [`PlannedNormalization`]: a normalization as a memory plan prices it, before its frames exist.
 
 use arrayvec::ArrayVec;
+use imaginarium::PlanarDesc;
 
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::Normalization;
 use crate::combine::normalization::common_domain::CommonDomain;
 use crate::frame_store::stratified_samples::StratifiedSamples;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::radix_median::RadixMedian;
 
 /// How a set's frames cover the pixels, which decides where
@@ -26,7 +26,7 @@ pub(crate) enum SetCoverage {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlannedNormalization {
     pub(crate) frame_count: usize,
-    pub(crate) dimensions: ImageDimensions,
+    pub(crate) dimensions: PlanarDesc,
     pub(crate) slots: Slots,
     pub(crate) normalization: Normalization,
     pub(crate) coverage: SetCoverage,

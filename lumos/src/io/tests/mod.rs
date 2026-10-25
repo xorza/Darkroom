@@ -2,13 +2,13 @@
 mod real_data;
 mod synthetic;
 
-use common::{Buffer2, Size2us, TempDir, fs};
+use common::{Size2us, TempDir, fs};
 use fits_well::image::SampleType;
-use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage, RasterFormat};
+use imaginarium::{
+    ChannelLayout, ColorFormat, InterleavedDesc, InterleavedImage, PlanarDesc, RasterFormat,
+};
 
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::image::linear_image::LinearImage;
@@ -29,56 +29,6 @@ fn metadata_default() {
     assert!(meta.header.object.is_none());
     assert!(meta.header.camera_white_balance.is_none());
     assert!(meta.derived.provenance().is_none());
-}
-
-#[test]
-fn convert_to_imaginarium_image_mono() {
-    let astro = LinearImage::from_interleaved(
-        ImageDimensions::new((3, 2), ChannelLayout::Mono),
-        vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
-    );
-
-    let image: InterleavedImage = astro.into();
-    let desc = image.desc();
-
-    assert_eq!(desc.size.width, 3);
-    assert_eq!(desc.size.height, 2);
-    assert_eq!(desc.color_format, ColorFormat::MONO_F32);
-
-    let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-    assert_eq!(pixels.len(), 6);
-    assert_eq!(pixels[0], 0.0);
-    assert_eq!(pixels[1], 0.25);
-    assert_eq!(pixels[4], 1.0);
-}
-
-#[test]
-fn convert_to_imaginarium_image_rgb() {
-    let astro = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
-        vec![
-            1.0, 0.0, 0.0, // red
-            0.0, 1.0, 0.0, // green
-            0.0, 0.0, 1.0, // blue
-            1.0, 1.0, 1.0, // white
-        ],
-    );
-
-    let image: InterleavedImage = astro.into();
-    let desc = image.desc();
-
-    assert_eq!(desc.size.width, 2);
-    assert_eq!(desc.size.height, 2);
-    assert_eq!(desc.color_format, ColorFormat::RGB_F32);
-
-    let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
-    assert_eq!(pixels.len(), 12);
-    assert_eq!(pixels[0], 1.0);
-    assert_eq!(pixels[1], 0.0);
-    assert_eq!(pixels[2], 0.0);
-    assert_eq!(pixels[9], 1.0);
-    assert_eq!(pixels[10], 1.0);
-    assert_eq!(pixels[11], 1.0);
 }
 
 #[test]
@@ -106,7 +56,7 @@ fn load_full_example_fits() {
 
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
-    assert_eq!(image.channels(), 1);
+    assert_eq!(image.channel_count(), 1);
     assert!(image.is_mono());
     assert_eq!(image.pixel_count(), 10000);
     assert_eq!(image.metadata.header.sample_type, Some(SampleType::I32));
@@ -116,7 +66,7 @@ fn load_full_example_fits() {
     // recoverable. The sample is that quotient narrowed once.
     let physical_scale = image.metadata.derived.domain().unwrap().scale;
     assert_eq!(physical_scale, 4_294_967_295.0);
-    let pixel = image.channel(0)[image.dimensions().size().idx_of(Vec2us::new(5, 20))];
+    let pixel = image.channel(0)[image.desc().size().idx_of(Vec2us::new(5, 20))];
     assert_eq!(pixel, (152.0 / 4_294_967_295.0_f64) as f32);
     assert_close!(f64::from(pixel) * physical_scale, 152.0, 1e-5, "{pixel}");
 
@@ -127,21 +77,6 @@ fn load_full_example_fits() {
     assert!(image.metadata.header.image_type.is_none());
 }
 
-#[test]
-fn from_image_no_stride_padding() {
-    let desc = InterleavedDesc::new(Size2us::new(3, 2), ColorFormat::MONO_F32);
-    let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-    let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
-    let image = InterleavedImage::new_with_data(desc, bytes).unwrap();
-
-    let linear = LinearImage::from(&image);
-
-    assert_eq!(linear.width(), 3);
-    assert_eq!(linear.height(), 2);
-    assert_eq!(linear.channels(), 1);
-    assert_eq!(linear.channel(0).pixels(), &*pixels);
-}
-
 /// A saved TIFF reloads with the same dimensions and the same f32 samples, mono and color.
 #[test]
 fn saved_tiff_round_trips_its_samples() {
@@ -150,14 +85,14 @@ fn saved_tiff_round_trips_its_samples() {
         (
             "mono.tiff",
             LinearImage::from_interleaved(
-                ImageDimensions::new((2, 2), ChannelLayout::Mono),
+                PlanarDesc::new((2, 2), ChannelLayout::Mono),
                 vec![0.1, 0.2, 0.3, 0.4],
             ),
         ),
         (
             "rgb.tiff",
             LinearImage::from_interleaved(
-                ImageDimensions::new((2, 2), ChannelLayout::Rgb),
+                PlanarDesc::new((2, 2), ChannelLayout::Rgb),
                 vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.25],
             ),
         ),
@@ -165,8 +100,8 @@ fn saved_tiff_round_trips_its_samples() {
         let output_path = dir.join(name);
         image.write_raster(&output_path).unwrap();
         let loaded = LoadCtx::default().linear(&output_path).unwrap();
-        assert_eq!(loaded.dimensions(), image.dimensions(), "{name}");
-        for channel in 0..image.channels() {
+        assert_eq!(loaded.desc(), image.desc(), "{name}");
+        for channel in 0..image.channel_count() {
             assert_eq!(
                 loaded.channel(channel).pixels(),
                 image.channel(channel).pixels(),
@@ -316,7 +251,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 fn save_invalid_extension() {
     let dir = TempDir::new("lumos-io-image");
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Mono),
+        PlanarDesc::new((2, 2), ChannelLayout::Mono),
         vec![0.1, 0.2, 0.3, 0.4],
     );
     let output_path = dir.join("astro_save_invalid.xyz");
@@ -327,58 +262,9 @@ fn save_invalid_extension() {
 }
 
 #[test]
-fn roundtrip_linear_to_image_to_linear() {
-    let mono = LinearImage::from_interleaved(
-        ImageDimensions::new((3, 2), ChannelLayout::Mono),
-        vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
-    );
-
-    let image: InterleavedImage = mono.clone().into();
-    let restored = LinearImage::from(&image);
-
-    assert_eq!(restored.dimensions(), mono.dimensions());
-    for (a, b) in mono.channel(0).iter().zip(restored.channel(0).iter()) {
-        assert_close!(*a, *b, 1e-6);
-    }
-
-    let rgb = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
-        vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
-    );
-
-    let image: InterleavedImage = rgb.clone().into();
-    let restored = LinearImage::from(&image);
-
-    assert_eq!(restored.dimensions(), rgb.dimensions());
-    for c in 0..rgb.channels() {
-        for (a, b) in rgb.channel(c).iter().zip(restored.channel(c).iter()) {
-            assert_close!(*a, *b, 1e-6);
-        }
-    }
-}
-
-#[test]
-fn image_rgba_to_linear_drops_alpha() {
-    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32);
-    let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
-    let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
-    let image = InterleavedImage::new_with_data(desc, bytes).unwrap();
-
-    let linear = LinearImage::from(&image);
-
-    assert_eq!(linear.channels(), 3);
-    assert_close!(linear.channel(0)[0], 1.0, 1e-6);
-    assert_close!(linear.channel(1)[0], 0.0, 1e-6);
-    assert_close!(linear.channel(2)[0], 0.0, 1e-6);
-    assert_close!(linear.channel(0)[1], 0.0, 1e-6);
-    assert_close!(linear.channel(1)[1], 1.0, 1e-6);
-    assert_close!(linear.channel(2)[1], 0.0, 1e-6);
-}
-
-#[test]
 fn rgb_image_creation_and_operations() {
     let image = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
+        PlanarDesc::new((2, 2), ChannelLayout::Rgb),
         vec![
             10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
         ],
@@ -386,115 +272,8 @@ fn rgb_image_creation_and_operations() {
 
     assert_eq!(image.width(), 2);
     assert_eq!(image.height(), 2);
-    assert_eq!(image.channels(), 3);
+    assert_eq!(image.channel_count(), 3);
     assert!(!image.is_mono());
     assert_eq!(image.pixel_count(), 4);
     assert_eq!(image.sample_count(), 12);
-}
-
-/// `from_interleaved` takes interleaved samples and splits them into row-major planes.
-#[test]
-fn from_interleaved_splits_samples_into_planes() {
-    let image = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Rgb),
-        vec![
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
-        ],
-    );
-    assert_eq!(image.channel(0).pixels(), &[1.0, 4.0, 7.0, 10.0]);
-    assert_eq!(image.channel(1).pixels(), &[2.0, 5.0, 8.0, 11.0]);
-    assert_eq!(image.channel(2).pixels(), &[3.0, 6.0, 9.0, 12.0]);
-}
-
-#[test]
-fn from_planar_channels_mono() {
-    let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
-    let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 2), ChannelLayout::Mono),
-        channels,
-    );
-
-    assert!(image.is_mono());
-    assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
-
-    let plane = Buffer2::new((2, 2), vec![5.0, 6.0, 7.0, 8.0]);
-    let pixels = plane.pixels().as_ptr();
-    let image = LinearImage::from(plane);
-    assert_eq!(
-        image.dimensions(),
-        ImageDimensions::new((2, 2), ChannelLayout::Mono)
-    );
-    assert_eq!(image.channel(0).pixels(), &[5.0, 6.0, 7.0, 8.0]);
-    assert_eq!(image.channel(0).pixels().as_ptr(), pixels);
-}
-
-#[test]
-fn from_planar_channels_rgb() {
-    let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), ChannelLayout::Rgb),
-        vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
-    );
-
-    assert!(image.is_rgb());
-    assert_eq!(image.channel(0).pixels(), &[1.0, 2.0]);
-    assert_eq!(image.channel(1).pixels(), &[3.0, 4.0]);
-    assert_eq!(image.channel(2).pixels(), &[5.0, 6.0]);
-
-    let planes = [
-        Buffer2::new((2, 1), vec![7.0, 8.0]),
-        Buffer2::new((2, 1), vec![9.0, 10.0]),
-        Buffer2::new((2, 1), vec![11.0, 12.0]),
-    ];
-    let green_pixels = planes[1].pixels().as_ptr();
-    let image = LinearImage::from(planes);
-    assert_eq!(
-        image.dimensions(),
-        ImageDimensions::new((2, 1), ChannelLayout::Rgb)
-    );
-    assert_eq!(image.channel(0).pixels(), &[7.0, 8.0]);
-    assert_eq!(image.channel(1).pixels(), &[9.0, 10.0]);
-    assert_eq!(image.channel(2).pixels(), &[11.0, 12.0]);
-    assert_eq!(image.channel(1).pixels().as_ptr(), green_pixels);
-}
-
-#[test]
-#[should_panic(expected = "all RGB planes must share width")]
-fn rgb_planes_reject_mismatched_dimensions() {
-    let _image = LinearImage::from([
-        Buffer2::new((2, 1), vec![1.0, 2.0]),
-        Buffer2::new((1, 1), vec![3.0]),
-        Buffer2::new((2, 1), vec![4.0, 5.0]),
-    ]);
-}
-
-/// Both `From` impls run `ImageDimensions::validate` for its panics alone — an empty plane cannot
-/// become a `LinearPixels`. Pinned because the check has no return value, so nothing else would
-/// notice it being dropped as dead code.
-#[test]
-#[should_panic(expected = "width must be positive")]
-fn single_plane_rejects_an_empty_image() {
-    let _image = LinearImage::from(Buffer2::<f32>::new((0, 4), vec![]));
-}
-
-#[test]
-#[should_panic(expected = "height must be positive")]
-fn rgb_planes_reject_an_empty_image() {
-    let _image = LinearImage::from([
-        Buffer2::<f32>::new((4, 0), vec![]),
-        Buffer2::<f32>::new((4, 0), vec![]),
-        Buffer2::<f32>::new((4, 0), vec![]),
-    ]);
-}
-
-#[test]
-fn channel_mut_writes_through_to_the_plane() {
-    let mut image = LinearImage::from_interleaved(
-        ImageDimensions::new((2, 2), ChannelLayout::Mono),
-        vec![1.0, 2.0, 3.0, 4.0],
-    );
-
-    image.channel_mut(0)[0] = 10.0;
-    image.channel_mut(0)[3] = 40.0;
-
-    assert_eq!(image.channel(0).pixels(), &[10.0, 2.0, 3.0, 40.0]);
 }

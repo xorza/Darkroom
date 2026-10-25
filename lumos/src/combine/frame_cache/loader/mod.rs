@@ -20,6 +20,7 @@ use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_frame::{SetKind, StoredFrame};
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::image::error::FrameDimensionMismatch;
+use crate::image::frame_desc;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::stackable_image::StackableImage;
 use crate::ingest::frame_check::FrameCheck;
@@ -61,7 +62,7 @@ fn stages(
             count: frame_count,
             dimensions,
             layout: StoredLayout::decoded(dimensions),
-            slots: Slots::new(frame.mosaic, dimensions.channels()),
+            slots: Slots::new(frame.mosaic, dimensions.channel_count()),
             coverage: SetCoverage::Common,
             workers,
         },
@@ -130,7 +131,7 @@ where
     );
 
     // A kept frame writes its gain too, a spilled one only its planes: its gain is the run's.
-    let frame_bytes = dimensions.decoded_bytes() as u64;
+    let frame_bytes = frame_desc::decoded_byte_len(dimensions) as u64;
     let writes = RunWrites {
         kept: (files.uncached() as u64)
             .saturating_mul(frame_bytes.saturating_add(peek.info.gain_bytes as u64)),
@@ -259,8 +260,8 @@ impl<D: Decoder, S: FrameStep<D::Image>> FrameStore<'_, D, S> {
     /// Frame `idx` as a run before kept it, held to the set's shape and facts and to the planes'
     /// checks, as a decode is on admission.
     fn reused(&self, idx: usize, reused: KeptFrame) -> Result<LoadedFrame, StackError> {
-        let dimensions = self.intake.dimensions();
-        FrameDimensionMismatch::check(idx, dimensions, reused.dimensions())?;
+        let dimensions = self.intake.desc();
+        FrameDimensionMismatch::check(idx, dimensions, reused.desc())?;
         self.intake.check_facts(idx, &reused.admitted.facts)?;
         let metadata = (idx == 0).then(|| reused.image.metadata.clone());
         let frame = reused.into_frame();

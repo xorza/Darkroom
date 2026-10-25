@@ -79,15 +79,14 @@ pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 pub use image::cfa::mosaic::Mosaic;
 pub use image::cfa::xtrans_pattern::XTransPattern;
-pub use image::channel_layout::ChannelLayout;
 pub use image::dark_comparison::DarkComparison;
 pub use image::derived_facts::DerivedFacts;
-pub use image::error::{DimensionsError, FrameDimensionMismatch, XTransPatternError};
+pub use image::error::{FrameDescError, FrameDimensionMismatch, XTransPatternError};
 pub use image::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 pub use image::fits_transfer_provenance::{FitsHduProvenance, FitsTransferProvenance};
 pub use image::flat_gain::FlatGain;
 pub use image::flat_gain::frame_gain::FrameGain;
-pub use image::image_dimensions::ImageDimensions;
+pub use image::frame_desc;
 pub use image::image_metadata::ImageMetadata;
 pub use image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer,

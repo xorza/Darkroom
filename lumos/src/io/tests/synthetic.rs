@@ -14,7 +14,7 @@ use fits_well::error::ValueKind;
 use fits_well::header::{Header, RecordName, keywords};
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
-use imaginarium::ColorFormat;
+use imaginarium::{ChannelLayout, ColorFormat, PlanarDesc};
 
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::combine::error::StackError;
@@ -29,9 +29,7 @@ use crate::drizzle::error::DrizzleError;
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::shared_gains::SharedGains;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_flags::QualityFlags;
 use crate::image::sample_domain::{DomainMap, ScaleOrigin};
@@ -151,7 +149,7 @@ fn fits_float32_round_trips_pixels_and_order() {
     let loaded = write_and_load("float32", &image).unwrap();
     assert_eq!(loaded.width(), size.width);
     assert_eq!(loaded.height(), size.height);
-    assert_eq!(loaded.channels(), 1);
+    assert_eq!(loaded.channel_count(), 1);
     assert_eq!(loaded.channel(0).pixels(), pixels);
 }
 
@@ -887,7 +885,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(
         Some(info),
         Some(FrameInfo {
-            dimensions: ImageDimensions::new((size.width, size.height), ChannelLayout::Mono),
+            dimensions: PlanarDesc::new((size.width, size.height), ChannelLayout::Mono),
             cfa_type: pattern,
             decoder: DecoderBytes {
                 source: 0,

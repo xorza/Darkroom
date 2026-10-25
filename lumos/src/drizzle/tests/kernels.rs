@@ -8,7 +8,8 @@ use std::f64::consts::PI;
 use glam::DVec2;
 
 use super::*;
-use crate::image::channel_layout::ChannelLayout;
+use imaginarium::ChannelLayout;
+
 use crate::internals::images::rgb_image;
 use common::Vec2us;
 
@@ -418,7 +419,7 @@ fn a_drop_deposits_its_pixel_weight() {
     weights[(pixel.x, pixel.y)] = 2.5;
     for kernel in DrizzleKernel::ALL {
         let mut acc = accumulator(
-            ImageDimensions::new(size, ChannelLayout::Mono),
+            PlanarDesc::new(size, ChannelLayout::Mono),
             usual_config(kernel),
         );
         acc.add_image(
@@ -486,7 +487,7 @@ fn a_zero_pixel_weight_keeps_the_pixel_out() {
             "{kernel:?}"
         );
 
-        let mut alone = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), config);
+        let mut alone = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), config);
         alone.add_image(
             constant_image(size, 4.0),
             &transform,
@@ -511,7 +512,7 @@ fn pixel_weights_scale_their_pixel_share() {
     let mut half = Buffer2::new_filled((4, 4), 1.0f32);
     half[(1, 1)] = 0.5;
     let mut acc = accumulator(
-        ImageDimensions::new(size, ChannelLayout::Mono),
+        PlanarDesc::new(size, ChannelLayout::Mono),
         kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
     acc.add_image(
@@ -635,7 +636,7 @@ fn rgb_channels_drizzle_independently() {
     };
     let image = rgb_image(size, [plane(1.0), plane(2.0), plane(3.0)]);
     let mut acc = accumulator(
-        ImageDimensions::new(size, ChannelLayout::Rgb),
+        PlanarDesc::new(size, ChannelLayout::Rgb),
         kernel_config(DrizzleKernel::Turbo, 2.0, 0.8),
     );
     acc.add_image(image, &Transform::identity(), None);
@@ -663,10 +664,7 @@ fn a_zero_lanczos_tap_marks_no_coverage() {
     let pixel = Vec2us::new(6, 6);
     let config = kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0);
     let shift = Transform::translation(DVec2::new(0.5, 0.0));
-    let mut alone = accumulator(
-        ImageDimensions::new(size, ChannelLayout::Mono),
-        config.clone(),
-    );
+    let mut alone = accumulator(PlanarDesc::new(size, ChannelLayout::Mono), config.clone());
     alone.add_image(constant_image(size, 1.0), &shift, Some(&only(size, pixel)));
     let zero_cells: Vec<(usize, usize)> = (4..=10)
         .flat_map(|x| [(x, 3), (x, 9)])

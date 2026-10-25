@@ -9,9 +9,8 @@
 
 use common::Buffer2;
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::channel_layout::ChannelLayout;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::camera::Camera;
 use crate::internals::synthetic::noise::{DarkCurrent, ReadNoise, apply_shot_noise};
@@ -155,7 +154,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         *p = p.clamp(0.0, camera.saturation);
     }
 
-    let dims = ImageDimensions::new((width, height), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((width, height), ChannelLayout::Mono);
     let mut image = LinearImage::from_planar_channels(dims, [raw]);
     image.metadata.header.image_type = Some("Light".to_string());
     image.metadata.header.exposure_time = Some(f64::from(obs.exposure_s));

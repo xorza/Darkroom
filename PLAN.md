@@ -180,17 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 8. Both layouts in imaginarium
-
-- [ ] `PlanarImage`, `PlanarDesc` and `ChannelLayout` move to imaginarium; the
-  layout conversions move with them. lumos's `LinearPixels`,
-  `ImageDimensions` and `ChannelLayout` go, and lumos keeps `MAX_SIDE` as its
-  decode limit. Proof: the conversion tests move along; a round trip of each
-  of the nine formats through the planes is exact for the formats planes hold.
-- [ ] `InterleavedImage::without_alpha`, and no lossy `From`. Proof: an RGBA
-  image refuses a `TryFrom` into planes; `without_alpha` keeps the color
-  channels exactly.
-
 ### 9. Errors
 
 - [ ] `Error` splits into `CodecError`, `DescError`, `PlanesError` and
@@ -295,3 +284,27 @@ with every other edit.
   run of samples are `contiguous`, as `flat` is a flat field in lumos. The
   shaders' uniforms take `byte_len`, `sample_byte_len` and `channel_count`
   with the Rust side.
+- Batch 8, `PlanarImage`: its planes are private, so no caller builds three
+  planes of two sizes; `From` a plane or three checks them. lumos's
+  `ImageParts` keeps its `ArrayVec`, which `into_mono` and `into_rgb` fill,
+  so imaginarium takes no `arrayvec`. `DescError` comes now, with
+  `PlanarDesc`; batch 9 gives it to `InterleavedDesc` too.
+- Batch 8, the side limit: `lumos::frame_desc` holds `MAX_SIDE`, `checked`
+  (a `PlanarDesc` or a `FrameDescError`, which replaces `DimensionsError`) and
+  the decode byte counts `ImageDimensions` held. `LinearImage::new` and
+  `CfaImage::from_plane` assert the limit, which `ImageDimensions` asserted on
+  every construction. The four readers of untrusted sizes (the drizzle grid,
+  a flat gain record, a kept frame, lens's cache) check it with `checked`,
+  which is public for lens.
+- Batch 8, names: `dimensions()` returning the descriptor is `desc()`, as
+  `InterleavedImage::desc`, on `LinearImage`, `CfaImage`, `StackableImage`
+  and the frame types; `DefectMap` and `DetectionResources` keep
+  `dimensions()` for their `Size2us`. `LinearImage::channels` is
+  `channel_count`. `LinearImage::color_format` went:
+  `PlanarDesc::color_format` and `From<PlanarDesc> for InterleavedDesc` say
+  it.
+- Batch 8, the alpha drop: `LinearImage` takes a `PlanarImage`, and its lossy
+  `From` impls went. lumos's preview decode and both lens crossings name
+  `without_alpha`; lens's borrowed crossing of an image with alpha copies it
+  first, as the drop takes the image. The linear decode refuses alpha, as it
+  did.

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use common::{CancelToken, TempDir, fs};
 use fits_well::image::{Image as FitsImage, Scaling};
 use glam::DVec2;
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_set::CalibrationSet;
@@ -22,9 +23,7 @@ use crate::combine::stack_config::weighting::Weighting;
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
-use crate::image::channel_layout::ChannelLayout;
 use crate::image::error::FrameDimensionMismatch;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
@@ -198,7 +197,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 #[test]
 fn drops_unregisterable_frame_and_stacks_the_rest() {
     let base = base_field();
-    let dims = base.dimensions();
+    let dims = base.desc();
     // A flat frame has no stars → registration fails → it is dropped, not fatal. Two of them, at
     // non-adjacent indices, so `dropped` also pins its documented ascending order — no sort
     // produces that, only rayon's order-preserving indexed `collect`.
@@ -311,11 +310,11 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     // sits ahead of registration; frame 1 is the first mismatch even though frame 2 also differs.
     let base = base_field();
     let odd = LinearImage::from_interleaved(
-        ImageDimensions::new((128, 128), ChannelLayout::Mono),
+        PlanarDesc::new((128, 128), ChannelLayout::Mono),
         vec![0.1; 128 * 128],
     );
     let odder = LinearImage::from_interleaved(
-        ImageDimensions::new((64, 64), ChannelLayout::Mono),
+        PlanarDesc::new((64, 64), ChannelLayout::Mono),
         vec![0.1; 64 * 64],
     );
 
@@ -336,14 +335,8 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
         panic!("expected a dimension mismatch, got {error:?}");
     };
     assert_eq!(idx, 1);
-    assert_eq!(
-        expected,
-        ImageDimensions::new((256, 256), ChannelLayout::Mono)
-    );
-    assert_eq!(
-        actual,
-        ImageDimensions::new((128, 128), ChannelLayout::Mono)
-    );
+    assert_eq!(expected, PlanarDesc::new((256, 256), ChannelLayout::Mono));
+    assert_eq!(actual, PlanarDesc::new((128, 128), ChannelLayout::Mono));
 }
 
 #[test]
@@ -393,7 +386,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     // report `AllFramesDropped` and never mention the config at all. Validating up front means
     // the config is blamed, and nothing upstream is paid for.
     let base = base_field();
-    let dims = base.dimensions();
+    let dims = base.desc();
     let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![base, blank(), blank()];
 
@@ -435,7 +428,7 @@ fn all_non_reference_frames_dropped_errors() {
     // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
     let base = base_field();
-    let dims = base.dimensions();
+    let dims = base.desc();
     let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
     let frames = vec![base, blank(), blank()];
@@ -462,7 +455,7 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
     let base = base_field();
     // Frame 0 is a near-blank with fewer stars than registration needs, so Auto chooses among the
     // other two, whatever its FWHM.
-    let dims = base.dimensions();
+    let dims = base.desc();
     let sparse = LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
 
@@ -491,7 +484,7 @@ fn auto_reference_passes_over_a_frame_without_enough_stars() {
 #[test]
 fn a_combine_error_names_the_input_light() {
     let base = base_field();
-    let dims = base.dimensions();
+    let dims = base.desc();
     let blank = LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
     let lowered = LinearImage::from_interleaved(
         dims,
@@ -549,7 +542,7 @@ fn public_input_errors() {
         ..AlignStackConfig::default()
     };
     let image =
-        LinearImage::from_interleaved(ImageDimensions::new((1, 1), ChannelLayout::Mono), vec![0.0]);
+        LinearImage::from_interleaved(PlanarDesc::new((1, 1), ChannelLayout::Mono), vec![0.0]);
     let error = config
         .align_stack_images(
             vec![image],
@@ -564,7 +557,7 @@ fn public_input_errors() {
 
     // Checked at entry, before any frame is worked: a weight count that does not match the
     // lights, a cosmic-ray config the detector cannot run, and a light with a non-finite sample.
-    let dims = ImageDimensions::new((4, 4), ChannelLayout::Mono);
+    let dims = PlanarDesc::new((4, 4), ChannelLayout::Mono);
     let flat = || LinearImage::from_interleaved(dims, vec![0.1; 16]);
     let run = |lights: Vec<LinearImage>, config: &AlignStackConfig| {
         config
@@ -647,7 +640,7 @@ fn the_raw_front_end_checks_each_light_at_decode() {
     let scratch = TempDir::new("lumos_decode_checks");
     let flat = |side: usize| {
         LinearImage::from_interleaved(
-            ImageDimensions::new((side, side), ChannelLayout::Mono),
+            PlanarDesc::new((side, side), ChannelLayout::Mono),
             vec![0.1; side * side],
         )
     };
@@ -682,8 +675,8 @@ fn the_raw_front_end_checks_each_light_at_decode() {
         (idx, expected, actual),
         (
             2,
-            ImageDimensions::new((32, 32), ChannelLayout::Mono),
-            ImageDimensions::new((16, 16), ChannelLayout::Mono)
+            PlanarDesc::new((32, 32), ChannelLayout::Mono),
+            PlanarDesc::new((16, 16), ChannelLayout::Mono)
         )
     );
 
@@ -952,7 +945,7 @@ fn assert_tiers_stack_as_held(
         ..
     } = lights;
     let held: Vec<LinearImage> = paths.iter().map(|path| ctx.linear(path).unwrap()).collect();
-    assert_eq!(held[0].channels(), 3, "the lights are read as RGB");
+    assert_eq!(held[0].channel_count(), 3, "the lights are read as RGB");
     let expected = config
         .align_stack_images(held, ingest, ProgressMonitor::unattended())
         .unwrap();
@@ -1124,7 +1117,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // that the comparison would silently skip one of the four output planes. Two starless frames
     // at non-adjacent indices fail registration on both tiers, so the drop bookkeeping and its
     // ascending order are compared too.
-    let dims = base.dimensions();
+    let dims = base.desc();
     let blank = || LinearImage::from_interleaved(dims, vec![0.1; dims.pixel_count()]);
     let frames = [
         base.clone(),
@@ -1281,12 +1274,8 @@ fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, lab
         "{label}"
     );
     let (expected, actual) = (&expected.product, &actual.product);
-    assert_eq!(
-        expected.image.dimensions(),
-        actual.image.dimensions(),
-        "{label}"
-    );
-    for channel in 0..expected.image.channels() {
+    assert_eq!(expected.image.desc(), actual.image.desc(), "{label}");
+    for channel in 0..expected.image.channel_count() {
         assert_eq!(
             bits(expected.image.channel(channel).pixels()),
             bits(actual.image.channel(channel).pixels()),
@@ -1359,8 +1348,8 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     // geometry and only finite samples.
     assert_eq!(result.dropped(), Vec::<usize>::new());
     assert_eq!(result.registered(), lights.len());
-    assert_eq!(result.product.image.dimensions(), frame.dimensions());
-    for channel in 0..frame.channels() {
+    assert_eq!(result.product.image.desc(), frame.desc());
+    for channel in 0..frame.channel_count() {
         assert!(
             result
                 .product

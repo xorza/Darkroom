@@ -1,6 +1,7 @@
 //! [`LightFiles`]: lights read from files, and what each goes through before its stars are
 //! detected.
 
+use imaginarium::PlanarDesc;
 use std::path::Path;
 
 use crate::calibration::cosmic_ray;
@@ -8,7 +9,6 @@ use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
 use crate::frame_store::run_storage::RunStorage;
-use crate::image::image_dimensions::ImageDimensions;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
@@ -116,7 +116,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             })?,
             None => 0,
         };
-        let dimensions = ImageDimensions::new(size, info.cfa_type.color_layout());
+        let dimensions = PlanarDesc::new(size, info.cfa_type.color_layout());
         // The decode; the cosmic-ray pass over the mosaic; the demosaic; the statistics, or the
         // detection's noise estimate, beside the demosaiced frame.
         let prepared = info
