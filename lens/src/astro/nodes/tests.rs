@@ -47,8 +47,8 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
 }
 
-/// The node keeps what the decoder stated: a FITS's header and provenance through the planar
-/// path, a TIFF's provenance through the interleaved one, which states no header.
+/// The node keeps what the decoder stated, in planes for either file: a FITS's header and
+/// provenance, and a TIFF's provenance, which states no header.
 #[tokio::test]
 async fn load_astro_image_keeps_the_decoded_metadata() {
     let dir = TempDir::new("lens-load-astro-image");
@@ -63,7 +63,7 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
 
     let library = astro_library(&MlModelPaths::default());
     let load = library.by_name("Load Astro Image").unwrap();
-    for (path, planar, object) in [(&fits, true, Some("M31")), (&tiff, false, None)] {
+    for (path, object, from_fits) in [(&fits, Some("M31"), true), (&tiff, None, false)] {
         let outputs = FuncInvoker::default()
             .call(
                 load,
@@ -72,10 +72,9 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
             .await
             .unwrap();
         let loaded = outputs[0].as_custom::<Image>().unwrap();
-        assert_eq!(
-            matches!(loaded.interleaved(), Cow::Owned(_)),
-            planar,
-            "{path:?} stays in the layout it decoded to"
+        assert!(
+            matches!(loaded.planar(), Cow::Borrowed(_)),
+            "{path:?} decodes to planes"
         );
         let metadata = &loaded.planar().metadata;
         assert_eq!(metadata.header.object.as_deref(), object, "{path:?}");
@@ -83,7 +82,7 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
             .derived
             .provenance()
             .map(|provenance| &provenance.source);
-        if planar {
+        if from_fits {
             assert!(
                 matches!(source, Some(SourceProvenance::Fits(_))),
                 "{source:?}"

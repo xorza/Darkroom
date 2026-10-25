@@ -8,7 +8,6 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
-use crate::image::preview_image::PreviewImage;
 use crate::io::decoder::Peek;
 use crate::io::decoder::cfa_decoder::CfaRead;
 use crate::io::error::{ImageError, ScientificRefusal};
@@ -118,13 +117,14 @@ impl LoadCtx {
         }
     }
 
-    /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG.
-    pub fn preview(&self, path: impl AsRef<Path>) -> Result<PreviewImage, ImageError> {
+    /// Load a display or inspection image from FITS, camera RAW, TIFF, PNG, or JPEG, as planes: a
+    /// mosaic demosaiced, a raster in `f32` with its alpha dropped.
+    pub fn preview(&self, path: impl AsRef<Path>) -> Result<LinearImage, ImageError> {
         let path = path.as_ref();
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_preview(path, self).map(Into::into),
-            InputFormat::CameraRaw => raw::load_preview(path, self).map(Into::into),
+            InputFormat::Fits => fits_decode::load_preview(path, self),
+            InputFormat::CameraRaw => raw::load_preview(path, self),
             InputFormat::Raster(format) => raster::preview(path, format, self),
         }
     }

@@ -13,7 +13,6 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::image_provenance::{ColorProvenance, ImageProvenance};
-use crate::image::preview_image::PreviewImage;
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
@@ -164,16 +163,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let scientific = LoadCtx::default().linear(&float_path).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
     let preview = LoadCtx::default().preview(&float_path).unwrap();
-    assert!(
-        matches!(preview, PreviewImage::Interleaved { .. }),
-        "a raster decode stays interleaved"
-    );
-    let preview: InterleavedImage = LoadCtx::default().preview(&float_path).unwrap().into();
-    assert_eq!(preview.desc().color_format(), ColorFormat::MONO_F32);
-    assert_eq!(
-        bytemuck::cast_slice::<u8, f32>(preview.bytes()),
-        float_pixels
-    );
+    assert!(preview.is_mono());
+    assert_eq!(preview.channel(0).pixels(), float_pixels);
 
     let integer_tiff = dir.join("integer.tiff");
     let png = dir.join("display.png");
@@ -228,7 +219,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     ));
     let alpha_preview = LoadCtx::default().preview(&alpha_path).unwrap();
     assert!(matches!(
-        alpha_preview.metadata().derived.provenance(),
+        alpha_preview.metadata.derived.provenance(),
         Some(ImageProvenance {
             color: ColorProvenance::UnmanagedRaster {
                 alpha_dropped: true

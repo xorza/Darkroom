@@ -14,7 +14,7 @@ use fits_well::error::ValueKind;
 use fits_well::header::{Header, RecordName, keywords};
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
-use imaginarium::{ChannelLayout, ColorFormat, PlanarDesc};
+use imaginarium::{ChannelLayout, PlanarDesc};
 
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::combine::error::StackError;
@@ -51,7 +51,7 @@ use crate::io::null_policy::NullPolicy;
 use crate::progress::progress_monitor::ProgressMonitor;
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance, PreviewImage};
+use crate::{CalibrationMasters, CalibrationSet, CfaType, ColorProvenance};
 use common::{Size2us, Vec2us};
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `decode::load_linear`.
@@ -913,28 +913,19 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 
     let preview = LoadCtx::default().preview(&path).unwrap();
     assert!(matches!(
-        &preview.metadata().derived.provenance(),
+        &preview.metadata.derived.provenance(),
         Some(crate::ImageProvenance {
             color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
             ..
         })
     ));
-    assert!(
-        matches!(
-            LoadCtx::default().preview(&path).unwrap(),
-            PreviewImage::Planes(_)
-        ),
-        "a demosaiced decode hands back its planes"
-    );
-    let preview: imaginarium::InterleavedImage = preview.into();
-    assert_eq!(preview.desc().color_format(), ColorFormat::RGB_F32);
-    let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
+    assert!(preview.is_rgb());
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
             let channel = pattern.slot_at(Vec2us::new(x, y));
             assert_eq!(
-                preview_pixels[(size.idx_of(Vec2us::new(x, y))) * 3 + channel],
+                preview.channel(channel).pixels()[size.idx_of(Vec2us::new(x, y))],
                 target[channel] + dark_value
             );
         }
