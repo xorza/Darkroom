@@ -62,10 +62,26 @@ Facts: `docs/research/2026-10-25-crate-seams.md` and
   gain.
 - **One bench policy**, `common::bench` (`Kind`, `Scale`, `fresh_copies`);
   each crate keeps its own scenes and ids.
+- **The pixel types stay one per layout; the layout is chosen at run time once,
+  at the wire.** lumos's kernels take planar `f32` and imaginarium's take
+  interleaved samples, so each op family keeps its layout in its types, and
+  lens's `Image` is the one boundary type, as the `image` crate's
+  `DynamicImage` is for its typed buffers. Refused: one `CpuImage` of every
+  layout and format, and a strided buffer where the two layouts are two stride
+  orders (Halide, NumPy): each moves the layout check into every op, at run
+  time, for nothing. Facts: `docs/research/2026-10-25-image-wire-shape.md`.
+- **An image's metadata, flags and flat gain sit beside its layout**, in
+  lens's `Image`: they state what the image is, which a repack does not
+  change, as a libvips image's header is the image's whatever its band format.
+  Refused: a frame type in one arm and pixels with metadata in the other, the
+  shape it had; a `LinearImage` arm beside bare interleaved pixels, which ties
+  the metadata to one layout, so a lossless Convert would erase the header.
 - **Not now.** A split of lumos into crates: its module graph has cycles,
   which come out first, and a split is then judged on measured build times. A
   generic `Frame<P>` for `LinearImage` and `CfaImage`: they share five
-  accessors, and their flat gains differ in shape.
+  accessors, and their flat gains differ in shape. A rename of `LinearImage`:
+  it names what its samples are, as `CfaImage` does, an axis apart from the
+  layout names of the pixel types, so a rename changes no shape.
 
 ## Verification
 
@@ -182,8 +198,8 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   `LmModel`.
 - **A type name keeps one meaning in the workspace.** Where two crates would
   declare one name past its module, the narrower use takes a qualified one, as
-  `DrawablePreview` beside `lumos::PreviewImage`; an error and its alias carry
-  their domain, as `ExecError` and `ExecResult`.
+  `imaginarium::AffineWarp` beside `lumos::Transform`; an error and its alias
+  carry their domain, as `ExecError` and `ExecResult`.
 - **One channel is `mono`.** `ChannelCount::Mono`, `ColorFormat::MONO_U8`,
   `ChannelLayout::Mono`; `luma` is the Rec. 709 weighted sum of encoded
   samples, and an RGB value with `R = G = B` a neutral. Refused: `L`, the PIL

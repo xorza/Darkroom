@@ -31,7 +31,8 @@ codecs.
   writer; the caller opens through `common::fs`. `RasterFormat` is the one
   raster-format enum, with serde, as lumos's provenance records it.
 - **The GPU backend stays**, though no workspace crate turns `wgpu` on: lens's
-  `Image` reserves a device variant for it, and the root lints and benches it.
+  `Image` takes a `Gpu(GpuImage)` arm when a device path is wanted, and the
+  root lints and benches it.
   Refused: deleting some 1 500 lines with their tests, which a device path
   would write again.
 
