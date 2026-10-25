@@ -43,7 +43,7 @@ fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
 
 #[test]
 fn a_mono_master_replicates_into_all_three_model_channels() {
-    // The net is RGB-only, so a grayscale master must arrive as R=G=B rather than leaving two
+    // The net is RGB-only, so a mono master must arrive as R=G=B rather than leaving two
     // channels at zero — and the clamp is what keeps a sub-background or star-core sample in
     // the [0,1] domain the model was trained on.
     let side = WINDOW;
@@ -108,14 +108,14 @@ fn feather_ramps_from_either_edge() {
 /// A model that returns its input, run over every tile of a frame two tiles a side, blends back to
 /// the input. Each pixel is `Σ v·wₖ / Σ wₖ` over at most four tiles: four products, three sums
 /// above and three below the line, and the division round by half an ulp each — 5.5ε of `v`.
-/// Gray averages its three equal channels first, two sums and a product more: 8ε bounds both. The
+/// Mono averages its three equal channels first, two sums and a product more: 8ε bounds both. The
 /// blend lands in the frame's planes, which keep the frame's metadata.
 #[test]
 fn an_identity_model_reproduces_the_input() {
     let size = Size2us::new(700, 600);
     let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
-    let gray = LinearImage::from(ramp(size, 1));
-    for image in [rgb, gray] {
+    let mono = LinearImage::from(ramp(size, 1));
+    for image in [rgb, mono] {
         let mut output = image.clone();
         output.metadata.header.exposure_time = Some(30.0);
         run_tiles(
@@ -175,7 +175,7 @@ fn the_stride_must_cover_the_frame() {
 }
 
 /// The whole-frame blend the band replaced: every tile's feathered sums over the frame, normalized
-/// once every tile is in, a grayscale frame the mean of the three channels.
+/// once every tile is in, a mono frame the mean of the three channels.
 fn whole_frame_blend(
     image: &LinearImage,
     stride: usize,
@@ -235,7 +235,7 @@ fn whole_frame_blend(
 fn a_band_blends_what_the_whole_frame_blended() {
     let size = Size2us::new(600, 1100);
     let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
-    let gray = LinearImage::from(ramp(size, 1));
+    let mono = LinearImage::from(ramp(size, 1));
     let model = || {
         let mut count = 0.0f32;
         move |input: &[f32], output: &mut [f32]| {
@@ -245,7 +245,7 @@ fn a_band_blends_what_the_whole_frame_blended() {
             }
         }
     };
-    for image in [rgb, gray] {
+    for image in [rgb, mono] {
         let expected = whole_frame_blend(&image, MAX_STRIDE, model());
         let mut in_place = image.clone();
         let mut infer = model();

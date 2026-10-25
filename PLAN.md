@@ -180,27 +180,6 @@ alone; then the names, so the planar layout arrives under its final names;
 then the errors over both descriptors; the file moves last, as they collide
 with every other edit.
 
-### 7. Names
-
-- [ ] `drawing` moves to `lumos::internals::visual`; `Color` goes, and `Rgb`
-  replaces it. Proof: the drawing tests pass in lumos; imaginarium has no
-  `drawing` module.
-- [ ] The `glam` re-export goes, and lens depends on `glam`.
-- [ ] `Image` becomes `InterleavedImage` and `ImageDesc` becomes
-  `InterleavedDesc`; the aliases `CpuImage`, `RawImage` and `LensImage` go.
-- [ ] `Transform` becomes `AffineWarp`, and `GpuTransformPipeline` becomes
-  `GpuAffineWarpPipeline`.
-- [ ] `L` becomes `Mono` in `ChannelCount`, in the `ColorFormat` constants, in
-  `ImagePixels` and in lumos's `LinearPixels`; `grey` becomes `mono` in names.
-- [ ] `FileFormat` becomes `RasterFormat` with serde; lumos's mirror goes.
-  Proof: a provenance round-trips through its RON form.
-- [ ] `GpuContext` becomes `GpuCtx`; `ALL_FORMATS` becomes `ColorFormat::ALL`;
-  byte counts take `len` (`SampleType::byte_len`, `ColorFormat::byte_len`,
-  `InterleavedDesc::byte_len`, `row_byte_len`); the rest of the merge research
-  note's list follows. Then compare imaginarium's words in
-  `cargo drive vocabulary` with the workspace's, and rename each word that has
-  a second meaning. Proof: no word of the listing has two meanings.
-
 ### 8. Both layouts in imaginarium
 
 - [ ] `PlanarImage`, `PlanarDesc` and `ChannelLayout` move to imaginarium; the
@@ -294,4 +273,25 @@ with every other edit.
   colors itself. `RawDecoder::classify` stays in lumos: which codecs are lossy
   is lumos's reading of LibRaw's facts. `LibrawCode` is `libraw`'s, and lumos
   no longer exports it.
-
+- Batch 7, drawing: the moved circles and crosses take `RGB_F32` alone. Every
+  caller draws on an RGB overlay, and the mono path, which wrote a color's
+  luma, had none. The overlay colors are constants beside them.
+- Batch 7, `AffineWarp`: its module, its example and its bench ids
+  (`atomic/affine_warp/…`, `integration/affine_warp/…`) take the name too, and
+  a value of it is a `warp`. lens's "Transform" node keeps its label and id,
+  which a saved graph binds to.
+- Batch 7, `Mono`: the format names are `Mono u8` and the rest, which the
+  editor's format menu and labels show. An RGB value with `R = G = B` is a
+  neutral, where imaginarium said grey. lumos's one-channel `gray` and
+  `grayscale` took `mono` too (`LinearImage::is_mono`,
+  `ImageDimensions::is_mono`, the test helpers); `gray` stays for a neutral
+  color.
+- Batch 7, `RasterFormat`: imaginarium's variant order, `Png`, `Jpeg`,
+  `Tiff`, replaces the order of lumos's mirror.
+- Batch 7, the vocabulary: three imaginarium words had a second meaning. The
+  Rec. 709 sum of encoded samples is `luma`, as darkroom's `luminance` is the
+  WCAG relative luminance; the GPU-to-CPU copy is a readback, as darkroom's
+  download fetches a model file; the contrast kernels that walk a row as one
+  run of samples are `contiguous`, as `flat` is a flat field in lumos. The
+  shaders' uniforms take `byte_len`, `sample_byte_len` and `channel_count`
+  with the Rust side.

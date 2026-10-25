@@ -7,14 +7,18 @@ use std::io::BufReader;
 use common::{Size2us, fs};
 
 use crate::color::color_format::{ColorFormat, SampleType};
-use crate::image::Image;
-use crate::image::file_format::FileFormat;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
+use crate::image::raster_format::RasterFormat;
 
 /// A test image with a deterministic pattern based on seed: integer formats get a byte
 /// pattern that reaches every byte value, float formats values on `[0, 1)`.
-pub(crate) fn create_test_image(format: ColorFormat, size: Size2us, seed: usize) -> Image {
-    let mut img = Image::new_black(ImageDesc::new(size, format)).unwrap();
+pub(crate) fn create_test_image(
+    format: ColorFormat,
+    size: Size2us,
+    seed: usize,
+) -> InterleavedImage {
+    let mut img = InterleavedImage::new_black(InterleavedDesc::new(size, format)).unwrap();
     match format.sample_type {
         SampleType::F32 => {
             let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
@@ -32,16 +36,17 @@ pub(crate) fn create_test_image(format: ColorFormat, size: Size2us, seed: usize)
 }
 
 /// The 895×551 lena test image in `format`, read once and converted per call.
-pub(crate) fn lena(format: ColorFormat) -> Image {
+pub(crate) fn lena(format: ColorFormat) -> InterleavedImage {
     use std::sync::OnceLock;
 
-    static LENA: OnceLock<Image> = OnceLock::new();
+    static LENA: OnceLock<InterleavedImage> = OnceLock::new();
     LENA.get_or_init(|| {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/test_resources/lena_895x551.tiff"
         );
-        Image::decode(BufReader::new(fs::open(path).unwrap()), FileFormat::Tiff).unwrap()
+        InterleavedImage::decode(BufReader::new(fs::open(path).unwrap()), RasterFormat::Tiff)
+            .unwrap()
     })
     .convert_to(format)
 }

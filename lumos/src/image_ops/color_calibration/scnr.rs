@@ -9,7 +9,7 @@ use crate::image::rgb::Rgb;
 use crate::image_ops::error::OpError;
 
 /// Remove the residual green cast (Subtractive Chromatic Noise Reduction), as PixInsight's SCNR
-/// does. Intended for the stretched, already-color-balanced image. No-op on grayscale.
+/// does. Intended for the stretched, already-color-balanced image. No-op on mono.
 ///
 /// Each protection method gives a full-strength green, and `strength` blends toward it from the
 /// original: `G′ = (1 − strength)·G + strength·G_full`, exactly `G` at 0 and `G_full` at 1. For the
@@ -89,7 +89,7 @@ impl Scnr {
 
     /// Remove the residual green cast from `image` in place.
     ///
-    /// A no-op on grayscale, which has no green channel to subtract.
+    /// A no-op on mono, which has no green channel to subtract.
     ///
     /// # Errors
     /// [`OpError::Config`] if the strength is outside `[0, 1]`.

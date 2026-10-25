@@ -20,7 +20,7 @@
 //! 32 640, and ties-to-even then lands on the wrong side. The `u16 → u8` kernels
 //! compute `round(v / 257)` exactly in integers.
 //!
-//! The luminance kernels face the same temptation from the other side: the Rec.
+//! The luma kernels face the same temptation from the other side: the Rec.
 //! 709 weights sum to 65536, so keeping the weighted sum in 16-bit lanes would
 //! mean scaling them down to 8-bit precision. Both arches accumulate into 32-bit
 //! lanes instead and carry the reference's own weights — x86 through `madd`,
@@ -75,17 +75,17 @@ pub(crate) fn tier_converter(
         (SimdTier::Ssse3, ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => {
             sse::convert_rgb_to_rgba_row_ssse3
         }
-        (SimdTier::Ssse3, ColorFormat::RGBA_U8, ColorFormat::L_U8) => {
-            sse::convert_rgba_to_l_row_ssse3
+        (SimdTier::Ssse3, ColorFormat::RGBA_U8, ColorFormat::MONO_U8) => {
+            sse::convert_rgba_to_mono_row_ssse3
         }
-        (SimdTier::Ssse3, ColorFormat::RGB_U8, ColorFormat::L_U8) => {
-            sse::convert_rgb_to_l_row_ssse3
+        (SimdTier::Ssse3, ColorFormat::RGB_U8, ColorFormat::MONO_U8) => {
+            sse::convert_rgb_to_mono_row_ssse3
         }
-        (SimdTier::Ssse3, ColorFormat::L_U8, ColorFormat::RGBA_U8) => {
-            sse::convert_l_to_rgba_row_ssse3
+        (SimdTier::Ssse3, ColorFormat::MONO_U8, ColorFormat::RGBA_U8) => {
+            sse::convert_mono_to_rgba_row_ssse3
         }
-        (SimdTier::Ssse3, ColorFormat::L_U8, ColorFormat::RGB_U8) => {
-            sse::convert_l_to_rgb_row_ssse3
+        (SimdTier::Ssse3, ColorFormat::MONO_U8, ColorFormat::RGB_U8) => {
+            sse::convert_mono_to_rgb_row_ssse3
         }
         _ => return element_converter(tier, from, to),
     };
@@ -102,10 +102,10 @@ pub(crate) fn tier_converter(
     let kernel: RowConvertFn = match (from, to) {
         (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => neon::convert_rgba_to_rgb_row_neon,
         (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => neon::convert_rgb_to_rgba_row_neon,
-        (ColorFormat::RGBA_U8, ColorFormat::L_U8) => neon::convert_rgba_to_l_row_neon,
-        (ColorFormat::RGB_U8, ColorFormat::L_U8) => neon::convert_rgb_to_l_row_neon,
-        (ColorFormat::L_U8, ColorFormat::RGBA_U8) => neon::convert_l_to_rgba_row_neon,
-        (ColorFormat::L_U8, ColorFormat::RGB_U8) => neon::convert_l_to_rgb_row_neon,
+        (ColorFormat::RGBA_U8, ColorFormat::MONO_U8) => neon::convert_rgba_to_mono_row_neon,
+        (ColorFormat::RGB_U8, ColorFormat::MONO_U8) => neon::convert_rgb_to_mono_row_neon,
+        (ColorFormat::MONO_U8, ColorFormat::RGBA_U8) => neon::convert_mono_to_rgba_row_neon,
+        (ColorFormat::MONO_U8, ColorFormat::RGB_U8) => neon::convert_mono_to_rgb_row_neon,
         _ => return element_converter(tier, from, to),
     };
     Some(kernel)

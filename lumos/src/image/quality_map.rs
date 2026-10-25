@@ -27,7 +27,7 @@ impl QualityMap {
 impl From<LinearPixels> for QualityMap {
     fn from(pixels: LinearPixels) -> Self {
         match pixels {
-            LinearPixels::L(plane) => Self::Shared(plane),
+            LinearPixels::Mono(plane) => Self::Shared(plane),
             LinearPixels::Rgb(planes) => Self::PerChannel(planes),
         }
     }

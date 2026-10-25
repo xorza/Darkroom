@@ -142,7 +142,7 @@ impl SelectedFits {
         let held_bytes = usize::try_from(image.view_bytes(std::iter::empty())?.kept)
             .expect("a tile index read fits the address space");
         let hdu = &reader.hdus()[selected.idx];
-        let cfa_type = if plan.dimensions.is_grayscale() {
+        let cfa_type = if plan.dimensions.is_mono() {
             metadata::read_cfa(
                 &hdu.header,
                 plan.dimensions.height(),
@@ -203,7 +203,7 @@ impl SelectedFits {
     /// header declares.
     pub(crate) fn require_cfa(&self) -> Result<CfaType, FitsLoadError> {
         let dimensions = self.plan.dimensions;
-        if !dimensions.is_grayscale() {
+        if !dimensions.is_mono() {
             return Err(FitsRefusal::CfaPlanes {
                 planes: dimensions.channels(),
             }

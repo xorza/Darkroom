@@ -1,7 +1,7 @@
 use common::Size2us;
 use glam::DVec2;
 
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use crate::internals::synthetic::scene::Placement;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
@@ -113,7 +113,7 @@ fn detection_is_invariant_to_scale_zero_point_and_rotation() {
         .map(|&value| Affine::quantize(value))
         .collect();
     let detect = |pixels: Vec<f32>| {
-        let mut image = gray_image(size, pixels);
+        let mut image = mono_image(size, pixels);
         image.metadata.derived.set_saturation_flagged(true);
         StarDetector::default().detect(&image).stars
     };

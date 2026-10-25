@@ -45,7 +45,7 @@ pub enum DimensionsError {
     ZeroHeight,
     #[error("{size} has a side past MAX_SIDE")]
     SidePastMax { size: Size2us },
-    #[error("only 1 (grayscale) or 3 (RGB) channels supported, got {count}")]
+    #[error("only 1 (mono) or 3 (RGB) channels supported, got {count}")]
     Channels { count: usize },
     #[error("{size}x{channels} samples overflow usize")]
     SampleCount { size: Size2us, channels: usize },

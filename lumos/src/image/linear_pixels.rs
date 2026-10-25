@@ -5,7 +5,7 @@ use std::{array, slice};
 
 use arrayvec::ArrayVec;
 use common::Buffer2;
-use imaginarium::{ChannelCount, Image};
+use imaginarium::{ChannelCount, InterleavedImage};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::image_dimensions::ImageDimensions;
@@ -14,7 +14,7 @@ use common::Size2us;
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
 pub(crate) enum LinearPixels {
-    L(Buffer2<f32>),
+    Mono(Buffer2<f32>),
     Rgb([Buffer2<f32>; 3]),
 }
 
@@ -28,7 +28,7 @@ impl LinearPixels {
             pixels.len()
         );
 
-        if dimensions.is_grayscale() {
+        if dimensions.is_mono() {
             return Buffer2::new(dimensions.size(), pixels).into();
         }
 
@@ -47,14 +47,14 @@ impl LinearPixels {
         let expected_pixels_per_channel = dimensions.pixel_count();
         let mut channels = channels.into_iter();
 
-        if dimensions.is_grayscale() {
-            let channel = channels.next().expect("Expected 1 channel for grayscale");
+        if dimensions.is_mono() {
+            let channel = channels.next().expect("Expected 1 channel for mono");
             assert_eq!(
                 channel.len(),
                 expected_pixels_per_channel,
                 "Channel 0 pixel count mismatch"
             );
-            assert!(channels.next().is_none(), "Too many channels for grayscale");
+            assert!(channels.next().is_none(), "Too many channels for mono");
             return Buffer2::new(dimensions.size(), channel).into();
         }
 
@@ -86,26 +86,26 @@ impl LinearPixels {
     }
 
     pub(crate) fn new_zeroed(dimensions: ImageDimensions) -> Self {
-        if dimensions.is_grayscale() {
+        if dimensions.is_mono() {
             Buffer2::new_default(dimensions.size()).into()
         } else {
             array::from_fn(|_| Buffer2::new_default(dimensions.size())).into()
         }
     }
 
-    /// The planes of an `L_F32` or `RGB_F32` image, borrowed or taken: a grayscale image taken
+    /// The planes of a `MONO_F32` or `RGB_F32` image, borrowed or taken: a mono image taken
     /// keeps its allocation.
     pub(super) fn from_f32_image<I>(image: I) -> Self
     where
-        I: Borrow<Image>,
+        I: Borrow<InterleavedImage>,
         [Buffer2<f32>; 1]: TryFrom<I, Error = imaginarium::Error>,
         [Buffer2<f32>; 3]: TryFrom<I, Error = imaginarium::Error>,
     {
         match image.borrow().desc().color_format.channel_count {
-            ChannelCount::L => {
+            ChannelCount::Mono => {
                 let [plane]: [Buffer2<f32>; 1] = image
                     .try_into()
-                    .expect("L_F32 image deinterleaves to one f32 plane");
+                    .expect("MONO_F32 image deinterleaves to one f32 plane");
                 plane.into()
             }
             ChannelCount::Rgb => {
@@ -120,11 +120,8 @@ impl LinearPixels {
 
     pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
         match self {
-            Self::L(plane) => {
-                assert!(
-                    channel == 0,
-                    "Grayscale image only has channel 0, got {channel}"
-                );
+            Self::Mono(plane) => {
+                assert!(channel == 0, "Mono image only has channel 0, got {channel}");
                 plane
             }
             Self::Rgb(planes) => {
@@ -136,11 +133,8 @@ impl LinearPixels {
 
     pub(crate) fn channel_mut(&mut self, channel: usize) -> &mut Buffer2<f32> {
         match self {
-            Self::L(plane) => {
-                assert!(
-                    channel == 0,
-                    "Grayscale image only has channel 0, got {channel}"
-                );
+            Self::Mono(plane) => {
+                assert!(channel == 0, "Mono image only has channel 0, got {channel}");
                 plane
             }
             Self::Rgb(planes) => {
@@ -152,7 +146,7 @@ impl LinearPixels {
 
     pub(crate) fn planes_mut(&mut self) -> slice::IterMut<'_, Buffer2<f32>> {
         match self {
-            Self::L(plane) => slice::from_mut(plane).iter_mut(),
+            Self::Mono(plane) => slice::from_mut(plane).iter_mut(),
             Self::Rgb(planes) => planes.iter_mut(),
         }
     }
@@ -161,17 +155,17 @@ impl LinearPixels {
     /// needs to walk R, G and B in step.
     ///
     /// # Panics
-    /// On a grayscale image, which has no three planes; callers gate on the `Rgb` variant.
+    /// On a mono image, which has no three planes; callers gate on the `Rgb` variant.
     pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
         match self {
-            Self::L(_) => panic!("Expected Rgb variant, got L"),
+            Self::Mono(_) => panic!("Expected Rgb variant, got Mono"),
             Self::Rgb([r, g, b]) => [r.pixels_mut(), g.pixels_mut(), b.pixels_mut()],
         }
     }
 
     pub(crate) const fn layout(&self) -> ChannelLayout {
         match self {
-            Self::L(_) => ChannelLayout::Mono,
+            Self::Mono(_) => ChannelLayout::Mono,
             Self::Rgb(_) => ChannelLayout::Rgb,
         }
     }
@@ -185,16 +179,16 @@ impl LinearPixels {
         ImageDimensions::new(plane.size(), self.layout())
     }
 
-    pub(crate) fn into_l(self) -> Buffer2<f32> {
+    pub(crate) fn into_mono(self) -> Buffer2<f32> {
         match self {
-            Self::L(plane) => plane,
-            Self::Rgb(_) => panic!("Expected L variant, got Rgb"),
+            Self::Mono(plane) => plane,
+            Self::Rgb(_) => panic!("Expected Mono variant, got Rgb"),
         }
     }
 
     pub(crate) fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3> {
         match self {
-            Self::L(plane) => ArrayVec::from_iter([plane]),
+            Self::Mono(plane) => ArrayVec::from_iter([plane]),
             Self::Rgb(planes) => ArrayVec::from(planes),
         }
     }
@@ -205,7 +199,7 @@ impl From<Buffer2<f32>> for LinearPixels {
         if let Err(error) = ImageDimensions::checked(plane.size(), ChannelLayout::Mono) {
             panic!("{error}");
         }
-        Self::L(plane)
+        Self::Mono(plane)
     }
 }
 
@@ -238,10 +232,10 @@ impl From<ArrayVec<Buffer2<f32>, 3>> for LinearPixels {
     }
 }
 
-impl From<&LinearPixels> for Image {
+impl From<&LinearPixels> for InterleavedImage {
     fn from(pixels: &LinearPixels) -> Self {
         match pixels {
-            LinearPixels::L(plane) => Self::from([plane]),
+            LinearPixels::Mono(plane) => Self::from([plane]),
             LinearPixels::Rgb(planes) => Self::from(planes.each_ref()),
         }
     }

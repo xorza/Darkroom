@@ -12,7 +12,7 @@ use common::bench::{self, Kind, Scale};
 
 use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME};
-use crate::color::color_format::ALL_FORMATS;
+use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
@@ -37,11 +37,11 @@ const GPU_ITERATION: Duration = Duration::from_millis(320);
 /// pixel, reading the row.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "contrast_brightness", Scale::Micros);
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let mut source = None;
         let affine = ChannelAffine::new(OP, format);
-        let bytes = FRAME.width * format.byte_count();
-        group.throughput(fixture::throughput(FRAME.width, format.byte_count()));
+        let bytes = FRAME.width * format.byte_len();
+        group.throughput(fixture::throughput(FRAME.width, format.byte_len()));
         for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
             let id = BenchmarkId::new(Backend::Cpu.case(variant.name), fixture::format_id(format));
             group.bench_function(id, |b| {
@@ -74,13 +74,10 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "contrast_brightness", Scale::Millis);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
-    for format in ALL_FORMATS {
+    for format in ColorFormat::ALL {
         let mut source = None;
-        let bytes = FRAME.pixel_count() * format.byte_count();
-        group.throughput(fixture::throughput(
-            FRAME.pixel_count(),
-            format.byte_count(),
-        ));
+        let bytes = FRAME.pixel_count() * format.byte_len();
+        group.throughput(fixture::throughput(FRAME.pixel_count(), format.byte_len()));
         for backend in backends.all() {
             match backend {
                 Backend::Cpu => Scale::Millis,

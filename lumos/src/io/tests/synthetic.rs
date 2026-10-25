@@ -929,7 +929,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         ),
         "a demosaiced decode hands back its planes"
     );
-    let preview: imaginarium::Image = preview.into();
+    let preview: imaginarium::InterleavedImage = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
     for y in 6..size.height - 6 {

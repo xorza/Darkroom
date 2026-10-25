@@ -16,13 +16,13 @@ pub trait GpuPipeline: Any + fmt::Debug + Send + Sync {}
 /// A caller that wants the GPU builds one of these, uploads with [`crate::GpuImage::from_image`],
 /// and calls the op's `apply_gpu`.
 #[derive(Debug)]
-pub struct GpuContext {
+pub struct GpuCtx {
     pub gpu: Gpu,
     pipelines: HashMap<TypeId, Box<dyn GpuPipeline>>,
 }
 
-impl GpuContext {
-    /// Creates a new `GpuContext` with no pipelines initialized.
+impl GpuCtx {
+    /// Creates a new `GpuCtx` with no pipelines initialized.
     pub fn new(gpu: Gpu) -> Self {
         Self {
             gpu,

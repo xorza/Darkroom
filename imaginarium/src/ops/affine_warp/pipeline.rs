@@ -1,21 +1,21 @@
 use crate::gpu::Gpu;
 use crate::gpu::compute_kernel::ComputeKernel;
-use crate::gpu::context::GpuPipeline;
+use crate::gpu::gpu_ctx::GpuPipeline;
 
 /// Cached GPU pipeline for affine transforms.
 /// Create once and reuse for multiple executions.
 #[derive(Debug)]
-pub struct GpuTransformPipeline {
+pub struct GpuAffineWarpPipeline {
     pub(super) kernel: ComputeKernel,
 }
 
-impl GpuTransformPipeline {
+impl GpuAffineWarpPipeline {
     /// Compiles the transform shader for `ctx`'s device.
     pub fn new(ctx: &Gpu) -> Self {
         Self {
-            kernel: ComputeKernel::new(ctx, "transform", include_str!("shader.wgsl"), 2),
+            kernel: ComputeKernel::new(ctx, "affine_warp", include_str!("shader.wgsl"), 2),
         }
     }
 }
 
-impl GpuPipeline for GpuTransformPipeline {}
+impl GpuPipeline for GpuAffineWarpPipeline {}

@@ -26,7 +26,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_map::QualityMap;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::io::load_ctx::LoadCtx;
 use crate::progress::progress_monitor::ProgressMonitor;
@@ -114,7 +114,7 @@ fn drizzle_one(config: DrizzleConfig, frame: &DrizzleFrame<LinearImage>) -> Stac
 }
 
 fn constant_image(size: Size2us, value: f32) -> LinearImage {
-    gray_image(size, vec![value; size.pixel_count()])
+    mono_image(size, vec![value; size.pixel_count()])
 }
 
 /// The one weight plane drizzle shares between channels.

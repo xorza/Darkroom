@@ -23,7 +23,7 @@ use criterion::Criterion;
 use crate::bench::fixture::Backends;
 use crate::image;
 use crate::image::conversion;
-use crate::ops::{blend, contrast_brightness, preview, transform};
+use crate::ops::{affine_warp, blend, contrast_brightness, preview};
 
 /// Every case, atomic first. The host's adapters are listed once here; no device opens.
 pub fn run(c: &mut Criterion) {
@@ -32,12 +32,12 @@ pub fn run(c: &mut Criterion) {
     conversion::bench::atomic(c);
     contrast_brightness::bench::atomic(c);
     blend::bench::atomic(c);
-    transform::bench::atomic(c);
+    affine_warp::bench::atomic(c);
 
     conversion::bench::integration(c);
     contrast_brightness::bench::integration(c, &backends);
     blend::bench::integration(c, &backends);
-    transform::bench::integration(c, &backends);
+    affine_warp::bench::integration(c, &backends);
     preview::bench::integration(c);
     image::bench::integration(c);
 }

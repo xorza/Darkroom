@@ -1,6 +1,7 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
-use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
+use glam::Vec2;
+use imaginarium::{AffineWarp, Blend, BlendMode, ColorFormat, ContrastBrightness};
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::async_lambda;
@@ -124,8 +125,8 @@ fn register_blend(library: &mut Library) {
                         destination.desc(),
                     ));
                 }
-                let mut output =
-                    imaginarium::Image::new_black(source.desc()).map_err(InvokeError::external)?;
+                let mut output = imaginarium::InterleavedImage::new_black(source.desc())
+                    .map_err(InvokeError::external)?;
                 Blend::new(mode, alpha).apply_cpu(
                     &source.interleaved(),
                     &destination.interleaved(),
@@ -180,20 +181,20 @@ fn register_transform(library: &mut Library) {
                     image.desc().size.height as f32 / 2.0,
                 );
                 let scale = Vec2::new(scalar(1), scalar(2));
-                let transform = Transform::new()
+                let warp = AffineWarp::new()
                     .scale(scale)
                     .rotate_around(scalar(3), center)
                     .translate(Vec2::new(scalar(4), scalar(5)));
-                if !transform.is_invertible() {
+                if !warp.is_invertible() {
                     return Err(InvokeError::invalid_input(
                         1,
                         "a scale, rotation and translation that make an invertible transform",
                         (1..6).map(scalar).collect::<Vec<f32>>(),
                     ));
                 }
-                let mut output =
-                    imaginarium::Image::new_black(image.desc()).map_err(InvokeError::external)?;
-                transform.apply_cpu(&image.interleaved(), &mut output);
+                let mut output = imaginarium::InterleavedImage::new_black(image.desc())
+                    .map_err(InvokeError::external)?;
+                warp.apply_cpu(&image.interleaved(), &mut output);
                 outputs[0] = DynamicValue::from_custom(Image::from(output));
                 Ok(())
             }),
@@ -251,13 +252,13 @@ mod tests {
 
     #[test]
     fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
-        let desc = imaginarium::ImageDesc::new(Size2us::new(9, 4), ColorFormat::RGBA_U8);
+        let desc = imaginarium::InterleavedDesc::new(Size2us::new(9, 4), ColorFormat::RGBA_U8);
         let op = ContrastBrightness::new(1.5, 0.1);
-        let pattern: Vec<u8> = (0..desc.size_in_bytes())
+        let pattern: Vec<u8> = (0..desc.byte_len())
             .map(|idx| u8::try_from(idx % 251).unwrap())
             .collect();
         let patterned_image = || {
-            let mut image = imaginarium::Image::new_black(desc).unwrap();
+            let mut image = imaginarium::InterleavedImage::new_black(desc).unwrap();
             image.bytes_mut().copy_from_slice(&pattern);
             image
         };

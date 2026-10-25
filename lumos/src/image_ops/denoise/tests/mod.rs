@@ -9,7 +9,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::internals::assertions::assert_close;
-use crate::internals::images::{gray_image, rgb_image};
+use crate::internals::images::{mono_image, rgb_image};
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::SkyNoise;
@@ -43,7 +43,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let px = noisy(size, bg, SkyNoise { sigma, seed: 12345 });
     let in_std = pixel_stats(&px).std as f32;
 
-    let mut img = gray_image(size, px);
+    let mut img = mono_image(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
 
@@ -69,8 +69,8 @@ fn higher_k_smooths_more() {
             seed: 7,
         },
     );
-    let mut img2 = gray_image(size, px.clone());
-    let mut img5 = gray_image(size, px);
+    let mut img2 = mono_image(size, px.clone());
+    let mut img5 = mono_image(size, px);
     Denoise {
         k: 2.0,
         ..Default::default()
@@ -104,7 +104,7 @@ fn strength_zero_is_identity_and_blends_between() {
     );
 
     // strength 0 removes nothing — bit-for-bit identity.
-    let mut img0 = gray_image(size, px.clone());
+    let mut img0 = mono_image(size, px.clone());
     Denoise {
         strength: 0.0,
         ..Default::default()
@@ -120,8 +120,8 @@ fn strength_zero_is_identity_and_blends_between() {
     // The removed noise depends on the input alone, so the output is affine in the strength: half
     // strength is the midpoint of none and full, to the rounding of each scale's subtraction —
     // two per scale, over at most 6 scales, of values ≤ 0.8: 16ε of 0.8.
-    let mut half = gray_image(size, px.clone());
-    let mut full = gray_image(size, px.clone());
+    let mut half = mono_image(size, px.clone());
+    let mut full = mono_image(size, px.clone());
     Denoise {
         strength: 0.5,
         ..Default::default()
@@ -160,8 +160,8 @@ fn hard_and_soft_thresholds_differ() {
             seed: 55,
         },
     );
-    let mut hard = gray_image(size, px.clone());
-    let mut soft = gray_image(size, px);
+    let mut hard = mono_image(size, px.clone());
+    let mut soft = mono_image(size, px);
     Denoise {
         threshold: Threshold::Hard,
         ..Default::default()
@@ -204,7 +204,7 @@ fn denoise_preserves_bright_feature() {
             px[yy * size.width + xx] = 0.9;
         }
     }
-    let mut img = gray_image(size, px);
+    let mut img = mono_image(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
 
@@ -267,7 +267,7 @@ fn denoise_is_per_channel_on_rgb() {
     );
     Denoise::default().apply(&mut img).unwrap();
     for (channel, plane) in planes.into_iter().enumerate() {
-        let mut alone = gray_image(size, plane);
+        let mut alone = mono_image(size, plane);
         Denoise::default().apply(&mut alone).unwrap();
         assert_eq!(img.channel(channel).pixels(), alone.channel(0).pixels());
     }
@@ -276,12 +276,12 @@ fn denoise_is_per_channel_on_rgb() {
 #[test]
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
-    let mut tiny = gray_image(
+    let mut tiny = mono_image(
         Size2us::new(3, 3),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     );
     Denoise::default().apply(&mut tiny).unwrap();
-    let mut one = gray_image(Size2us::new(1, 1), vec![0.42]);
+    let mut one = mono_image(Size2us::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
     assert_eq!(
         one.channel(0).pixels(),

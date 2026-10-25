@@ -227,7 +227,7 @@ mod tests {
                 },
                 row_length,
             );
-            let image = gpu_image::internals::download_words(&gpu, &output, count);
+            let image = gpu_image::internals::read_back_words(&gpu, &output, count);
             assert_eq!(
                 image,
                 (0..count).collect::<Vec<_>>(),

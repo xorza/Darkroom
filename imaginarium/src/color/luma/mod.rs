@@ -7,7 +7,7 @@ const WEIGHTS: [f64; 3] = [0.2126, 0.7152, 0.0722];
 pub(crate) const WEIGHTS_F32: [f32; 3] = [WEIGHTS[0] as f32, WEIGHTS[1] as f32, WEIGHTS[2] as f32];
 
 /// The weights in 16-bit fixed point for integer channel values: each the nearest multiple of
-/// `2⁻¹⁶`. They sum to exactly `2¹⁶`, so a grey pixel keeps its value.
+/// `2⁻¹⁶`. They sum to exactly `2¹⁶`, so a neutral pixel, `R = G = B`, keeps its value.
 pub(crate) const WEIGHTS_Q16: [u32; 3] = {
     let q16 = [
         nearest_q16(WEIGHTS[0]),

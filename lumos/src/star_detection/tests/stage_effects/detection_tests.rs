@@ -7,15 +7,14 @@
 )]
 
 use crate::internals::init_tracing;
-use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
+use crate::internals::visual::drawing::{self, draw_circle, draw_cross};
+use crate::internals::visual::{ToneMap, mono_to_rgb, save_image};
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detector::stages::detect::internals::detect_stars_test;
 use crate::star_detection::tests::stage_effects::{bg_estimate, peaks};
 use crate::star_detection::tests::{ISOLATION, Scenario, isolated, near};
 use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Color;
-use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// How far from a star's centre its candidate's peak pixel can lie. Noiseless, the peak is the
 /// nearest pixel, within √2/2; noise can lift a neighbour over it, but every pixel past 2 px holds
@@ -45,18 +44,12 @@ fn every_isolated_star_is_one_candidate() {
     let found = peaks(&candidates);
     let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
 
-    let mut overlay = gray_to_rgb(&pixels, ToneMap::AutoRange);
+    let mut overlay = mono_to_rgb(&pixels, ToneMap::AutoRange);
     for star in &stars {
-        draw_circle(
-            &mut overlay,
-            star.as_vec2(),
-            8.0,
-            Color::rgb(0.3, 0.3, 1.0),
-            1.0,
-        );
+        draw_circle(&mut overlay, star.as_vec2(), 8.0, drawing::BLUE, 1.0);
     }
     for peak in &found {
-        draw_cross(&mut overlay, peak.as_vec2(), 3.0, Color::GREEN, 1.0);
+        draw_cross(&mut overlay, peak.as_vec2(), 3.0, drawing::GREEN, 1.0);
     }
     save_image(overlay, "synthetic_starfield/stage_det_sparse_overlay");
 

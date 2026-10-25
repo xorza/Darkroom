@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use imaginarium::FileFormat;
+use imaginarium::RasterFormat;
 
 use crate::io::error::ImageError;
 use crate::io::input_format::{InputFormat, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
@@ -12,8 +12,8 @@ fn the_extension_names_the_decoder_in_any_case() {
         ("a.FIT", InputFormat::Fits),
         ("dir.fits/a.Cr3", InputFormat::CameraRaw),
         ("a.raf", InputFormat::CameraRaw),
-        ("a.TIF", InputFormat::Raster(FileFormat::Tiff)),
-        ("a.jpeg", InputFormat::Raster(FileFormat::Jpeg)),
+        ("a.TIF", InputFormat::Raster(RasterFormat::Tiff)),
+        ("a.jpeg", InputFormat::Raster(RasterFormat::Jpeg)),
     ] {
         assert_eq!(
             InputFormat::of(Path::new(path)).unwrap(),

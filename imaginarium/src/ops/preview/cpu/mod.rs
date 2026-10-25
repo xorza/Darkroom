@@ -6,24 +6,24 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 use crate::ops::preview::Preview;
 
 /// Area-averages `input` to `params`' target size, fused with the conversion to
 /// `RGBA_U8`. See [`Preview`] for the algorithm.
-pub(super) fn generate(params: &Preview, input: &Image) -> Image {
+pub(super) fn generate(params: &Preview, input: &InterleavedImage) -> InterleavedImage {
     let dst_w = params.size.width.max(1);
     let dst_h = params.size.height.max(1);
     let format = input.desc().color_format;
     match (format.sample_type, format.channel_count) {
-        (SampleType::U8, ChannelCount::L) => typed::<u8, 1>(input, dst_w, dst_h),
+        (SampleType::U8, ChannelCount::Mono) => typed::<u8, 1>(input, dst_w, dst_h),
         (SampleType::U8, ChannelCount::Rgb) => typed::<u8, 3>(input, dst_w, dst_h),
         (SampleType::U8, ChannelCount::Rgba) => typed::<u8, 4>(input, dst_w, dst_h),
-        (SampleType::U16, ChannelCount::L) => typed::<u16, 1>(input, dst_w, dst_h),
+        (SampleType::U16, ChannelCount::Mono) => typed::<u16, 1>(input, dst_w, dst_h),
         (SampleType::U16, ChannelCount::Rgb) => typed::<u16, 3>(input, dst_w, dst_h),
         (SampleType::U16, ChannelCount::Rgba) => typed::<u16, 4>(input, dst_w, dst_h),
-        (SampleType::F32, ChannelCount::L) => typed::<f32, 1>(input, dst_w, dst_h),
+        (SampleType::F32, ChannelCount::Mono) => typed::<f32, 1>(input, dst_w, dst_h),
         (SampleType::F32, ChannelCount::Rgb) => typed::<f32, 3>(input, dst_w, dst_h),
         (SampleType::F32, ChannelCount::Rgba) => typed::<f32, 4>(input, dst_w, dst_h),
     }
@@ -100,14 +100,18 @@ fn narrow(value: u64) -> u8 {
     u8::try_from(value).expect("a mean never exceeds its largest value")
 }
 
-fn typed<T: PreviewSample, const N: usize>(input: &Image, dst_w: usize, dst_h: usize) -> Image {
+fn typed<T: PreviewSample, const N: usize>(
+    input: &InterleavedImage,
+    dst_w: usize,
+    dst_h: usize,
+) -> InterleavedImage {
     let Size2us {
         width: src_w,
         height: src_h,
     } = input.desc().size;
     let src: &[T] = bytemuck::cast_slice(input.bytes());
 
-    let mut out = Image::new_black(ImageDesc::new(
+    let mut out = InterleavedImage::new_black(InterleavedDesc::new(
         Size2us::new(dst_w, dst_h),
         ColorFormat::RGBA_U8,
     ))
@@ -141,7 +145,7 @@ fn typed<T: PreviewSample, const N: usize>(input: &Image, dst_w: usize, dst_h: u
                 let count = ((sy1 - sy0) * (sx1 - sx0)) as u64;
                 let mean = sum.map(|sum| T::to_u8(sum, count));
                 *out = match *mean.as_slice() {
-                    [grey] => [grey, grey, grey, u8::MAX],
+                    [mono] => [mono, mono, mono, u8::MAX],
                     [r, g, b] => [r, g, b, u8::MAX],
                     [r, g, b, a] => [r, g, b, a],
                     _ => unreachable!("one, three or four channels"),

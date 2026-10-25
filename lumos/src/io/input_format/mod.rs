@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use imaginarium::{FileFormat, SUPPORTED_EXTENSIONS};
+use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 
 use crate::io::error::ImageError;
 
@@ -50,7 +50,7 @@ pub(crate) enum InputFormat {
     Fits,
     CameraRaw,
     /// A raster imaginarium reads.
-    Raster(FileFormat),
+    Raster(RasterFormat),
 }
 
 impl InputFormat {
@@ -69,7 +69,7 @@ impl InputFormat {
             Ok(Self::CameraRaw)
         } else {
             extension
-                .and_then(FileFormat::from_extension)
+                .and_then(RasterFormat::from_extension)
                 .map(Self::Raster)
                 .ok_or_else(|| ImageError::UnsupportedFormat {
                     path: path.to_path_buf(),

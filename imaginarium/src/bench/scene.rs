@@ -8,8 +8,8 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP, as the lumos benches use.
 pub(crate) const FRAME: Size2us = Size2us::new(6000, 4000);
@@ -20,7 +20,7 @@ pub(crate) const TILE: usize = 512;
 /// white noise of σ 0.01, one pixel in fifty a star up to 1 above it in every color channel, all
 /// clamped to `[0, 1]`; alpha opaque. Each pixel draws from its own `split_mix` stream, so rows
 /// fill in parallel and a 24 MP frame takes a fraction of a second.
-pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> Image {
+pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> InterleavedImage {
     match format.sample_type {
         SampleType::U8 => typed_sky::<u8>(format, size, seed),
         SampleType::U16 => typed_sky::<u16>(format, size, seed),
@@ -28,28 +28,28 @@ pub(crate) fn sky(format: ColorFormat, size: Size2us, seed: u64) -> Image {
     }
 }
 
-fn typed_sky<T: Sample>(format: ColorFormat, size: Size2us, seed: u64) -> Image {
+fn typed_sky<T: Sample>(format: ColorFormat, size: Size2us, seed: u64) -> InterleavedImage {
     let Size2us { width, height } = size;
-    let channels = format.channel_count.count();
-    let color = channels - usize::from(format.has_alpha());
-    let mut samples = vec![T::FULL_SCALE; width * height * channels];
-    par::chunks_mut(&mut samples, width * channels)
+    let channel_count = format.channel_count.count();
+    let color_count = channel_count - usize::from(format.has_alpha());
+    let mut samples = vec![T::FULL_SCALE; width * height * channel_count];
+    par::chunks_mut(&mut samples, width * channel_count)
         .enumerate()
         .for_each(|(y, row)| {
-            for (x, pixel) in row.chunks_exact_mut(channels).enumerate() {
+            for (x, pixel) in row.chunks_exact_mut(channel_count).enumerate() {
                 let mut draws = SplitMix((seed << 40) ^ (y * width + x) as u64);
                 let star = if draws.next().is_multiple_of(50) {
                     draws.unit()
                 } else {
                     0.0
                 };
-                for sample in &mut pixel[..color] {
+                for sample in &mut pixel[..color_count] {
                     let value = 0.1 + 0.01 * draws.gaussian() + star;
                     *sample = T::from_unit(value.clamp(0.0, 1.0));
                 }
             }
         });
-    Image::from_samples(ImageDesc::new(size, format), samples).unwrap()
+    InterleavedImage::from_samples(InterleavedDesc::new(size, format), samples).unwrap()
 }
 
 /// Steele, Lea and Flood's SplitMix64: one 64-bit state, a fresh output per call.

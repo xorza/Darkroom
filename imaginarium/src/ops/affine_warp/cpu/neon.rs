@@ -1,6 +1,6 @@
 //! NEON bilinear specialization for the packed (RGB/RGBA) transform paths: one
 //! pixel fills the low `N` lanes of an `f32x4`, so the convert → mix → convert
-//! chain is vectorized across channels. L stays on the scalar path — its single
+//! chain is vectorized across channels. Mono stays on the scalar path — its single
 //! channel leaves only one useful lane, and a pixel-parallel variant measured
 //! slower (the 4-tap gather dominates and doesn't vectorize).
 //!
@@ -17,9 +17,9 @@ use glam::Vec2;
 use rayon::prelude::*;
 
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::ops::transform::Transform;
-use crate::ops::transform::cpu::packed_source::PackedSource;
+use crate::image::InterleavedImage;
+use crate::ops::affine_warp::AffineWarp;
+use crate::ops::affine_warp::cpu::packed_source::PackedSource;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
@@ -170,19 +170,19 @@ fn read_tap<T: NeonPacked, const N: usize>(
 /// None in practice — NEON is baseline on aarch64. The marker is what lets this
 /// share one kernel type with the x86 side, where the feature is a runtime fact.
 pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
-    transform: &Transform,
-    input: &Image,
-    output: &mut Image,
+    warp: &AffineWarp,
+    input: &InterleavedImage,
+    output: &mut InterleavedImage,
 ) {
     let source = PackedSource::<T>::of(input);
     let out_w = output.desc().size.width;
-    let out_stride = output.desc().row_bytes();
-    let inv = transform.inverse();
+    let out_stride = output.desc().row_byte_len();
+    let inv = warp.inverse();
 
     par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
-        .for_each(|(y, out_row_bytes)| {
-            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);
+        .for_each(|(y, out_row_byte_len)| {
+            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_byte_len);
             for x in 0..out_w {
                 let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 let src = inv.transform_point2(out_pos) - Vec2::splat(0.5);

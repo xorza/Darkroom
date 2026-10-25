@@ -4,7 +4,7 @@ mod real_data;
 use crate::image_ops::color_calibration::neutralize_bg::*;
 use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::{assert_close, assert_close_slice};
-use crate::internals::images::{gray_image, rgb_image};
+use crate::internals::images::{mono_image, rgb_image};
 use common::Size2us;
 
 /// A green background at 0.3 over red and blue at 0.1, and a white star 0.4 above every channel.
@@ -113,13 +113,9 @@ fn every_protection_blends_by_its_amount() {
 }
 
 #[test]
-fn color_ops_are_noops_on_grayscale() {
-    let mut g = gray_image(Size2us::new(2, 1), vec![0.3, 0.7]);
+fn color_ops_are_noops_on_mono() {
+    let mut g = mono_image(Size2us::new(2, 1), vec![0.3, 0.7]);
     NeutralizeBg.apply(&mut g).unwrap();
     Scnr::average_neutral(1.0).apply(&mut g).unwrap();
-    assert_eq!(
-        g.channel(0).pixels(),
-        vec![0.3, 0.7],
-        "grayscale left unchanged"
-    );
+    assert_eq!(g.channel(0).pixels(), vec![0.3, 0.7], "mono left unchanged");
 }

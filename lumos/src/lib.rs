@@ -90,8 +90,8 @@ pub use image::flat_gain::frame_gain::FrameGain;
 pub use image::image_dimensions::ImageDimensions;
 pub use image::image_metadata::ImageMetadata;
 pub use image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RasterFormat,
-    RasterTransfer, RowOrder, SourceProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer,
+    RowOrder, SourceProvenance,
 };
 pub use image::linear_image::LinearImage;
 pub use image::mosaic_noise::MosaicNoise;

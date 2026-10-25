@@ -6,7 +6,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use imaginarium::FileFormat;
+use imaginarium::RasterFormat;
 use serde::{Deserialize, Serialize};
 
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -46,24 +46,6 @@ pub enum DecoderProvenance {
     FitsWell,
     LibRaw,
     Imaginarium,
-}
-
-/// The container of a raster source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RasterFormat {
-    Tiff,
-    Png,
-    Jpeg,
-}
-
-impl From<FileFormat> for RasterFormat {
-    fn from(format: FileFormat) -> Self {
-        match format {
-            FileFormat::Png => Self::Png,
-            FileFormat::Jpeg => Self::Jpeg,
-            FileFormat::Tiff => Self::Tiff,
-        }
-    }
 }
 
 /// How a raster's samples relate to light.
@@ -150,4 +132,33 @@ pub struct ImageProvenance {
     /// Which end of the image the first stored row belongs to, as the source declared it. The rows
     /// were not reordered to match — see [`RowOrder`].
     pub row_order: RowOrder,
+}
+
+#[cfg(test)]
+mod tests {
+    use common::SerdeFormat;
+    use imaginarium::RasterFormat;
+
+    use crate::image::image_provenance::{RasterTransfer, SourceProvenance};
+
+    /// imaginarium's format is the provenance's own field: it writes by its variant name and
+    /// reads back as itself.
+    #[test]
+    fn a_raster_source_round_trips_through_ron() {
+        let source = SourceProvenance::Raster {
+            format: RasterFormat::Jpeg,
+            transfer: RasterTransfer::Unspecified,
+        };
+        let text = SerdeFormat::Ron.serialize(&source).unwrap();
+        assert_eq!(
+            String::from_utf8(text.clone()).unwrap(),
+            "Raster(\n    format: Jpeg,\n    transfer: Unspecified,\n)"
+        );
+        assert_eq!(
+            SerdeFormat::Ron
+                .deserialize::<SourceProvenance>(&text)
+                .unwrap(),
+            source
+        );
+    }
 }

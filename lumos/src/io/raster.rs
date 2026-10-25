@@ -9,13 +9,13 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, fs};
-use imaginarium::{ChannelCount, FileFormat, Image};
+use imaginarium::{ChannelCount, InterleavedImage, RasterFormat};
 
 use crate::image::derived_facts::DerivedFacts;
 use crate::image::image_dimensions::ImageDimensions;
 use crate::image::image_metadata::ImageMetadata;
 use crate::image::image_provenance::{
-    ColorProvenance, DemosaicProvenance, ImageProvenance, RasterFormat, RasterTransfer, RowOrder,
+    ColorProvenance, DemosaicProvenance, ImageProvenance, RasterTransfer, RowOrder,
     SourceProvenance,
 };
 use crate::image::linear_image::{self, LinearImage};
@@ -27,12 +27,12 @@ use crate::io::load_ctx::LoadCtx;
 use crate::io::null_policy::NullSamples;
 
 /// The `format` image at `path`, decoded by imaginarium.
-fn read(path: &Path, format: FileFormat) -> Result<Image, ImageError> {
+fn read(path: &Path, format: RasterFormat) -> Result<InterleavedImage, ImageError> {
     let file = fs::open(path).map_err(|source| ImageError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    Image::decode(BufReader::new(file), format).map_err(|source| ImageError::Image {
+    InterleavedImage::decode(BufReader::new(file), format).map_err(|source| ImageError::Image {
         path: path.to_path_buf(),
         source,
     })
@@ -40,16 +40,13 @@ fn read(path: &Path, format: FileFormat) -> Result<Image, ImageError> {
 
 /// What a raster decode of a `format` file records: imaginarium decoded it, it stores its first
 /// row at the top, and nothing was clipped or demosaiced.
-fn provenance(
-    format: FileFormat,
+const fn provenance(
+    format: RasterFormat,
     transfer: RasterTransfer,
     color: ColorProvenance,
 ) -> ImageProvenance {
     ImageProvenance {
-        source: SourceProvenance::Raster {
-            format: RasterFormat::from(format),
-            transfer,
-        },
+        source: SourceProvenance::Raster { format, transfer },
         color,
         clipped: false,
         demosaic: DemosaicProvenance::None,
@@ -63,10 +60,10 @@ fn provenance(
 /// raster is refused, an integer one among them: its samples are display-encoded.
 pub(crate) fn linear(
     path: &Path,
-    format: FileFormat,
+    format: RasterFormat,
     ctx: &LoadCtx,
 ) -> Result<LinearImage, ImageError> {
-    if format != FileFormat::Tiff {
+    if format != RasterFormat::Tiff {
         return Err(ImageError::scientific_rejection(
             path,
             ScientificRefusal::PreviewOnlyRaster { format },
@@ -97,7 +94,7 @@ pub(crate) fn linear(
         ));
     }
 
-    let color = if desc.color_format.channel_count == ChannelCount::L {
+    let color = if desc.color_format.channel_count == ChannelCount::Mono {
         ColorProvenance::Monochrome
     } else {
         ColorProvenance::Unspecified
@@ -134,7 +131,7 @@ pub(crate) fn linear(
 /// channel dropped.
 pub(crate) fn preview(
     path: &Path,
-    format: FileFormat,
+    format: RasterFormat,
     ctx: &LoadCtx,
 ) -> Result<PreviewImage, ImageError> {
     let decoded = read(path, format)?;
@@ -160,12 +157,12 @@ pub(crate) fn preview(
 /// Write `image` to `path` as the raster format its extension names: PNG, JPEG or TIFF,
 /// published durably as the FITS writers publish, so a reader sees the old file or the new one.
 pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
-    write_image(path, &Image::from(image))
+    write_image(path, &InterleavedImage::from(image))
 }
 
 /// Write `image` to `path` as the raster format its extension names, published durably.
-pub(crate) fn write_image(path: &Path, image: &Image) -> Result<(), WriteError> {
-    let format = FileFormat::from_path(path)?;
+pub(crate) fn write_image(path: &Path, image: &InterleavedImage) -> Result<(), WriteError> {
+    let format = RasterFormat::from_path(path)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
         image.encode(&mut out, format)?;
@@ -177,14 +174,14 @@ pub(crate) fn write_image(path: &Path, image: &Image) -> Result<(), WriteError> 
 pub(crate) mod internals {
     use std::path::Path;
 
-    use imaginarium::{FileFormat, Image};
+    use imaginarium::{InterleavedImage, RasterFormat};
 
     use crate::io::error::ImageError;
     use crate::io::raster;
 
     /// The dataset's raster at `path`, in the format its extension names.
-    pub(crate) fn read_image(path: &Path) -> Result<Image, ImageError> {
-        let format = FileFormat::from_path(path).expect("a dataset raster's extension names it");
+    pub(crate) fn read_image(path: &Path) -> Result<InterleavedImage, ImageError> {
+        let format = RasterFormat::from_path(path).expect("a dataset raster's extension names it");
         raster::read(path, format)
     }
 }

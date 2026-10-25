@@ -24,7 +24,7 @@ impl OnePixel {
     fn on(self, size: Size2us, bg: f32) -> LinearImage {
         let mut pixels = vec![bg; size.pixel_count()];
         pixels[size.idx_of(self.at)] = self.value;
-        gray_image(size, pixels)
+        mono_image(size, pixels)
     }
 }
 
@@ -347,7 +347,7 @@ fn lanczos_keeps_its_negative_lobes() {
 #[test]
 fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
     let size = Size2us::new(4, 4);
-    let image = gray_image(size, (0..16).map(|i| i as f32 + 1.0).collect());
+    let image = mono_image(size, (0..16).map(|i| i as f32 + 1.0).collect());
     let config = DrizzleConfig {
         fill_value: -999.0,
         ..kernel_config(DrizzleKernel::Point, 2.0, 0.8)
@@ -393,7 +393,7 @@ fn unit_sampling_copies_the_input() {
         let product = drizzle_one(
             kernel_config(kernel, 1.0, 1.0),
             &DrizzleFrame::new(
-                gray_image(size, pixels.clone()),
+                mono_image(size, pixels.clone()),
                 warp_of(Transform::identity()),
             ),
         );

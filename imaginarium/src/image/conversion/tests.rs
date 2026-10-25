@@ -1,16 +1,16 @@
-use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::image::conversion::scalar::{self, Luminance};
-use crate::image::{Image, ImageDesc};
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::image::conversion::scalar::{self, Luma};
+use crate::image::{InterleavedDesc, InterleavedImage};
 use crate::internals::create_test_image;
 use common::Size2us;
 
 /// `(r·13933 + g·46871 + b·4732) / 65536`, rounded half to even:
 /// red 255 → 3 552 915 / 65536 = 54.21 → 54; green 255 → 11 952 105 / 65536 = 182.38 → 182;
-/// blue 255 → 1 206 660 / 65536 = 18.41 → 18; grey 255 → 255 exactly. In `u16` the weights are
+/// blue 255 → 1 206 660 / 65536 = 18.41 → 18; neutral 255 → 255 exactly. In `u16` the weights are
 /// the same, so red 65535 → 913 099 155 / 65536 = 13 932.79 → 13 933. Float carries the weights
 /// unrounded.
 #[test]
-fn luminance_is_the_rounded_rec709_sum() {
+fn luma_is_the_rounded_rec709_sum() {
     for (rgb, expected) in [
         ([255, 0, 0], 54),
         ([0, 255, 0], 182),
@@ -18,24 +18,24 @@ fn luminance_is_the_rounded_rec709_sum() {
         ([255, 255, 255], 255),
         ([0, 0, 0], 0),
     ] {
-        assert_eq!(u8::luminance(rgb[0], rgb[1], rgb[2]), expected, "{rgb:?}");
+        assert_eq!(u8::luma(rgb[0], rgb[1], rgb[2]), expected, "{rgb:?}");
     }
-    assert_eq!(u16::luminance(65535, 0, 0), 13933);
-    assert_eq!(u16::luminance(65535, 65535, 65535), 65535);
-    assert_eq!(f32::luminance(1.0, 0.0, 0.0), 0.2126);
+    assert_eq!(u16::luma(65535, 0, 0), 13933);
+    assert_eq!(u16::luma(65535, 65535, 65535), 65535);
+    assert_eq!(f32::luma(1.0, 0.0, 0.0), 0.2126);
 }
 
-/// Exhaustive over `u8` grey: every grey value is its own luminance, which needs the weights to
+/// Exhaustive over `u8` neutrals, `R = G = B`: each is its own luma, which needs the weights to
 /// sum to 65536 and the rounding to be exact.
 #[test]
-fn grey_keeps_its_value() {
+fn a_neutral_keeps_its_value() {
     for v in 0..=u8::MAX {
-        assert_eq!(u8::luminance(v, v, v), v);
+        assert_eq!(u8::luma(v, v, v), v);
     }
 }
 
-/// One pixel per channel-count pair, in `u8`: grey broadcasts and gains an opaque alpha, color
-/// keeps its channels or reduces to luminance, alpha is kept only into a format with alpha.
+/// One pixel per channel-count pair, in `u8`: mono broadcasts and gains an opaque alpha, color
+/// keeps its channels or reduces to luma, alpha is kept only into a format with alpha.
 #[test]
 fn channel_counts_expand_and_reduce() {
     let l = [100u8];
@@ -43,25 +43,25 @@ fn channel_counts_expand_and_reduce() {
     let rgba = [255u8, 0, 0, 7];
     for (from, src, to, expected) in [
         (
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             &l[..],
             ColorFormat::RGB_U8,
             &[100, 100, 100][..],
         ),
         (
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             &l,
             ColorFormat::RGBA_U8,
             &[100, 100, 100, 255],
         ),
-        (ColorFormat::RGB_U8, &rgb, ColorFormat::L_U8, &[54]),
+        (ColorFormat::RGB_U8, &rgb, ColorFormat::MONO_U8, &[54]),
         (
             ColorFormat::RGB_U8,
             &rgb,
             ColorFormat::RGBA_U8,
             &[255, 0, 0, 255],
         ),
-        (ColorFormat::RGBA_U8, &rgba, ColorFormat::L_U8, &[54]),
+        (ColorFormat::RGBA_U8, &rgba, ColorFormat::MONO_U8, &[54]),
         (
             ColorFormat::RGBA_U8,
             &rgba,
@@ -69,7 +69,7 @@ fn channel_counts_expand_and_reduce() {
             &[255, 0, 0],
         ),
     ] {
-        let mut dst = vec![0; to.byte_count()];
+        let mut dst = vec![0; to.byte_len()];
         scalar::row_converter(from, to)(src, &mut dst, 1);
         assert_eq!(dst, expected, "{from} -> {to}");
     }
@@ -83,25 +83,25 @@ fn channel_counts_expand_and_reduce() {
 fn whole_images_convert_by_the_rule() {
     let cases: [(ColorFormat, Vec<u8>, ColorFormat, Vec<u8>); 4] = [
         (
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             vec![0, 64, 128, 200, 255],
-            ColorFormat::L_U16,
+            ColorFormat::MONO_U16,
             bytemuck::cast_slice(&[0u16, 16448, 32896, 51400, 65535]).to_vec(),
         ),
         (
-            ColorFormat::L_U16,
+            ColorFormat::MONO_U16,
             bytemuck::cast_slice(&[0u16, 32896, 32767, 65535, 128]).to_vec(),
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             vec![0, 128, 127, 255, 0],
         ),
         (
-            ColorFormat::L_F32,
+            ColorFormat::MONO_F32,
             bytemuck::cast_slice(&[0.5f32, 0.2, 1.0, -1.0, 2.0]).to_vec(),
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             vec![128, 51, 255, 0, 255],
         ),
         (
-            ColorFormat::L_U8,
+            ColorFormat::MONO_U8,
             vec![0, 51, 255, 1, 2],
             ColorFormat::RGBA_F32,
             bytemuck::cast_slice(&[0, 51, 255, 1, 2].map(|v: u8| {
@@ -116,9 +116,14 @@ fn whole_images_convert_by_the_rule() {
         ),
     ];
     for (from, bytes, to, expected) in cases {
-        let image = Image::new_with_data(ImageDesc::new(Size2us::new(5, 1), from), bytes).unwrap();
+        let image =
+            InterleavedImage::new_with_data(InterleavedDesc::new(Size2us::new(5, 1), from), bytes)
+                .unwrap();
         let converted = image.convert_to(to);
-        assert_eq!(converted.desc(), ImageDesc::new(Size2us::new(5, 1), to));
+        assert_eq!(
+            converted.desc(),
+            InterleavedDesc::new(Size2us::new(5, 1), to)
+        );
         assert_eq!(converted.bytes(), expected, "{from} -> {to}");
     }
 }
@@ -126,12 +131,15 @@ fn whole_images_convert_by_the_rule() {
 /// A conversion to the image's own format is a full copy, not a black image.
 #[test]
 fn converting_to_the_same_format_copies() {
-    for format in ALL_FORMATS {
-        let bytes: Vec<u8> = (0..3 * 2 * format.byte_count())
+    for format in ColorFormat::ALL {
+        let bytes: Vec<u8> = (0..3 * 2 * format.byte_len())
             .map(|i| (i * 37 % 251) as u8)
             .collect();
-        let image = Image::new_with_data(ImageDesc::new(Size2us::new(3, 2), format), bytes.clone())
-            .unwrap();
+        let image = InterleavedImage::new_with_data(
+            InterleavedDesc::new(Size2us::new(3, 2), format),
+            bytes.clone(),
+        )
+        .unwrap();
         assert_eq!(image.convert_to(format).bytes(), bytes, "{format}");
         assert_eq!(image.convert(format).bytes(), bytes, "{format}");
     }
@@ -154,7 +162,7 @@ fn conversion_snapshot() {
         hash
     }
 
-    let digests = ALL_FORMATS.map(|from| {
+    let digests = ColorFormat::ALL.map(|from| {
         let mut source = create_test_image(from, Size2us::new(37, 5), 3);
         if from.sample_type == SampleType::F32 {
             let edges = [-1.0f32, -0.0, 1.5, 255.0, f32::INFINITY, f32::NEG_INFINITY];
@@ -163,7 +171,7 @@ fn conversion_snapshot() {
                 *sample = *edge;
             }
         }
-        ALL_FORMATS
+        ColorFormat::ALL
             .into_iter()
             .filter(|&to| to != from)
             .fold(0xcbf2_9ce4_8422_2325, |hash, to| {

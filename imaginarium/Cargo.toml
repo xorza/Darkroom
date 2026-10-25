@@ -30,6 +30,7 @@ thiserror = { workspace = true, features = ["std"] }
 bytemuck = { workspace = true, features = ["derive", "extern_crate_std", "min_const_generics"] }
 glam = { workspace = true, features = ["std"] }
 rayon = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
 strum = { workspace = true, features = ["derive", "std"] }
 tiff = { workspace = true, features = ["deflate", "fax", "jpeg", "lzw"] }
 image = { workspace = true, features = ["jpeg", "png", "tiff"] }
@@ -40,7 +41,7 @@ common = { workspace = true, features = ["internals"] }
 imaginarium = { workspace = true, features = ["internals"] }
 
 [[example]]
-name = "transform"
+name = "affine_warp"
 required-features = ["wgpu"]
 
 [[example]]

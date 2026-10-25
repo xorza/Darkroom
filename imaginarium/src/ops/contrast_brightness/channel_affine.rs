@@ -40,7 +40,7 @@ impl ChannelAffine {
     }
 
     /// Every channel value of `values` adjusted in place: the scalar reference over a row with no
-    /// alpha, and the sub-vector tail of a flat kernel.
+    /// alpha, and the sub-vector tail of a contiguous kernel.
     #[inline]
     pub(crate) fn apply_all<T: Sample>(self, values: &mut [T]) {
         for value in values {

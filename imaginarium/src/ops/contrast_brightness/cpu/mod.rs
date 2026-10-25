@@ -10,13 +10,13 @@ use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::image::image_desc::ImageDesc;
+use crate::image::InterleavedImage;
+use crate::image::image_desc::InterleavedDesc;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 
 /// A SIMD row kernel applying [`ChannelAffine`] to a row in place, over `count`
-/// items: channel values for the flat kernels, whole pixels for the
+/// items: channel values for the contiguous kernels, whole pixels for the
 /// alpha-preserving ones.
 pub(super) type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
 
@@ -30,7 +30,7 @@ pub(super) fn row_kernel(tier: SimdTier, _format: ColorFormat) -> Option<RowKern
 /// that tier has none. The FMA tier has none: dispatch walks down to the AVX2
 /// kernels, which fuse nothing, and below SSE4.1 to the scalar path.
 ///
-/// `L` and `RGB` have no channel to protect, so they take a flat kernel that
+/// Mono and RGB have no channel to protect, so they take a contiguous kernel that
 /// walks the row as one contiguous channel array and never pays for pixel
 /// boundaries; only `RGBA` needs the per-pixel form that carries alpha through.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -61,11 +61,11 @@ pub(super) fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKerne
 #[cfg(target_arch = "x86_64")]
 fn avx2_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => avx2::u8_flat,
+        (SampleType::U8, false) => avx2::u8_contiguous,
         (SampleType::U8, true) => avx2::u8_rgba,
-        (SampleType::U16, false) => avx2::u16_flat,
+        (SampleType::U16, false) => avx2::u16_contiguous,
         (SampleType::U16, true) => avx2::u16_rgba,
-        (SampleType::F32, false) => avx2::f32_flat,
+        (SampleType::F32, false) => avx2::f32_contiguous,
         (SampleType::F32, true) => avx2::f32_rgba,
     }
 }
@@ -74,11 +74,11 @@ fn avx2_kernel(format: ColorFormat) -> RowKernel {
 #[cfg(target_arch = "x86_64")]
 fn sse41_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => sse41::u8_flat,
+        (SampleType::U8, false) => sse41::u8_contiguous,
         (SampleType::U8, true) => sse41::u8_rgba,
-        (SampleType::U16, false) => sse41::u16_flat,
+        (SampleType::U16, false) => sse41::u16_contiguous,
         (SampleType::U16, true) => sse41::u16_rgba,
-        (SampleType::F32, false) => sse41::f32_flat,
+        (SampleType::F32, false) => sse41::f32_contiguous,
         (SampleType::F32, true) => sse41::f32_rgba,
     }
 }
@@ -87,11 +87,11 @@ fn sse41_kernel(format: ColorFormat) -> RowKernel {
 #[cfg(target_arch = "aarch64")]
 fn neon_kernel(format: ColorFormat) -> RowKernel {
     match (format.sample_type, format.has_alpha()) {
-        (SampleType::U8, false) => neon::u8_flat,
+        (SampleType::U8, false) => neon::u8_contiguous,
         (SampleType::U8, true) => neon::u8_rgba,
-        (SampleType::U16, false) => neon::u16_flat,
+        (SampleType::U16, false) => neon::u16_contiguous,
         (SampleType::U16, true) => neon::u16_rgba,
-        (SampleType::F32, false) => neon::f32_flat,
+        (SampleType::F32, false) => neon::f32_contiguous,
         (SampleType::F32, true) => neon::f32_rgba,
     }
 }
@@ -103,7 +103,7 @@ fn neon_kernel(format: ColorFormat) -> RowKernel {
 /// One rayon job per row. Rows carry no padding, so coarser jobs would be
 /// correct too, but they measure slower: on a hybrid core CPU the small jobs are
 /// what lets work-stealing keep the efficiency cores from holding up a frame.
-pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
+pub(super) fn apply(params: ContrastBrightness, image: &mut InterleavedImage) {
     let format = image.desc().color_format;
 
     if let Some(kernel) = SimdTier::dispatch(|tier| row_kernel(tier, format)) {
@@ -116,10 +116,10 @@ pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
 
 /// The scalar path, one row at a time through [`scalar_row`]. Split out so the
 /// tests can reach the reference past the SIMD dispatch.
-pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut Image) {
+pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut InterleavedImage) {
     let format = image.desc().color_format;
     let affine = ChannelAffine::new(params, format);
-    let stride = image.desc().row_bytes();
+    let stride = image.desc().row_byte_len();
 
     par::chunks_mut(image.bytes_mut(), stride).for_each(|row| scalar_row(affine, format, row));
 }
@@ -145,8 +145,8 @@ fn typed_row<T: Sample>(affine: ChannelAffine, format: ColorFormat, row: &mut [u
 }
 
 /// How many items a kernel is asked to walk per row: channel values for the
-/// flat kernels, whole pixels for the alpha-preserving ones.
-pub(super) const fn kernel_count(desc: ImageDesc) -> usize {
+/// contiguous kernels, whole pixels for the alpha-preserving ones.
+pub(super) const fn kernel_count(desc: InterleavedDesc) -> usize {
     if desc.color_format.has_alpha() {
         desc.size.width
     } else {
@@ -158,11 +158,15 @@ pub(super) const fn kernel_count(desc: ImageDesc) -> usize {
 ///
 /// # Safety
 /// The running CPU must support the feature `kernel` was compiled for.
-unsafe fn apply_kernel(kernel: RowKernel, params: ContrastBrightness, image: &mut Image) {
+unsafe fn apply_kernel(
+    kernel: RowKernel,
+    params: ContrastBrightness,
+    image: &mut InterleavedImage,
+) {
     let format = image.desc().color_format;
     let affine = ChannelAffine::new(params, format);
     let count = kernel_count(image.desc());
-    let stride = image.desc().row_bytes();
+    let stride = image.desc().row_byte_len();
 
     par::chunks_mut(image.bytes_mut(), stride).for_each(|row| {
         unsafe { kernel(row, count, affine) };

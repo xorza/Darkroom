@@ -61,7 +61,8 @@ GUI, and the imaging stack it draws on:
 | **[palantir](https://github.com/xorza/palantir)** | The immediate-mode GUI — WPF-style two-pass layout, wgpu renderer. *Submodule.* |
 | **common** | Shared leaf utilities: typed UUID ids, serialization + format detection, cooperative cancellation, struct introspection, file discovery + atomic publication. |
 | **lens** | The image + astronomical node libraries — adapts `imaginarium` operations into graph nodes. |
-| **imaginarium** | Image library with CPU and wgpu GPU operations. *Submodule.* |
+| **imaginarium** | Interleaved images in nine pixel formats: their codecs, SIMD and wgpu GPU operations. |
+| **libraw** | A safe wrapper over LibRaw, the camera RAW decoder, built from `libraw-sys`. |
 | **lumos** | Astronomical pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, drizzle. |
 | **fits-well** | A fast reader/writer for FITS (astronomy's image format), targeting the full FITS 4.0 standard. *Submodule.* |
 

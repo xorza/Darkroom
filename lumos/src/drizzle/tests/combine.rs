@@ -14,7 +14,7 @@ fn textured_image(size: Size2us, seed: usize) -> LinearImage {
     let pixels = (0..size.pixel_count())
         .map(|i| 1.0 + hash_unit(i + seed * size.pixel_count()))
         .collect();
-    gray_image(size, pixels)
+    mono_image(size, pixels)
 }
 
 /// With no rejection and equal frame weights, the combine of the drizzled frames is the
@@ -141,7 +141,7 @@ fn a_satellite_trail_in_one_frame_is_rejected() {
                     pixels[size.idx_of(Vec2us::new(x, 64))] = 100.0;
                 }
             }
-            gray_image(size, pixels)
+            mono_image(size, pixels)
         })
         .collect();
     let transforms: Vec<Transform> = (0..FRAMES)

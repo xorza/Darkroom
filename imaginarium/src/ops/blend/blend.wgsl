@@ -6,14 +6,14 @@
 // output word, no row stride, no shared-word read-modify-write, no races.
 
 struct Params {
-    mode: u32,           // 0=Normal,1=Add,2=Subtract,3=Multiply,4=Screen,5=Overlay
+    mode: u32,             // 0=Normal,1=Add,2=Subtract,3=Multiply,4=Screen,5=Overlay
     alpha: f32,
     _pad0: u32,
     _pad1: u32,
-    total_bytes: u32,    // packed image size = width * height * bytes_per_pixel
-    elem_size: u32,      // bytes per channel value: 1 (u8), 2 (u16), 4 (f32)
-    channels: u32,       // channels per pixel
-    alpha_channel: u32,  // channel index passed through (Normal), or NO_ALPHA
+    byte_len: u32,         // packed image size = width * height * bytes_per_pixel
+    sample_byte_len: u32,  // bytes per channel value: 1 (u8), 2 (u16), 4 (f32)
+    channel_count: u32,    // channels per pixel
+    alpha_channel: u32,    // channel index passed through (Normal), or NO_ALPHA
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -52,24 +52,24 @@ fn main(
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
     let w = linear_index(gid, groups);
-    if w * 4u >= params.total_bytes {
+    if w * 4u >= params.byte_len {
         return;
     }
 
-    let elem = params.elem_size;
-    let scale = full_scale(elem);
+    let sample_byte_len = params.sample_byte_len;
+    let scale = full_scale(sample_byte_len);
     var out_word: u32 = 0u;
-    for (var byte: u32 = 0u; byte < 4u; byte += elem) {
+    for (var byte: u32 = 0u; byte < 4u; byte += sample_byte_len) {
         let offset = w * 4u + byte;
-        if offset >= params.total_bytes {
+        if offset >= params.byte_len {
             break;
         }
         let shift = byte * 8u;
-        let s = unpack(src[w], shift, elem) / scale;
-        let d = unpack(dst[w], shift, elem) / scale;
-        let is_alpha = (offset / elem) % params.channels == params.alpha_channel;
+        let s = unpack(src[w], shift, sample_byte_len) / scale;
+        let d = unpack(dst[w], shift, sample_byte_len) / scale;
+        let is_alpha = (offset / sample_byte_len) % params.channel_count == params.alpha_channel;
         let blended = clamp(blend_elem(s, d, is_alpha) * scale, 0.0, scale);
-        out_word = out_word | pack(blended, shift, elem);
+        out_word = out_word | pack(blended, shift, sample_byte_len);
     }
     output[w] = out_word;
 }

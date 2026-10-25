@@ -19,7 +19,7 @@ const BIN_COUNT: usize = 256;
 
 /// Local contrast enhancement of a *stretched* (display-domain) image in place via CLAHE.
 ///
-/// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
+/// Computed on the combined intensity; color channels are rescaled hue-preservingly. Mono gets
 /// the mapping directly.
 #[derive(Debug, Clone, Copy, Introspect)]
 #[config(type_id = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c")]

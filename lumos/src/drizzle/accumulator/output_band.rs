@@ -492,7 +492,7 @@ mod tests {
     use crate::drizzle::deposit::Deposit;
     use crate::drizzle::drizzle_frame::DrizzleFrame;
     use crate::drizzle::output_grid::OutputGrid;
-    use crate::internals::images::gray_image;
+    use crate::internals::images::mono_image;
     use crate::registration::distortion::sip::SipModel;
     use crate::registration::distortion::sip::sip_order::SipOrder;
     use crate::registration::transform::Transform;
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn the_corner_lattice_maps_the_corners_each_drop_would() {
         let size = Size2us::new(24, 16);
-        let image = gray_image(size, vec![1.0; size.pixel_count()]);
+        let image = mono_image(size, vec![1.0; size.pixel_count()]);
         let centre = DVec2::new(12.0, 8.0);
         let reference: Vec<DVec2> = (0..size.height)
             .flat_map(|y| (0..size.width).map(move |x| DVec2::new(x as f64, y as f64)))

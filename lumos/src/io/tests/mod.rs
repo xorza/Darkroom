@@ -4,7 +4,7 @@ mod synthetic;
 
 use common::{Buffer2, Size2us, TempDir, fs};
 use fits_well::image::SampleType;
-use imaginarium::{ColorFormat, FileFormat, Image, ImageDesc};
+use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage, RasterFormat};
 
 use crate::image::channel_layout::ChannelLayout;
 use crate::image::flat_gain::shared_gains::SharedGains;
@@ -32,18 +32,18 @@ fn metadata_default() {
 }
 
 #[test]
-fn convert_to_imaginarium_image_grayscale() {
+fn convert_to_imaginarium_image_mono() {
     let astro = LinearImage::from_interleaved(
         ImageDimensions::new((3, 2), ChannelLayout::Mono),
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
     );
 
-    let image: Image = astro.into();
+    let image: InterleavedImage = astro.into();
     let desc = image.desc();
 
     assert_eq!(desc.size.width, 3);
     assert_eq!(desc.size.height, 2);
-    assert_eq!(desc.color_format, ColorFormat::L_F32);
+    assert_eq!(desc.color_format, ColorFormat::MONO_F32);
 
     let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
     assert_eq!(pixels.len(), 6);
@@ -64,7 +64,7 @@ fn convert_to_imaginarium_image_rgb() {
         ],
     );
 
-    let image: Image = astro.into();
+    let image: InterleavedImage = astro.into();
     let desc = image.desc();
 
     assert_eq!(desc.size.width, 2);
@@ -88,12 +88,12 @@ fn convert_fits_to_imaginarium_image() {
         "/test_resources/full_example.fits"
     );
     let astro = LoadCtx::default().linear(path).unwrap();
-    let image: Image = astro.into();
+    let image: InterleavedImage = astro.into();
 
     let desc = image.desc();
     assert_eq!(desc.size.width, 100);
     assert_eq!(desc.size.height, 100);
-    assert_eq!(desc.color_format, ColorFormat::L_F32);
+    assert_eq!(desc.color_format, ColorFormat::MONO_F32);
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn load_full_example_fits() {
     assert_eq!(image.width(), 100);
     assert_eq!(image.height(), 100);
     assert_eq!(image.channels(), 1);
-    assert!(image.is_grayscale());
+    assert!(image.is_mono());
     assert_eq!(image.pixel_count(), 10000);
     assert_eq!(image.metadata.header.sample_type, Some(SampleType::I32));
 
@@ -129,10 +129,10 @@ fn load_full_example_fits() {
 
 #[test]
 fn from_image_no_stride_padding() {
-    let desc = ImageDesc::new(Size2us::new(3, 2), ColorFormat::L_F32);
+    let desc = InterleavedDesc::new(Size2us::new(3, 2), ColorFormat::MONO_F32);
     let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
-    let image = Image::new_with_data(desc, bytes).unwrap();
+    let image = InterleavedImage::new_with_data(desc, bytes).unwrap();
 
     let linear = LinearImage::from(&image);
 
@@ -142,13 +142,13 @@ fn from_image_no_stride_padding() {
     assert_eq!(linear.channel(0).pixels(), &*pixels);
 }
 
-/// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and color.
+/// A saved TIFF reloads with the same dimensions and the same f32 samples, mono and color.
 #[test]
 fn saved_tiff_round_trips_its_samples() {
     let dir = TempDir::new("lumos-save-tiff");
     for (name, image) in [
         (
-            "gray.tiff",
+            "mono.tiff",
             LinearImage::from_interleaved(
                 ImageDimensions::new((2, 2), ChannelLayout::Mono),
                 vec![0.1, 0.2, 0.3, 0.4],
@@ -183,8 +183,8 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
     let dir = TempDir::new("lumos-tiff-nulls");
     let path = dir.join("holes.tiff");
     let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
-    let image = Image::new_with_data(
-        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_F32),
+    let image = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_F32),
         bytemuck::cast_slice(&samples).to_vec(),
     )
     .unwrap();
@@ -219,8 +219,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let dir = TempDir::new("lumos-io-image");
     let float_path = dir.join("linear_float.tiff");
     let float_pixels = vec![-0.25f32, 0.5, 1.25, 3.0];
-    let float_image = Image::new_with_data(
-        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_F32),
+    let float_image = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_F32),
         bytemuck::cast_slice(&float_pixels).to_vec(),
     )
     .unwrap();
@@ -233,8 +233,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         matches!(preview, PreviewImage::Interleaved { .. }),
         "a raster decode stays interleaved"
     );
-    let preview: Image = LoadCtx::default().preview(&float_path).unwrap().into();
-    assert_eq!(preview.desc().color_format, ColorFormat::L_F32);
+    let preview: InterleavedImage = LoadCtx::default().preview(&float_path).unwrap().into();
+    assert_eq!(preview.desc().color_format, ColorFormat::MONO_F32);
     assert_eq!(
         bytemuck::cast_slice::<u8, f32>(preview.bytes()),
         float_pixels
@@ -243,8 +243,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
     let integer_tiff = dir.join("integer.tiff");
     let png = dir.join("display.png");
     let jpeg = dir.join("lossy.jpg");
-    let integer_image = Image::new_with_data(
-        ImageDesc::new(Size2us::new(2, 2), ColorFormat::L_U8),
+    let integer_image = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_U8),
         vec![0, 64, 128, 255],
     )
     .unwrap();
@@ -253,13 +253,13 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         (
             &png,
             ScientificRefusal::PreviewOnlyRaster {
-                format: FileFormat::Png,
+                format: RasterFormat::Png,
             },
         ),
         (
             &jpeg,
             ScientificRefusal::PreviewOnlyRaster {
-                format: FileFormat::Jpeg,
+                format: RasterFormat::Jpeg,
             },
         ),
     ] {
@@ -278,8 +278,8 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let alpha_path = dir.join("alpha.tiff");
     let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
-    let alpha_image = Image::new_with_data(
-        ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32),
+    let alpha_image = InterleavedImage::new_with_data(
+        InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32),
         bytemuck::cast_slice(&alpha_pixels).to_vec(),
     )
     .unwrap();
@@ -328,16 +328,16 @@ fn save_invalid_extension() {
 
 #[test]
 fn roundtrip_linear_to_image_to_linear() {
-    let gray = LinearImage::from_interleaved(
+    let mono = LinearImage::from_interleaved(
         ImageDimensions::new((3, 2), ChannelLayout::Mono),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
     );
 
-    let image: Image = gray.clone().into();
+    let image: InterleavedImage = mono.clone().into();
     let restored = LinearImage::from(&image);
 
-    assert_eq!(restored.dimensions(), gray.dimensions());
-    for (a, b) in gray.channel(0).iter().zip(restored.channel(0).iter()) {
+    assert_eq!(restored.dimensions(), mono.dimensions());
+    for (a, b) in mono.channel(0).iter().zip(restored.channel(0).iter()) {
         assert_close!(*a, *b, 1e-6);
     }
 
@@ -346,7 +346,7 @@ fn roundtrip_linear_to_image_to_linear() {
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5],
     );
 
-    let image: Image = rgb.clone().into();
+    let image: InterleavedImage = rgb.clone().into();
     let restored = LinearImage::from(&image);
 
     assert_eq!(restored.dimensions(), rgb.dimensions());
@@ -359,10 +359,10 @@ fn roundtrip_linear_to_image_to_linear() {
 
 #[test]
 fn image_rgba_to_linear_drops_alpha() {
-    let desc = ImageDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32);
+    let desc = InterleavedDesc::new(Size2us::new(2, 1), ColorFormat::RGBA_F32);
     let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
-    let image = Image::new_with_data(desc, bytes).unwrap();
+    let image = InterleavedImage::new_with_data(desc, bytes).unwrap();
 
     let linear = LinearImage::from(&image);
 
@@ -387,7 +387,7 @@ fn rgb_image_creation_and_operations() {
     assert_eq!(image.width(), 2);
     assert_eq!(image.height(), 2);
     assert_eq!(image.channels(), 3);
-    assert!(!image.is_grayscale());
+    assert!(!image.is_mono());
     assert_eq!(image.pixel_count(), 4);
     assert_eq!(image.sample_count(), 12);
 }
@@ -407,14 +407,14 @@ fn from_interleaved_splits_samples_into_planes() {
 }
 
 #[test]
-fn from_planar_channels_grayscale() {
+fn from_planar_channels_mono() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
     let image = LinearImage::from_planar_channels(
         ImageDimensions::new((2, 2), ChannelLayout::Mono),
         channels,
     );
 
-    assert!(image.is_grayscale());
+    assert!(image.is_mono());
     assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
 
     let plane = Buffer2::new((2, 2), vec![5.0, 6.0, 7.0, 8.0]);

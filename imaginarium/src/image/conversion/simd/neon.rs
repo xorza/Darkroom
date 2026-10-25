@@ -65,7 +65,7 @@ fn quads(channel: uint8x16_t) -> [uint16x4_t; 4] {
     ]
 }
 
-/// The Rec. 709 luminance of four pixels, rounded as [`luma::round_q16`] rounds.
+/// The Rec. 709 luma of four pixels, rounded as [`luma::round_q16`] rounds.
 ///
 /// The widening multiply-accumulate takes *unsigned* 16-bit scalars and lands in
 /// `u32` lanes, so the full weights go in as they are and the sum is the scalar
@@ -73,7 +73,7 @@ fn quads(channel: uint8x16_t) -> [uint16x4_t; 4] {
 /// force.
 #[inline]
 #[target_feature(enable = "neon")]
-fn luminance(r: uint16x4_t, g: uint16x4_t, b: uint16x4_t) -> uint16x4_t {
+fn luma(r: uint16x4_t, g: uint16x4_t, b: uint16x4_t) -> uint16x4_t {
     const _: () = assert!(luma::WEIGHTS_Q16[1] <= u16::MAX as u32);
     let [wr, wg, wb] = luma::WEIGHTS_Q16.map(|weight| weight as u16);
     let sum = vmlal_n_u16(vmlal_n_u16(vmull_n_u16(r, wr), g, wg), b, wb);
@@ -81,7 +81,7 @@ fn luminance(r: uint16x4_t, g: uint16x4_t, b: uint16x4_t) -> uint16x4_t {
     vshrn_n_u32::<16>(vaddq_u32(vaddq_u32(sum, vdupq_n_u32(0x7FFF)), odd))
 }
 
-/// Four luminance quads — sixteen values — packed back into 16 bytes.
+/// Four luma quads — sixteen values — packed back into 16 bytes.
 #[inline]
 #[target_feature(enable = "neon")]
 fn pack_quads(lum: [uint16x4_t; 4]) -> uint8x16_t {
@@ -91,18 +91,18 @@ fn pack_quads(lum: [uint16x4_t; 4]) -> uint8x16_t {
     )
 }
 
-/// The luminance of sixteen pixels given as deinterleaved channels.
+/// The luma of sixteen pixels given as deinterleaved channels.
 #[inline]
 #[target_feature(enable = "neon")]
-fn luminance16(r: uint8x16_t, g: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+fn luma16(r: uint8x16_t, g: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
     let (r, g, b) = (quads(r), quads(g), quads(b));
-    pack_quads([0, 1, 2, 3].map(|quad| luminance(r[quad], g[quad], b[quad])))
+    pack_quads([0, 1, 2, 3].map(|quad| luma(r[quad], g[quad], b[quad])))
 }
 
 /// Sixteen `RGBA_U8` pixels per iteration: one deinterleaving 64-byte load, one
 /// 16-byte store.
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_rgba_to_mono_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels * 4].as_chunks::<64>();
     let (out_groups, _) = dst[..pixels].as_chunks_mut::<16>();
@@ -110,7 +110,7 @@ pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], widt
     for (group, out) in groups.iter().zip(out_groups) {
         unsafe {
             let rgba = vld4q_u8(group.as_ptr());
-            vst1q_u8(out.as_mut_ptr(), luminance16(rgba.0, rgba.1, rgba.2));
+            vst1q_u8(out.as_mut_ptr(), luma16(rgba.0, rgba.1, rgba.2));
         }
     }
 
@@ -120,7 +120,7 @@ pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], widt
 /// Sixteen `RGB_U8` pixels per iteration: one deinterleaving 48-byte load, one
 /// 16-byte store.
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_rgb_to_mono_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels * 3].as_chunks::<48>();
     let (out_groups, _) = dst[..pixels].as_chunks_mut::<16>();
@@ -128,16 +128,16 @@ pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width
     for (group, out) in groups.iter().zip(out_groups) {
         unsafe {
             let rgb = vld3q_u8(group.as_ptr());
-            vst1q_u8(out.as_mut_ptr(), luminance16(rgb.0, rgb.1, rgb.2));
+            vst1q_u8(out.as_mut_ptr(), luma16(rgb.0, rgb.1, rgb.2));
         }
     }
 
     scalar::convert_row::<u8, u8, 3, 1>(&src[pixels * 3..], &mut dst[pixels..], width - pixels);
 }
 
-/// Sixteen `L_U8` pixels per iteration: one load, one interleaving store.
+/// Sixteen `MONO_U8` pixels per iteration: one load, one interleaving store.
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_mono_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     let alpha = vdupq_n_u8(u8::MAX);
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels].as_chunks::<16>();
@@ -145,25 +145,25 @@ pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], widt
 
     for (group, out) in groups.iter().zip(out_groups) {
         unsafe {
-            let grey = vld1q_u8(group.as_ptr());
-            vst4q_u8(out.as_mut_ptr(), uint8x16x4_t(grey, grey, grey, alpha));
+            let mono = vld1q_u8(group.as_ptr());
+            vst4q_u8(out.as_mut_ptr(), uint8x16x4_t(mono, mono, mono, alpha));
         }
     }
 
     scalar::convert_row::<u8, u8, 1, 4>(&src[pixels..], &mut dst[pixels * 4..], width - pixels);
 }
 
-/// Sixteen `L_U8` pixels per iteration: one load, one interleaving store.
+/// Sixteen `MONO_U8` pixels per iteration: one load, one interleaving store.
 #[target_feature(enable = "neon")]
-pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+pub(super) unsafe fn convert_mono_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     let pixels = width - width % 16;
     let (groups, _) = src[..pixels].as_chunks::<16>();
     let (out_groups, _) = dst[..pixels * 3].as_chunks_mut::<48>();
 
     for (group, out) in groups.iter().zip(out_groups) {
         unsafe {
-            let grey = vld1q_u8(group.as_ptr());
-            vst3q_u8(out.as_mut_ptr(), uint8x16x3_t(grey, grey, grey));
+            let mono = vld1q_u8(group.as_ptr());
+            vst3q_u8(out.as_mut_ptr(), uint8x16x3_t(mono, mono, mono));
         }
     }
 

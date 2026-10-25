@@ -1,6 +1,6 @@
 use common::SimdTier;
 
-use crate::color::color_format::{ALL_FORMATS, SampleType};
+use crate::color::color_format::{ColorFormat, SampleType};
 use crate::image::conversion::scalar;
 use crate::image::conversion::simd::tier_converter;
 
@@ -60,8 +60,8 @@ fn every_tier_matches_the_scalar_reference() {
             continue;
         }
         tiers_run += 1;
-        for from in ALL_FORMATS {
-            for to in ALL_FORMATS {
+        for from in ColorFormat::ALL {
+            for to in ColorFormat::ALL {
                 if from == to {
                     continue;
                 }
@@ -70,20 +70,20 @@ fn every_tier_matches_the_scalar_reference() {
                 };
                 // Cycled to fit the widest row; the whole of it is one more row.
                 let mut source = samples(from.sample_type);
-                let widest = WIDTHS[WIDTHS.len() - 1] * from.byte_count();
+                let widest = WIDTHS[WIDTHS.len() - 1] * from.byte_len();
                 while source.len() < widest {
                     source.extend_from_within(..);
                 }
-                source.truncate(source.len() - source.len() % from.byte_count());
-                let pixels = source.len() / from.byte_count();
+                source.truncate(source.len() - source.len() % from.byte_len());
+                let pixels = source.len() / from.byte_len();
                 let widths = WIDTHS.into_iter().chain([pixels]);
                 for (offset, width) in widths.enumerate() {
-                    let start = (offset * 7 % (pixels - width + 1)) * from.byte_count();
-                    let row = &source[start..start + width * from.byte_count()];
+                    let start = (offset * 7 % (pixels - width + 1)) * from.byte_len();
+                    let row = &source[start..start + width * from.byte_len()];
                     // A source row runs on to the end of the image; the kernel must stop at its own.
                     let padded = [row, &[0xA5; 64]].concat();
-                    let mut expected = vec![0; width * to.byte_count()];
-                    let mut actual = vec![0; width * to.byte_count()];
+                    let mut expected = vec![0; width * to.byte_len()];
+                    let mut actual = vec![0; width * to.byte_len()];
                     scalar::row_converter(from, to)(&padded, &mut expected, width);
                     unsafe { kernel(&padded, &mut actual, width) };
                     assert!(
@@ -112,9 +112,9 @@ fn first_difference(expected: &[u8], actual: &[u8]) -> usize {
 #[test]
 fn every_vectorized_pair_has_a_kernel_at_its_tiers() {
     let pairs = || {
-        ALL_FORMATS
+        ColorFormat::ALL
             .into_iter()
-            .flat_map(|from| ALL_FORMATS.map(|to| (from, to)))
+            .flat_map(|from| ColorFormat::ALL.map(|to| (from, to)))
             .filter(|&(from, to)| from != to)
     };
     let own = |tier: SimdTier| {

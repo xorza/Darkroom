@@ -24,6 +24,6 @@ fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     assert_eq!(image.channels(), 3);
 
     if let Some(path) = internals::debug_output_path("light_from_raw.tiff") {
-        raster::write_image(&path, &imaginarium::Image::from(image)).unwrap();
+        raster::write_image(&path, &imaginarium::InterleavedImage::from(image)).unwrap();
     }
 }

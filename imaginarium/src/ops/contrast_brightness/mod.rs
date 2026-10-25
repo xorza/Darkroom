@@ -9,7 +9,7 @@ pub(crate) mod pipeline;
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 #[cfg(feature = "wgpu")]
 use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 
@@ -62,7 +62,7 @@ impl ContrastBrightness {
     ///
     /// Where `mid` is the middle value of the type's range.
     /// Alpha channel (if present) is preserved unchanged.
-    pub fn apply_cpu(&self, image: &mut Image) {
+    pub fn apply_cpu(&self, image: &mut InterleavedImage) {
         cpu::apply(*self, image);
     }
 
@@ -90,7 +90,7 @@ pub(crate) mod bench;
 mod tests {
     use common::Size2us;
 
-    use crate::color::color_format::ALL_FORMATS;
+    use crate::color::color_format::ColorFormat;
     use crate::internals::create_test_image;
     use crate::internals::image_diff::pixels_equal;
     use crate::ops::contrast_brightness::ContrastBrightness;
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn apply_cpu_adjusts_in_place_without_reallocating() {
-        for format in ALL_FORMATS {
+        for format in ColorFormat::ALL {
             let source = create_test_image(format, Size2us::new(17, 5), 0);
             let mut image = source.clone();
             let before = image.bytes().as_ptr();

@@ -46,14 +46,14 @@ enum Pixels {
     /// Interleaved samples, what the `imaginarium` ops take, and what their decoder stated of them:
     /// default for an op's output, which states nothing.
     InterleavedCpu {
-        image: imaginarium::Image,
+        image: imaginarium::InterleavedImage,
         metadata: ImageMetadata,
     },
 }
 
 impl Image {
     /// A planar image of `width × height`, in the layout the `lumos` nodes publish: one `f32`
-    /// plane per channel, gray from one plane and RGB from three.
+    /// plane per channel, mono from one plane and RGB from three.
     ///
     /// # Panics
     /// When `planes` holds neither one nor three planes, or a plane does not hold
@@ -77,7 +77,7 @@ impl Image {
     /// The interleaved pixels of a required image input, owned: moved out
     /// when the value is their last holder and copied when it is not,
     /// repacked from planes either way if that is what they are.
-    pub(crate) fn take_interleaved(value: DynamicValue) -> imaginarium::Image {
+    pub(crate) fn take_interleaved(value: DynamicValue) -> imaginarium::InterleavedImage {
         match value.into_custom::<Self>() {
             Ok(image) => image.into_interleaved(),
             Err(value) => value.required_custom::<Self>().interleaved().into_owned(),
@@ -96,10 +96,10 @@ impl Image {
 
     /// Takes the interleaved form, repacking from planes if that is what this holds. The metadata
     /// stays behind: the `imaginarium` ops take samples alone.
-    fn into_interleaved(self) -> imaginarium::Image {
+    fn into_interleaved(self) -> imaginarium::InterleavedImage {
         match self.pixels {
             Pixels::InterleavedCpu { image, .. } => image,
-            Pixels::PlanarCpu(planar) => imaginarium::Image::from(&planar),
+            Pixels::PlanarCpu(planar) => imaginarium::InterleavedImage::from(&planar),
         }
     }
 
@@ -117,10 +117,10 @@ impl Image {
     /// not. For the readers that only ever get a `&Image` — document serialization and the
     /// previewer — where taking ownership is not on offer and copying an already-interleaved master
     /// would be pure waste.
-    pub fn interleaved(&self) -> Cow<'_, imaginarium::Image> {
+    pub fn interleaved(&self) -> Cow<'_, imaginarium::InterleavedImage> {
         match &self.pixels {
             Pixels::InterleavedCpu { image, .. } => Cow::Borrowed(image),
-            Pixels::PlanarCpu(planar) => Cow::Owned(imaginarium::Image::from(planar)),
+            Pixels::PlanarCpu(planar) => Cow::Owned(imaginarium::InterleavedImage::from(planar)),
         }
     }
 
@@ -136,11 +136,11 @@ impl Image {
     }
 
     /// Dimensions and format, without repacking either way.
-    pub(crate) fn desc(&self) -> imaginarium::ImageDesc {
+    pub(crate) fn desc(&self) -> imaginarium::InterleavedDesc {
         match &self.pixels {
             Pixels::InterleavedCpu { image, .. } => image.desc(),
             Pixels::PlanarCpu(planar) => {
-                imaginarium::ImageDesc::new(planar.dimensions().size(), planar.color_format())
+                imaginarium::InterleavedDesc::new(planar.dimensions().size(), planar.color_format())
             }
         }
     }
@@ -181,8 +181,8 @@ impl Display for Image {
     }
 }
 
-impl From<imaginarium::Image> for Image {
-    fn from(image: imaginarium::Image) -> Self {
+impl From<imaginarium::InterleavedImage> for Image {
+    fn from(image: imaginarium::InterleavedImage) -> Self {
         Self {
             pixels: Pixels::InterleavedCpu {
                 image,

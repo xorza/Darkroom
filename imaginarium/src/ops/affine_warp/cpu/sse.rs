@@ -1,6 +1,6 @@
 //! SSE4.1 bilinear specialization for the packed (RGB/RGBA) transform paths: one
 //! pixel fills the low `N` lanes of an `f32x4` (`__m128`), so the convert → mix →
-//! convert chain is vectorized across channels — the x86 analog of `neon.rs`. L
+//! convert chain is vectorized across channels — the x86 analog of `neon.rs`. Mono
 //! stays on the scalar path (one useful lane), and the gather-bound nearest path
 //! the scalar code already nails.
 //!
@@ -21,9 +21,9 @@ use glam::{Affine2, Vec2};
 use rayon::prelude::*;
 
 use crate::color::sample::Sample;
-use crate::image::Image;
-use crate::ops::transform::Transform;
-use crate::ops::transform::cpu::packed_source::PackedSource;
+use crate::image::InterleavedImage;
+use crate::ops::affine_warp::AffineWarp;
+use crate::ops::affine_warp::cpu::packed_source::PackedSource;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
@@ -208,20 +208,20 @@ fn read_tap<T: SsePacked, const N: usize>(source: PackedSource<'_, T>, x: i32, y
 /// # Safety
 /// The running CPU must support SSE4.1.
 pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
-    transform: &Transform,
-    input: &Image,
-    output: &mut Image,
+    warp: &AffineWarp,
+    input: &InterleavedImage,
+    output: &mut InterleavedImage,
 ) {
-    let out_stride = output.desc().row_bytes();
+    let out_stride = output.desc().row_byte_len();
     let resample = Resample {
         source: PackedSource::<T>::of(input),
-        inverse: transform.inverse(),
+        inverse: warp.inverse(),
     };
 
     par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
-        .for_each(|(y, out_row_bytes)| {
-            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);
+        .for_each(|(y, out_row_byte_len)| {
+            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_byte_len);
             unsafe { resample.row::<N>(y, out_row) };
         });
 }

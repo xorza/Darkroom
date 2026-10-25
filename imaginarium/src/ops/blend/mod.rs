@@ -10,7 +10,7 @@ use strum::{EnumIter, EnumString, VariantNames};
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
-use crate::image::Image;
+use crate::image::InterleavedImage;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 
@@ -111,7 +111,12 @@ impl Blend {
     ///
     /// # Panics
     /// Panics unless all three images share a descriptor.
-    pub fn apply_cpu(&self, src: &Image, dst: &Image, output: &mut Image) {
+    pub fn apply_cpu(
+        &self,
+        src: &InterleavedImage,
+        dst: &InterleavedImage,
+        output: &mut InterleavedImage,
+    ) {
         cpu::apply(*self, src, dst, output);
     }
 

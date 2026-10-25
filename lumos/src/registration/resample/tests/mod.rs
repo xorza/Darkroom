@@ -13,7 +13,7 @@ use crate::image::linear_image::LinearImage;
 use crate::image::mosaic_noise::MosaicNoise;
 use crate::image::pixel_flags::PixelFlags;
 use crate::image::quality_flags::QualityFlags;
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::{InterpolationMethod, WarpConfig};
 use crate::registration::resample::{Warp, WarpResult, WarpScratch};
@@ -448,7 +448,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
     let warp = |flag: Option<QualityFlags>, shift: DVec2| {
         let mut pixels = vec![CONSTANT; size.pixel_count()];
         pixels[flagged] = 999.0;
-        let mut image = gray_image(size, pixels);
+        let mut image = mono_image(size, pixels);
         image.set_flags(flag.and_then(|flag| {
             PixelFlags::from_fn(size, |idx| {
                 if idx == flagged {
@@ -554,7 +554,7 @@ fn a_flag_leaves_its_pixel_out_or_carries_it_by_what_it_says() {
 #[test]
 fn a_warp_moves_the_flat_gain_with_the_pixels() {
     let size = Size2us::new(9, 9);
-    let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
+    let mut image = mono_image(size, vec![0.5; size.pixel_count()]);
     let divisor = Buffer2::from_fn((9, 9), |x, _| 1.0 / (1.0 + x as f32 / 8.0));
     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
         &divisor,
@@ -578,7 +578,7 @@ fn a_warp_moves_the_flat_gain_with_the_pixels() {
 #[test]
 fn only_the_nearest_pixel_keeps_the_quantization_step() {
     let size = Size2us::new(9, 9);
-    let mut image = gray_image(size, vec![0.5; size.pixel_count()]);
+    let mut image = mono_image(size, vec![0.5; size.pixel_count()]);
     image.metadata.derived.set_quantization_sigma(Some(0.25));
     let mosaic_noise = MosaicNoise {
         bg: [0.1, 0.2, 0.3].map(BgSplit::of_sigma),

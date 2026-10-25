@@ -10,8 +10,8 @@ struct Params {
     inv_translation: vec2<f32>,
     input_size: vec2<u32>,
     output_size: vec2<u32>,
-    channels: u32,
-    elem_size: u32,
+    channel_count: u32,
+    sample_byte_len: u32,
     // 0 = Nearest, 1 = Bilinear
     filter_mode: u32,
     _pad: u32,
@@ -22,14 +22,14 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> output_data: array<atomic<u32>>;
 
 fn read_elem(index: u32) -> f32 {
-    let byte = index * params.elem_size;
-    return unpack(input_data[byte / 4u], (byte % 4u) * 8u, params.elem_size);
+    let byte = index * params.sample_byte_len;
+    return unpack(input_data[byte / 4u], (byte % 4u) * 8u, params.sample_byte_len);
 }
 
 fn write_elem(index: u32, value: f32) {
-    let byte = index * params.elem_size;
-    let bits = pack(value, (byte % 4u) * 8u, params.elem_size);
-    if params.elem_size == 4u {
+    let byte = index * params.sample_byte_len;
+    let bits = pack(value, (byte % 4u) * 8u, params.sample_byte_len);
+    if params.sample_byte_len == 4u {
         atomicStore(&output_data[byte / 4u], bits);
     } else {
         atomicOr(&output_data[byte / 4u], bits);
@@ -43,8 +43,8 @@ fn read_pixel(x: i32, y: i32) -> vec4<f32> {
     if x < 0 || x >= i32(params.input_size.x) || y < 0 || y >= i32(params.input_size.y) {
         return color;
     }
-    let base = (u32(y) * params.input_size.x + u32(x)) * params.channels;
-    for (var k: u32 = 0u; k < params.channels; k++) {
+    let base = (u32(y) * params.input_size.x + u32(x)) * params.channel_count;
+    for (var k: u32 = 0u; k < params.channel_count; k++) {
         color[k] = read_elem(base + k);
     }
     return color;
@@ -87,8 +87,8 @@ fn main(
         color = sample_bilinear(src_pos);
     }
 
-    let base = pixel * params.channels;
-    for (var k: u32 = 0u; k < params.channels; k++) {
+    let base = pixel * params.channel_count;
+    for (var k: u32 = 0u; k < params.channel_count; k++) {
         write_elem(base + k, color[k]);
     }
 }

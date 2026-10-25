@@ -88,7 +88,7 @@ pub enum StretchMethod {
     },
 }
 
-/// How a stretch curve is applied across the channels of a color image. No effect on a grayscale
+/// How a stretch curve is applied across the channels of a color image. No effect on a mono
 /// image — with one channel, both modes stretch it identically.
 ///
 /// `type_id` is this enum's identity to an introspecting consumer; that
@@ -703,7 +703,7 @@ fn color_preserve_pixel<C: ToneCurve>(px: Rgb, black: BlackPoint, curve: &C) -> 
 
 /// Color-preserving stretch. Resolves the curve type once.
 ///
-/// On a grayscale image the combined intensity *is* the single channel, so "scale each channel by
+/// On a mono image the combined intensity *is* the single channel, so "scale each channel by
 /// `f(I)/I`" reduces to the curve on that plane.
 fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     if !image.is_rgb() {
@@ -724,7 +724,7 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
 /// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
 /// itself, and the kernel that evaluates it, live in [`simd`].
 fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: AsinhCurve) {
-    debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
+    debug_assert!(image.is_rgb(), "caller dispatches mono to map_samples");
     let [r, g, b] = image.rgb_planes_mut();
     // The three planes split in lockstep so each task sees one band's worth of every channel.
     par::chunks_mut(r, SAMPLES_PER_BLOCK)

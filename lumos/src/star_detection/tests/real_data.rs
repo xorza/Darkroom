@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::internals::visual::drawing::{self, draw_circle};
 use common::internals;
 use glam::Vec2;
-use imaginarium::drawing::draw_circle;
-use imaginarium::{Color, ColorFormat};
+use imaginarium::ColorFormat;
 
 use crate::ImageDimensions;
 use crate::image::channel_layout::ChannelLayout;
@@ -33,7 +33,7 @@ fn rho_opiuchi_path() -> PathBuf {
 pub(crate) fn rho_opiuchi() -> LinearImage {
     let image = raster::internals::read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
-        .convert(ColorFormat::L_F32);
+        .convert(ColorFormat::MONO_F32);
     LinearImage::from_interleaved(
         ImageDimensions::new(
             (image.desc().size.width, image.desc().size.height),
@@ -98,7 +98,7 @@ fn detect_rho_opiuchi() {
             &mut output_img,
             Vec2::new(star.pos.x as f32, star.pos.y as f32),
             radius,
-            Color::GREEN,
+            drawing::GREEN,
             1.0,
         );
     }

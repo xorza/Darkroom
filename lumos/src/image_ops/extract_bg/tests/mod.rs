@@ -4,7 +4,7 @@ mod real_data;
 use crate::image_ops::extract_bg::*;
 use crate::image_ops::stretch::{Stretch, StretchMethod};
 use crate::internals::assertions::assert_close;
-use crate::internals::images::gray_image;
+use crate::internals::images::mono_image;
 use crate::internals::images::rgb_image;
 use crate::internals::test_rng::TestRng;
 use crate::math::statistics;
@@ -20,8 +20,8 @@ fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn gray_of(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
-    gray_image(size, fill(size, f))
+fn mono_of(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
+    mono_image(size, fill(size, f))
 }
 
 fn mean(p: &[f32]) -> f64 {
@@ -103,7 +103,7 @@ fn subtract_leaves_a_flat_sky_and_its_stars_unchanged() {
             0.3125
         }
     });
-    let mut img = gray_image(size, sky.clone());
+    let mut img = mono_image(size, sky.clone());
     ExtractBg {
         degree: 2,
         tile_size: 32,
@@ -119,7 +119,7 @@ fn subtract_leaves_a_flat_sky_and_its_stars_unchanged() {
 #[test]
 fn divide_corrects_a_planar_falloff() {
     let size = Size2us::new(160, 160);
-    let mut img = gray_of(size, dyadic_plane);
+    let mut img = mono_of(size, dyadic_plane);
     ExtractBg {
         degree: 2,
         tile_size: 20,
@@ -144,7 +144,7 @@ fn divide_floor_caps_the_gain() {
     let size = Size2us::new(160, 32);
     let falloff = |x: usize, _: usize| x as f32 / 1024.0 + 1.0 / 64.0;
     let run = |divide_floor| {
-        let mut img = gray_of(size, falloff);
+        let mut img = mono_of(size, falloff);
         ExtractBg {
             degree: 1,
             tile_size: 16,
@@ -212,7 +212,7 @@ fn outlier_tiles_are_rejected_from_the_fit() {
         dyadic_plane(x, y) + if blob(x, y) { 0.5 } else { 0.0 }
     });
     let run = |config: ExtractBg| {
-        let mut img = gray_image(size, sky.clone());
+        let mut img = mono_image(size, sky.clone());
         config.apply(&mut img).unwrap();
         img.channel(0).pixels().to_vec()
     };
@@ -299,7 +299,7 @@ fn higher_degree_fits_cubic_better() {
         0.4 + 0.2 * nx - 0.3 * nx * nx + 0.25 * nx * nx * nx + 0.15 * ny * ny * ny
     };
     let resid_energy = |degree| {
-        let mut img = gray_of(size, cubic);
+        let mut img = mono_of(size, cubic);
         ExtractBg {
             degree,
             tile_size: 20,
@@ -327,7 +327,7 @@ fn higher_degree_fits_cubic_better() {
 
 #[test]
 fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
-    let mut img = gray_of(Size2us::new(8, 64), |x, y| {
+    let mut img = mono_of(Size2us::new(8, 64), |x, y| {
         0.2 + 0.01 * x as f32 + 0.001 * y as f32
     });
     let before = img.channel(0).pixels().to_vec();
@@ -403,7 +403,7 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
     .map(|v| v + 0.002 * rng.next_gaussian_f32())
     .collect();
     for stretch in [Stretch::auto_asinh(), Stretch::auto_stf()] {
-        let mut img = gray_image(size, sky.clone());
+        let mut img = mono_image(size, sky.clone());
         ExtractBg {
             tile_size: 32,
             ..Default::default()

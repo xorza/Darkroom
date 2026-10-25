@@ -124,7 +124,7 @@ impl Planes<'_> {
 
 /// Run `infer` over `planes`' input in 512² tiles at `stride` (NHWC `[0,1]` in, NHWC out),
 /// feather-blending the overlaps, and write the blend into its output's planes: their metadata
-/// and flags stay, as every other op keeps them. Grayscale is replicated to RGB for the model,
+/// and flags stay, as every other op keeps them. Mono is replicated to RGB for the model,
 /// then averaged back. Expects a display-domain `[0, 1]` master.
 ///
 /// The tiles run a row of them at a time, and every row above the next tile row's start is then
@@ -200,7 +200,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 }
 
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
-/// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
+/// `[0,1]`. Mono replicates its single channel to R=G=B. `input` is the caller's
 /// tile-loop-lifetime scratch buffer (see [`run_tiles`]), overwritten in full every call.
 fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
     let w = planar.width();
@@ -293,7 +293,7 @@ impl FeatherBlend {
     }
 
     /// Write the normalized blend of every row above `end` not written yet over `image`'s rows,
-    /// of the frame it was made for, and clear their band rows: a grayscale frame takes the mean
+    /// of the frame it was made for, and clear their band rows: a mono frame takes the mean
     /// of the model's three channels.
     fn write_rows(&mut self, image: &mut LinearImage, end: usize) {
         let Self {

@@ -112,7 +112,7 @@ fn drizzle_paths_loads_its_frames_under_the_run_token() {
     let paths: Vec<PathBuf> = (0..2)
         .map(|k| {
             let path = scratch.join(format!("frame{k}.tiff"));
-            gray_image(
+            mono_image(
                 size,
                 (0..size.pixel_count())
                     .map(|i| ((i * 7 + k * 3) % 11) as f32 / 10.0)
@@ -233,7 +233,7 @@ fn drizzle_admits_each_frame_before_it_deposits() {
             WarpTransform::new(Transform::identity()),
         ),
         DrizzleFrame::new(
-            gray_image(Size2us::new(4, 4), pixels),
+            mono_image(Size2us::new(4, 4), pixels),
             WarpTransform::new(Transform::identity()),
         ),
     ];
@@ -349,7 +349,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
         |d| d * 2e-5 * d.length_squared(),
     );
     let config = kernel_config(DrizzleKernel::Square, 1.5, 0.7);
-    let image = gray_image(
+    let image = mono_image(
         size,
         (0..size.pixel_count())
             .map(|i| (i % 7) as f32 * 0.25)
@@ -384,7 +384,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     pixels[size.idx_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
     let mut acc = accumulator(ImageDimensions::new(size, ChannelLayout::Mono), point);
-    acc.add_frame(&DrizzleFrame::new(gray_image(size, pixels), warp.clone()))
+    acc.add_frame(&DrizzleFrame::new(mono_image(size, pixels), warp.clone()))
         .unwrap();
     let out = acc.finalize();
     let r = warp
@@ -917,7 +917,7 @@ fn a_null_pixel_deposits_nothing() {
         pixels[y * size.width + 5] = 5.0;
         nulls[y * size.width + 5] = f32::NAN;
     }
-    let mut image = gray_image(size, pixels);
+    let mut image = mono_image(size, pixels);
     image.set_flags(PixelFlags::of_non_finite(size, &[&nulls]));
     let product = drizzle_one(
         kernel_config(DrizzleKernel::Square, 1.0, 1.0),

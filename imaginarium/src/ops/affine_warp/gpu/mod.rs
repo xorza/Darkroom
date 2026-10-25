@@ -3,14 +3,14 @@ use bytemuck::{Pod, Zeroable};
 use crate::gpu::Gpu;
 use crate::gpu::compute_kernel::{KernelJob, OutputStart};
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::transform::pipeline::GpuTransformPipeline;
-use crate::ops::transform::{FilterMode, Transform};
+use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
+use crate::ops::affine_warp::{AffineWarp, FilterMode};
 
-/// The GPU path behind [`Transform::apply_gpu`].
+/// The GPU path behind [`AffineWarp::apply_gpu`].
 pub(super) fn apply(
-    params: &Transform,
+    params: &AffineWarp,
     ctx: &Gpu,
-    pipeline: &GpuTransformPipeline,
+    pipeline: &GpuAffineWarpPipeline,
     input: &GpuImage,
     output: &mut GpuImage,
 ) {
@@ -34,8 +34,8 @@ pub(super) fn apply(
             extent(output_desc.size.width),
             extent(output_desc.size.height),
         ],
-        channels: extent(format.channel_count.count()),
-        elem_size: extent(format.sample_type.size()),
+        channel_count: extent(format.channel_count.count()),
+        sample_byte_len: extent(format.sample_type.byte_len()),
         filter_mode: match params.filter {
             FilterMode::Nearest => 0,
             FilterMode::Bilinear => 1,
@@ -49,7 +49,7 @@ pub(super) fn apply(
             buffers: &[input.read_buffer(), output.write_buffer()],
             invocations: extent(output_desc.size.width * output_desc.size.height),
             // Sub-word elements are ORed into the output.
-            output: if format.sample_type.size() < 4 {
+            output: if format.sample_type.byte_len() < 4 {
                 OutputStart::Zeroed
             } else {
                 OutputStart::AsIs
@@ -67,8 +67,8 @@ struct Params {
     inv_translation: [f32; 2],
     input_size: [u32; 2],
     output_size: [u32; 2],
-    channels: u32,
-    elem_size: u32,
+    channel_count: u32,
+    sample_byte_len: u32,
     filter_mode: u32,
     _pad: u32,
 }

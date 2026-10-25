@@ -13,7 +13,7 @@ use crate::image::linear_image::LinearImage;
 use common::Size2us;
 
 /// Single-channel image from explicit pixel values, row-major.
-pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
+pub(crate) fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
     LinearImage::from(Buffer2::new(size, pixels))
 }
 

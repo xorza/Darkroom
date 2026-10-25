@@ -1,5 +1,5 @@
 pub(crate) mod compute_kernel;
-pub(crate) mod context;
+pub(crate) mod gpu_ctx;
 pub(crate) mod gpu_image;
 pub(crate) mod packed_layout;
 
