@@ -1,6 +1,6 @@
 //! Tests for threshold mask creation (packed `BitBuffer2` version).
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;

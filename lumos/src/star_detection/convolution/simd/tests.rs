@@ -1,6 +1,6 @@
 //! Tests for SIMD convolution implementations.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};

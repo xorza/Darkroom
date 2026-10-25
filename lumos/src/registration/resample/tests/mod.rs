@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::image::bg_split::BgSplit;
 use crate::image::cfa::cfa_type::CfaType;

@@ -1,7 +1,7 @@
 //! [`ColorMesh`]: the local sky and σ of each color of a mosaic, between tile centres.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::mesh_workspace::{
     DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams, MeshWorkspace,

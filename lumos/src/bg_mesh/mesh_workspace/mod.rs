@@ -1,6 +1,6 @@
 //! [`MeshWorkspace`]: the buffers a tile mesh is measured in, kept across frames.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::tile_stats::{ColorSites, TileInput, TileScratch, TileStats};
@@ -98,7 +98,7 @@ impl MeshWorkspace {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::bg_mesh::BgMesh;
     use crate::bg_mesh::mesh_workspace::{MeshParams, MeshWorkspace};

@@ -224,7 +224,7 @@ pub(crate) mod internals {
     use crate::star_detection::resources::DetectionResources;
     use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
     use crate::star_detection::star_detector::stages::detect::{Candidates, DetectionInput};
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     /// Detect stars in `residual` taken as the detection plane, its noise `sky`, with a throwaway
     /// [`DetectionResources`] per call.

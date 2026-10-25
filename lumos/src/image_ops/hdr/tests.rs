@@ -1,6 +1,6 @@
 use std::mem;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image_ops::hdr::Hdr;
 use crate::internals::assertions::assert_close_slice;

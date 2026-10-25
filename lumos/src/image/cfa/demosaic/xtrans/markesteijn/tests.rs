@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::cfa::demosaic::tiled::TilePlace;
 use crate::image::cfa::demosaic::xtrans::markesteijn::*;

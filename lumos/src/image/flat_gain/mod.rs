@@ -9,9 +9,8 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use arrayvec::ArrayVec;
-use common::par;
+use common::{Buffer2, par};
 use glam::DVec2;
-use imaginarium::Buffer2;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 

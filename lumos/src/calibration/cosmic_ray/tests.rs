@@ -3,9 +3,8 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use common::PerWorker;
+use common::{Buffer2, PerWorker};
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::bg_mesh::color_mesh::LocalBg;
 use crate::calibration::cosmic_ray::cosmic_ray_config::NoiseEstimation;

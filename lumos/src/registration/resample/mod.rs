@@ -3,8 +3,7 @@
 use std::slice;
 
 use arrayvec::ArrayVec;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::frame::frame_quality::FrameQuality;

@@ -115,8 +115,6 @@ disallowed-methods = [
     { path = "image::ImageBuffer::save_with_format", reason = "encode into the file `common::fs::publish` hands over" },
     { path = "image::DynamicImage::save", reason = "encode into the file `common::fs::publish` hands over" },
     { path = "image::DynamicImage::save_with_format", reason = "encode into the file `common::fs::publish` hands over" },
-    { path = "imaginarium::Image::read_file", reason = "open the file through `common::fs` and decode the reader" },
-    { path = "imaginarium::Image::save_file", reason = "encode into the file `common::fs::publish` hands over" },
     { path = "ort::session::builder::SessionBuilder::commit_from_file", reason = "read the model through `common::fs` and commit it from memory" },
     # Parallel work goes through `common::par`, which `common/clippy.toml` leaves unbanned.
     { path = "rayon::iter::IntoParallelIterator::into_par_iter", reason = "start a parallel loop through `common::par`, which refuses one in a loop's body" },

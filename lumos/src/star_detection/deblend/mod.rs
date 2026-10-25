@@ -48,7 +48,7 @@ fn nearest_peak_idx(pos: Vec2us, peaks: &[Pixel]) -> usize {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
     use crate::math::size2us::Size2us;

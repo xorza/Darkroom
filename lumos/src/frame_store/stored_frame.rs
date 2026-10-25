@@ -1,7 +1,7 @@
 //! One frame as the combine engine sees it, and the writer every frame a sink holds goes through.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_facts::FrameFacts;
@@ -210,8 +210,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use common::{MappedFile, TempDir};
-    use imaginarium::Buffer2;
+    use common::{Buffer2, MappedFile, TempDir};
 
     use crate::frame::admitted::Admitted;
     use crate::frame::frame_quality::FrameQuality;

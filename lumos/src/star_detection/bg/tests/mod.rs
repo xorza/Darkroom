@@ -4,8 +4,8 @@ mod synthetic_skies;
 
 use std::num::NonZeroUsize;
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::bg_map;

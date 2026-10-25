@@ -3,7 +3,7 @@
 //!
 //! [`StackConfig::stack_images`]: crate::combine::stack_config::StackConfig::stack_images
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;

@@ -1,6 +1,6 @@
 //! A stacked master's ancillary quality plane: one shared, or one per channel.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::linear_image::LinearImage;
 use crate::image::linear_pixels::LinearPixels;

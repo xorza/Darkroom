@@ -2,9 +2,7 @@
 
 imaginarium stops being a submodule and becomes a member crate, as lumos is.
 The 2D primitives that two crates keep in copies move to `common`, and the
-crate's names and errors follow the workspace's rules. This plan holds item
-5.2 of `.notes/proposal-parallel-work.md` ("imaginarium a workspace member"),
-which is checked when batch 1 lands. Facts and counts:
+crate's names and errors follow the workspace's rules. Facts and counts:
 `docs/research/2026-10-25-imaginarium-merge.md`. When the plan lands, each
 lasting decision moves into `AGENTS.md`, `imaginarium/AGENTS.md` or the doc
 comments of the code it governs, and this file is deleted.
@@ -75,61 +73,14 @@ comments of the code it governs, and this file is deleted.
   Refused: one `Error` of messages, which a caller cannot match on and whose
   name every crate has.
 - **The root's lanes cover it.** The drive table adds the CPU-only lint set
-  `{ all-features-but = ["imaginarium/wgpu"] }`,
-  `bench = "--features imaginarium/wgpu"`, and
-  `cross-lint = { macos = ["x86_64-apple-darwin"] }`, so an arm64 host lints
-  the SSE and AVX kernels, lumos's AVX2 ones among them. The root's profiles,
-  `clippy.toml` and `.cargo/config.toml` replace the crate's own.
+  `{ all-features-but = ["imaginarium/wgpu"] }` and
+  `bench = "--features imaginarium/wgpu"`. The root's profiles, `clippy.toml`
+  and `.cargo/config.toml` replace the crate's own.
 
 ## Plan
 
 Each batch ends with `cargo drive check` and `cargo drive test` green from the
 root. Each item states its proof.
-
-### 1. A member crate
-
-- [ ] Replace the submodule with the crate and its history: deinit and
-  `git rm` the submodule, remove its `.gitmodules` entry, then
-  `git subtree add --prefix=imaginarium` its `main`. Proof: `git blame` of
-  `imaginarium/src/simd_tier.rs` names imaginarium's own commits.
-- [ ] Manifest: a member, out of `exclude`; `version`, `edition` and `[lints]`
-  from the workspace; every dependency `workspace = true`, with `wgpu`,
-  `pollster` and `tiff` added to `[workspace.dependencies]`; a `common`
-  dependency; `strum`, `strum_macros`, `tokio`, `tempfile` and the machete
-  table removed. Delete the crate's profiles, drive table, `.cargo/`,
-  `clippy.toml`, `Cargo.lock`, `.gitignore`, `.notes/` and stale `README.md`.
-  Keep the two licence files. The root drops
-  `[profile.dev.package.imaginarium]`. lumos, lens and darkroom add
-  `imaginarium = { workspace = true, features = ["internals"] }` to their
-  dev-dependencies. `cargo update --workspace` writes the lock. Proof:
-  `cargo drive check`.
-- [ ] The module `common` goes: `src/color/` holds `color_format`, `sample`,
-  `luma` and `color`; the errors go to `src/error.rs`; the test helpers
-  `image_diff` and `internals` go to `src/internals/`. `Buffer2` moves to the
-  `common` crate with its API and tests as they are, and every
-  `imaginarium::Buffer2` becomes `common::Buffer2`. Proof: the moved tests
-  pass in `common`.
-- [ ] I/O through `common`: `read_file` and `save_file` removed with their
-  two `disallowed-methods` entries; the test image read through
-  `common::fs::open` and `Image::decode`; `tempfile` and `std::fs::read`
-  replaced by `common::TempDir` and `common::fs`; the bench fixture and the
-  examples through `common::fs`, `common::env`, `common::process` and
-  `common::thread`. Proof: clippy with the root bans passes on every target.
-- [ ] Rayon through `common::par`: the twelve calls of the research note, and
-  `image_diff`. Proof: a test that converts planes to an image inside a
-  `common::par` loop's body panics. Rerun the nesting probe (method in
-  `docs/research/2026-10-24-parallel-work.md`) over every member's tests, and
-  record the result there; this is the proposal's "Again after imaginarium
-  moves".
-- [ ] The lanes: the CPU-only lint set, the bench flag and `cross-lint`.
-  Proof: `cargo drive gate` passes; `cargo drive bench --test` runs
-  imaginarium's cases with the ids they had.
-- [ ] Documents: the root `AGENTS.md` lists imaginarium after `scenarium`,
-  drops it from the submodules, and adds it to the benches the root runs.
-  `imaginarium/AGENTS.md` keeps its rules (GPU optional, a scalar reference
-  and a test for every SIMD kernel, all nine formats, one rounding rule, the
-  aarch64 check) and points to the root for verification, as lumos's does.
-  Check item 5.2 of the proposal.
 
 ### 2. Geometry and the grid in `common`
 
@@ -140,8 +91,10 @@ root. Each item states its proof.
   `from_fn` and `reshape` take `impl Into<Size2us>`, and `size()` replaces
   `Size2us::from(&buffer)`. Every caller is rewritten. Proof: the `Buffer2`
   tests, with sizes that are not square, so a transposed size fails.
-- [ ] `ImageDesc`, `Preview`, the drawing canvas and the bench scene hold a
-  `Size2us` in place of `width` and `height`. Proof: the tests of each.
+- [ ] Every `width, height` pair in imaginarium becomes a `Size2us`:
+  `ImageDesc`, `Preview`, the drawing canvas, the bench scene (`sky`), the
+  test helpers (`create_test_image`) and each fn that takes the pair. Proof:
+  the tests of each.
 
 ### 3. One CPU detection, one bench policy
 
@@ -183,3 +136,18 @@ root. Each item states its proof.
   `Option`. lumos's `ImageError` and lens's `DecodeError::InvalidImage` take
   the new types. Proof: a test for each case that the code can return, with
   its fields; the descriptor tests take zero sides and an overflowing size.
+
+## Changed
+
+- Batch 1, the lanes: no `cross-lint`. The lane lints every feature, and
+  `ort-sys` has no `x86_64-apple-darwin` binaries for lumos's `ml`, in
+  rc.15 or on its `main` of 2026-10-23. `imaginarium/AGENTS.md` gives the
+  one-crate clippy for the x86 kernels instead.
+- Batch 1, the bench proof: `cargo drive bench --test` fails to link, as
+  `.notes/ISSUES.md` records. imaginarium's own bench target ran instead: its
+  391 ids equal those of `93cae6e`, and each case passed once.
+- Batch 1, dependencies: `strum` and `tokio` stay, which the plan wrongly
+  called unused (`BlendMode`'s derives, the GPU readback). `strum`'s `derive`
+  replaces `strum_macros`. lumos names `glam`'s `f64`, which imaginarium's
+  default features gave it before.
+

@@ -1,6 +1,6 @@
 //! [`ThresholdParams`]: the level a residual pixel must clear to be detected.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};
@@ -82,7 +82,7 @@ impl NoiseRows for SurfaceReader<'_> {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     #[cfg(test)]
     use crate::bit_buffer2::BitBuffer2;

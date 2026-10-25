@@ -7,8 +7,7 @@
 use std::ops::Range;
 use std::{array, fmt};
 
-use common::{PerWorker, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -648,8 +647,7 @@ fn ring(centre: Vec2us, reach: usize, size: Size2us) -> impl Iterator<Item = (us
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::PerWorker;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, PerWorker};
 
     use crate::bg_mesh::color_mesh::LocalBg;
     use crate::bit_buffer2::BitBuffer2;

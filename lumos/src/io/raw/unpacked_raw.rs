@@ -3,8 +3,7 @@
 use std::time::Instant;
 use std::{array, ffi, mem};
 
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::image::cfa::cfa_image::CfaImage;

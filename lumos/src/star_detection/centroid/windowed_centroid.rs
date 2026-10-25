@@ -1,7 +1,7 @@
 //! [`WindowedCentroid`]: the centre of a Gaussian-windowed stamp, iterated to convergence.
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;

@@ -8,11 +8,10 @@
 //! NaN there, not the repair, and a reader fills it again. An image whose flags hold nothing but
 //! `NO_DATA` needs no extension: its NaNs carry all of it.
 
-use common::par;
+use common::{Buffer2, par};
 use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 use fits_well::io::Hdu;
-use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::image::pixel_flags::PixelFlags;

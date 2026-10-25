@@ -30,7 +30,8 @@
 //! - Parallel work: [`par`] starts every parallel loop, and panics when a loop's body would start
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
-//! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own. `TempDir`,
+//! [`Id`], [`FloatExt`], [`is_debug`] and [`Buffer2`], the row-major 2D grid, stand on their
+//! own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build.
 
@@ -60,6 +61,7 @@ pub mod task;
 pub mod thread;
 
 mod bg_runtime;
+mod buffer2;
 mod cancel_token;
 mod float_ext;
 mod id;
@@ -69,6 +71,7 @@ mod platform;
 mod serde;
 
 pub use bg_runtime::BgRuntime;
+pub use buffer2::Buffer2;
 pub use cancel_token::CancelToken;
 pub use float_ext::FloatExt;
 pub use fs::file_identity::{FileId, FileIdentity};

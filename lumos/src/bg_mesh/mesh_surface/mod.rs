@@ -281,8 +281,8 @@ pub(crate) mod internals {
 
         /// The surface read out into a plane.
         #[cfg(test)]
-        pub(crate) fn plane(&self) -> imaginarium::Buffer2<f32> {
-            let mut plane = imaginarium::Buffer2::new_default(self.size.width, self.size.height);
+        pub(crate) fn plane(&self) -> common::Buffer2<f32> {
+            let mut plane = common::Buffer2::new_default(self.size.width, self.size.height);
             let mut reader = self.reader();
             for (y, row) in plane.pixels_mut().chunks_mut(self.size.width).enumerate() {
                 row.copy_from_slice(reader.row(y));

@@ -21,8 +21,7 @@ use std::iter;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::combine::error::StackError;

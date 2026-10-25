@@ -1,6 +1,6 @@
 //! [`RefinedBg`]: a frame's sky measured again around the sources found on it.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;

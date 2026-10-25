@@ -319,7 +319,7 @@ impl WeightedTap<'_> {
 
 #[cfg(test)]
 pub(super) mod plane_ring {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::math::size2us::Size2us;
     use crate::star_detection::convolution::simd::RowRing;

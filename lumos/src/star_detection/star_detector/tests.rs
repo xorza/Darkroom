@@ -18,8 +18,8 @@ use crate::star_detection::tests::Scenario;
 /// 0.015 of standard deviation: within 5 of them.
 #[test]
 fn a_demosaiced_frame_measures_its_stars_unfiltered() {
+    use common::Buffer2;
     use glam::Vec2;
-    use imaginarium::Buffer2;
 
     use crate::image::image_provenance::{
         ColorProvenance, DemosaicProvenance, ImageProvenance, RowOrder, SourceProvenance,

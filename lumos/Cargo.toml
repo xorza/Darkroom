@@ -32,7 +32,7 @@ thiserror = { workspace = true }
 bytemuck = { workspace = true, features = ["derive", "extern_crate_alloc"] }
 rayon = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
-glam = { workspace = true, features = ["serde", "std"] }
+glam = { workspace = true, features = ["f64", "serde", "std"] }
 serde = { workspace = true, features = ["derive", "std"] }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
@@ -43,6 +43,7 @@ blake3 = { workspace = true, features = ["std"] }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
+imaginarium = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }
 image = { workspace = true, features = ["png"] }
 lumos = { workspace = true, features = ["internals"] }

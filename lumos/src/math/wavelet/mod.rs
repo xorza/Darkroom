@@ -7,8 +7,7 @@
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
 //! telescoping identity, so the layer pyramid is never materialized.
 
-use common::{PerWorker, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::math::size2us::Size2us;

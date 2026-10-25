@@ -2,7 +2,7 @@
 //! statistics, read about the tile's own plane for the sky, and the crowding-aware Pearson-mode
 //! sky estimator for a single tile box.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::mosaic::Mosaic;

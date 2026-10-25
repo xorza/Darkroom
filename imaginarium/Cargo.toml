@@ -1,0 +1,56 @@
+[package]
+name = "imaginarium"
+version.workspace = true
+edition.workspace = true
+description = "Image processing with CPU (SIMD) and GPU (wgpu compute) backends: one image buffer, nine pixel formats."
+license = "MIT OR Apache-2.0"
+exclude = ["AGENTS.md", "CLAUDE.md"]
+
+[lints]
+workspace = true
+
+[features]
+default = []
+wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
+internals = ["common/internals", "dep:criterion"]
+
+[dependencies]
+common = { workspace = true }
+wgpu = { workspace = true, optional = true, features = [
+    "dx12",
+    "metal",
+    "parking_lot",
+    "std",
+    "vulkan",
+    "wgsl",
+] }
+pollster = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["sync"] }
+thiserror = { workspace = true, features = ["std"] }
+bytemuck = { workspace = true, features = ["derive", "extern_crate_std", "min_const_generics"] }
+glam = { workspace = true, features = ["std"] }
+rayon = { workspace = true }
+strum = { workspace = true, features = ["derive", "std"] }
+tiff = { workspace = true, features = ["deflate", "fax", "jpeg", "lzw"] }
+image = { workspace = true, features = ["jpeg", "png", "tiff"] }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals"] }
+imaginarium = { workspace = true, features = ["internals"] }
+
+[[example]]
+name = "transform"
+required-features = ["wgpu"]
+
+[[example]]
+name = "pipeline"
+required-features = ["wgpu"]
+
+[lib]
+bench = false
+
+[[bench]]
+name = "imaginarium"
+harness = false
+required-features = ["internals"]

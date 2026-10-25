@@ -1,7 +1,7 @@
 use crate::internals::synthetic::fixtures::*;
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 /// The sum of the `side`-pixel square of `px` whose top-left corner is `corner`.
 fn region_sum(px: &Buffer2<f32>, corner: Vec2us, side: usize) -> f64 {

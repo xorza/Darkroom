@@ -3,8 +3,8 @@
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::drizzle::accumulator::band_scan::BandScan;

@@ -11,9 +11,9 @@ pub(crate) mod report;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use common::{fs, internals};
+use common::{Buffer2, fs, internals};
 use image::GrayImage;
-use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
+use imaginarium::{ColorFormat, Image, ImageDesc};
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
