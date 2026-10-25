@@ -4,9 +4,9 @@
 use std::hint::black_box;
 
 use common::CancelToken;
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
@@ -18,7 +18,7 @@ use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let mut group = Kind::Atomic.group(c, "calibration/defect_map/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "calibration/defect_map/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // As `CalibrationMasters::from_images` builds it: hot pixels from the dark as stacked, dead
     // ones from the flat with the bias taken out.

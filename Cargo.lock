@@ -527,6 +527,7 @@ dependencies = [
  "bitcode",
  "common",
  "common-derive",
+ "criterion",
  "glam 0.34.1",
  "libc",
  "memmap2",

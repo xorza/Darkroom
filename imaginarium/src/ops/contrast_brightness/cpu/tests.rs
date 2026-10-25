@@ -6,8 +6,7 @@ use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
-use crate::simd_tier::SimdTier;
-use common::Size2us;
+use common::{SimdTier, Size2us};
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Image {

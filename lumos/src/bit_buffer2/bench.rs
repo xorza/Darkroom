@@ -2,21 +2,21 @@
 //! measures the sky around them: by the radius the crowded-field preset dilates with, and by the
 //! widest a configuration takes.
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::bit_buffer2::BitBuffer2;
-use crate::star_detection::bench;
+use crate::star_detection::bench as detection;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::star_detection_config::bg_config::{BgRefinement, IterativeRefinement};
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
-    let mut group = Kind::Atomic.group(c, "detection/dilation/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "detection/dilation/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     let BgRefinement::Iterative(IterativeRefinement { mask_dilation, .. }) =
-        bench::config(Field::Dense).bg.refinement
+        detection::config(Field::Dense).bg.refinement
     else {
         unreachable!("the crowded-field preset refines the background")
     };
@@ -29,7 +29,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
                 b.iter_batched_ref(
                     || mask.clone(),
                     |mask| mask.dilate(radius, &mut scratch),
-                    fixture::fresh_copies(BitBuffer2::heap_bytes(mask.size)),
+                    bench::fresh_copies(BitBuffer2::heap_bytes(mask.size)),
                 );
             },
         );

@@ -31,9 +31,11 @@
 //!   another; [`PerWorker`] is the scratch such a body takes.
 //!
 //! [`Id`], [`FloatExt`] and [`is_debug`] stand on their own, as do [`Buffer2`], the row-major 2D
-//! grid, and its geometry: [`Size2us`], [`Vec2us`] and [`Rect2us`]. `TempDir`,
+//! grid, and its geometry: [`Size2us`], [`Vec2us`] and [`Rect2us`]; and [`SimdTier`], the
+//! instruction sets this CPU runs, detected once for every crate's SIMD kernels. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
-//! the `internals` feature so they never enter a release build.
+//! the `internals` feature so they never enter a release build, as is `bench`, the policy every
+//! crate's benches share: a case's kind and the sampling of its group.
 
 #![deny(unsafe_code)]
 // The one `thread_local!` is test-only: `WorkerPool` marks the worker whose body is top-level code.
@@ -51,6 +53,8 @@
 // crate-root `pub use`s below (one canonical path per item). Modules that are
 // free-function namespaces stay `pub` and are used as `common::<module>::fn`.
 
+#[cfg(feature = "internals")]
+pub mod bench;
 pub mod env;
 pub mod fs;
 #[cfg(feature = "internals")]
@@ -70,6 +74,7 @@ mod introspect;
 mod platform;
 mod rect2us;
 mod serde;
+mod simd_tier;
 mod size2us;
 mod vec2us;
 
@@ -101,6 +106,7 @@ pub use par::worker_pool::WorkerPool;
 pub use rect2us::Rect2us;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};
+pub use simd_tier::SimdTier;
 pub use size2us::Size2us;
 pub use vec2us::Vec2us;
 

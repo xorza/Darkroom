@@ -3,9 +3,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::registration::bench::Pair;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform::TransformType;
@@ -14,7 +14,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
     let config = RegistrationConfig::default();
     let count = config.matching.max_stars;
-    let mut group = Kind::Atomic.group(c, "registration/ransac", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/ransac", Scale::Micros);
     group.throughput(Throughput::Elements(count as u64));
     for (name, transform) in [
         ("similarity", TransformType::Similarity),

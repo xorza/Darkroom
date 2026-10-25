@@ -6,8 +6,9 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion};
 
 use common::Size2us;
+use common::bench::{Kind, Scale};
 
-use crate::bench::fixture::{self, Backend, Kind, Scale};
+use crate::bench::fixture::{self, Backend};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ALL_FORMATS;
 use crate::ops::preview::Preview;
@@ -23,7 +24,7 @@ pub(crate) fn integration(c: &mut Criterion) {
         PREVIEW,
         (FRAME.height * PREVIEW + FRAME.width / 2) / FRAME.width,
     ));
-    let mut group = Kind::Integration.group(c, "preview", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "preview", Scale::Millis);
     for format in ALL_FORMATS {
         let pixels = FRAME.pixel_count();
         group.throughput(fixture::throughput(pixels, format.byte_count()));

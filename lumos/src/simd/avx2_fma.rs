@@ -8,7 +8,7 @@
 use std::arch::x86_64::*;
 use std::ops::{Add, Div, Mul, Sub};
 
-use imaginarium::SimdTier;
+use common::SimdTier;
 
 use crate::simd::{
     F32_LANES, F32x8, F64_LANES, F64x4, Frexp, Halves, Isa, Kernel, Mask8, lookup_last,

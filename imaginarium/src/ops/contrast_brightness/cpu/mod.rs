@@ -5,7 +5,7 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
 
-use common::par;
+use common::{SimdTier, par};
 use rayon::prelude::*;
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -14,7 +14,6 @@ use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
-use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel applying [`ChannelAffine`] to a row in place, over `count`
 /// items: channel values for the flat kernels, whole pixels for the

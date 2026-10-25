@@ -3,9 +3,10 @@
 
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::lm_controller::{LmController, LmProblem, NormalEquations};
 
 const STAMP: usize = 15;
@@ -14,7 +15,7 @@ const TRUTH: [f64; 5] = [1.0, 7.3, 6.8, 1.6, 0.1];
 const START: [f64; 5] = [0.8, 7.0, 7.4, 2.1, 0.0];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/lm_controller", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "math/lm_controller", Scale::Micros);
     group.throughput(Throughput::Elements(1));
     group.bench_function(BenchmarkId::new("fit/gaussian", STAMP * STAMP), |b| {
         let stamp = Stamp::new();

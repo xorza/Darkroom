@@ -185,8 +185,8 @@ disallowed-methods = [
     { path = "fits_well::FitsWriter::write_compressed_table", reason = "call it through a wrapper in `lumos::io::fits::tile_parallel`, which refuses it in a loop's body: it decodes or encodes tiles in parallel" },
     # A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
     # policy every case shares; `Scale::apply` alone calls these.
-    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `common::bench::Scale`" },
 ]

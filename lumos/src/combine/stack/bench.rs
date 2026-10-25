@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::combine::stack_config::StackConfig;
 use crate::ingest::ingest_config::IngestConfig;
@@ -17,7 +17,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(2110);
-    let mut group = Kind::Integration.group(c, "pipeline/stack", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "pipeline/stack", Scale::Slow { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("fits_mono", set), |b| {

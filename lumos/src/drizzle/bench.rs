@@ -7,10 +7,10 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
+use common::bench::{Kind, Scale};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{Files, LIGHTS};
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field, STACKED_LIGHTS};
 use crate::drizzle::accumulator;
 use crate::drizzle::drizzle_config::DrizzleConfig;
@@ -42,7 +42,7 @@ fn stage(c: &mut Criterion) {
     let frames = OnceCell::new();
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(7200);
-    let mut group = Kind::Integration.group(c, "drizzle", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "drizzle", Scale::Slow { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * SIDE.pixel_count()) as u64,
     ));
@@ -81,7 +81,7 @@ fn end_to_end(c: &mut Criterion) {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(64_730);
-    let mut group = Kind::Integration.group(c, "pipeline/drizzle", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "pipeline/drizzle", Scale::Slow { iteration });
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
     group.bench_function(BenchmarkId::new("rggb", set), |b| {

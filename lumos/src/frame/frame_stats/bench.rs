@@ -3,9 +3,9 @@
 //! flat divided, with the share of its noise the flat amplified.
 
 use common::CancelToken;
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
@@ -17,7 +17,7 @@ use crate::image::cfa::mosaic::Mosaic;
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;
     let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let mut group = Kind::Atomic.group(c, "frame/frame_stats/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "frame/frame_stats/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("measure/mono", field.name()), |b| {
         let frame = field.render(FRAME);

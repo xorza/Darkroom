@@ -5,9 +5,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::star_detection::bench;
 use crate::star_detection::bench::Stages;
@@ -21,7 +21,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Dense;
     let crowded = bench::config(field).extraction;
     let labelled = OnceCell::new();
-    let mut group = Kind::Atomic.group(c, "detection/deblend/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "detection/deblend/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for (name, deblend) in [
         ("local_maxima", ExtractionConfig::default().deblend),

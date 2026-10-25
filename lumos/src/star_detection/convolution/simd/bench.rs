@@ -5,9 +5,9 @@
 use std::cell::OnceCell;
 use std::hint::black_box;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::math::fwhm;
 use crate::simd::Kernel;
@@ -28,7 +28,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         Inputs { row, kernel }
     };
     let tiers: Vec<IsaTier> = IsaTier::supported().collect();
-    let mut group = Kind::Atomic.group(c, "detection/convolution", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/convolution", Scale::Micros);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     let mut output = vec![0.0; FRAME.width];
     group.bench_function(BenchmarkId::new("row/scalar", FRAME.width), |b| {

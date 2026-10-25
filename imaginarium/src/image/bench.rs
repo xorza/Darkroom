@@ -6,10 +6,11 @@ use std::io::{BufReader, BufWriter, Cursor, Write};
 use std::path::Path;
 use std::time::Duration;
 
+use common::bench::{Kind, Scale};
 use common::{Size2us, TempDir, fs};
 use criterion::{BenchmarkId, Criterion};
 
-use crate::bench::fixture::{self, Backend, Kind, Scale};
+use crate::bench::fixture::{self, Backend};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 use crate::error::Error;
@@ -24,7 +25,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let dir = TempDir::new("imaginarium-bench-file");
     let pixels = FRAME.pixel_count();
 
-    let mut group = Kind::Integration.group(c, "save_file", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "save_file", Scale::Millis);
     for (file, format) in cases() {
         scale(file).apply(&mut group);
         group.throughput(fixture::throughput(pixels, format.byte_count()));
@@ -43,7 +44,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     }
     group.finish();
 
-    let mut group = Kind::Integration.group(c, "read_file", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "read_file", Scale::Millis);
     for (file, format) in cases() {
         scale(file).apply(&mut group);
         group.throughput(fixture::throughput(pixels, format.byte_count()));
@@ -103,12 +104,12 @@ const fn extension(file: FileFormat) -> &'static str {
 /// measured on a Ryzen 7 6800U: PNG 468 ms (RGBA u16), JPEG 336 ms (RGB u8), TIFF 201 ms.
 const fn scale(file: FileFormat) -> Scale {
     match file {
-        FileFormat::Png => Scale::Set {
+        FileFormat::Png => Scale::Slow {
             iteration: Duration::from_millis(470),
         },
-        FileFormat::Jpeg => Scale::Set {
+        FileFormat::Jpeg => Scale::Slow {
             iteration: Duration::from_millis(340),
         },
-        FileFormat::Tiff => Scale::Frame,
+        FileFormat::Tiff => Scale::Millis,
     }
 }

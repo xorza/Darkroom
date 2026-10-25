@@ -9,7 +9,7 @@ Palantir.
 Workspace members, each after the crates it uses:
 
 - **`common`** — typed ids, serialization, introspection, cancellation, the
-  2D grid, I/O and thread creation. A leaf: in-tree it uses only its own `common-derive`.
+  2D grid, CPU features, I/O and thread creation. A leaf: in-tree it uses only its own `common-derive`.
 - **`scenarium`** — the node-graph framework: the authoring model and the
   compile → plan → execute pipeline.
 - **`imaginarium`** — interleaved images in nine pixel formats: their codecs,

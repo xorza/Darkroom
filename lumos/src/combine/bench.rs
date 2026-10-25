@@ -7,10 +7,10 @@
 use std::cell::OnceCell;
 use std::time::Duration;
 
+use common::bench::{Kind, Scale};
 use common::{MappedFile, TempDir, par};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field, STACKED_LIGHTS};
 use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::frame_cache::sample;
@@ -52,7 +52,7 @@ fn set(c: &mut Criterion) {
     // The slowest bench's iteration, `light_preset/spilled_cold`'s median on a Ryzen 7 6800U,
     // x86-64-v3.
     let iteration = Duration::from_millis(2550);
-    let mut group = Kind::Integration.group(c, "combine", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "combine", Scale::Slow { iteration });
     group.throughput(Throughput::Elements(
         (STACKED_LIGHTS * FRAME.pixel_count()) as u64,
     ));

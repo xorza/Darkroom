@@ -3,9 +3,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::Field;
 use crate::registration::bench::{Correction, Pair};
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
@@ -16,7 +16,7 @@ use crate::registration::tuning;
 pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
     let count = Field::Typical.stars();
-    let mut group = Kind::Atomic.group(c, "registration/final_fit", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/final_fit", Scale::Micros);
     group.throughput(Throughput::Elements(count as u64));
     for (name, correction) in [
         ("similarity", Correction::Linear),

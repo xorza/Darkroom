@@ -6,9 +6,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
@@ -27,7 +27,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let field = Field::Typical;
     let pair = OnceCell::new();
     let similarity = || pair.get_or_init(Pair::typical).similarity_warp();
-    let mut group = Kind::Integration.group(c, "warp", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "warp", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for method in InterpolationMethod::ALL {
         let id = format!("{}/mono", name(method));

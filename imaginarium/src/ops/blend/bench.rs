@@ -9,8 +9,9 @@ use criterion::{BenchmarkId, Criterion};
 use strum::IntoEnumIterator;
 
 use common::Size2us;
+use common::bench::{Kind, Scale};
 
-use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
+use crate::bench::fixture::{self, Backend, Backends, Variant};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ALL_FORMATS;
 #[cfg(feature = "wgpu")]
@@ -32,7 +33,7 @@ const GPU_ITERATION: Duration = Duration::from_millis(470);
 /// `atomic/blend/cpu/<variant>/<mode>/<format>`: one row pair of the standard frame in every mode,
 /// through the scalar reference and each tier's kernel. Per pixel, reading both rows.
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "blend", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "blend", Scale::Micros);
     for format in ALL_FORMATS {
         let mut layers = None;
         let mut out =
@@ -86,7 +87,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// which the modes' atomic cases compare against. On the CPU into a caller's output; on the GPU
 /// the uploads, the op and the readback. Per pixel, reading both frames.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
-    let mut group = Kind::Integration.group(c, "blend", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "blend", Scale::Millis);
     let params = Blend::new(BlendMode::default(), ALPHA);
     #[cfg(feature = "wgpu")]
     let mut pipeline = None;
@@ -96,9 +97,9 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
         group.throughput(fixture::throughput(pixels, 2 * format.byte_count()));
         for backend in backends.all() {
             match backend {
-                Backend::Cpu => Scale::Frame,
+                Backend::Cpu => Scale::Millis,
                 #[cfg(feature = "wgpu")]
-                Backend::Gpu => Scale::Set {
+                Backend::Gpu => Scale::Slow {
                     iteration: GPU_ITERATION,
                 },
             }

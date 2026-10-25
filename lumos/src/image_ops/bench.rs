@@ -5,9 +5,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{FRAME, Field};
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
@@ -31,7 +31,7 @@ pub(crate) fn integration(c: &mut Criterion) {
             image
         })
     };
-    let mut group = Kind::Integration.group(c, "image_ops", Scale::Frame);
+    let mut group = Kind::Integration.group(c, "image_ops", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     for op in Op::ALL {
         let input = if op.stretched() {
@@ -48,7 +48,7 @@ pub(crate) fn integration(c: &mut Criterion) {
             b.iter_batched_ref(
                 || image.clone(),
                 |image| op.apply(image),
-                fixture::fresh_copies(3 * size_of_val(image.channel(0).pixels())),
+                bench::fresh_copies(3 * size_of_val(image.channel(0).pixels())),
             );
         });
     }

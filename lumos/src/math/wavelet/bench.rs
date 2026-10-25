@@ -3,16 +3,17 @@
 use std::hint::black_box;
 
 use common::Buffer2;
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{self, Kind, Scale};
+use crate::bench::fixture;
 use crate::math::wavelet::atrous_smooth;
 
 const SIDE: usize = 2_048;
 const STEPS: [usize; 4] = [1, 2, 4, 8];
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "math/wavelet/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "math/wavelet/frame", Scale::Millis);
     group.throughput(Throughput::Elements((SIDE * SIDE) as u64));
     for step in STEPS {
         group.bench_function(

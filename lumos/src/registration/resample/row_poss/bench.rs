@@ -4,9 +4,9 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::bench::scene::FRAME;
 use crate::registration::bench::{Correction, Pair};
 use crate::registration::resample::row_poss::RowPoss;
@@ -14,7 +14,7 @@ use crate::registration::transform::TransformType;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
-    let mut group = Kind::Atomic.group(c, "registration/row_poss", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/row_poss", Scale::Micros);
     group.throughput(Throughput::Elements(FRAME.width as u64));
     for (name, transform, correction) in [
         ("affine", TransformType::Similarity, Correction::Linear),

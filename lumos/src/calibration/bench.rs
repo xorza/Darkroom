@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
+use common::bench::{self, Kind, Scale};
 use common::{CancelToken, TempDir};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::files::{LIGHTS, MasterFiles};
-use crate::bench::fixture::{self, Kind, Scale};
 use crate::bench::scene::{self, FRAME, Field};
 use crate::calibration::calibration_masters::{CalibrationMasters, MasterBuild};
 use crate::calibration::calibration_set::CalibrationSet;
@@ -31,7 +31,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
 fn apply(c: &mut Criterion) {
     let field = Field::Typical;
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let mut group = Kind::Atomic.group(c, "calibration/apply/frame", Scale::Frame);
+    let mut group = Kind::Atomic.group(c, "calibration/apply/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     group.bench_function(BenchmarkId::new("light/rggb", field.name()), |b| {
         let masters = CalibrationMasters::from_images(
@@ -44,7 +44,7 @@ fn apply(c: &mut Criterion) {
         b.iter_batched_ref(
             || light.clone(),
             |light| masters.calibrate(light).unwrap(),
-            fixture::fresh_copies(size_of_val(light.data().pixels())),
+            bench::fresh_copies(size_of_val(light.data().pixels())),
         );
     });
 }
@@ -56,7 +56,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
     // The bench's median iteration on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(6620);
-    let mut group = Kind::Integration.group(c, "pipeline/masters", Scale::Set { iteration });
+    let mut group = Kind::Integration.group(c, "pipeline/masters", Scale::Slow { iteration });
     group.throughput(Throughput::Elements(
         (3 * LIGHTS * FRAME.pixel_count()) as u64,
     ));

@@ -9,7 +9,6 @@ mod image;
 #[cfg(test)]
 mod internals;
 mod ops;
-mod simd_tier;
 
 pub use glam::{Affine2, Vec2};
 
@@ -25,7 +24,6 @@ pub use crate::ops::blend::{Blend, BlendMode};
 pub use crate::ops::contrast_brightness::ContrastBrightness;
 pub use crate::ops::preview::Preview;
 pub use crate::ops::transform::{FilterMode, Transform};
-pub use crate::simd_tier::SimdTier;
 
 #[cfg(feature = "wgpu")]
 pub use crate::{

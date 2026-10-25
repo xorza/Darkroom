@@ -8,12 +8,14 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 workspace = true
 
 [features]
-# `libc` drops a file's pages from the page cache, for the benches of cold reads on Linux.
-internals = ["dep:libc"]
+# `libc` drops a file's pages from the page cache, for the benches of cold reads on Linux;
+# `criterion` is the bench policy's, which every crate's benches share.
+internals = ["dep:criterion", "dep:libc"]
 introspect-derive = ["dep:common-derive"]
 
 [dependencies]
 common-derive = { workspace = true, optional = true }
+criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 glam = { workspace = true, features = ["serde", "std"] }
 memmap2 = { workspace = true }
 notify = { workspace = true, features = ["macos_fsevent"] }

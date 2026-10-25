@@ -7,10 +7,10 @@ use std::f64::consts::TAU;
 use std::hint::black_box;
 
 use common::Buffer2;
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::DVec2;
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::camera::{Camera, PsfModel};
 use crate::internals::synthetic::observe::{Observation, render};
@@ -36,7 +36,7 @@ const BETA: f32 = 2.5;
 const SIZE: Size2us = Size2us::new(128, 128);
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let mut group = Kind::Atomic.group(c, "detection/centroid", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "detection/centroid", Scale::Micros);
     for star in [Star::TIGHT, Star::WIDE] {
         let stamp = star.stamp();
         group.throughput(Throughput::Elements((stamp * stamp) as u64));

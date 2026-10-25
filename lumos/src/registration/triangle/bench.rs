@@ -3,15 +3,15 @@
 
 use std::cell::OnceCell;
 
+use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use crate::bench::fixture::{Kind, Scale};
 use crate::registration::bench::Pair;
 use crate::registration::registration_config::RegistrationConfig;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let pair = OnceCell::new();
-    let mut group = Kind::Atomic.group(c, "registration/triangle", Scale::Sample);
+    let mut group = Kind::Atomic.group(c, "registration/triangle", Scale::Micros);
     for config in [
         RegistrationConfig::default(),
         RegistrationConfig::precise_wide_field(),

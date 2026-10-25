@@ -8,11 +8,11 @@ disallowed-types = [
     { path = "std::thread::LocalKey", reason = "state lives on an owner and travels by parameter" },
 ]
 
-# A group's sampling is set through `Scale` (`src/bench/fixture.rs`), the one
-# policy every case shares; `Scale::apply` alone calls these.
+# A group's sampling is set through `common::bench::Scale`, the one policy every
+# crate's cases share; `Scale::apply` alone calls these.
 disallowed-methods = [
-    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `Scale`" },
-    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `Scale`" },
+    { path = "criterion::BenchmarkGroup::sample_size", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::warm_up_time", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::measurement_time", reason = "set a group's sampling through `common::bench::Scale`" },
+    { path = "criterion::BenchmarkGroup::sampling_mode", reason = "set a group's sampling through `common::bench::Scale`" },
 ]
