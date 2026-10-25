@@ -8,7 +8,7 @@
 //!    brighter one kept — greedy non-maximum suppression, as in those two.
 //! 3. Assign every pixel to its nearest kept peak (Voronoi partition).
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend;

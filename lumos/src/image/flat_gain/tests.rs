@@ -1,5 +1,5 @@
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;

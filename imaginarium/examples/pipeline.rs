@@ -7,20 +7,18 @@
     clippy::print_stdout,
     reason = "an example reports what it did on stdout"
 )]
-mod common;
+mod shared;
 
 use std::f32::consts::PI;
 use std::mem;
 
-use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
 use imaginarium::{
     Blend, BlendMode, ContrastBrightness, Gpu, GpuBlendPipeline, GpuContext, GpuImage,
     GpuTransformPipeline, Transform, Vec2,
 };
+use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
-    ensure_output_dir();
-
     let Ok(gpu) = Gpu::new() else {
         println!("No GPU available, exiting");
         return;

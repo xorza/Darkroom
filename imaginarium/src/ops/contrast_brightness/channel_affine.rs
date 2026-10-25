@@ -1,5 +1,5 @@
-use crate::common::color_format::{ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::ops::contrast_brightness::ContrastBrightness;
 
 /// The per-channel affine `value * scale + offset`, clamped to `[0, max]`, that

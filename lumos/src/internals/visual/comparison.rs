@@ -6,9 +6,10 @@ use crate::internals::synthetic::metrics::match_catalogs;
 use crate::internals::synthetic::observe::ObservedSource;
 use crate::internals::visual::{ToneMap, debug_file, gray_to_rgb, save_image};
 use crate::star_detection::star::Star;
+use common::Buffer2;
 use glam::Vec2;
+use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
-use imaginarium::{Buffer2, Image};
 
 /// Colors for comparison images.
 mod colors {

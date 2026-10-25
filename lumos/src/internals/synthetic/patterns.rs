@@ -1,6 +1,6 @@
 //! Simple test patterns for benchmarks and tests: gradients and noise.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::internals::test_rng::TestRng;
 use crate::math::size2us::Size2us;

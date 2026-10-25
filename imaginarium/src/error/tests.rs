@@ -1,7 +1,7 @@
 use std::error::Error as _;
 use std::io;
 
-use crate::common::error::Error;
+use crate::error::Error;
 
 #[test]
 fn only_a_wrapped_cause_is_reachable_through_source() {

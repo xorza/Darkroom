@@ -1,8 +1,8 @@
 use super::*;
-use crate::common::color_format::ALL_FORMATS;
-use crate::common::image_diff::pixels_equal;
-use crate::common::internals::create_test_image;
+use crate::color::color_format::ALL_FORMATS;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::create_test_image;
+use crate::internals::image_diff::pixels_equal;
 
 fn image_u8(width: usize, height: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
     Image::new_with_data(ImageDesc::new(width, height, fmt), bytes).unwrap()

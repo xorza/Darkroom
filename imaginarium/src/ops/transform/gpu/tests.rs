@@ -1,12 +1,12 @@
 use glam::Vec2;
 
-use crate::common::color_format::ALL_FORMATS;
-use crate::common::image_diff::assert_matches_cpu;
-use crate::common::internals::create_test_image;
-use crate::common::internals::gpu::test_gpu;
+use crate::color::color_format::ALL_FORMATS;
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::create_test_image;
+use crate::internals::gpu::test_gpu;
+use crate::internals::image_diff::assert_matches_cpu;
 use crate::ops::transform::pipeline::GpuTransformPipeline;
 use crate::ops::transform::{FilterMode, Transform};
 

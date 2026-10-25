@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bg_mesh::BgMesh;
 use crate::bg_mesh::mesh_spline::MeshSpline;

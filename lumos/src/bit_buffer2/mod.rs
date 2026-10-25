@@ -375,7 +375,7 @@ impl Index<usize> for BitBuffer2 {
 
 #[cfg(test)]
 mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;

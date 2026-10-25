@@ -1,6 +1,6 @@
 //! What share of the frames reached each output pixel.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::linear_image::LinearImage;
 use crate::image::quality_map::QualityMap;
@@ -53,7 +53,7 @@ impl From<Coverage> for LinearImage {
 pub(crate) mod internals {
     use std::ops::Index;
 
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::quality_map::QualityMap;
     use crate::stack_product::coverage::Coverage;

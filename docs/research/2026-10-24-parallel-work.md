@@ -72,6 +72,15 @@ rayon directly to prove a callback may. The production nestings of the table
 above are gone; the tests that prove a nested start panics stop at the check,
 before their inner loop starts.
 
+### Rerun after imaginarium moves into the workspace
+
+The same probe, rebuilt as written above, at the batch that made imaginarium a
+member (see `docs/research/2026-10-25-imaginarium-merge.md`), over every
+member's test targets with `lumos/ml`, `imaginarium/wgpu` and `internals`:
+2243 tests passed. The one nesting recorded is again
+`stage_counter::a_callback_that_uses_rayon_completes`. None was recorded in
+imaginarium's ops or in a body that converts its planes.
+
 ## MRS tile scratch
 
 `NoisePlane::coefficients` makes a `TileScratch` in `map_init`, one for each

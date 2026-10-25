@@ -140,7 +140,7 @@ impl WarpConfig {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::channel_layout::ChannelLayout;
     use crate::image::image_dimensions::ImageDimensions;

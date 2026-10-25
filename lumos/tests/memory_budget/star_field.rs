@@ -3,11 +3,10 @@
 use std::f32::consts::{LN_2, TAU};
 use std::path::{Path, PathBuf};
 
-use common::{TempDir, fs};
+use common::{Buffer2, TempDir, fs};
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Image as FitsImage, Scaling};
-use imaginarium::Buffer2;
 use lumos::ChannelLayout;
 use lumos::{CfaImage, CfaPattern, CfaType, ImageDimensions, ImageMetadata, LinearImage, Mosaic};
 use rand::prelude::*;

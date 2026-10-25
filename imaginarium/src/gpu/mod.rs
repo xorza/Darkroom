@@ -5,7 +5,7 @@ pub(crate) mod packed_layout;
 
 use std::sync::Arc;
 
-use crate::common::error::{Error, Result};
+use crate::error::{Error, Result};
 
 /// GPU context holding wgpu device and queue for compute operations.
 #[derive(Debug, Clone)]
@@ -91,7 +91,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::internals::gpu::test_gpu;
+    use crate::internals::gpu::test_gpu;
 
     /// A device exists when the host has a GPU, and it binds at least wgpu's downlevel
     /// 128 MiB storage buffer.

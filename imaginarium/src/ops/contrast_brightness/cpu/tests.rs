@@ -1,9 +1,9 @@
 use super::{apply_kernel, row_kernel};
-use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::common::image_diff::{max_pixel_diff, pixels_equal};
-use crate::common::internals::create_test_image;
+use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
+use crate::internals::create_test_image;
+use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 use crate::simd_tier::SimdTier;

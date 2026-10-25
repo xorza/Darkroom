@@ -1,9 +1,10 @@
 //! Image comparison utilities for testing.
 
+use common::par;
 use rayon::prelude::*;
 
-use crate::common::color_format::SampleType;
-use crate::common::sample::Sample;
+use crate::color::color_format::SampleType;
+use crate::color::sample::Sample;
 use crate::image::Image;
 
 /// The largest per-channel difference between two images: normalized to `[0, 1]`
@@ -35,8 +36,8 @@ where
     let scale = f64::from(T::FULL_SCALE_F32);
     let a: &[T] = bytemuck::cast_slice(a);
     let b: &[T] = bytemuck::cast_slice(b);
-    a.par_iter()
-        .zip(b.par_iter())
+    par::iter(a)
+        .zip(b)
         .map(|(&a, &b)| (a.into() - b.into()).abs() / scale)
         .reduce(|| 0.0, f64::max)
 }

@@ -3,8 +3,7 @@
 use std::ops::Range;
 use std::slice;
 
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -512,8 +511,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use common::par;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, par};
 
     use crate::image::pixel_flags::{
         DilationScratch, DilationSpec, PixelFlags, Reach, dilate_bytes,

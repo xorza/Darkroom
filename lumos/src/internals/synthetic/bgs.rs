@@ -1,8 +1,8 @@
 //! Background generators for synthetic test images: uniform, linear gradient, radial vignette
 //! and nebula-like structure.
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;

@@ -3,16 +3,14 @@
     reason = "an example reports what it did on stdout"
 )]
 
-mod common;
+mod shared;
 
 use std::f32::consts::PI;
 
-use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
 use imaginarium::{FilterMode, Gpu, GpuImage, GpuTransformPipeline, ImageDesc, Transform, Vec2};
+use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
-    ensure_output_dir();
-
     let ctx = Gpu::new().expect("Failed to create GPU context");
     let pipeline = GpuTransformPipeline::new(&ctx);
 

@@ -3,7 +3,7 @@
 //! Pins the cosmic-ray scratch the pipeline's decode budget charges against what the detectors
 //! allocate; that a run holds no more than its budget is the `memory_budget` integration test's.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray;

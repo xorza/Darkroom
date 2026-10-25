@@ -3,13 +3,14 @@ members = [
     "common",
     "common/common-derive",
     "scenarium",
+    "imaginarium",
     "lumos",
     "libraw-sys",
     "lens",
     "darkroom",
 ]
 default-members = ["darkroom"]
-exclude = ["palantir", "imaginarium", "fits-well"]
+exclude = ["palantir", "fits-well"]
 
 resolver = "3"
 
@@ -24,6 +25,10 @@ edition = "2024"
 version = "0.2.1"
 test = [{ all-features-but = ["lumos/real-data", "darkroom/profile-with-tracy"] }]
 test-runner = "cargo-test"
+# The second lint set is the CPU-only build of imaginarium. The benches always measure its GPU
+# build.
+lint = ["--all-features", { all-features-but = ["imaginarium/wgpu"] }]
+bench = "--features imaginarium/wgpu"
 
 [workspace.dependencies]
 common = { path = "common" }
@@ -80,6 +85,9 @@ ort = { version = "2.0.0-rc.15", default-features = false }
 cc = { version = "1.10", default-features = false }
 libz-sys = { version = "1.1", default-features = false }
 bindgen = { version = "0.73", default-features = false }
+wgpu = { version = "30.0", default-features = false }
+pollster = { version = "1.0", default-features = false }
+tiff = { version = "0.11", default-features = false }
 
 [profile.dev]
 opt-level = 1
@@ -90,9 +98,6 @@ opt-level = 3
 debug = false
 
 [profile.dev.package.palantir]
-opt-level = 1
-debug = "line-tables-only"
-[profile.dev.package.imaginarium]
 opt-level = 1
 debug = "line-tables-only"
 [profile.dev.package.fits-well]

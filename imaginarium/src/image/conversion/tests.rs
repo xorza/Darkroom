@@ -1,7 +1,7 @@
-use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
-use crate::common::internals::create_test_image;
+use crate::color::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::image::conversion::scalar::{self, Luminance};
 use crate::image::{Image, ImageDesc};
+use crate::internals::create_test_image;
 
 /// `(r·13933 + g·46871 + b·4732) / 65536`, rounded half to even:
 /// red 255 → 3 552 915 / 65536 = 54.21 → 54; green 255 → 11 952 105 / 65536 = 182.38 → 182;

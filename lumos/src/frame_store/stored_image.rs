@@ -1,7 +1,7 @@
 //! [`StoredImage`]: an image whose planes are memory maps, between the stages that read it.
 
 use arrayvec::ArrayVec;
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
@@ -140,8 +140,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use common::{MappedFile, TempDir};
-    use imaginarium::Buffer2;
+    use common::{Buffer2, MappedFile, TempDir};
 
     use std::sync::Arc;
 

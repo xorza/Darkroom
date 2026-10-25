@@ -1,8 +1,8 @@
 //! Runtime-format interleaved storage owned by [`Image`](crate::image::Image).
 
-use crate::common::buffer2::Buffer2;
-use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::sample::Sample;
+use common::Buffer2;
 
 /// Tightly packed pixels of one of the nine formats, typed.
 #[derive(Debug, Clone)]

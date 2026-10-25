@@ -8,10 +8,12 @@ Palantir.
 
 Workspace members, each after the crates it uses:
 
-- **`common`** — typed ids, serialization, introspection, cancellation, I/O
-  and thread creation. A leaf: in-tree it uses only its own `common-derive`.
+- **`common`** — typed ids, serialization, introspection, cancellation, the
+  2D grid, I/O and thread creation. A leaf: in-tree it uses only its own `common-derive`.
 - **`scenarium`** — the node-graph framework: the authoring model and the
   compile → plan → execute pipeline.
+- **`imaginarium`** — interleaved images in nine pixel formats: their codecs,
+  SIMD and GPU ops. GPU work is behind its `wgpu` feature.
 - **`lumos`** — the astronomical image-processing pipeline.
 - **`lens`** — the node-function library: application nodes (filesystem
   watching, random generation) and adapters from `imaginarium` and `lumos`.
@@ -22,9 +24,8 @@ Workspace members, each after the crates it uses:
 `default-members = ["darkroom"]`: a bare `cargo run`, `test` or `clippy`
 covers `darkroom` alone.
 
-The submodules `palantir` (GUI), `imaginarium` (CPU/GPU images) and
-`fits-well` (FITS) are standalone projects, `exclude`d from this workspace
-with their own lockfiles and profiles. Run cargo for them from their own
+The submodules `palantir` (GUI) and `fits-well` (FITS) are standalone
+projects, `exclude`d from this workspace with their own lockfiles and profiles. Run cargo for them from their own
 directory, and keep their `Cargo.toml` valid in a standalone checkout —
 never inherit from this workspace.
 
@@ -100,9 +101,9 @@ An `atomic` case times one operation on the unit production hands it; an
 to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's filter
 selects by it; a crate with GPU cases puts the backend first in every case, so
 `'/cpu/'` opens no device. `cargo drive bench` runs the benches of the root
-it runs in (here lumos, and darkroom's editor frame; each submodule runs its
-own), with the root's fixed bench features; `--test` runs each case once, and
-a change to bench code runs it.
+it runs in (here imaginarium, lumos, and darkroom's editor frame; each
+submodule runs its own), with the root's fixed bench features, `wgpu` among
+them; `--test` runs each case once, and a change to bench code runs it.
 
 ## Conventions
 

@@ -51,8 +51,7 @@ fn fill_gaussian_kernel_1d(sigma: f32, radius: usize, kernel: &mut Vec<f32>) {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::par;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, par};
     use rayon::prelude::*;
 
     use crate::math::size2us::Size2us;

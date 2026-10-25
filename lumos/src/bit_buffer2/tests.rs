@@ -1,7 +1,7 @@
 use std::mem;
 use std::panic::catch_unwind;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::panic_message;

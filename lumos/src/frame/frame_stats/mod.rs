@@ -1,8 +1,7 @@
 //! Per-frame robust statistics, with the white noise measured before any interpolation.
 
 use arrayvec::ArrayVec;
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 

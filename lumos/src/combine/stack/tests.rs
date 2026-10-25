@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::{CancelToken, TempDir, par};
+use common::{Buffer2, CancelToken, TempDir, par};
 use glam::{DVec2, Vec2};
-use imaginarium::Buffer2;
 
 use crate::combine::error::StackConfigError;
 use crate::combine::frame_cache::core::CacheCore;

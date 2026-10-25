@@ -1,6 +1,6 @@
 //! [`DrizzleFrame`]: one drizzle input, with what has to stay aligned with it.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::registration::warp_transform::WarpTransform;
 

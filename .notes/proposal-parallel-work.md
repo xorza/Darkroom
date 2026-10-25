@@ -162,7 +162,7 @@ counting allocator, in batch 4.
 - [x] fits-well's parallel methods in `disallowed-methods`, called through
   `tile_parallel`. Test: a loop's body that reads a plain image through it
   panics, and the same read at top level returns the samples.
-- [ ] imaginarium a workspace member: its own `common` module renamed, its
+- [x] imaginarium a workspace member: its own `common` module renamed, its
   file reads and writes through `common::fs`, its rayon calls through
   `common::par`, its names and lints held to the workspace's.
 - [x] Rerun the nesting probe (method in the research note) over the lumos,

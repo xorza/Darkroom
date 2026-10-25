@@ -11,8 +11,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use bytemuck::Pod;
-use common::{MappedFile, fs};
-use imaginarium::Buffer2;
+use common::{Buffer2, MappedFile, fs};
 
 use crate::frame_store::error::FrameStoreError;
 

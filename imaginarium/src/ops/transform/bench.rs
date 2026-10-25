@@ -11,7 +11,7 @@ use glam::Vec2;
 
 use crate::bench::fixture::{self, Backend, Backends, Kind, Scale, Variant};
 use crate::bench::scene::{self, HEIGHT, TILE, WIDTH};
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::color::color_format::{ALL_FORMATS, ColorFormat};
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;

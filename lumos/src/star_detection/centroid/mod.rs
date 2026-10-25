@@ -23,8 +23,8 @@ mod star_noise;
 mod windowed_centroid;
 mod windowed_stamp;
 
+use common::Buffer2;
 use glam::DVec2;
-use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;

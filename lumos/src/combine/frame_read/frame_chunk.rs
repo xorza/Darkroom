@@ -195,8 +195,7 @@ impl ChunkCopy {
 #[cfg(test)]
 mod tests {
     use arrayvec::ArrayVec;
-    use common::TempDir;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, TempDir};
 
     use crate::combine::frame_read::frame_chunk::{ChunkCopy, FrameChunk};
     use crate::frame::admitted::Admitted;

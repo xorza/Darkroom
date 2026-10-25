@@ -6,10 +6,10 @@
 //! its noise model would read every pixel as undivided.
 
 use arrayvec::ArrayVec;
+use common::Buffer2;
 use fits_well::header::{Header, Keyword};
 use fits_well::image::Scaling;
 use fits_well::io::Hdu;
-use imaginarium::Buffer2;
 
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{self, FlatGain, GainGrid};

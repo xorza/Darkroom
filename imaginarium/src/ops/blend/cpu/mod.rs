@@ -3,10 +3,11 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
 
+use common::par;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
 use crate::simd_tier::SimdTier;
@@ -79,9 +80,7 @@ fn apply_scalar(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
     let stride = src.desc().row_bytes();
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 
-    output
-        .bytes_mut()
-        .par_chunks_mut(stride)
+    par::chunks_mut(output.bytes_mut(), stride)
         .enumerate()
         .for_each(|(y, out_row)| {
             let src_row = &src_bytes[y * stride..][..stride];
@@ -104,9 +103,7 @@ unsafe fn apply_kernel(
     let stride = src.desc().row_bytes();
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 
-    output
-        .bytes_mut()
-        .par_chunks_mut(stride)
+    par::chunks_mut(output.bytes_mut(), stride)
         .enumerate()
         .for_each(|(y, out_row)| {
             let src_row = &src_bytes[y * stride..][..stride];

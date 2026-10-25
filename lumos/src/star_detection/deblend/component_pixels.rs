@@ -205,7 +205,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::math::size2us::Size2us;
     use crate::math::urect::URect;

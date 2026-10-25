@@ -19,8 +19,8 @@
 //!   truncated wing is a systematic error they would otherwise have to widen their tolerances
 //!   to absorb.
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::math::pixel_gaussian::PixelGaussian;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};

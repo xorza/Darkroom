@@ -1,8 +1,7 @@
-use common::{TempDir, fs};
+use common::{Buffer2, TempDir, fs};
 use fits_well::FitsReader;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Scaling};
-use imaginarium::Buffer2;
 
 use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;

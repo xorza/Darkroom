@@ -1,6 +1,6 @@
 //! [`Component`]: one connected component of the residual, as the deblenders read it.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;

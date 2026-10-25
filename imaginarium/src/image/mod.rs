@@ -4,17 +4,16 @@ pub(crate) mod image_desc;
 pub(crate) mod image_pixels;
 mod io;
 
-use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
-use std::path::Path;
+use std::io::{BufRead, Seek, Write};
 
-use crate::common::buffer2::Buffer2;
-use crate::common::color_format::ColorFormat;
-use crate::common::error::{Error, Result};
-use crate::common::sample::Sample;
+use crate::color::color_format::ColorFormat;
+use crate::color::sample::Sample;
+use crate::error::{Error, Result};
 use crate::image::conversion::convert_image;
 use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 use crate::image::image_pixels::{ImagePixels, Stored};
+use common::Buffer2;
 
 /// A runtime-format image backed by tightly packed, typed interleaved pixels.
 #[derive(Clone, Debug)]
@@ -88,27 +87,10 @@ impl Image {
         Ok(Self { pixels })
     }
 
-    /// The image in the file at `filename`, in the format its extension names.
-    pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Self> {
-        let filename = filename.as_ref();
-        let format = FileFormat::from_path(filename)?;
-        Self::decode(BufReader::new(std::fs::File::open(filename)?), format)
-    }
-
     /// The image `input` holds, in `format`, decoded as it is read: a file whoever owns the
     /// reading opened, or bytes in a [`Cursor`](std::io::Cursor).
     pub fn decode(mut input: impl BufRead + Seek, format: FileFormat) -> Result<Self> {
         io::load(&mut input, format)
-    }
-
-    /// This image written to `filename`, in the format its extension names.
-    pub fn save_file<P: AsRef<Path>>(&self, filename: P) -> Result<()> {
-        let filename = filename.as_ref();
-        let format = FileFormat::from_path(filename)?;
-        let mut file = BufWriter::new(std::fs::File::create(filename)?);
-        self.encode(&mut file, format)?;
-        file.flush()?;
-        Ok(())
     }
 
     /// This image in `format`, written into `out`, which the encoder may seek back over.

@@ -4,7 +4,7 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
-use strum_macros::{EnumIter, EnumString, VariantNames};
+use strum::{EnumIter, EnumString, VariantNames};
 
 #[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;

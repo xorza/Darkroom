@@ -6,8 +6,8 @@
 //! fixture is checked to be one connected component first, and the contrast and the separation
 //! are each shown to move the split.
 
+use common::Buffer2;
 use glam::Vec2;
-use imaginarium::Buffer2;
 
 use crate::internals::synthetic::bg_map;
 use crate::internals::synthetic::sky_field::{GaussianStars, Sky, SkyField, SkyNoise};

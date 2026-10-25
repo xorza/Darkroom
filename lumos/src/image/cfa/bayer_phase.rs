@@ -1,7 +1,6 @@
 //! [`BayerPhase`]: one of a 2×2 pattern's four phases, and its photosites as a dense plane.
 
-use common::par;
-use imaginarium::Buffer2;
+use common::{Buffer2, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -116,7 +115,7 @@ const fn even_bits(word: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::bit_buffer2::BitBuffer2;
     use crate::image::cfa::bayer_phase::{BayerPhase, even_bits};

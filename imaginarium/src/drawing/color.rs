@@ -1,6 +1,6 @@
 //! The color drawing operations take.
 
-use crate::common::luma;
+use crate::color::luma;
 
 /// An RGB color with components on `[0, 1]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,7 +26,7 @@ impl Color {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::color::Color;
+    use crate::drawing::color::Color;
 
     /// `0.2126 · 0.5 + 0.7152 · 0.25 + 0.0722 · 1` in `f32`, summed left to right.
     #[test]

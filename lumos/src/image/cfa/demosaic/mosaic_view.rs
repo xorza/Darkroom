@@ -9,8 +9,7 @@
 
 use std::ops::Range;
 
-use common::{CancelToken, PerWorker, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::error::Cancelled;
@@ -253,7 +252,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
+    use common::Buffer2;
 
     use crate::image::cfa::cfa_pattern::CfaPattern;
     use crate::image::cfa::demosaic::mosaic_view::MosaicView;

@@ -16,7 +16,7 @@
 //!   warp samples it like any other and carries its flag to every output pixel whose sample gave
 //!   it weight, for the combine to leave out while enough clean samples remain.
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::image::flag_counts::FlagCounts;
 use crate::image::pixel_flags::{DilationScratch, DilationSpec, PixelFlags, Reach};

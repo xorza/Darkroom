@@ -10,7 +10,7 @@ use std::fmt::Debug;
 
 use bytemuck::Pod;
 
-use crate::common::color_format::SampleType;
+use crate::color::color_format::SampleType;
 
 /// A channel storage type.
 pub(crate) trait Sample: Pod + Debug + PartialEq + Send + Sync + 'static {
@@ -137,7 +137,7 @@ impl Sample for f32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::sample::Sample;
+    use crate::color::sample::Sample;
 
     /// Exhaustive over both integer types: the one rule reduces to the integer formulas.
     #[test]

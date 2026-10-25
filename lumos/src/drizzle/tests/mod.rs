@@ -7,7 +7,7 @@ mod kernels;
 mod square;
 mod synthetic;
 
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;

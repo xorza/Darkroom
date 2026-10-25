@@ -3,10 +3,11 @@
 
 use std::f32::consts::TAU;
 
+use common::par;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 
@@ -33,8 +34,7 @@ fn typed_sky<T: Sample>(format: ColorFormat, width: usize, height: usize, seed: 
     let channels = format.channel_count.count();
     let color = channels - usize::from(format.has_alpha());
     let mut samples = vec![T::FULL_SCALE; width * height * channels];
-    samples
-        .par_chunks_mut(width * channels)
+    par::chunks_mut(&mut samples, width * channels)
         .enumerate()
         .for_each(|(y, row)| {
             for (x, pixel) in row.chunks_exact_mut(channels).enumerate() {

@@ -1331,13 +1331,18 @@ name = "imaginarium"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "common",
+ "criterion",
  "glam 0.34.1",
  "image",
+ "imaginarium",
+ "pollster 1.0.1",
  "rayon",
  "strum",
- "strum_macros",
  "thiserror 2.0.21",
  "tiff",
+ "tokio",
+ "wgpu",
 ]
 
 [[package]]

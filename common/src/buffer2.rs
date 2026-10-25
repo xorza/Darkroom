@@ -2,12 +2,13 @@
 //! range indexing plus `Deref` to `[T]`. An interleaved image stores
 //! `Buffer2<[T; N]>`; a planar one, one `Buffer2<T>` per channel, and
 //! [`Buffer2::interleave`] / [`Buffer2::deinterleave`] move between the two.
-//! Lumos uses it for `LinearImage` channel planes.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::{array, slice, vec};
 
-use rayon::prelude::*;
+use rayon::iter::ParallelIterator;
+
+use crate::par;
 
 /// `width × height` values in row-major order.
 ///
@@ -160,8 +161,7 @@ impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
                 "all channel planes must share dimensions"
             );
         }
-        let pixels = (0..width * height)
-            .into_par_iter()
+        let pixels = par::into_iter(0..width * height)
             .map(|i| planes.map(|plane| plane.pixels[i]))
             .collect();
         Self::new(width, height, pixels)
@@ -170,7 +170,9 @@ impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
     /// The `N` channel planes of this pixel buffer.
     pub fn deinterleave(&self) -> [Buffer2<T>; N] {
         array::from_fn(|channel| {
-            let plane = self.pixels.par_iter().map(|pixel| pixel[channel]).collect();
+            let plane = par::iter(&self.pixels)
+                .map(|pixel| pixel[channel])
+                .collect();
             Buffer2::new(self.width, self.height, plane)
         })
     }
@@ -298,7 +300,7 @@ impl<T> From<Buffer2<T>> for Vec<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::buffer2::Buffer2;
+    use crate::buffer2::Buffer2;
 
     #[test]
     fn indexing_is_row_major() {

@@ -8,8 +8,8 @@ use tiff::encoder::colortype::{
 };
 use tiff::encoder::{TiffEncoder, TiffValue};
 
-use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::common::error::{Error, Result};
+use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::error::{Error, Result};
 use crate::image::Image;
 use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;

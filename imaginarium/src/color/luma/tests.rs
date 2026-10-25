@@ -1,4 +1,4 @@
-use crate::common::luma::{WEIGHTS_Q16, round_q16};
+use crate::color::luma::{WEIGHTS_Q16, round_q16};
 
 /// `0.2126 · 65536 = 13933.4`, `0.7152 · 65536 = 46871.3`, `0.0722 · 65536 = 4731.8`.
 #[test]

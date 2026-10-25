@@ -72,8 +72,7 @@ impl From<CalibrationMasters> for Masters {
 
 #[cfg(test)]
 mod tests {
-    use common::CancelToken;
-    use imaginarium::Buffer2;
+    use common::{Buffer2, CancelToken};
     use lumos::{
         CalibrationMasters, CalibrationSet, CfaImage, CfaType, ImageMetadata, SigmaThreshold,
     };

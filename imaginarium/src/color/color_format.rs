@@ -136,7 +136,7 @@ pub const ALL_FORMATS: [ColorFormat; 9] = [
 
 #[cfg(test)]
 mod tests {
-    use crate::common::color_format::ALL_FORMATS;
+    use crate::color::color_format::ALL_FORMATS;
 
     /// Each name is the channel layout's and the sample type's own text, so no two match.
     #[test]

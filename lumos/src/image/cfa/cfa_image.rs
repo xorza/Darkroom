@@ -4,8 +4,7 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use arrayvec::ArrayVec;
-use common::{CancelToken, par};
-use imaginarium::Buffer2;
+use common::{Buffer2, CancelToken, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;

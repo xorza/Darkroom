@@ -8,11 +8,12 @@ mod sse;
 
 mod packed_source;
 
+use common::par;
 use glam::Vec2;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::common::sample::Sample;
+use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::image::Image;
 use crate::ops::transform::cpu::packed_source::PackedSource;
 use crate::ops::transform::{FilterMode, Transform};
@@ -136,9 +137,7 @@ where
     let inv = transform.inverse();
     let filter = transform.filter;
 
-    output
-        .bytes_mut()
-        .par_chunks_mut(out_stride)
+    par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
         .for_each(|(y, out_row_bytes)| {
             let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);

@@ -1,4 +1,4 @@
-use imaginarium::Buffer2;
+use common::Buffer2;
 
 use crate::calibration::defect_map::sampling::internals::color_samples;
 use crate::calibration::defect_map::*;
