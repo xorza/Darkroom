@@ -31,6 +31,26 @@ test-runner = "cargo-test"
 lint = ["--all-features", { all-features-but = ["imaginarium/wgpu"] }]
 bench = "--features imaginarium/wgpu"
 
+# A host never compiles imaginarium's SIMD kernels of the other architecture, so a change to one
+# runs the lint for it: `lint-x86` from an arm64 host, `lint-aarch64` from an x86 one, each after
+# `rustup target add` of its target. Not `cross-lint`, which lints every member: `libraw-sys`
+# builds LibRaw's C++ for the target. The target's own rustflags join the root's `target-cpu`,
+# where `RUSTFLAGS` would replace it.
+[workspace.metadata.drive.commands.lint-x86]
+steps = [{ build = "clippy -p imaginarium --all-targets --all-features --target x86_64-unknown-linux-gnu", env = { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } }]
+
+[workspace.metadata.drive.commands.lint-aarch64]
+steps = [{ build = "clippy -p imaginarium --all-targets --all-features --target aarch64-unknown-linux-gnu", env = { CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-D warnings" } }]
+
+# The tests that read the gitignored dataset in `test_data/lumos_data/`, only when asked; the
+# arguments go to the test binaries, as a name filter.
+[workspace.metadata.drive.commands.real-data]
+steps = [{ cargo = "test -p lumos --all-features", args = true }]
+
+# A change to a lumos vector kernel, on an x86_64 host: no vector op fell out of line.
+[workspace.metadata.drive.commands.inline-kernels]
+steps = [{ program = ["lumos/scripts/inline-kernels.sh", "{target}"] }]
+
 [workspace.dependencies]
 common = { path = "common" }
 common-derive = { path = "common/common-derive" }
