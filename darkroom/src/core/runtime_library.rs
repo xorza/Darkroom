@@ -1,5 +1,6 @@
 //! The ephemeral runtime registry shared by every frontend.
 
+use std::path::{self, PathBuf};
 use std::sync::Arc;
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
@@ -50,6 +51,13 @@ impl RuntimeLibrary {
 }
 
 fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> ScenariumLibrary {
+    // A model path binds into each new node as its default, and a document holds absolute paths:
+    // a relative one is taken against the working directory, where a run would have read it.
+    let absolute = |path: &PathBuf| path::absolute(path).unwrap_or_else(|_| path.clone());
+    let model_paths = MlModelPaths {
+        denoise: absolute(&model_paths.denoise),
+        star_removal: absolute(&model_paths.star_removal),
+    };
     let mut library = ScenariumLibrary::default();
     library.add(preview_sink::func(Arc::clone(previews)));
     library.merge(math_library());
@@ -58,12 +66,13 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
     library.merge(fs_watch_library());
     library.merge(random_library());
     library.merge(image_library());
-    library.merge(astro_library(model_paths));
+    library.merge(astro_library(&model_paths));
     library
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::{self, PathBuf};
     use std::sync::Arc;
 
     use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
@@ -98,5 +107,32 @@ mod tests {
             library.types().len(),
             parts.iter().map(|part| part.types().len()).sum::<usize>()
         );
+    }
+
+    /// The default model paths are bare file names; each path default the library binds into a
+    /// new node is absolute, taken against the working directory, as a document holds its paths.
+    #[test]
+    fn the_model_path_defaults_are_absolute() {
+        let paths = MlModelPaths::default();
+        assert!(paths.denoise.is_relative() && paths.star_removal.is_relative());
+        let library = compose(&paths, &Arc::default());
+        let mut defaults: Vec<PathBuf> = library
+            .iter()
+            .flat_map(|func| func.inputs().iter())
+            .filter_map(|input| {
+                input
+                    .default_value
+                    .as_ref()?
+                    .as_fs_path()
+                    .map(PathBuf::from)
+            })
+            .collect();
+        defaults.sort();
+        let mut expected = vec![
+            path::absolute(&paths.denoise).unwrap(),
+            path::absolute(&paths.star_removal).unwrap(),
+        ];
+        expected.sort();
+        assert_eq!(defaults, expected);
     }
 }

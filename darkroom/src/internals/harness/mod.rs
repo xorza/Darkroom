@@ -28,6 +28,7 @@ use serde::Serialize;
 use tracing::subscriber::{self, DefaultGuard};
 use tracing_subscriber::layer::SubscriberExt as _;
 
+use crate::core::io::document as io_document;
 use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::gui::app::app_host::AppHost;
@@ -412,6 +413,15 @@ impl Harness {
                 path: document.to_path_buf(),
             });
         };
+        // A document the load cannot read is the open's to report, as it is for one in place.
+        if let Ok(paths) = io_document::paths_leaving_folder(document)
+            && !paths.is_empty()
+        {
+            return Err(HarnessError::PathsLeaveFolder {
+                document: document.to_path_buf(),
+                paths,
+            });
+        }
         let files = ProjectFiles::of(folder)?;
         if files.bytes > COPY_LIMIT {
             return Err(HarnessError::FolderTooLarge {

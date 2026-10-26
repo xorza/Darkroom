@@ -9,6 +9,7 @@ use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;
 
+use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
 use crate::platform;
 
@@ -36,6 +37,10 @@ pub(crate) struct Preferences {
     /// "Don't ask again" checkbox clears it; the Preferences tab can
     /// restore it. Defaults to `true`.
     pub(crate) confirm_unsaved_changes: bool,
+    /// Save the paths inside a document's folder relative to it, so the folder moves or is copied
+    /// whole and its files go with it. When `false`, a save writes every path absolute. Defaults
+    /// to `true`.
+    pub(crate) relative_paths: bool,
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
     /// (platform picks).
@@ -104,6 +109,7 @@ impl Default for Preferences {
             document_path: None,
             load_last_document: true,
             confirm_unsaved_changes: true,
+            relative_paths: true,
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPaths::default(),
@@ -112,6 +118,15 @@ impl Default for Preferences {
 }
 
 impl Preferences {
+    /// How a document save writes its paths, as [`Self::relative_paths`] says.
+    pub(crate) const fn saved_paths(&self) -> SavedPaths {
+        if self.relative_paths {
+            SavedPaths::Relative
+        } else {
+            SavedPaths::Absolute
+        }
+    }
+
     /// Read the preferences from `path`. A missing file is a first run, and
     /// reads as the defaults; a file that cannot be read or parsed is an error,
     /// so the caller can report it and leave the file as the user has it.

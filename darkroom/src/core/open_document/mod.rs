@@ -34,6 +34,7 @@ use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::undo_history::UndoHistory;
 use crate::core::io::document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
+use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::Preferences;
 use crate::core::status_log::{StatusFamily, StatusLog};
 use scenarium::Library;
@@ -341,8 +342,12 @@ impl OpenDocument {
     /// Write the document to `path` and adopt it. Clears
     /// [`dirty`](Self::dirty) — only on success, so a failed save leaves the
     /// unsaved work still flagged.
-    pub(crate) fn save_to(&mut self, path: &Path) -> Result<(), DocumentSaveError> {
-        document::save(&self.document, path)?;
+    pub(crate) fn save_to(
+        &mut self,
+        path: &Path,
+        paths: SavedPaths,
+    ) -> Result<(), DocumentSaveError> {
+        document::save(&self.document, path, paths)?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         Ok(())

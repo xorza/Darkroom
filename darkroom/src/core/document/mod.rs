@@ -33,9 +33,15 @@ pub(crate) mod stubs;
 pub(crate) mod tab_ref;
 pub(crate) mod viewport;
 
+use std::path::Path;
+use std::slice;
+
 use glam::Vec2;
 use palantir::DockState;
-use scenarium::{Binding, DetachedNode, Detachment, Graph as CoreGraph, Library, Node, NodeId};
+use scenarium::{
+    Binding, ConstValue, DetachedNode, DetachedNodeParts, Detachment, Graph as CoreGraph, Library,
+    Node, NodeId,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::DocumentValidationError;
@@ -58,7 +64,7 @@ use crate::core::preview_sink;
 /// borrowed together, and destructuring is what proves they are disjoint —
 /// accessor methods would each borrow the whole `Document` and couldn't be
 /// held at once.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     /// Holds only nodes the library resolves, with only admitted wiring.
     pub(crate) graph: CoreGraph,
@@ -250,8 +256,81 @@ impl Document {
                 return Err(DocumentValidationError::MissingTab { tab });
             }
         }
-        Ok(())
+        // A file holds relative paths; memory resolves each where it enters, so a relative one
+        // here would be read against the working directory.
+        let mut relative = None;
+        self.for_each_path(|node_id, path| {
+            if relative.is_none() && !path.is_empty() && Path::new(path).is_relative() {
+                relative = Some(DocumentValidationError::RelativePath {
+                    node_id,
+                    path: path.to_string(),
+                });
+            }
+        });
+        relative.map_or(Ok(()), Err)
     }
+
+    /// Each path a const binding holds, the stubs' included, with the node it binds.
+    pub(crate) fn for_each_path(&self, mut visit: impl FnMut(NodeId, &str)) {
+        let graph = self.graph.bindings.iter();
+        let stubs = self.stubs.iter().flat_map(|record| {
+            record
+                .bindings()
+                .iter()
+                .map(|entry| (&entry.port, &entry.binding))
+        });
+        for (port, binding) in graph.chain(stubs) {
+            if let Binding::Const(value) = binding
+                && let Some(paths) = value.as_fs_paths()
+            {
+                for path in paths {
+                    visit(port.node_id, path);
+                }
+            }
+        }
+    }
+
+    /// Put `map`'s answer in place of each path a const binding holds that it answers for, the
+    /// stubs' included.
+    pub(crate) fn map_paths(&mut self, mut map: impl FnMut(&str) -> Option<String>) {
+        for binding in self.graph.bindings.values_mut() {
+            map_binding(binding, &mut map);
+        }
+        for record in self.stubs.iter_mut() {
+            let mut bindings = record.bindings().to_vec();
+            let mut changed = false;
+            for entry in &mut bindings {
+                changed |= map_binding(&mut entry.binding, &mut map);
+            }
+            if changed {
+                // A record is checked whole; changing a const keeps every check it passed.
+                *record = DetachedNode::new(DetachedNodeParts {
+                    node_id: record.node_id(),
+                    node: record.node().clone(),
+                    bindings,
+                    subscriptions: record.subscriptions().to_vec(),
+                })
+                .expect("a record with other consts is as well formed as before");
+            }
+        }
+    }
+}
+
+/// Put `map`'s answers in place in `binding`'s paths; whether it answered any.
+fn map_binding(binding: &mut Binding, map: &mut impl FnMut(&str) -> Option<String>) -> bool {
+    let paths: &mut [String] = match binding {
+        Binding::Const(ConstValue::FsPath(path)) => slice::from_mut(path),
+        Binding::Const(ConstValue::FsPaths(paths)) => paths,
+        _ => return false,
+    };
+    let mut changed = false;
+    for path in paths {
+        if let Some(mapped) = map(path) {
+            *path = mapped;
+            changed = true;
+        }
+    }
+    changed
 }
 
 impl From<CoreGraph> for Document {
@@ -615,6 +694,45 @@ mod tests {
         assert!(matches!(
             document.validate(),
             Err(DocumentValidationError::ForeignDock)
+        ));
+    }
+
+    /// A path a binding holds is absolute or unset in memory: a stub's relative one fails the
+    /// check and names its node, while an absolute one and an empty one pass.
+    #[test]
+    fn validation_holds_paths_absolute() {
+        use std::path::{self, Path};
+
+        use scenarium::{BindingEntry, ConstValue, DetachedNodeParts, InputPort};
+
+        let mut fixture = DocumentFixture::sample();
+        let stub = fixture.stub_at(Vec2::ZERO);
+        let mut document = fixture.document;
+        let with_path = |document: &mut Document, value: &str| {
+            let record = document.stubs.remove(stub).unwrap();
+            document.stubs.insert(
+                DetachedNode::new(DetachedNodeParts {
+                    node_id: stub,
+                    node: record.node().clone(),
+                    bindings: vec![BindingEntry {
+                        port: InputPort::new(stub, 0),
+                        binding: Binding::Const(ConstValue::FsPath(value.to_string())),
+                    }],
+                    subscriptions: Vec::new(),
+                })
+                .unwrap(),
+            );
+        };
+        let absolute = path::absolute(Path::new("x.tiff")).unwrap();
+        for valid in [absolute.to_str().unwrap(), ""] {
+            with_path(&mut document, valid);
+            document.validate().unwrap();
+        }
+        with_path(&mut document, "inputs/x.tiff");
+        assert!(matches!(
+            document.validate(),
+            Err(DocumentValidationError::RelativePath { node_id, path })
+                if node_id == stub && path == "inputs/x.tiff"
         ));
     }
 }

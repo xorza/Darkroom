@@ -38,6 +38,7 @@ fn preferences_roundtrip() {
         // Every field off its default, so a field the round trip drops fails.
         load_last_document: false,
         confirm_unsaved_changes: false,
+        relative_paths: false,
         window: Some(WindowState {
             size: UVec2::new(1440, 900),
             maximized: true,

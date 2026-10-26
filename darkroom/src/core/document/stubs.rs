@@ -1,7 +1,7 @@
 //! [`Stubs`]: the nodes a document keeps while the library cannot run them.
 
 use std::collections::BTreeMap;
-use std::collections::btree_map::Values;
+use std::collections::btree_map::{Values, ValuesMut};
 
 use scenarium::{DetachedNode, NodeId};
 use serde::de::Error as _;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// A stub has no ports, so no edit wires to one: its record is a frozen
 /// snapshot. Saved as the list of records, in node-id order.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Stubs(BTreeMap<NodeId, DetachedNode>);
 
 impl Stubs {
@@ -48,6 +48,11 @@ impl Stubs {
     /// The records, in node-id order.
     pub(crate) fn iter(&self) -> Values<'_, NodeId, DetachedNode> {
         self.0.values()
+    }
+
+    /// The records for writing, in node-id order. A record replaced keeps its node id.
+    pub(crate) fn iter_mut(&mut self) -> ValuesMut<'_, NodeId, DetachedNode> {
+        self.0.values_mut()
     }
 
     /// Remove and return each record `take` picks, in node-id order.

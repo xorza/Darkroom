@@ -80,6 +80,14 @@ impl PreferencesForm<'_> {
                                 self.out
                                     .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
                             }
+                            if Checkbox::new(&mut preferences.relative_paths)
+                                .label("Save paths inside the project folder as relative")
+                                .show(ui)
+                                .changed
+                            {
+                                self.out
+                                    .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
+                            }
                         });
 
                         // ML models — caller-supplied ONNX files the ml_denoise /

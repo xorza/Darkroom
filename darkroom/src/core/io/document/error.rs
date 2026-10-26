@@ -12,6 +12,11 @@ use crate::core::io::document::{DOCUMENT_ENTRY, EXTENSION, MAX_DOCUMENT_BYTES};
 pub(crate) enum DocumentLoadError {
     #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
     InvalidExtension { path: PathBuf },
+    #[error(
+        "{path} holds paths relative to its folder, whose name is not valid Unicode",
+        path = .path.display()
+    )]
+    NonUnicodeFolder { path: PathBuf },
     #[error("{path}: {source}", path = .path.display())]
     Open {
         path: PathBuf,
