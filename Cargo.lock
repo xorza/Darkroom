@@ -2477,6 +2477,7 @@ dependencies = [
  "fixedbitset",
  "glam 0.34.1",
  "half",
+ "image",
  "padding-struct",
  "palantir-anim-derive",
  "pollster 1.0.1",
