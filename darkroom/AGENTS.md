@@ -50,7 +50,9 @@ pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
   role and a label for every widget kind, a much larger palantir change than the harness needs.
 - **Each action waits until the editor settles**: frames run until one asks no repaint, the app
   has no wake pending, and no preview is converting on its thread, bounded in frames and in real
-  time; a timer wake, as a caret blink asks, does not hold it. `darkroom_wait_run` waits for the
+  time; a timer wake, as a caret blink asks, does not hold it. A wake from the worker or the
+  preview converter makes the next frame a full one, as the window host's repaint does: a frame
+  nothing asked for paints only and runs no `update`. `darkroom_wait_run` waits for the
   worker too. This is Playwright's auto-wait. Refused: a fixed sleep or frame count, which breaks
   when a frame or a conversion takes longer.
 - **Text first, pixels when the look matters.** `darkroom_state` and `darkroom_ui` reply with
@@ -78,6 +80,10 @@ pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
 - **A panic ends the session, not the server.** The server catches it at the editor thread's
   edge, drops the session, and answers with the panic's message and location. Refused: a server
   that dies with the editor, which the client shows only as a lost connection.
+- **A quit ends the session**, as it closes the window: once an action quits the editor (File ▸
+  Quit, or Ctrl+Q past the unsaved-changes prompt), every harness call that runs a frame is
+  refused with `HarnessError::Quit`, and the MCP server closes the session and says so. Refused: a
+  session that goes on after its editor asked to end, which a user never sees.
 - **A session works on a copy of the project's folder, in RAM**, under `common::env::temp_dir`,
   tmpfs on Debian 13 and Arch, so saves, the runtime cache and the shots stay inside the session
   and cost no disk writes. A folder over 256 MiB, one holding a link to a folder, or a document

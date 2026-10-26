@@ -22,6 +22,11 @@ pub enum HarnessError {
     },
     #[error("{locator} is in the document but not on screen; pan or zoom the canvas to it")]
     OffScreen { locator: String },
+    #[error(
+        "the editor quit, as an action asked (File ▸ Quit or Ctrl+Q), and the session ended; open \
+         a project to go on"
+    )]
+    Quit,
     #[error("the editor did not settle within {frames} frames after {step}")]
     Unsettled { step: String, frames: u32 },
     #[error("{region} covers none of the window; pick a region inside it")]
