@@ -1,5 +1,6 @@
 //! `darkroom-mcp`: the darkroom editor as an MCP server over stdio, for an agent to open
-//! projects in, click through and look at. `.notes/editor-harness.md` holds the decisions.
+//! projects in, click through and look at. `darkroom/AGENTS.md`, "The editor harness", holds the
+//! decisions.
 
 mod darkroom_server;
 mod params;

@@ -37,17 +37,20 @@ pub(crate) enum AppCommand {
     Quit,
 }
 
-/// Document file lifecycle: new / open / save / save-as.
+/// Document file lifecycle: new / open / save / save-as, plain or zipped.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FileCommand {
     /// Replace the document with an empty one.
     New,
     /// Prompt for a file and open it.
     Open,
-    /// Save to the current file, or prompt (Save As) if there isn't one.
+    /// Save to the current file in the format it was opened in, or prompt (Save As) if there
+    /// isn't one.
     Save,
-    /// Always prompt for a destination.
+    /// Always prompt for a destination, and write the document's RON text there.
     SaveAs,
+    /// Always prompt for a destination, and write the RON text zipped there.
+    SaveAsCompressed,
 }
 
 /// An image of the whole window as the next frame paints it.

@@ -84,9 +84,10 @@ impl DarkroomServer {
     }
 
     #[tool(
-        description = "Open a .darkroom project in a new editor session, closing any open one. \
-        By default the project's folder is copied into the session's own directory in RAM and the \
-        copy opens, so nothing the session does reaches the original; in_place opens the original. \
+        description = "Open a .darkroom project in a new editor session, closing any open one; \
+        with no project, a new unsaved document, which a Save As names. By default the project's \
+        folder is copied into the session's own directory in RAM and the copy opens, so nothing \
+        the session does reaches the original; in_place opens the original. \
         Answers with the build the server runs, the session directory, and the editor's state. \
         Example: {\"project\": \"darkroom/sample/sample.darkroom\"}"
     )]
@@ -100,7 +101,7 @@ impl DarkroomServer {
                 config.scale = scale;
             }
             check_config(config)?;
-            let harness = session.start(config, &params.project, params.in_place)?;
+            let harness = session.start(config, params.project.as_deref(), params.in_place)?;
             json(&Opened {
                 build: env!("DARKROOM_BUILD"),
                 session_dir: harness.session_dir().to_path_buf(),

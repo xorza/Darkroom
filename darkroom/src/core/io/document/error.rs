@@ -1,4 +1,4 @@
-//! Why a document archive could not be loaded or saved.
+//! Why a document file could not be loaded or saved.
 
 use std::io;
 use std::path::PathBuf;
@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use common::{DeserializeError, SerializeError};
 use zip::result::ZipError;
 
-use crate::core::io::document::{DOCUMENT_ENTRY, EXTENSION, MAX_DOCUMENT_BYTES};
+use crate::core::io::document::document_format::DOCUMENT_ENTRY;
+use crate::core::io::document::{EXTENSION, MAX_DOCUMENT_BYTES};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DocumentLoadError {
@@ -48,19 +49,19 @@ pub(crate) enum DocumentLoadError {
     #[error("{path} contains a non-file {DOCUMENT_ENTRY} entry", path = .path.display())]
     NonFileDocumentEntry { path: PathBuf },
     #[error(
-        "{DOCUMENT_ENTRY} in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
+        "the document in {path} is {size} bytes, over the {max_mib} MiB size limit",
         path = .path.display(),
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("failed to read {DOCUMENT_ENTRY} from {path}: {source}", path = .path.display())]
-    ReadDocument {
+    #[error("failed to read {path}: {source}", path = .path.display())]
+    Read {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("invalid {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
-    DeserializeDocument {
+    #[error("{path} is not a valid Darkroom document: {source}", path = .path.display())]
+    Deserialize {
         path: PathBuf,
         /// Boxed: a spanned RON error carries its whole span, which every
         /// `load` on the happy path would otherwise pay for in its `Result`.
@@ -73,14 +74,14 @@ pub(crate) enum DocumentLoadError {
 pub(crate) enum DocumentSaveError {
     #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
     InvalidExtension { path: PathBuf },
-    #[error("failed to serialize {DOCUMENT_ENTRY} for {path}: {source}", path = .path.display())]
+    #[error("failed to serialize the document for {path}: {source}", path = .path.display())]
     Serialize {
         path: PathBuf,
         #[source]
         source: SerializeError,
     },
     #[error(
-        "{DOCUMENT_ENTRY} for {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
+        "the document for {path} is {size} bytes, over the {max_mib} MiB size limit",
         path = .path.display(),
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]

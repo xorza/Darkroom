@@ -67,6 +67,13 @@ fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
         if MenuItem::new("Save As…").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::SaveAs));
         }
+        if MenuItem::new("Save As Compressed…")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            out.push_app(AppCommand::File(FileCommand::SaveAsCompressed));
+        }
         MenuSeparator::new().show(ui);
         if MenuItem::new("Preferences").show(ui, popup).left.clicked() {
             out.push_view(DockOperation::OpenTab {
