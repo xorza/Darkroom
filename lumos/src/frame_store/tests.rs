@@ -17,7 +17,7 @@ use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::StoredImage;
-use crate::frame_store::stored_plane::StoredPlane;
+use crate::frame_store::stored_plane::{PlaneDigest, StoredPlane};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flags::pixel_flags::PixelFlags;
@@ -365,10 +365,7 @@ fn a_published_plane_maps_back_what_its_writer_wrote() {
     let first = StoredPlane::publish(&path, &pixels).unwrap();
     let second = StoredPlane::publish(&path, &[7.0f32; 12]).unwrap();
     for published in [&first, &second] {
-        assert_eq!(
-            published.digest,
-            <[u8; 32]>::from(blake3::hash(published.plane.bytes()))
-        );
+        assert_eq!(published.digest, PlaneDigest::of(published.plane.bytes()));
     }
     assert_ne!(first.digest, second.digest);
     let (first, second) = (first.plane, second.plane);

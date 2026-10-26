@@ -14,7 +14,8 @@ const LE_CHUNK: usize = 4096;
 /// machine. Two gains of one key are the same gain, so a run holds one of them, and a file that
 /// states its key is taken without its nodes being read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct GainKey([u8; 32]);
+#[serde(transparent)]
+pub(crate) struct GainKey(#[serde(with = "common::hex_bytes")] [u8; 32]);
 
 impl GainKey {
     /// The key of `gain`, which [`FlatGain::key`] takes once.

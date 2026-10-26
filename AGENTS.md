@@ -121,6 +121,13 @@ the benches of the root it runs in; each submodule runs its own.
   with the library and reports it; the edit gate keeps the document
   consistent after that. At run time and in each frame, code asserts the
   document is valid and does not check it again or fall back.
+- **Raw bytes are lowercase hex in text.** A serialized field of bytes, a
+  digest or a byte string, takes `#[serde(with = "common::hex_bytes")]`: a
+  text format writes two hex digits a byte, as blake3, git and `Cargo.lock`
+  write a digest, and a binary format the bytes as the type holds them, so a
+  binary layout does not move. Refused: serde's own form, a tuple of numbers
+  four times as long in a document; base64, a third shorter, which mixes case
+  and reads worse.
 
 ## Names
 

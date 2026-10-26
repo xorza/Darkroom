@@ -18,7 +18,8 @@ use crate::graph::func::func_output::FuncOutput;
 /// match does not resolve ([`Library::func_of`](crate::Library::func_of)), so the load detaches
 /// it with its wiring rather than landing that wiring on the wrong ports.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct FuncSignature([u8; 32]);
+#[serde(transparent)]
+pub(crate) struct FuncSignature(#[serde(with = "common::hex_bytes")] [u8; 32]);
 
 impl FuncSignature {
     /// Versions the encoding below: a change to it is a change to every signature.
@@ -94,11 +95,12 @@ impl fmt::Debug for FuncSignature {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Write as _;
+    use common::SerdeFormat;
 
     use crate::data::data_type::DataType;
     use crate::graph::func::func_input::FuncInput;
     use crate::graph::func::func_output::FuncOutput;
+    use crate::graph::func::signature::FuncSignature;
     use crate::graph::identity::FuncId;
     use crate::internals;
 
@@ -130,13 +132,31 @@ mod tests {
         .concat();
         let signature = func.func_ref().signature();
         assert_eq!(signature.0, *blake3::hash(&layout).as_bytes());
-        let hex = signature.0.iter().fold(String::new(), |mut hex, byte| {
-            write!(hex, "{byte:02x}").unwrap();
-            hex
-        });
+        // The pin, as text holds it; both forms read back.
+        let hex = "5397de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c";
+        let ron = SerdeFormat::Ron.serialize(&signature).unwrap();
+        assert_eq!(ron, format!("\"{hex}\"").into_bytes());
         assert_eq!(
-            hex,
-            "5397de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c"
+            SerdeFormat::Ron.deserialize::<FuncSignature>(&ron).unwrap(),
+            signature
         );
+        let bytes = SerdeFormat::Bitcode.serialize(&signature).unwrap();
+        assert_eq!(
+            SerdeFormat::Bitcode
+                .deserialize::<FuncSignature>(&bytes)
+                .unwrap(),
+            signature
+        );
+        for bad in [
+            "5397",
+            "zz97de314d19d188c4723d6ba61629586d9cc16175bffa3a222f1588565d8f1c",
+        ] {
+            assert!(
+                SerdeFormat::Ron
+                    .deserialize::<FuncSignature>(format!("\"{bad}\"").as_bytes())
+                    .is_err(),
+                "{bad}"
+            );
+        }
     }
 }

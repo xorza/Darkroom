@@ -102,6 +102,7 @@ pub use par::per_worker::PerWorker;
 #[cfg(feature = "internals")]
 pub use par::worker_pool::WorkerPool;
 pub use rect2us::Rect2us;
+pub use serde::hex_bytes;
 pub use serde::serde_format::SerdeFormat;
 pub use serde::{DeserializeError, SerializeError};
 pub use size2us::Size2us;
