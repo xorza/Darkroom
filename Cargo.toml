@@ -9,6 +9,7 @@ members = [
     "libraw",
     "lens",
     "darkroom",
+    "mcp",
 ]
 default-members = ["darkroom"]
 exclude = ["palantir", "fits-well"]
@@ -46,6 +47,10 @@ steps = [{ build = "clippy -p simd --all-targets --all-features --target aarch64
 # arguments go to the test binaries, as a name filter.
 [workspace.metadata.drive.commands.real-data]
 steps = [{ cargo = "test -p lumos --all-features", args = true }]
+
+# The editor's MCP server, which `.mcp.json` starts from `target/mcp/`.
+[workspace.metadata.drive.commands.mcp]
+steps = [{ build = "build -p darkroom-mcp --profile mcp" }]
 
 [workspace.dependencies]
 common = { path = "common" }
@@ -108,6 +113,7 @@ bindgen = { version = "0.73", default-features = false }
 wgpu = { version = "30.0", default-features = false }
 pollster = { version = "1.0", default-features = false }
 tiff = { version = "0.11", default-features = false }
+rmcp = { version = "3.7", default-features = false }
 
 [profile.dev]
 opt-level = 1
@@ -146,6 +152,13 @@ lto = "thin"
 codegen-units = 16
 incremental = true
 debug = "line-tables-only"
+
+# The MCP server catches a panic at its harness thread's edge, so a logic error ends the session
+# and not the server; `release` aborts on one. A profile of its own, as `panic` is not set per
+# package.
+[profile.mcp]
+inherits = "release-dev"
+panic = "unwind"
 
 # Warn, not deny: the verification chain runs clippy with `-D warnings`.
 [workspace.lints.rust]

@@ -78,7 +78,9 @@ impl Region {
             Self::World(world) => {
                 let min = Locator::World(world.min).point(app, ui)?;
                 let max = Locator::World(world.max()).point(app, ui)?;
-                Ok(Some(Rect::from_min_max(min, max)))
+                // Not `from_min_max`: a rect of negative size is a caller's empty region.
+                let size = max - min;
+                Ok(Some(Rect::new(min.x, min.y, size.x, size.y)))
             }
         }
     }

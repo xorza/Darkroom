@@ -5,6 +5,14 @@
 //! is what every altitude above it composes — a context fixture and a canvas
 //! harness both start by building one.
 
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "a test fixture tree: the harness's project fixture uses part of it"
+    )
+)]
+
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{

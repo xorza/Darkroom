@@ -413,7 +413,7 @@ fn new_layout() -> DockState<TabRef> {
     DockState::new(DOCK_SEED, TabRef::Graph)
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals;
 
 #[cfg(test)]

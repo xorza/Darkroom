@@ -35,6 +35,8 @@ pub enum HarnessError {
          enter, escape, f2, delete or a single character"
     )]
     BadChord { chord: String },
+    #[error("a pinch factor of {factor} zooms nowhere; give a positive one, above 1 to zoom in")]
+    BadPinch { factor: f32 },
     #[error(
         "the project folder {} holds {bytes} bytes, over the {limit}-byte copy limit; open it \
          in place instead",

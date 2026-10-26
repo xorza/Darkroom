@@ -64,7 +64,7 @@ static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 
 [features]
-internals = ["dep:criterion", "palantir/internals"]
+internals = ["dep:criterion", "palantir/internals", "scenarium/internals"]
 profile-with-tracy = ["palantir/profile-with-tracy"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
