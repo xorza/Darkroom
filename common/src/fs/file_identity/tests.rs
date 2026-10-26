@@ -5,14 +5,15 @@ use crate::TempDir;
 use crate::fs::file_identity::{FileId, FileIdentity, epoch_offset_ns};
 
 /// Hand-computed against the epoch: signed, so the two sides of it are ordered rather than
-/// folded together, at full nanosecond resolution on both.
+/// folded together, below the microsecond on both. 100 ns is the finest time every system holds:
+/// Windows counts 100 ns ticks.
 #[test]
 fn epoch_offset_is_signed_nanoseconds() {
     for (time, expected) in [
         (UNIX_EPOCH, 0),
         (UNIX_EPOCH + Duration::from_secs(1), 1_000_000_000),
         (UNIX_EPOCH - Duration::from_secs(1), -1_000_000_000),
-        (UNIX_EPOCH - Duration::from_nanos(3), -3),
+        (UNIX_EPOCH - Duration::from_nanos(100), -100),
     ] {
         assert_eq!(epoch_offset_ns(time), expected, "{time:?}");
     }

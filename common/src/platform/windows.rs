@@ -1,11 +1,11 @@
 //! Windows: a scratch file deleted when its last handle closes, the free space of a volume, the
 //! memory limits of the job object the process runs in, and the cache under `%LOCALAPPDATA%`;
-//! `MoveFileExW`, which replaces in one step and needs no directory sync, and the file's id and
-//! change time, which come from its handle, as `Metadata` does not expose them.
+//! a replace in one step that holds when the destination is open and needs no directory sync, and
+//! the file's id and change time, which come from its handle, as `Metadata` does not expose them.
 
 use std::ffi::c_void;
 use std::fs::{File, Metadata, OpenOptions};
-use std::os::windows::ffi::OsStrExt as _;
+use std::mem::offset_of;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle as _;
 use std::path::{Path, PathBuf};
@@ -13,11 +13,12 @@ use std::{env, io};
 
 use memmap2::Mmap;
 use sysinfo::System;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WIN32_ERROR};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, HANDLE, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{
-    FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS,
-    FileBasicInfo, FileIdInfo, GetDiskFreeSpaceExW, GetFileInformationByHandleEx,
-    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    DELETE, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_WRITE_THROUGH, FILE_ID_INFO,
+    FILE_INFO_BY_HANDLE_CLASS, FILE_RENAME_INFO, FileBasicInfo, FileIdInfo, FileRenameInfoEx,
+    GetDiskFreeSpaceExW, GetFileInformationByHandleEx, MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, SetFileInformationByHandle,
 };
 use windows::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_BASIC_PROCESS_ID_LIST,
@@ -30,7 +31,7 @@ use windows::Win32::System::ProcessStatus::{
 use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::core::{Error, HSTRING, PCWSTR};
+use windows::core::{Error, HSTRING};
 
 use crate::fs::PublicationMode;
 use crate::fs::file_identity::FileId;
@@ -175,23 +176,64 @@ pub(super) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_file(original, link)
 }
 
+/// `MoveFileExW`, then, where it refuses because a handle holds the destination open — another
+/// writer checking it, a reader — the rename with POSIX semantics, which replaces a file that
+/// still has handles open. `std::fs::rename` takes the two in this order: every file system takes
+/// `MoveFileExW`, where only some take the second.
 pub(super) fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
-    let wide = |path: &Path| {
-        path.as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect::<Vec<_>>()
-    };
-    let (source, destination) = (wide(source), wide(destination));
+    let destination = HSTRING::from(destination);
     let mut flags = MOVEFILE_REPLACE_EXISTING;
     if mode == PublicationMode::Durable {
         flags |= MOVEFILE_WRITE_THROUGH;
     }
-    unsafe { MoveFileExW(PCWSTR(source.as_ptr()), PCWSTR(destination.as_ptr()), flags) }
-        .map_err(io_error)
+    let Err(error) = (unsafe { MoveFileExW(&HSTRING::from(source), &destination, flags) }) else {
+        return Ok(());
+    };
+    if WIN32_ERROR::from_error(&error) != Some(ERROR_ACCESS_DENIED) {
+        return Err(io_error(error));
+    }
+    rename_posix(source, &destination, mode).map_err(|_| io_error(error))
 }
 
-/// Nothing: `MOVEFILE_WRITE_THROUGH` already returns once the rename is on disk.
+/// `source` renamed to `destination` through `FileRenameInfoEx`; the flags' values are the Win32
+/// headers'. `MOVEFILE_WRITE_THROUGH` opens its source handle write-through and renames through
+/// it, as ReactOS's `MoveFileWithProgressW` shows, so a durable rename opens its handle the same
+/// way.
+fn rename_posix(source: &Path, destination: &HSTRING, mode: PublicationMode) -> io::Result<()> {
+    const FILE_RENAME_FLAG_REPLACE_IF_EXISTS: u32 = 0x1;
+    const FILE_RENAME_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+    let mut options = OpenOptions::new();
+    options.access_mode(DELETE.0);
+    if mode == PublicationMode::Durable {
+        options.custom_flags(FILE_FLAG_WRITE_THROUGH.0);
+    }
+    let file = options.open(source)?;
+
+    // The name follows the struct in one buffer, and the buffer's zeros end it; a `u64` buffer
+    // holds the struct's alignment.
+    let name_len = size_of_val::<[u16]>(destination);
+    let size = offset_of!(FILE_RENAME_INFO, FileName) + name_len + size_of::<u16>();
+    let mut buffer = vec![0u64; size.div_ceil(size_of::<u64>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*info).Anonymous.Flags =
+            FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+        (*info).FileNameLength = u32::try_from(name_len).expect("a path's length fits u32");
+        (&raw mut (*info).FileName)
+            .cast::<u16>()
+            .copy_from_nonoverlapping(destination.as_ptr(), destination.len());
+        SetFileInformationByHandle(
+            HANDLE(file.as_raw_handle()),
+            FileRenameInfoEx,
+            info.cast::<c_void>(),
+            u32::try_from(size).expect("a path's length fits u32"),
+        )
+    }
+    .map_err(io_error)
+}
+
+/// Nothing: a durable rename goes through a write-through handle, which returns once the rename is
+/// on disk.
 #[expect(
     clippy::unnecessary_wraps,
     reason = "one signature on every system: Unix syncs the directory, which can fail"
@@ -256,8 +298,8 @@ fn io_error(error: Error) -> io::Error {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::env;
-    use std::fs::File;
-    use std::path::PathBuf;
+    use std::fs::{File, Permissions};
+    use std::path::{Path, PathBuf};
 
     use memmap2::Mmap;
 
@@ -286,4 +328,12 @@ pub(crate) mod internals {
 
     /// Yes: a scratch file is deleted only when its last handle closes.
     pub(crate) const SCRATCH_KEEPS_NAME: bool = true;
+
+    /// `None`: Windows has no mode bits. A path unreadable here takes an ACL that denies the
+    /// user, and an open that asks for no access still reads the attributes of a file whose
+    /// reading is denied, as `CreateFileW`'s docs state, so a Unix fixture's other effects would
+    /// not follow.
+    pub(crate) const fn take_permissions(_path: &Path) -> Option<Permissions> {
+        None
+    }
 }

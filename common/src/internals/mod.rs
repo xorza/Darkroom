@@ -3,7 +3,6 @@
 
 pub(crate) mod temp_dir;
 pub(crate) mod temp_file;
-#[cfg(unix)]
 pub(crate) mod unreadable;
 
 use std::env;

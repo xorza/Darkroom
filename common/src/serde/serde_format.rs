@@ -11,7 +11,9 @@ use crate::serde::{DeserializeError, SerializeError};
 /// The encoding of a serialized value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
-    /// Pretty-printed RON text, for files a person reads or edits.
+    /// Pretty-printed RON text, for files a person reads or edits. Lines end in `\n` on every
+    /// system, so one value is the same bytes wherever it is written: ron's default is `\r\n` on
+    /// Windows.
     Ron,
     /// Compact binary, for values only the program reads back.
     Bitcode,
@@ -34,7 +36,11 @@ impl SerdeFormat {
         out: &mut Vec<u8>,
     ) -> Result<(), SerializeError> {
         match self {
-            Self::Ron => ser::to_writer_pretty(Utf8Writer(out), value, PrettyConfig::default())?,
+            Self::Ron => ser::to_writer_pretty(
+                Utf8Writer(out),
+                value,
+                PrettyConfig::default().new_line("\n"),
+            )?,
             Self::Bitcode => out.extend_from_slice(&bitcode::serialize(value)?),
         }
         Ok(())

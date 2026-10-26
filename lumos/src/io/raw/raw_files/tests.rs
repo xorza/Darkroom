@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use common::{TempDir, fs};
+use common::{TempDir, Unreadable, fs};
 
 use crate::io::raw::error::RawScanError;
 use crate::io::raw::raw_files::raw_files;
@@ -85,11 +85,8 @@ fn only_raw_named_links_are_followed() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn unreadable_directory_returns_contextual_error() {
-    use common::Unreadable;
-
     let dir = TempDir::new("lumos-raw-files");
     let Some(unreadable) = Unreadable::new(dir.path()) else {
         return;

@@ -1,11 +1,13 @@
 //! [`Unreadable`]: a file or directory with its permissions taken away for a test.
 
 use std::fs::{self, File, Permissions};
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
-/// A path with mode `000` for as long as the guard lives; dropping it restores the mode the
-/// path had, on a panic too, so a fixture never outlives its test unremovable.
+use crate::platform;
+
+/// A path with every permission taken away for as long as the guard lives; dropping it restores
+/// the permissions the path had, on a panic too, so a fixture never outlives its test
+/// unremovable.
 #[derive(Debug)]
 pub struct Unreadable {
     path: PathBuf,
@@ -13,19 +15,22 @@ pub struct Unreadable {
 }
 
 impl Unreadable {
-    /// Take every permission away from `path`. `None` when the process bypasses permission
-    /// checks (root, `CAP_DAC_OVERRIDE`), so no path can be unreadable to it: the mode is
-    /// restored at once, and the test that wanted the fixture says so and skips.
+    /// Take every permission away from `path`: mode `000` on Unix. `None` where the system has no
+    /// such fixture, as Windows, and when the process bypasses permission checks (root,
+    /// `CAP_DAC_OVERRIDE`), so no path can be unreadable to it: the permissions are restored at
+    /// once, and the test that wanted the fixture says so and skips.
     #[expect(
         clippy::print_stderr,
         reason = "a test that skips says so on the test output"
     )]
     pub fn new(path: &Path) -> Option<Self> {
-        let original = fs::metadata(path)
-            .expect("an unreadable fixture starts from an existing path")
-            .permissions();
-        fs::set_permissions(path, Permissions::from_mode(0o000))
-            .expect("take a fixture's permissions away");
+        let Some(original) = platform::internals::take_permissions(path) else {
+            eprintln!(
+                "skipping: this system has no unreadable fixture for {}",
+                path.display()
+            );
+            return None;
+        };
         let guard = Self {
             path: path.to_path_buf(),
             original,
@@ -37,7 +42,8 @@ impl Unreadable {
         };
         if still_readable {
             eprintln!(
-                "skipping: this process reads {} at mode 000 (it bypasses permission checks)",
+                "skipping: this process reads {} with its permissions taken away (it bypasses \
+                 permission checks)",
                 path.display()
             );
             return None;

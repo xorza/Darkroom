@@ -124,6 +124,13 @@ impl MappedFile {
     }
 
     /// `map`, with the handle of its file kept while it lives when one is given.
+    #[cfg_attr(
+        not(unix),
+        expect(
+            clippy::missing_const_for_fn,
+            reason = "const where the system takes no access advice, not on Unix"
+        )
+    )]
     fn new(map: Mmap, handle: Option<File>) -> Self {
         files::advise_sequential(&map);
         Self {
@@ -288,9 +295,23 @@ pub(crate) fn observe(path: &Path) -> io::Result<Observed> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use std::path::PathBuf;
+    use std::fs::Permissions;
+    use std::path::{Path, PathBuf};
 
     use crate::platform::{FileSystem, MappedFile, ScratchFile, files, os};
+
+    /// Every permission taken away from `path`, and the permissions it had, to restore; `None`
+    /// where the system has no such fixture, as Windows.
+    #[cfg_attr(
+        not(unix),
+        expect(
+            clippy::missing_const_for_fn,
+            reason = "const where the system has no fixture, not on Unix"
+        )
+    )]
+    pub(crate) fn take_permissions(path: &Path) -> Option<Permissions> {
+        files::internals::take_permissions(path)
+    }
 
     impl FileSystem {
         /// A temporary directory on disk: the system's — `%TMP%`, else `%TEMP%`, on Windows;

@@ -2,7 +2,7 @@ use super::*;
 
 use std::sync::Mutex;
 
-use common::{TempDir, TempFile, fs};
+use common::{TempDir, TempFile, Unreadable, fs};
 
 use crate::async_lambda;
 use crate::data::data_type::{FsPathConfig, FsPathMode};
@@ -115,15 +115,12 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
 /// silently never is has no other symptom than a cache that stops hitting.
 /// Hence the warning, and hence its own test below.
 #[tokio::test]
-#[cfg(unix)]
 async fn an_unidentifiable_path_runs_the_node_uncached() {
-    use common::Unreadable;
-
     let dir = TempDir::new("locked");
     let data = dir.join("data.txt");
     fs::write(&data, "v1").unwrap();
     let data_path = data.to_string_lossy().into_owned();
-    // A process that reads through mode 000 cannot see the fixture: the test skips.
+    // Where no path can be made unreadable, the test skips.
     let lock = || Unreadable::new(dir.path());
     let warned = |run: &RunOutcome| {
         run.logs()
