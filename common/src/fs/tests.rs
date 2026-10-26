@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt as _;
 
 use crate::TempDir;
 use crate::fs::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
-use crate::internals;
+use crate::{internals, platform};
 
 #[test]
 fn publication_replaces_complete_files_and_cleans_up_failures() {
@@ -17,12 +17,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     let path = dir.join("state.bin");
     fs::write(&path, b"previous").unwrap();
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-    }
+    let uncommon = platform::internals::set_uncommon_permissions(&path);
 
     // A handle open on the destination does not refuse the replace, and still reads the file it
     // opened. Windows' `MoveFileExW` refuses here, so this reaches the POSIX rename.
@@ -31,14 +26,8 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     assert_eq!(fs::read(&path).unwrap(), b"durable");
     assert_eq!(io::read_to_string(held).unwrap(), "previous");
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o640
-        );
+    if let Some(uncommon) = uncommon {
+        assert_eq!(fs::metadata(&path).unwrap().permissions(), uncommon);
     }
 
     let error = publish(&path, PublicationMode::Cache, |file| {

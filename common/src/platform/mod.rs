@@ -295,6 +295,7 @@ pub(crate) fn observe(path: &Path) -> io::Result<Observed> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::ffi::OsString;
     use std::fs::Permissions;
     use std::path::{Path, PathBuf};
 
@@ -313,7 +314,48 @@ pub(crate) mod internals {
         files::internals::take_permissions(path)
     }
 
+    /// See `common::internals::non_unicode_name`.
+    pub(crate) fn non_unicode_name(idx: u8) -> OsString {
+        debug_assert!(idx < 128, "{idx} past the 128 names");
+        files::internals::non_unicode_name(idx)
+    }
+
+    /// Whether `Metadata` holds what [`Stated`] carries, the file's id and change time, which
+    /// [`FileIdentity::from_metadata`] reads.
+    ///
+    /// [`Stated`]: crate::platform::Stated
+    /// [`FileIdentity::from_metadata`]: crate::FileIdentity::from_metadata
+    #[cfg(test)]
+    pub(crate) const METADATA_HOLDS_STATED: bool = files::internals::METADATA_HOLDS_STATED;
+
+    /// Permissions on `path` that a writable file holds and a new one does not take, and the
+    /// permissions it then has; `None` where a writable file holds no others, as on Windows.
+    #[cfg(test)]
+    #[cfg_attr(
+        not(unix),
+        expect(
+            clippy::missing_const_for_fn,
+            reason = "const where the system has no such permissions, not on Unix"
+        )
+    )]
+    pub(crate) fn set_uncommon_permissions(path: &Path) -> Option<Permissions> {
+        files::internals::set_uncommon_permissions(path)
+    }
+
     impl FileSystem {
+        /// Whether this process may make a link in `dir`: always on Unix; on Windows only in
+        /// Developer Mode or elevated.
+        #[cfg_attr(
+            unix,
+            expect(
+                clippy::missing_const_for_fn,
+                reason = "const where a link needs no privilege, on Unix"
+            )
+        )]
+        pub fn symlinks_allowed(dir: &Path) -> bool {
+            files::internals::symlinks_allowed(dir)
+        }
+
         /// A temporary directory on disk: the system's — `%TMP%`, else `%TEMP%`, on Windows;
         /// `$TMPDIR`, else `/tmp`, on macOS and Linux — else `/var/tmp` on Linux; `None` when
         /// both are memory-backed.

@@ -1,8 +1,8 @@
 use std::fs;
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::TempDir;
 use crate::fs::file_identity::{FileId, FileIdentity, epoch_offset_ns};
+use crate::{TempDir, platform};
 
 /// Hand-computed against the epoch: signed, so the two sides of it are ordered rather than
 /// folded together, below the microsecond on both. 100 ns is the finest time every system holds:
@@ -70,14 +70,12 @@ fn write_to_folds_every_field_in_a_fixed_layout() {
 }
 
 /// A rewrite that keeps the length and sets the mtime back keeps both, and moves the change
-/// time, which no call sets; a `chmod` moves it as well, and a file renamed into place moves
-/// the id. The kernel stamps the change time from a clock as coarse as a few milliseconds, so
-/// each step waits 20 ms past the last.
-#[cfg(unix)]
+/// time, which no call sets; a permission change moves it as well, and a file renamed into place
+/// moves the id. The system stamps the change time from a clock as coarse as Windows' 15.6 ms
+/// tick, so each step waits 20 ms past the last.
 #[test]
 fn a_rewrite_that_restores_the_mtime_moves_the_identity() {
-    use std::fs::{File, Permissions};
-    use std::os::unix::fs::PermissionsExt;
+    use std::fs::File;
     use std::thread;
 
     let dir = TempDir::new("file_identity_rewrite");
@@ -86,9 +84,18 @@ fn a_rewrite_that_restores_the_mtime_moves_the_identity() {
     let original = FileIdentity::of(&path).unwrap();
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
     assert!(original.file_id.is_some() && original.changed_ns.is_some());
+    let from_metadata = if platform::internals::METADATA_HOLDS_STATED {
+        original
+    } else {
+        FileIdentity {
+            file_id: None,
+            changed_ns: None,
+            ..original
+        }
+    };
     assert_eq!(
         FileIdentity::from_metadata(&fs::metadata(&path).unwrap()).unwrap(),
-        original
+        from_metadata
     );
     let settle = || thread::sleep(Duration::from_millis(20));
 
@@ -108,9 +115,14 @@ fn a_rewrite_that_restores_the_mtime_moves_the_identity() {
     assert_ne!(rewritten.changed_ns, original.changed_ns);
 
     settle();
-    fs::set_permissions(&path, Permissions::from_mode(0o600)).unwrap();
+    let writable = fs::metadata(&path).unwrap().permissions();
+    let mut read_only = writable.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&path, read_only).unwrap();
     let chmodded = FileIdentity::of(&path).unwrap();
     assert_ne!(chmodded.changed_ns, rewritten.changed_ns);
+    // Windows refuses to rename over a read-only file.
+    fs::set_permissions(&path, writable).unwrap();
 
     let replacement = dir.path().join("frame.tmp");
     fs::write(&replacement, b"5678").unwrap();

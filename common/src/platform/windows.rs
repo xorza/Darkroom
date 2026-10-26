@@ -288,20 +288,28 @@ fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> Option<T>
 /// conversion keeps the HRESULT, which it does not.
 fn io_error(error: Error) -> io::Error {
     match WIN32_ERROR::from_error(&error) {
-        Some(code) => io::Error::from_raw_os_error(
-            i32::try_from(code.0).expect("a Win32 error code is 16 bits"),
-        ),
+        Some(code) => io::Error::from_raw_os_error(raw_os_error(code)),
         None => error.into(),
     }
+}
+
+/// `code` as `io::Error` carries a raw OS error.
+fn raw_os_error(code: WIN32_ERROR) -> i32 {
+    i32::try_from(code.0).expect("a Win32 error code is 16 bits")
 }
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     use std::env;
-    use std::fs::{File, Permissions};
+    use std::ffi::OsString;
+    use std::fs::{self, File, Permissions};
+    use std::os::windows::ffi::OsStringExt as _;
     use std::path::{Path, PathBuf};
 
     use memmap2::Mmap;
+    use windows::Win32::Foundation::ERROR_PRIVILEGE_NOT_HELD;
+
+    use crate::platform::windows::{raw_os_error, symlink};
 
     /// This system offers no call that drops a file's pages from its cache here.
     pub(crate) const EVICTS: bool = false;
@@ -334,6 +342,38 @@ pub(crate) mod internals {
     /// reading is denied, as `CreateFileW`'s docs state, so a Unix fixture's other effects would
     /// not follow.
     pub(crate) const fn take_permissions(_path: &Path) -> Option<Permissions> {
+        None
+    }
+
+    /// Whether a link made in `dir` succeeds: Windows refuses one outside Developer Mode and an
+    /// elevated process. A link to a missing file, removed at once, tells.
+    pub(crate) fn symlinks_allowed(dir: &Path) -> bool {
+        let link = dir.join("symlink-probe");
+        match symlink(&dir.join("symlink-probe-target"), &link) {
+            Ok(()) => {
+                fs::remove_file(&link).expect("remove the symlink probe");
+                true
+            }
+            Err(error) if error.raw_os_error() == Some(raw_os_error(ERROR_PRIVILEGE_NOT_HELD)) => {
+                false
+            }
+            Err(error) => panic!("make a symlink probe in {}: {error}", dir.display()),
+        }
+    }
+
+    /// One unpaired UTF-16 surrogate, `0xDC00 + idx`.
+    pub(crate) fn non_unicode_name(idx: u8) -> OsString {
+        OsString::from_wide(&[0xDC00 + u16::from(idx)])
+    }
+
+    /// No: the id and the change time come from the file's handle, not its `Metadata`.
+    #[cfg(test)]
+    pub(crate) const METADATA_HOLDS_STATED: bool = false;
+
+    /// `None`: `Permissions` is the read-only flag alone here, and a publication refuses a
+    /// read-only destination, so a writable file holds no permissions but the default.
+    #[cfg(test)]
+    pub(crate) const fn set_uncommon_permissions(_path: &Path) -> Option<Permissions> {
         None
     }
 }
