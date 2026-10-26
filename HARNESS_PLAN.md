@@ -92,29 +92,14 @@ Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locato
   `Ambiguous`; a focused text field still settles; a copied session leaves the source folder
   unchanged byte for byte; a 257 MiB folder is refused (made of one sparse file).
 
-### 3. palantir: a screenshot of the frame
+### 3. darkroom: copy and save the view
 
-Files: palantir's `ui/` (the request and the delivery), `host/window_driver/`, `host/winit/`,
-`host/offscreen.rs`, `gpu/` (the copy), `lib.rs` (the public surface), `.notes/API_SURFACE.md`;
-darkroom's `gui/frame/app_command.rs` and the View menu.
+Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui/app/mod.rs`.
 
-- [ ] Public API, approved: `Ui::request_screenshot(region: Option<Rect>)` asks for the frame
-  being recorded, the region in logical px (`None` for the whole window). The host copies that
-  frame as it presents it, and the next frame's `Ui::screenshot() -> Option<Screenshot>` hands it
-  over once. `Screenshot` holds the RGBA8 pixels, their physical size and the scale, as a type
-  of palantir's own, so the public API does not expose the `image` crate. This is the shape of
-  egui's `ViewportCommand::Screenshot`: ask in one frame, receive in a later one
-  ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
-- [ ] The copy comes from the backbuffer the frame painted, so a damaged-only frame still yields
-  the whole picture; on a target with no backbuffer and no `COPY_SRC` (a GLES swapchain), the
-  request answers `ScreenshotError::Unsupported` instead of an image. `OffscreenHost` and
-  `WinitHost` share the one path in `WindowDriver`.
-- [ ] Tests: an offscreen frame of a known scene asked for a screenshot gives, one frame later,
-  the same pixels as `Gpu::read_back` of the target; a region gives that crop, rounded out to
-  whole physical pixels at scale 2; a second `screenshot()` call gives `None`; a frame that skipped
-  paint still gives the whole picture. `cargo drive surface` regenerates `.notes/API_SURFACE.md`.
-- [ ] darkroom: View ▸ Copy view as image and View ▸ Save view as PNG…, through
-  `AppCommand`; the save goes through `Dialogs` and `common::fs`.
+- [ ] View ▸ Copy view as image and View ▸ Save view as PNG…, through `AppCommand`: the command
+  asks `Ui::request_screenshot(None)`, and the frame whose `Ui::screenshot_taken()` holds the
+  image copies it to the clipboard or saves it through `Dialogs` and `common::fs`. Test: a
+  scripted Save answers a path, and the file there decodes to the screenshot's pixels.
 
 ### 4. Shots
 
@@ -122,7 +107,7 @@ Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
 `darkroom/src/harness/tests.rs`.
 
 - [ ] `Harness::shot(region: Region, max_side: u32) -> Shot`: asks `Ui::request_screenshot` for
-  the region and runs the frame that delivers it, so the agent sees what a user's capture gives;
+  the region and runs frames until `Ui::screenshot_taken()` holds it, so the agent sees what a user's capture gives;
   the region is `Window`, `Pane(name)`, `Node(name)` with a 24 px margin, or `World(rect)`,
   resolved to logical px. It scales the image so that its longer side is at most `max_side`, and
   writes `<session>/shots/<n>-<name>.png` through `common::fs`. `Shot` holds the PNG bytes, the
@@ -206,6 +191,11 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
 
 - palantir's readback is `Gpu::read_back` under `internals`, not `golden::read_back`: wgpu types
   stay in `crate::gpu`, and its callers are palantir's visual suite and tests, as the harness shoots
-  through the screenshot API of batch 3; `internals` now enables `image`.
+  through palantir's screenshot API; `internals` now enables `image`.
 - `InspectedWidget` also carries `focusable` and `disabled`, which the hit table holds and an agent
   needs to tell a dead control from a live one.
+- palantir's screenshot landed as `Ui::request_screenshot(Option<Rect>)` and the frame edge
+  `Ui::screenshot_taken() -> Option<&Screenshot>`, not `screenshot()`: an image belongs to the one
+  frame it lands in, as a click does. It has no `ScreenshotError::Unsupported`: a frame that asks
+  paints in full through the backbuffer, which every target has, GLES included, and a blit into
+  `Rgba8UnormSrgb` gives BGRA and float targets the same bytes.
