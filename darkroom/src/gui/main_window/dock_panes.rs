@@ -15,6 +15,7 @@ use palantir::{
 };
 use scenarium::NodeId;
 
+use crate::core::document::Document;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::io::preferences::Preferences;
 use crate::gui::frame::app_command::AppCommand;
@@ -40,16 +41,20 @@ pub(crate) struct DockPanes<'a> {
     pub(crate) out: &'a mut Requests,
 }
 
+/// The name a tab's chip shows.
+pub(crate) fn tab_label(document: &Document, tab: TabRef) -> &str {
+    match tab {
+        TabRef::Graph => "main",
+        TabRef::Preferences => "preferences",
+        TabRef::ImageViewer(node_id) => image_viewer::node_label(document, node_id),
+    }
+}
+
 impl DockTabs for DockPanes<'_> {
     type Tab = TabRef;
 
     fn title(&mut self, ui: &mut Ui, tab: TabRef) -> InternedStr {
-        let document = self.ctx.document();
-        ui.intern(match tab {
-            TabRef::Graph => "main",
-            TabRef::Preferences => "preferences",
-            TabRef::ImageViewer(node_id) => image_viewer::node_label(document, node_id),
-        })
+        ui.intern(tab_label(self.ctx.document(), tab))
     }
 
     fn content(&mut self, ui: &mut Ui, tab: TabRef, size: Option<Size>) {

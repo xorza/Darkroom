@@ -26,8 +26,11 @@ relative paths, and it is made in the editor through the finished harness.
 - `darkroom::internals::harness::Harness` runs the real `App` on `DisplayKind::Gpu` (palantir's
   `internals::HeadlessWindow`) or `DisplayKind::Cpu` (`UiHarness`): `open` (a copy of the folder,
   or in place), `resize`, `act(&[Action])`, `state(Detail, nodes)`, `ui(filter, limit)`,
-  `wait_run(timeout)`, with `Locator`s by node, title, port, world point, text, screen point,
-  offset and `Nth`.
+  `wait_run(timeout)`, `shot(region, max_side)`, with `Locator`s by node, title, port, world
+  point, text, screen point, offset and `Nth`. A shot is the window, a pane, a node with a margin,
+  or a canvas rect, scaled to `max_side`, with a legend of the visible nodes and ports.
+- View ▸ Copy View as Image and View ▸ Save View as PNG… take the window through
+  `Ui::request_screenshot`; palantir's `Clipboard::set_image(&Image)` takes the copy.
 - `App::new(ui, AppHost, LaunchInputs)`: `AppHost::Offscreen(Arc<OffscreenSignals>)` gives the
   harness the app's wakes and quit; `LaunchInputs` carries a `PreferencesStore` (`File(path)` or
   `Memory`) and a `Dialogs` (`Native`, or `Scripted` answers under `internals`).
@@ -36,34 +39,7 @@ relative paths, and it is made in the editor through the finished harness.
 
 ## Plan
 
-### 1. darkroom: copy and save the view
-
-Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui/app/mod.rs`.
-
-- [ ] View ▸ Copy view as image and View ▸ Save view as PNG…, through `AppCommand`: the command
-  asks `Ui::request_screenshot(None)`, and the frame whose `Ui::screenshot_taken()` holds the
-  image copies it to the clipboard or saves it through `Dialogs` and `common::fs`. Test: a
-  scripted Save answers a path, and the file there decodes to the screenshot's pixels.
-
-### 2. Shots
-
-Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
-`darkroom/src/harness/tests.rs`.
-
-- [ ] `Harness::shot(region: Region, max_side: u32) -> Shot`: asks `Ui::request_screenshot` for
-  the region and runs frames until `Ui::screenshot_taken()` holds it, so the agent sees what a user's capture gives;
-  the region is `Window`, `Pane(name)`, `Node(name)` with a 24 px margin, or `World(rect)`,
-  resolved to logical px. It scales the image so that its longer side is at most `max_side`, and
-  writes `<session>/shots/<n>-<name>.png` through `common::fs`. `Shot` holds the PNG bytes, the
-  path and the legend: each visible node and port with its rect in the image's pixels. On `Cpu` it
-  is `HarnessError::NoGpu`. `act` takes an optional shot to end with.
-- [ ] Test with `DisplayKind::Gpu`: a 400 × 300 frame of one node at a known place; the pixel at
-  (2, 2) is the palette's `canvas_bg` and the pixel at the node body's centre is `node_fill`,
-  exactly, both read from `Palette`. A region of one node is the node's screen rect plus the
-  margin; a `max_side` of 100 scales a 400 × 300 window to 100 × 75 and its legend by 1/4. A node's
-  rect from `state` is the same on `Cpu` and `Gpu`.
-
-### 3. The MCP server
+### 1. The MCP server
 
 Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src/tests.rs`), root
 `Cargo.toml` (member, dependency, drive command), new `.mcp.json`.
@@ -88,7 +64,7 @@ Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src
   locator is a tool error that lists both matches; a harness panic answers the next call with its
   message and leaves the server serving.
 
-### 4. Relative paths in a document
+### 2. Relative paths in a document
 
 Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every other reader of
 `required_fs_path`; scenarium's invocation context; `darkroom/src/core/runtime_host/`,
@@ -107,7 +83,7 @@ Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every othe
   the same undo step as the save's path change. Test: `a/b.tiff` saved from `/p` to `/p/q` becomes
   `../a/b.tiff`.
 
-### 5. The sample project
+### 3. The sample project
 
 Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 `darkroom/src/core/open_document/tests.rs`.
@@ -120,7 +96,7 @@ Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 - [ ] Test: the sample opens with an empty `LoadReport`, compiles and runs to completion on the
   real library, and each preview receives an image of the input's size.
 
-### 6. Fold the decisions into the documents
+### 4. Fold the decisions into the documents
 
 Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `HARNESS_PLAN.md`.
 
@@ -161,3 +137,15 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
     and errors, not the worker thread's.
   - palantir gained `internals::HeadlessWindow`, so darkroom names no wgpu type, and
     `internals::DOUBLE_CLICK_WINDOW`, so the click spacing is the input state's own.
+- The view's image: palantir's `Clipboard::set_image(&Image)` takes palantir's own `Image`, and a
+  `Screenshot` holds one, `image() -> Option<&Image>` in place of `pixels()` and `size()`, `None`
+  for an empty region: one image type, which a copy, a save and a shot share. arboard's
+  `image-data` feature is on; the in-process clipboard keeps no image, which nothing reads back.
+  Save View as PNG… asks for its file before the capture, so a cancel costs no frame, and the
+  save dialog takes a `SavedFile` kind that adds its extension, as the project save did.
+- Shots differ from the plan, each for the reason given:
+  - `act` takes no shot: the MCP tool takes one after the actions, the same call.
+  - A picture scales down in linear light with a tent filter widened by the ratio, as the frame
+    blends: a mean of encoded bytes darkens every edge between light and dark.
+  - `Region::Pane` covers the pane with its tab strip; a region clamped to nothing is
+    `HarnessError::EmptyRegion`.

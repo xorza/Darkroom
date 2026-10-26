@@ -4,7 +4,7 @@ pub(crate) mod error;
 
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use common::{SerdeFormat, fs};
 use zip::write::SimpleFileOptions;
@@ -141,13 +141,6 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
         path: path.to_path_buf(),
         source,
     })
-}
-
-pub(crate) fn with_extension(mut path: PathBuf) -> PathBuf {
-    if !has_extension(&path) {
-        path.set_extension(EXTENSION);
-    }
-    path
 }
 
 fn has_extension(path: &Path) -> bool {

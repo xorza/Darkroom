@@ -45,6 +45,11 @@ impl Display {
         }
     }
 
+    /// Whether frames paint pixels, which a screenshot copies.
+    pub(crate) const fn paints(&self) -> bool {
+        matches!(self, Self::Gpu { .. })
+    }
+
     pub(crate) const fn ui(&mut self) -> &mut Ui {
         match self {
             Self::Gpu { window, .. } => window.ui(),

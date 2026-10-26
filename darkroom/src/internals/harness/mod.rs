@@ -7,6 +7,7 @@ pub mod display;
 pub mod error;
 pub mod locator;
 mod log_ring;
+pub mod shot;
 pub mod state;
 mod stepped_clock;
 
@@ -36,6 +37,7 @@ use crate::internals::harness::display::Display;
 use crate::internals::harness::error::HarnessError;
 use crate::internals::harness::locator::Locator;
 use crate::internals::harness::log_ring::LogRing;
+use crate::internals::harness::shot::{Region, Shot};
 use crate::internals::harness::state::{Detail, State, UiList};
 
 /// The UI time one frame takes.
@@ -82,6 +84,8 @@ pub struct Harness {
     /// Whether the last pointer step was a click, so the next one waits out the double-click
     /// window.
     clicked: bool,
+    /// Shots taken, which numbers the next one's file.
+    shots: u32,
 }
 
 /// What an action changed.
@@ -117,6 +121,7 @@ impl Harness {
             log,
             _log_guard: log_guard,
             clicked: false,
+            shots: 0,
         };
         harness
             .settle("the launch")
@@ -183,6 +188,45 @@ impl Harness {
     /// The visible interactive widgets whose text contains `filter`, at most `limit`.
     pub fn ui(&mut self, filter: Option<&str>, limit: usize) -> UiList {
         UiList::of(self.display.ui(), filter, limit)
+    }
+
+    /// A picture of `region` as the next frame paints it, scaled so that its longer side is at
+    /// most `max_side` pixels, and written to `shots/<n>-<region>.png` in the session directory.
+    ///
+    /// # Panics
+    ///
+    /// When `max_side` is 0.
+    pub fn shot(&mut self, region: &Region, max_side: u32) -> Result<Shot, HarnessError> {
+        assert!(max_side > 0, "a shot has at least one pixel a side");
+        if !self.display.paints() {
+            return Err(HarnessError::NoGpu);
+        }
+        let rect = region.rect(&self.app, self.display.ui())?;
+        self.display.ui().request_screenshot(rect);
+        let step = format!("the shot of {region:?}");
+        let mut taken = None;
+        for _ in 0..SETTLE_FRAMES {
+            self.frame();
+            if let Some(screenshot) = self.display.ui().screenshot_taken() {
+                taken = Some(screenshot.clone());
+                break;
+            }
+        }
+        let screenshot = taken.ok_or_else(|| HarnessError::Unsettled {
+            step: step.clone(),
+            frames: SETTLE_FRAMES,
+        })?;
+        self.shots += 1;
+        let dir = self.session.path.join("shots");
+        let path = dir.join(format!("{:03}-{}.png", self.shots, region.slug()));
+        // The legend reads the frame the image landed in; the session settles even when the shot
+        // fails, so the next call starts from a settled frame.
+        let shot = Shot::of(&screenshot, max_side, &self.app, self.display.ui(), path);
+        self.settle(&step)?;
+        let shot = shot?;
+        fs::create_dir_all(&dir).map_err(|source| io_error(&dir, source))?;
+        fs::write(&shot.path, &shot.png).map_err(|source| io_error(&shot.path, source))?;
+        Ok(shot)
     }
 
     /// Run frames until the worker has no run in flight and the editor settles.
