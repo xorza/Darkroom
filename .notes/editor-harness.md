@@ -67,6 +67,13 @@ server. The plan is `HARNESS_PLAN.md`.
   picture becomes a locator. An image costs about w·h/750 tokens, and Playwright MCP gives agents
   an accessibility snapshot before a screenshot for the same reason
   ([Playwright MCP](https://github.com/microsoft/playwright-mcp)).
+- **A screenshot is product API, and the harness takes its shots through it.** palantir's `Ui`
+  asks for a capture of the frame it records, and the host hands the image over a frame later, as
+  egui's `ViewportCommand::Screenshot` does; darkroom's View menu copies or saves the view with it.
+  The harness's `darkroom_shot` asks the same way, so an agent sees what a user's capture gives.
+  Refused: a test-only readback for the harness beside a product capture, two paths to keep right;
+  `Gpu::read_back` stays for palantir's visual suite
+  ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
 - **The display is chosen when the harness is built.** `Display::Gpu` renders each frame into an
   offscreen texture, and a build with no GPU adapter panics. `Display::Cpu` runs the same frames on
   palantir's deviceless frontend, where `darkroom_shot` is an error. Both shape text with the

@@ -14,12 +14,12 @@ relative paths, and it is made in the editor through the finished harness.
 ## What exists
 
 - palantir's `OffscreenHost` renders an `App` into a texture with no window, and takes an injected
-  `Clock`. Its one readback to an image is in the visual test harness
-  (`palantir/tests/visual/harness.rs`).
+  `Clock`. Under palantir's `internals`, `Gpu::read_back(&texture)` copies an 8-bit RGBA or BGRA
+  texture back as an `RgbaImage` in RGBA order, and `Ui::inspect(&mut out)` lists the last frame's
+  interactive widgets as `InspectedWidget { id, rect, sense, focusable, disabled, clipped, text }`.
 - palantir's `UiHarness` drives a `Ui` with synthetic input on the deviceless frontend
   (`on_input`, `press_at`, `drag_to`, `key`, `type_text`, `set_modifiers`, `rect(id)`,
-  `hit_at(pos)`, `advance`, `frame_app`), with real shaping through `with_text`. It finds a widget
-  by `WidgetId` only.
+  `hit_at(pos)`, `advance`, `frame_app`), with real shaping through `with_text`.
 - `FrameReport` says `repaint_requested` and `repaint_after`; a focused text field's caret asks
   `repaint_after` for 30 s.
 - darkroom's `SessionHarness` and `CanvasHarness` run on fixtures, with no runtime and no worker.
@@ -31,23 +31,7 @@ relative paths, and it is made in the editor through the finished harness.
 
 ## Plan
 
-### 1. palantir: readback and the widget list
-
-Files: `palantir/src/golden/mod.rs`, `palantir/tests/visual/harness.rs`, new
-`palantir/src/internals/inspect.rs`, `palantir/src/internals/mod.rs`, `palantir/src/ui/mod.rs`.
-
-- [ ] `golden::read_back(gpu: &Gpu, texture: &wgpu::Texture) -> RgbaImage`: the visual harness's
-  readback, moved into the library under `golden`; the harness calls it. Test: a 3 × 2 texture
-  cleared to one colour reads back as six pixels of it; the visual goldens still match.
-- [ ] `Ui::inspect(&self, out: &mut Vec<InspectedWidget>)` under `internals`:
-  `InspectedWidget { id: WidgetId, rect: Rect, sense: Sense, text: String, clipped: bool }`, one
-  per sensing widget of the last frame's cascade, in paint order. `text` is the text shapes of its
-  subtree in record order, joined by a space, leaving out the subtrees of nested sensing widgets.
-  Test: a button whose label is a child text widget, beside a text field, gives two entries with
-  their rects, the button's text "Save" and its click sense; a widget scrolled out of its clip is
-  `clipped`; a sensing row inside a sensing list keeps its own text out of the list's.
-
-### 2. darkroom: the seams the harness plugs into
+### 1. darkroom: the seams the harness plugs into
 
 Files: `darkroom/src/gui/app/mod.rs`, `darkroom/src/lib.rs`, `darkroom/src/gui/dialogs.rs`,
 `darkroom/src/core/io/preferences/mod.rs`.
@@ -62,7 +46,7 @@ Files: `darkroom/src/gui/app/mod.rs`, `darkroom/src/lib.rs`, `darkroom/src/gui/d
   `App` goes through it. `Scripted` pops the next answer; an ask with no answer left is an error
   in the status log, not a block. Test: a scripted Open dialog opens the answered path.
 
-### 3. The harness core
+### 2. The harness core
 
 Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locator.rs`,
 `state.rs`, `clock.rs`, `log.rs`, `tests.rs`); `darkroom/src/lib.rs`'s `internals`.
@@ -96,8 +80,10 @@ Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locato
   selection, dirty, focus, open popups, the status line, and the warnings and errors logged since
   the last call; `Detailed` adds ids, ports with their bindings, the wires, the viewport, undo depth
   and the run status of each node, and takes a node-name filter. `Harness::ui(filter, limit)`
-  gives `Ui::inspect`'s unclipped entries and the count it left out. `Harness::wait_run(timeout)`.
-  The log is a tracing layer the harness installs, kept in a ring of 200 lines.
+  gives `Ui::inspect`'s unclipped entries and the count it left out; each entry's text is cut at
+  120 characters with its full length, as a scroll area's text is all its rows.
+  `Harness::wait_run(timeout)`. The log is a tracing layer the harness installs, kept in a ring
+  of 200 lines.
 - [ ] Tests with `DisplayKind::Cpu` on `DocumentFixture` documents saved to a temp folder: a click
   on a node selects it; a drag of a node header moves it by the pointer's travel, exactly; a drag
   from an output port to an input port binds the wire; `Key("ctrl+z")` takes it back; a
@@ -106,17 +92,42 @@ Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locato
   `Ambiguous`; a focused text field still settles; a copied session leaves the source folder
   unchanged byte for byte; a 257 MiB folder is refused (made of one sparse file).
 
+### 3. palantir: a screenshot of the frame
+
+Files: palantir's `ui/` (the request and the delivery), `host/window_driver/`, `host/winit/`,
+`host/offscreen.rs`, `gpu/` (the copy), `lib.rs` (the public surface), `.notes/API_SURFACE.md`;
+darkroom's `gui/frame/app_command.rs` and the View menu.
+
+- [ ] Public API, approved: `Ui::request_screenshot(region: Option<Rect>)` asks for the frame
+  being recorded, the region in logical px (`None` for the whole window). The host copies that
+  frame as it presents it, and the next frame's `Ui::screenshot() -> Option<Screenshot>` hands it
+  over once. `Screenshot` holds the RGBA8 pixels, their physical size and the scale, as a type
+  of palantir's own, so the public API does not expose the `image` crate. This is the shape of
+  egui's `ViewportCommand::Screenshot`: ask in one frame, receive in a later one
+  ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
+- [ ] The copy comes from the backbuffer the frame painted, so a damaged-only frame still yields
+  the whole picture; on a target with no backbuffer and no `COPY_SRC` (a GLES swapchain), the
+  request answers `ScreenshotError::Unsupported` instead of an image. `OffscreenHost` and
+  `WinitHost` share the one path in `WindowDriver`.
+- [ ] Tests: an offscreen frame of a known scene asked for a screenshot gives, one frame later,
+  the same pixels as `Gpu::read_back` of the target; a region gives that crop, rounded out to
+  whole physical pixels at scale 2; a second `screenshot()` call gives `None`; a frame that skipped
+  paint still gives the whole picture. `cargo drive surface` regenerates `.notes/API_SURFACE.md`.
+- [ ] darkroom: View ▸ Copy view as image and View ▸ Save view as PNG…, through
+  `AppCommand`; the save goes through `Dialogs` and `common::fs`.
+
 ### 4. Shots
 
 Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
 `darkroom/src/harness/tests.rs`.
 
-- [ ] `Harness::shot(region: Region, max_side: u32) -> Shot`: reads the target back with
-  `golden::read_back`, crops to the region (`Window`, `Pane(name)`, `Node(name)` with a 24 px
-  margin, `World(rect)`), scales it so that its longer side is at most `max_side`, and writes
-  `<session>/shots/<n>-<name>.png` through `common::fs`. `Shot` holds the PNG bytes, the path and
-  the legend: each visible node and port with its rect in the image's pixels. On `Cpu` it is
-  `HarnessError::NoGpu`. `act` takes an optional shot to end with.
+- [ ] `Harness::shot(region: Region, max_side: u32) -> Shot`: asks `Ui::request_screenshot` for
+  the region and runs the frame that delivers it, so the agent sees what a user's capture gives;
+  the region is `Window`, `Pane(name)`, `Node(name)` with a 24 px margin, or `World(rect)`,
+  resolved to logical px. It scales the image so that its longer side is at most `max_side`, and
+  writes `<session>/shots/<n>-<name>.png` through `common::fs`. `Shot` holds the PNG bytes, the
+  path and the legend: each visible node and port with its rect in the image's pixels. On `Cpu` it
+  is `HarnessError::NoGpu`. `act` takes an optional shot to end with.
 - [ ] Test with `DisplayKind::Gpu`: a 400 × 300 frame of one node at a known place; the pixel at
   (2, 2) is the palette's `canvas_bg` and the pixel at the node body's centre is `node_fill`,
   exactly, both read from `Palette`. A region of one node is the node's screen rect plus the
@@ -190,3 +201,11 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
   Verification says how an agent builds the server, opens the sample and takes a shot, in three
   lines.
 - [ ] Delete `.notes/editor-harness.md` and `HARNESS_PLAN.md`.
+
+## Changed
+
+- palantir's readback is `Gpu::read_back` under `internals`, not `golden::read_back`: wgpu types
+  stay in `crate::gpu`, and its callers are palantir's visual suite and tests, as the harness shoots
+  through the screenshot API of batch 3; `internals` now enables `image`.
+- `InspectedWidget` also carries `focusable` and `disabled`, which the hit table holds and an agent
+  needs to tell a dead control from a live one.
