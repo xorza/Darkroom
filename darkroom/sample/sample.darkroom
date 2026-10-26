@@ -1,0 +1,215 @@
+(
+    graph: (
+        nodes: {
+            ("c3b97484-121a-4c3e-8b83-6644eeb5f563"): (
+                kind: Func((
+                    id: ("fbcc8899-efc3-40e0-a6fd-8743f86edbd3"),
+                    signature: ((160, 50, 188, 165, 101, 5, 106, 196, 230, 168, 238, 147, 161, 45, 224, 77, 189, 238, 134, 3, 150, 131, 152, 93, 255, 33, 40, 173, 48, 234, 10, 14)),
+                )),
+                name: "Load Astro Image",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
+                kind: Func((
+                    id: ("975cc74b-8412-4293-b2cb-ef8d41fdd9b3"),
+                    signature: ((96, 53, 166, 14, 248, 149, 65, 226, 216, 110, 8, 161, 28, 1, 151, 93, 155, 91, 136, 117, 81, 173, 62, 57, 219, 92, 151, 95, 110, 37, 151, 22)),
+                )),
+                name: "Blend",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("6b35d277-448c-4251-93e3-fd0ca81d492c"): (
+                kind: Func((
+                    id: ("a4d9bf87-9d98-44f1-a162-7483c298be3d"),
+                    signature: ((160, 50, 188, 165, 101, 5, 106, 196, 230, 168, 238, 147, 161, 45, 224, 77, 189, 238, 134, 3, 150, 131, 152, 93, 255, 33, 40, 173, 48, 234, 10, 14)),
+                )),
+                name: "Load Image",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("ef3d267f-7460-490f-a885-3944c99a9fdb"): (
+                kind: Func((
+                    id: ("ebe9a4d0-2cb1-4354-b66e-8e7bee7cb860"),
+                    signature: ((21, 67, 86, 105, 47, 240, 94, 105, 159, 121, 187, 238, 127, 24, 249, 114, 244, 13, 57, 207, 225, 118, 219, 208, 71, 87, 136, 218, 233, 204, 41, 137)),
+                )),
+                name: "Brightness / Contrast",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("88281733-0d48-4ecf-b97f-0519ebd03bc3"): (
+                kind: Func((
+                    id: ("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe"),
+                    signature: ((29, 254, 160, 215, 236, 134, 123, 182, 193, 181, 253, 51, 30, 64, 20, 124, 48, 225, 143, 211, 98, 100, 248, 243, 76, 21, 55, 95, 112, 0, 81, 8)),
+                )),
+                name: "Preview Adjusted",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("696af895-549c-44c9-9b92-5917e2dfbd9a"): (
+                kind: Func((
+                    id: ("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe"),
+                    signature: ((29, 254, 160, 215, 236, 134, 123, 182, 193, 181, 253, 51, 30, 64, 20, 124, 48, 225, 143, 211, 98, 100, 248, 243, 76, 21, 55, 95, 112, 0, 81, 8)),
+                )),
+                name: "Preview Blend",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"): (
+                kind: Func((
+                    id: ("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe"),
+                    signature: ((29, 254, 160, 215, 236, 134, 123, 182, 193, 181, 253, 51, 30, 64, 20, 124, 48, 225, 143, 211, 98, 100, 248, 243, 76, 21, 55, 95, 112, 0, 81, 8)),
+                )),
+                name: "Preview Astro",
+                cache: r#None,
+                disabled: false,
+            ),
+            ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"): (
+                kind: Func((
+                    id: ("c15248e0-006a-4a4a-9aae-b1fc7886dea1"),
+                    signature: ((93, 237, 171, 182, 64, 201, 210, 236, 115, 132, 149, 27, 160, 46, 178, 223, 139, 62, 28, 114, 97, 126, 143, 21, 228, 252, 153, 253, 231, 32, 190, 236)),
+                )),
+                name: "Auto Stretch",
+                cache: r#None,
+                disabled: false,
+            ),
+        },
+        bindings: [
+            ((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 1,
+            ), Wire((
+                node_id: ("6b35d277-448c-4251-93e3-fd0ca81d492c"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 2,
+            ), Const(Enum("Normal"))),
+            ((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 3,
+            ), Const(Float(0.5))),
+            ((
+                node_id: ("696af895-549c-44c9-9b92-5917e2dfbd9a"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("1597eb8d-1700-4637-9d30-37da1b6d28d4"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("6b35d277-448c-4251-93e3-fd0ca81d492c"),
+                port_idx: 0,
+            ), Const(FsPath("inputs/lena.tiff"))),
+            ((
+                node_id: ("88281733-0d48-4ecf-b97f-0519ebd03bc3"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("c3b97484-121a-4c3e-8b83-6644eeb5f563"),
+                port_idx: 0,
+            ), Const(FsPath("inputs/full_example.fits"))),
+            ((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("6b35d277-448c-4251-93e3-fd0ca81d492c"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 1,
+            ), Const(Float(0.15))),
+            ((
+                node_id: ("ef3d267f-7460-490f-a885-3944c99a9fdb"),
+                port_idx: 2,
+            ), Const(Float(1.0))),
+            ((
+                node_id: ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"),
+                port_idx: 0,
+            ), Wire((
+                node_id: ("c3b97484-121a-4c3e-8b83-6644eeb5f563"),
+                port_idx: 0,
+            ))),
+            ((
+                node_id: ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"),
+                port_idx: 1,
+            ), Const(Enum("auto_asinh"))),
+        ],
+        subscriptions: [],
+    ),
+    stubs: [],
+    main_view: (
+        item_placements: {
+            ("1597eb8d-1700-4637-9d30-37da1b6d28d4"): (
+                pos: (900.0, 300.0),
+                z: 3,
+            ),
+            ("696af895-549c-44c9-9b92-5917e2dfbd9a"): (
+                pos: (1260.0, 360.0),
+                z: 6,
+            ),
+            ("6b35d277-448c-4251-93e3-fd0ca81d492c"): (
+                pos: (140.0, 80.0),
+                z: 0,
+            ),
+            ("88281733-0d48-4ecf-b97f-0519ebd03bc3"): (
+                pos: (1260.0, 40.0),
+                z: 5,
+            ),
+            ("c3b97484-121a-4c3e-8b83-6644eeb5f563"): (
+                pos: (140.0, 560.0),
+                z: 1,
+            ),
+            ("ef3d267f-7460-490f-a885-3944c99a9fdb"): (
+                pos: (520.0, 60.0),
+                z: 2,
+            ),
+            ("f6f72b9b-3e13-4d8d-bcbb-bffad1eeaa4b"): (
+                pos: (900.0, 580.0),
+                z: 7,
+            ),
+            ("fcbce7ce-a04b-4b54-85fd-830e5b2fa22a"): (
+                pos: (520.0, 580.0),
+                z: 4,
+            ),
+        },
+        viewport: (
+            pan: (0.0, 0.0),
+            zoom: 1.0,
+        ),
+        selected: [],
+    ),
+    layout: (
+        nodes: [
+            Group((
+                id: (0),
+                tabs: [
+                    Graph,
+                ],
+                active: 0,
+            )),
+        ],
+        focused: (0),
+        next_group: 1,
+        pinned: Graph,
+        seed: 4257369575896356136,
+    ),
+)

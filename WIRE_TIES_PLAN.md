@@ -1,7 +1,7 @@
 # Wire ties
 
-Wire ties as `.notes/wire-ties.md` decides them. This plan starts after `HARNESS_PLAN.md` lands:
-each batch that changes what the canvas shows is checked with the editor harness, by a session on a
+Wire ties as `.notes/wire-ties.md` decides them. Each batch that changes what the canvas shows is
+checked with the editor harness (`darkroom/AGENTS.md`, "The editor harness"), by a session on a
 project and a `Shot` of the canvas.
 
 Each batch leaves `cargo drive check` and `cargo drive test` green.

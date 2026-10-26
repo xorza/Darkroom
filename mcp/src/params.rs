@@ -23,8 +23,9 @@ pub(crate) const RUN_TIMEOUT_S: f32 = 60.0;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct OpenParams {
-    /// The `.darkroom` document to open, absolute or relative to the server's working directory.
-    pub(crate) project: PathBuf,
+    /// The `.darkroom` document to open, absolute or relative to the server's working directory;
+    /// absent, a new unsaved document, which File ▸ Save As names.
+    pub(crate) project: Option<PathBuf>,
     /// Open the project where it is, so saves and its cache reach the original. By default its
     /// folder is copied into the session first.
     #[serde(default)]

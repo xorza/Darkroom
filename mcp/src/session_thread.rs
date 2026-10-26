@@ -141,19 +141,22 @@ impl Session {
         }
     }
 
-    /// A new session of `config` on `project`, in place of any open one. A project that does not
-    /// open leaves no session, rather than an empty document the agent did not ask for.
+    /// A new session of `config` on `project`, or on a new document for none, in place of any
+    /// open one. A project that does not open leaves no session, rather than an empty document
+    /// the agent did not ask for.
     pub(crate) fn start(
         &mut self,
         config: SessionConfig,
-        project: &Path,
+        project: Option<&Path>,
         in_place: bool,
     ) -> Result<&mut Harness, HarnessError> {
         // The old session first: its log layer is this thread's default until it drops.
         self.harness = None;
         self.ended = None;
         let mut harness = Harness::new(config);
-        harness.open(project, in_place)?;
+        if let Some(project) = project {
+            harness.open(project, in_place)?;
+        }
         Ok(self.harness.insert(harness))
     }
 

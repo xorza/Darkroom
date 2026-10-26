@@ -1,132 +1,88 @@
-//! Darkroom document archives: one RON document inside a ZIP file.
+//! Darkroom documents: one `.darkroom` file, the document's RON text as it is or zipped.
 
+pub(crate) mod document_format;
 pub(crate) mod error;
 pub(crate) mod saved_paths;
 
-use std::fs::File;
-use std::io::{self, Read as _, Write as _};
+use std::io::Read as _;
 use std::path::Path;
 
 use common::{SerdeFormat, fs};
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::document::Document;
+use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::document::saved_paths::SavedPaths;
 
 pub(crate) const EXTENSION: &str = "darkroom";
-const DOCUMENT_ENTRY: &str = "document.ron";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Decode the document at `path`, each path it holds made absolute against its folder. What it
-/// holds is made consistent by [`Document::reconcile`], which the caller runs against its library.
-pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
-    let mut document = decode(path)?;
-    saved_paths::resolve(&mut document, path)?;
-    Ok(document)
+/// A document as its file held it.
+#[derive(Debug)]
+pub(crate) struct DocumentFile {
+    pub(crate) document: Document,
+    /// The form the file had, which a save of the document keeps.
+    pub(crate) format: DocumentFormat,
+}
+
+/// Decode the document at `path`, in either format, each path it holds made absolute against its
+/// folder. What it holds is made consistent by [`Document::reconcile`], which the caller runs
+/// against its library.
+pub(crate) fn load(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
+    let mut file = decode(path)?;
+    saved_paths::resolve(&mut file.document, path)?;
+    Ok(file)
 }
 
 /// The relative paths the document at `path` holds that climb out of its folder.
 pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
-    Ok(saved_paths::leaving_folder(&decode(path)?))
+    Ok(saved_paths::leaving_folder(&decode(path)?.document))
 }
 
 /// The document at `path` as its file holds it.
-fn decode(path: &Path) -> Result<Document, DocumentLoadError> {
+fn decode(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
     if !has_extension(path) {
         return Err(DocumentLoadError::InvalidExtension {
             path: path.to_path_buf(),
         });
     }
-
     let file = fs::open(path).map_err(|source| DocumentLoadError::Open {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut archive =
-        ZipArchive::new(file).map_err(|source| DocumentLoadError::InvalidArchive {
+    // One byte past the limit, so a file over it is told apart from one at it without trusting
+    // a size the file system reported before the read.
+    let mut bytes = Vec::new();
+    file.take(MAX_DOCUMENT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| DocumentLoadError::Read {
             path: path.to_path_buf(),
             source,
         })?;
-    let has_overlapping_files =
-        archive
-            .has_overlapping_files()
-            .map_err(|source| DocumentLoadError::InspectArchive {
-                path: path.to_path_buf(),
-                source,
-            })?;
-    if has_overlapping_files {
-        return Err(DocumentLoadError::OverlappingEntries {
-            path: path.to_path_buf(),
-        });
-    }
-
-    let document_entries = archive
-        .file_names()
-        .try_fold(0, |count, name| {
-            name.map(|name| count + usize::from(name == DOCUMENT_ENTRY))
-        })
-        .map_err(|source| DocumentLoadError::InspectArchive {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if document_entries != 1 {
-        return Err(DocumentLoadError::DocumentEntryCount {
-            path: path.to_path_buf(),
-            count: document_entries,
-        });
-    }
-
-    let mut entry =
-        archive
-            .by_name(DOCUMENT_ENTRY)
-            .map_err(|source| DocumentLoadError::OpenDocumentEntry {
-                path: path.to_path_buf(),
-                source,
-            })?;
-    if !entry.is_file() {
-        return Err(DocumentLoadError::NonFileDocumentEntry {
-            path: path.to_path_buf(),
-        });
-    }
-    if !fits(entry.size()) {
+    if !fits(bytes.len() as u64) {
         return Err(DocumentLoadError::DocumentTooLarge {
             path: path.to_path_buf(),
-            size: entry.size(),
+            size: bytes.len() as u64,
         });
     }
-
-    let mut encoded = Vec::with_capacity(
-        usize::try_from(entry.size()).expect("`fits` bounds the entry to an addressable size"),
-    );
-    (&mut entry)
-        .take(MAX_DOCUMENT_BYTES + 1)
-        .read_to_end(&mut encoded)
-        .map_err(|source| DocumentLoadError::ReadDocument {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if !fits(encoded.len() as u64) {
-        return Err(DocumentLoadError::DocumentTooLarge {
-            path: path.to_path_buf(),
-            size: encoded.len() as u64,
-        });
-    }
-
-    SerdeFormat::Ron.deserialize(&encoded).map_err(|source| {
-        DocumentLoadError::DeserializeDocument {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        }
-    })
+    let format = DocumentFormat::of(&bytes);
+    let ron = format.ron(&bytes, path)?;
+    let document =
+        SerdeFormat::Ron
+            .deserialize(&ron)
+            .map_err(|source| DocumentLoadError::Deserialize {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+    Ok(DocumentFile { document, format })
 }
 
-/// Write `document` to `path`, its paths as `paths` says.
+/// Write `document` to `path` in `format`, its paths as `paths` says.
 pub(crate) fn save(
     document: &Document,
     path: &Path,
     paths: SavedPaths,
+    format: DocumentFormat,
 ) -> Result<(), DocumentSaveError> {
     if !has_extension(path) {
         return Err(DocumentSaveError::InvalidExtension {
@@ -153,7 +109,7 @@ pub(crate) fn save(
     }
 
     fs::publish(path, fs::PublicationMode::Durable, |file| {
-        write_archive(file, &encoded)
+        format.write(file, &encoded)
     })
     .map_err(|source| DocumentSaveError::Publish {
         path: path.to_path_buf(),
@@ -167,21 +123,10 @@ fn has_extension(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
 }
 
-/// Whether a `size`-byte document entry is within the limit — the one
-/// predicate a load and a save both hold an entry to.
+/// Whether a `size`-byte document is within the limit — the one predicate a load and a save
+/// both hold a document to.
 const fn fits(size: u64) -> bool {
     size <= MAX_DOCUMENT_BYTES
-}
-
-fn write_archive(file: &mut File, encoded: &[u8]) -> io::Result<()> {
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    let mut archive = ZipWriter::new(file);
-    archive
-        .start_file(DOCUMENT_ENTRY, options)
-        .map_err(io::Error::other)?;
-    archive.write_all(encoded)?;
-    archive.finish().map_err(io::Error::other)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -191,16 +136,11 @@ pub(crate) mod internals {
     use common::{SerdeFormat, fs};
 
     use crate::core::document::Document;
-    use crate::core::io::document::write_archive;
 
     /// Write `document` to `path` as it is, unchecked: a file holding what no save writes, as a
     /// relative path that climbs out of its folder.
     pub(crate) fn write_unchecked(document: &Document, path: &Path) {
-        let encoded = SerdeFormat::Ron.serialize(document).unwrap();
-        fs::publish(path, fs::PublicationMode::Durable, |file| {
-            write_archive(file, &encoded)
-        })
-        .unwrap();
+        fs::write(path, SerdeFormat::Ron.serialize(document).unwrap()).unwrap();
     }
 }
 

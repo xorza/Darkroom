@@ -11,6 +11,7 @@ use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
+use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::core::io::preferences::{Preferences, WindowState};
@@ -227,7 +228,10 @@ impl App {
                 self.guard_discard(PendingTransition::OpenPicked);
             }
             AppCommand::File(FileCommand::Save) => self.save_cur(),
-            AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
+            AppCommand::File(FileCommand::SaveAs) => self.save_document_as(DocumentFormat::Ron),
+            AppCommand::File(FileCommand::SaveAsCompressed) => {
+                self.save_document_as(DocumentFormat::ZippedRon);
+            }
             AppCommand::Run(RunCommand::Once) => self.run_graph(),
             AppCommand::Run(RunCommand::Node(node_id)) => self.run_node(node_id),
             AppCommand::Run(RunCommand::EvictCache(node_id)) => self.evict_cache(node_id),
@@ -497,33 +501,35 @@ impl App {
         loaded.report.report(&mut self.status);
     }
 
-    /// Cmd+S: overwrite the current file if there is one, else fall
-    /// back to Save As (first save of a fresh document).
+    /// Cmd+S: overwrite the current file, in the format it was opened in, if
+    /// there is one, else fall back to Save As (first save of a fresh document).
     fn save_cur(&mut self) {
+        let format = self.session.open.format;
         match self.session.open.path.clone() {
-            Some(path) => self.save_document(&path),
-            None => self.save_document_as(),
+            Some(path) => self.save_document(&path, format),
+            None => self.save_document_as(format),
         }
     }
 
-    /// Cmd+Shift+S / "Save As…": always prompt for a destination.
-    fn save_document_as(&mut self) {
+    /// Cmd+Shift+S / "Save As…" and "Save As Compressed…": always prompt for a destination,
+    /// and write `format` there.
+    fn save_document_as(&mut self, format: DocumentFormat) {
         if let Some(path) = self
             .dialogs
             .save_path(SavedFile::PROJECT, self.session.open.path.as_deref())
         {
-            self.save_document(&path);
+            self.save_document(&path, format);
         }
     }
 
-    /// Write the document to `path` and adopt it as the save target. Save-As
+    /// Write the document to `path` in `format` and adopt both as the save target. Save-As
     /// moves the document, so the worker's disk cache repoints to the new
     /// location's store — the old one stays where it is.
-    fn save_document(&mut self, path: &Path) {
+    fn save_document(&mut self, path: &Path, format: DocumentFormat) {
         match self
             .session
             .open
-            .save_to(path, self.preferences.saved_paths())
+            .save_to(path, self.preferences.saved_paths(), format)
         {
             Ok(()) => {
                 self.runtime
@@ -877,7 +883,7 @@ mod tests {
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
-            .save_to(&document, SavedPaths::Relative)
+            .save_to(&document, SavedPaths::Relative, DocumentFormat::Ron)
             .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 

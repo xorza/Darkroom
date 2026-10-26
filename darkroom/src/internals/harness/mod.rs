@@ -1,6 +1,6 @@
 //! The editor harness: the whole editor with no desktop. It opens a project, plays input into its
-//! window, waits for it to settle, and reads back what it shows. `.notes/editor-harness.md` holds
-//! the decisions.
+//! window, waits for it to settle, and reads back what it shows. `darkroom/AGENTS.md`, "The
+//! editor harness", holds the decisions.
 
 pub mod action;
 pub mod display;

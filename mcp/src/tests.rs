@@ -103,8 +103,8 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
 /// A call before any open says to open first. An opened fixture reports the build and its
 /// nodes, and `darkroom_state` lists them; a click on a name two nodes share is a tool error
 /// that names the action it stopped at and lists both nodes, and `nth` picks one. The CPU
-/// display has no shots, and a window of no pixels is refused before a session starts. A project
-/// that does not open closes the session.
+/// display has no shots, and a window of no pixels is refused before a session starts. An open
+/// with no project is a new unsaved document; a project that does not open closes the session.
 #[tokio::test]
 async fn an_opened_project_is_driven_through_the_tools() {
     let (_server, client) = connect(DisplayKind::Cpu).await;
@@ -189,6 +189,14 @@ async fn an_opened_project_is_driven_through_the_tools() {
     );
     let still = call(&client, "darkroom_state", json!({})).await.unwrap();
     assert_eq!(still.is_error, Some(false), "the open session stays");
+
+    let new = call(&client, "darkroom_open", json!({})).await.unwrap();
+    let new: Value = serde_json::from_str(text(&new, 0)).unwrap();
+    assert_eq!(
+        (&new["state"]["document"], &new["state"]["nodes"]),
+        (&Value::Null, &json!([])),
+        "no project is a new unsaved document"
+    );
 
     let missing = call(
         &client,

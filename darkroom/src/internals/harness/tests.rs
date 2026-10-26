@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
@@ -6,6 +7,9 @@ use palantir::{DockView, Modifiers, PointerButton, Rect};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use crate::core::io::document as io_document;
+use crate::core::io::document::document_format::DocumentFormat;
+use crate::core::io::document::saved_paths::SavedPaths;
+use crate::gui::state::preview_store::StoredContent;
 use crate::gui::theme::Theme;
 use crate::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
 use crate::internals::harness::error::HarnessError;
@@ -331,7 +335,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-break");
     let path = fixture::project(dir.path(), &["Load Image"]);
-    let mut document = io_document::load(&path).unwrap();
+    let mut document = io_document::load(&path).unwrap().document;
     let node_id = document.graph.iter().next().unwrap().node_id;
     document.graph.bindings.insert(
         InputPort::new(node_id, 0),
@@ -521,4 +525,107 @@ fn the_view_menu_copies_and_saves_the_window() {
     let saved = decode(&fs::read(dir.join("view.png")).unwrap());
     let shot = harness.shot(&Region::Window, 400).unwrap();
     assert_eq!(saved, decode(&shot.png));
+}
+
+/// A save keeps the format the file was opened in, Save As writes plain RON, and Save As
+/// Compressed… writes it zipped: a zipped project saves zipped, Ctrl+Shift+S makes a plain copy,
+/// and the menu row makes a zipped one again.
+#[test]
+fn a_save_keeps_the_file_format_and_save_as_names_one() {
+    let mut harness = harness();
+    let dir = TempDir::new("darkroom-harness-format");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    let file = io_document::load(&path).unwrap();
+    io_document::save(
+        &file.document,
+        &path,
+        SavedPaths::Relative,
+        DocumentFormat::ZippedRon,
+    )
+    .unwrap();
+    harness.open(&path, true).unwrap();
+    let zipped = |path: &Path| fs::read(path).unwrap().starts_with(b"PK");
+
+    harness
+        .act(&[
+            drag(
+                Locator::NodeHeader(BRIGHTNESS.to_string()),
+                Locator::Screen(Vec2::new(900.0, 700.0)),
+            ),
+            Action::Key("ctrl+s".to_string()),
+        ])
+        .unwrap();
+    assert!(zipped(&path), "the save kept the zipped format");
+
+    let plain = dir.join("plain.darkroom");
+    harness
+        .act(&[
+            Action::Answer(DialogAnswer::Path(plain.clone())),
+            Action::Key("ctrl+shift+s".to_string()),
+        ])
+        .unwrap();
+    assert!(!zipped(&plain), "Save As writes plain RON");
+
+    let again = dir.join("again.darkroom");
+    harness
+        .act(&[
+            Action::Answer(DialogAnswer::Path(again.clone())),
+            click(Locator::Text("File".to_string())),
+            click(Locator::Text("Save As Compressed…".to_string())),
+        ])
+        .unwrap();
+    assert!(zipped(&again), "Save As Compressed writes it zipped");
+    assert_eq!(
+        io_document::load(&again).unwrap().document,
+        io_document::load(&plain).unwrap().document
+    );
+}
+
+/// The sample project runs to completion, and each preview shows an image of its input's size:
+/// the TIFF's 895 × 551 after Brightness / Contrast and after Blend, and the FITS frame's
+/// 100 × 100 after Auto Stretch.
+#[test]
+fn the_sample_project_runs_to_its_previews() {
+    let mut harness = harness();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
+    harness.open(&sample, false).unwrap();
+    harness.act(&[Action::Key("ctrl+r".to_string())]).unwrap();
+    harness.wait_run(Duration::from_secs(30)).unwrap();
+
+    let state = harness.state(Detail::Detailed, None);
+    for node in &state.nodes {
+        assert!(
+            node.run
+                .as_ref()
+                .is_some_and(|run| run.starts_with("Executed")),
+            "{}: {:?}",
+            node.name,
+            node.run
+        );
+    }
+    let mut sizes: Vec<(String, UVec2)> = state
+        .nodes
+        .iter()
+        .filter(|node| node.name.starts_with("Preview"))
+        .map(|node| {
+            let shown = harness
+                .app
+                .run_state()
+                .previews
+                .get(node_id(&harness, &node.name))
+                .and_then(StoredContent::image)
+                .unwrap_or_else(|| panic!("{} shows an image", node.name));
+            (node.name.clone(), shown.preview.native_size)
+        })
+        .collect();
+    sizes.sort_by(|a, b| a.0.cmp(&b.0));
+    let lena = UVec2::new(895, 551);
+    assert_eq!(
+        sizes,
+        [
+            ("Preview Adjusted".to_string(), lena),
+            ("Preview Astro".to_string(), UVec2::new(100, 100)),
+            ("Preview Blend".to_string(), lena),
+        ]
+    );
 }

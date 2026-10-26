@@ -1,7 +1,7 @@
 //! [`SavedPaths`]: how a document file holds the paths its path inputs name. In memory every path
 //! is absolute; the file holds a path inside the document's folder relative to it, so the folder
-//! moves or is copied whole and its files go with it. `.notes/editor-harness.md` holds the
-//! decision.
+//! moves or is copied whole and its files go with it. `darkroom/AGENTS.md`, "Paths in a
+//! document", holds the decisions.
 
 use std::borrow::Cow;
 use std::path::{self, Component, Path, PathBuf};
