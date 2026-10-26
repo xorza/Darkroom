@@ -520,7 +520,11 @@ impl App {
     /// moves the document, so the worker's disk cache repoints to the new
     /// location's store — the old one stays where it is.
     fn save_document(&mut self, path: &Path) {
-        match self.session.open.save_to(path) {
+        match self
+            .session
+            .open
+            .save_to(path, self.preferences.saved_paths())
+        {
             Ok(()) => {
                 self.runtime
                     .set_document_cache(self.session.open.path.as_deref());
@@ -866,12 +870,15 @@ mod tests {
         use glam::UVec2;
         use palantir::internals::ui_harness::UiHarness;
 
+        use crate::core::io::document::saved_paths::SavedPaths;
         use crate::gui::app::offscreen_signals::OffscreenSignals;
         use crate::internals::harness::action::DialogAnswer;
 
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
-        OpenDocument::default().save_to(&document).unwrap();
+        OpenDocument::default()
+            .save_to(&document, SavedPaths::Relative)
+            .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 
         let unreadable = || PreferencesLoadError::Read {

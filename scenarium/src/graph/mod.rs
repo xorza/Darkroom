@@ -86,7 +86,7 @@ pub(crate) mod subscription;
 /// are: `bindings` is a plain map a caller keys into directly, so it is public
 /// rather than fronted by trivial accessors, while `nodes` and `subscriptions`
 /// are reached only through the methods below and so are private.
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     /// Every node, keyed by the id that reaches it — so an id is unique here
     /// by construction, and [`insert`](Self::insert) panics rather than

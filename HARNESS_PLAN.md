@@ -39,31 +39,13 @@ relative paths, and it is made in the editor through the finished harness.
 - `App::new(ui, AppHost, LaunchInputs)`: `AppHost::Offscreen(Arc<OffscreenSignals>)` gives the
   harness the app's wakes and quit; `LaunchInputs` carries a `PreferencesStore` (`File(path)` or
   `Memory`) and a `Dialogs` (`Native`, or `Scripted` answers under `internals`).
-- A path const is used as written: `Load Image` does `PathBuf::from(inputs[0].required_fs_path())`,
-  so a relative path resolves against the process's working directory.
+- A document file holds the paths inside its folder relative to it, and memory holds every path
+  absolute: `core::io::document::load` resolves them, `save` writes them as `SavedPaths` says,
+  from `Preferences::relative_paths`.
 
 ## Plan
 
-### 1. Relative paths in a document
-
-Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every other reader of
-`required_fs_path`; scenarium's invocation context; `darkroom/src/core/runtime_host/`,
-`darkroom/src/core/io/preferences/`, `darkroom/src/gui/pane/preferences.rs`,
-`darkroom/src/gui/app/mod.rs` (the path picks and Save As).
-
-- [ ] The invocation context carries the document's folder (`None` for an unsaved document).
-  Each path input resolves through one function: a relative path joins the folder, an absolute
-  path stays. A relative path in an unsaved document is an `InvokeError` that says to save first.
-  Test: `a/b.tiff` in a document at `/p/x.darkroom` reads `/p/a/b.tiff`; `/q/c.tiff` reads
-  `/q/c.tiff`; `a/b.tiff` in an unsaved document is the error.
-- [ ] `Preferences::store_relative_paths`, default true, with a row in the preferences pane. A
-  pick inside the document's folder stores the path relative to it when the preference is on.
-  Test: the four cases of on/off by inside/outside, and an unsaved document storing absolute.
-- [ ] Save As to another folder rewrites each relative path so that it names the same file, in
-  the same undo step as the save's path change. Test: `a/b.tiff` saved from `/p` to `/p/q` becomes
-  `../a/b.tiff`.
-
-### 2. The sample project
+### 1. The sample project
 
 Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 `darkroom/src/core/open_document/tests.rs`.
@@ -76,7 +58,7 @@ Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 - [ ] Test: the sample opens with an empty `LoadReport`, compiles and runs to completion on the
   real library, and each preview receives an image of the input's size.
 
-### 3. Fold the decisions into the documents
+### 2. Fold the decisions into the documents
 
 Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `HARNESS_PLAN.md`.
 
@@ -112,7 +94,7 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
   - `resize` takes a size only; the scale is the session's, as a window keeps its monitor.
   - `State` reports `can_undo`, not an undo depth, which the history does not count; and no open
     popups, which `Ui::inspect` does not mark: their rows are in `ui()`.
-  - The relative-path check of a copy waits for the batch that brings relative paths.
+  - The relative-path check of a copy came with relative paths: `HarnessError::PathsLeaveFolder`.
   - The log ring is the harness thread's default subscriber, so it holds the app's own warnings
     and errors, not the worker thread's.
   - palantir gained `internals::HeadlessWindow`, so darkroom names no wgpu type, and
@@ -145,3 +127,12 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
     so the crate adds no base64 dependency.
   - `DocumentFixture` compiles under darkroom's `internals`, which turns on scenarium's, so the
     server's tests make their projects as the harness's do.
+- Relative paths are relative in the file only, as `.notes/editor-harness.md` now decides: the
+  undo history holds absolute values that stay right across Save As, and nothing at run time
+  changes. A path is written relative only inside the document's folder, never with `..`, so a
+  copy of the folder is whole; the folder itself is written `.`. A stub's paths move with the
+  graph's, its record rebuilt with the new values. What enters memory is made absolute where it
+  enters: a scripted dialog answers absolute paths, as a native one does, and the default model
+  paths, bare file names, are taken against the working directory when the library is composed.
+  `Document::validate`, the debug check every load and save runs, refuses a relative path, so a
+  new way in that skips this is loud.

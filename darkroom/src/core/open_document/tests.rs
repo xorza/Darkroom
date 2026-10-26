@@ -14,6 +14,7 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::document;
 use crate::core::io::document::error::DocumentLoadError;
+use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::{LaunchSource, Loaded, OpenDocument};
 use crate::core::status_log::StatusLog;
@@ -47,7 +48,7 @@ fn empty_document_has_the_main_graph_tab() {
 fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     let dir = TempDir::new("darkroom-open-document");
     let path = dir.join("preferred.darkroom");
-    document::save(&Document::default(), &path).unwrap();
+    document::save(&Document::default(), &path, SavedPaths::Relative).unwrap();
     let mut preferences = Preferences {
         document_path: Some(path.clone()),
         ..Preferences::default()
@@ -102,7 +103,7 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
 fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     let dir = TempDir::new("darkroom-open-document-argument");
     let named = dir.join("named.darkroom");
-    document::save(&Document::default(), &named).unwrap();
+    document::save(&Document::default(), &named, SavedPaths::Relative).unwrap();
     let remembered = PathBuf::from("remembered.darkroom");
     let mut preferences = Preferences {
         document_path: Some(remembered.clone()),
@@ -202,7 +203,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     let into_dst = InputPort::new(dst_id, 0);
     graph.set_input_binding(into_mid, Binding::wire(src_id, 0));
     graph.set_input_binding(into_dst, Binding::wire(mid_id, 0));
-    document::save(&Document::from(graph), &first).unwrap();
+    document::save(&Document::from(graph), &first, SavedPaths::Relative).unwrap();
 
     let same = OpenDocument::load(first.clone(), &library).unwrap();
     assert!(same.report.is_empty());
@@ -242,7 +243,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         .document
         .graph
         .set_input_binding(into_dst, Binding::wire(src_id, 0));
-    loaded.open.save_to(&stubbed).unwrap();
+    loaded.open.save_to(&stubbed, SavedPaths::Relative).unwrap();
 
     let reattached = OpenDocument::load(stubbed, &library).unwrap();
     assert_eq!(
@@ -364,7 +365,7 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         graph.insert(producer, Node::from(&probe));
         graph.insert(consumer, Node::from(&probe));
         wire(&mut graph);
-        document::save(&Document::from(graph), &path).unwrap();
+        document::save(&Document::from(graph), &path, SavedPaths::Relative).unwrap();
         OpenDocument::load(path.clone(), &library).unwrap()
     };
 

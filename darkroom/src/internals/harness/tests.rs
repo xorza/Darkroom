@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::{DockView, Modifiers, PointerButton, Rect};
-use scenarium::NodeId;
+use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
+use crate::core::io::document as io_document;
 use crate::gui::theme::Theme;
 use crate::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
 use crate::internals::harness::error::HarnessError;
@@ -322,12 +323,27 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
     );
 }
 
-/// A link to a folder inside the project is refused: following it could copy the folder into
-/// itself.
+/// A copy that would break the project is refused: a document whose relative path climbs out of
+/// its folder, which would name another file beside the copy, and a link to a folder inside the
+/// project, which could copy the folder into itself. In place, the first opens.
 #[test]
-fn a_linked_folder_is_refused() {
+fn a_folder_a_copy_would_break_is_refused() {
     let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-link");
+    let dir = TempDir::new("darkroom-harness-break");
+    let path = fixture::project(dir.path(), &["Load Image"]);
+    let mut document = io_document::load(&path).unwrap();
+    let node_id = document.graph.iter().next().unwrap().node_id;
+    document.graph.bindings.insert(
+        InputPort::new(node_id, 0),
+        Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
+    );
+    io_document::internals::write_unchecked(&document, &path);
+    match harness.open(&path, false) {
+        Err(HarnessError::PathsLeaveFolder { paths, .. }) => assert_eq!(paths, ["../x.tiff"]),
+        other => panic!("{other:?}"),
+    }
+    harness.open(&path, true).unwrap();
+
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     fs::symlink(dir.path(), dir.join("loop")).unwrap();
     assert!(matches!(

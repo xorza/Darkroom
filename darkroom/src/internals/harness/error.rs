@@ -52,6 +52,16 @@ pub enum HarnessError {
         .path.display()
     )]
     LinkedFolder { path: PathBuf },
+    #[error(
+        "{} holds paths that climb out of its folder ({}), which a copy of the folder alone would \
+         point at other files; open it in place",
+        .document.display(),
+        .paths.join(", ")
+    )]
+    PathsLeaveFolder {
+        document: PathBuf,
+        paths: Vec<String>,
+    },
     #[error("{} has no parent folder to copy", .path.display())]
     NoFolder { path: PathBuf },
     #[error("{}: {source}", .path.display())]

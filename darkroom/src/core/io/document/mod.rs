@@ -1,6 +1,7 @@
 //! Darkroom document archives: one RON document inside a ZIP file.
 
 pub(crate) mod error;
+pub(crate) mod saved_paths;
 
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
@@ -12,14 +13,27 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::document::Document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
+use crate::core::io::document::saved_paths::SavedPaths;
 
 pub(crate) const EXTENSION: &str = "darkroom";
 const DOCUMENT_ENTRY: &str = "document.ron";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Decode the document at `path`. What it holds is made consistent by
-/// [`Document::reconcile`], which the caller runs against its library.
+/// Decode the document at `path`, each path it holds made absolute against its folder. What it
+/// holds is made consistent by [`Document::reconcile`], which the caller runs against its library.
 pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
+    let mut document = decode(path)?;
+    saved_paths::resolve(&mut document, path)?;
+    Ok(document)
+}
+
+/// The relative paths the document at `path` holds that climb out of its folder.
+pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
+    Ok(saved_paths::leaving_folder(&decode(path)?))
+}
+
+/// The document at `path` as its file holds it.
+fn decode(path: &Path) -> Result<Document, DocumentLoadError> {
     if !has_extension(path) {
         return Err(DocumentLoadError::InvalidExtension {
             path: path.to_path_buf(),
@@ -108,7 +122,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
     })
 }
 
-pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveError> {
+/// Write `document` to `path`, its paths as `paths` says.
+pub(crate) fn save(
+    document: &Document,
+    path: &Path,
+    paths: SavedPaths,
+) -> Result<(), DocumentSaveError> {
     if !has_extension(path) {
         return Err(DocumentSaveError::InvalidExtension {
             path: path.to_path_buf(),
@@ -120,13 +139,12 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
         document.validate()
     );
 
-    let encoded =
-        SerdeFormat::Ron
-            .serialize(document)
-            .map_err(|source| DocumentSaveError::Serialize {
-                path: path.to_path_buf(),
-                source,
-            })?;
+    let encoded = SerdeFormat::Ron
+        .serialize(paths.of(document, path).as_ref())
+        .map_err(|source| DocumentSaveError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
     if !fits(encoded.len() as u64) {
         return Err(DocumentSaveError::DocumentTooLarge {
             path: path.to_path_buf(),
@@ -164,6 +182,26 @@ fn write_archive(file: &mut File, encoded: &[u8]) -> io::Result<()> {
     archive.write_all(encoded)?;
     archive.finish().map_err(io::Error::other)?;
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use std::path::Path;
+
+    use common::{SerdeFormat, fs};
+
+    use crate::core::document::Document;
+    use crate::core::io::document::write_archive;
+
+    /// Write `document` to `path` as it is, unchecked: a file holding what no save writes, as a
+    /// relative path that climbs out of its folder.
+    pub(crate) fn write_unchecked(document: &Document, path: &Path) {
+        let encoded = SerdeFormat::Ron.serialize(document).unwrap();
+        fs::publish(path, fs::PublicationMode::Durable, |file| {
+            write_archive(file, &encoded)
+        })
+        .unwrap();
+    }
 }
 
 #[cfg(test)]

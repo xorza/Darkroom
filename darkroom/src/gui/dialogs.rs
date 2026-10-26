@@ -6,7 +6,7 @@
 
 #[cfg(feature = "internals")]
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 
 use common::fs;
 
@@ -107,7 +107,9 @@ impl Dialogs {
             Self::Native => pick_existing_files(extensions),
             #[cfg(feature = "internals")]
             Self::Scripted(answers) => match answers.pop_front() {
-                Some(DialogAnswer::Paths(paths)) => normalize_file_selection(paths),
+                Some(DialogAnswer::Paths(paths)) => {
+                    normalize_file_selection(paths.into_iter().map(absolute).collect())
+                }
                 Some(DialogAnswer::Cancel) => None,
                 answer => unanswered("pick files", answer.as_ref()),
             },
@@ -137,10 +139,17 @@ impl Dialogs {
 #[cfg(feature = "internals")]
 fn scripted_path(answers: &mut VecDeque<DialogAnswer>, ask: &str) -> Option<PathBuf> {
     match answers.pop_front() {
-        Some(DialogAnswer::Path(path)) => Some(path),
+        Some(DialogAnswer::Path(path)) => Some(absolute(path)),
         Some(DialogAnswer::Cancel) => None,
         answer => unanswered(ask, answer.as_ref()),
     }
+}
+
+/// `path` as a native dialog answers it: absolute, a relative one taken against the working
+/// directory, so a scripted pick holds what a document keeps in memory.
+#[cfg(feature = "internals")]
+fn absolute(path: PathBuf) -> PathBuf {
+    path::absolute(&path).unwrap_or(path)
 }
 
 /// A scripted ask with no answer of its shape: a cancel, and an error for the harness to report.
@@ -221,7 +230,7 @@ fn pick_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{self, PathBuf};
 
     use common::{TempDir, fs};
 
@@ -296,11 +305,14 @@ mod tests {
         );
     }
 
-    /// Scripted answers go to the asks in order, each of its own shape. The project save adds the
-    /// extension, as the native one does; the file list comes back sorted and once each. A cancel,
-    /// an answer of the other shape, and an ask past the last answer all read as `None`.
+    /// Scripted answers go to the asks in order, each of its own shape and absolute, as a native
+    /// dialog's are: a relative one is taken against the working directory. The project save adds
+    /// the extension, as the native one does; the file list comes back sorted and once each. A
+    /// cancel, an answer of the other shape, and an ask past the last answer all read as `None`.
     #[test]
     fn scripted_answers_go_to_the_asks_in_order() {
+        // As a native dialog answers: absolute, so `/p` on Windows takes the working drive.
+        let abs = |path: &str| path::absolute(path).unwrap();
         let mut dialogs = Dialogs::Scripted(VecDeque::from([
             DialogAnswer::Path(PathBuf::from("/p/scene.darkroom")),
             DialogAnswer::Path(PathBuf::from("/p/copy")),
@@ -308,18 +320,19 @@ mod tests {
             DialogAnswer::Cancel,
             DialogAnswer::Paths(vec![PathBuf::from("/d/c.fit")]),
             DialogAnswer::Path(PathBuf::from("/d")),
+            DialogAnswer::Path(PathBuf::from("inputs/x.fit")),
         ]));
         assert_eq!(
             dialogs.project_open_path(None),
-            Some(PathBuf::from("/p/scene.darkroom"))
+            Some(abs("/p/scene.darkroom"))
         );
         assert_eq!(
             dialogs.save_path(SavedFile::PROJECT, None),
-            Some(PathBuf::from("/p/copy.darkroom"))
+            Some(abs("/p/copy.darkroom"))
         );
         assert_eq!(
             dialogs.existing_files(&["fit"]),
-            Some(vec![PathBuf::from("/d/a.fit"), PathBuf::from("/d/b.fit")])
+            Some(vec![abs("/d/a.fit"), abs("/d/b.fit")])
         );
         assert_eq!(dialogs.new_file(&[]), None, "cancelled");
         assert_eq!(
@@ -327,7 +340,14 @@ mod tests {
             None,
             "a list for a one-file ask"
         );
-        assert_eq!(dialogs.dir(), Some(PathBuf::from("/d")));
+        assert_eq!(dialogs.dir(), Some(abs("/d")));
+        let relative = dialogs.existing_file(&["fit"]).unwrap();
+        assert!(relative.is_absolute(), "{}", relative.display());
+        assert_eq!(
+            relative,
+            abs("inputs/x.fit"),
+            "taken against the working directory"
+        );
         assert_eq!(dialogs.dir(), None, "no answer left");
     }
 }

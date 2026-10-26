@@ -101,12 +101,15 @@ server. The plan is `HARNESS_PLAN.md`.
   editor's own RON text, and the small inputs it reads by relative path. It is made and changed in
   the editor, through the harness or by hand, never generated. A test opens it with no load
   repair and runs it, so a format change that breaks it fails in the same commit.
-- **A document holds relative and absolute paths.** A relative path resolves against the
-  document's folder at run time, and an absolute path is used as written, as Blender's `//` paths
-  are. A preference, "store picked paths relative", on by default, makes a file picked inside the
-  document's folder a relative path; an unsaved document has no folder, so its picks are
-  absolute. Save As to another folder rewrites the relative paths so that they keep naming the
-  same files ([Blender relative paths](https://docs.blender.org/manual/en/latest/files/blend/open_save.html)).
+- **A document file holds the paths inside its folder relative; memory holds every path
+  absolute.** A load joins each relative path to the file's folder, and a save writes each path
+  inside the document's folder relative to it, `/` between its parts, so the folder moves or is
+  copied whole. A preference, "save paths inside the project folder as relative", on by default,
+  turns it off. Refused: relative paths in memory, resolved at run time against the document's
+  folder — the undo history holds the path values of earlier edits, so after Save As to another
+  folder an undo would put back a path that names another file, and every path reader in `lens`
+  and the worker would need the folder. Blender keeps its `//` paths relative in memory, so its
+  Save As must remap them ([Blender relative paths](https://docs.blender.org/manual/en/latest/files/blend/open_save.html)).
 - **Native dialogs are a seam.** `App` asks for a path through a `Dialogs` value: native in the
   window, scripted in the harness, where `darkroom_act` answers each dialog in turn and an
   unanswered one is an error. A blocking native dialog would hang a session that no one can see.
