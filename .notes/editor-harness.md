@@ -21,10 +21,11 @@ server. The plan is `HARNESS_PLAN.md`.
   times, and a shot comes back as an image the agent sees at once. Refused: a loopback server with
   a `send` client, which an agent must start and address by hand; scripts only, which replay the
   whole session for each step ([Claude Code MCP](https://code.claude.com/docs/en/mcp)).
-- **`.mcp.json` starts a built binary.** It runs `target/release-dev/darkroom-mcp`, which a drive
-  command builds, and `darkroom_open` replies with the commit the binary was built from and
-  whether the tree differs, so a stale server says so. Refused: `cargo run` in `.mcp.json`, whose
-  cold build outlasts the client's startup timeout and waits on any other build's lock.
+- **`.mcp.json` starts a built binary.** It runs `target/mcp/darkroom-mcp`, which `cargo drive run
+  mcp` builds under the `mcp` profile (`release-dev` that unwinds a panic), and `darkroom_open`
+  replies with the commit the binary was built from and whether the tree differed, so a stale
+  server says so. Refused: `cargo run` in `.mcp.json`, whose cold build outlasts the client's
+  startup timeout and waits on any other build's lock.
 - **The server uses rmcp.** rmcp is the official Rust SDK of the protocol: it keeps the protocol
   version, the capability negotiation, the schemas (from schemars) and the content types in step
   with the spec. Refused: our own JSON-RPC loop, whose protocol and schemas would be ours to keep

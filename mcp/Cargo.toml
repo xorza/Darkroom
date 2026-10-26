@@ -1,0 +1,36 @@
+[package]
+name = "darkroom-mcp"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "darkroom-mcp"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+darkroom = { workspace = true, features = ["internals"] }
+palantir = { workspace = true }
+common = { workspace = true }
+
+glam = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+rmcp = { workspace = true, features = ["base64", "macros", "server", "transport-io"] }
+clap = { workspace = true, features = [
+    "derive",
+    "error-context",
+    "help",
+    "std",
+    "suggestions",
+    "usage",
+] }
+
+[dev-dependencies]
+common = { workspace = true, features = ["internals"] }
+rmcp = { workspace = true, features = ["client"] }
+tokio = { workspace = true, features = ["io-util"] }

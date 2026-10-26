@@ -5,11 +5,10 @@ use glam::{UVec2, Vec2};
 use palantir::{DockView, Modifiers, PointerButton, Rect};
 use scenarium::NodeId;
 
-use crate::core::document::internals::DocumentFixture;
-use crate::core::open_document::OpenDocument;
 use crate::gui::theme::Theme;
 use crate::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
 use crate::internals::harness::error::HarnessError;
+use crate::internals::harness::fixture;
 use crate::internals::harness::locator::{Locator, Side};
 use crate::internals::harness::shot::{NODE_MARGIN, Region, Shot};
 use crate::internals::harness::state::Detail;
@@ -42,22 +41,6 @@ fn decode(png: &[u8]) -> image::RgbaImage {
 fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
     let bytes = color.to_srgba_u8();
     [bytes.r, bytes.g, bytes.b, bytes.a]
-}
-
-/// A project of one node of each func named, from `harness`'s library, saved in `dir`.
-fn project(harness: &Harness, dir: &TempDir, funcs: &[&str]) -> PathBuf {
-    let library = harness.app.library();
-    let mut fixture = DocumentFixture::default();
-    for name in funcs {
-        fixture.add(
-            library
-                .by_name(name)
-                .expect("the editor's library has the func"),
-        );
-    }
-    let path = dir.join("scene.darkroom");
-    OpenDocument::over(fixture.document).save_to(&path).unwrap();
-    path
 }
 
 fn click(at: Locator) -> Action {
@@ -101,7 +84,7 @@ fn node_id(harness: &Harness, name: &str) -> NodeId {
 fn clicks_drags_and_keys_edit_the_document() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-edit");
-    let path = project(&harness, &dir, &[BRIGHTNESS, CONVERT]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS, CONVERT]);
     harness.open(&path, false).unwrap();
 
     let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
@@ -159,7 +142,7 @@ fn clicks_drags_and_keys_edit_the_document() {
 fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-world");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     let id = node_id(&harness, BRIGHTNESS);
     let pos = harness
@@ -184,7 +167,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
 fn the_new_node_palette_adds_the_node_clicked() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-palette");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     harness
         .act(&[
@@ -217,7 +200,7 @@ fn the_new_node_palette_adds_the_node_clicked() {
 fn a_node_locator_names_exactly_one_node() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-names");
-    let path = project(&harness, &dir, &[BRIGHTNESS, BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS, BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     match harness.act(&[click(node("missing"))]) {
         Err(HarnessError::NotFound { nearest, .. }) => {
@@ -252,7 +235,7 @@ fn a_node_locator_names_exactly_one_node() {
 fn a_focused_text_field_still_settles() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-focus");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     let report = harness
         .act(&[Action::DoubleClick(Locator::NodeHeader(
@@ -268,7 +251,7 @@ fn a_focused_text_field_still_settles() {
 fn a_copied_session_leaves_the_source_alone() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-copy");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     let original = fs::read(&path).unwrap();
     harness.open(&path, false).unwrap();
     harness
@@ -307,12 +290,12 @@ fn a_copied_session_leaves_the_source_alone() {
 }
 
 /// A drag whose target is not found fails before any input goes in, so the next click finds no
-/// button held; and the error an unanswered dialog logs during `act` reaches the next `state`.
+/// button held; a pinch by no positive factor is refused, not dropped; and the error an unanswered dialog logs during `act` reaches the next `state`.
 #[test]
 fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-failed");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     assert!(matches!(
         harness.act(&[drag(node(BRIGHTNESS), node("missing"))]),
@@ -320,6 +303,15 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
     ));
     let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
+    for factor in [0.0, -2.0] {
+        assert!(matches!(
+            harness.act(&[Action::Pinch {
+                at: node(BRIGHTNESS),
+                factor
+            }]),
+            Err(HarnessError::BadPinch { factor: refused }) if refused == factor
+        ));
+    }
 
     harness.act(&[Action::Key("ctrl+o".to_string())]).unwrap();
     let log = harness.state(Detail::Concise, None).log;
@@ -336,7 +328,7 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
 fn a_linked_folder_is_refused() {
     let mut harness = harness();
     let dir = TempDir::new("darkroom-harness-link");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     fs::symlink(dir.path(), dir.join("loop")).unwrap();
     assert!(matches!(
         harness.open(&path, false),
@@ -350,13 +342,13 @@ fn a_linked_folder_is_refused() {
 /// node's shot is its body, clipped by the canvas to (40, 100) to (327.5, 278), with 24 px around
 /// it, clamped to the window and rounded out: (16, 76) to (352, 300), 336 × 224, the body at
 /// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
-/// body's corner, and one past the window is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
+/// body's corner, and one past the window or of negative size is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let mut harness = small(DisplayKind::Gpu);
     let dir = TempDir::new("darkroom-harness-shot");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     let screen = harness.state(Detail::Concise, None).nodes[0]
         .screen
@@ -437,6 +429,13 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         harness.shot(&Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)), 1000),
         Err(HarnessError::EmptyRegion { .. })
     ));
+    assert!(matches!(
+        harness.shot(
+            &Region::World(Rect::new(placed.x, placed.y, -10.0, 10.0)),
+            1000
+        ),
+        Err(HarnessError::EmptyRegion { .. })
+    ));
     assert!(
         harness
             .act(&[click(Locator::Node(BRIGHTNESS.to_string()))])
@@ -480,7 +479,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
 fn the_view_menu_copies_and_saves_the_window() {
     let mut harness = small(DisplayKind::Gpu);
     let dir = TempDir::new("darkroom-harness-view");
-    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     harness.open(&path, false).unwrap();
     let view = || click(Locator::Text("View".to_string()));
 

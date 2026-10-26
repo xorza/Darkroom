@@ -29,6 +29,11 @@ relative paths, and it is made in the editor through the finished harness.
   `wait_run(timeout)`, `shot(region, max_side)`, with `Locator`s by node, title, port, world
   point, text, screen point, offset and `Nth`. A shot is the window, a pane, a node with a margin,
   or a canvas rect, scaled to `max_side`, with a legend of the visible nodes and ports.
+- `darkroom-mcp` (member `mcp/`) serves the harness over stdio with rmcp: `darkroom_open`,
+  `darkroom_act`, `darkroom_state`, `darkroom_ui`, `darkroom_shot`, `darkroom_wait_run`.
+  `cargo drive run mcp` builds `target/mcp/darkroom-mcp`, which `.mcp.json` starts.
+  `darkroom::internals::harness::fixture::project(dir, funcs)` saves a project of one node per
+  func, for a test of the harness or of the server.
 - View ▸ Copy View as Image and View ▸ Save View as PNG… take the window through
   `Ui::request_screenshot`; palantir's `Clipboard::set_image(&Image)` takes the copy.
 - `App::new(ui, AppHost, LaunchInputs)`: `AppHost::Offscreen(Arc<OffscreenSignals>)` gives the
@@ -39,32 +44,7 @@ relative paths, and it is made in the editor through the finished harness.
 
 ## Plan
 
-### 1. The MCP server
-
-Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src/tests.rs`), root
-`Cargo.toml` (member, dependency, drive command), new `.mcp.json`.
-
-- [ ] `darkroom-mcp`, `publish = false`, depending on `darkroom` with `internals` and on rmcp. One
-  binary: `darkroom-mcp [--display gpu|cpu] [--size WxH] [--scale S]`, default `gpu`, serving over
-  stdio. The harness lives on one thread, started through `common::thread`; the tools reach it
-  through a channel. A panic on that thread drops the session, and the next call gets the panic's
-  message and location; `darkroom_open` starts a new one. `build.rs` records the commit and
-  whether the tree was dirty.
-- [ ] The tools, each with a description written for an agent and an example input:
-  `darkroom_open { project, in_place, size, scale }` (replies with the build's commit, the
-  document's summary and the session directory), `darkroom_act { actions, shot }`,
-  `darkroom_state { detail, nodes }`, `darkroom_ui { filter, limit }`,
-  `darkroom_shot { region, max_side }` (an image block, the path and the legend),
-  `darkroom_wait_run { timeout_s }`. A `HarnessError` becomes a tool error that says how to fix
-  the call, with the matches for `Ambiguous` and the nearest names for `NotFound`.
-- [ ] Root `Cargo.toml`: a drive command `mcp`, `build -p darkroom-mcp --profile release-dev`.
-  `.mcp.json` at the root: the server `darkroom`, command `target/release-dev/darkroom-mcp`.
-- [ ] Tests through rmcp's in-process client: `tools/list` names the six tools with their
-  schemas; `darkroom_open` of a fixture then `darkroom_state` lists its nodes; an `Ambiguous`
-  locator is a tool error that lists both matches; a harness panic answers the next call with its
-  message and leaves the server serving.
-
-### 2. Relative paths in a document
+### 1. Relative paths in a document
 
 Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every other reader of
 `required_fs_path`; scenarium's invocation context; `darkroom/src/core/runtime_host/`,
@@ -83,7 +63,7 @@ Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every othe
   the same undo step as the save's path change. Test: `a/b.tiff` saved from `/p` to `/p/q` becomes
   `../a/b.tiff`.
 
-### 3. The sample project
+### 2. The sample project
 
 Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 `darkroom/src/core/open_document/tests.rs`.
@@ -96,7 +76,7 @@ Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 - [ ] Test: the sample opens with an empty `LoadReport`, compiles and runs to completion on the
   real library, and each preview receives an image of the input's size.
 
-### 4. Fold the decisions into the documents
+### 3. Fold the decisions into the documents
 
 Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `HARNESS_PLAN.md`.
 
@@ -149,3 +129,19 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
     blends: a mean of encoded bytes darkens every edge between light and dark.
   - `Region::Pane` covers the pane with its tab strip; a region clamped to nothing is
     `HarnessError::EmptyRegion`.
+- The MCP server differs from the plan, each for the reason given:
+  - It builds under its own profile `mcp`, `release-dev` with `panic = "unwind"`, and
+    `.mcp.json` starts `target/mcp/darkroom-mcp`: `release` aborts on a panic, so the thread's
+    edge could catch none, and Cargo sets `panic` per profile, not per package.
+  - A project that does not open leaves no session, rather than an empty document the agent did
+    not ask for; a panic's message and location answer the call that panicked, and each later
+    call says how the session ended.
+  - `darkroom_act` plays its actions one at a time, so a failure names the action it stopped at
+    and says that the ones before it ran.
+  - The editor's thread is joined when the server drops: a process that exits while the thread
+    tears down its GPU device crashes in the driver.
+  - The tools' JSON shapes are the server's own types, converted to the harness's: the harness
+    carries no schema. The image block's base64 comes from rmcp's `PromptMessage::new_image`,
+    so the crate adds no base64 dependency.
+  - `DocumentFixture` compiles under darkroom's `internals`, which turns on scenarium's, so the
+    server's tests make their projects as the harness's do.

@@ -5,6 +5,7 @@
 pub mod action;
 pub mod display;
 pub mod error;
+pub mod fixture;
 pub mod locator;
 mod log_ring;
 pub mod shot;
@@ -302,6 +303,10 @@ impl Harness {
                 self.input(InputEvent::ScrollPixels(*delta));
             }
             Action::Pinch { at, factor } => {
+                // palantir drops a zoom that is not a positive factor, which would pass silently.
+                if !(factor.is_finite() && *factor > 0.0) {
+                    return Err(HarnessError::BadPinch { factor: *factor });
+                }
                 let point = self.point(at)?;
                 frames += self.hover(point, &step)?;
                 self.input(InputEvent::Zoom(*factor));
