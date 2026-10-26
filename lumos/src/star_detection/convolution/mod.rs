@@ -54,13 +54,13 @@ pub(crate) mod internals {
     use common::{Buffer2, par};
     use rayon::prelude::*;
 
-    use crate::simd::Kernel;
     use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
     use crate::star_detection::convolution::simd::{
         Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
     };
     use crate::star_detection::convolution::{fill_gaussian_kernel_1d, kernel_radius};
     use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
+    use ::simd::Kernel;
 
     /// The 1D kernel of `sigma` out to `3σ`.
     pub(crate) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {

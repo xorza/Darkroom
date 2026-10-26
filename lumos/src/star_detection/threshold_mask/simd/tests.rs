@@ -1,9 +1,9 @@
 //! Cross-checks that every tier's packed words match the scalar reference exactly.
 
 use crate::internals::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
-use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::threshold_mask::simd::ProcessWords;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
+use simd::IsaTier;
 
 /// The shared sweep plus widths spanning whole 64-pixel words. The kernel takes full words from the
 /// row and pads the partial last one, so a word exactly filled, a word and a little, and several

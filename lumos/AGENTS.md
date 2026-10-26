@@ -3,7 +3,7 @@
 Astronomical stacking pipeline: **load / decode (RAW, FITS) → calibrate →
 detect stars → register → combine (stack or drizzle)**, then an optional
 non-linear **stretch**, strictly after all linear-domain work. CPU only:
-vector kernels written once over one ISA abstraction (AVX2+FMA, NEON, a
+vector kernels written once over the `simd` crate's `Isa` (AVX2+FMA, NEON, a
 portable fallback) and rayon. Pixels are **planar** f32, one plane per
 channel, normalized to `[0, 1]`.
 

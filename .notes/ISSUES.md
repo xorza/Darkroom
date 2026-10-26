@@ -1,10 +1,7 @@
 # Open issues
 
-- **The darkroom binary does not link on macOS in any LTO profile** —
-  `release`, `bench` and `release-dev`. `ort-sys`'s CoreML objects
-  (`host_utils.mm.o`, `model.mm.o`) use `@available`, so they reference
-  `___isPlatformVersionAtLeast`. std defines
-  it as a weak `#[rustc_std_internal_symbol]`, and LTO, fat or thin, removes
-  it from the link, as no Rust code calls it; without LTO it links. Seen with
-  rustc 1.99.1, 1.100.0-beta.5 and 1.101.0-nightly (2026-10-21). `cargo
-drive bench` fails before any case runs.
+- **imaginarium: five `atomic` NEON cases slower than before the `simd` port on an M2.**
+  `contrast_brightness/cpu/neon/rgb_f32` (+19 %), `affine_warp/cpu/neon/bilinear/rgba_f32`
+  (+14 %) and `rgba_u16` (+7 %), `convert/cpu/neon/mono_u8/rgb_u8` (+10 %) and `rgb_u8/rgba_u8`
+  (+11 %), against master `dbfb50926`, ABBA order, three rounds. x86 has no case slower beyond
+  its cross-build noise.

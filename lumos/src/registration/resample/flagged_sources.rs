@@ -24,8 +24,8 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::registration::resample::source_pos::SourcePos;
 use crate::registration::resample::warp_kernel::TapAxis;
 use crate::scratch_pool::Shapeless;
-use crate::simd::{F32_LANES, Isa};
 use common::Size2us;
+use simd::{F32_LANES, Isa};
 
 /// A flagged frame's sources as the warp samples them, prepared once per frame in a
 /// [`FlagScratch`].

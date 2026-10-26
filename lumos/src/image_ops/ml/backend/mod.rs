@@ -9,11 +9,9 @@
 //! ~60 s for a full 24 MP frame on a 10-core machine.
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use common::fs;
 use imaginarium::PlanarDesc;
-use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::TensorRef;
 
@@ -57,7 +55,7 @@ impl OnnxModel {
             path: path.to_owned(),
             source,
         })?;
-        let session = Session::builder(&environment()?)?.commit_from_memory(&bytes)?;
+        let session = Session::builder()?.commit_from_memory(&bytes)?;
         Ok(Self { session })
     }
 
@@ -168,19 +166,6 @@ fn run_tiles(
 fn validate_stride(stride: usize) -> Result<(), InvalidConfigField> {
     ConfigField::count("ML tile stride", stride)
         .must_be("between 1 and 384", (1..=MAX_STRIDE).contains(&stride))
-}
-
-/// The process's ONNX Runtime environment, built on first use. ONNX Runtime allows one environment
-/// per process, created once even after a release, so it is never dropped.
-fn environment() -> Result<Environment, ort::Error> {
-    static ENVIRONMENT: Mutex<Option<Environment>> = Mutex::new(None);
-    let mut environment = ENVIRONMENT.lock().unwrap();
-    if let Some(environment) = environment.as_ref() {
-        return Ok(environment.clone());
-    }
-    let built = ort::init().build()?;
-    *environment = Some(built.clone());
-    Ok(built)
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge. The

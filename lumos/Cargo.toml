@@ -11,14 +11,15 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-internals = ["common/internals", "dep:criterion"]
+internals = ["common/internals", "dep:criterion", "simd/internals"]
 
 [dependencies]
+simd = { workspace = true }
 common = { workspace = true, features = ["introspect-derive"] }
 imaginarium = { workspace = true }
 
 ort = { workspace = true, optional = true, features = [
-    "api-31",
+    "api-28",
     "download-binaries",
     "std",
     "tls-native",
@@ -43,6 +44,7 @@ blake3 = { workspace = true, features = ["std"] }
 criterion = { workspace = true, optional = true, features = ["cargo_bench_support"] }
 
 [dev-dependencies]
+simd = { workspace = true, features = ["internals"] }
 libraw = { workspace = true, features = ["internals"] }
 imaginarium = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }

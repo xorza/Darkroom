@@ -16,6 +16,7 @@ use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
+use crate::ops::contrast_brightness::cpu::AffineKernel;
 #[cfg(feature = "wgpu")]
 use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
@@ -33,31 +34,33 @@ const OP: ContrastBrightness = ContrastBrightness {
 const GPU_ITERATION: Duration = Duration::from_millis(320);
 
 /// `atomic/contrast_brightness/cpu/<variant>/<format>`: one row of the standard frame in place,
-/// through the scalar reference and each tier's kernel, on a fresh copy each iteration. Per
-/// pixel, reading the row.
+/// through the scalar reference and the format's kernel on each tier this CPU has, on a fresh
+/// copy each iteration. Per pixel, reading the row.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "contrast_brightness", Scale::Micros);
     for format in ColorFormat::ALL {
         let mut source = None;
         let affine = ChannelAffine::new(OP, format);
+        let kernel = AffineKernel::of(format);
         let bytes = FRAME.width * format.byte_len();
         group.throughput(fixture::throughput(FRAME.width, format.byte_len()));
-        for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
-            let id = BenchmarkId::new(Backend::Cpu.case(variant.name), fixture::format_id(format));
+        for variant in Variant::all(Some(kernel)) {
+            let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), fixture::format_id(format));
             group.bench_function(id, |b| {
                 let row = source
                     .get_or_insert_with(|| scene::sky(format, Size2us::new(FRAME.width, 1), 1));
-                if let Some(kernel) = variant.kernel {
-                    let count = cpu::kernel_count(row.desc());
+                if let Variant::Kernel { kernel, tier } = variant {
                     b.iter_batched_ref(
                         || row.clone(),
-                        |row| unsafe { kernel(black_box(row.bytes_mut()), count, affine) },
+                        |row| kernel.adjust_row(tier, affine, black_box(row.bytes_mut())),
                         bench::fresh_copies(bytes),
                     );
                 } else {
                     b.iter_batched_ref(
                         || row.clone(),
-                        |row| cpu::scalar_row(affine, format, black_box(row.bytes_mut())),
+                        |row| {
+                            cpu::internals::scalar_row(affine, format, black_box(row.bytes_mut()));
+                        },
                         bench::fresh_copies(bytes),
                     );
                 }

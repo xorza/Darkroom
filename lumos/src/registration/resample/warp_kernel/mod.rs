@@ -11,8 +11,8 @@ use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_config::InterpolationMethod;
 use crate::registration::transform::TransformType;
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 use common::Size2us;
+use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// The spacing, in output pixels, of the grid a non-affine warp's local scale is read on.
 ///

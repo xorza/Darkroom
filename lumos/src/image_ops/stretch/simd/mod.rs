@@ -5,8 +5,8 @@
 //! falls; the scalar path calls libm's `asinhf`, and the two agree to a few ULP.
 
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
-use crate::simd::math::Math;
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
+use simd::Math;
+use simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
 
 /// The arcsinh plane curve after `black`, in place, over one band of a plane:
 /// `clamp(asinh(v′ / β) / norm, 0, 1)` of `v′` after the black point, a NaN sample to 0.

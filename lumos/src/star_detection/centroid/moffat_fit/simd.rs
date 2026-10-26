@@ -3,10 +3,10 @@
 //! order, the general one is `exp(−β·ln u)` from [`Math`], which the scalar model takes through
 //! [`GeneralPower`], and every division is a division, so a lane is the scalar model bit for bit.
 
-use crate::simd::math::Math;
-use crate::simd::{F64x4, Isa, Kernel};
 use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
+use simd::Math;
+use simd::{F64x4, Isa, Kernel};
 
 /// `u^neg_beta` for one `u`, as a lane of [`Profile::pow_neg`]'s general power computes it.
 #[derive(Debug, Clone, Copy)]

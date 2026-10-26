@@ -3,8 +3,8 @@ use common::Buffer2;
 use crate::math::wavelet::{
     B3, SmoothRow, atrous_smooth, atrous_smooth_serial, max_scales, reflect, white_noise_sigma,
 };
-use crate::simd::isa_tier::IsaTier;
 use common::Size2us;
+use simd::IsaTier;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     Buffer2::from_fn(size, |x, y| {

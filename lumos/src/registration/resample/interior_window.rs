@@ -9,7 +9,7 @@ use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_pos::SourceAt;
 use crate::registration::resample::tap_window::{AxisSums, Lobes, RowLanes, WindowWeights};
 use crate::registration::resample::warp_kernel::WarpKernel;
-use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
+use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// A window of at most [`F32_LANES`] taps per axis, wholly inside the source.
 #[derive(Debug, Clone, Copy)]

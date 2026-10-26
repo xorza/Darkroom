@@ -21,13 +21,13 @@ use crate::math::fwhm;
 use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{AnalyticProfile, PixelQuadrature};
-use crate::simd::Kernel;
 use crate::star_detection::centroid::moffat_fit::simd::{GeneralPower, MoffatBatch};
 use crate::star_detection::centroid::profile_bounds::ProfileBounds;
 use crate::star_detection::centroid::profile_problem::{FitData, LmModel, PIXEL_MEAN_TOLERANCE};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::{FitInputs, StampFit};
 use crate::star_detection::centroid::{profile_problem, stamp};
+use ::simd::Kernel;
 
 /// A converged 2D Moffat profile fitted to one star stamp: where its centre landed and
 /// the FWHM that follows from its alpha and beta. Build one with [`MoffatFit::new`].

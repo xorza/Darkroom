@@ -18,6 +18,7 @@ use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
+use crate::ops::blend::cpu::BlendKernel;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 use crate::ops::blend::{Blend, BlendMode, cpu};
@@ -31,7 +32,8 @@ const ALPHA: f32 = 0.5;
 const GPU_ITERATION: Duration = Duration::from_millis(470);
 
 /// `atomic/blend/cpu/<variant>/<mode>/<format>`: one row pair of the standard frame in every mode,
-/// through the scalar reference and each tier's kernel. Per pixel, reading both rows.
+/// through the scalar reference and the format's kernel on each tier this CPU has. Per pixel,
+/// reading both rows.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Micros);
     for format in ColorFormat::ALL {
@@ -39,34 +41,36 @@ pub(crate) fn atomic(c: &mut Criterion) {
         let mut out =
             InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), format));
         group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
+        let kernel = BlendKernel::of(format);
         for mode in BlendMode::iter() {
             let params = Blend::new(mode, ALPHA);
-            for variant in Variant::all(|tier| cpu::row_kernel(tier, format)) {
+            for variant in Variant::all(Some(kernel)) {
                 let input = format!(
                     "{}/{}",
                     fixture::variant_id(mode),
                     fixture::format_id(format)
                 );
                 group.bench_function(
-                    BenchmarkId::new(Backend::Cpu.case(variant.name), input),
+                    BenchmarkId::new(Backend::Cpu.case(variant.id()), input),
                     |b| {
                         let [src, dst] = layers.get_or_insert_with(|| {
                             [1, 2]
                                 .map(|seed| scene::sky(format, Size2us::new(FRAME.width, 1), seed))
                         });
                         let (src, dst, out) = (src.bytes(), dst.bytes(), out.bytes_mut());
-                        if let Some(kernel) = variant.kernel {
-                            b.iter(|| unsafe {
-                                kernel(
+                        if let Variant::Kernel { kernel, tier } = variant {
+                            b.iter(|| {
+                                kernel.blend_row(
+                                    tier,
+                                    params,
                                     black_box(src),
                                     black_box(dst),
                                     black_box(&mut *out),
-                                    params,
                                 );
                             });
                         } else {
                             b.iter(|| {
-                                cpu::scalar_row(
+                                cpu::internals::scalar_row(
                                     params,
                                     format,
                                     black_box(src),

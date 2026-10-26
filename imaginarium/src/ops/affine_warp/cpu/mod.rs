@@ -1,79 +1,80 @@
-/// NEON RGB/RGBA bilinear specialization of the scalar path below (aarch64 only).
-#[cfg(target_arch = "aarch64")]
-mod neon;
-
-/// SSE4.1 RGB/RGBA bilinear specialization of the scalar path below (x86_64).
-#[cfg(target_arch = "x86_64")]
-mod sse;
-
+mod gather_bilinear;
 mod packed_source;
+mod source_map;
 
-use common::{SimdTier, par};
-use glam::Vec2;
+use common::par;
 use rayon::prelude::*;
+use simd::IsaTier;
 
-use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::color_format::{ChannelCount, SampleType};
 use crate::color::sample::Sample;
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
+use crate::ops::affine_warp::cpu::gather_bilinear::GatherBilinear;
 use crate::ops::affine_warp::cpu::packed_source::PackedSource;
+use crate::ops::affine_warp::cpu::source_map::SourceMap;
 use crate::ops::affine_warp::{AffineWarp, FilterMode};
 
-/// A SIMD kernel: the packed RGB/RGBA bilinear specialization of [`apply_typed`]
-/// for one storage type and channel count.
-///
-/// # Safety
-/// The running CPU must support the feature the kernel was compiled for;
-/// [`packed_kernel`] at a supported [`SimdTier`] is what establishes that.
-pub(super) type PackedKernel = unsafe fn(&AffineWarp, &InterleavedImage, &mut InterleavedImage);
-
-/// No arch kernels: [`SimdTier`] has no value here.
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub(super) fn packed_kernel(
-    tier: SimdTier,
-    _format: ColorFormat,
-    _filter: FilterMode,
-) -> Option<PackedKernel> {
-    match tier {}
+/// The vector kernel of a warp, picked once per image: bilinear RGB and RGBA. Every other warp
+/// takes the scalar reference: nearest is a copy of one tap, and a mono pixel fills one lane of
+/// a gather's four bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BilinearKernel {
+    sample_type: SampleType,
+    channels: ChannelCount,
 }
 
-/// The SIMD kernel compiled for `tier` itself for `format` under `filter`, or
-/// `None` when the tier or the combination has no vector path — callers then
-/// take the scalar reference.
-///
-/// RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
-/// (cross-checked). Mono stays scalar (gather-bound — SIMD measured slower), and
-/// nearest is a near-memcpy the scalar path already nails.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-pub(super) fn packed_kernel(
-    tier: SimdTier,
-    format: ColorFormat,
-    filter: FilterMode,
-) -> Option<PackedKernel> {
-    #[cfg(target_arch = "aarch64")]
-    use crate::ops::affine_warp::cpu::neon as simd;
-    #[cfg(target_arch = "x86_64")]
-    use crate::ops::affine_warp::cpu::sse as simd;
-
-    if filter != FilterMode::Bilinear {
-        return None;
+impl BilinearKernel {
+    /// The kernel of `warp` from an image of `input` to one of `output`, or `None` when it has
+    /// none. The gathers index a tap's bytes in `i32`, and the float bounds hold every input
+    /// edge and output centre exactly, so an image past those takes the reference too.
+    pub(super) fn of(
+        warp: &AffineWarp,
+        input: InterleavedDesc,
+        output: InterleavedDesc,
+    ) -> Option<Self> {
+        let format = input.color_format();
+        let fits = input.size().pixel_count() <= i32::MAX as usize / 16
+            && input.size().width <= 1 << 24
+            && input.size().height <= 1 << 24
+            && output.size().width <= 1 << 23;
+        (warp.filter == FilterMode::Bilinear && format.channel_count != ChannelCount::Mono && fits)
+            .then_some(Self {
+                sample_type: format.sample_type,
+                channels: format.channel_count,
+            })
     }
 
-    #[cfg(target_arch = "x86_64")]
-    if tier != SimdTier::Sse41 {
-        return None;
+    /// Output row `y` of a warp by `map` from `input`, on `tier`.
+    #[inline]
+    fn warp_row(
+        self,
+        tier: IsaTier,
+        input: &InterleavedImage,
+        map: SourceMap,
+        y: usize,
+        row: &mut [u8],
+    ) {
+        macro_rules! gather {
+            ($sample:ty, $channels:literal) => {
+                tier.run(GatherBilinear::<$sample, $channels> {
+                    source: PackedSource::of(input),
+                    map,
+                    y,
+                    row: bytemuck::cast_slice_mut(row),
+                })
+            };
+        }
+        match (self.sample_type, self.channels) {
+            (SampleType::U8, ChannelCount::Rgb) => gather!(u8, 3),
+            (SampleType::U8, ChannelCount::Rgba) => gather!(u8, 4),
+            (SampleType::U16, ChannelCount::Rgb) => gather!(u16, 3),
+            (SampleType::U16, ChannelCount::Rgba) => gather!(u16, 4),
+            (SampleType::F32, ChannelCount::Rgb) => gather!(f32, 3),
+            (SampleType::F32, ChannelCount::Rgba) => gather!(f32, 4),
+            (_, ChannelCount::Mono) => unreachable!("a mono warp has no kernel"),
+        }
     }
-    #[cfg(target_arch = "aarch64")]
-    let SimdTier::Neon = tier;
-
-    Some(match (format.sample_type, format.channel_count) {
-        (_, ChannelCount::Mono) => return None,
-        (SampleType::U8, ChannelCount::Rgb) => simd::apply_packed::<u8, 3>,
-        (SampleType::U8, ChannelCount::Rgba) => simd::apply_packed::<u8, 4>,
-        (SampleType::U16, ChannelCount::Rgb) => simd::apply_packed::<u16, 3>,
-        (SampleType::U16, ChannelCount::Rgba) => simd::apply_packed::<u16, 4>,
-        (SampleType::F32, ChannelCount::Rgb) => simd::apply_packed::<f32, 3>,
-        (SampleType::F32, ChannelCount::Rgba) => simd::apply_packed::<f32, 4>,
-    })
 }
 
 /// Applies an affine transform to `input`, sampling into `output`.
@@ -87,23 +88,37 @@ pub(super) fn packed_kernel(
 /// Panics unless `input` and `output` share a color format. Their dimensions
 /// need not match — that is what makes this a resample.
 pub(super) fn apply(warp: &AffineWarp, input: &InterleavedImage, output: &mut InterleavedImage) {
+    apply_on(IsaTier::widest(), warp, input, output);
+}
+
+/// [`apply`] through the warp's kernel on `tier`, or the scalar reference for a warp with none,
+/// one rayon job per row.
+pub(super) fn apply_on(
+    tier: IsaTier,
+    warp: &AffineWarp,
+    input: &InterleavedImage,
+    output: &mut InterleavedImage,
+) {
     let format = input.desc().color_format();
     assert_eq!(
         format,
         output.desc().color_format(),
         "input/output color format mismatch"
     );
-
-    if let Some(kernel) = SimdTier::dispatch(|tier| packed_kernel(tier, format, warp.filter)) {
-        unsafe { kernel(warp, input, output) };
+    let Some(kernel) = BilinearKernel::of(warp, input.desc(), output.desc()) else {
+        apply_scalar(warp, input, output);
         return;
-    }
-
-    apply_scalar(warp, input, output);
+    };
+    let map = SourceMap::new(warp.inverse());
+    let stride = output.desc().row_byte_len();
+    par::chunks_mut(output.bytes_mut(), stride)
+        .enumerate()
+        .for_each(|(y, row)| kernel.warp_row(tier, input, map, y, row));
 }
 
 /// The scalar reference, picking the storage type and channel count the format
-/// stores pixels in. Split out so the tests can reach it past SIMD dispatch.
+/// stores pixels in: what a warp with no kernel takes, and what the tests hold
+/// every kernel to.
 pub(super) fn apply_scalar(
     warp: &AffineWarp,
     input: &InterleavedImage,
@@ -140,7 +155,7 @@ fn apply_typed<T, const N: usize>(
     let out_w = output.desc().size().width;
     let out_stride = output.desc().row_byte_len();
 
-    let inv = warp.inverse();
+    let map = SourceMap::new(warp.inverse());
     let filter = warp.filter;
 
     par::chunks_mut(output.bytes_mut(), out_stride)
@@ -148,8 +163,7 @@ fn apply_typed<T, const N: usize>(
         .for_each(|(y, out_row_byte_len)| {
             let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_byte_len);
             for x in 0..out_w {
-                let out_pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-                let src = inv.transform_point2(out_pos) - Vec2::splat(0.5);
+                let src = map.position(x, y);
                 let rgba = match filter {
                     FilterMode::Nearest => source.nearest::<N>(src),
                     FilterMode::Bilinear => source.bilinear::<N>(src),

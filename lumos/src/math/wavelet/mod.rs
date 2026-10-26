@@ -10,8 +10,8 @@
 use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 use common::Size2us;
+use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];

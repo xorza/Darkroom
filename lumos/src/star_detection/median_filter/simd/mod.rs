@@ -5,7 +5,7 @@
 //! with no scalar remainder: the last vector overlaps the one before it and recomputes a few
 //! pixels to the same values, and a row narrower than a vector runs one zero-padded vector.
 
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// The interior of one row, pixels `1..width − 1` of `output`, from the rows above, at and below
 /// it. The edges carry no full window and are left alone.

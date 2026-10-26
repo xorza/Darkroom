@@ -3,5 +3,4 @@
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
 - wire zips
-- simd consolidation
 - decide which imaginarium nodes keep an image's metadata, flags and flat gain

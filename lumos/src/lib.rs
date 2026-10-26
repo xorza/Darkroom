@@ -58,7 +58,6 @@ mod progress;
 mod recycled;
 mod registration;
 mod scratch_pool;
-mod simd;
 mod stack_product;
 mod star_detection;
 mod unsafe_send_ptr;

@@ -5,8 +5,8 @@ use rayon::prelude::*;
 
 use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};
 use crate::bit_buffer2::BitBuffer2;
-use crate::simd::Kernel;
 use crate::star_detection::threshold_mask::simd::ProcessWords;
+use simd::Kernel;
 
 /// What a threshold comparison needs beyond the buffers: how many σ above the noise a pixel must
 /// sit, and the floor its σ is held to first.

@@ -11,8 +11,9 @@ reads rasters through its codecs.
 - **Every format.** A new op or shader handles the full format set, or
   declares the narrower list it supports.
 - **One rounding rule.** Narrowing into an integer sample rounds to nearest,
-  ties to even, and saturates; the SIMD kernels and the shaders follow the
-  scalar rule, and every GPU test compares with the CPU result.
+  ties to even, and saturates; the vector kernels take it from the `simd`
+  crate's clamped round, the shaders follow it, and every GPU test compares
+  with the CPU result.
 - **Pixels alone.** `InterleavedImage` and `PlanarImage` hold samples; lumos
   wraps the planes with its metadata, flags and flat gain. Refused: an image
   with a metadata field, which would carry FITS keywords into the raster ops.

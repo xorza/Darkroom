@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::fixture;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{scalar, sum_f32, weighted_sums};
-use crate::simd::isa_tier::IsaTier;
+use simd::IsaTier;
 
 /// The 6/10/12/24 rungs measure the range about the one-vector gate: steps of 4, 8, 16 jump clean
 /// over it.

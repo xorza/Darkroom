@@ -15,8 +15,8 @@
 
 use crate::math::lm_controller::NormalEquations;
 use crate::math::pixel_quadrature::{MAX_ORDER, PixelQuadrature};
-use crate::simd::{F64_LANES, F64x4, Isa, Kernel};
 use crate::star_detection::centroid::profile_problem::FitData;
+use simd::{F64_LANES, F64x4, Isa, Kernel};
 
 /// One vector of a stamp's samples: positions and values.
 #[derive(Debug, Clone, Copy)]
@@ -290,9 +290,9 @@ impl<S: Isa, P: LaneProfile<S, N>, const N: usize> LaneSink<S> for NormalSums<P,
 pub(crate) mod internals {
     use crate::math::lm_controller::NormalEquations;
     use crate::math::pixel_quadrature::PixelQuadrature;
-    use crate::simd::isa_tier::IsaTier;
     use crate::star_detection::centroid::profile_problem::FitData;
     use crate::star_detection::centroid::simd::{BatchModel, Chi2Kernel, NormalEquationsKernel};
+    use simd::IsaTier;
 
     /// Every entry's bits, Hessian then gradient then χ².
     fn bits<const N: usize>(equations: &NormalEquations<N>) -> Vec<u64> {
