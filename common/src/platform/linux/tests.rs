@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use crate::platform::linux::internals::first_on_disk;
 use crate::platform::linux::memory_backed_in;
 use crate::platform::linux::mount_table::MountTable;
 use crate::platform::{FileSystem, UserCache};
@@ -29,6 +30,31 @@ fn a_directory_on_tmpfs_or_ramfs_is_memory_backed() {
         memory_backed_in(&mounts("tmpfs"), Path::new("/home/u")),
         None
     );
+}
+
+/// A temporary directory on tmpfs gives way to `/var/tmp`, and one on disk stays: `/tmp` as tmpfs
+/// and as ext4 in turn, a `$TMPDIR` under `/home` beside a tmpfs `/tmp`, and none when `/var/tmp`
+/// is tmpfs as well.
+#[test]
+fn the_disk_temp_dir_leaves_a_memory_backed_tmp() {
+    let mounts = |tmp: &str, var_tmp: &str| {
+        MountTable::parse(&format!(
+            "22 1 8:2 / / rw - ext4 /dev/sda2 rw\n\
+             30 22 0:40 / /tmp rw - {tmp} none rw\n\
+             31 22 0:41 / /var/tmp rw - {var_tmp} none rw\n"
+        ))
+    };
+    let first = |mounts: &MountTable, temp: &str| {
+        first_on_disk(mounts, [PathBuf::from(temp), PathBuf::from("/var/tmp")])
+    };
+    let path = |path: &str| Some(PathBuf::from(path));
+    assert_eq!(first(&mounts("tmpfs", "ext4"), "/tmp"), path("/var/tmp"));
+    assert_eq!(first(&mounts("ext4", "ext4"), "/tmp"), path("/tmp"));
+    assert_eq!(
+        first(&mounts("tmpfs", "ext4"), "/home/u/tmp"),
+        path("/home/u/tmp")
+    );
+    assert_eq!(first(&mounts("tmpfs", "tmpfs"), "/tmp"), None);
 }
 
 /// `XDG_CACHE_HOME` when absolute, then `~/.cache`, then `/var/tmp`, each with `lumos` below.

@@ -288,7 +288,18 @@ pub(crate) fn observe(path: &Path) -> io::Result<Observed> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
-    use crate::platform::{MappedFile, ScratchFile, files, os};
+    use std::path::PathBuf;
+
+    use crate::platform::{FileSystem, MappedFile, ScratchFile, files, os};
+
+    impl FileSystem {
+        /// A temporary directory on disk: the system's — `%TMP%`, else `%TEMP%`, on Windows;
+        /// `$TMPDIR`, else `/tmp`, on macOS and Linux — else `/var/tmp` on Linux; `None` when
+        /// both are memory-backed.
+        pub(crate) fn disk_temp_dir() -> Option<PathBuf> {
+            os::internals::disk_temp_dir()
+        }
+    }
 
     impl ScratchFile {
         /// Whether a scratch file keeps its name in its directory while it is open: not on Unix,

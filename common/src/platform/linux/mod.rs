@@ -19,12 +19,16 @@ pub(super) fn available_memory(system: &System) -> u64 {
         .map_or(host, |groups| host.min(groups))
 }
 
+/// The disk-backed directory every Linux system has: `file-hierarchy(7)` names it the place for
+/// larger temporary files, and the FHS keeps it across reboots.
+const VAR_TMP: &str = "/var/tmp";
+
 /// `$XDG_CACHE_HOME` when absolute, as the XDG specification says, else `~/.cache`, else
-/// `/var/tmp`, a disk-backed directory every Linux system has.
+/// [`VAR_TMP`].
 pub(super) fn user_cache_root(var: &dyn Fn(&str) -> Option<PathBuf>) -> PathBuf {
     var("XDG_CACHE_HOME")
         .or_else(|| var("HOME").map(|home| home.join(".cache")))
-        .unwrap_or_else(|| PathBuf::from("/var/tmp"))
+        .unwrap_or_else(|| PathBuf::from(VAR_TMP))
 }
 
 /// The memory-backed file system `path` lies on, from this process's `mountinfo`.
@@ -42,11 +46,36 @@ fn memory_backed_in(mounts: &MountTable, path: &Path) -> Option<String> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::env;
     use std::ffi::c_void;
     use std::fs::File;
     use std::os::fd::AsRawFd;
+    use std::path::PathBuf;
 
     use memmap2::Mmap;
+
+    use crate::fs;
+    use crate::platform::linux::mount_table::MountTable;
+    use crate::platform::linux::{VAR_TMP, memory_backed_in};
+
+    /// The system's temporary directory, else [`VAR_TMP`], whichever resolves first to a directory
+    /// on disk by this process's `mountinfo`: `/tmp` is tmpfs on Debian 13 and Arch. Resolved, as
+    /// the mount a link leads to is the one written to.
+    pub(crate) fn disk_temp_dir() -> Option<PathBuf> {
+        let resolved = [env::temp_dir(), PathBuf::from(VAR_TMP)]
+            .into_iter()
+            .filter_map(|dir| fs::canonicalize(dir).ok());
+        first_on_disk(&MountTable::read(), resolved)
+    }
+
+    /// The first of `dirs` not memory-backed among `mounts`.
+    pub(super) fn first_on_disk(
+        mounts: &MountTable,
+        dirs: impl IntoIterator<Item = PathBuf>,
+    ) -> Option<PathBuf> {
+        dirs.into_iter()
+            .find(|dir| memory_backed_in(mounts, dir).is_none())
+    }
 
     /// [`evict`] drops a file's pages by `POSIX_FADV_DONTNEED`.
     pub(crate) const EVICTS: bool = true;

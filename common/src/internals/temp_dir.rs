@@ -17,7 +17,7 @@ impl TempDir {
     /// left behind by a killed run says what it was for.
     pub fn new(tag: &str) -> Self {
         let path = internals::unique_temp_path(tag);
-        fs::create_dir_all(&path).expect("a test temp directory is creatable");
+        fs::create_dir(&path).expect("a test temp directory is creatable");
         Self(path)
     }
 
