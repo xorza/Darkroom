@@ -18,10 +18,6 @@ pub(crate) enum AppHost {
     Window(HostHandle<App>),
     /// The harness, which runs every frame itself and reads what the app asked of it.
     #[cfg(feature = "internals")]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "made by the harness, which lands after this seam")
-    )]
     Offscreen(Arc<OffscreenSignals>),
 }
 

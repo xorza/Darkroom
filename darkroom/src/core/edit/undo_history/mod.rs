@@ -240,7 +240,7 @@ fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
     start..end
 }
 
-#[cfg(test)]
+#[cfg(feature = "internals")]
 pub(crate) mod internals {
     use crate::core::edit::undo_history::UndoHistory;
 

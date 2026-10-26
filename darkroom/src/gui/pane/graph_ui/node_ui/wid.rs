@@ -53,7 +53,7 @@ pub(crate) fn body(node_id: NodeId) -> WidgetId {
 /// A node's inline title-rename editor *and* its idle label, so the same id is
 /// recorded across the label⇄editor swap. Polled by [`drag_handles`] to drag
 /// the node by its title (the idle label senses `DRAG`).
-pub(super) fn rename(node_id: NodeId) -> WidgetId {
+pub(crate) fn rename(node_id: NodeId) -> WidgetId {
     node("title_rename", node_id)
 }
 
