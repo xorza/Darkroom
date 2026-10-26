@@ -107,6 +107,9 @@ pub fn init_tracing() {
 #[cfg(feature = "internals")]
 pub mod bench;
 
+#[cfg(feature = "internals")]
+pub mod internals;
+
 #[cfg(test)]
 #[expect(
     unsafe_code,

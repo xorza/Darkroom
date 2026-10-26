@@ -375,7 +375,6 @@ pub(crate) mod internals {
         }
 
         /// Whether an undo would take an entry back.
-        #[cfg(test)]
         pub(crate) fn can_undo(&self) -> bool {
             self.history.can_undo()
         }

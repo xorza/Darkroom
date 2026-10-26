@@ -23,6 +23,11 @@ relative paths, and it is made in the editor through the finished harness.
 - `FrameReport` says `repaint_requested` and `repaint_after`; a focused text field's caret asks
   `repaint_after` for 30 s.
 - darkroom's `SessionHarness` and `CanvasHarness` run on fixtures, with no runtime and no worker.
+- `darkroom::internals::harness::Harness` runs the real `App` on `DisplayKind::Gpu` (palantir's
+  `internals::HeadlessWindow`) or `DisplayKind::Cpu` (`UiHarness`): `open` (a copy of the folder,
+  or in place), `resize`, `act(&[Action])`, `state(Detail, nodes)`, `ui(filter, limit)`,
+  `wait_run(timeout)`, with `Locator`s by node, title, port, world point, text, screen point,
+  offset and `Nth`.
 - `App::new(ui, AppHost, LaunchInputs)`: `AppHost::Offscreen(Arc<OffscreenSignals>)` gives the
   harness the app's wakes and quit; `LaunchInputs` carries a `PreferencesStore` (`File(path)` or
   `Memory`) and a `Dialogs` (`Native`, or `Scripted` answers under `internals`).
@@ -31,53 +36,7 @@ relative paths, and it is made in the editor through the finished harness.
 
 ## Plan
 
-### 1. The harness core
-
-Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locator.rs`,
-`state.rs`, `clock.rs`, `log.rs`, `tests.rs`); `darkroom/src/lib.rs`'s `internals`.
-
-- [ ] `Harness::new(HarnessConfig { display: DisplayKind, size: UVec2, scale: f32 })` makes the
-  session directory `darkroom-harness-<pid>-<n>` under `common::env::temp_dir()`, removed when the
-  harness drops, and builds `App` with `AppHost::Offscreen`, `PreferencesStore::Memory` and
-  `Dialogs::Scripted`. `DisplayKind::Gpu` opens `RequestedGpu::headless` and an `OffscreenHost`
-  with bundled fonts, and panics with the adapter error when there is none; `DisplayKind::Cpu`
-  runs `UiHarness::with_text` and `frame_app`. Both take input as `InputEvent`s through
-  `on_input`, so one input path serves both.
-- [ ] `Harness::open(path, in_place: bool)`: copies the document's folder into the session
-  directory and opens the copy, or opens the path itself with `in_place`. A folder over 256 MiB, or
-  a relative path that leaves the folder, is `HarnessError::CopyRefused` with the reason and the
-  `in_place` hint. `Harness::resize(size, scale)`.
-- [ ] `SteppedClock`: each frame advances 1/60 s, injected into `OffscreenHost` and driven by
-  `UiHarness::advance` on `Cpu`; a click after another click advances past `DOUBLE_CLICK_WINDOW`
-  first, unless the action is a double-click.
-- [ ] `Action`: `Move(Locator)`, `Click { at, button, mods }`, `DoubleClick(at)`,
-  `Drag { from, to, button, mods, steps }`, `Scroll { at, delta }`, `Pinch { at, factor }`,
-  `Key(chord)` (`"ctrl+z"`), `Type(text)`, `Answer(DialogAnswer)`. `Harness::act(&[Action])`
-  runs each and settles after each: frames until a frame asks no repaint, no input is held and no
-  app wake is pending, a timer wake not counted, bounded by a timeout that is an error naming the
-  step. `act` returns what changed: the selection, dirty, focus and popups.
-- [ ] `Locator`: `Node(name or id)`, `NodeHeader(..)`, `Port { node, side, port }`, `Tab(name)`,
-  `World(x, y)`, `Text(string)`, `Screen(x, y)`, each with an optional offset. Node and port
-  locators resolve through the graph pane's geometry and the viewport; `Text` through
-  `Ui::inspect`. More than one match is `HarnessError::Ambiguous` with every match; none is
-  `NotFound` with the nearest names.
-- [ ] `Harness::state(Detail)`: `Concise` gives the nodes by name with their screen rects, the
-  selection, dirty, focus, open popups, the status line, and the warnings and errors logged since
-  the last call; `Detailed` adds ids, ports with their bindings, the wires, the viewport, undo depth
-  and the run status of each node, and takes a node-name filter. `Harness::ui(filter, limit)`
-  gives `Ui::inspect`'s unclipped entries and the count it left out; each entry's text is cut at
-  120 characters with its full length, as a scroll area's text is all its rows.
-  `Harness::wait_run(timeout)`. The log is a tracing layer the harness installs, kept in a ring
-  of 200 lines.
-- [ ] Tests with `DisplayKind::Cpu` on `DocumentFixture` documents saved to a temp folder: a click
-  on a node selects it; a drag of a node header moves it by the pointer's travel, exactly; a drag
-  from an output port to an input port binds the wire; `Key("ctrl+z")` takes it back; a
-  right-click on the canvas opens the new-node popup, `Type` filters it, and a click on a `Text`
-  locator adds the node; `Node("missing")` is `NotFound`, and two nodes of one name are
-  `Ambiguous`; a focused text field still settles; a copied session leaves the source folder
-  unchanged byte for byte; a 257 MiB folder is refused (made of one sparse file).
-
-### 2. darkroom: copy and save the view
+### 1. darkroom: copy and save the view
 
 Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui/app/mod.rs`.
 
@@ -86,7 +45,7 @@ Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui
   image copies it to the clipboard or saves it through `Dialogs` and `common::fs`. Test: a
   scripted Save answers a path, and the file there decodes to the screenshot's pixels.
 
-### 3. Shots
+### 2. Shots
 
 Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
 `darkroom/src/harness/tests.rs`.
@@ -104,7 +63,7 @@ Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
   margin; a `max_side` of 100 scales a 400 × 300 window to 100 × 75 and its legend by 1/4. A node's
   rect from `state` is the same on `Cpu` and `Gpu`.
 
-### 4. The MCP server
+### 3. The MCP server
 
 Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src/tests.rs`), root
 `Cargo.toml` (member, dependency, drive command), new `.mcp.json`.
@@ -129,7 +88,7 @@ Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src
   locator is a tool error that lists both matches; a harness panic answers the next call with its
   message and leaves the server serving.
 
-### 5. Relative paths in a document
+### 4. Relative paths in a document
 
 Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every other reader of
 `required_fs_path`; scenarium's invocation context; `darkroom/src/core/runtime_host/`,
@@ -148,7 +107,7 @@ Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every othe
   the same undo step as the save's path change. Test: `a/b.tiff` saved from `/p` to `/p/q` becomes
   `../a/b.tiff`.
 
-### 6. The sample project
+### 5. The sample project
 
 Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 `darkroom/src/core/open_document/tests.rs`.
@@ -161,7 +120,7 @@ Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 - [ ] Test: the sample opens with an empty `LoadReport`, compiles and runs to completion on the
   real library, and each preview receives an image of the input's size.
 
-### 7. Fold the decisions into the documents
+### 6. Fold the decisions into the documents
 
 Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `HARNESS_PLAN.md`.
 
@@ -189,3 +148,16 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
   ask with no answer of its shape reads as a cancel and logs an error, which the harness's log
   reports, rather than writing the status log: the dialogs know no status log, and a pick already
   returns `None` for a cancel.
+- The harness core: the session directory is under `common::env::temp_dir()` as planned. These
+  differ from the plan, each for the reason given:
+  - `Locator::Nth(locator, n)` picks one of several `Node` or `Text` matches, as Playwright's
+    `nth` does: a palette's search field shows the typed text beside the row it finds.
+  - No `Tab` locator: a tab chip shows its name, so `Text` finds it.
+  - `resize` takes a size only; the scale is the session's, as a window keeps its monitor.
+  - `State` reports `can_undo`, not an undo depth, which the history does not count; and no open
+    popups, which `Ui::inspect` does not mark: their rows are in `ui()`.
+  - The relative-path check of a copy waits for the batch that brings relative paths.
+  - The log ring is the harness thread's default subscriber, so it holds the app's own warnings
+    and errors, not the worker thread's.
+  - palantir gained `internals::HeadlessWindow`, so darkroom names no wgpu type, and
+    `internals::DOUBLE_CLICK_WINDOW`, so the click spacing is the input state's own.

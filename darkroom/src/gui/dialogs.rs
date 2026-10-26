@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use common::fs;
 
 use crate::core::io::document;
+#[cfg(feature = "internals")]
+use crate::internals::harness::action::DialogAnswer;
 
 /// Where `App`'s path picks are answered.
 #[derive(Debug)]
@@ -21,27 +23,7 @@ pub(crate) enum Dialogs {
     /// dialog. An ask with no answer left, or with an answer of the other shape, reads as a
     /// cancel and logs an error, which the harness reports.
     #[cfg(feature = "internals")]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "made by the harness, which lands after this seam")
-    )]
     Scripted(VecDeque<DialogAnswer>),
-}
-
-/// One scripted answer to a dialog.
-#[cfg(feature = "internals")]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "made by the harness, which lands after this seam")
-)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DialogAnswer {
-    /// One path, for every ask but the multi-file pick.
-    Path(PathBuf),
-    /// The multi-file pick's paths.
-    Paths(Vec<PathBuf>),
-    /// The user closed the dialog.
-    Cancel,
 }
 
 #[cfg_attr(

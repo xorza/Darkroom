@@ -725,6 +725,43 @@ impl palantir::App for App {
     }
 }
 
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use std::sync::Arc;
+
+    use scenarium::Library;
+
+    use crate::core::open_document::OpenDocument;
+    use crate::core::status_log::StatusLog;
+    use crate::gui::app::App;
+    use crate::gui::dialogs::Dialogs;
+    use crate::gui::state::run_state::RunState;
+
+    /// What the harness reads of the app between frames, and the dialogs it answers.
+    impl App {
+        pub(crate) const fn open_document(&self) -> &OpenDocument {
+            &self.session.open
+        }
+
+        pub(crate) const fn status(&self) -> &StatusLog {
+            &self.status
+        }
+
+        pub(crate) const fn run_state(&self) -> &RunState {
+            &self.run_state
+        }
+
+        /// The library this session resolves the document's funcs against.
+        pub(crate) const fn library(&self) -> &Arc<Library> {
+            self.runtime.library.cur()
+        }
+
+        pub(crate) const fn dialogs_mut(&mut self) -> &mut Dialogs {
+            &mut self.dialogs
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,7 +835,7 @@ mod tests {
         use palantir::internals::ui_harness::UiHarness;
 
         use crate::gui::app::offscreen_signals::OffscreenSignals;
-        use crate::gui::dialogs::DialogAnswer;
+        use crate::internals::harness::action::DialogAnswer;
 
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");

@@ -22,10 +22,6 @@ impl OffscreenSignals {
     }
 
     /// Whether a wake came since the last call; the call clears it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read by the harness, which lands after this seam")
-    )]
     pub(crate) fn take_wake(&self) -> bool {
         self.woken.swap(false, Ordering::AcqRel)
     }
