@@ -22,6 +22,8 @@ pub(crate) enum StatusFamily {
     Preferences,
     /// Setting a node input from a dialog's pick.
     Edit,
+    /// Copying or saving an image of the window.
+    View,
 }
 
 /// How the status bar paints a line.

@@ -1,5 +1,6 @@
 //! [`AppCommand`]: what a surface asks of the shell, by group — the document
-//! file, the worker, the preferences, and edits that need a dialog first.
+//! file, the worker, the preferences, the window's image, and edits that need a
+//! dialog first.
 //!
 //! Data only. `App::run_command` is what each one does: the work bridges the
 //! open document, the runtime, the preferences and the dialogs, so it belongs
@@ -30,6 +31,8 @@ pub(crate) enum AppCommand {
     Preferences(PreferencesCommand),
     /// Node edits raised via a dialog.
     Edit(EditCommand),
+    /// An image of the window.
+    View(ViewCommand),
     /// Quit the app, through the unsaved-changes prompt.
     Quit,
 }
@@ -45,6 +48,15 @@ pub(crate) enum FileCommand {
     Save,
     /// Always prompt for a destination.
     SaveAs,
+}
+
+/// An image of the whole window as the next frame paints it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ViewCommand {
+    /// Put it on the clipboard.
+    CopyImage,
+    /// Prompt for a file and save it there as a PNG.
+    SaveImage,
 }
 
 /// Graph execution + the worker event loop. Commands only request work;

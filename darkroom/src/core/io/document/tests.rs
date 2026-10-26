@@ -48,19 +48,6 @@ fn document_extension_is_required_case_insensitively() {
     let uppercase = dir.join("uppercase.DARKROOM");
     save(&document, &uppercase).expect("uppercase extension is valid");
     assert_eq!(load(&uppercase).unwrap(), document);
-
-    assert_eq!(
-        with_extension(PathBuf::from("scene")),
-        PathBuf::from("scene.darkroom")
-    );
-    assert_eq!(
-        with_extension(PathBuf::from("scene.json")),
-        PathBuf::from("scene.darkroom")
-    );
-    assert_eq!(
-        with_extension(PathBuf::from("scene.DARKROOM")),
-        PathBuf::from("scene.DARKROOM")
-    );
 }
 
 #[test]

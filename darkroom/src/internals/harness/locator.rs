@@ -48,20 +48,10 @@ pub enum Side {
 }
 
 impl Locator {
-    /// The window point this locator names in `app`'s current frame.
+    /// The window point this locator names in `app`'s current frame: a widget's centre, or the
+    /// point itself.
     pub(crate) fn point(&self, app: &App, ui: &Ui) -> Result<Vec2, HarnessError> {
         match self {
-            Self::Node(node) => {
-                self.on_screen(ui.response_for(wid::body(find_node(self, app, node)?)).rect)
-            }
-            Self::NodeHeader(node) => self.on_screen(
-                ui.response_for(wid::rename(find_node(self, app, node)?))
-                    .rect,
-            ),
-            Self::Port { node, side, port } => {
-                let port = find_port(self, app, find_node(self, app, node)?, *side, port)?;
-                self.on_screen(ui.response_for(port_row::port_circle_wid(port)).rect)
-            }
             Self::World(point) => {
                 let canvas = ui.response_for(canvas::outer_wid()).rect.ok_or_else(|| {
                     HarnessError::OffScreen {
@@ -71,9 +61,33 @@ impl Locator {
                 let viewport = app.open_document().document.main_view.viewport;
                 Ok(canvas.min + viewport.pan + *point * viewport.zoom)
             }
-            Self::Text(text) => find_text(self, ui, text),
             Self::Screen(point) => Ok(*point),
             Self::Offset(inner, by) => Ok(inner.point(app, ui)? + *by),
+            Self::Node(_)
+            | Self::NodeHeader(_)
+            | Self::Port { .. }
+            | Self::Text(_)
+            | Self::Nth(..) => self.rect(app, ui).map(Rect::center),
+        }
+    }
+
+    /// The visible rect, in the window's logical pixels, of the widget this locator names: a
+    /// node's body, its title, a port circle, a text, or one of several of them. A point names
+    /// no widget.
+    pub(crate) fn rect(&self, app: &App, ui: &Ui) -> Result<Rect, HarnessError> {
+        match self {
+            Self::Node(node) => {
+                self.visible(ui.response_for(wid::body(find_node(self, app, node)?)).rect)
+            }
+            Self::NodeHeader(node) => self.visible(
+                ui.response_for(wid::rename(find_node(self, app, node)?))
+                    .rect,
+            ),
+            Self::Port { node, side, port } => {
+                let port = find_port(self, app, find_node(self, app, node)?, *side, port)?;
+                self.visible(ui.response_for(port_row::port_circle_wid(port)).rect)
+            }
+            Self::Text(text) => find_text(self, ui, text),
             Self::Nth(inner, n) => {
                 let not_found = |count: usize| HarnessError::NotFound {
                     locator: format!("{self:?}"),
@@ -83,12 +97,12 @@ impl Locator {
                     Self::Node(node) => {
                         let ids = node_ids(app, node);
                         let id = ids.get(*n).ok_or_else(|| not_found(ids.len()))?;
-                        self.on_screen(ui.response_for(wid::body(*id)).rect)
+                        self.visible(ui.response_for(wid::body(*id)).rect)
                     }
                     Self::Text(text) => {
                         let (_, matches) = text_matches(ui, text);
                         let widget = matches.get(*n).ok_or_else(|| not_found(matches.len()))?;
-                        Ok(widget.rect.center())
+                        Ok(widget.rect)
                     }
                     _ => Err(HarnessError::NotFound {
                         locator: format!("{self:?}"),
@@ -96,14 +110,17 @@ impl Locator {
                     }),
                 }
             }
+            Self::World(_) | Self::Screen(_) | Self::Offset(..) => Err(HarnessError::NotFound {
+                locator: format!("{self:?}"),
+                nearest: vec!["a point names no widget".to_string()],
+            }),
         }
     }
 
-    /// The center of `rect`, the visible rect of what this locator names; `None` is a widget that
-    /// did not record or that its clip hides.
-    fn on_screen(&self, rect: Option<Rect>) -> Result<Vec2, HarnessError> {
+    /// `rect`, the visible rect of what this locator names; `None` is a widget that did not
+    /// record or that its clip hides.
+    fn visible(&self, rect: Option<Rect>) -> Result<Rect, HarnessError> {
         rect.filter(|rect| !rect.is_paint_empty())
-            .map(Rect::center)
             .ok_or_else(|| HarnessError::OffScreen {
                 locator: format!("{self:?}"),
             })
@@ -186,11 +203,11 @@ fn find_port(
     })
 }
 
-/// The center of the one visible interactive widget showing exactly `text`.
-fn find_text(locator: &Locator, ui: &Ui, text: &str) -> Result<Vec2, HarnessError> {
+/// The rect of the one visible interactive widget showing exactly `text`.
+fn find_text(locator: &Locator, ui: &Ui, text: &str) -> Result<Rect, HarnessError> {
     let (widgets, matches) = text_matches(ui, text);
     match matches.as_slice() {
-        [one] => Ok(one.rect.center()),
+        [one] => Ok(one.rect),
         [] => Err(HarnessError::NotFound {
             locator: format!("{locator:?}"),
             nearest: nearest(widgets.iter().map(|widget| widget.text.clone()), text),

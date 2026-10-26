@@ -4,15 +4,16 @@ use palantir::{CloseHandle, DockOperation, MenuSeparator};
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
+use crate::gui::frame::app_command::ViewCommand;
 use crate::gui::frame::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
 ///
-/// A pick goes onto `out` in whichever tier it belongs to: the file lifecycle
-/// and `Quit` as [`AppCommand`]s for `App` to run after the pass, Preferences
-/// as the [`DockOperation`] that opens its tab.
+/// A pick goes onto `out` in whichever tier it belongs to: the file lifecycle,
+/// the view's image and `Quit` as [`AppCommand`]s for `App` to run after the
+/// pass, Preferences as the [`DockOperation`] that opens its tab.
 pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
     Panel::hstack()
         .auto_id()
@@ -21,6 +22,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
         .gap(2.0)
         .show(ui, |ui| {
             file_menu(ui, theme, out);
+            view_menu(ui, theme, out);
         });
 }
 
@@ -74,6 +76,25 @@ fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
         MenuSeparator::new().show(ui);
         if MenuItem::new("Quit").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::Quit);
+        }
+    });
+}
+
+fn view_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
+    Dropdown { label: "View" }.show(ui, theme, |ui, popup| {
+        if MenuItem::new("Copy View as Image")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            out.push_app(AppCommand::View(ViewCommand::CopyImage));
+        }
+        if MenuItem::new("Save View as PNG…")
+            .show(ui, popup)
+            .left
+            .clicked()
+        {
+            out.push_app(AppCommand::View(ViewCommand::SaveImage));
         }
     });
 }

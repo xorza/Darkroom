@@ -21,9 +21,11 @@ use crate::gui::app::app_host::AppHost;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
-use crate::gui::dialogs::Dialogs;
+use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
+use crate::gui::dialogs::{Dialogs, SavedFile};
 use crate::gui::frame::app_command::{
     AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PreferencesCommand, RunCommand,
+    ViewCommand,
 };
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
@@ -38,6 +40,7 @@ mod error;
 #[cfg(feature = "internals")]
 pub(crate) mod offscreen_signals;
 pub(crate) mod session;
+pub(crate) mod view_capture;
 
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Session`] that authors each
@@ -82,6 +85,8 @@ pub(crate) struct App {
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
     confirm_discard: Option<PendingTransition>,
+    /// The image of the window a View command waits on; a second command replaces the first.
+    capture: Option<ViewCapture>,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
     /// `App` rather than `Editor` because it measures the process, not the
     /// document. Sampled where it is consumed rather than in `update`:
@@ -191,6 +196,7 @@ impl App {
             preferences_store,
             dialogs,
             confirm_discard: None,
+            capture: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
@@ -235,6 +241,14 @@ impl App {
             }
             AppCommand::Edit(EditCommand::PickInputPath(pick)) => {
                 return self.pick_input_path(&pick);
+            }
+            AppCommand::View(ViewCommand::CopyImage) => {
+                self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
+            }
+            AppCommand::View(ViewCommand::SaveImage) => {
+                if let Some(path) = self.dialogs.save_path(SavedFile::PNG, None) {
+                    self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
+                }
             }
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
         }
@@ -496,7 +510,7 @@ impl App {
     fn save_document_as(&mut self) {
         if let Some(path) = self
             .dialogs
-            .project_save_path(self.session.open.path.as_deref())
+            .save_path(SavedFile::PROJECT, self.session.open.path.as_deref())
         {
             self.save_document(&path);
         }
@@ -617,6 +631,20 @@ impl App {
     fn stop_events(&self) {
         self.runtime.stop_event_loop();
     }
+
+    /// Hand the image that landed this frame to the capture that asked for it.
+    fn deliver_capture(&mut self, ui: &Ui) {
+        let Some(shot) = ui.screenshot_taken() else {
+            return;
+        };
+        let Some(capture) = self.capture.take_if(|capture| capture.asked()) else {
+            return;
+        };
+        match capture.deliver(shot, &ui.clipboard()) {
+            Ok(()) => self.status.succeeded(StatusFamily::View),
+            Err(error) => self.status.error(StatusFamily::View, error.to_string()),
+        }
+    }
 }
 
 /// One picked path as an `FsPath` input value.
@@ -673,6 +701,7 @@ impl palantir::App for App {
         );
         self.session.reconcile_caches();
 
+        self.deliver_capture(ui);
         self.handle_close_request(ui);
     }
 
@@ -713,6 +742,9 @@ impl palantir::App for App {
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
             needs_relayout |= self.run_command(command);
+        }
+        if let Some(capture) = &mut self.capture {
+            capture.ask(ui);
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,

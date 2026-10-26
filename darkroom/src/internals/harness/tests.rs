@@ -2,14 +2,16 @@ use std::path::PathBuf;
 
 use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
-use palantir::{Modifiers, PointerButton};
+use palantir::{DockView, Modifiers, PointerButton, Rect};
 use scenarium::NodeId;
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::open_document::OpenDocument;
-use crate::internals::harness::action::{Action, DRAG_STEPS};
+use crate::gui::theme::Theme;
+use crate::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
 use crate::internals::harness::error::HarnessError;
 use crate::internals::harness::locator::{Locator, Side};
+use crate::internals::harness::shot::{NODE_MARGIN, Region, Shot};
 use crate::internals::harness::state::Detail;
 use crate::internals::harness::{COPY_LIMIT, DisplayKind, Harness, SessionConfig};
 
@@ -22,6 +24,24 @@ fn harness() -> Harness {
         size: UVec2::new(1600, 1000),
         scale: 1.0,
     })
+}
+
+/// A 400 × 300 window at scale 1 on `display`.
+fn small(display: DisplayKind) -> Harness {
+    Harness::new(SessionConfig {
+        display,
+        size: UVec2::new(400, 300),
+        scale: 1.0,
+    })
+}
+
+fn decode(png: &[u8]) -> image::RgbaImage {
+    image::load_from_memory(png).unwrap().to_rgba8()
+}
+
+fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
+    let bytes = color.to_srgba_u8();
+    [bytes.r, bytes.g, bytes.b, bytes.a]
 }
 
 /// A project of one node of each func named, from `harness`'s library, saved in `dir`.
@@ -322,4 +342,168 @@ fn a_linked_folder_is_refused() {
         harness.open(&path, false),
         Err(HarnessError::LinkedFolder { .. })
     ));
+}
+
+/// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
+/// show the theme's colours exactly, and the legend's node rect is the rect `state` reports, as
+/// the scale is 1. A `max_side` of 100 scales it to 100 × 75 and the legend by 1/4, exactly. A
+/// node's shot is its body, clipped by the canvas to (40, 100) to (327.5, 278), with 24 px around
+/// it, clamped to the window and rounded out: (16, 76) to (352, 300), 336 × 224, the body at
+/// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
+/// body's corner, and one past the window is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
+/// that are. The CPU display lays the node out where the GPU one does, and has no shots.
+#[test]
+fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
+    let mut harness = small(DisplayKind::Gpu);
+    let dir = TempDir::new("darkroom-harness-shot");
+    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    harness.open(&path, false).unwrap();
+    let screen = harness.state(Detail::Concise, None).nodes[0]
+        .screen
+        .unwrap();
+    assert_eq!(screen, [40.0, 100.0, 287.4953, 178.0]);
+
+    let theme = Theme::default();
+    let whole = harness.shot(&Region::Window, 400).unwrap();
+    assert_eq!(whole.size, UVec2::new(400, 300));
+    assert_eq!(whole.legend[0].name, BRIGHTNESS);
+    assert_eq!(whole.legend[0].rect, screen);
+    let pixels = decode(&whole.png);
+    assert_eq!(
+        pixels.get_pixel(380, 90).0,
+        srgb(theme.canvas.bg),
+        "the canvas"
+    );
+    assert_eq!(
+        pixels.get_pixel(250, 240).0,
+        srgb(theme.card.fill),
+        "the body"
+    );
+    assert_eq!(fs::read(&whole.path).unwrap(), whole.png);
+    assert!(
+        whole.path.ends_with("shots/001-window.png"),
+        "{}",
+        whole.path.display()
+    );
+
+    let quarter = harness.shot(&Region::Window, 100).unwrap();
+    assert_eq!(quarter.size, UVec2::new(100, 75));
+    assert_eq!(decode(&quarter.png).dimensions(), (100, 75));
+    assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
+    let ports = |shot: &Shot| {
+        shot.legend[0]
+            .inputs
+            .iter()
+            .chain(&shot.legend[0].outputs)
+            .map(|port| (port.name.clone(), port.rect))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ports(&quarter),
+        ports(&whole)
+            .into_iter()
+            .map(|(name, rect)| (name, rect.map(|v| v / 4.0)))
+            .collect::<Vec<_>>()
+    );
+
+    let node = harness
+        .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
+        .unwrap();
+    assert_eq!(NODE_MARGIN, 24.0);
+    assert_eq!(node.size, UVec2::new(336, 224));
+    assert_eq!(node.legend[0].rect[..2], [24.0, 24.0]);
+    assert!(
+        node.path
+            .ends_with("shots/003-node-brightness---contrast.png")
+    );
+
+    let id = node_id(&harness, BRIGHTNESS);
+    let placed = harness
+        .app
+        .open_document()
+        .document
+        .main_view
+        .item_placements[&id]
+        .pos;
+    let world = harness
+        .shot(
+            &Region::World(Rect::new(placed.x, placed.y, 100.0, 50.0)),
+            1000,
+        )
+        .unwrap();
+    assert_eq!(world.size, UVec2::new(100, 50));
+    assert_eq!(world.legend[0].rect, [0.0, 0.0, 100.0, 50.0]);
+    assert!(matches!(
+        harness.shot(&Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)), 1000),
+        Err(HarnessError::EmptyRegion { .. })
+    ));
+    assert!(
+        harness
+            .act(&[click(Locator::Node(BRIGHTNESS.to_string()))])
+            .is_ok(),
+        "settled after the failure"
+    );
+
+    let layout = &harness.app.open_document().document.layout;
+    let rect = harness
+        .display
+        .ui()
+        .response_for(DockView::pane_id(layout, layout.primary().id))
+        .rect
+        .unwrap();
+    let pane = harness
+        .shot(&Region::Pane("main".to_string()), 1000)
+        .unwrap();
+    let rounded = rect.max().ceil() - rect.min.floor();
+    assert_eq!(pane.size.as_vec2(), rounded, "{rect:?}");
+    match harness.shot(&Region::Pane("missing".to_string()), 1000) {
+        Err(HarnessError::NotFound { nearest, .. }) => assert_eq!(nearest, ["main"]),
+        other => panic!("{other:?}"),
+    }
+
+    let mut cpu = small(DisplayKind::Cpu);
+    cpu.open(&path, false).unwrap();
+    assert_eq!(
+        cpu.state(Detail::Concise, None).nodes[0].screen,
+        Some(screen)
+    );
+    assert!(matches!(
+        cpu.shot(&Region::Window, 100),
+        Err(HarnessError::NoGpu)
+    ));
+}
+
+/// View ▸ Copy View as Image puts an image on the clipboard, which then holds no text; View ▸
+/// Save View as PNG… writes the scripted answer with the extension added, and the file holds the
+/// window as a shot of it shows it.
+#[test]
+fn the_view_menu_copies_and_saves_the_window() {
+    let mut harness = small(DisplayKind::Gpu);
+    let dir = TempDir::new("darkroom-harness-view");
+    let path = project(&harness, &dir, &[BRIGHTNESS]);
+    harness.open(&path, false).unwrap();
+    let view = || click(Locator::Text("View".to_string()));
+
+    let clipboard = harness.display.ui().clipboard();
+    clipboard.set_text("text").unwrap();
+    harness
+        .act(&[
+            view(),
+            click(Locator::Text("Copy View as Image".to_string())),
+        ])
+        .unwrap();
+    assert_eq!(clipboard.text().unwrap(), "");
+
+    harness
+        .act(&[
+            Action::Answer(DialogAnswer::Path(dir.join("view"))),
+            view(),
+            click(Locator::Text("Save View as PNG…".to_string())),
+        ])
+        .unwrap();
+    let state = harness.state(Detail::Concise, None);
+    assert_eq!((state.status, state.log), (None, Vec::<String>::new()));
+    let saved = decode(&fs::read(dir.join("view.png")).unwrap());
+    let shot = harness.shot(&Region::Window, 400).unwrap();
+    assert_eq!(saved, decode(&shot.png));
 }

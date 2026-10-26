@@ -24,6 +24,10 @@ pub enum HarnessError {
     OffScreen { locator: String },
     #[error("the editor did not settle within {frames} frames after {step}")]
     Unsettled { step: String, frames: u32 },
+    #[error("{region} covers none of the window; pick a region inside it")]
+    EmptyRegion { region: String },
+    #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
+    NoGpu,
     #[error("the run did not finish within {seconds} s")]
     RunTimeout { seconds: f32 },
     #[error(

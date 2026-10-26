@@ -26,6 +26,45 @@ pub(crate) enum Dialogs {
     Scripted(VecDeque<DialogAnswer>),
 }
 
+/// A kind of file a save names: the label of its dialog's filter, and the extension the save
+/// adds when the typed name lacks it, as the native dialogs do not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SavedFile {
+    label: &'static str,
+    extension: &'static str,
+}
+
+impl SavedFile {
+    pub(crate) const PROJECT: Self = Self {
+        label: "Darkroom project",
+        extension: document::EXTENSION,
+    };
+    pub(crate) const PNG: Self = Self {
+        label: "PNG image",
+        extension: "png",
+    };
+
+    /// `path` with this kind's extension, which replaces any other; one that matches without
+    /// regard to case stays as typed.
+    fn extended(self, mut path: PathBuf) -> PathBuf {
+        let has = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(self.extension));
+        if !has {
+            path.set_extension(self.extension);
+        }
+        path
+    }
+
+    /// The file a save to `picked` would replace without the dialog having asked about it: the
+    /// extended name, when it differs from the picked one and exists.
+    fn unconfirmed_target(self, picked: &Path) -> Option<PathBuf> {
+        let target = self.extended(picked.to_path_buf());
+        (target != picked && fs::exists(&target)).then_some(target)
+    }
+}
+
 #[cfg_attr(
     not(feature = "internals"),
     expect(
@@ -43,14 +82,13 @@ impl Dialogs {
         }
     }
 
-    /// Where to save the project, the picker starting beside `start`; the extension is added.
-    pub(crate) fn project_save_path(&mut self, start: Option<&Path>) -> Option<PathBuf> {
+    /// Where to save a file of `kind`, the picker starting beside `start`; the extension is added.
+    pub(crate) fn save_path(&mut self, kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
         match self {
-            Self::Native => pick_project_save_path(start),
+            Self::Native => pick_save_path(kind, start),
             #[cfg(feature = "internals")]
-            Self::Scripted(answers) => {
-                scripted_path(answers, "save the project").map(document::with_extension)
-            }
+            Self::Scripted(answers) => scripted_path(answers, &format!("save a {}", kind.label))
+                .map(|path| kind.extended(path)),
         }
     }
 
@@ -130,32 +168,25 @@ fn pick_project_open_path(start: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// The native dialog confirms overwriting the name the user typed, not the one
-/// [`document::with_extension`] makes of it — so when that one already exists,
+/// [`SavedFile::extended`] makes of it — so when that one already exists,
 /// the dialog asks again with it filled in, and its own overwrite prompt
 /// answers for the file that will be replaced. A second save dialog rather than
 /// a message box, because rfd shows message boxes on Linux through zenity,
 /// which a desktop may lack, and the save then fails with nothing on screen.
-fn pick_project_save_path(start: Option<&Path>) -> Option<PathBuf> {
-    let mut picked = project_save_dialog(start).save_file()?;
-    while let Some(target) = unconfirmed_target(&picked) {
-        let mut dialog = project_save_dialog(Some(&target));
+fn pick_save_path(kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
+    let mut picked = save_dialog(kind, start).save_file()?;
+    while let Some(target) = kind.unconfirmed_target(&picked) {
+        let mut dialog = save_dialog(kind, Some(&target));
         if let Some(name) = target.file_name().and_then(|name| name.to_str()) {
             dialog = dialog.set_file_name(name);
         }
         picked = dialog.save_file()?;
     }
-    Some(document::with_extension(picked))
+    Some(kind.extended(picked))
 }
 
-fn project_save_dialog(start: Option<&Path>) -> rfd::FileDialog {
-    file_dialog(start).add_filter("Darkroom project", &[document::EXTENSION])
-}
-
-/// The file a save to `picked` would replace without the dialog having asked
-/// about it: the extended name, when it differs from the picked one and exists.
-fn unconfirmed_target(picked: &Path) -> Option<PathBuf> {
-    let target = document::with_extension(picked.to_path_buf());
-    (target != picked && fs::exists(&target)).then_some(target)
+fn save_dialog(kind: SavedFile, start: Option<&Path>) -> rfd::FileDialog {
+    file_dialog(start).add_filter(kind.label, &[kind.extension])
 }
 
 fn filtered_file_dialog(extensions: &[&str]) -> rfd::FileDialog {
@@ -196,29 +227,57 @@ mod tests {
 
     use std::collections::VecDeque;
 
-    use crate::gui::dialogs::{
-        DialogAnswer, Dialogs, normalize_file_selection, unconfirmed_target,
-    };
+    use crate::gui::dialogs::{DialogAnswer, Dialogs, SavedFile, normalize_file_selection};
 
-    /// Only an extended name that exists and differs from the pick is owed a
-    /// second confirmation: a bare name over nothing, and a pick that already
-    /// carries the extension (the dialog asked about that very file), are not.
+    /// A save adds its kind's extension to a bare name and puts it in place of another, and keeps
+    /// one that matches without regard to case. Only an extended name that exists and differs
+    /// from the pick is owed a second confirmation: a bare name over nothing, and a pick that
+    /// already carries the extension (the dialog asked about that very file), are not.
     #[test]
     fn only_an_existing_extended_name_needs_confirming_again() {
+        let extended = |kind: SavedFile, name: &str| kind.extended(PathBuf::from(name));
+        assert_eq!(
+            extended(SavedFile::PROJECT, "scene"),
+            PathBuf::from("scene.darkroom")
+        );
+        assert_eq!(
+            extended(SavedFile::PROJECT, "scene.json"),
+            PathBuf::from("scene.darkroom")
+        );
+        assert_eq!(
+            extended(SavedFile::PROJECT, "scene.DARKROOM"),
+            PathBuf::from("scene.DARKROOM")
+        );
+        assert_eq!(extended(SavedFile::PNG, "view"), PathBuf::from("view.png"));
+        assert_eq!(
+            extended(SavedFile::PNG, "view.PNG"),
+            PathBuf::from("view.PNG")
+        );
+
+        let project = SavedFile::PROJECT;
         let dir = TempDir::new("darkroom-save-target");
         let bare = dir.join("scene");
         let extended = dir.join("scene.darkroom");
-        assert_eq!(unconfirmed_target(&bare), None, "nothing to replace yet");
+        assert_eq!(
+            project.unconfirmed_target(&bare),
+            None,
+            "nothing to replace yet"
+        );
 
         fs::write(&extended, b"x").unwrap();
-        assert_eq!(unconfirmed_target(&bare), Some(extended.clone()));
+        assert_eq!(project.unconfirmed_target(&bare), Some(extended.clone()));
         assert_eq!(
-            unconfirmed_target(&extended),
+            SavedFile::PNG.unconfirmed_target(&bare),
+            None,
+            "another kind's file is not the one a save replaces"
+        );
+        assert_eq!(
+            project.unconfirmed_target(&extended),
             None,
             "the dialog confirmed this file itself"
         );
         assert_eq!(
-            unconfirmed_target(&dir.join("scene.DARKROOM")),
+            project.unconfirmed_target(&dir.join("scene.DARKROOM")),
             None,
             "the extension matches without regard to case, so nothing is appended"
         );
@@ -255,7 +314,7 @@ mod tests {
             Some(PathBuf::from("/p/scene.darkroom"))
         );
         assert_eq!(
-            dialogs.project_save_path(None),
+            dialogs.save_path(SavedFile::PROJECT, None),
             Some(PathBuf::from("/p/copy.darkroom"))
         );
         assert_eq!(
