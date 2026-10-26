@@ -3,7 +3,8 @@
 use std::fmt;
 
 use common::{Size2us, Vec2us};
-use libraw_sys as sys;
+
+use crate::sys;
 
 /// Why LibRaw did not open, unpack or process a file.
 ///

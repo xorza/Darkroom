@@ -5,10 +5,10 @@ use std::ptr::NonNull;
 use std::{fmt, slice};
 
 use common::Size2us;
-use libraw_sys as sys;
 
 use crate::error::LibrawError;
 use crate::libraw::Libraw;
+use crate::sys;
 
 /// An image LibRaw's own processing made, freed when dropped. It borrows the [`Libraw`] that made
 /// it, which LibRaw requires to outlive it.

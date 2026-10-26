@@ -10,12 +10,6 @@
 #include <omp.h>
 #endif
 
-extern "C" unsigned libraw_lumos_zero_is_bad(libraw_data_t *lr)
-{
-  LibRaw *raw = static_cast<LibRaw *>(lr->parent_class);
-  return raw->get_internal_data_pointer()->internal_output_params.zero_is_bad;
-}
-
 extern "C" void libraw_lumos_set_decode_threads(int threads)
 {
 #ifdef _OPENMP

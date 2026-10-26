@@ -30,7 +30,7 @@ fn compile(root: &Path) {
     collect_sources(&root.join("src"), &mut sources);
     assert!(
         !sources.is_empty(),
-        "no LibRaw sources under {}: run `git submodule update --init libraw-sys/LibRaw`",
+        "no LibRaw sources under {}: run `git submodule update --init libraw/LibRaw`",
         root.display()
     );
     sources.sort();
@@ -44,6 +44,9 @@ fn compile(root: &Path) {
         .include(root)
         .files(&sources)
         .flag_if_supported("-pthread")
+        // The decoders at full optimization in every profile, so a dev build decodes at the speed
+        // a release does, while the crate's own Rust keeps its profile's level.
+        .opt_level(3)
         .warnings(false)
         .extra_warnings(false);
     for define in DEFINES {
