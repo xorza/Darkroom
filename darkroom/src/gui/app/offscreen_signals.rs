@@ -26,11 +26,12 @@ impl OffscreenSignals {
         self.woken.swap(false, Ordering::AcqRel)
     }
 
+    /// Whether a wake came that no [`Self::take_wake`] has taken yet; the call leaves it.
+    pub(crate) fn wake_pending(&self) -> bool {
+        self.woken.load(Ordering::Acquire)
+    }
+
     /// Whether the app asked to quit.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read by the harness, which lands after this seam")
-    )]
     pub(crate) fn quit_asked(&self) -> bool {
         self.quit.load(Ordering::Acquire)
     }
@@ -51,8 +52,15 @@ mod tests {
         let wake = host.wake();
         assert!(!signals.take_wake() && !signals.quit_asked());
         wake();
+        assert!(
+            signals.wake_pending() && signals.wake_pending(),
+            "a look leaves the wake"
+        );
         assert!(signals.take_wake(), "the wake shows");
-        assert!(!signals.take_wake(), "and clears once taken");
+        assert!(
+            !signals.take_wake() && !signals.wake_pending(),
+            "and clears once taken"
+        );
         host.quit();
         assert!(
             signals.quit_asked() && signals.quit_asked(),

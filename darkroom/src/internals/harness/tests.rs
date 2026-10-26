@@ -629,3 +629,47 @@ fn the_sample_project_runs_to_its_previews() {
         ]
     );
 }
+
+/// A quit ends the session as it closes a window. With unsaved edits Ctrl+Q only asks, and
+/// Cancel keeps the session; Don't Save then quits, and every later call that runs a frame is
+/// refused, the action after it unplayed. A new open starts afresh.
+#[test]
+fn a_quit_ends_the_session() {
+    let mut harness = harness();
+    let dir = TempDir::new("darkroom-harness-quit");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    harness.open(&path, false).unwrap();
+    let quit = || Action::Key("ctrl+q".to_string());
+    harness
+        .act(&[
+            drag(
+                Locator::NodeHeader(BRIGHTNESS.to_string()),
+                Locator::Screen(Vec2::new(900.0, 700.0)),
+            ),
+            quit(),
+            click(Locator::Text("Cancel".to_string())),
+        ])
+        .unwrap();
+    assert!(
+        harness.state(Detail::Concise, None).dirty,
+        "still open, still dirty"
+    );
+
+    match harness.act(&[
+        quit(),
+        click(Locator::Text("Don't Save".to_string())),
+        click(node(BRIGHTNESS)),
+    ]) {
+        Err(HarnessError::Quit) => {}
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(harness.act(&[]), Err(HarnessError::Quit)));
+    assert!(matches!(
+        harness.wait_run(Duration::from_secs(1)),
+        Err(HarnessError::Quit)
+    ));
+
+    harness.open(&path, false).unwrap();
+    let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
+    assert_eq!(report.selection, [BRIGHTNESS]);
+}

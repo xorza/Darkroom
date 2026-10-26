@@ -42,8 +42,17 @@ pub(crate) struct Session {
     /// What a new session is made with when `darkroom_open` names nothing else.
     pub(crate) defaults: SessionConfig,
     harness: Option<Harness>,
-    /// Why the last session ended, when a panic ended it.
-    ended: Option<String>,
+    /// Why the last session ended, when it did not end by a new open.
+    ended: Option<Ended>,
+}
+
+/// Why a session ended on its own.
+#[derive(Debug)]
+enum Ended {
+    /// The editor panicked, with this message and location.
+    Panic(String),
+    /// An action asked the editor to quit, as File ▸ Quit or Ctrl+Q do.
+    Quit,
 }
 
 /// A failed call, in words that tell the agent how to correct it.
@@ -131,10 +140,15 @@ impl Session {
     pub(crate) fn harness(&mut self) -> Result<&mut Harness, ToolError> {
         match (&mut self.harness, &self.ended) {
             (Some(harness), _) => Ok(harness),
-            (None, Some(panic)) => Err(ToolError(format!(
+            (None, Some(Ended::Panic(panic))) => Err(ToolError(format!(
                 "no project is open: the last session ended when the editor panicked: {panic}. Call \
                  darkroom_open to start a new one."
             ))),
+            (None, Some(Ended::Quit)) => Err(ToolError(
+                "no project is open: the last session ended when an action quit the editor. Call \
+                 darkroom_open to start a new one."
+                    .to_string(),
+            )),
             (None, None) => Err(ToolError(
                 "no project is open; call darkroom_open first".to_string(),
             )),
@@ -160,12 +174,18 @@ impl Session {
         Ok(self.harness.insert(harness))
     }
 
+    /// Drop the session an action quit, as a window closes when its editor quits.
+    pub(crate) fn quit(&mut self) {
+        self.harness = None;
+        self.ended = Some(Ended::Quit);
+    }
+
     /// Drop the session a panic left, whose state no call can trust.
     fn end(&mut self, panic: String) {
         // Its drop may panic too, on the same broken state; the session is gone either way.
         let harness = self.harness.take();
         panic::catch_unwind(AssertUnwindSafe(move || drop(harness))).ok();
-        self.ended = Some(panic);
+        self.ended = Some(Ended::Panic(panic));
     }
 }
 

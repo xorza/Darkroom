@@ -148,6 +148,8 @@ impl Harness {
         } else {
             self.copy_project(document)?
         };
+        // Signals of its own: the session before may have asked to quit.
+        self.signals = Arc::new(OffscreenSignals::default());
         self.app = launch(&mut self.display, &self.signals, Some(opened));
         self.clicked = false;
         self.settle("the open")?;
@@ -156,6 +158,7 @@ impl Harness {
 
     /// Give the window `size` physical pixels.
     pub fn resize(&mut self, size: UVec2) -> Result<(), HarnessError> {
+        self.running()?;
         self.display.resize(size);
         self.settle("the resize")?;
         Ok(())
@@ -163,6 +166,7 @@ impl Harness {
 
     /// Play `actions` in order, settling after each.
     pub fn act(&mut self, actions: &[Action]) -> Result<ActReport, HarnessError> {
+        self.running()?;
         let mut frames = 0;
         for action in actions {
             frames += self.play(action)?;
@@ -203,6 +207,7 @@ impl Harness {
     /// When `max_side` is 0.
     pub fn shot(&mut self, region: &Region, max_side: u32) -> Result<Shot, HarnessError> {
         assert!(max_side > 0, "a shot has at least one pixel a side");
+        self.running()?;
         if !self.display.paints() {
             return Err(HarnessError::NoGpu);
         }
@@ -237,10 +242,11 @@ impl Harness {
     /// Run frames until the worker has no run in flight and the editor settles, its previews
     /// landed.
     pub fn wait_run(&mut self, timeout: Duration) -> Result<(), HarnessError> {
+        self.running()?;
         let started = Instant::now();
         loop {
             self.settle("the run")?;
-            if !self.app.run_state().activity.is_executing() && !self.signals.take_wake() {
+            if !self.app.run_state().activity.is_executing() && !self.signals.wake_pending() {
                 return Ok(());
             }
             if started.elapsed() > timeout {
@@ -380,8 +386,23 @@ impl Harness {
         at.point(&self.app, self.display.ui())
     }
 
+    /// One frame. A wake asks for a full one, as the window host's `request_repaint` does: a frame
+    /// nothing asked for paints only, and runs no `update` to drain what the wake announced.
     fn frame(&mut self) -> FrameReport {
+        if self.signals.take_wake() {
+            self.display.ui().request_repaint();
+        }
         self.display.frame(&mut self.app, FRAME)
+    }
+
+    /// Refuse to go on once the editor asked to quit, as File ▸ Quit and Ctrl+Q do: a window
+    /// closes then, and the session a harness runs ends with it.
+    fn running(&self) -> Result<(), HarnessError> {
+        if self.signals.quit_asked() {
+            Err(HarnessError::Quit)
+        } else {
+            Ok(())
+        }
     }
 
     /// One frame, counted.
@@ -392,33 +413,34 @@ impl Harness {
 
     /// Run frames until one asks no repaint, the app has no wake pending, and no preview is
     /// converting. A timer wake, as a caret blink asks, does not count: the frame it would run
-    /// changes nothing. A conversion runs on the converter's thread and a later frame lands it, so
-    /// a quiet frame with one in flight waits a moment in real time and runs another; those frames
-    /// count against the real-time bound, not the frame bound.
+    /// changes nothing. A conversion runs on the converter's thread, so a quiet frame with one in
+    /// flight waits in real time, bounded, for the wake that makes the next frame land it. A frame
+    /// that quits the editor ends the step with [`HarnessError::Quit`]: every step ends here, so no
+    /// call goes on past a quit, whatever it guards at its start.
     fn settle(&mut self, step: &str) -> Result<u32, HarnessError> {
         let unsettled = || HarnessError::Unsettled {
             step: step.to_string(),
             frames: SETTLE_FRAMES,
         };
         let deadline = Instant::now() + BACKGROUND_WAIT;
-        let mut busy = 0;
-        let mut frames = 0;
-        loop {
+        for frames in 1..=SETTLE_FRAMES {
             let report = self.frame();
-            frames += 1;
-            if report.repaint_requested || self.signals.take_wake() {
-                busy += 1;
-                if busy == SETTLE_FRAMES {
+            self.running()?;
+            if report.repaint_requested || self.signals.wake_pending() {
+                continue;
+            }
+            if !self.app.run_state().previews.in_flight() {
+                return Ok(frames);
+            }
+            // The converter's wake announces the result; the next frame, made full, lands it.
+            while !self.signals.wake_pending() {
+                if Instant::now() > deadline {
                     return Err(unsettled());
                 }
-            } else if !self.app.run_state().previews.in_flight() {
-                return Ok(frames);
-            } else if Instant::now() > deadline {
-                return Err(unsettled());
-            } else {
                 thread::sleep(Duration::from_millis(1));
             }
         }
+        Err(unsettled())
     }
 
     /// Copy the folder of `document` into the session directory, refusing one over

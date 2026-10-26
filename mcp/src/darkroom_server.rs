@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use darkroom::internals::harness::action::Action;
+use darkroom::internals::harness::error::HarnessError;
 use darkroom::internals::harness::shot::{LegendNode, Region};
 use darkroom::internals::harness::state::{Detail, State};
 use darkroom::internals::harness::{ActReport, Harness, SessionConfig};
@@ -114,7 +115,8 @@ impl DarkroomServer {
     #[tool(
         description = "Play input into the editor: clicks, double clicks, drags, scrolls, \
         pinches, key chords, typed text, and the answers file dialogs take. The editor settles \
-        after each action; the first that fails stops the rest. Name each place with a locator: \
+        after each action; the first that fails stops the rest, and one that quits the editor \
+        closes the session. Name each place with a locator: \
         node, header, port, text, world, screen, offset or nth. Answers with the selection, the \
         dirty flag and the focus, and with a shot when one is asked. Example: {\"actions\": \
         [{\"click\": {\"at\": {\"node\": \"Blur\"}}}, {\"drag\": {\"from\": {\"port\": {\"node\": \
@@ -129,12 +131,24 @@ impl DarkroomServer {
             // One at a time, so a failure names the action it stopped at.
             let mut report = harness.act(&[])?;
             for (idx, action) in params.actions.into_iter().enumerate() {
-                let step = harness.act(&[Action::from(action)]).map_err(|error| {
-                    ToolError(format!(
-                        "action {} of {count} failed, and the ones before it ran: {error}",
-                        idx + 1
-                    ))
-                })?;
+                let step = match harness.act(&[Action::from(action)]) {
+                    Ok(step) => step,
+                    Err(HarnessError::Quit) => {
+                        session.quit();
+                        return Ok(vec![ContentBlock::text(format!(
+                            "The editor quit at action {} of {count}, as the action asked, and \
+                             the session is closed; the actions after it did not run. Call \
+                             darkroom_open to start a new one.",
+                            idx + 1
+                        ))]);
+                    }
+                    Err(error) => {
+                        return Err(ToolError(format!(
+                            "action {} of {count} failed, and the ones before it ran: {error}",
+                            idx + 1
+                        )));
+                    }
+                };
                 report = ActReport {
                     frames: report.frames + step.frames,
                     ..step

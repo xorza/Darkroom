@@ -216,7 +216,8 @@ async fn an_opened_project_is_driven_through_the_tools() {
 
 /// A panic on the editor's thread answers its call with the message and where it was raised,
 /// closes the session, and leaves the server serving: the next call says the session ended and
-/// how, and an open starts a new one.
+/// how, and an open starts a new one. A quit, which an action asks, closes the session too, and
+/// says so in place of the actions after it.
 #[tokio::test]
 async fn a_panic_ends_the_session_and_not_the_server() {
     let (server, client) = connect(DisplayKind::Cpu).await;
@@ -248,6 +249,26 @@ async fn a_panic_ends_the_session_and_not_the_server() {
         .await
         .unwrap();
     assert_eq!(reopened.is_error, Some(false), "{}", text(&reopened, 0));
+
+    let quit = call(
+        &client,
+        "darkroom_act",
+        json!({ "actions": [{ "key": "ctrl+q" }, { "key": "escape" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(quit.is_error, Some(false));
+    assert!(
+        text(&quit, 0).starts_with("The editor quit at action 1 of 2"),
+        "{}",
+        text(&quit, 0)
+    );
+    let after = call(&client, "darkroom_state", json!({})).await.unwrap();
+    assert_eq!(
+        text(&after, 0),
+        "no project is open: the last session ended when an action quit the editor. Call \
+         darkroom_open to start a new one."
+    );
 }
 
 /// On the GPU display a shot comes back as a PNG image block and its legend, which names the
