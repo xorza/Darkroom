@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push cancels the older run of its branch or pull request: only the latest commit's result
+# is read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# No RUSTFLAGS: it would replace the x86-64-v3 flags of `.cargo/config.toml`. No
+# CARGO_INCREMENTAL: rust-cache sets it to 0.
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # The driver's commit that the drive table's `version` takes, as a local install has it.
+  DRIVE_REV: dcb1db7afe89a955f2d7d6c7e3aeafc6d7a0a477
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # The newest GA image of each: x64 Linux and Windows, arm64 macOS, so `simd` runs both
+        # architectures' backends.
+        os: [ubuntu-26.04, macos-26, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # palantir, fits-well and LibRaw. The action fetches the `git@github.com:` URLs over
+          # HTTPS, as no ssh-key is given.
+          submodules: true
+      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`, and
+      # lavapipe, a software Vulkan adapter, so imaginarium's GPU tests run on a runner with no
+      # GPU instead of skipping. macOS exposes Metal and Windows ships WARP, so both need nothing.
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libclang-dev libssl-dev pkg-config mesa-vulkan-drivers
+      # Every hosted runner has rustup, so no action is needed to install the toolchain.
+      - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Only master writes, so a pull request cannot evict what master reads.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      # The cache keeps `~/.cargo/bin`, so this builds the driver only when `DRIVE_REV` moves.
+      - run: cargo install --locked --git https://github.com/xorza/drive --rev "$DRIVE_REV"
+      # `--ci` runs past a failure, so one run reports every step.
+      - run: cargo drive gate --ci
