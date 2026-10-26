@@ -255,7 +255,9 @@ fn io_error(error: Error) -> io::Error {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::env;
     use std::fs::File;
+    use std::path::PathBuf;
 
     use memmap2::Mmap;
 
@@ -270,6 +272,16 @@ pub(crate) mod internals {
     /// `None`: not read on this system.
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
+    }
+
+    /// The system's temporary directory, which is on disk: Windows lists no memory-backed file
+    /// system.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the API is the same on every system, and Linux can find no directory on disk"
+    )]
+    pub(crate) fn disk_temp_dir() -> Option<PathBuf> {
+        Some(env::temp_dir())
     }
 
     /// Yes: a scratch file is deleted only when its last handle closes.

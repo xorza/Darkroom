@@ -39,7 +39,9 @@ pub(super) const fn memory_backed(_path: &Path) -> Option<String> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::env;
     use std::fs::File;
+    use std::path::PathBuf;
 
     use memmap2::Mmap;
 
@@ -54,6 +56,15 @@ pub(crate) mod internals {
     /// `None`: not read on this system.
     pub(crate) const fn resident_share(_map: &Mmap) -> Option<f64> {
         None
+    }
+
+    /// The system's temporary directory, which is on disk: macOS has no tmpfs.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the API is the same on every system, and Linux can find no directory on disk"
+    )]
+    pub(crate) fn disk_temp_dir() -> Option<PathBuf> {
+        Some(env::temp_dir())
     }
 }
 
