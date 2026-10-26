@@ -80,6 +80,24 @@ pub(super) fn observe(path: &Path) -> io::Result<Observed> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::Path;
+
     /// No: a scratch file is unlinked as soon as it is created.
     pub(crate) const SCRATCH_KEEPS_NAME: bool = false;
+
+    /// Mode `000` on `path`, and the permissions it had.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "one signature on every system: Windows has no mode to take away"
+    )]
+    pub(crate) fn take_permissions(path: &Path) -> Option<Permissions> {
+        let original = fs::metadata(path)
+            .expect("an unreadable fixture starts from an existing path")
+            .permissions();
+        fs::set_permissions(path, Permissions::from_mode(0o000))
+            .expect("take a fixture's permissions away");
+        Some(original)
+    }
 }

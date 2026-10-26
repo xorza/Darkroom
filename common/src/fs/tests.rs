@@ -1,4 +1,5 @@
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::io::{Seek as _, SeekFrom, Write as _};
 use std::sync::{Arc, Barrier};
@@ -23,8 +24,12 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
     }
 
+    // A handle open on the destination does not refuse the replace, and still reads the file it
+    // opened. Windows' `MoveFileExW` refuses here, so this reaches the POSIX rename.
+    let held = File::open(&path).unwrap();
     publish_bytes(&path, b"durable", PublicationMode::Durable).unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"durable");
+    assert_eq!(io::read_to_string(held).unwrap(), "previous");
 
     #[cfg(unix)]
     {

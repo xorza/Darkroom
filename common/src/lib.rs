@@ -86,7 +86,7 @@ pub use id::Id;
 pub use internals::temp_dir::TempDir;
 #[cfg(feature = "internals")]
 pub use internals::temp_file::TempFile;
-#[cfg(all(unix, feature = "internals"))]
+#[cfg(feature = "internals")]
 pub use internals::unreadable::Unreadable;
 pub use platform::{
     Eviction, FileSystem, MappedFile, ResidentMemory, ScratchFile, SystemMemory, UserCache,

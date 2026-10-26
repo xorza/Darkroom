@@ -1,9 +1,7 @@
 use std::io;
 use std::slice;
 
-#[cfg(unix)]
-use common::Unreadable;
-use common::{CancelToken, FileId, FileIdentity, TempDir, fs};
+use common::{CancelToken, FileId, FileIdentity, TempDir, Unreadable, fs};
 
 use crate::data::const_value::ConstValue;
 use crate::data::data_type::DataType;
@@ -35,24 +33,21 @@ fn directory_identity_tracks_entry_changes() {
     // A directory that will not list has no identity to stamp, and is
     // deliberately *not* handed one: a marker value would be perfectly stable,
     // so the node would go on reusing a cached result while the contents it
-    // cannot see changed underneath it. Skipped where the process reads
-    // through mode 000.
-    #[cfg(unix)]
-    {
-        let empty = fingerprint(&path);
-        if let Some(locked) = Unreadable::new(dir.path()) {
-            let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
-            drop(locked);
-            assert!(
-                matches!(&unreadable, Err(StampError::Io { path, .. }) if path == dir.path()),
-                "an unlistable directory surfaces its error, naming it: {unreadable:?}",
-            );
-            assert_eq!(
-                fingerprint(&path),
-                empty,
-                "and it stamps again once readable"
-            );
-        }
+    // cannot see changed underneath it. Skipped where no path can be made
+    // unreadable.
+    let empty = fingerprint(&path);
+    if let Some(locked) = Unreadable::new(dir.path()) {
+        let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
+        drop(locked);
+        assert!(
+            matches!(&unreadable, Err(StampError::Io { path, .. }) if path == dir.path()),
+            "an unlistable directory surfaces its error, naming it: {unreadable:?}",
+        );
+        assert_eq!(
+            fingerprint(&path),
+            empty,
+            "and it stamps again once readable"
+        );
     }
 
     fs::write(dir.join("a.fits"), b"one").unwrap();

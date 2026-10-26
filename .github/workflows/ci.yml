@@ -22,6 +22,9 @@ env:
   RUST_BACKTRACE: 1
   # The driver's commit that the drive table's `version` takes, as a local install has it.
   DRIVE_REV: dcb1db7afe89a955f2d7d6c7e3aeafc6d7a0a477
+  # fits-well's test runner: its drive table keeps nextest's default, which ran its suite in 0.48 s
+  # where `cargo test` took 0.75 s.
+  NEXTEST_VERSION: 0.9.148
 
 defaults:
   run:
@@ -60,7 +63,9 @@ jobs:
         with:
           # Only master writes, so a pull request cannot evict what master reads.
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      # The cache keeps `~/.cargo/bin`, so this builds the driver only when `DRIVE_REV` moves.
+      # The cache keeps `~/.cargo/bin`, so these build the driver and nextest only when their
+      # versions move.
       - run: cargo install --locked --git https://github.com/xorza/drive --rev "$DRIVE_REV"
+      - run: cargo install --locked cargo-nextest --version "$NEXTEST_VERSION"
       # `--ci` runs past a failure, so one run reports every step.
       - run: cargo drive gate --ci
