@@ -23,6 +23,7 @@ use common::{env, fs};
 use glam::{UVec2, Vec2};
 use palantir::internals::DOUBLE_CLICK_WINDOW;
 use palantir::{FrameReport, InputEvent, Key, KeyText, Modifiers, PointerButton};
+use serde::Serialize;
 use tracing::subscriber::{self, DefaultGuard};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -89,7 +90,7 @@ pub struct Harness {
 }
 
 /// What an action changed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ActReport {
     /// Frames the actions ran.
     pub frames: u32,
