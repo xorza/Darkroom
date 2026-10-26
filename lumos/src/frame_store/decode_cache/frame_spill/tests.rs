@@ -14,6 +14,7 @@ use crate::frame_store::decode_cache::frame_spill::{
     Commit, Decoded, FrameSpill, KeptGain, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::stored_plane::PlaneDigest;
 use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -90,9 +91,9 @@ fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
 
 fn digests() -> PlaneDigests {
     PlaneDigests {
-        channels: vec![[1; 32]],
+        channels: vec![PlaneDigest::from_bytes([1; 32])],
         flags: None,
-        samples: vec![[2; 32]],
+        samples: vec![PlaneDigest::from_bytes([2; 32])],
     }
 }
 
@@ -237,9 +238,12 @@ fn sidecar_layout_is_pinned() {
             channels: 3,
         }),
         digests: PlaneDigests {
-            channels: vec![[3; 32], [5; 32]],
-            flags: Some([7; 32]),
-            samples: vec![[9; 32]],
+            channels: vec![
+                PlaneDigest::from_bytes([3; 32]),
+                PlaneDigest::from_bytes([5; 32]),
+            ],
+            flags: Some(PlaneDigest::from_bytes([7; 32])),
+            samples: vec![PlaneDigest::from_bytes([9; 32])],
         },
         metadata: Cow::Owned(metadata()),
         stats: Cow::Owned(admitted.stats),

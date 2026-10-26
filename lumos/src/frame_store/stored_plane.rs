@@ -12,6 +12,7 @@ use std::path::Path;
 
 use bytemuck::Pod;
 use common::{Buffer2, MappedFile, fs};
+use serde::{Deserialize, Serialize};
 
 use crate::frame_store::error::FrameStoreError;
 
@@ -30,7 +31,19 @@ pub(crate) enum StoredPlane<T = f32> {
 #[derive(Debug)]
 pub(crate) struct PublishedPlane<T = f32> {
     pub(crate) plane: StoredPlane<T>,
-    pub(crate) digest: [u8; 32],
+    pub(crate) digest: PlaneDigest,
+}
+
+/// The blake3 digest of a plane's bytes, which a commit records and a reuse checks a file against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct PlaneDigest(#[serde(with = "common::hex_bytes")] [u8; 32]);
+
+impl PlaneDigest {
+    /// The digest of `bytes`.
+    pub(crate) fn of(bytes: &[u8]) -> Self {
+        Self(blake3::hash(bytes).into())
+    }
 }
 
 impl<T: Pod> StoredPlane<T> {
@@ -55,7 +68,7 @@ impl<T: Pod> StoredPlane<T> {
         })?;
         Ok(PublishedPlane {
             plane: Self::mapped(mapped.expect("a published plane was mapped as it was written")),
-            digest: blake3::hash(bytemuck::cast_slice(pixels)).into(),
+            digest: PlaneDigest::of(bytemuck::cast_slice(pixels)),
         })
     }
 
@@ -110,7 +123,17 @@ impl<T: Pod> StoredPlane<T> {
 pub(crate) mod internals {
     use bytemuck::Pod;
 
+    #[cfg(test)]
+    use crate::frame_store::stored_plane::PlaneDigest;
     use crate::frame_store::stored_plane::StoredPlane;
+
+    #[cfg(test)]
+    impl PlaneDigest {
+        /// A digest of `bytes` as it is, for a fixture that pins what a commit holds.
+        pub(crate) const fn from_bytes(bytes: [u8; 32]) -> Self {
+            Self(bytes)
+        }
+    }
 
     impl<T: Pod> StoredPlane<T> {
         /// Drop a mapped plane's pages from the page cache, so its next read comes from the disk;

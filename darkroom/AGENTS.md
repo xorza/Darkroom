@@ -48,10 +48,11 @@ pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
 - **palantir lists what it drew**: under its `internals`, `Ui::inspect` lists the last frame's
   widgets that sense input, with their rects and the text of their subtree. Refused: AccessKit, a
   role and a label for every widget kind, a much larger palantir change than the harness needs.
-- **Each action waits until the editor settles**: frames run until one asks no repaint and the
-  app has no wake pending, bounded; a timer wake, as a caret blink asks, does not hold it.
-  `darkroom_wait_run` waits for the worker too. This is Playwright's auto-wait. Refused: sleeps
-  and frame counts, which break when a frame takes longer.
+- **Each action waits until the editor settles**: frames run until one asks no repaint, the app
+  has no wake pending, and no preview is converting on its thread, bounded in frames and in real
+  time; a timer wake, as a caret blink asks, does not hold it. `darkroom_wait_run` waits for the
+  worker too. This is Playwright's auto-wait. Refused: a fixed sleep or frame count, which breaks
+  when a frame or a conversion takes longer.
 - **Text first, pixels when the look matters.** `darkroom_state` and `darkroom_ui` reply with
   text and the warnings and errors logged since the last call. `darkroom_shot` replies with a PNG
   scaled to `max_side` (1280 by default) and a legend of each visible node and port at its rect in

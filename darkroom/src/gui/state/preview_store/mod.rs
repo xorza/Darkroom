@@ -513,8 +513,7 @@ pub(crate) mod internals {
         }
 
         /// Whether a card or a full raster is still converting.
-        #[cfg(test)]
-        fn in_flight(&self) -> bool {
+        pub(crate) fn in_flight(&self) -> bool {
             !self.converting.is_empty()
                 || self.entries.values().any(|content| {
                     content.image().is_some_and(|image| {

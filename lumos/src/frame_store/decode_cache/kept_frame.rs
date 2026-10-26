@@ -19,7 +19,7 @@ use crate::frame_store::plane_sink::{PlaneRole, PlaneSink};
 use crate::frame_store::stored_frame::{FrameWrite, SetKind, StoredFrame, WrittenFrame};
 use crate::frame_store::stored_gain::StoredGain;
 use crate::frame_store::stored_image::{StoredFlags, StoredImage};
-use crate::frame_store::stored_plane::{PublishedPlane, StoredPlane};
+use crate::frame_store::stored_plane::{PlaneDigest, PublishedPlane, StoredPlane};
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
@@ -327,9 +327,9 @@ struct Copied<T> {
 
 /// The `len` samples of the plane at `path`, mapped and copied into RAM; `None` when it does not
 /// map, holds another count, or its bytes are not `digest`'s.
-fn copied<T: Pod>(path: &Path, digest: &[u8; 32], len: usize) -> Option<Copied<T>> {
+fn copied<T: Pod>(path: &Path, digest: &PlaneDigest, len: usize) -> Option<Copied<T>> {
     let plane = FrameSpill::map::<T>(path)?;
     let samples = plane.chunk(0..plane.samples()).to_vec();
-    (samples.len() == len && blake3::hash(bytemuck::cast_slice(&samples)).as_bytes() == digest)
+    (samples.len() == len && PlaneDigest::of(bytemuck::cast_slice(&samples)) == *digest)
         .then_some(Copied { plane, samples })
 }

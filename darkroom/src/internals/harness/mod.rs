@@ -47,6 +47,8 @@ use crate::internals::harness::state::{Detail, State, UiList};
 const FRAME: Duration = Duration::from_nanos(16_666_667);
 /// Frames an action may run before it counts as unsettled: ten seconds of UI time.
 const SETTLE_FRAMES: u32 = 600;
+/// Real time an action may wait for the app's background work, a preview's conversion, to land.
+const BACKGROUND_WAIT: Duration = Duration::from_secs(30);
 /// The largest project folder a session copies into its directory, which sits in RAM on a tmpfs
 /// `/tmp`.
 pub const COPY_LIMIT: u64 = 256 * 1024 * 1024;
@@ -232,7 +234,8 @@ impl Harness {
         Ok(shot)
     }
 
-    /// Run frames until the worker has no run in flight and the editor settles.
+    /// Run frames until the worker has no run in flight and the editor settles, its previews
+    /// landed.
     pub fn wait_run(&mut self, timeout: Duration) -> Result<(), HarnessError> {
         let started = Instant::now();
         loop {
@@ -387,19 +390,35 @@ impl Harness {
         1
     }
 
-    /// Run frames until one asks no repaint and the app has no wake pending. A timer wake, as a
-    /// caret blink asks, does not count: the frame it would run changes nothing.
+    /// Run frames until one asks no repaint, the app has no wake pending, and no preview is
+    /// converting. A timer wake, as a caret blink asks, does not count: the frame it would run
+    /// changes nothing. A conversion runs on the converter's thread and a later frame lands it, so
+    /// a quiet frame with one in flight waits a moment in real time and runs another; those frames
+    /// count against the real-time bound, not the frame bound.
     fn settle(&mut self, step: &str) -> Result<u32, HarnessError> {
-        for frames in 1..=SETTLE_FRAMES {
-            let report = self.frame();
-            if !report.repaint_requested && !self.signals.take_wake() {
-                return Ok(frames);
-            }
-        }
-        Err(HarnessError::Unsettled {
+        let unsettled = || HarnessError::Unsettled {
             step: step.to_string(),
             frames: SETTLE_FRAMES,
-        })
+        };
+        let deadline = Instant::now() + BACKGROUND_WAIT;
+        let mut busy = 0;
+        let mut frames = 0;
+        loop {
+            let report = self.frame();
+            frames += 1;
+            if report.repaint_requested || self.signals.take_wake() {
+                busy += 1;
+                if busy == SETTLE_FRAMES {
+                    return Err(unsettled());
+                }
+            } else if !self.app.run_state().previews.in_flight() {
+                return Ok(frames);
+            } else if Instant::now() > deadline {
+                return Err(unsettled());
+            } else {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 
     /// Copy the folder of `document` into the session directory, refusing one over

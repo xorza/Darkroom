@@ -24,7 +24,7 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::decode_cache::cache_key::CacheKey;
 use crate::frame_store::error::FrameStoreError;
 use crate::frame_store::stored_image::StoredImage;
-use crate::frame_store::stored_plane::StoredPlane;
+use crate::frame_store::stored_plane::{PlaneDigest, StoredPlane};
 use crate::image::flags::flag_counts::FlagCounts;
 use crate::image::flat_gain::gain_key::GainKey;
 use crate::image::flat_gain::{FlatGain, GainGrid};
@@ -202,6 +202,7 @@ impl<'a> FrameSpill<'a> {
 struct Commit<'a> {
     key: CacheKey,
     /// The source's canonical path, as its platform encodes it.
+    #[serde(with = "common::hex_bytes")]
     source: Vec<u8>,
     width: usize,
     height: usize,
@@ -251,22 +252,21 @@ impl KeptGain {
 /// carries one, and each slot's samples. The flat gain is checked against its key.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PlaneDigests {
-    pub(crate) channels: Vec<[u8; 32]>,
-    pub(crate) flags: Option<[u8; 32]>,
-    pub(crate) samples: Vec<[u8; 32]>,
+    pub(crate) channels: Vec<PlaneDigest>,
+    pub(crate) flags: Option<PlaneDigest>,
+    pub(crate) samples: Vec<PlaneDigest>,
 }
 
 impl PlaneDigests {
     /// The digests of `image`'s planes and of `samples`, as they hold now.
     pub(crate) fn of(image: &StoredImage, samples: Option<&ArrayVec<StoredPlane, 3>>) -> Self {
-        let digest = |bytes: &[u8]| -> [u8; 32] { blake3::hash(bytes).into() };
-        let plane = |plane: &StoredPlane| digest(plane.bytes());
+        let plane = |plane: &StoredPlane| PlaneDigest::of(plane.bytes());
         Self {
             channels: image.channels.iter().map(plane).collect(),
             flags: image
                 .flags
                 .as_ref()
-                .map(|flags| digest(flags.plane.bytes())),
+                .map(|flags| PlaneDigest::of(flags.plane.bytes())),
             samples: samples.into_iter().flatten().map(plane).collect(),
         }
     }
@@ -335,6 +335,7 @@ pub(crate) mod internals {
     use crate::frame_store::decode_cache::frame_spill::{
         Commit, FrameSpill, read_sidecar, write_sidecar,
     };
+    use crate::frame_store::stored_plane::PlaneDigest;
 
     impl<'a> FrameSpill<'a> {
         /// A kept frame's files under `stem` in `dir`, of a source with no path, decoded
@@ -352,8 +353,7 @@ pub(crate) mod internals {
         /// edits that plane on purpose, to see it read back, keeps it reusable.
         pub(crate) fn reseal(&self) {
             let mut commit: Commit<'static> = read_sidecar(&self.commit_path()).unwrap();
-            commit.digests.channels[0] =
-                blake3::hash(&fs::read(self.channel_path(0)).unwrap()).into();
+            commit.digests.channels[0] = PlaneDigest::of(&fs::read(self.channel_path(0)).unwrap());
             write_sidecar(&self.commit_path(), &commit).unwrap();
         }
     }

@@ -1,3 +1,4 @@
+pub mod hex_bytes;
 pub(crate) mod serde_format;
 
 use ron::de::SpannedError;
