@@ -1,6 +1,7 @@
 use std::io;
 use std::slice;
 
+use common::internals::non_unicode_name;
 use common::{CancelToken, FileId, FileIdentity, TempDir, Unreadable, fs};
 
 use crate::data::const_value::ConstValue;
@@ -237,16 +238,12 @@ fn a_reused_stamper_stamps_like_a_fresh_one() {
 /// names would be interchangeable without moving the fingerprint —
 /// a rename that a pure node's cache key could not see.
 #[test]
-#[cfg(unix)]
 fn directory_identity_separates_non_utf8_names() {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
     let dir = TempDir::new("bytes");
     let path = dir.path().to_string_lossy().into_owned();
     // Both lossy-convert to the same U+FFFD replacement character.
-    let first = dir.join(OsStr::from_bytes(b"\xff"));
-    let second = dir.join(OsStr::from_bytes(b"\xfe"));
+    let first = dir.join(non_unicode_name(0));
+    let second = dir.join(non_unicode_name(1));
 
     // APFS refuses a name that is not valid UTF-8 (`EILSEQ`), so on macOS the
     // input this test is about cannot be created at all — leave it to the

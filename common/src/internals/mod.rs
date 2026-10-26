@@ -6,6 +6,7 @@ pub(crate) mod temp_file;
 pub(crate) mod unreadable;
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::iter;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ use std::process;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::FileSystem;
+use crate::{FileSystem, platform};
 
 /// The environment variable that turns debug output on: any value does.
 pub const DEBUG_OUTPUT_VAR: &str = "DARKROOM_TEST_OUTPUT";
@@ -35,6 +36,13 @@ pub fn output_path(name: &str) -> PathBuf {
 pub fn debug_output_path(name: &str) -> Option<PathBuf> {
     env::var_os(DEBUG_OUTPUT_VAR)?;
     Some(output_path(name))
+}
+
+/// The `idx`-th of 128 file names that are not Unicode, each one unit: a byte on Unix, an
+/// unpaired UTF-16 surrogate on Windows. A file system may refuse one — APFS refuses a name that
+/// is not UTF-8.
+pub fn non_unicode_name(idx: u8) -> OsString {
+    platform::internals::non_unicode_name(idx)
 }
 
 /// The publication temporaries beside `destination`: every file named like the ones

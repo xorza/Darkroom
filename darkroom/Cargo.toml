@@ -72,9 +72,10 @@ objc2 = { workspace = true }
 objc2-app-kit = { workspace = true, features = ["NSApplication", "NSResponder"] }
 objc2-foundation = { workspace = true, features = ["NSArray", "NSString", "NSURL"] }
 
-# Embeds the app icon in the .exe; a no-op off Windows.
-[target.'cfg(windows)'.build-dependencies]
-winresource = { workspace = true, features = ["toml"] }
+# Embeds the app icon in the .exe. Not gated on `cfg(windows)`, which a build-dependency takes
+# from the host: a build for Windows from another host needs it too.
+[build-dependencies]
+winresource = { workspace = true }
 
 # Regenerate the icons with scripts/generate-icons.sh.
 [package.metadata.bundle]

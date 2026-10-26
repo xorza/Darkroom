@@ -731,20 +731,17 @@ mod tests {
         assert_eq!(PendingTransition::New.prompt_tail(), "closing it");
     }
 
-    /// A Unicode pick becomes the value as it is. One byte that is not Unicode
+    /// A Unicode pick becomes the value as it is. One unit that is not Unicode
     /// refuses the whole pick and names that path, instead of replacing the
-    /// byte and pointing the node at a file that does not exist.
-    ///
-    /// Unix only: std builds a path that is not Unicode from bytes there, and
-    /// from unpaired UTF-16 surrogates on Windows.
-    #[cfg(unix)]
+    /// unit and pointing the node at a file that does not exist.
     #[test]
     fn a_pick_that_is_not_unicode_is_refused_whole() {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
+        use common::internals::non_unicode_name;
 
         let good = PathBuf::from("/data/a.fit");
-        let bad = PathBuf::from(OsString::from_vec(b"/data/\xffb.fit".to_vec()));
+        let mut bad_name = non_unicode_name(0);
+        bad_name.push("b.fit");
+        let bad = Path::new("/data").join(bad_name);
 
         assert!(matches!(
             fs_path(good.clone()),

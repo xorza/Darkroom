@@ -80,7 +80,9 @@ pub(super) fn observe(path: &Path) -> io::Result<Observed> {
 
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
+    use std::ffi::OsString;
     use std::fs::{self, Permissions};
+    use std::os::unix::ffi::OsStringExt as _;
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::Path;
 
@@ -99,5 +101,31 @@ pub(crate) mod internals {
         fs::set_permissions(path, Permissions::from_mode(0o000))
             .expect("take a fixture's permissions away");
         Some(original)
+    }
+
+    /// Yes: a link needs no privilege.
+    pub(crate) const fn symlinks_allowed(_dir: &Path) -> bool {
+        true
+    }
+
+    /// One byte, `0x80 + idx`: no UTF-8 sequence holds one alone.
+    pub(crate) fn non_unicode_name(idx: u8) -> OsString {
+        OsString::from_vec(vec![0x80 + idx])
+    }
+
+    /// Yes: `Metadata` holds the device, the inode and the change time.
+    #[cfg(test)]
+    pub(crate) const METADATA_HOLDS_STATED: bool = true;
+
+    /// Mode `0o640`, which a new file does not take under the usual umask, and the permissions
+    /// `path` then has.
+    #[cfg(test)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "one signature on every system: Windows has no such permissions"
+    )]
+    pub(crate) fn set_uncommon_permissions(path: &Path) -> Option<Permissions> {
+        fs::set_permissions(path, Permissions::from_mode(0o640)).unwrap();
+        Some(fs::metadata(path).unwrap().permissions())
     }
 }

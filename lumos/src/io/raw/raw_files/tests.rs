@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use common::{TempDir, Unreadable, fs};
+use common::{FileSystem, TempDir, Unreadable, fs};
 
 use crate::io::raw::error::RawScanError;
 use crate::io::raw::raw_files::raw_files;
@@ -63,10 +63,13 @@ fn scan_failures_name_the_path() {
 /// Only an entry named as a RAW file is examined: a dangling `notes.txt` link leaves the scan
 /// whole, a link named `link.cr2` to a RAW file is kept, and a dangling `x.cr2` link is an error
 /// that names it.
-#[cfg(unix)]
 #[test]
 fn only_raw_named_links_are_followed() {
     let dir = TempDir::new("lumos-raw-files");
+    if !FileSystem::symlinks_allowed(dir.path()) {
+        eprintln!("skipping: this process may not make links");
+        return;
+    }
     fs::write(dir.join("a.cr2"), []).unwrap();
     fs::symlink(dir.join("gone.txt"), dir.join("notes.txt")).unwrap();
     fs::symlink(dir.join("a.cr2"), dir.join("link.cr2")).unwrap();
