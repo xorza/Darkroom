@@ -23,30 +23,15 @@ relative paths, and it is made in the editor through the finished harness.
 - `FrameReport` says `repaint_requested` and `repaint_after`; a focused text field's caret asks
   `repaint_after` for 30 s.
 - darkroom's `SessionHarness` and `CanvasHarness` run on fixtures, with no runtime and no worker.
-- `App::new` takes a `HostHandle<App>`, which only `WinitHost` makes. `App` saves preferences
-  unless `preferences_writable` is false. File dialogs are blocking `rfd` calls in
-  `gui/dialogs.rs`.
+- `App::new(ui, AppHost, LaunchInputs)`: `AppHost::Offscreen(Arc<OffscreenSignals>)` gives the
+  harness the app's wakes and quit; `LaunchInputs` carries a `PreferencesStore` (`File(path)` or
+  `Memory`) and a `Dialogs` (`Native`, or `Scripted` answers under `internals`).
 - A path const is used as written: `Load Image` does `PathBuf::from(inputs[0].required_fs_path())`,
   so a relative path resolves against the process's working directory.
 
 ## Plan
 
-### 1. darkroom: the seams the harness plugs into
-
-Files: `darkroom/src/gui/app/mod.rs`, `darkroom/src/lib.rs`, `darkroom/src/gui/dialogs.rs`,
-`darkroom/src/core/io/preferences/mod.rs`.
-
-- [ ] `App` holds `AppHost`, `Window(HostHandle<App>)` or `Offscreen(OffscreenSignals)`, with
-  `wake()` and `quit()`. `OffscreenSignals` holds two atomics that the harness reads: a wake
-  pending, and a quit asked. `run` builds `Window`.
-- [ ] `PreferencesStore`, `File` or `Memory`, replaces `preferences_writable`: `save_preferences`
-  writes only for `File`. `LaunchInputs` carries it; `run` passes `File` when the load succeeded,
-  and the harness passes `Memory`.
-- [ ] `Dialogs`, `Native` or `Scripted(VecDeque<DialogAnswer>)`: each `dialogs::pick_*` call in
-  `App` goes through it. `Scripted` pops the next answer; an ask with no answer left is an error
-  in the status log, not a block. Test: a scripted Open dialog opens the answered path.
-
-### 2. The harness core
+### 1. The harness core
 
 Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locator.rs`,
 `state.rs`, `clock.rs`, `log.rs`, `tests.rs`); `darkroom/src/lib.rs`'s `internals`.
@@ -92,7 +77,7 @@ Files: new `darkroom/src/harness/` (`mod.rs`, `display.rs`, `action.rs`, `locato
   `Ambiguous`; a focused text field still settles; a copied session leaves the source folder
   unchanged byte for byte; a 257 MiB folder is refused (made of one sparse file).
 
-### 3. darkroom: copy and save the view
+### 2. darkroom: copy and save the view
 
 Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui/app/mod.rs`.
 
@@ -101,7 +86,7 @@ Files: `darkroom/src/gui/frame/app_command.rs`, the View menu, `darkroom/src/gui
   image copies it to the clipboard or saves it through `Dialogs` and `common::fs`. Test: a
   scripted Save answers a path, and the file there decodes to the screenshot's pixels.
 
-### 4. Shots
+### 3. Shots
 
 Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
 `darkroom/src/harness/tests.rs`.
@@ -119,7 +104,7 @@ Files: `darkroom/src/harness/display.rs`, `darkroom/src/harness/shot.rs`,
   margin; a `max_side` of 100 scales a 400 × 300 window to 100 × 75 and its legend by 1/4. A node's
   rect from `state` is the same on `Cpu` and `Gpu`.
 
-### 5. The MCP server
+### 4. The MCP server
 
 Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src/tests.rs`), root
 `Cargo.toml` (member, dependency, drive command), new `.mcp.json`.
@@ -144,7 +129,7 @@ Files: new `mcp/` (`Cargo.toml`, `build.rs`, `src/main.rs`, `src/tools.rs`, `src
   locator is a tool error that lists both matches; a harness panic answers the next call with its
   message and leaves the server serving.
 
-### 6. Relative paths in a document
+### 5. Relative paths in a document
 
 Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every other reader of
 `required_fs_path`; scenarium's invocation context; `darkroom/src/core/runtime_host/`,
@@ -163,7 +148,7 @@ Files: `lens/src/image/nodes/io.rs`, `lens/src/astro/nodes/io.rs` and every othe
   the same undo step as the save's path change. Test: `a/b.tiff` saved from `/p` to `/p/q` becomes
   `../a/b.tiff`.
 
-### 7. The sample project
+### 6. The sample project
 
 Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 `darkroom/src/core/open_document/tests.rs`.
@@ -176,7 +161,7 @@ Files: new `darkroom/sample/` (`sample.darkroom`, `inputs/`), its test in
 - [ ] Test: the sample opens with an empty `LoadReport`, compiles and runs to completion on the
   real library, and each preview receives an image of the input's size.
 
-### 8. Fold the decisions into the documents
+### 7. Fold the decisions into the documents
 
 Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `HARNESS_PLAN.md`.
 
@@ -199,3 +184,8 @@ Files: new `darkroom/AGENTS.md`, root `AGENTS.md`, `.notes/editor-harness.md`, `
   frame it lands in, as a click does. It has no `ScreenshotError::Unsupported`: a frame that asks
   paints in full through the backbuffer, which every target has, GLES included, and a blit into
   `Rgba8UnormSrgb` gives BGRA and float targets the same bytes.
+- The seams: `PreferencesStore::File` holds its path, and loading goes through the store too, so
+  a test points a session at a temp file; `Dialogs` is a value `LaunchInputs` carries. A scripted
+  ask with no answer of its shape reads as a cancel and logs an error, which the harness's log
+  reports, rather than writing the status log: the dialogs know no status log, and a pick already
+  returns `None` for a cancel.
