@@ -11,7 +11,8 @@ use crate::image::masked_plane::MaskedPlane;
 use crate::internals::synthetic::bg_map;
 use crate::math::statistics;
 use crate::star_detection::bg::bg_estimate::BgEstimate;
-use crate::star_detection::detection_plane::{PlaneSpec, Prefilter};
+use crate::star_detection::detection_filter::Prefilter;
+use crate::star_detection::detection_plane::PlaneSpec;
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::{

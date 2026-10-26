@@ -1,6 +1,4 @@
-//! What the calibration masters hold that is not frame data.
-//!
-//! Pins the cosmic-ray scratch the pipeline's decode budget charges against what the detectors
+//! The cosmic-ray scratch the pipeline's decode budget charges, against what the detectors
 //! allocate; that a run holds no more than its budget is the `memory_budget` integration test's.
 
 use common::Buffer2;
@@ -8,11 +6,10 @@ use common::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::calibration::cosmic_ray::masks::CONCURRENT_MASKS;
 use crate::calibration::cosmic_ray::masks::internals::new_cr_mask;
 use crate::calibration::cosmic_ray::mono::MONO_SCRATCH_PLANES;
 use crate::calibration::cosmic_ray::mono::internals::mono_scratch_floats;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::cfa::cfa_from_plane;
@@ -28,7 +25,7 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
     for side in [1024usize, 6144] {
         let size = Size2us::new(side, side);
         let pixels = size.pixel_count();
-        let packed = BitBuffer2::heap_bytes(new_cr_mask(size).size);
+        let packed = BitBuffer2::heap_bytes(new_cr_mask(size).size());
 
         // Each row pads to 128 bits; 1024 and 6144 are both multiples, so there is no slack here.
         assert_eq!(
@@ -42,13 +39,6 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
             "{side}²: packing should be 8x"
         );
     }
-
-    // The peak is what actually decides whether a stack fits, so pin that rather than the count on
-    // its own: 6144² = 37 748 736 px, 4 718 592 B per packed mask, three of them = 14 155 776 B.
-    // A fourth concurrent mask, or a revert to `Vec<bool>`, both land here.
-    let size = Size2us::new(6144, 6144);
-    let peak = CONCURRENT_MASKS * BitBuffer2::heap_bytes(new_cr_mask(size).size);
-    assert_eq!(peak, 14_155_776, "peak cosmic-ray mask footprint");
 }
 
 /// The mono detector's `f32` scratch is five frame-sized planes, *whatever* `max_iterations` is —
@@ -78,14 +68,6 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
         MONO_SCRATCH_PLANES * size.pixel_count(),
         "one plane each, exactly — no stage grew a buffer past the frame"
     );
-
-    // 6144² = 37 748 736 px × 4 B = 144 MB a plane, five of them = 720 MB.
-    let big = Size2us::new(6144, 6144);
-    assert_eq!(
-        MONO_SCRATCH_PLANES * big.pixel_count() * size_of::<f32>(),
-        754_974_720,
-        "mono cosmic-ray float working set"
-    );
 }
 
 /// What the decode budget charges for a cosmic-ray pass, from the planes above and the masks. A
@@ -98,7 +80,7 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
 /// and the pass's two: 2 rows of 16 B each at 2×2, 4 at 4×4.
 #[test]
 fn cosmic_ray_heap_bytes_count_planes_and_masks() {
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     for (cfa, side, expected) in [
         (CfaType::Mono, 64, 81_920 + 3_072 + 2_048),
         (bayer, 64, 4_096 + 20_480 + 1_536 + 1_024 + 1_024 + 2_048),

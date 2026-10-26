@@ -74,7 +74,7 @@ impl KeptOut {
 
 /// `cores` grown by the octagon of [`STAR_REACH`] and [`STAR_TAXICAB`], clipped to the frame.
 fn grown(cores: &BitBuffer2) -> BitBuffer2 {
-    let size = cores.size;
+    let size = cores.size();
     let mut mask = BitBuffer2::new_default(size);
     cores.for_each_set(|core| {
         for dy in -STAR_REACH..=STAR_REACH {
@@ -97,7 +97,7 @@ fn grown(cores: &BitBuffer2) -> BitBuffer2 {
 /// The saturated pixels of `data` whose 5×5 median, the border replicated, passes a tenth of the
 /// saturation level, the median of the saturated samples.
 fn star_cores(data: &Buffer2<f32>, saturated: &BitBuffer2) -> BitBuffer2 {
-    let size = saturated.size;
+    let size = saturated.size();
     let mut cores = BitBuffer2::new_default(size);
     // Ranked in place rather than gathered: a frame can be saturated anywhere, and a copy of its
     // saturated samples would be a plane no budget charges.

@@ -16,7 +16,7 @@ pub(crate) fn integration(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(field.name()), |b| {
             let image = field.render(FRAME).image;
             let mut detector =
-                StarDetector::from_config(bench::config(field)).expect("a preset is valid");
+                StarDetector::checked(bench::config(field)).expect("a preset is valid");
             b.iter(|| detector.detect(&image));
         });
     }

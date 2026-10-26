@@ -22,57 +22,59 @@ pub(super) struct PairVotes {
     pub(super) votes: usize,
 }
 
-/// Every vote cast, one entry per vote: the pair packed as `reference << 32 | target`.
+/// The votes each pair drew, a count per `(reference, target)` cell, row-major.
 ///
-/// Sorted, equal pairs sit together and a run's length is the pair's count: one flat buffer at any
-/// star count, visited in `(reference, target)` order. A dense matrix costs `n_ref·n_target` cells
-/// whatever the votes, and a hash map visits in an order its seed sets.
-#[derive(Debug, Default)]
+/// Dense, at `ref_count·target_count` cells: every pair of similar triangles casts three votes, and
+/// their count grows with both star counts' squares — about 4·10⁶ at 500 stars a side — where the
+/// cells are 2.5·10⁵, so a list of every vote, sorted to count it, holds and sorts more than the
+/// matrix holds. The scan visits the pairs in `(reference, target)` order, as a hash map, seeded,
+/// would not.
+#[derive(Debug)]
 pub(super) struct Votes {
-    votes: Vec<u64>,
+    counts: Vec<u32>,
+    target_count: usize,
 }
 
 impl Votes {
+    /// No votes yet, for `ref_count` reference and `target_count` target stars.
+    pub(super) fn new(ref_count: usize, target_count: usize) -> Self {
+        Self {
+            counts: vec![0; ref_count * target_count],
+            target_count,
+        }
+    }
+
     #[inline]
     pub(super) fn increment(&mut self, ref_idx: usize, target_idx: usize) {
         debug_assert!(
-            u32::try_from(ref_idx).is_ok() && u32::try_from(target_idx).is_ok(),
-            "star indices fit in 32 bits"
+            target_idx < self.target_count,
+            "a target star of the matrix"
         );
-        self.votes
-            .push(((ref_idx as u64) << 32) | target_idx as u64);
+        self.counts[ref_idx * self.target_count + target_idx] += 1;
     }
 
-    /// Put the votes in `(reference, target)` order, so each pair's votes are one run.
-    pub(super) fn sort(&mut self) {
-        self.votes.sort_unstable();
-    }
-
-    /// Every pair that drew votes, with how many it drew, in the order of the votes: by
-    /// `(reference, target)` once [`Self::sort`]ed. The pair travels as a [`MatchIdxs`] rather
-    /// than two `usize`s, which are the same type and so could be handed over transposed without
-    /// the compiler noticing.
+    /// Every pair that drew votes, with how many it drew, by `(reference, target)`. The pair
+    /// travels as a [`MatchIdxs`] rather than two `usize`s, which are the same type and so could
+    /// be handed over transposed without the compiler noticing.
     pub(super) fn counts(&self) -> impl Iterator<Item = PairVotes> + '_ {
-        debug_assert!(self.votes.is_sorted(), "votes are counted once sorted");
-        self.votes.chunk_by(|a, b| a == b).map(|run| PairVotes {
-            pair: MatchIdxs {
-                reference: (run[0] >> 32) as usize,
-                target: (run[0] & u64::from(u32::MAX)) as usize,
-            },
-            votes: run.len(),
-        })
+        self.counts
+            .iter()
+            .enumerate()
+            .filter(|&(_, &votes)| votes > 0)
+            .map(|(cell, &votes)| PairVotes {
+                pair: MatchIdxs {
+                    reference: cell / self.target_count,
+                    target: cell % self.target_count,
+                },
+                votes: votes as usize,
+            })
     }
 
     /// The matches the votes resolve to: each pair of at least `min_votes`, most votes first,
-    /// greedily, so each of the `n_ref` reference and `n_target` target stars is claimed at most
-    /// once.
-    pub(super) fn resolve(
-        mut self,
-        n_ref: usize,
-        n_target: usize,
-        min_votes: usize,
-    ) -> Vec<PointMatch> {
-        self.sort();
+    /// greedily, so each reference and each target star is claimed at most once.
+    pub(super) fn resolve(self, min_votes: usize) -> Vec<PointMatch> {
+        let target_count = self.target_count;
+        let ref_count = self.counts.len().checked_div(target_count).unwrap_or(0);
         let mut voted: Vec<PairVotes> = self
             .counts()
             .filter(|counted| counted.votes >= min_votes)
@@ -82,8 +84,8 @@ impl Votes {
         // among ties, so the greedy resolution below takes them the same way every run.
         voted.sort_by_key(|counted| Reverse(counted.votes));
 
-        let mut used_ref = vec![false; n_ref];
-        let mut used_target = vec![false; n_target];
+        let mut used_ref = vec![false; ref_count];
+        let mut used_target = vec![false; target_count];
         voted.retain(|PairVotes { pair, .. }| {
             let free = !used_ref[pair.reference] && !used_target[pair.target];
             if free {
@@ -112,8 +114,7 @@ pub(super) mod internals {
     impl Votes {
         /// Every pair that drew votes, in `(reference, target)` order, as an owned list — the
         /// shape the tests assert against, which production has no use for.
-        pub(crate) fn nonzero_entries(&mut self) -> Vec<PairVotes> {
-            self.sort();
+        pub(crate) fn nonzero_entries(&self) -> Vec<PairVotes> {
             self.counts().collect()
         }
     }

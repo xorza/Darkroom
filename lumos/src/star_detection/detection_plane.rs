@@ -6,10 +6,10 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::scratch_pool::Pooled;
 use crate::star_detection::bg::sky_noise::SkyNoise;
-use crate::star_detection::detection_filter::{DetectionFilter, FilterSource};
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
+use crate::star_detection::detection_filter::{DetectionFilter, FilterSource, Prefilter};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 
 /// The plane the threshold and both deblenders read, with the noise measured on it: the residual
@@ -25,14 +25,6 @@ use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
 pub(crate) struct DetectionPlane {
     pub(crate) values: Pooled<Buffer2<f32>>,
     pub(crate) noise: SkyNoise,
-}
-
-/// What a detection plane's residual passes through before the matched filter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Prefilter {
-    None,
-    /// The 3×3 median, for a demosaiced frame: interpolation leaves artifacts a single pixel wide.
-    Median3x3,
 }
 
 /// How a detection plane is filtered, and how its noise is measured.

@@ -71,13 +71,14 @@ pub(crate) fn integration(c: &mut Criterion) {
 /// `image` encoded as `file` into a new file at `path`.
 fn save(image: &InterleavedImage, path: &Path, file: RasterFormat) {
     let mut out = BufWriter::new(fs::create(path).unwrap());
-    image.encode(&mut out, file).unwrap();
+    file.encode(image, &mut out).unwrap();
     out.flush().unwrap();
 }
 
 /// The `file` image at `path`.
 fn read(path: &Path, file: RasterFormat) -> InterleavedImage {
-    InterleavedImage::decode(BufReader::new(fs::open(path).unwrap()), file).unwrap()
+    file.decode(BufReader::new(fs::open(path).unwrap()), u64::MAX)
+        .unwrap()
 }
 
 /// Every file format with each color format it stores, found by encoding one pixel.
@@ -87,7 +88,10 @@ fn cases() -> Vec<(RasterFormat, ColorFormat)> {
         .flat_map(|file| ColorFormat::ALL.map(|format| (file, format)));
     pairs
         .filter(|&(file, format)| {
-            match scene::sky(format, Size2us::new(1, 1), 0).encode(Cursor::new(Vec::new()), file) {
+            match file.encode(
+                &scene::sky(format, Size2us::new(1, 1), 0),
+                Cursor::new(Vec::new()),
+            ) {
                 Ok(()) => true,
                 Err(CodecError::Unstorable { .. }) => false,
                 Err(error) => panic!("probing {file:?} for {format}: {error}"),

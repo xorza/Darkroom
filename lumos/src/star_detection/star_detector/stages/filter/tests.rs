@@ -311,6 +311,16 @@ fn remove_duplicate_stars_over_every_geometry() {
             why: "one pair at 2.83, one star far off",
         },
         Case {
+            stars: vec![
+                (100.0, 100.0, 100.0),
+                (100.0, 100.0, 90.0),
+                (101.0, 100.0, 80.0),
+            ],
+            separation: 1e-30,
+            survivors: vec![100.0, 80.0],
+            why: "a separation far under a pixel keeps the grid's cells a pixel wide",
+        },
+        Case {
             stars: vec![(10.0, 10.0, 100.0), (11.0, 11.0, 50.0)],
             separation: 8.0,
             survivors: vec![100.0],

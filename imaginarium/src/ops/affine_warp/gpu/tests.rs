@@ -8,7 +8,6 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
 use crate::internals::gpu::test_gpu;
 use crate::internals::image_diff::assert_matches_cpu;
-use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 use crate::ops::affine_warp::{AffineWarp, FilterMode};
 
 /// Every format against the CPU reference. Nearest sampling picks a pixel on a rounding
@@ -20,7 +19,6 @@ fn gpu_matches_cpu() {
     let Some(gpu) = test_gpu() else {
         return;
     };
-    let pipeline = GpuAffineWarpPipeline::new(&gpu);
     let (width, height) = (13, 9);
     let center = Vec2::new(6.5, 4.5);
     let cases = [
@@ -39,7 +37,7 @@ fn gpu_matches_cpu() {
     ];
     for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(width, height), 3);
-        let input = GpuImage::from_image(&gpu, &image).unwrap();
+        let input = GpuImage::from_image(gpu, &image).unwrap();
         for (warp, [out_w, out_h], exact) in cases {
             let filters: &[FilterMode] = if exact {
                 &[FilterMode::Nearest, FilterMode::Bilinear]
@@ -49,13 +47,13 @@ fn gpu_matches_cpu() {
             for &filter in filters {
                 let warp = warp.filter(filter);
                 let desc = InterleavedDesc::new(Size2us::new(out_w, out_h), format);
-                let mut output = GpuImage::new_empty(&gpu, desc).unwrap();
-                warp.apply_gpu(&gpu, &pipeline, &input, &mut output);
+                let mut output = GpuImage::new_empty(gpu, desc).unwrap();
+                warp.apply_gpu(gpu, &input, &mut output);
 
-                let mut expected = InterleavedImage::new_black(desc);
+                let mut expected = InterleavedImage::new_zeroed(desc);
                 warp.apply_cpu(&image, &mut expected);
                 assert_matches_cpu(
-                    &output.to_image(&gpu).unwrap(),
+                    &output.to_image(gpu).unwrap(),
                     &expected,
                     &format!("{format} {filter:?} {warp:?}"),
                 );

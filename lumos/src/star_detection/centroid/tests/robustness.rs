@@ -301,13 +301,19 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
         area: 200,
     };
     let expected_fwhm = 6.23;
+    let sky = bg.sky_noise();
     let star = MeasurePlanes {
         residual: &bg.residual_of(&pixels),
-        sky: &bg.sky_noise(),
+        sky: &sky,
         saturation: &unsaturated(&pixels),
         no_data: None,
     }
-    .measure_star(&region, &config, &MeasureGrid::new(expected_fwhm))
+    .measure_star(
+        &region,
+        &config,
+        &MeasureGrid::new(expected_fwhm),
+        &mut sky.noise.reader(),
+    )
     .expect("the star measures");
     // FWHM = 2√(2 ln 2)·√(3.5·2) = 6.230268. The covariance is fitted to noiseless samples of its
     // own model, so both hold to a few f32 ulps; 1e-5 bounds that.

@@ -21,6 +21,7 @@ use glam::DVec2;
 
 use crate::registration::error::RansacFailure;
 use crate::registration::estimate::Pairs;
+use crate::registration::point_normalization;
 use crate::registration::point_pairs::PointPairs;
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::ransac::sampling::Sampler;
@@ -160,7 +161,7 @@ impl<'a> Search<'a> {
             pairs,
             transform_type,
             scorer: WelschScorer::new(estimator.max_sigma),
-            centre: pairs.reference.iter().sum::<DVec2>() / pairs.reference.len() as f64,
+            centre: point_normalization::centroid(&pairs.reference),
         }
     }
 

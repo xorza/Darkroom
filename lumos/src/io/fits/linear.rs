@@ -1,6 +1,7 @@
 //! A [`LinearImage`] as one FITS image HDU, a plane or an RGB cube, and the file that holds it with
 //! its flags and flat gain beside it.
 
+use std::io::{Seek, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -59,23 +60,28 @@ pub(crate) fn hdu(
     })
 }
 
-/// Write `image` to `path` as a checksummed floating-point FITS file: the primary HDU, then its
-/// flags and its flat gain when it has them.
+/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`].
 pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
+        write(image, file)
+    })
+}
+
+/// Write `image` to `out` as a checksummed floating-point FITS file: the primary HDU, then its
+/// flags and its flat gain when it has them.
+pub(crate) fn write(image: &LinearImage, out: impl Write + Seek) -> Result<(), WriteError> {
     let primary = hdu(image, None)?;
     let flags = flags_extension::encode(image.flags(), None, 1)?;
     let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
-    fs::publish(path, fs::PublicationMode::Durable, |file| {
-        let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        primary.write(&mut writer)?;
-        if let Some(flags) = &flags {
-            flags.write(&mut writer)?;
-        }
-        if let Some(gain) = &gain {
-            gain.write(&mut writer)?;
-        }
-        Ok(())
-    })
+    let mut writer = FitsWriter::new(out).with_checksums();
+    primary.write(&mut writer)?;
+    if let Some(flags) = &flags {
+        flags.write(&mut writer)?;
+    }
+    if let Some(gain) = &gain {
+        gain.write(&mut writer)?;
+    }
+    Ok(())
 }
 
 /// Whether `image` is a Lumos linear image's header, refused when it is one of another version.

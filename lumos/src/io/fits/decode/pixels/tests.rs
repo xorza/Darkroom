@@ -2,7 +2,8 @@ use common::CancelToken;
 use fits_well::image::{Scaling, View as FitsView};
 
 use crate::error::Cancelled;
-use crate::io::fits::decode::pixels::{ChunkScan, Conversion, NullSummary, SampleScan};
+use crate::io::fits::decode::pixels::{ChunkScan, Conversion, SampleScan};
+use crate::io::null_policy::PlaneNulls;
 
 const IDENTITY: Scaling = Scaling {
     bscale: 1.0,
@@ -141,7 +142,7 @@ fn the_blank_sentinel_is_a_null_and_stays_out_of_the_integer_scan() {
     assert_eq!([out[0], out[2]], [4.0, 8.0]);
     assert_eq!(
         scan.nulls,
-        Some(NullSummary {
+        Some(PlaneNulls {
             count: 1,
             first_idx: 1,
         })
@@ -170,7 +171,7 @@ fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
     let Converted { scan, .. } = convert(FitsView::F32(&[1.0e30, 0.0]), IDENTITY, 1.0e-30);
     assert_eq!(
         scan.nulls,
-        Some(NullSummary {
+        Some(PlaneNulls {
             count: 1,
             first_idx: 0,
         })
@@ -185,7 +186,7 @@ fn nan_and_both_infinities_are_counted_after_the_divide() {
     let Converted { scan, .. } = convert(FitsView::F32(&pixels), IDENTITY, 65_535.0);
     assert_eq!(
         scan.nulls,
-        Some(NullSummary {
+        Some(PlaneNulls {
             count: 3,
             first_idx: 1,
         })
@@ -210,17 +211,17 @@ fn the_integer_step_is_the_shared_trailing_zeros() {
 fn summaries_from_two_chunks_combine_into_the_planes_index_space() {
     // Row-chunk 0 holds one null at 2; row-chunk 1 starts 8 samples in and holds two, at its
     // own 0 and 3 — pixels 8 and 11 of the plane. Merged: three nulls, first at 2.
-    let first = NullSummary {
+    let first = PlaneNulls {
         count: 1,
         first_idx: 2,
     };
-    let second = NullSummary {
+    let second = PlaneNulls {
         count: 2,
         first_idx: 0,
     };
     assert_eq!(
         first.merge(second.offset_by(8)),
-        NullSummary {
+        PlaneNulls {
             count: 3,
             first_idx: 2,
         }

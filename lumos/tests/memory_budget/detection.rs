@@ -22,7 +22,7 @@ fn holds_the_same_heap_for_any_frame_count(config: &StarDetectionConfig) {
     let peak = |frames: usize| {
         session
             .measure(|| {
-                let mut detector = StarDetector::from_config(config.clone()).unwrap();
+                let mut detector = StarDetector::new(config.clone());
                 for _ in 0..frames {
                     drop(detector.detect(&frame));
                 }

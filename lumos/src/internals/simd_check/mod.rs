@@ -77,6 +77,38 @@ pub(crate) const DATA_SHAPES: &[DataShape] = &[
         fill: |w, s| (0..w).map(|i| ((i + s) as f32).mul_add(1e4, 1e6)).collect(),
     },
     DataShape {
+        // NaN and both infinities beside ordinary values: a kernel that takes one in any lane
+        // decides it as its reference does, in that lane alone.
+        name: "non-finite",
+        fill: |w, s| {
+            (0..w)
+                .map(|i| match (i + s) % 5 {
+                    0 => f32::NAN,
+                    1 => 0.4,
+                    2 => f32::INFINITY,
+                    3 => f32::NEG_INFINITY,
+                    _ => 0.8,
+                })
+                .collect()
+        },
+    },
+    DataShape {
+        // Both zeros and subnormals of both signs, where a min, a max or a flush to zero shows
+        // which operand it keeps.
+        name: "zeros-and-subnormals",
+        fill: |w, s| {
+            (0..w)
+                .map(|i| match (i + s) % 5 {
+                    0 => 0.0,
+                    1 => -0.0,
+                    2 => 1e-40,
+                    3 => -1e-40,
+                    _ => 0.6,
+                })
+                .collect()
+        },
+    },
+    DataShape {
         name: "pseudo-random",
         fill: |w, s| {
             let mut rng = TestRng::new(0x2545_F491_4F6C_DD1D ^ s as u64);
@@ -94,64 +126,31 @@ pub(crate) const SWEEP_WIDTHS: &[usize] = &[3, 4, 5, 7, 8, 9, 11, 15, 16, 17, 31
 pub(crate) struct ScalarSimd {
     scalar: Vec<f32>,
     simd: Vec<f32>,
-    /// Per element, what the error is measured against; empty for each element's own size.
-    magnitude: Vec<f32>,
 }
 
 impl ScalarSimd {
-    /// Outputs whose error is measured against each element's own size, floored at 1.
-    pub(crate) fn new(scalar: Vec<f32>, simd: Vec<f32>) -> Self {
-        Self {
-            scalar,
-            simd,
-            magnitude: Vec::new(),
-        }
+    pub(crate) const fn new(scalar: Vec<f32>, simd: Vec<f32>) -> Self {
+        Self { scalar, simd }
     }
 
-    /// Outputs that are sums, with `magnitude[i]` the sum of the absolute terms of element `i`.
-    ///
-    /// Two summation orders of one sum differ by at most `2·γₖ·Σ|tᵢ|`, with `γₖ ≈ k·u` for k
-    /// terms (Higham, *Accuracy and Stability of Numerical Algorithms*, §3.1), however far the
-    /// terms cancel. Measured against `Σ|tᵢ|` rather than against the result, the tolerance can be
-    /// that bound.
-    pub(crate) fn of_sums(scalar: Vec<f32>, simd: Vec<f32>, magnitude: Vec<f32>) -> Self {
-        assert_eq!(magnitude.len(), scalar.len(), "one magnitude per element");
-        Self {
-            scalar,
-            simd,
-            magnitude,
-        }
-    }
-
-    /// Outputs whose error is measured purely relative to the scalar value, with no absolute
-    /// floor: a zero must stay exactly zero.
-    pub(crate) fn relative(scalar: Vec<f32>, simd: Vec<f32>) -> Self {
-        let magnitude = scalar.iter().map(|value| value.abs()).collect();
-        Self::of_sums(scalar, simd, magnitude)
-    }
-
-    fn agree(&self, i: usize, tol: f64) -> bool {
-        let (s, v) = (f64::from(self.scalar[i]), f64::from(self.simd[i]));
-        match self.magnitude.get(i) {
-            Some(&magnitude) => s == v || (s - v).abs() <= tol * f64::from(magnitude),
-            // Each element's own size, floored at 1: near zero a relative bound leaves no room.
-            None => s == v || (s - v).abs() <= tol * s.abs().max(v.abs()).max(1.0),
-        }
+    /// Element `i` is the same bits on both sides, or NaN on both: IEEE 754 leaves a NaN's sign and
+    /// payload to the hardware, and `simd` specifies its ops to the bit save those.
+    fn agree(&self, i: usize) -> bool {
+        let (s, v) = (self.scalar[i], self.simd[i]);
+        s.to_bits() == v.to_bits() || (s.is_nan() && v.is_nan())
     }
 }
 
 /// Run `kernels` on every tier this CPU has (see [`IsaTier::supported`]), over every shape in
-/// [`DATA_SHAPES`] at every width in `widths`, asserting that each tier agrees with the scalar
-/// reference to `tol` (see [`ScalarSimd`]; `0.0` demands equality).
+/// [`DATA_SHAPES`] at every width in `widths`, asserting that each tier computes its scalar
+/// reference's bits (see [`ScalarSimd`]).
 ///
 /// `kernels` is handed one tier, a shape and a width, and returns the scalar and the vector
 /// output; whatever else the kernel needs, it closes over.
 pub(crate) fn assert_simd_matches_scalar(
     widths: &[usize],
-    tol: f32,
     kernels: impl Fn(IsaTier, &DataShape, usize) -> ScalarSimd,
 ) {
-    let tol = f64::from(tol);
     for tier in IsaTier::supported() {
         for shape in DATA_SHAPES {
             for &width in widths {
@@ -164,8 +163,8 @@ pub(crate) fn assert_simd_matches_scalar(
                 );
                 for i in 0..out.scalar.len() {
                     assert!(
-                        out.agree(i, tol),
-                        "{tier} {} w={width} [{i}]: scalar {} vs simd {}",
+                        out.agree(i),
+                        "{tier} {} w={width} [{i}]: scalar {:?} vs simd {:?}",
                         shape.name,
                         out.scalar[i],
                         out.simd[i]
@@ -201,29 +200,37 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Portable uniform w=4 [0]: scalar 1 vs simd 2")]
+    #[should_panic(expected = "Portable uniform w=4 [0]: scalar 1.0 vs simd 2.0")]
     fn a_disagreeing_kernel_pair_fails() {
-        assert_simd_matches_scalar(&[4], 1e-6, |_, _, width| {
+        assert_simd_matches_scalar(&[4], |_, _, width| {
             ScalarSimd::new(vec![1.0; width], vec![2.0; width])
         });
     }
 
-    /// Sums are held to `tol` of their absolute terms: a difference of 1 in a sum whose terms
-    /// add to 10 in magnitude is exactly a tolerance of 0.1.
+    /// Bits decide: the two zeros and two values an ulp apart differ, and any two NaNs agree.
     #[test]
-    fn sums_are_measured_against_their_absolute_terms() {
-        let sums = || ScalarSimd::of_sums(vec![0.5], vec![1.5], vec![10.0]);
-        assert!(sums().agree(0, 0.1));
-        assert!(!sums().agree(0, 0.099));
-        // Each element's own size would have refused it at 0.1.
-        assert!(!ScalarSimd::new(vec![0.5], vec![1.5]).agree(0, 0.1));
+    fn outputs_agree_bit_for_bit_and_nan_for_nan() {
+        let pairs = [
+            (0.0, 0.0, true),
+            (0.0, -0.0, false),
+            (1.0, 1.0f32.next_up(), false),
+            (f32::NAN, -f32::NAN, true),
+            (f32::NAN, f32::INFINITY, false),
+        ];
+        for (scalar, simd, agree) in pairs {
+            assert_eq!(
+                ScalarSimd::new(vec![scalar], vec![simd]).agree(0),
+                agree,
+                "{scalar:?} vs {simd:?}"
+            );
+        }
     }
 
     /// Each supported tier runs once per shape and width: over widths 3 and 8, twice per shape.
     #[test]
     fn every_tier_runs_every_shape_at_every_width() {
         let calls = Cell::new(0);
-        assert_simd_matches_scalar(&[3, 8], 0.0, |_, shape, width| {
+        assert_simd_matches_scalar(&[3, 8], |_, shape, width| {
             calls.set(calls.get() + 1);
             let row = shape.row(width, 0);
             ScalarSimd::new(row.clone(), row)

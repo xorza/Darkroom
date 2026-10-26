@@ -130,7 +130,7 @@ impl GroupStep<u8, u8, U8_LANES, { 4 * U8_LANES }> for Channels<'_, 1, 4> {
     #[inline(always)]
     fn step<V: Isa>(isa: V, group: &[u8; U8_LANES], out: &mut [u8; 4 * U8_LANES]) {
         let mono = isa.load_u8(group);
-        isa.store_interleaved4_u8([mono, mono, mono, isa.splat_u8(u8::MAX)], out);
+        isa.store_interleaved_u8([mono, mono, mono, isa.splat_u8(u8::MAX)], out);
     }
 }
 
@@ -138,7 +138,7 @@ impl GroupStep<u8, u8, U8_LANES, { 3 * U8_LANES }> for Channels<'_, 1, 3> {
     #[inline(always)]
     fn step<V: Isa>(isa: V, group: &[u8; U8_LANES], out: &mut [u8; 3 * U8_LANES]) {
         let mono = isa.load_u8(group);
-        isa.store_interleaved3_u8([mono, mono, mono], out);
+        isa.store_interleaved_u8([mono, mono, mono], out);
     }
 }
 

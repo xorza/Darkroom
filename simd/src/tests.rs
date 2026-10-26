@@ -1,16 +1,18 @@
 use std::any;
+use std::f32::consts::FRAC_1_SQRT_2;
 use std::f64::consts::PI;
 
 use crate::backend::portable::Portable;
 use crate::f32x8::{F32_LANES, F32x8};
 use crate::f64x4::{F64_LANES, F64x4};
+use crate::full_scale::FullScale;
 use crate::halves::Halves;
 use crate::i32x8::I32x8;
 use crate::isa::Isa;
 use crate::isa_tier::IsaTier;
 use crate::kernel::Kernel;
 use crate::mask8::Mask8;
-use crate::math::Math;
+use crate::math::{ASINH_LOG_FROM, Math};
 use crate::u8x32::U8x32;
 use crate::u16x16::U16x16;
 
@@ -30,6 +32,13 @@ const ROWS: [[f32; F32_LANES]; 4] = [
     [-0.0, 0.0, f32::NAN, 3.0, 1.0, f32::INFINITY, 7.5, -1e-40],
     [1e30, -1e-30, 0.1, 0.2, 0.3, 1.0e7, -3.0, 6.0],
     [1.0, 1.0, 1.0, -1.0, f32::NAN, 0.5, 2.0, 1e-38],
+];
+
+/// f64 lanes past what an f32 widens to: subnormals and the far normal range of both signs, both
+/// infinities and both zeros.
+const F64_ROWS: [[f64; F64_LANES]; 2] = [
+    [1e-310, -1e-310, 1e300, -1e300],
+    [f64::INFINITY, f64::NEG_INFINITY, -0.0, 0.0],
 ];
 
 /// Bytes at both ends and the middle of the range, in every lane position.
@@ -144,6 +153,7 @@ impl Kernel for Battery {
                 f32s(format!("{i} / {j}"), va / vb);
                 f32s(format!("{i} mul_add {j}"), va.mul_add(vb, vc));
                 f32s(format!("{i} max {j}"), va.max(vb));
+                f32s(format!("{i} copysign {j}"), va.copysign(vb));
                 f32s(format!("{i} min {j}"), va.min(vb));
                 f32s(format!("{i} gt {j}"), va.lanes_gt(vb).select(va, vb));
                 f32s(format!("{i} lt {j}"), va.lanes_lt(vb).select(va, vb));
@@ -173,6 +183,27 @@ impl Kernel for Battery {
                 f64s.push((format!("{i} mul_add {j} f64"), wa.mul_add(wb, wc)));
                 f64s.push((format!("{i} max {j} f64"), wa.max(wb)));
                 f64s.push((format!("{i} min {j} f64"), wa.min(wb)));
+            }
+        }
+
+        // Values f64 holds and no f32 does — subnormals, the far normal range — beside both
+        // infinities and both zeros, which the widened rows above never reach.
+        for (i, row) in F64_ROWS.iter().enumerate() {
+            let v = isa.load_f64(row);
+            f64s.push((format!("f64 row sqrt {i}"), v.sqrt()));
+            f64s.push((format!("f64 row floor {i}"), v.floor()));
+            f64s.push((format!("f64 row exp {i}"), isa.exp_f64(v)));
+            f64s.push((format!("f64 row ln {i}"), isa.ln_f64(v)));
+            let split = v.frexp();
+            f64s.push((format!("f64 row frexp mantissa {i}"), split.mantissa));
+            f64s.push((format!("f64 row frexp exponent {i}"), split.exponent));
+            scalars.push((format!("f64 row reduce {i}"), v.reduce_sum()));
+            for (j, other) in F64_ROWS.iter().enumerate() {
+                let w = isa.load_f64(other);
+                f64s.push((format!("f64 row {i} max {j}"), v.max(w)));
+                f64s.push((format!("f64 row {i} min {j}"), v.min(w)));
+                f64s.push((format!("f64 row {i} mul_add {j}"), v.mul_add(w, v)));
+                f64s.push((format!("f64 row {i} / {j}"), v / w));
             }
         }
 
@@ -214,9 +245,9 @@ impl Kernel for Battery {
             isa.splat_u8(9),
             isa.load_u8(&pixels[32..64].try_into().unwrap()),
         ];
-        isa.store_interleaved3_u8(channels, &mut out3);
+        isa.store_interleaved_u8(channels, &mut out3);
         scalars.extend(out3.map(|byte| ("rgb store".to_string(), f64::from(byte))));
-        isa.store_interleaved4_u8(
+        isa.store_interleaved_u8(
             [channels[2], channels[0], isa.splat_u8(255), channels[1]],
             &mut out4,
         );
@@ -244,7 +275,7 @@ impl Kernel for Battery {
             .store(&mut narrowed);
         scalars.extend(narrowed.map(|byte| ("u16 narrow_u8".to_string(), f64::from(byte))));
         let ints = a.widen();
-        let rounded = isa.round_clamped(
+        let rounded = isa.round_clamped_f64_to_i32(
             Halves {
                 low: isa.load_f64(&ROUNDED[0]),
                 high: isa.load_f64(&ROUNDED[1]),
@@ -252,15 +283,56 @@ impl Kernel for Battery {
             isa.splat_f64(65535.0),
         );
         let loaded = INTS.map(|lanes| isa.load_i32(&lanes));
-        let rounded_f32 = isa.round_clamped_f32(
+        let rounded_f32 = isa.round_clamped_f32_to_i32(
             isa.load_f32(&[0.5, 1.5, -0.5, f32::NAN, 254.5, 255.4, 1e30, 16_777_215.0]),
+            isa.splat_f32(16_777_216.0),
+        );
+        // The extremes a round meets: both infinities and both zeros, ties at the top, a bound
+        // per lane — lane `i` of the eight is held to lane `i mod 4` of `high` — and a bound at
+        // `i32::MAX`, past which no f64 below it rounds.
+        let rounded_extremes = isa.round_clamped_f64_to_i32(
+            Halves {
+                low: isa.load_f64(&[f64::INFINITY, f64::NEG_INFINITY, -0.0, 0.0]),
+                high: isa.load_f64(&[65535.5, 65534.5, 3.5, 2.5]),
+            },
+            isa.splat_f64(65535.0),
+        );
+        let rounded_per_lane = isa.round_clamped_f64_to_i32(
+            Halves {
+                low: isa.load_f64(&[300.0, 300.0, 300.0, 300.0]),
+                high: isa.load_f64(&[1e9, -5.0, 1.5, 0.5]),
+            },
+            isa.load_f64(&[255.0, 65535.0, 1.0, 2.0e6]),
+        );
+        let rounded_at_max = isa.round_clamped_f64_to_i32(
+            Halves {
+                low: isa.load_f64(&[3e9, 2_147_483_646.5, 2_147_483_647.0, 2_147_483_645.5]),
+                high: isa.load_f64(&[f64::INFINITY, -1.0, 1e300, 2_147_483_647.4]),
+            },
+            isa.splat_f64(f64::from(i32::MAX)),
+        );
+        let rounded_f32_extremes = isa.round_clamped_f32_to_i32(
+            isa.load_f32(&[
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                -0.0,
+                2.5,
+                3.5,
+                16_777_216.0,
+                -1e30,
+                0.5,
+            ]),
             isa.splat_f32(16_777_216.0),
         );
         for (name, v) in [
             ("u16 widen low", ints.low),
             ("u16 widen high", ints.high),
             ("round", rounded),
+            ("round extremes", rounded_extremes),
+            ("round per lane", rounded_per_lane),
+            ("round at i32 max", rounded_at_max),
             ("round f32", rounded_f32),
+            ("round f32 extremes", rounded_f32_extremes),
             ("loaded", loaded[0]),
             ("loaded weights", loaded[1]),
         ] {
@@ -346,15 +418,17 @@ impl Kernel for Battery {
         let mut rgb = [0u16; 24];
         isa.store_interleaved_u16::<3, 24>([w1, w2, w0], &mut rgb);
         scalars.extend(rgb.map(|word| ("rgb u16 store".to_string(), f64::from(word))));
-        for (divisor, values) in [
-            (255.0, BYTES.map(f32::from).to_vec()),
-            (65535.0, WORDS.concat().into_iter().map(f32::from).collect()),
+        for (scale, values) in [
+            (FullScale::U8, BYTES.map(f32::from).to_vec()),
+            (
+                FullScale::U16,
+                WORDS.concat().into_iter().map(f32::from).collect(),
+            ),
         ] {
-            let (divisor, reciprocal) = (isa.splat_f32(divisor), isa.splat_f32(1.0 / divisor));
             for chunk in values.chunks(F32_LANES) {
                 f32s(
-                    "div scale".to_string(),
-                    isa.load_f32_partial(chunk).div_scale(divisor, reciprocal),
+                    "div full scale".to_string(),
+                    isa.div_full_scale(isa.load_f32_partial(chunk), scale),
                 );
             }
         }
@@ -379,10 +453,10 @@ impl Kernel for Battery {
         );
         u16s.push((
             "round u16".to_string(),
-            isa.round_clamped_u16([ordered, swapped], isa.splat_f64(65535.0)),
+            isa.round_clamped_f64_to_u16([ordered, swapped], isa.splat_f64(65535.0)),
         ));
         let mut narrowed = [0u8; 32];
-        isa.round_clamped_u8([ordered, swapped, swapped, ordered], isa.splat_f64(255.0))
+        isa.round_clamped_f64_to_u8([ordered, swapped, swapped, ordered], isa.splat_f64(255.0))
             .store(&mut narrowed);
         scalars.extend(narrowed.map(|byte| ("round u8".to_string(), f64::from(byte))));
         let mut narrowed = [0u8; 32];
@@ -406,21 +480,13 @@ impl Kernel for Battery {
             op,
             lanes: v.to_array().to_vec(),
         }));
-        out.extend(u16s.into_iter().map(|(op, v): (String, S::U16)| {
-            let mut lanes = [0u16; 16];
-            v.store(&mut lanes);
-            Outcome {
-                op,
-                lanes: lanes.map(f64::from).to_vec(),
-            }
+        out.extend(u16s.into_iter().map(|(op, v): (String, S::U16)| Outcome {
+            op,
+            lanes: v.to_array().map(f64::from).to_vec(),
         }));
-        out.extend(i32s.into_iter().map(|(op, v): (String, S::I32)| {
-            let mut lanes = [0i32; 8];
-            v.store(&mut lanes);
-            Outcome {
-                op,
-                lanes: lanes.map(f64::from).to_vec(),
-            }
+        out.extend(i32s.into_iter().map(|(op, v): (String, S::I32)| Outcome {
+            op,
+            lanes: v.to_array().map(f64::from).to_vec(),
         }));
         out.extend(scalars.into_iter().map(|(op, value)| Outcome {
             op,
@@ -441,7 +507,7 @@ fn same(a: f64, b: f64) -> bool {
 /// every CPU.
 #[test]
 fn every_tier_matches_portable_lane_for_lane() {
-    let reference = Portable::new().run(Battery);
+    let reference = Battery.run(Portable::new());
     for tier in IsaTier::supported() {
         let outcomes = tier.run(Battery);
         assert_eq!(outcomes.len(), reference.len(), "{tier}");
@@ -585,19 +651,22 @@ fn gather_reads_only_valid_lanes_inside_the_table() {
 #[test]
 fn scale_divide_is_the_divide_for_every_byte_and_word() {
     #[derive(Debug)]
-    struct Quotients(u16);
+    struct Quotients(FullScale);
 
     impl Kernel for Quotients {
         type Output = usize;
 
         #[inline(always)]
         fn run<S: Isa>(self, isa: S) -> usize {
-            let divisor = f32::from(self.0);
-            let (divisors, reciprocal) = (isa.splat_f32(divisor), isa.splat_f32(1.0 / divisor));
-            let values: Vec<f32> = (0..=self.0).map(f32::from).collect();
+            let divisor = self.0.divisor();
+            let top = match self.0 {
+                FullScale::U8 => u16::from(u8::MAX),
+                FullScale::U16 => u16::MAX,
+            };
+            let values: Vec<f32> = (0..=top).map(f32::from).collect();
             let mut mismatches = 0;
             for chunk in values.chunks(F32_LANES) {
-                let got = isa.load_f32_partial(chunk).div_scale(divisors, reciprocal);
+                let got = isa.div_full_scale(isa.load_f32_partial(chunk), self.0);
                 mismatches += chunk
                     .iter()
                     .zip(got.to_array())
@@ -609,8 +678,8 @@ fn scale_divide_is_the_divide_for_every_byte_and_word() {
     }
 
     for tier in IsaTier::supported() {
-        for divisor in [255, 65535] {
-            assert_eq!(tier.run(Quotients(divisor)), 0, "{tier}, {divisor}");
+        for scale in [FullScale::U8, FullScale::U16] {
+            assert_eq!(tier.run(Quotients(scale)), 0, "{tier}, {scale:?}");
         }
     }
 }
@@ -621,23 +690,6 @@ fn bitmask_puts_lane_i_at_bit_i() {
     let isa = Portable::new();
     let lanes = isa.load_f32(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
     assert_eq!(lanes.lanes_gt(isa.splat_f32(0.5)).to_bitmask(), 0b1000_0100);
-}
-
-/// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³`; `2^n` is exact at both ends of the
-/// normal range.
-#[test]
-fn frexp_and_pow2i_split_and_build_powers_of_two() {
-    let isa = Portable::new();
-    let split = isa
-        .load_f32(&[6.0, 1.0, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0])
-        .frexp();
-    assert_eq!(split.mantissa.to_array()[..3], [0.75, 0.5, 0.1 / 0.125]);
-    assert_eq!(split.exponent.to_array()[..3], [3.0, 1.0, -3.0]);
-    let powers = isa.load_f64(&[-1022.0, -1.0, 0.0, 1023.0]).pow2i();
-    assert_eq!(
-        powers.to_array(),
-        [f64::MIN_POSITIVE, 0.5, 1.0, 2f64.powi(1023)]
-    );
 }
 
 /// `exp` holds 1e-12 relative from −700 to 700, the whole range a Gaussian exponent `−½·q` takes
@@ -700,27 +752,51 @@ fn dispatch_runs_on_the_widest_supported_tier() {
     assert_eq!(IsaTier::widest().run(IsaName), widest.run(IsaName));
 }
 
-/// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³` and the smallest normal `0.5 · 2⁻¹⁰²¹` in
-/// f64 lanes, on every tier.
+/// `6 = 0.75 · 2³`, `1 = 0.5 · 2¹`, `0.1 = 0.8 · 2⁻³` in f32 lanes and in f64 ones, with the
+/// smallest normal `0.5 · 2⁻¹⁰²¹` in f64; `2^n` is exact at both ends of the normal range. On every
+/// tier.
 #[test]
-fn f64_frexp_splits_off_the_exponent() {
+fn frexp_and_pow2i_split_and_build_powers_of_two() {
     #[derive(Debug)]
     struct Split;
 
     impl Kernel for Split {
-        type Output = [[f64; F64_LANES]; 2];
+        type Output = ([[f32; 3]; 2], [[f64; F64_LANES]; 3]);
 
         #[inline(always)]
-        fn run<S: Isa>(self, isa: S) -> [[f64; F64_LANES]; 2] {
-            let split = isa.load_f64(&[6.0, 1.0, 0.1, f64::MIN_POSITIVE]).frexp();
-            [split.mantissa.to_array(), split.exponent.to_array()]
+        fn run<S: Isa>(self, isa: S) -> Self::Output {
+            let f32s = isa
+                .load_f32(&[6.0, 1.0, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0])
+                .frexp();
+            let f64s = isa.load_f64(&[6.0, 1.0, 0.1, f64::MIN_POSITIVE]).frexp();
+            let first = |lanes: [f32; F32_LANES]| [lanes[0], lanes[1], lanes[2]];
+            (
+                [
+                    first(f32s.mantissa.to_array()),
+                    first(f32s.exponent.to_array()),
+                ],
+                [
+                    f64s.mantissa.to_array(),
+                    f64s.exponent.to_array(),
+                    isa.load_f64(&[-1022.0, -1.0, 0.0, 1023.0])
+                        .pow2i()
+                        .to_array(),
+                ],
+            )
         }
     }
 
     for tier in IsaTier::supported() {
         assert_eq!(
             tier.run(Split),
-            [[0.75, 0.5, 0.1 / 0.125, 0.5], [3.0, 1.0, -3.0, -1021.0]],
+            (
+                [[0.75, 0.5, 0.1 / 0.125], [3.0, 1.0, -3.0]],
+                [
+                    [0.75, 0.5, 0.1 / 0.125, 0.5],
+                    [3.0, 1.0, -3.0, -1021.0],
+                    [f64::MIN_POSITIVE, 0.5, 1.0, 2f64.powi(1023)],
+                ]
+            ),
             "{tier}"
         );
     }
@@ -774,71 +850,140 @@ fn ln_f64_is_accurate_at_every_magnitude() {
     }
 }
 
+/// `ln` holds ε relative from the smallest normal to the largest finite value, and `asinh` 2ε
+/// at every magnitude from the smallest subnormal up — through `x → 0`, where the textbook
+/// `ln(x + √(x² + 1))` loses its relative accuracy as `ε/x`, and past [`ASINH_LOG_FROM`] — on
+/// every tier. A sweep of every positive finite f32 measured the worst at 0.68ε for `ln`, at
+/// 2.797, and 1.91ε for `asinh`, at 1.26e-4, both in the sweep here. At 1 `ln` is exactly 0, and
+/// at 0 `asinh`.
+#[test]
+fn ln_f32_and_asinh_f32_are_accurate_at_every_magnitude() {
+    #[derive(Debug)]
+    struct LnAsinh<'a>(&'a [f32]);
+
+    impl Kernel for LnAsinh<'_> {
+        type Output = Vec<[f32; 2]>;
+
+        #[inline(always)]
+        fn run<S: Isa>(self, isa: S) -> Vec<[f32; 2]> {
+            let (chunks, []) = self.0.as_chunks::<F32_LANES>() else {
+                unreachable!("the sweep is whole vectors")
+            };
+            chunks
+                .iter()
+                .flat_map(|chunk| {
+                    let x = isa.load_f32(chunk);
+                    let ln = isa.ln_f32(x).to_array();
+                    let asinh = isa.asinh_f32(x).to_array();
+                    (0..F32_LANES).map(move |lane| [ln[lane], asinh[lane]])
+                })
+                .collect()
+        }
+    }
+
+    let mut xs: Vec<f32> = (-126..128).map(|e| 1.37 * 2f32.powi(e)).collect();
+    for exponent in -30..=30 {
+        xs.extend([1.0f32, 1.7, 3.3, 7.9].map(|mantissa| mantissa * 10f32.powi(exponent)));
+    }
+    xs.extend((0..1000).map(|i| 0.5 + i as f32 * 5e-4));
+    xs.extend([
+        f32::MIN_POSITIVE,
+        f32::MAX,
+        FRAC_1_SQRT_2,
+        FRAC_1_SQRT_2.next_up(),
+        FRAC_1_SQRT_2.next_down(),
+        1.0f32.next_up(),
+        1.0f32.next_down(),
+        ASINH_LOG_FROM,
+        ASINH_LOG_FROM.next_up(),
+        2.797_423_4,
+        0.000_126_115_72,
+        0.0,
+        1e-45,
+    ]);
+    xs.resize(xs.len().next_multiple_of(F32_LANES), 1.0);
+    let relative = |got: f32, want: f64| {
+        if want == 0.0 {
+            if got == 0.0 { 0.0 } else { f64::INFINITY }
+        } else {
+            (f64::from(got) - want).abs() / want.abs()
+        }
+    };
+    for tier in IsaTier::supported() {
+        for (&x, [ln, asinh]) in xs.iter().zip(tier.run(LnAsinh(&xs))) {
+            if x >= f32::MIN_POSITIVE {
+                let error = relative(ln, f64::from(x).ln());
+                assert!(
+                    error <= f64::from(f32::EPSILON),
+                    "{tier} ln({x}) = {ln}, {error:e} off"
+                );
+            }
+            let error = relative(asinh, f64::from(x).asinh());
+            assert!(
+                error <= 2.0 * f64::from(f32::EPSILON),
+                "{tier} asinh({x}) = {asinh}, {error:e} off"
+            );
+        }
+    }
+}
+
 /// The integer ops on `Portable`, the model: a widen zero-extends, a narrow keeps each lane in its
 /// range, `mul_high` keeps the high half of the 32-bit product, and a round clamps and breaks a
 /// tie to the even neighbour.
 #[test]
 fn integer_ops_widen_narrow_and_round_as_specified() {
-    fn words<V: U16x16>(v: V) -> [u16; 16] {
-        let mut lanes = [0; 16];
-        v.store(&mut lanes);
-        lanes
-    }
-    fn ints<V: I32x8>(v: V) -> [i32; 8] {
-        let mut lanes = [0; 8];
-        v.store(&mut lanes);
-        lanes
-    }
-    fn bytes<V: U8x32>(v: V) -> [u8; 32] {
-        let mut lanes = [0; 32];
-        v.store(&mut lanes);
-        lanes
-    }
     let isa = Portable::new();
     let mut input = [0u8; 32];
     input[0] = 255;
     input[17] = 7;
     let widened = isa.load_u8(&input).widen();
-    assert_eq!([words(widened.low)[0], words(widened.high)[1]], [255, 7]);
+    assert_eq!(
+        [widened.low.to_array()[0], widened.high.to_array()[1]],
+        [255, 7]
+    );
 
     let mut lanes = [0u16; 16];
     lanes[..4].copy_from_slice(&[255, 1, 128, 7]);
-    let narrowed = bytes(isa.load_u16(&lanes).narrow_u8(isa.splat_u16(200)));
+    let narrowed = isa
+        .load_u16(&lanes)
+        .narrow_u8(isa.splat_u16(200))
+        .to_array();
     assert_eq!(narrowed[..5], [255, 1, 128, 7, 0]);
     assert_eq!(narrowed[16..], [200; 16]);
     // 65535 · 65281 = 0xFF00_00FF: the high half is 0xFF00, the low 0x00FF.
     let (max, factor) = (isa.splat_u16(65535), isa.splat_u16(65281));
-    assert_eq!(words(max.mul_high(factor))[0], 0xFF00);
-    assert_eq!(words(max.mul_low(factor))[0], 0x00FF);
-    assert_eq!(words(max + isa.splat_u16(2))[0], 1);
+    assert_eq!(max.mul_high(factor).to_array()[0], 0xFF00);
+    assert_eq!(max.mul_low(factor).to_array()[0], 0x00FF);
+    assert_eq!((max + isa.splat_u16(2)).to_array()[0], 1);
 
-    let rounded = isa.round_clamped(
-        Halves {
-            low: isa.load_f64(&[0.5, 1.5, 2.5, -0.5]),
-            high: isa.load_f64(&[f64::NAN, 254.5, 255.4, 1e30]),
-        },
-        isa.splat_f64(255.0),
-    );
-    assert_eq!(ints(rounded), [0, 2, 2, 0, 0, 254, 255, 255]);
     let quads = Halves {
-        low: isa.load_f64(&[0.5, 1.5, 2.5, -0.5]),
-        high: isa.load_f64(&[f64::NAN, 254.5, 255.4, 1e30]),
+        low: isa.load_f64(&ROUNDED[0]),
+        high: isa.load_f64(&ROUNDED[1]),
     };
     let reversed = Halves {
         low: quads.high,
         high: quads.low,
     };
     assert_eq!(
-        words(isa.round_clamped_u16([quads, reversed], isa.splat_f64(255.0))),
-        [0, 2, 2, 0, 0, 254, 255, 255, 0, 254, 255, 255, 0, 2, 2, 0]
+        isa.round_clamped_f64_to_i32(quads, isa.splat_f64(65535.0))
+            .to_array(),
+        [0, 2, 2, 0, 0, 254, 65535, 65535]
     );
     assert_eq!(
-        bytes(isa.round_clamped_u8([reversed, quads, quads, reversed], isa.splat_f64(255.0)))[..16],
+        isa.round_clamped_f64_to_u16([quads, reversed], isa.splat_f64(65535.0))
+            .to_array(),
+        [
+            0, 2, 2, 0, 0, 254, 65535, 65535, 0, 254, 65535, 65535, 0, 2, 2, 0
+        ]
+    );
+    assert_eq!(
+        isa.round_clamped_f64_to_u8([reversed, quads, quads, reversed], isa.splat_f64(255.0))
+            .to_array()[..16],
         [0, 254, 255, 255, 0, 2, 2, 0, 0, 2, 2, 0, 0, 254, 255, 255]
     );
     let mixed = isa.load_i32(&[2, 70, 40_000, 3, 0, 1, 65535, 255]);
     assert_eq!(
-        words(mixed.narrow_u16(mixed))[..8],
+        mixed.narrow_u16(mixed).to_array()[..8],
         [2, 70, 40_000, 3, 0, 1, 65535, 255]
     );
     // 2²⁴ + 1 is no f32: it rounds to the even 2²⁴.
@@ -859,7 +1004,7 @@ fn layout_ops_move_and_weigh_bytes_as_specified() {
     isa.append_fourth_u8(&rgb, 255, &mut rgba);
     assert_eq!(rgba[..8], [0, 1, 2, 255, 4, 5, 6, 255]);
     let mut channels = [0u8; 96];
-    isa.store_interleaved3_u8(
+    isa.store_interleaved_u8(
         [isa.splat_u8(1), isa.splat_u8(2), isa.splat_u8(3)],
         &mut channels,
     );

@@ -28,12 +28,4 @@ pub use crate::ops::contrast_brightness::ContrastBrightness;
 pub use crate::ops::preview::Preview;
 
 #[cfg(feature = "wgpu")]
-pub use crate::{
-    error::GpuError,
-    gpu::Gpu,
-    gpu::gpu_ctx::{GpuCtx, GpuPipeline},
-    gpu::gpu_image::GpuImage,
-    ops::affine_warp::pipeline::GpuAffineWarpPipeline,
-    ops::blend::pipeline::GpuBlendPipeline,
-    ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline,
-};
+pub use crate::{error::GpuError, gpu::Gpu, gpu::gpu_image::GpuImage};

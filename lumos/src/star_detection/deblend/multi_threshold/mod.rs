@@ -374,7 +374,7 @@ impl TreeBuffers {
 }
 
 #[cfg(test)]
-pub(crate) mod buffer_room {
+pub(crate) mod internals {
     use crate::star_detection::deblend::multi_threshold::TreeBuffers;
 
     impl TreeBuffers {

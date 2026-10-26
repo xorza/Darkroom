@@ -72,7 +72,7 @@ impl BayerPhase {
     /// width, which is padding or no word at all.
     pub(crate) fn deinterleave_mask(self, mosaic: &BitBuffer2, plane: &mut BitBuffer2) {
         let Vec2us { x: a, y: b } = self.origin;
-        plane.clear_to(self.size(mosaic.size));
+        plane.clear_to(self.size(mosaic.size()));
         plane.par_rows_mut().enumerate().for_each(|(y, row)| {
             let source = mosaic.row_words(2 * y + b);
             let half = |idx: usize| source.get(idx).map_or(0, |&word| even_bits(word >> a));
@@ -163,7 +163,7 @@ mod tests {
             for phase in BayerPhase::ALL {
                 phase.deinterleave_mask(&mosaic, &mut plane);
                 let plane_size = phase.size(size);
-                assert_eq!(plane.size, plane_size, "{width} {phase:?}");
+                assert_eq!(plane.size(), plane_size, "{width} {phase:?}");
                 assert!(plane.padding_is_clear(), "{width} {phase:?}");
                 for y in 0..plane_size.height {
                     for x in 0..plane_size.width {

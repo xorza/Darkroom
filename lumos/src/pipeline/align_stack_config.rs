@@ -174,7 +174,7 @@ impl AlignStackConfig {
     ) -> Result<AlignStackResult, AlignStackError> {
         self.linear()?;
         self.begin(lights.len(), ingest, monitor)?
-            .stack(LightSource::<&Path>::Held(lights))
+            .stack(LightSource::Held(lights))
     }
 
     /// Detect → register → warp → stack calibrated linear lights read from files: FITS or
@@ -186,16 +186,17 @@ impl AlignStackConfig {
     /// and warped through the frame store as [`Self::calibrate_align_stack_paths`] parks its
     /// lights, so peak RAM stays flat in the frame count. With [`Reference::Idx`] each light goes
     /// through one pass, written once.
-    pub fn align_stack_paths<P: AsRef<Path> + Sync>(
+    pub fn align_stack_paths<P: AsRef<Path>>(
         &self,
         light_paths: &[P],
         ingest: &IngestConfig,
         monitor: ProgressMonitor,
     ) -> Result<AlignStackResult, AlignStackError> {
         self.linear()?;
+        let light_paths: Vec<&Path> = light_paths.iter().map(AsRef::as_ref).collect();
         let run = self.begin(light_paths.len(), ingest, monitor)?;
         run.stack(LightSource::Files(Box::new(LightFiles::new(
-            light_paths,
+            &light_paths,
             Preparation::Linear,
             &run.ingest,
         )?)))
@@ -221,7 +222,7 @@ impl AlignStackConfig {
     /// For lights already calibrated (e.g. pre-processed FITS), skip this and call
     /// [`Self::align_stack_paths`], or
     /// [`Self::align_stack_images`] for frames already decoded.
-    pub fn calibrate_align_stack_paths<P: AsRef<Path> + Sync>(
+    pub fn calibrate_align_stack_paths<P: AsRef<Path>>(
         &self,
         lights: CalibratedLights<'_, P>,
         ingest: &IngestConfig,
@@ -231,6 +232,7 @@ impl AlignStackConfig {
             paths: light_paths,
             masters,
         } = lights;
+        let light_paths: Vec<&Path> = light_paths.iter().map(AsRef::as_ref).collect();
         let run = self.begin(light_paths.len(), ingest, monitor)?;
         let notes = CalibrationNotes::default();
         let preparation = Preparation::Calibrate(MosaicPreparation {
@@ -239,7 +241,7 @@ impl AlignStackConfig {
             notes: &notes,
         });
         let mut result = run.stack(LightSource::Files(Box::new(LightFiles::new(
-            light_paths,
+            &light_paths,
             preparation,
             &run.ingest,
         )?)))?;

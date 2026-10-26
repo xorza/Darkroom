@@ -8,11 +8,11 @@ use crate::bg_mesh::tile_stats::TileComponent;
 use crate::internals::test_rng::TestRng;
 use crate::scratch_pool::ScratchPool;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
+use crate::star_detection::detection_filter::Prefilter;
 use crate::star_detection::detection_filter::{DetectionFilter, FilterSource};
-use crate::star_detection::detection_plane::Prefilter;
 use crate::star_detection::median_filter::internals::apply_3x3;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// A plane of noise around a slope, its sky the mesh of 16-px tiles measures on it.
 fn frame(size: Size2us, seed: u64) -> (Buffer2<f32>, MeshSurface) {

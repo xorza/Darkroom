@@ -1,5 +1,7 @@
 use common::Buffer2;
 
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::intensity::Intensity;
 use crate::image_ops::local_contrast::{
     BIN_COUNT, LocalContrast, TileAxis, TileGrid, clip_histogram,
@@ -109,6 +111,36 @@ fn clahe_tile_mappings_are_monotonic() {
             );
         }
     }
+}
+
+/// A tile's mapping is that of its data: half of a 4×4 tile at 0.25 beside fills flagged `NO_DATA`
+/// maps alike whether the fills hold 0.9 or 0.1, and unflagged the 0.9 moves it. A tile of fills
+/// alone keeps every level.
+#[test]
+fn clahe_tiles_map_their_data_alone() {
+    let size = Size2us::new(4, 4);
+    let grid = TileGrid {
+        cols: TileAxis::new(4, 1),
+        rows: TileAxis::new(4, 1),
+    };
+    let halves = |fill: f32| -> Vec<f32> {
+        (0..16)
+            .map(|idx| if idx < 8 { 0.25 } else { fill })
+            .collect()
+    };
+    let fills = PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &(8..16).collect::<Vec<_>>());
+    let luts = |values: &[f32], flags: Option<&PixelFlags>| {
+        grid.luts(Intensity::mono(size, values).with_flags(flags), 2.0)
+    };
+    let data = luts(&halves(0.9), fills.as_ref());
+    assert_eq!(luts(&halves(0.1), fills.as_ref()), data);
+    assert_ne!(luts(&halves(0.9), None), data);
+
+    let all = PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &(0..16).collect::<Vec<_>>());
+    let identity: Vec<f32> = (0..=BIN_COUNT)
+        .map(|b| b as f32 / BIN_COUNT as f32)
+        .collect();
+    assert_eq!(luts(&halves(0.9), all.as_ref())[0].as_slice(), identity);
 }
 
 /// A 2:1:1 field keeps its hue exactly: every channel of a pixel is scaled by one factor, and

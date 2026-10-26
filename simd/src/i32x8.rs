@@ -29,4 +29,11 @@ pub trait I32x8:
     fn narrow_u16(self, high: Self) -> Self::U16;
 
     fn store(self, lanes: &mut [i32; I32_LANES]);
+
+    #[inline(always)]
+    fn to_array(self) -> [i32; I32_LANES] {
+        let mut lanes = [0; I32_LANES];
+        self.store(&mut lanes);
+        lanes
+    }
 }

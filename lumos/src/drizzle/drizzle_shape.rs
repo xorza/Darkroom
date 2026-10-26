@@ -7,13 +7,13 @@ use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
 use crate::combine::stack_config::StackConfig;
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::error::DrizzleError;
-use crate::frame::frame_peek::FramePeek;
+use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::storage_tier::StorageTier;
 use crate::frame_store::stored_layout::StoredLayout;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::frame_desc;
 use crate::ingest::ingest_run::IngestRun;
-use crate::io::frame_info::DecoderBytes;
 use crate::memory::footprint::Footprint;
 use crate::memory::run_plan::RunPlan;
 use crate::memory::stage::{Stage, Units};
@@ -21,7 +21,7 @@ use crate::memory::stage::{Stage, Units};
 /// Where a drizzle run's input frames come from, which decides whether the caller already holds
 /// them when the run reads the machine's memory.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum FrameOrigin {
+pub(crate) enum DrizzleSource {
     /// Decoded from files, one at a time, `uncached` of them not yet in the decode cache, beside
     /// the `gains` bytes of the source gains they share, which the run holds from their decode on,
     /// each decode holding `decoder` on its way.
@@ -41,7 +41,7 @@ pub(crate) struct DrizzleShape {
     pub(crate) output: PlanarDesc,
     pub(crate) deposit: Deposit,
     pub(crate) frame_count: usize,
-    pub(crate) origin: FrameOrigin,
+    pub(crate) origin: DrizzleSource,
 }
 
 impl DrizzleShape {
@@ -61,8 +61,8 @@ impl DrizzleShape {
             budget,
         );
         let uncached = match self.origin {
-            FrameOrigin::Files { uncached, .. } => uncached,
-            FrameOrigin::Memory => 0,
+            DrizzleSource::Files { uncached, .. } => uncached,
+            DrizzleSource::Memory => 0,
         };
         let writes = RunWrites {
             kept: (frame_desc::decoded_byte_len(self.input) as u64)
@@ -98,8 +98,8 @@ impl DrizzleShape {
     /// handed over.
     const fn gain_bytes(&self) -> usize {
         match self.origin {
-            FrameOrigin::Files { gains, .. } => gains,
-            FrameOrigin::Memory => 0,
+            DrizzleSource::Files { gains, .. } => gains,
+            DrizzleSource::Memory => 0,
         }
     }
 
@@ -126,13 +126,14 @@ impl DrizzleShape {
         let drizzled_bytes = drizzled.heap_bytes(output);
         let input_bytes = frame_desc::decoded_byte_len(input);
         let decoder = match origin {
-            FrameOrigin::Files { decoder, .. } => decoder,
-            FrameOrigin::Memory => DecoderBytes::default(),
+            DrizzleSource::Files { decoder, .. } => decoder,
+            DrizzleSource::Memory => DecoderBytes::default(),
         };
-        let way = FramePeek {
+        let way = FrameInfo {
             desc: input,
+            cfa_type: deposit.mosaic().map_or(CfaType::Mono, CfaType::Mosaic),
             decoder,
-            mosaic: deposit.mosaic(),
+            gain_bytes: 0,
         }
         .footprint(workers)
         .then(Footprint {
@@ -142,8 +143,8 @@ impl DrizzleShape {
         // A held input is freed as its frame is drizzled; a drizzled frame smaller than its input
         // frees at most its own size.
         let kept = match origin {
-            FrameOrigin::Files { .. } => drizzled_bytes,
-            FrameOrigin::Memory => drizzled_bytes - input_bytes.min(drizzled_bytes),
+            DrizzleSource::Files { .. } => drizzled_bytes,
+            DrizzleSource::Memory => drizzled_bytes - input_bytes.min(drizzled_bytes),
         };
         let held = self.held_bytes();
         // A drizzled frame covers only the pixels its drops reached; a mosaic's, in each channel by
@@ -187,8 +188,8 @@ mod tests {
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
     use crate::drizzle::deposit::Deposit;
-    use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
-    use crate::io::frame_info::DecoderBytes;
+    use crate::drizzle::drizzle_shape::{DrizzleShape, DrizzleSource};
+    use crate::frame::frame_info::DecoderBytes;
     use crate::memory::stage::{Stage, Units};
     use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -222,7 +223,7 @@ mod tests {
                 output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
                 deposit: Deposit::Channels(ChannelLayout::Mono),
                 frame_count: 3,
-                origin: FrameOrigin::Files {
+                origin: DrizzleSource::Files {
                     uncached: 0,
                     gains,
                     decoder: DecoderBytes::default(),
@@ -260,7 +261,7 @@ mod tests {
             output: PlanarDesc::new((4, 4), ChannelLayout::Mono),
             deposit: Deposit::Channels(ChannelLayout::Mono),
             frame_count: 3,
-            origin: FrameOrigin::Files {
+            origin: DrizzleSource::Files {
                 uncached: 0,
                 gains: 0,
                 decoder: DecoderBytes {

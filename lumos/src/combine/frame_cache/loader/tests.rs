@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
-use common::{TempDir, fs};
+use common::{Size2us, TempDir, WorkerPool, fs};
+use fits_well::header::Header;
 use fits_well::image::{Image as FitsImage, Scaling};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
@@ -12,20 +13,22 @@ use crate::combine::frame_cache::loader::*;
 use crate::combine::normalization::Normalization;
 use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
+use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::frame_store::decode_cache::cached_source::CachedSource;
 use crate::frame_store::decode_cache::frame_spill::FrameSpill;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::ingest::error::AdmissionError;
 use crate::ingest::ingest_config::IngestConfig;
+use crate::internals::cfa::make_cfa;
 use crate::internals::fits::write_fits;
 use crate::io::decoder::cfa_decoder::CfaDecoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::frame_info::{DecoderBytes, FrameInfo};
+use crate::io::load_ctx::LoadCtx;
 use crate::memory::budget::Budget;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -64,12 +67,11 @@ impl SetFrame<'_> {
             combine: CombineBudget::new(Budget::of_memory(1 << 30, 1)),
         };
         let paths = vec![source; idx + 1];
-        let files = FileSet::<_, D>::new(&paths, &run).unwrap();
+        let files = FileSet::<_, D>::new(&paths, &run.storage, &run.ctx).unwrap();
         FrameStore {
             files: &files,
             kept: files.storage().kept(),
             step: &None::<Infallible>,
-            ctx: &run.ctx,
             tier: &tier,
             intake: &intake,
         }
@@ -347,7 +349,7 @@ fn a_kept_cache_is_reused_by_the_next_run() {
         };
         let path_refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
         let run = |step: &Option<AddOne>| {
-            load_tiered::<LinearDecoder, _, StackError>(
+            LoadedCache::load::<LinearDecoder, _, StackError>(
                 SteppedPaths {
                     paths: &path_refs,
                     step,
@@ -456,7 +458,7 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
         idx: 0,
         info: FrameInfo {
             desc: PlanarDesc::new((100, 100), ChannelLayout::Mono),
-            cfa_type: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            cfa_type: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             decoder: DecoderBytes::default(),
             gain_bytes: 8112,
         },
@@ -491,4 +493,134 @@ fn stages_charge_the_decode_the_normalization_and_the_combine() {
             },
         ]
     );
+}
+
+/// A set whose second frame disagrees with the first — on sample domain, row order or CFA
+/// pattern — is refused by both load tiers before the third frame decodes: the third path names
+/// no file, so reaching it would report a load error instead. One worker thread keeps the order
+/// fixed.
+#[test]
+fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
+    use crate::combine::error::StackError;
+    use crate::combine::frame_cache::FrameCache;
+    use crate::combine::normalization::Normalization;
+    use crate::ingest::ingest_config::IngestConfig;
+
+    let dir = TempDir::new("lumos-frame-set");
+    let image =
+        FitsImage::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0], Scaling::IDENTITY).unwrap();
+    let linear = |name: &str, keywords: &[(&str, &str)], datamax: f64| {
+        let mut header = Header::new();
+        header.set("DATAMAX", datamax).unwrap();
+        for (keyword, value) in keywords {
+            header.set(*keyword, *value).unwrap();
+        }
+        let path = dir.join(format!("{name}.fits"));
+        write_fits(&path, image.view(), Some(&header));
+        path
+    };
+    let mosaic = |name: &str, pattern: BayerPattern| {
+        let path = dir.join(format!("{name}.fits"));
+        make_cfa(
+            Size2us::new(4, 2),
+            vec![0.5; 8],
+            CfaType::Mosaic(Mosaic::Bayer(pattern)),
+        )
+        .write_fits(&path)
+        .unwrap();
+        path
+    };
+    let reference = linear("reference", &[], 1.0);
+    let other_span = linear("other_span", &[], 65_535.0);
+    let mirrored = linear("mirrored", &[("ROWORDER", "BOTTOM-UP")], 1.0);
+    let rggb = mosaic("rggb", BayerPattern::Rggb);
+    let bggr = mosaic("bggr", BayerPattern::Bggr);
+    let never_decoded = dir.join("never_decoded.fits");
+
+    let single_thread = WorkerPool::new("lumos-test", 1);
+    for available_memory in [1 << 30, 1] {
+        let ingest = IngestConfig::with_cache_dir(dir.join("cache"));
+        let config = StackConfig {
+            normalization: Normalization::None,
+            weighting: Weighting::Equal,
+            ..StackConfig::light()
+        };
+        let memory = available_memory;
+        let linear_set = |second: &Path| {
+            single_thread.run(|| {
+                FrameCache::from_paths(
+                    &[reference.as_path(), second, never_decoded.as_path()],
+                    PlannedCombine {
+                        normalization: config.normalization,
+                        quality: config.quality,
+                    },
+                    IngestRun::planned(memory, &ingest),
+                )
+            })
+        };
+        let tier = if available_memory == 1 {
+            "disk"
+        } else {
+            "memory"
+        };
+        assert!(
+            matches!(
+                linear_set(&other_span),
+                Err(StackError::Admission(
+                    AdmissionError::SampleDomainMismatch {
+                        idx: 1,
+                        reference_idx: 0,
+                        ..
+                    }
+                ))
+            ),
+            "{tier}"
+        );
+        assert!(
+            matches!(
+                linear_set(&mirrored),
+                Err(StackError::Admission(AdmissionError::RowOrderMismatch {
+                    idx: 1,
+                    reference_idx: 0,
+                    ..
+                }))
+            ),
+            "{tier}"
+        );
+        let cfa_set = single_thread.run(|| {
+            FrameCache::from_cfa_paths(
+                SteppedPaths {
+                    paths: &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
+                    step: &None::<Infallible>,
+                },
+                PlannedCombine {
+                    normalization: config.normalization,
+                    quality: config.quality,
+                },
+                IngestRun::planned(memory, &ingest),
+            )
+        });
+        assert!(
+            matches!(
+                cfa_set,
+                Err(StackError::Admission(AdmissionError::CfaPatternMismatch {
+                    idx: 1,
+                    reference_idx: 0,
+                    actual: Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr))),
+                    expected: Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb))),
+                }))
+            ),
+            "{tier}"
+        );
+        // The same set with a matching second frame does reach the third, which fails: the disk
+        // tier reads the file's identity before decoding it, the memory tier decodes it.
+        let reached = linear_set(&reference);
+        assert!(
+            matches!(
+                reached,
+                Err(StackError::ImageLoad(_) | StackError::FrameStore(_))
+            ),
+            "{tier}: {reached:?}"
+        );
+    }
 }

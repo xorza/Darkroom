@@ -60,23 +60,6 @@ enum Pixels {
 }
 
 impl Image {
-    /// A planar image of `width × height`, in the layout the `lumos` nodes publish: one `f32`
-    /// plane per channel, mono from one plane and RGB from three.
-    ///
-    /// # Panics
-    /// When `planes` holds neither one nor three planes, or a plane does not hold
-    /// `width × height` samples.
-    pub fn from_planes(
-        size: impl Into<Size2us>,
-        planes: impl IntoIterator<Item = Vec<f32>>,
-    ) -> Self {
-        let planes: Vec<Vec<f32>> = planes.into_iter().collect();
-        let layout =
-            ChannelLayout::try_from(planes.len()).expect("an image has one plane or three");
-        let desc = PlanarDesc::new(size, layout);
-        Self::from(LinearImage::from_planar_channels(desc, planes))
-    }
-
     /// A required image input to process, named `name`.
     pub(crate) fn input(name: &str) -> FuncInput {
         FuncInput::required(name, IMAGE_DATA_TYPE).description("Image to process.")
@@ -108,7 +91,7 @@ impl Image {
     fn into_interleaved(self) -> imaginarium::InterleavedImage {
         match self.pixels {
             Pixels::Interleaved(image) => image,
-            Pixels::Planar(planes) => imaginarium::InterleavedImage::from(&planes),
+            Pixels::Planar(planes) => imaginarium::InterleavedImage::from(planes),
         }
     }
 
@@ -118,8 +101,7 @@ impl Image {
         frame_desc_of(self.desc())?;
         let pixels = match self.pixels {
             Pixels::Planar(planes) => planes,
-            Pixels::Interleaved(image) => PlanarImage::try_from(image.without_alpha())
-                .expect("an image without alpha has planes"),
+            Pixels::Interleaved(image) => PlanarImage::without_alpha(&image),
         };
         Ok(LinearImage::from(LinearParts {
             pixels,
@@ -157,21 +139,22 @@ impl Image {
     pub(crate) fn planar(&self) -> Cow<'_, PlanarImage> {
         match &self.pixels {
             Pixels::Planar(planes) => Cow::Borrowed(planes),
-            Pixels::Interleaved(image) => {
-                // The alpha drop takes the image, so one with alpha is copied first; one without
-                // converts straight from the borrow.
-                let planes = if image.desc().color_format().has_alpha() {
-                    PlanarImage::try_from(image.clone().without_alpha())
-                } else {
-                    PlanarImage::try_from(image)
-                };
-                Cow::Owned(planes.expect("an image without alpha has planes"))
-            }
+            Pixels::Interleaved(image) => Cow::Owned(PlanarImage::without_alpha(image)),
+        }
+    }
+
+    /// The `RGBA_U8` preview of this image at `size` — see [`imaginarium::Preview`] — read from
+    /// the pixels where they lie, planes without interleaving them first.
+    pub fn preview_rgba8(&self, size: Size2us) -> imaginarium::InterleavedImage {
+        let preview = imaginarium::Preview::new(size);
+        match &self.pixels {
+            Pixels::Interleaved(image) => preview.to_rgba8(image),
+            Pixels::Planar(planes) => preview.planes_to_rgba8(planes),
         }
     }
 
     /// Dimensions and format, without repacking either way.
-    pub(crate) fn desc(&self) -> imaginarium::InterleavedDesc {
+    pub fn desc(&self) -> imaginarium::InterleavedDesc {
         match &self.pixels {
             Pixels::Interleaved(image) => image.desc(),
             Pixels::Planar(planes) => imaginarium::InterleavedDesc::from(planes.desc()),
@@ -230,6 +213,18 @@ impl From<imaginarium::InterleavedImage> for Image {
     fn from(image: imaginarium::InterleavedImage) -> Self {
         Self {
             pixels: Pixels::Interleaved(image),
+            metadata: ImageMetadata::default(),
+            flags: None,
+            flat_gain: None,
+        }
+    }
+}
+
+/// Planes, which carry no metadata, flags or flat gain, in the layout the `lumos` nodes publish.
+impl From<PlanarImage> for Image {
+    fn from(pixels: PlanarImage) -> Self {
+        Self {
+            pixels: Pixels::Planar(pixels),
             metadata: ImageMetadata::default(),
             flags: None,
             flat_gain: None,

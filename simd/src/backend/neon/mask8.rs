@@ -25,12 +25,9 @@ impl Mask8<NeonF32> for NeonMask {
 
     #[inline(always)]
     fn keep(self, value: NeonF32) -> NeonF32 {
-        let and = |mask: uint32x4_t, value: float32x4_t| unsafe {
-            vreinterpretq_f32_u32(vandq_u32(mask, vreinterpretq_u32_f32(value)))
-        };
         NeonF32 {
-            low: and(self.low, value.low),
-            high: and(self.high, value.high),
+            low: keep(self.low, value.low),
+            high: keep(self.high, value.high),
         }
     }
 
@@ -56,10 +53,21 @@ impl Mask8<NeonF32> for NeonMask {
 
     #[inline(always)]
     fn to_bitmask(self) -> u8 {
-        let bits = |mask: uint32x4_t| unsafe {
-            let weights = vld1q_u32([1, 2, 4, 8].as_ptr());
-            vaddvq_u32(vandq_u32(mask, weights)) as u8
-        };
-        bits(self.low) | (bits(self.high) << 4)
+        bitmask(self.low) | (bitmask(self.high) << 4)
+    }
+}
+
+/// `value` where `mask` is set, 0 elsewhere.
+#[inline(always)]
+fn keep(mask: uint32x4_t, value: float32x4_t) -> float32x4_t {
+    unsafe { vreinterpretq_f32_u32(vandq_u32(mask, vreinterpretq_u32_f32(value))) }
+}
+
+/// Lane `i` of `mask` at bit `i`.
+#[inline(always)]
+fn bitmask(mask: uint32x4_t) -> u8 {
+    unsafe {
+        let weights = vld1q_u32([1, 2, 4, 8].as_ptr());
+        vaddvq_u32(vandq_u32(mask, weights)) as u8
     }
 }

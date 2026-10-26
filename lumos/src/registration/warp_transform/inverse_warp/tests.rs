@@ -27,8 +27,7 @@ fn sip_on(transform: Transform, extent: i32, field: impl Fn(DVec2) -> DVec2) -> 
 }
 
 /// Back through the inverse lands where the forward warp started, to the Newton tolerance, and
-/// the position alone is the same bits; the inverse's Jacobian is the inverse of the forward
-/// one; and without SIP it is `T⁻¹` exactly.
+/// without SIP it is `T⁻¹` exactly.
 #[test]
 fn the_inverse_undoes_the_forward_warp() {
     let transform = Transform::similarity(DVec2::new(12.0, -7.0), 0.3, 1.05);
@@ -39,31 +38,16 @@ fn the_inverse_undoes_the_forward_warp() {
         DVec2::new(150.0, -90.0),
         DVec2::new(-180.0, 175.0),
     ] {
-        let t = warp.apply(r);
-        let mapped = inverse.apply(t).unwrap();
-        assert_eq!(inverse.pos(t), Some(mapped.pos));
+        let pos = inverse.pos(warp.apply(r)).unwrap();
         assert!(
-            (mapped.pos - r).length() < NEWTON_TOLERANCE_PX,
-            "{r:?} came back as {:?}",
-            mapped.pos
+            (pos - r).length() < NEWTON_TOLERANCE_PX,
+            "{r:?} came back as {pos:?}"
         );
-        // Forward Jacobian by the chain rule, `J_T · (I + ∂c)`; its product with the inverse's
-        // is the identity to the rounding of two 2×2 products, 1e-12 at these entry sizes.
-        let forward = transform.jacobian(warp.sip.as_ref().unwrap().correct(r))
-            * warp.sip.as_ref().unwrap().jacobian(r);
-        let identity = forward * mapped.jacobian;
-        for (actual, expected) in identity
-            .to_cols_array()
-            .into_iter()
-            .zip([1.0, 0.0, 0.0, 1.0])
-        {
-            assert!((actual - expected).abs() < 1e-12, "{identity:?}");
-        }
     }
 
     let plain = WarpTransform::new(transform).inverse();
     let t = DVec2::new(33.0, 44.0);
-    assert_eq!(plain.apply(t).unwrap().pos, transform.inverse().apply(t));
+    assert_eq!(plain.pos(t), Some(transform.inverse().apply(t)));
 }
 
 /// Past a fold the correction has no inverse, and the iteration says so rather than returning
@@ -75,8 +59,8 @@ fn a_point_past_a_fold_does_not_invert() {
         DVec2::new(-0.01 * r.x * r.x, 0.0)
     });
     let inverse = warp.inverse();
-    assert!(inverse.apply(DVec2::new(30.0, 0.0)).is_none());
-    let inside = inverse.apply(DVec2::new(10.0, 5.0)).unwrap().pos;
+    assert!(inverse.pos(DVec2::new(30.0, 0.0)).is_none());
+    let inside = inverse.pos(DVec2::new(10.0, 5.0)).unwrap();
     let expected = (1.0 - 0.6f64.sqrt()) / 0.02;
     assert!((inside.x - expected).abs() < 1e-6, "{inside:?}");
     assert!((inside.y - 5.0).abs() < 1e-6, "{inside:?}");

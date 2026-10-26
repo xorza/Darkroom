@@ -18,7 +18,8 @@ use std::fmt;
 use std::num::NonZeroU32;
 
 use glam::UVec2;
-use imaginarium::{ColorFormat, InterleavedDesc, InterleavedImage, Preview};
+use imaginarium::{ColorFormat, InterleavedDesc};
+use lens::Image;
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
 
@@ -434,8 +435,8 @@ fn native_size(desc: InterleavedDesc) -> Result<UVec2, DrawablePreviewError> {
 
 /// Downscale to `target` and convert to RGBA8 — the one place pixels are
 /// produced, and so the seam a test asserts exact output on.
-fn rgba8_raster(cpu: &InterleavedImage, target: UVec2) -> Raster {
-    let rgba = Preview::new(Size2us::new(target.x as usize, target.y as usize)).to_rgba8(cpu);
+fn rgba8_raster(image: &Image, target: UVec2) -> Raster {
+    let rgba = image.preview_rgba8(Size2us::new(target.x as usize, target.y as usize));
     let desc = rgba.desc();
     debug_assert_eq!(desc.color_format(), ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
@@ -464,7 +465,7 @@ fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
 #[cfg(feature = "internals")]
 pub(crate) mod internals {
     #[cfg(test)]
-    use lens::Image;
+    use imaginarium::InterleavedImage;
 
     use super::*;
 
@@ -569,7 +570,7 @@ pub(crate) mod internals {
     /// A black image of `size` in `format`, as a node would publish it.
     #[cfg(test)]
     pub(crate) fn image_value(size: Size2us, format: ColorFormat) -> DynamicValue {
-        let raw = InterleavedImage::new_black(InterleavedDesc::new(size, format));
+        let raw = InterleavedImage::new_zeroed(InterleavedDesc::new(size, format));
         DynamicValue::from_custom(Image::from(raw))
     }
 

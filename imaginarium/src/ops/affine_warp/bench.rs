@@ -20,8 +20,6 @@ use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::affine_warp::cpu::BilinearKernel;
-#[cfg(feature = "wgpu")]
-use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 use crate::ops::affine_warp::{AffineWarp, FilterMode, cpu};
 
 /// The slowest GPU case's iteration as measured on a Radeon 680M (bilinear RGBA f32, 326 ms):
@@ -39,7 +37,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for format in ColorFormat::ALL {
         let mut tile = None;
         let desc = InterleavedDesc::new(Size2us::new(TILE, TILE), format);
-        let mut output = InterleavedImage::new_black(desc);
+        let mut output = InterleavedImage::new_zeroed(desc);
         group.throughput(fixture::throughput(TILE * TILE, format.byte_len()));
         for filter in FILTERS {
             let warp = rotation(Size2us::new(TILE, TILE), filter);
@@ -69,8 +67,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// reading the frame.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "affine_warp", Scale::Millis);
-    #[cfg(feature = "wgpu")]
-    let mut pipeline = None;
     for format in ColorFormat::ALL {
         let mut source = None;
         let pixels = FRAME.pixel_count();
@@ -91,18 +87,16 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     let frame = source.get_or_insert_with(|| scene::sky(format, FRAME, 1));
                     match backend {
                         Backend::Cpu => {
-                            let mut output = InterleavedImage::new_black(frame.desc());
+                            let mut output = InterleavedImage::new_zeroed(frame.desc());
                             b.iter(|| warp.apply_cpu(black_box(frame), &mut output));
                         }
                         #[cfg(feature = "wgpu")]
                         Backend::Gpu => {
                             let gpu = backends.gpu();
-                            let pipeline =
-                                pipeline.get_or_insert_with(|| GpuAffineWarpPipeline::new(gpu));
                             b.iter_with_large_drop(|| {
                                 let input = GpuImage::from_image(gpu, frame).unwrap();
                                 let mut output = GpuImage::new_empty(gpu, frame.desc()).unwrap();
-                                warp.apply_gpu(gpu, pipeline, &input, &mut output);
+                                warp.apply_gpu(gpu, &input, &mut output);
                                 output.to_image(gpu).unwrap()
                             });
                         }

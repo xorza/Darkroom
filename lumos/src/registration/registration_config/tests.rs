@@ -29,7 +29,6 @@ fn config_default_values() {
     assert_eq!(config.matching.min_matches, 8);
     assert_eq!(config.matching.triangle.ratio_tolerance, 0.01);
     assert_eq!(config.matching.triangle.min_votes, 3);
-    assert!(config.matching.triangle.check_orientation);
     assert_eq!(config.ransac.max_iterations, 2000);
     assert_eq!(config.ransac.confidence, 0.995);
     assert_eq!(config.ransac.min_inlier_ratio, 0.3);

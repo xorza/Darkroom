@@ -3,7 +3,7 @@
 //! that read a compressed image would start parallel work unrefused. The check runs for a plain
 //! image too, whose read is serial, so a test on a plain file refuses what a compressed one would.
 
-use std::fs::File;
+use std::io::{Read, Seek};
 
 use common::par;
 use fits_well::image::{Borrowed, Region};
@@ -16,8 +16,8 @@ use fits_well::{FitsError, ImageReader};
 /// # Panics
 /// In a parallel loop's body.
 #[expect(clippy::disallowed_methods, reason = "the checked route to the call")]
-pub(crate) fn view<'a, 'g>(
-    image: &'a mut ImageReader<'_, StreamSource<File>>,
+pub(crate) fn view<'a, 'g, R: Read + Seek>(
+    image: &'a mut ImageReader<'_, StreamSource<R>>,
     region: impl Into<Region<'g>>,
     words: &'a mut Vec<u64>,
 ) -> Result<Borrowed<'a>, FitsError> {
@@ -30,8 +30,8 @@ pub(crate) fn view<'a, 'g>(
 /// # Panics
 /// In a parallel loop's body.
 #[expect(clippy::disallowed_methods, reason = "the checked route to the call")]
-pub(crate) fn read_table<'h>(
-    reader: &mut StreamReader<File>,
+pub(crate) fn read_table<'h, R: Read + Seek>(
+    reader: &mut StreamReader<R>,
     hdu: impl Into<HduSelector<'h>>,
 ) -> Result<Table, FitsError> {
     par::enter();
@@ -40,12 +40,14 @@ pub(crate) fn read_table<'h>(
 
 #[cfg(test)]
 mod tests {
-    use common::{TempDir, fs, par};
+    use std::io::Cursor;
+
+    use common::par;
     use fits_well::FitsReader;
     use fits_well::image::{Image, Region, Scaling, View};
     use rayon::iter::ParallelIterator;
 
-    use crate::internals::fits::write_fits;
+    use crate::internals::fits::fits_bytes;
     use crate::io::fits::tile_parallel;
 
     /// A plain image's read is serial, yet a loop's body that reads one is refused, as one that
@@ -53,12 +55,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "a parallel loop's body starts no parallel work")]
     fn a_body_that_reads_a_plain_image_panics() {
-        let dir = TempDir::new("lumos-tile-parallel");
-        let path = dir.join("plain.fits");
         let image = Image::new([2, 1], vec![1.0_f32, 2.0], Scaling::IDENTITY).unwrap();
-        write_fits(&path, image.view(), None);
+        let bytes = fits_bytes(image.view(), None);
         let read = || {
-            let mut reader = FitsReader::open(fs::open(&path).unwrap()).unwrap();
+            let mut reader = FitsReader::open(Cursor::new(bytes.as_slice())).unwrap();
             let mut image = reader.image(0).unwrap();
             let mut words = Vec::new();
             let view = tile_parallel::view(&mut image, Region::All, &mut words).unwrap();

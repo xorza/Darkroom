@@ -29,7 +29,7 @@
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
-//! let mut detector = StarDetector::from_config(config)?;
+//! let mut detector = StarDetector::checked(config)?;
 //! let result = detector.detect(&image);
 //!
 //! println!("Found {} stars", result.stars.len());
@@ -69,9 +69,9 @@ pub use calibration::error::{
     CalibrationError, DarkMismatch, MasterBuildError, MasterStackError, SubtractionError,
 };
 pub use error::InvalidConfigField;
+pub use image::cfa::bayer_pattern::BayerPattern;
 pub use image::cfa::cfa_color::CfaColor;
 pub use image::cfa::cfa_image::CfaImage;
-pub use image::cfa::cfa_pattern::CfaPattern;
 pub use image::cfa::cfa_type::CfaType;
 pub use image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 pub use image::cfa::mosaic::Mosaic;
@@ -101,14 +101,14 @@ pub use image::metadata::temperature_difference::TemperatureDifference;
 pub use image::metadata::temperature_source::TemperatureSource;
 pub use image::metadata::unverified_conditions::UnverifiedConditions;
 pub use io::error::{ImageError, ScientificRefusal, WriteError};
-pub use io::fits::error::{FitsAllocation, FitsRefusal};
+pub use io::fits::error::{FitsAllocation, FitsLoadError, FitsRefusal};
 pub use io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
 pub use io::fits::lumos_extension::LumosExtension;
 pub use io::input_format::{PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 pub use io::load_ctx::LoadCtx;
-pub use io::null_policy::NullPolicy;
+pub use io::null_policy::{NullPolicy, NullSamples};
 pub use io::raw::error::{BlackLevelError, RawError, RawScanError};
 pub use io::raw::raw_files::raw_files;
 pub use stack_product::fits::error::{ProductError, ProductRefusal};
@@ -148,7 +148,7 @@ pub use star_detection::star_detector::detection_result::{
 pub use registration::distortion::sip::sip_order::SipOrder;
 pub use registration::distortion::sip::{SipConfig, SipPolynomial};
 pub use registration::error::{
-    FailedModel, RansacFailure, RegistrationCatalog, RegistrationError, StarField,
+    FailedModel, ModelFailure, RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
 pub use registration::match_idxs::MatchIdxs;
 pub use registration::ransac::ransac_config::{RansacConfig, ScaleRange};
@@ -163,7 +163,7 @@ pub use registration::transform::{Transform, TransformType};
 pub use registration::transform_model::TransformModel;
 pub use registration::triangle::triangle_config::TriangleConfig;
 pub use registration::warp_transform::WarpTransform;
-pub use registration::warp_transform::inverse_warp::{InverseMapped, InverseWarp};
+pub use registration::warp_transform::inverse_warp::InverseWarp;
 
 pub use combine::error::{StackConfigError, StackError};
 pub use combine::normalization::Normalization;

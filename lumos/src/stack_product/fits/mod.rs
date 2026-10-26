@@ -8,14 +8,14 @@
 pub(crate) mod error;
 mod report_keywords;
 
-use std::fs::File;
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
 use common::{Buffer2, fs};
-use fits_well::FitsWriter;
 use fits_well::header::{Header, Keyword};
 use fits_well::io::StreamReader;
+use fits_well::{FitsReader, FitsWriter};
 
 use crate::error::Cancelled;
 use crate::image::flags::quality_flags::QualityFlags;
@@ -71,9 +71,16 @@ const PLANES: [LumosExtension; 5] = [
     LumosExtension::Dispersion,
 ];
 
-/// Write `product` to `path` as one checksummed FITS file, each HDU streamed from the planes the
-/// product holds.
+/// Write `product` to `path` as one checksummed FITS file — see [`write`].
 pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError> {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
+        write(product, file)
+    })
+}
+
+/// Write `product` to `out` as one checksummed FITS file, each HDU streamed from the planes the
+/// product holds.
+pub(crate) fn write(product: &StackProduct, out: impl Write + Seek) -> Result<(), WriteError> {
     let image = &product.image;
     let mut primary = linear::hdu(image, product.cfa_type)?;
     primary.header.set(PRODUCT_KEYWORD, PRODUCT_VERSION)?;
@@ -122,39 +129,40 @@ pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError
     .into_iter()
     .filter_map(|(extension, map)| map.map(|map| map_hdu(extension, map, &described)))
     .collect::<Result<ArrayVec<_, 4>, _>>()?;
-    fs::publish(path, fs::PublicationMode::Durable, |file| {
-        let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        primary.write(&mut writer)?;
-        if let Some(flags) = &flags {
-            flags.write(&mut writer)?;
-        }
-        if let Some(gain) = &gain {
-            gain.write(&mut writer)?;
-        }
-        if let Some(mask) = &mask {
-            mask.write(&mut writer)?;
-        }
-        for map in &maps {
-            map.write(&mut writer)?;
-        }
-        Ok(())
-    })
+    let mut writer = FitsWriter::new(out).with_checksums();
+    primary.write(&mut writer)?;
+    if let Some(flags) = &flags {
+        flags.write(&mut writer)?;
+    }
+    if let Some(gain) = &gain {
+        gain.write(&mut writer)?;
+    }
+    if let Some(mask) = &mask {
+        mask.write(&mut writer)?;
+    }
+    for map in &maps {
+        map.write(&mut writer)?;
+    }
+    Ok(())
 }
 
 /// Read the stack product at `path`, under `ctx`'s options.
 pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ProductError> {
-    read(path, ctx).map_err(|failure| match failure {
-        ReadFailure::Fits(error) => ImageError::fits_load(path, error).into(),
-        ReadFailure::Refused(refusal) => ProductError::Refused {
-            path: path.to_path_buf(),
-            refusal,
-        },
-    })
+    fs::open(path)
+        .map_err(ReadFailure::from)
+        .and_then(|file| read(file, ctx))
+        .map_err(|failure| match failure {
+            ReadFailure::Fits(error) => ImageError::fits_load(path, error).into(),
+            ReadFailure::Refused(refusal) => ProductError::Refused {
+                path: path.to_path_buf(),
+                refusal,
+            },
+        })
 }
 
 /// Why [`read`] stopped, before [`load`] names the file.
 #[derive(Debug)]
-enum ReadFailure {
+pub(crate) enum ReadFailure {
     Fits(FitsLoadError),
     Refused(ProductRefusal),
 }
@@ -165,8 +173,11 @@ impl<E: Into<FitsLoadError>> From<E> for ReadFailure {
     }
 }
 
-fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
-    let mut reader = selected_fits::open(path, ctx)?;
+/// The stack product `source` holds, under `ctx`'s options.
+pub(crate) fn read(source: impl Read + Seek, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
+    Cancelled::check(&ctx.cancel)?;
+    let mut reader = FitsReader::open(source)?;
+    Cancelled::check(&ctx.cancel)?;
     let primary = reader.hdus()[0].header.clone();
     if !linear::validate_image_header(&primary)? {
         return Err(ReadFailure::Refused(ProductRefusal::NotAProduct));
@@ -221,10 +232,10 @@ fn read(path: &Path, ctx: &LoadCtx) -> Result<StackProduct, ReadFailure> {
         Cancelled::check(&ctx.cancel)?;
         check_plane(&reader, idx, extension, &described)?;
         if extension == LumosExtension::Mask {
-            mask = Some(selected_fits::read_extension::<u8>(&mut reader, idx)?);
+            mask = Some(selected_fits::read_extension::<u8, _>(&mut reader, idx)?);
             continue;
         }
-        let stored = Some(selected_fits::read_extension::<f32>(&mut reader, idx)?);
+        let stored = Some(selected_fits::read_extension::<f32, _>(&mut reader, idx)?);
         match extension {
             LumosExtension::Uncertainty => planes.inverse_variance = stored,
             LumosExtension::Coverage => planes.coverage = stored,
@@ -359,8 +370,8 @@ fn plane_hdu<S: PlaneSource>(
 
 /// Refuse the `extension` plane at HDU `idx` unless it is its format's for `image`
 /// ([`LumosExtension::check`]), an uncertainty an inverse variance.
-fn check_plane(
-    reader: &StreamReader<File>,
+fn check_plane<R: Read + Seek>(
+    reader: &StreamReader<R>,
     idx: usize,
     extension: LumosExtension,
     image: &DescribedImage,

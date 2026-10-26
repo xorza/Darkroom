@@ -3,8 +3,8 @@
 use imaginarium::ChannelLayout;
 use serde::{Deserialize, Serialize};
 
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_color::CfaColor;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
 use crate::image::metadata::image_provenance::ColorProvenance;
 use common::Vec2us;
@@ -14,7 +14,7 @@ use common::Vec2us;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mosaic {
     /// 2x2 Bayer pattern
-    Bayer(CfaPattern),
+    Bayer(BayerPattern),
     /// 6x6 X-Trans pattern
     XTrans(XTransPattern),
 }

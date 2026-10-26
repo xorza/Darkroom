@@ -5,14 +5,14 @@ use super::*;
 /// order, whatever order the votes came in. 70 000 votes on one pair count exactly.
 #[test]
 fn vote_matrices_count_each_pair_in_order() {
-    for (n_ref, n_target) in [(10, 10), (3, 4), (600, 600)] {
-        let mut matrix = Votes::default();
+    for (ref_count, target_count) in [(10, 10), (3, 4), (600, 600)] {
+        let mut matrix = Votes::new(ref_count, target_count);
         assert!(matrix.nonzero_entries().is_empty());
         let entries = [
-            tally(n_ref - 1, n_target - 1, 4),
-            tally(0, n_target - 1, 2),
-            tally(n_ref / 2, n_target / 3, 5),
-            tally(n_ref - 1, 0, 3),
+            tally(ref_count - 1, target_count - 1, 4),
+            tally(0, target_count - 1, 2),
+            tally(ref_count / 2, target_count / 3, 5),
+            tally(ref_count - 1, 0, 3),
             tally(0, 0, 1),
         ];
         for &PairVotes { pair, votes } in &entries {
@@ -22,9 +22,13 @@ fn vote_matrices_count_each_pair_in_order() {
         }
         let mut expected = entries.to_vec();
         expected.sort_unstable_by_key(|entry| (entry.pair.reference, entry.pair.target));
-        assert_eq!(matrix.nonzero_entries(), expected, "{n_ref}×{n_target}");
+        assert_eq!(
+            matrix.nonzero_entries(),
+            expected,
+            "{ref_count}×{target_count}"
+        );
     }
-    let mut matrix = Votes::default();
+    let mut matrix = Votes::new(600, 600);
     for _ in 0..70_000 {
         matrix.increment(599, 3);
     }
@@ -108,7 +112,7 @@ fn resolve_claims_each_star_once_by_votes() {
         expected,
     } in cases
     {
-        let matches = votes_from_entries(entries).resolve(5, 5, min_votes);
+        let matches = votes_from_entries(5, 5, entries).resolve(min_votes);
         assert_eq!(matches, expected, "{entries:?} with min_votes {min_votes}");
     }
 }
@@ -116,28 +120,16 @@ fn resolve_claims_each_star_once_by_votes() {
 /// Each pair of similar triangles votes for its three vertex pairs. `IRREGULAR` against itself: its
 /// ten triangles are pairwise dissimilar, so each votes only for itself, and point `i` draws one
 /// vote per triangle it is a vertex of — six, `C(4, 2)` — at `(i, i)` and nothing anywhere else.
-/// Mirrored, every triangle turns the other way: with the orientation check no pair votes at all,
-/// and without it the votes are the unmirrored ones.
+/// Mirrored, every triangle turns the other way, and no pair votes at all.
 #[test]
 fn similar_triangles_vote_for_their_vertices() {
     let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
     let reference = triangles_of(&IRREGULAR, 4);
     let diagonal: Vec<PairVotes> = (0..5).map(|i| tally(i, i, 6)).collect();
-    for (target, check_orientation, expected) in [
-        (IRREGULAR, true, diagonal.clone()),
-        (mirrored, false, diagonal),
-        (mirrored, true, Vec::new()),
-    ] {
-        let config = TriangleConfig {
-            check_orientation,
-            ..Default::default()
-        };
-        let mut votes = cast_votes(&triangles_of(&target, 4), reference.clone(), &config);
-        assert_eq!(
-            votes.nonzero_entries(),
-            expected,
-            "orientation check {check_orientation}"
-        );
+    for (target, expected) in [(IRREGULAR, diagonal), (mirrored, Vec::new())] {
+        let config = TriangleConfig::default();
+        let votes = cast_votes(&triangles_of(&target, 4), reference.clone(), &config);
+        assert_eq!(votes.nonzero_entries(), expected);
     }
 }
 
@@ -145,7 +137,7 @@ fn similar_triangles_vote_for_their_vertices() {
 /// true vertices. Over (0, 0)–(10, 0), the apex 0.01 px left of the axis, (4.99, 3), makes the
 /// side from the origin the shortest, √33.9001 against √34.1001; 0.01 px right, the other side is.
 /// The roles of the base vertices swap, and with them the orientation each triangle reads, so the
-/// order alone pairs each base vertex with the other, and the orientation check refuses even that.
+/// order alone pairs each base vertex with the other, and its orientation refuses even that.
 /// The sides differ by 0.0017 of the longest, inside the 0.01 tolerance: the swapped order votes,
 /// once for each true pair.
 #[test]
@@ -154,7 +146,7 @@ fn a_near_isosceles_triangle_votes_in_both_orders() {
     let with_apex = |x: f64| [base[0], base[1], DVec2::new(x, 3.0)];
     let reference = triangles_of(&with_apex(4.99), 3);
     let target = triangles_of(&with_apex(5.01), 3);
-    let mut votes = cast_votes(&target, reference, &TriangleConfig::default());
+    let votes = cast_votes(&target, reference, &TriangleConfig::default());
     assert_eq!(
         votes.nonzero_entries(),
         [tally(0, 0, 1), tally(1, 1, 1), tally(2, 2, 1)]
@@ -175,7 +167,7 @@ fn dissimilar_triangles_do_not_vote() {
         DVec2::new(100.0, 0.0),
         DVec2::new(50.0, 1.0),
     ];
-    let mut votes = cast_votes(
+    let votes = cast_votes(
         &triangles_of(&thin, 3),
         triangles_of(&equilateral, 3),
         &TriangleConfig::default(),

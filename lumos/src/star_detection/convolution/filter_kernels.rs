@@ -6,9 +6,17 @@ use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
 };
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use common::Size2us;
 use simd::Kernel;
+
+/// The matched filter's PSF: a Gaussian of `fwhm` along its major axis, before the pixel integrates
+/// it, as [`Star::fwhm`](crate::star_detection::star::Star::fwhm) reports it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MatchedFilter {
+    pub(crate) fwhm: f32,
+    pub(crate) axis_ratio: f32,
+    pub(crate) angle: f32,
+}
 
 /// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.

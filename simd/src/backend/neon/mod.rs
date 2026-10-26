@@ -26,9 +26,8 @@ use crate::backend::neon::u16x16::NeonU16;
 use crate::f32x8::F32_LANES;
 use crate::f64x4::F64_LANES;
 use crate::halves::Halves;
-use crate::i32x8::I32_LANES;
-use crate::isa::{Isa, lanes_of, pair_lanes, u32_le_lanes};
-use crate::kernel::Kernel;
+use crate::i32x8::{I32_LANES, I32x8};
+use crate::isa::{Isa, pair_lanes, u32_le_lanes};
 use crate::mask8::Mask8;
 use crate::u8x32::U8_LANES;
 use crate::u16x16::U16_LANES;
@@ -51,11 +50,6 @@ impl Isa for Neon {
     type U8 = NeonU8;
     type U16 = NeonU16;
     type I32 = NeonI32;
-
-    #[inline(always)]
-    fn run<K: Kernel>(self, kernel: K) -> K::Output {
-        kernel.run(self)
-    }
 
     #[inline(always)]
     fn splat_f32(self, value: f32) -> NeonF32 {
@@ -164,10 +158,9 @@ impl Isa for Neon {
         let (sources, []) = pixels.as_chunks::<48>() else {
             unreachable!("thirty-two pixels are two halves of sixteen")
         };
-        let [low, high] =
-            [&sources[0], &sources[1]].map(|source| unsafe { vld3q_u8(source.as_ptr()) });
+        let (low, high) = unsafe { (vld3q_u8(sources[0].as_ptr()), vld3q_u8(sources[1].as_ptr())) };
         let fourth = unsafe { vdupq_n_u8(fourth) };
-        self.store_interleaved4_u8(
+        self.store_interleaved_u8(
             [
                 NeonU8 {
                     low: low.0,
@@ -197,11 +190,10 @@ impl Isa for Neon {
         let (sources, []) = pixels.as_chunks::<48>() else {
             unreachable!("thirty-two pixels are two halves of sixteen")
         };
-        let [low, high] = [&sources[0], &sources[1]].map(|source| unsafe {
-            let rgb = vld3q_u8(source.as_ptr());
-            weighted_sum16(rgb.0, rgb.1, rgb.2, weights)
-        });
-        NeonU8 { low, high }
+        NeonU8 {
+            low: weighted_sum16_of3(&sources[0], weights),
+            high: weighted_sum16_of3(&sources[1], weights),
+        }
     }
 
     /// [`Self::weighted_sum3_u8`] through `ld4`, the fourth channel dropped.
@@ -210,45 +202,50 @@ impl Isa for Neon {
         let (sources, []) = pixels.as_chunks::<64>() else {
             unreachable!("thirty-two pixels are two halves of sixteen")
         };
-        let [low, high] = [&sources[0], &sources[1]].map(|source| unsafe {
-            let rgba = vld4q_u8(source.as_ptr());
-            weighted_sum16(rgba.0, rgba.1, rgba.2, weights)
-        });
-        NeonU8 { low, high }
-    }
-
-    #[inline(always)]
-    fn store_interleaved3_u8(self, channels: [NeonU8; 3], bytes: &mut [u8; 3 * U8_LANES]) {
-        let (halves, []) = bytes.as_chunks_mut::<48>() else {
-            unreachable!("ninety-six bytes are two halves of forty-eight")
-        };
-        let [r, g, b] = channels;
-        unsafe {
-            vst3q_u8(halves[0].as_mut_ptr(), uint8x16x3_t(r.low, g.low, b.low));
-            vst3q_u8(halves[1].as_mut_ptr(), uint8x16x3_t(r.high, g.high, b.high));
+        NeonU8 {
+            low: weighted_sum16_of4(&sources[0], weights),
+            high: weighted_sum16_of4(&sources[1], weights),
         }
     }
 
-    /// [`interleave4`] on each half.
+    /// Three channels as an `st3` of each half, four as [`interleave4`] on each half.
     #[inline(always)]
-    fn store_interleaved4_u8(self, channels: [NeonU8; 4], bytes: &mut [u8; 4 * U8_LANES]) {
-        let (halves, []) = bytes.as_chunks_mut::<64>() else {
-            unreachable!("a hundred and twenty-eight bytes are two halves of sixty-four")
-        };
-        let [r, g, b, a] = channels;
-        interleave4([r.low, g.low, b.low, a.low], &mut halves[0]);
-        interleave4([r.high, g.high, b.high, a.high], &mut halves[1]);
+    fn store_interleaved_u8<const C: usize, const G: usize>(
+        self,
+        channels: [NeonU8; C],
+        bytes: &mut [u8; G],
+    ) {
+        const { assert!((C == 3 || C == 4) && G == C * U8_LANES) };
+        let c = channels.as_slice();
+        if C == 3 {
+            let (halves, []) = bytes.as_chunks_mut::<48>() else {
+                unreachable!("ninety-six bytes are two halves of forty-eight")
+            };
+            unsafe {
+                vst3q_u8(
+                    halves[0].as_mut_ptr(),
+                    uint8x16x3_t(c[0].low, c[1].low, c[2].low),
+                );
+                vst3q_u8(
+                    halves[1].as_mut_ptr(),
+                    uint8x16x3_t(c[0].high, c[1].high, c[2].high),
+                );
+            }
+        } else {
+            let (halves, []) = bytes.as_chunks_mut::<64>() else {
+                unreachable!("a hundred and twenty-eight bytes are two halves of sixty-four")
+            };
+            interleave4([c[0].low, c[1].low, c[2].low, c[3].low], &mut halves[0]);
+            interleave4([c[0].high, c[1].high, c[2].high, c[3].high], &mut halves[1]);
+        }
     }
 
     /// `fcvtnu` rounds to nearest, ties to even, and saturates a negative or NaN lane to 0.
     #[inline(always)]
-    fn round_clamped_f32(self, values: NeonF32, high: NeonF32) -> NeonI32 {
-        let round = |half: float32x4_t, high: float32x4_t| unsafe {
-            vreinterpretq_s32_u32(vcvtnq_u32_f32(vminq_f32(half, high)))
-        };
+    fn round_clamped_f32_to_i32(self, values: NeonF32, high: NeonF32) -> NeonI32 {
         NeonI32 {
-            low: round(values.low, high.low),
-            high: round(values.high, high.high),
+            low: round_clamped_f32_to_i32(values.low, high.low),
+            high: round_clamped_f32_to_i32(values.high, high.high),
         }
     }
 
@@ -316,20 +313,25 @@ impl Isa for Neon {
     ) {
         const { assert!((C == 3 || C == 4) && G == C * I32_LANES) };
         let channels = channels.as_slice();
-        let narrow = |k: usize| unsafe {
-            let low = vmovn_u32(vreinterpretq_u32_s32(channels[k].low));
-            vmovn_high_u32(low, vreinterpretq_u32_s32(channels[k].high))
-        };
         unsafe {
             if C == 4 {
                 vst4q_u16(
                     words.as_mut_ptr(),
-                    uint16x8x4_t(narrow(0), narrow(1), narrow(2), narrow(3)),
+                    uint16x8x4_t(
+                        channels[0].narrowed(),
+                        channels[1].narrowed(),
+                        channels[2].narrowed(),
+                        channels[3].narrowed(),
+                    ),
                 );
             } else {
                 vst3q_u16(
                     words.as_mut_ptr(),
-                    uint16x8x3_t(narrow(0), narrow(1), narrow(2)),
+                    uint16x8x3_t(
+                        channels[0].narrowed(),
+                        channels[1].narrowed(),
+                        channels[2].narrowed(),
+                    ),
                 );
             }
         }
@@ -354,7 +356,7 @@ impl Isa for Neon {
         let reads = Reads::new(bytes.len(), 4, offset, valid);
         if reads.partial {
             return self.load_i32(
-                &u32_le_lanes(bytes, lanes_of(offset), valid.to_bitmask()).map(u32::cast_signed),
+                &u32_le_lanes(bytes, offset.to_array(), valid.to_bitmask()).map(u32::cast_signed),
             );
         }
         let offsets = reads.starts(offset);
@@ -379,31 +381,32 @@ impl Isa for Neon {
         let reads = Reads::new(table.len(), 8, start, first.or(second));
         if reads.partial {
             let bits = [first.to_bitmask(), second.to_bitmask()];
-            return pair_lanes::<f32, SPLIT>(table, lanes_of(start), bits)
+            return pair_lanes::<f32, SPLIT>(table, start.to_array(), bits)
                 .map(|lanes| self.load_f32(&lanes));
         }
         let starts = reads.starts(start);
-        let at = table.as_ptr();
-        let quads = |lane: usize| unsafe {
-            let pair = vld1q_f32_x2(at.add(starts[lane]));
-            [vreinterpretq_u32_f32(pair.0), vreinterpretq_u32_f32(pair.1)]
-        };
         let lanes = [
-            quads(0),
-            quads(1),
-            quads(2),
-            quads(3),
-            quads(4),
-            quads(5),
-            quads(6),
-            quads(7),
+            f32_pair_at(table, starts[0]),
+            f32_pair_at(table, starts[1]),
+            f32_pair_at(table, starts[2]),
+            f32_pair_at(table, starts[3]),
+            f32_pair_at(table, starts[4]),
+            f32_pair_at(table, starts[5]),
+            f32_pair_at(table, starts[6]),
+            f32_pair_at(table, starts[7]),
         ];
-        pair_transposed::<SPLIT>(lanes, reads.whole, first, second).map(|samples| unsafe {
-            NeonF32 {
-                low: vreinterpretq_f32_s32(samples.low),
-                high: vreinterpretq_f32_s32(samples.high),
-            }
-        })
+        let [s0, s1, s2, s3, s4, s5, s6, s7] =
+            pair_transposed::<SPLIT>(lanes, reads.whole, first, second);
+        [
+            s0.as_f32(),
+            s1.as_f32(),
+            s2.as_f32(),
+            s3.as_f32(),
+            s4.as_f32(),
+            s5.as_f32(),
+            s6.as_f32(),
+            s7.as_f32(),
+        ]
     }
 
     /// [`Self::gather_pair_f32`]'s loads and transposes, each lane's eight words widened first.
@@ -418,24 +421,19 @@ impl Isa for Neon {
         let reads = Reads::new(table.len(), 8, start, first.or(second));
         if reads.partial {
             let bits = [first.to_bitmask(), second.to_bitmask()];
-            return pair_lanes::<u16, SPLIT>(table, lanes_of(start), bits)
+            return pair_lanes::<u16, SPLIT>(table, start.to_array(), bits)
                 .map(|lanes| self.load_i32(&lanes.map(i32::from)));
         }
         let starts = reads.starts(start);
-        let at = table.as_ptr();
-        let quads = |lane: usize| unsafe {
-            let words = vld1q_u16(at.add(starts[lane]));
-            [vmovl_u16(vget_low_u16(words)), vmovl_high_u16(words)]
-        };
         let lanes = [
-            quads(0),
-            quads(1),
-            quads(2),
-            quads(3),
-            quads(4),
-            quads(5),
-            quads(6),
-            quads(7),
+            u16_pair_at(table, starts[0]),
+            u16_pair_at(table, starts[1]),
+            u16_pair_at(table, starts[2]),
+            u16_pair_at(table, starts[3]),
+            u16_pair_at(table, starts[4]),
+            u16_pair_at(table, starts[5]),
+            u16_pair_at(table, starts[6]),
+            u16_pair_at(table, starts[7]),
         ];
         pair_transposed::<SPLIT>(lanes, reads.whole, first, second)
     }
@@ -443,34 +441,105 @@ impl Isa for Neon {
     /// `fcvtnu` rounds to nearest, ties to even, and saturates a negative or NaN lane to 0, so
     /// only the high bound is a separate step; a lane up to `i32::MAX` then narrows exactly.
     #[inline(always)]
-    fn round_clamped(self, f64s: Halves<NeonF64>, high: NeonF64) -> NeonI32 {
-        let round = |pair: float64x2_t, high: float64x2_t| unsafe {
-            vmovn_u64(vcvtnq_u64_f64(vminq_f64(pair, high)))
-        };
-        let quad = |f64s: NeonF64| unsafe {
-            vreinterpretq_s32_u32(vcombine_u32(
-                round(f64s.low, high.low),
-                round(f64s.high, high.high),
-            ))
-        };
+    fn round_clamped_f64_to_i32(self, f64s: Halves<NeonF64>, high: NeonF64) -> NeonI32 {
         NeonI32 {
-            low: quad(f64s.low),
-            high: quad(f64s.high),
+            low: round_clamped_f64_quad(f64s.low, high),
+            high: round_clamped_f64_quad(f64s.high, high),
         }
     }
 
     #[inline(always)]
     fn narrow_i32_to_u8(self, ints: [NeonI32; 4]) -> NeonU8 {
-        let narrow = |ints: NeonI32| unsafe {
-            let low = vmovn_u32(vreinterpretq_u32_s32(ints.low));
-            vmovn_u16(vmovn_high_u32(low, vreinterpretq_u32_s32(ints.high)))
-        };
         unsafe {
             NeonU8 {
-                low: vcombine_u8(narrow(ints[0]), narrow(ints[1])),
-                high: vcombine_u8(narrow(ints[2]), narrow(ints[3])),
+                low: vcombine_u8(vmovn_u16(ints[0].narrowed()), vmovn_u16(ints[1].narrowed())),
+                high: vcombine_u8(vmovn_u16(ints[2].narrowed()), vmovn_u16(ints[3].narrowed())),
             }
         }
+    }
+}
+
+/// [`weighted_sum16`] of sixteen pixels of three bytes.
+#[inline(always)]
+fn weighted_sum16_of3(pixels: &[u8; 48], weights: [u16; 3]) -> uint8x16_t {
+    let rgb = unsafe { vld3q_u8(pixels.as_ptr()) };
+    weighted_sum16(rgb.0, rgb.1, rgb.2, weights)
+}
+
+/// [`weighted_sum16`] of sixteen pixels of four bytes, the fourth dropped.
+#[inline(always)]
+fn weighted_sum16_of4(pixels: &[u8; 64], weights: [u16; 3]) -> uint8x16_t {
+    let rgba = unsafe { vld4q_u8(pixels.as_ptr()) };
+    weighted_sum16(rgba.0, rgba.1, rgba.2, weights)
+}
+
+/// [`Isa::round_clamped_f32_to_i32`] of four lanes.
+#[inline(always)]
+fn round_clamped_f32_to_i32(values: float32x4_t, high: float32x4_t) -> int32x4_t {
+    unsafe { vreinterpretq_s32_u32(vcvtnq_u32_f32(vminq_f32(values, high))) }
+}
+
+/// [`Isa::round_clamped_f64_to_i32`] of four lanes, bounded by `high`'s lanes as its own.
+#[inline(always)]
+fn round_clamped_f64_quad(f64s: NeonF64, high: NeonF64) -> int32x4_t {
+    unsafe {
+        vreinterpretq_s32_u32(vcombine_u32(
+            round_clamped_pair(f64s.low, high.low),
+            round_clamped_pair(f64s.high, high.high),
+        ))
+    }
+}
+
+/// [`Isa::round_clamped_f64_to_i32`] of two lanes.
+#[inline(always)]
+fn round_clamped_pair(values: float64x2_t, high: float64x2_t) -> uint32x2_t {
+    unsafe { vmovn_u64(vcvtnq_u64_f64(vminq_f64(values, high))) }
+}
+
+/// The eight samples of `table` from `start`, a lane of a gather [`Reads`] admitted whole.
+#[inline(always)]
+fn f32_pair_at(table: &[f32], start: usize) -> [uint32x4_t; 2] {
+    debug_assert!(start + 8 <= table.len(), "a whole lane's eight samples");
+    unsafe {
+        let pair = vld1q_f32_x2(table.as_ptr().add(start));
+        [vreinterpretq_u32_f32(pair.0), vreinterpretq_u32_f32(pair.1)]
+    }
+}
+
+/// The eight words of `table` from `start`, widened, a lane of a gather [`Reads`] admitted whole.
+#[inline(always)]
+fn u16_pair_at(table: &[u16], start: usize) -> [uint32x4_t; 2] {
+    debug_assert!(start + 8 <= table.len(), "a whole lane's eight words");
+    unsafe {
+        let words = vld1q_u16(table.as_ptr().add(start));
+        [vmovl_u16(vget_low_u16(words)), vmovl_high_u16(words)]
+    }
+}
+
+/// The sixteen bytes of `channel` widened, as four quarters of four words.
+#[inline(always)]
+fn quarters(channel: uint8x16_t) -> [uint16x4_t; 4] {
+    unsafe {
+        let low = vmovl_u8(vget_low_u8(channel));
+        let high = vmovl_high_u8(channel);
+        [
+            vget_low_u16(low),
+            vget_high_u16(low),
+            vget_low_u16(high),
+            vget_high_u16(high),
+        ]
+    }
+}
+
+/// `weighted_sum_q16` of four pixels given as their channels' quarters.
+#[inline(always)]
+fn weighted_sum4(channels: [uint16x4_t; 3], weights: [u16; 3]) -> uint16x4_t {
+    let [a, b, c] = channels;
+    let [w0, w1, w2] = weights;
+    unsafe {
+        let sum = vmlal_n_u16(vmlal_n_u16(vmull_n_u16(a, w0), b, w1), c, w2);
+        let odd = vandq_u32(vshrq_n_u32::<16>(sum), vdupq_n_u32(1));
+        vshrn_n_u32::<16>(vaddq_u32(vaddq_u32(sum, vdupq_n_u32(0x7FFF)), odd))
     }
 }
 
@@ -481,8 +550,14 @@ impl Isa for Neon {
 fn interleave4(channels: [uint8x16_t; 4], out: &mut [u8; 64]) {
     let [r, g, b, a] = channels;
     unsafe {
-        let rg = [vzip1q_u8(r, g), vzip2q_u8(r, g)].map(|pairs| vreinterpretq_u16_u8(pairs));
-        let ba = [vzip1q_u8(b, a), vzip2q_u8(b, a)].map(|pairs| vreinterpretq_u16_u8(pairs));
+        let rg = [
+            vreinterpretq_u16_u8(vzip1q_u8(r, g)),
+            vreinterpretq_u16_u8(vzip2q_u8(r, g)),
+        ];
+        let ba = [
+            vreinterpretq_u16_u8(vzip1q_u8(b, a)),
+            vreinterpretq_u16_u8(vzip2q_u8(b, a)),
+        ];
         vst1q_u8_x4(
             out.as_mut_ptr(),
             uint8x16x4_t(
@@ -498,28 +573,12 @@ fn interleave4(channels: [uint8x16_t; 4], out: &mut [u8; 64]) {
 /// [`Isa::weighted_sum3_u8`] of sixteen pixels given as their channels.
 #[inline(always)]
 fn weighted_sum16(c0: uint8x16_t, c1: uint8x16_t, c2: uint8x16_t, weights: [u16; 3]) -> uint8x16_t {
-    let quads = |channel: uint8x16_t| unsafe {
-        let low = vmovl_u8(vget_low_u8(channel));
-        let high = vmovl_high_u8(channel);
-        [
-            vget_low_u16(low),
-            vget_high_u16(low),
-            vget_low_u16(high),
-            vget_high_u16(high),
-        ]
-    };
-    let [w0, w1, w2] = weights;
-    let sum = |a: uint16x4_t, b: uint16x4_t, c: uint16x4_t| unsafe {
-        let sum = vmlal_n_u16(vmlal_n_u16(vmull_n_u16(a, w0), b, w1), c, w2);
-        let odd = vandq_u32(vshrq_n_u32::<16>(sum), vdupq_n_u32(1));
-        vshrn_n_u32::<16>(vaddq_u32(vaddq_u32(sum, vdupq_n_u32(0x7FFF)), odd))
-    };
-    let (a, b, c) = (quads(c0), quads(c1), quads(c2));
+    let (a, b, c) = (quarters(c0), quarters(c1), quarters(c2));
     let words = [
-        sum(a[0], b[0], c[0]),
-        sum(a[1], b[1], c[1]),
-        sum(a[2], b[2], c[2]),
-        sum(a[3], b[3], c[3]),
+        weighted_sum4([a[0], b[0], c[0]], weights),
+        weighted_sum4([a[1], b[1], c[1]], weights),
+        weighted_sum4([a[2], b[2], c[2]], weights),
+        weighted_sum4([a[3], b[3], c[3]], weights),
     ];
     unsafe {
         vcombine_u8(
@@ -559,7 +618,7 @@ impl Reads {
     /// start whose `width` elements lie in the table, as [`Self::new`] found them.
     #[inline(always)]
     fn starts(self, start: NeonI32) -> [usize; I32_LANES] {
-        let starts = lanes_of(self.keep(start));
+        let starts = self.keep(start).to_array();
         let mut lanes = [0; I32_LANES];
         for (lane, start) in lanes.iter_mut().zip(starts) {
             *lane = start.cast_unsigned() as usize;
@@ -579,14 +638,19 @@ impl Reads {
 #[inline(always)]
 fn in_range(end: usize, idx: NeonI32, valid: NeonMask) -> NeonMask {
     let end = unsafe { vdupq_n_s32(i32::try_from(end).unwrap_or(i32::MAX)) };
-    let in_range = |idx: int32x4_t, valid: uint32x4_t| unsafe {
+    NeonMask {
+        low: in_range4(end, idx.low, valid.low),
+        high: in_range4(end, idx.high, valid.high),
+    }
+}
+
+/// [`in_range`] of four lanes, `end` splat.
+#[inline(always)]
+fn in_range4(end: int32x4_t, idx: int32x4_t, valid: uint32x4_t) -> uint32x4_t {
+    unsafe {
         let below_end = vcltq_s32(idx, end);
         let non_negative = vcgezq_s32(idx);
         vandq_u32(valid, vandq_u32(below_end, non_negative))
-    };
-    NeonMask {
-        low: in_range(idx.low, valid.low),
-        high: in_range(idx.high, valid.high),
     }
 }
 

@@ -8,7 +8,7 @@
 
 use std::ops::Range;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::demosaic::bayer::rcd::{
     BORDER, EPS, EPSSQ, INTERPOLATED_BORDER, Neighbour, TILE, discriminate, estimate_green, intp,
     pq_neighbourhood, vh_neighbourhood,
@@ -75,7 +75,7 @@ struct Stages<'a> {
 #[derive(Debug, Clone, Copy)]
 struct Crop {
     size: Size2us,
-    pattern: CfaPattern,
+    pattern: BayerPattern,
     red_blue: [usize; 2],
 }
 
@@ -83,7 +83,7 @@ struct Crop {
 #[derive(Debug, Clone, Copy)]
 struct ColorSamples<'a> {
     cfa: [&'a [f32]; 4],
-    pattern: CfaPattern,
+    pattern: BayerPattern,
     color: usize,
 }
 
@@ -128,7 +128,7 @@ struct Vectors {
 
 impl Tile {
     /// The buffers of a tile of a frame of `pattern`.
-    pub(super) fn new(pattern: CfaPattern) -> Self {
+    pub(super) fn new(pattern: BayerPattern) -> Self {
         let plane = || vec![0.0f32; PLANE];
         let row = || vec![0.0f32; STRIDE];
         let color = |color: usize| {
@@ -169,7 +169,7 @@ impl Tile {
     /// the frame without overlap at the stride of `TILE − 2·INTERPOLATED_BORDER`.
     pub(super) unsafe fn demosaic(
         &mut self,
-        bayer: &MosaicView<'_, CfaPattern>,
+        bayer: &MosaicView<'_, BayerPattern>,
         place: TilePlace,
         out: OutputPlanes,
     ) {
@@ -842,7 +842,7 @@ fn direction_ratio<V: F32x8>(a: V, b: V, floor: V) -> V {
 
 /// The color of a frame of `pattern` at Bayer phase `phase`.
 #[inline(always)]
-const fn phase_color(pattern: CfaPattern, phase: usize) -> usize {
+const fn phase_color(pattern: BayerPattern, phase: usize) -> usize {
     pattern.color_at(Vec2us::new(phase % 2, phase / 2)).idx()
 }
 

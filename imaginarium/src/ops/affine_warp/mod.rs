@@ -2,7 +2,7 @@ mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
 #[cfg(feature = "wgpu")]
-pub(crate) mod pipeline;
+mod pipeline;
 
 use glam::{Affine2, Vec2};
 
@@ -11,8 +11,6 @@ use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_image::InterleavedImage;
-#[cfg(feature = "wgpu")]
-use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 
 /// Filter mode for image sampling during transformation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -128,14 +126,8 @@ impl AffineWarp {
     /// Panics if input and output have different color formats, or if the
     /// transform is not invertible.
     #[cfg(feature = "wgpu")]
-    pub fn apply_gpu(
-        &self,
-        ctx: &Gpu,
-        pipeline: &GpuAffineWarpPipeline,
-        input: &GpuImage,
-        output: &mut GpuImage,
-    ) {
-        gpu::apply(self, ctx, pipeline, input, output);
+    pub fn apply_gpu(&self, gpu: &Gpu, input: &GpuImage, output: &mut GpuImage) {
+        gpu::apply(self, gpu, input, output);
     }
 }
 

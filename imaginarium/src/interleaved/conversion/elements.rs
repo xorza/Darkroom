@@ -3,7 +3,7 @@
 //!
 //! Every kernel is bit-identical to [`Sample::convert`], the scalar reference, a row's last partial
 //! group included, which runs through the same step. That is why the widening kernels take the
-//! quotient by the source type's full scale as [`F32x8::div_scale`], as the divide rounds it:
+//! quotient by the source type's full scale as [`Isa::div_full_scale`], as the divide rounds it:
 //! the reciprocal's product alone, `x * (1.0 / 255.0)`, is doubly rounded and disagrees with
 //! `x / 255.0` for 126 of the 256 byte values, and `x * (1.0 / 65535.0)` for 512 of the 65 536
 //! word values. For the same reason the float narrowing kernels multiply in `f64`, as the
@@ -12,8 +12,8 @@
 //! `round(v / 257)` exactly in integers.
 
 use simd::{
-    F32_LANES, F32x8, Halves, I32_LANES, I32x8, Isa, IsaTier, Kernel, U8_LANES, U8x32, U16_LANES,
-    U16x16,
+    F32_LANES, F32x8, FullScale, Halves, I32_LANES, I32x8, Isa, IsaTier, Kernel, U8_LANES, U8x32,
+    U16_LANES, U16x16,
 };
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -124,24 +124,15 @@ impl GroupStep<u8, u16, U8_LANES, U8_LANES> for Elements<'_, u8, u16> {
 impl GroupStep<u8, f32, U8_LANES, U8_LANES> for Elements<'_, u8, f32> {
     #[inline(always)]
     fn step<V: Isa>(isa: V, group: &[u8; U8_LANES], out: &mut [f32; U8_LANES]) {
-        let (divisor, reciprocal) = (isa.splat_f32(255.0), isa.splat_f32(1.0 / 255.0));
         let (octets, _) = group.as_chunks::<I32_LANES>();
         let (out, _) = out.as_chunks_mut::<F32_LANES>();
-        isa.load_u8_as_i32(&octets[0])
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(isa.load_u8_as_i32(&octets[0]).to_f32(), FullScale::U8)
             .store(&mut out[0]);
-        isa.load_u8_as_i32(&octets[1])
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(isa.load_u8_as_i32(&octets[1]).to_f32(), FullScale::U8)
             .store(&mut out[1]);
-        isa.load_u8_as_i32(&octets[2])
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(isa.load_u8_as_i32(&octets[2]).to_f32(), FullScale::U8)
             .store(&mut out[2]);
-        isa.load_u8_as_i32(&octets[3])
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(isa.load_u8_as_i32(&octets[3]).to_f32(), FullScale::U8)
             .store(&mut out[3]);
     }
 }
@@ -164,16 +155,11 @@ impl GroupStep<u16, u8, U8_LANES, U8_LANES> for Elements<'_, u16, u8> {
 impl GroupStep<u16, f32, U16_LANES, U16_LANES> for Elements<'_, u16, f32> {
     #[inline(always)]
     fn step<V: Isa>(isa: V, group: &[u16; U16_LANES], out: &mut [f32; U16_LANES]) {
-        let (divisor, reciprocal) = (isa.splat_f32(65535.0), isa.splat_f32(1.0 / 65535.0));
         let ints = isa.load_u16(group).widen();
         let (out, _) = out.as_chunks_mut::<F32_LANES>();
-        ints.low
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(ints.low.to_f32(), FullScale::U16)
             .store(&mut out[0]);
-        ints.high
-            .to_f32()
-            .div_scale(divisor, reciprocal)
+        isa.div_full_scale(ints.high.to_f32(), FullScale::U16)
             .store(&mut out[1]);
     }
 }
@@ -184,8 +170,13 @@ impl GroupStep<f32, u8, U8_LANES, U8_LANES> for Elements<'_, f32, u8> {
     fn step<V: Isa>(isa: V, group: &[f32; U8_LANES], out: &mut [u8; U8_LANES]) {
         let full_scale = isa.splat_f64(255.0);
         let (octets, _) = group.as_chunks::<F32_LANES>();
-        let f64s = [0, 1, 2, 3].map(|i| scaled(isa.load_f32(&octets[i]), full_scale));
-        isa.round_clamped_u8(f64s, full_scale).store(out);
+        let f64s = [
+            scaled(isa.load_f32(&octets[0]), full_scale),
+            scaled(isa.load_f32(&octets[1]), full_scale),
+            scaled(isa.load_f32(&octets[2]), full_scale),
+            scaled(isa.load_f32(&octets[3]), full_scale),
+        ];
+        isa.round_clamped_f64_to_u8(f64s, full_scale).store(out);
     }
 }
 
@@ -195,8 +186,11 @@ impl GroupStep<f32, u16, U16_LANES, U16_LANES> for Elements<'_, f32, u16> {
     fn step<V: Isa>(isa: V, group: &[f32; U16_LANES], out: &mut [u16; U16_LANES]) {
         let full_scale = isa.splat_f64(65535.0);
         let (octets, _) = group.as_chunks::<F32_LANES>();
-        let f64s = [0, 1].map(|i| scaled(isa.load_f32(&octets[i]), full_scale));
-        isa.round_clamped_u16(f64s, full_scale).store(out);
+        let f64s = [
+            scaled(isa.load_f32(&octets[0]), full_scale),
+            scaled(isa.load_f32(&octets[1]), full_scale),
+        ];
+        isa.round_clamped_f64_to_u16(f64s, full_scale).store(out);
     }
 }
 

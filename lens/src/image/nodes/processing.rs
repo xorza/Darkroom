@@ -125,7 +125,7 @@ fn register_blend(library: &mut Library) {
                         destination.desc(),
                     ));
                 }
-                let mut output = imaginarium::InterleavedImage::new_black(source.desc());
+                let mut output = imaginarium::InterleavedImage::new_zeroed(source.desc());
                 Blend::new(mode, alpha).apply_cpu(
                     &source.interleaved(),
                     &destination.interleaved(),
@@ -191,7 +191,7 @@ fn register_transform(library: &mut Library) {
                         (1..6).map(scalar).collect::<Vec<f32>>(),
                     ));
                 }
-                let mut output = imaginarium::InterleavedImage::new_black(image.desc());
+                let mut output = imaginarium::InterleavedImage::new_zeroed(image.desc());
                 warp.apply_cpu(&image.interleaved(), &mut output);
                 outputs[0] = DynamicValue::from_custom(Image::from(output));
                 Ok(())
@@ -256,7 +256,7 @@ mod tests {
             .map(|idx| u8::try_from(idx % 251).unwrap())
             .collect();
         let patterned_image = || {
-            let mut image = imaginarium::InterleavedImage::new_black(desc);
+            let mut image = imaginarium::InterleavedImage::new_zeroed(desc);
             image.bytes_mut().copy_from_slice(&pattern);
             image
         };

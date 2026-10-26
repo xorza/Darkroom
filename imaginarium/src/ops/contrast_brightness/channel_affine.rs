@@ -2,8 +2,9 @@ use crate::color::color_format::{ColorFormat, SampleType};
 use crate::color::sample::Sample;
 use crate::ops::contrast_brightness::ContrastBrightness;
 
-/// The per-channel affine `value * scale + offset`, clamped to `[0, max]`, that
-/// contrast/brightness reduces to in a storage type's own units.
+/// The per-channel affine `value * scale + offset` that contrast/brightness reduces to in a
+/// storage type's own units: an integer store saturates it to `[0, max]`, and `f32` keeps it
+/// unbounded.
 ///
 /// Folding brightness and the mid-point recentering into one offset is what
 /// lets a row be a single multiply-add. The scalar reference and every vector
@@ -40,11 +41,11 @@ pub(crate) mod internals {
 
     /// The scalar reference, which the tests hold every kernel to.
     impl ChannelAffine {
-        /// One channel value adjusted: the affine, clamped to `[0, max]`, then narrowed by the
-        /// crate's rounding rule. A NaN survives the clamp, as `f32::clamp` leaves it.
+        /// One channel value adjusted: the affine, narrowed by the crate's rounding rule, which
+        /// saturates an integer to `[0, max]` and keeps an `f32`, a NaN included.
         #[inline]
         pub(crate) fn apply<T: Sample>(self, value: T) -> T {
-            T::from_f32((value.to_f32() * self.scale + self.offset).clamp(0.0, self.max))
+            T::from_f32(value.to_f32() * self.scale + self.offset)
         }
 
         /// Every channel value of `values` adjusted in place: the scalar reference over a row with

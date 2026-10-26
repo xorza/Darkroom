@@ -19,8 +19,6 @@ use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::ops::blend::cpu::BlendKernel;
-#[cfg(feature = "wgpu")]
-use crate::ops::blend::pipeline::GpuBlendPipeline;
 use crate::ops::blend::{Blend, BlendMode, cpu};
 
 /// A partial mix, so neither layer passes through unchanged.
@@ -38,8 +36,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "blend", Scale::Micros);
     for format in ColorFormat::ALL {
         let mut layers = None;
-        let mut out =
-            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), format));
+        let mut out = InterleavedImage::new_zeroed(InterleavedDesc::new(
+            Size2us::new(FRAME.width, 1),
+            format,
+        ));
         group.throughput(fixture::throughput(FRAME.width, 2 * format.byte_len()));
         let kernel = BlendKernel::of(format);
         for mode in BlendMode::iter() {
@@ -93,8 +93,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "blend", Scale::Millis);
     let params = Blend::new(BlendMode::default(), ALPHA);
-    #[cfg(feature = "wgpu")]
-    let mut pipeline = None;
     for format in ColorFormat::ALL {
         let mut layers = None;
         let pixels = FRAME.pixel_count();
@@ -114,18 +112,17 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     .get_or_insert_with(|| [1, 2].map(|seed| scene::sky(format, FRAME, seed)));
                 match backend {
                     Backend::Cpu => {
-                        let mut output = InterleavedImage::new_black(src.desc());
+                        let mut output = InterleavedImage::new_zeroed(src.desc());
                         b.iter(|| params.apply_cpu(black_box(src), black_box(dst), &mut output));
                     }
                     #[cfg(feature = "wgpu")]
                     Backend::Gpu => {
                         let gpu = backends.gpu();
-                        let pipeline = pipeline.get_or_insert_with(|| GpuBlendPipeline::new(gpu));
                         b.iter_with_large_drop(|| {
                             let top = GpuImage::from_image(gpu, src).unwrap();
                             let bottom = GpuImage::from_image(gpu, dst).unwrap();
                             let mut output = GpuImage::new_empty(gpu, src.desc()).unwrap();
-                            params.apply_gpu(gpu, pipeline, &top, &bottom, &mut output);
+                            params.apply_gpu(gpu, &top, &bottom, &mut output);
                             output.to_image(gpu).unwrap()
                         });
                     }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::bit_buffer2::BitBuffer2;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use common::Size2us;
 
@@ -12,7 +12,7 @@ use common::Size2us;
 #[test]
 fn each_color_reads_its_own_level() {
     let size = 128;
-    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let red = |x: usize| 0.125 + x as f32 / 1024.0;
     let pixels = Buffer2::from_fn((size, size), |x, y| match cfa.slot_at(Vec2us::new(x, y)) {
         0 => red(x),
@@ -41,7 +41,7 @@ fn each_color_reads_its_own_level() {
 #[test]
 fn a_mostly_masked_tile_takes_its_neighbours_sky() {
     let size = Size2us::new(128, 128);
-    let cfa = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let pixels = Buffer2::from_fn(size, |x, y| match (x, y) {
         (0..48, 0..48) => 100.0,
         (0..64, 0..64) => 0.5,

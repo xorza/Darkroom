@@ -5,9 +5,9 @@ use std::fmt::Debug;
 
 use crate::f32x8::{F32_LANES, F32x8};
 use crate::f64x4::{F64_LANES, F64x4};
+use crate::full_scale::FullScale;
 use crate::halves::Halves;
 use crate::i32x8::{I32_LANES, I32x8};
-use crate::kernel::Kernel;
 use crate::mask8::Mask8;
 use crate::u8x32::{U8_LANES, U8x32};
 use crate::u16x16::{U16_LANES, U16x16};
@@ -26,9 +26,6 @@ pub trait Isa: Copy + Debug {
     type U8: U8x32<U16 = Self::U16>;
     type U16: U16x16<U8 = Self::U8, I32 = Self::I32>;
     type I32: I32x8<F32 = Self::F32, U16 = Self::U16>;
-
-    /// `kernel` compiled for this Isa's features.
-    fn run<K: Kernel>(self, kernel: K) -> K::Output;
 
     fn splat_f32(self, value: f32) -> Self::F32;
 
@@ -55,7 +52,7 @@ pub trait Isa: Copy + Debug {
     /// A lane can never read outside `bytes`.
     #[inline(always)]
     fn gather_u32_le(self, bytes: &[u8], offset: Self::I32, valid: Mask<Self>) -> Self::I32 {
-        let words = u32_le_lanes(bytes, lanes_of(offset), valid.to_bitmask());
+        let words = u32_le_lanes(bytes, offset.to_array(), valid.to_bitmask());
         self.load_i32(&words.map(u32::cast_signed))
     }
 
@@ -73,7 +70,7 @@ pub trait Isa: Copy + Debug {
         second: Mask<Self>,
     ) -> [Self::F32; 8] {
         let bits = [first, second].map(Mask8::to_bitmask);
-        pair_lanes::<f32, SPLIT>(table, lanes_of(start), bits).map(|lanes| self.load_f32(&lanes))
+        pair_lanes::<f32, SPLIT>(table, start.to_array(), bits).map(|lanes| self.load_f32(&lanes))
     }
 
     /// [`Self::gather_pair_f32`] of `u16` samples, each zero-extended.
@@ -86,7 +83,7 @@ pub trait Isa: Copy + Debug {
         second: Mask<Self>,
     ) -> [Self::I32; 8] {
         let bits = [first, second].map(Mask8::to_bitmask);
-        pair_lanes::<u16, SPLIT>(table, lanes_of(start), bits)
+        pair_lanes::<u16, SPLIT>(table, start.to_array(), bits)
             .map(|lanes| self.load_i32(&lanes.map(i32::from)))
     }
 
@@ -98,48 +95,63 @@ pub trait Isa: Copy + Debug {
     }
 
     /// The eight lanes of `f64s`, low then high, each clamped to `[0, high]` and rounded to the
-    /// nearest integer, ties to even: a NaN to 0. Each lane of `high` is an integer of at most
+    /// nearest integer, ties to even: a NaN to 0. Lane `i` of the eight is clamped to lane `i mod
+    /// 4` of `high`, which bounds both halves alike. Each lane of `high` is an integer of at most
     /// `i32::MAX`; another `high` breaks the contract, which `Portable` asserts in a debug build.
-    fn round_clamped(self, f64s: Halves<Self::F64>, high: Self::F64) -> Self::I32;
+    fn round_clamped_f64_to_i32(self, f64s: Halves<Self::F64>, high: Self::F64) -> Self::I32;
 
-    /// [`Self::round_clamped`] of eight f32 lanes; each lane of `high` is an integer of at most
-    /// 2²⁴, which f32 holds exactly, and `Portable` asserts it in a debug build.
-    fn round_clamped_f32(self, values: Self::F32, high: Self::F32) -> Self::I32;
+    /// `values / scale`, as the divide rounds it, for lanes holding an integer in `[0, scale]`. A
+    /// lane past it breaks the contract, which `Portable` asserts in a debug build; the other Isas
+    /// then give an unspecified value. Where a vector divide is slow, as on x86, an Isa takes the
+    /// reciprocal's product and one fused correction, `q + r · (v − q · d)`: Markstein's correction
+    /// of a correctly rounded reciprocal, which gives the correctly rounded quotient for every such
+    /// lane, as the tests check exhaustively.
+    #[inline(always)]
+    fn div_full_scale(self, values: Self::F32, scale: FullScale) -> Self::F32 {
+        let divisor = scale.divisor();
+        debug_assert!(
+            values
+                .to_array()
+                .iter()
+                .all(|&v| v.fract() == 0.0 && (0.0..=divisor).contains(&v)),
+            "{:?} / {divisor} past the contract",
+            values.to_array()
+        );
+        values / self.splat_f32(divisor)
+    }
+
+    /// [`Self::round_clamped_f64_to_i32`] of eight f32 lanes; each lane of `high` is an integer of
+    /// at most 2²⁴, which f32 holds exactly, and `Portable` asserts it in a debug build.
+    fn round_clamped_f32_to_i32(self, values: Self::F32, high: Self::F32) -> Self::I32;
 
     /// The lanes of `ints`, in order, each in `[0, 255]`, as bytes. A lane outside it breaks the
     /// contract, which `Portable` asserts in a debug build; the other Isas then give an
     /// unspecified value. Each Isa narrows with its cheapest instruction.
     fn narrow_i32_to_u8(self, ints: [Self::I32; 4]) -> Self::U8;
 
-    /// [`Self::round_clamped`] of `f64s`, in order, as words; `high` is at most 65535.
+    /// [`Self::round_clamped_f64_to_i32`] of `f64s`, in order, as words; `high` is at most 65535.
     #[inline(always)]
-    fn round_clamped_u16(self, f64s: [Halves<Self::F64>; 2], high: Self::F64) -> Self::U16 {
-        let [low, upper] = f64s.map(|f64s| self.round_clamped(f64s, high));
+    fn round_clamped_f64_to_u16(self, f64s: [Halves<Self::F64>; 2], high: Self::F64) -> Self::U16 {
+        let [low, upper] = f64s.map(|f64s| self.round_clamped_f64_to_i32(f64s, high));
         low.narrow_u16(upper)
     }
 
-    /// [`Self::round_clamped`] of `f64s`, in order, as bytes; `high` is at most 255.
+    /// [`Self::round_clamped_f64_to_i32`] of `f64s`, in order, as bytes; `high` is at most 255.
     #[inline(always)]
-    fn round_clamped_u8(self, f64s: [Halves<Self::F64>; 4], high: Self::F64) -> Self::U8 {
-        self.narrow_i32_to_u8(f64s.map(|f64s| self.round_clamped(f64s, high)))
+    fn round_clamped_f64_to_u8(self, f64s: [Halves<Self::F64>; 4], high: Self::F64) -> Self::U8 {
+        self.narrow_i32_to_u8(f64s.map(|f64s| self.round_clamped_f64_to_i32(f64s, high)))
     }
 
-    /// Thirty-two pixels of three bytes (RGBRGB…), byte `k` of each from `channels[k]`.
+    /// Thirty-two pixels of `C` bytes, byte `k` of each from `channels[k]`: three (RGBRGB…) or
+    /// four (RGBARGBA…).
     #[inline(always)]
-    fn store_interleaved3_u8(self, channels: [Self::U8; 3], bytes: &mut [u8; 3 * U8_LANES]) {
-        let lanes = channels.map(u8_lanes);
-        for (idx, byte) in bytes.iter_mut().enumerate() {
-            *byte = lanes[idx % 3][idx / 3];
-        }
-    }
-
-    /// Thirty-two pixels of four bytes (RGBARGBA…), byte `k` of each from `channels[k]`.
-    #[inline(always)]
-    fn store_interleaved4_u8(self, channels: [Self::U8; 4], bytes: &mut [u8; 4 * U8_LANES]) {
-        let lanes = channels.map(u8_lanes);
-        for (idx, byte) in bytes.iter_mut().enumerate() {
-            *byte = lanes[idx % 4][idx / 4];
-        }
+    fn store_interleaved_u8<const C: usize, const G: usize>(
+        self,
+        channels: [Self::U8; C],
+        bytes: &mut [u8; G],
+    ) {
+        const { assert!((C == 3 || C == 4) && G == C * U8_LANES) };
+        interleave_lanes(&channels.map(U8x32::to_array), bytes);
     }
 
     /// Eight pixels of `C` samples, sample `k` of each from `channels[k]`: three or four.
@@ -150,10 +162,7 @@ pub trait Isa: Copy + Debug {
         samples: &mut [f32; G],
     ) {
         const { assert!((C == 3 || C == 4) && G == C * F32_LANES) };
-        let lanes = channels.map(F32x8::to_array);
-        for (idx, sample) in samples.iter_mut().enumerate() {
-            *sample = lanes[idx % C][idx / C];
-        }
+        interleave_lanes(&channels.map(F32x8::to_array), samples);
     }
 
     /// [`Self::store_interleaved_f32`] of words: each lane of `channels` in `[0, 65535]`. A lane
@@ -170,15 +179,16 @@ pub trait Isa: Copy + Debug {
         words: &mut [u16; G],
     ) {
         const { assert!((C == 3 || C == 4) && G == C * I32_LANES) };
-        let lanes = channels.map(lanes_of);
-        for (idx, word) in words.iter_mut().enumerate() {
-            let lane = lanes[idx % C][idx / C];
-            debug_assert!(
-                (0..=65535).contains(&lane),
-                "a lane of {lane} stored as a u16"
-            );
-            *word = lane as u16;
-        }
+        let lanes = channels.map(|channel| {
+            channel.to_array().map(|lane| {
+                debug_assert!(
+                    (0..=65535).contains(&lane),
+                    "a lane of {lane} stored as a u16"
+                );
+                lane as u16
+            })
+        });
+        interleave_lanes(&lanes, words);
     }
 
     /// The first three bytes of each of thirty-two pixels of four (RGBARGBA…), the fourth dropped.
@@ -298,6 +308,19 @@ fn lookup_lane(table: &[f32], last: f32, idx: f32) -> f32 {
     table[clamped as usize]
 }
 
+/// `C` channels of `N` lanes each as `N` pixels of `C` samples: sample `k` of pixel `i` is lane `i`
+/// of `channels[k]`.
+#[inline(always)]
+pub(crate) fn interleave_lanes<T: Copy, const N: usize, const C: usize, const G: usize>(
+    channels: &[[T; N]; C],
+    out: &mut [T; G],
+) {
+    const { assert!(G == C * N) };
+    for (idx, sample) in out.iter_mut().enumerate() {
+        *sample = channels[idx % C][idx / C];
+    }
+}
+
 /// [`Isa::gather_u32_le`] lane by lane: the lanes `bits` sets read their up to four bytes.
 #[inline(always)]
 pub(crate) fn u32_le_lanes(bytes: &[u8], offsets: [i32; I32_LANES], bits: u8) -> [u32; I32_LANES] {
@@ -337,22 +360,6 @@ pub(crate) fn pair_lanes<T: Copy + Default, const SPLIT: usize>(
                 .unwrap_or_default()
         })
     })
-}
-
-/// The lanes of `ints`, as an array.
-#[inline(always)]
-pub(crate) fn lanes_of<V: I32x8>(ints: V) -> [i32; I32_LANES] {
-    let mut lanes = [0; I32_LANES];
-    ints.store(&mut lanes);
-    lanes
-}
-
-/// The lanes of `vector`, as an array.
-#[inline(always)]
-fn u8_lanes<V: U8x32>(vector: V) -> [u8; U8_LANES] {
-    let mut lanes = [0; U8_LANES];
-    vector.store(&mut lanes);
-    lanes
 }
 
 /// [`Isa::weighted_sum3_u8`] of one pixel: the sum, then `(sum + 0x7FFF + odd) >> 16` with `odd`

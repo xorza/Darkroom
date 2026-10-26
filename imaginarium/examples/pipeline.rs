@@ -13,10 +13,7 @@ use std::f32::consts::PI;
 use std::mem;
 
 use glam::Vec2;
-use imaginarium::{
-    AffineWarp, Blend, BlendMode, ContrastBrightness, Gpu, GpuAffineWarpPipeline, GpuBlendPipeline,
-    GpuCtx, GpuImage,
-};
+use imaginarium::{AffineWarp, Blend, BlendMode, ContrastBrightness, Gpu, GpuImage};
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
@@ -24,7 +21,6 @@ fn main() {
         println!("No GPU available, exiting");
         return;
     };
-    let mut context = GpuCtx::new(gpu.clone());
 
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
@@ -41,10 +37,9 @@ fn main() {
     // Step 1: rotate. The transform shader cannot read and write one image, so it renders into
     // `scratch` and the two swap — `main` is always the live one.
     println!("Step 1: rotating...");
-    let pipeline = context.get_or_create(GpuAffineWarpPipeline::new);
     AffineWarp::default()
         .rotate_around(PI / 12.0, center)
-        .apply_gpu(&gpu, pipeline, &main, &mut scratch);
+        .apply_gpu(&gpu, &main, &mut scratch);
     mem::swap(&mut main, &mut scratch);
 
     // Step 2: contrast, on the CPU. This is the one step that costs a round trip, and it is
@@ -59,18 +54,16 @@ fn main() {
     // Step 3: blend against a differently-rotated copy of the original, all on the device.
     println!("Step 3: blending an overlay...");
     let mut overlay = GpuImage::from_image(&gpu, &input).expect("upload");
-    let pipeline = context.get_or_create(GpuAffineWarpPipeline::new);
     AffineWarp::default()
         .rotate_around(-PI / 6.0, center)
-        .apply_gpu(&gpu, pipeline, &overlay, &mut scratch);
+        .apply_gpu(&gpu, &overlay, &mut scratch);
     mem::swap(&mut overlay, &mut scratch);
 
     let mut blended = GpuImage::new_empty(&gpu, desc).expect("allocate");
-    let pipeline = context.get_or_create(GpuBlendPipeline::new);
     Blend::default()
         .mode(BlendMode::Screen)
         .alpha(0.4)
-        .apply_gpu(&gpu, pipeline, &overlay, &main, &mut blended);
+        .apply_gpu(&gpu, &overlay, &main, &mut blended);
 
     // Read back once, at the end.
     let result = blended.to_image(&gpu).unwrap();

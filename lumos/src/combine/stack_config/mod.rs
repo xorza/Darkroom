@@ -13,9 +13,8 @@ use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_cache::core::CacheCore;
 use crate::combine::normalization::Normalization;
 use crate::combine::rejection::Rejection;
-use crate::combine::stack;
 use crate::combine::stack::planned_combine::PlannedCombine;
-use crate::combine::stack::{CombinePlan, FrameOrigin, FrameSet};
+use crate::combine::stack::{CombinePlan, CombineSource, FrameSet};
 use crate::combine::stack_config::combine::Combine;
 use crate::combine::stack_config::combine_method::CombineMethod;
 use crate::combine::stack_config::small_n::SmallN;
@@ -104,12 +103,15 @@ impl StackConfig {
         config
     }
 
-    /// Preset for light frames: σ-clip σ=2.5, global normalization, noise weighting. Frames of one
-    /// field differ in sky level and transparency, so lights are put on one scale and weighted by
-    /// their noise, as Siril, PixInsight and DSS do by default.
+    /// The σ the light preset clips at.
+    pub const LIGHT_SIGMA: f32 = 2.5;
+
+    /// Preset for light frames: σ-clip at [`Self::LIGHT_SIGMA`], global normalization, noise
+    /// weighting. Frames of one field differ in sky level and transparency, so lights are put on
+    /// one scale and weighted by their noise, as Siril, PixInsight and DSS do by default.
     pub const fn light() -> Self {
         Self {
-            combine: Combine::sigma_clip(2.5),
+            combine: Combine::sigma_clip(Self::LIGHT_SIGMA),
             weighting: Weighting::Noise,
             normalization: Normalization::Global,
             quality: QualityPlanes::STANDARD,
@@ -252,7 +254,7 @@ impl StackConfig {
     ) -> Result<StackProduct, StackError> {
         let paths: Vec<&Path> = paths.iter().map(AsRef::as_ref).collect();
         let set = FrameSet {
-            source: FrameOrigin::Paths,
+            source: CombineSource::Paths,
             count: paths.len(),
         };
         // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
@@ -292,7 +294,7 @@ impl StackConfig {
         monitor: ProgressMonitor,
     ) -> Result<StackProduct, StackError> {
         let set = FrameSet {
-            source: FrameOrigin::Memory,
+            source: CombineSource::Memory,
             count: frames.len(),
         };
         self.combine_cached(set, || {
@@ -307,7 +309,7 @@ impl StackConfig {
         core: CacheCore,
     ) -> Result<StackProduct, StackError> {
         let set = FrameSet {
-            source: FrameOrigin::FrameStore,
+            source: CombineSource::FrameStore,
             count: frames.len(),
         };
         self.combine_cached(set, || {
@@ -363,17 +365,15 @@ impl StackConfig {
     }
 
     /// Combine the cached frames into one stacked product under this configuration — see
-    /// [`stack::combine`].
+    /// [`CombinePlan::combine`].
     pub(crate) fn run_stacking(&self, cache: &FrameCache) -> Result<StackProduct, StackError> {
-        stack::combine(
-            cache,
-            CombinePlan {
-                combine: self.combine,
-                weighting: &self.weighting,
-                quality: self.quality,
-                min_survivors: self.min_survivors,
-            },
-        )
+        CombinePlan {
+            combine: self.combine,
+            weighting: &self.weighting,
+            quality: self.quality,
+            min_survivors: self.min_survivors,
+        }
+        .combine(cache)
     }
 }
 

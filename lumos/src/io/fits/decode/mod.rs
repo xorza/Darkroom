@@ -18,24 +18,16 @@
 //! is not.
 
 use imaginarium::PlanarImage;
-use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::image_provenance::ColorProvenance;
-use crate::io::decoder::Peek;
-use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::decode::fits_file::FitsFile;
-use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
-use crate::io::load_ctx::LoadCtx;
-use crate::noise::mosaic_noise_measure::MosaicNoiseMeasure;
 
 mod extension_chunks;
 pub(crate) mod fits_file;
@@ -97,106 +89,6 @@ fn check_gain_channels(flat_gain: Option<&FlatGain>, channels: usize) -> Result<
         .into()),
         _ => Ok(()),
     }
-}
-
-/// Refuse, as a linear load of `path` does, an image whose header declares a mosaic: it loads as a
-/// `CfaImage`, to be calibrated before it is demosaiced.
-fn refuse_mosaic(path: &Path, selected: &SelectedFits) -> Result<(), ImageError> {
-    if selected.is_mosaic() {
-        return Err(ImageError::scientific_rejection(
-            path,
-            ScientificRefusal::MosaicFits,
-        ));
-    }
-    Ok(())
-}
-
-/// Load an already-linear astronomical image from a FITS file, its flat gain shared through
-/// `gains`.
-pub(crate) fn load_linear(
-    path: &Path,
-    ctx: &LoadCtx,
-    gains: &SharedGains,
-) -> Result<LinearImage, ImageError> {
-    load_linear_file(FitsFile::open(path, ctx)?, path, ctx, gains)
-}
-
-/// [`load_linear`] of `file`, open from `path`.
-pub(crate) fn load_linear_file(
-    file: FitsFile,
-    path: &Path,
-    ctx: &LoadCtx,
-    gains: &SharedGains,
-) -> Result<LinearImage, ImageError> {
-    refuse_mosaic(path, &file.selected)?;
-    file.read(ctx, Checksum::Judged, gains)
-        .and_then(DecodedFitsImage::into_linear)
-        .map_err(|error| ImageError::fits_load(path, error))
-}
-
-/// What a linear FITS image of `path` is, from its header and a compressed image's tile index
-/// alone: the dimensions it decodes to and what its decode holds beside them, by the same
-/// selection, cube reading and limits [`load_linear`] applies, without reading a sample; with the
-/// file, which [`load_linear_file`] reads on from. A header that declares a mosaic is refused, as
-/// the load refuses it.
-pub(crate) fn linear_peek(path: &Path, ctx: &LoadCtx) -> Result<Peek<FitsFile>, ImageError> {
-    let file = FitsFile::open(path, ctx)?;
-    refuse_mosaic(path, &file.selected)?;
-    Ok(Peek {
-        info: file.selected.linear_frame_info(),
-        read: file,
-    })
-}
-
-pub(crate) fn load_preview(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
-    let file = FitsFile::open(path, ctx)?;
-    let preview = || {
-        let Some(cfa_type) = file.selected.cfa_type else {
-            return file
-                .read(ctx, Checksum::Judged, &SharedGains::default())?
-                .into_linear();
-        };
-        let cfa = file
-            .read(ctx, Checksum::Judged, &SharedGains::default())?
-            .into_cfa(cfa_type)?;
-        let noise = MosaicNoiseMeasure::of(&cfa).map(MosaicNoiseMeasure::measure);
-        Ok(cfa.demosaic(ctx.xtrans_passes, noise, &ctx.cancel)?)
-    };
-    preview().map_err(|error| ImageError::fits_load(path, error))
-}
-
-/// Load a sensor frame from a FITS file, its flat gain shared through `gains`.
-pub(crate) fn load_cfa(
-    path: &Path,
-    ctx: &LoadCtx,
-    gains: &SharedGains,
-) -> Result<CfaImage, ImageError> {
-    load_cfa_file(FitsFile::open(path, ctx)?, path, ctx, gains)
-}
-
-/// [`load_cfa`] of `file`, open from `path`.
-pub(crate) fn load_cfa_file(
-    file: FitsFile,
-    path: &Path,
-    ctx: &LoadCtx,
-    gains: &SharedGains,
-) -> Result<CfaImage, ImageError> {
-    let cfa = || {
-        let cfa_type = file.selected.require_cfa()?;
-        file.read(ctx, Checksum::Judged, gains)?.into_cfa(cfa_type)
-    };
-    cfa().map_err(|error| ImageError::fits_load(path, error))
-}
-
-/// What the sensor frame of `path` is, from its header as [`load_cfa`] requires it, with the file,
-/// which [`load_cfa_file`] reads on from.
-pub(crate) fn cfa_peek(path: &Path, ctx: &LoadCtx) -> Result<Peek<FitsFile>, ImageError> {
-    let file = FitsFile::open(path, ctx)?;
-    let info = file
-        .selected
-        .cfa_frame_info()
-        .map_err(|error| ImageError::fits_load(path, error))?;
-    Ok(Peek { info, read: file })
 }
 
 #[cfg(feature = "internals")]

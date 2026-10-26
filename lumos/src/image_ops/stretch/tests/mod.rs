@@ -1,10 +1,13 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image_ops::stretch::*;
 use crate::internals::assertions::assert_close;
 use crate::internals::images::{mono_image, rgb_image};
 use crate::math::statistics;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 use common::Size2us;
 use std::f32::consts::LN_10;
 use std::iter;
@@ -102,9 +105,10 @@ fn asinh_reference(beta: f32, x: f32) -> f64 {
     (f64::from(x) / beta).asinh() / (1.0 / beta).asinh()
 }
 
-/// The f32 curve rounds `1/β` and `x/β` (2ε on the argument, which `asinh` does not magnify),
-/// takes libm's `asinhf` twice (ε each), the reciprocal of the norm and the product (ε each): 7ε.
-const ASINH_EVAL_BOUND: f32 = 7.0 * f32::EPSILON;
+/// The f32 curve rounds `1/β` and `x · (1/β)` (2ε on the numerator's argument, ε on the norm's,
+/// which `asinh` does not magnify), takes the kernels' `asinh` twice (2ε each), the reciprocal of
+/// the norm and the product (ε each): 9ε.
+const ASINH_EVAL_BOUND: f32 = 9.0 * f32::EPSILON;
 
 /// A smaller `β` lifts a faint value higher, and a large one nears the identity — at β = 1000,
 /// `x(1 + (1 − x²)/(6β²))` is 0.5 + 6e-8 at 0.5, inside one ulp. Hand-computed at β = 0.01:
@@ -130,10 +134,11 @@ fn asinh_beta_controls_strength() {
 }
 
 /// Every reachable median lands on its target, down to the near-zero sky a background
-/// subtraction leaves. The bisection ends on adjacent f32 exponents `m = log₁₀ β` that bracket the
-/// target to the ~5ε its `g` rounds to; `|d ln g / d ln β| ≤ 1`, so one ulp of `m` moves `g` by at
-/// most `ln 10 · ulp(m)` relative. `10^m` rounds once more (ε), and the curve evaluated here
-/// differs from `g` by [`ASINH_EVAL_BOUND`]: together `ln 10 · ulp(m) + 13ε` relative.
+/// subtraction leaves. The solver bisects on the curve itself, and ends on adjacent f32 exponents
+/// `m = log₁₀ β` whose curves bracket the target; the result is one of the two. `|d ln g / d ln β|
+/// ≤ 1`, so one ulp of `m` moves the exact curve by at most `ln 10 · ulp(m)` relative, and `10^m`
+/// rounds on each side (2ε); each of the two f32 curves is within [`ASINH_EVAL_BOUND`] of its exact
+/// one: together `ln 10 · ulp(m) + 20ε` relative.
 #[test]
 fn solve_beta_hits_target_background() {
     for &(median, target) in &[
@@ -147,7 +152,7 @@ fn solve_beta_hits_target_background() {
         let got = AsinhCurve::new(beta).eval(median);
         let exponent = beta.log10().abs();
         let ulp = exponent.next_up() - exponent;
-        let bound = (LN_10 * ulp + 13.0 * f32::EPSILON) * target;
+        let bound = (LN_10 * ulp + 20.0 * f32::EPSILON) * target;
         assert!(
             (got - target).abs() <= bound,
             "median {median} -> {got}, want {target} within {bound:e}"
@@ -707,7 +712,10 @@ fn end_to_end_mono_auto_stf_brightens_background_to_target() {
 }
 
 /// Past [`MAX_STATISTIC_SAMPLES`] pixels the auto stretches sample with a stride: 1001 × 1000 takes
-/// every second pixel. The samples read from the planes are those of the intensity plane.
+/// every second pixel. The samples read from the planes are those of the intensity plane. A pixel
+/// holding a fill is left out and the stride runs over the others: of a 2 000 001-pixel image with
+/// its first pixel flagged `NO_DATA`, the 2 000 000 others are sampled every second one, from
+/// pixel 1.
 #[test]
 fn subsampled_intensity_is_the_intensity_plane_subsampled() {
     let size = Size2us::new(1001, 1000);
@@ -720,7 +728,27 @@ fn subsampled_intensity_is_the_intensity_plane_subsampled() {
     let sample = Subsample::new(size.pixel_count(), MAX_STATISTIC_SAMPLES);
     assert_eq!(sample.count(), 500_500);
     let expected: Vec<f32> = sample.of(image.intensity_plane().pixels()).collect();
-    assert_eq!(subsample_intensity(&image), expected);
+    assert_eq!(image.intensity().statistic_values(), expected);
+
+    let size = Size2us::new(2_000_001, 1);
+    let mut image = mono_image(size, (0..size.pixel_count()).map(|i| i as f32).collect());
+    image.set_flags(PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &[0]));
+    let values = image.statistic_values(0);
+    assert_eq!(values.len(), 1_000_000);
+    assert_eq!(values[..3], [1.0, 3.0, 5.0]);
+    assert_eq!(image.intensity().statistic_values(), values);
+}
+
+/// An image every pixel of which holds a fill has nothing for an auto stretch to measure.
+#[test]
+fn an_auto_stretch_of_no_data_is_refused() {
+    let size = Size2us::new(2, 1);
+    let mut image = mono_image(size, vec![0.0; 2]);
+    image.set_flags(PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &[0, 1]));
+    assert!(matches!(
+        Stretch::default().apply(&mut image),
+        Err(OpError::NoData)
+    ));
 }
 
 #[test]

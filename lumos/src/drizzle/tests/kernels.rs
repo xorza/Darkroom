@@ -10,6 +10,7 @@ use glam::DVec2;
 use super::*;
 use imaginarium::ChannelLayout;
 
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::internals::images::rgb_image;
 use common::Vec2us;
 
@@ -271,7 +272,8 @@ fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
 /// every cell's weight is 0.3·0.5 = 0.15 or 0.7·0.5 = 0.35: the maximum is 0.35, the threshold
 /// 0.6·0.35 = 0.21. The bright pixel (0,0)'s cells (1,0) and (1,1) weigh 0.35 and read 1.0; its
 /// cells (0,0) and (0,1) weigh 0.15 — covered, but below the threshold — and take the fill. A
-/// filled cell holds no measurement, so its weight plane reads 0 and its coverage 0.
+/// filled cell holds no measurement, so its weight plane reads 0, its coverage 0, and it is flagged
+/// `NO_DATA`; a kept cell carries no flag.
 #[test]
 fn min_weight_fraction_gates_against_the_deepest_weight() {
     let size = Size2us::new(4, 4);
@@ -295,14 +297,17 @@ fn min_weight_fraction_gates_against_the_deepest_weight() {
     .unwrap();
     let out = product.image.channel(0);
     let weight = weight_plane(&product);
+    let flags = product.image.flags().unwrap();
     for (x, y) in [(1, 0), (1, 1)] {
         assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
+        assert_eq!(flags.at_pos(Vec2us::new(x, y)), QualityFlags::default());
     }
     let coverage = product.coverage.as_ref().unwrap().to_plane(0);
     for (x, y) in [(0, 0), (0, 1)] {
         assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
         assert_eq!(weight[(x, y)], 0.0, "cell ({x},{y}) weight");
         assert_eq!(coverage[(x, y)], 0.0, "cell ({x},{y}) coverage");
+        assert_eq!(flags.at_pos(Vec2us::new(x, y)), QualityFlags::NO_DATA);
     }
 }
 

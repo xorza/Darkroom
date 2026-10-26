@@ -569,7 +569,7 @@ fn a_pixel_with_no_data_keeps_out_of_the_measurement() {
             saturation: &star.saturation,
             no_data: Some(no_data),
         }
-        .measure_star(&region, &config, &grid)
+        .measure_star(&region, &config, &grid, &mut star.sky.noise.reader())
     };
     let clean = measure(&star.residual, &BitBuffer2::new_default(size)).unwrap();
 

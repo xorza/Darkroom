@@ -1,7 +1,7 @@
 use fits_well::io::{ChecksumReport, ChecksumStatus};
 use serde::Serialize;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::image::metadata::sample_domain::Pedestal;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
@@ -133,7 +133,7 @@ pub struct FitsLoadConfig {
     /// The Bayer phase of a frame whose `BAYERPAT` says only `'TRUE'` — mosaiced, phase unstated —
     /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
     /// four.
-    pub unstated_bayer_pattern: Option<CfaPattern>,
+    pub unstated_bayer_pattern: Option<BayerPattern>,
     /// The pedestal a frame's values carry, in its physical units, when the header records none.
     /// Only a lumos-written file records one; a third-party file usually keeps the camera offset in
     /// the data and says nothing, so the default is [`Pedestal::Unknown`], which calibration then

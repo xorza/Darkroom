@@ -26,6 +26,7 @@ mod slot_pixels;
 pub(crate) mod slot_planes;
 
 use arrayvec::ArrayVec;
+use common::IntrospectEnum;
 
 use crate::combine::error::StackError;
 use crate::combine::normalization::norm_fit::{Fitted, NormFit};
@@ -35,7 +36,11 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::image::metadata::sample_domain::DomainMap;
 
 /// Frame normalization method applied before stacking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `type_id` is this enum's identity to an introspecting consumer, which stores it: lens's graphs
+/// held it as their normalization choice, so it is fixed for the life of the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "a784ccc5-0139-4a2b-93ec-902d6212539d")]
 pub enum Normalization {
     /// No normalization.
     None,

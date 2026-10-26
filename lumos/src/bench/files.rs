@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use common::TempDir;
+use common::{TempDir, fs};
 use fits_well::header::Header;
 use fits_well::image::{Borrowed, Image, Scaling, View};
 
@@ -13,7 +13,7 @@ use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
-use crate::internals::fits::write_fits;
+use crate::internals::fits::fits_bytes;
 
 /// The lights of the end-to-end sets: few enough that an iteration stays near ten seconds.
 pub(crate) const LIGHTS: usize = 12;
@@ -30,7 +30,7 @@ impl Files {
     /// calibrated and registered elsewhere.
     pub(crate) fn aligned_lights(field: Field) -> Self {
         Self::write("aligned", |path, idx| {
-            write_mono_f32(path, &field.aligned(FRAME, idx).image);
+            fs::write(path, mono_f32(&field.aligned(FRAME, idx).image)).unwrap();
         })
     }
 
@@ -38,7 +38,11 @@ impl Files {
     /// behind `cfa_type`'s filters, the pattern in `BAYERPAT`.
     pub(crate) fn raw_lights(field: Field, cfa_type: CfaType) -> Self {
         Self::write("raw", |path, idx| {
-            write_mosaic_u16(path, &field.light_exposure(FRAME, cfa_type, idx));
+            fs::write(
+                path,
+                mosaic_u16(&field.light_exposure(FRAME, cfa_type, idx)),
+            )
+            .unwrap();
         })
     }
 
@@ -90,7 +94,11 @@ impl MasterFiles {
                 ("flat", set.flat, &mut frames.flat),
             ] {
                 let path = dir.join(format!("{name}_{idx:02}.fits"));
-                write_mosaic_u16(&path, &frame.expect("every sequence has a frame"));
+                fs::write(
+                    &path,
+                    mosaic_u16(&frame.expect("every sequence has a frame")),
+                )
+                .unwrap();
                 paths.push(path);
             }
         }
@@ -99,27 +107,26 @@ impl MasterFiles {
 }
 
 /// `image`'s one plane as normalized 32-bit floats.
-pub(crate) fn write_mono_f32(path: &Path, image: &LinearImage) {
+pub(crate) fn mono_f32(image: &LinearImage) -> Vec<u8> {
     let plane = image.channel(0);
     let shape = [plane.width(), plane.height()];
     let samples = View::F32(plane.pixels());
-    write_fits(
-        path,
+    fits_bytes(
         Borrowed::new(&shape, samples, Scaling::IDENTITY).unwrap(),
         None,
-    );
+    )
 }
 
 /// `mosaic` as a camera's 16-bit file: `BITPIX = 16` with `BZERO = 32768`, and for a Bayer mosaic
 /// its pattern in `BAYERPAT`.
-pub(crate) fn write_mosaic_u16(path: &Path, mosaic: &CfaImage) {
+pub(crate) fn mosaic_u16(mosaic: &CfaImage) -> Vec<u8> {
     let shape = vec![mosaic.data().width(), mosaic.data().height()];
     let image = Image::from_u16(shape, &quantize(mosaic.data().pixels())).unwrap();
     let mut header = Header::new();
     if let CfaType::Mosaic(Mosaic::Bayer(pattern)) = mosaic.cfa_type() {
         header.set("BAYERPAT", pattern.bayerpat()).unwrap();
     }
-    write_fits(path, image.view(), Some(&header));
+    fits_bytes(image.view(), Some(&header))
 }
 
 /// `samples` in `[0, 1]` to the 16-bit full scale, rounded.
@@ -133,10 +140,12 @@ fn quantize(samples: &[f32]) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
-    use crate::image::cfa::cfa_pattern::CfaPattern;
-    use crate::image::flat_gain::shared_gains::SharedGains;
-    use crate::io::fits::decode;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
+    use crate::internals::fits::{load_cfa, load_linear};
+    use crate::io::fits::cfa;
     use crate::io::load_ctx::LoadCtx;
     use common::Size2us;
 
@@ -146,7 +155,7 @@ mod tests {
     fn each_file_loads_back_as_written() {
         let size = Size2us::new(60, 40);
         let field = Field::Typical;
-        let dir = TempDir::new("lumos-bench-files-test");
+        let ctx = LoadCtx::default();
         let within_half_step = |loaded: &[f32], expected: &[f32]| {
             assert_eq!(loaded.len(), expected.len());
             for (&loaded, &expected) in loaded.iter().zip(expected) {
@@ -156,31 +165,23 @@ mod tests {
         };
 
         let mono = field.light(size, CfaType::Mono);
-        let path = dir.join("mono.fits");
-        write_mosaic_u16(&path, &mono);
-        let loaded =
-            decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
+        let loaded = load_linear(&mosaic_u16(&mono), &ctx).unwrap();
         within_half_step(loaded.channel(0).pixels(), mono.data().pixels());
 
         let render = field.render(size).image;
-        let path = dir.join("render.fits");
-        write_mono_f32(&path, &render);
-        let loaded =
-            decode::load_linear(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
+        let loaded = load_linear(&mono_f32(&render), &ctx).unwrap();
         assert_eq!(loaded.channel(0).pixels(), render.channel(0).pixels());
 
-        let mosaic = field.light(size, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
-        let path = dir.join("mosaic.fits");
-        write_mosaic_u16(&path, &mosaic);
-        let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
+        let mosaic = field.light(size, CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
+        let loaded = load_cfa(&mosaic_u16(&mosaic), &ctx).unwrap();
         assert_eq!(loaded.cfa_type(), mosaic.cfa_type());
         within_half_step(loaded.data().pixels(), mosaic.data().pixels());
 
         let calibrated =
-            field.mosaic_exposure(size, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)), 1);
-        let path = dir.join("calibrated.fits");
-        calibrated.write_fits(&path).unwrap();
-        let loaded = decode::load_cfa(&path, &LoadCtx::default(), &SharedGains::default()).unwrap();
+            field.mosaic_exposure(size, CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)), 1);
+        let mut written = Cursor::new(Vec::new());
+        cfa::write(&calibrated, &mut written).unwrap();
+        let loaded = load_cfa(written.get_ref(), &ctx).unwrap();
         assert_eq!(loaded.cfa_type(), calibrated.cfa_type());
         assert_eq!(loaded.data().pixels(), calibrated.data().pixels());
     }

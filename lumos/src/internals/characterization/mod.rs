@@ -27,8 +27,8 @@ use crate::combine::stack_config::StackConfig;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::combine::stack_frame::StackFrame;
 use crate::frame::frame_stats::FrameStats;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
@@ -115,8 +115,7 @@ fn cfa_snapshot(snapshot: &mut Snapshot, cfa: &CfaImage) {
 }
 
 fn detect(image: &LinearImage) -> Vec<Star> {
-    StarDetector::from_config(StarDetectionConfig::default())
-        .unwrap()
+    StarDetector::new(StarDetectionConfig::default())
         .detect(image)
         .stars
 }
@@ -157,7 +156,7 @@ fn decode_snapshot() {
     let mosaic = make_cfa(
         size,
         channels[0].channel(0).pixels().to_vec(),
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     cfa::save(&fits, &mosaic).unwrap();
     let cfa = LoadCtx::default().cfa(&fits).unwrap();
@@ -202,7 +201,7 @@ fn calibrate_snapshot() {
         .map(|((s, g), d)| s * g + d)
         .collect();
 
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(make_cfa(size, dark, bayer)),
@@ -244,7 +243,7 @@ fn master_snapshot() {
         return;
     }
     let size = Size2us::new(32, 32);
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let scratch = TempDir::new("lumos_master_snapshot");
     let mut rng = TestRng::new(0x3A57);
     let mut write = |name: String, level: &dyn Fn(usize) -> f32, sigma: f32| -> PathBuf {
@@ -327,7 +326,7 @@ fn frame_stats_snapshot() {
     let mosaic = make_cfa(
         Size2us::new(192, 192),
         mono.channel(0).pixels().to_vec(),
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     let demosaiced = mosaic.clone().demosaic_measured(MarkesteijnPasses::One);
     let mut snapshot = Snapshot::default();

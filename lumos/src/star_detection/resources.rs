@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(resources.acquire_f32().as_ptr(), address);
 
         let mask = resources.acquire_bit();
-        assert_eq!(mask.size, Size2us::new(64, 32));
+        assert_eq!(mask.size(), Size2us::new(64, 32));
         let address = mask.words_ptr();
         drop(mask);
         assert_eq!(resources.buffer_counts(), counts(1, 1));

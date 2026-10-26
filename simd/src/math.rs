@@ -115,8 +115,10 @@ pub trait Math: Isa {
         exp_r * n.pow2i()
     }
 
-    /// `ln(x)` for `x > 0` (Cephes `logf`), about 1 ULP. Other lanes give a value the caller
-    /// discards, the same on every Isa.
+    /// `ln(x)` for a positive normal finite `x` (Cephes `logf`), within ε relative. Other lanes —
+    /// 0, a subnormal, +∞ — give a finite value the caller discards, as `frexp` reads their bits,
+    /// the same on every Isa: a lane the caller keeps is held to the domain by its caller, as a
+    /// block's padded lanes are not.
     #[inline(always)]
     fn ln_f32(self, x: Self::F32) -> Self::F32 {
         let one = self.splat_f32(1.0);
@@ -170,11 +172,11 @@ pub trait Math: Isa {
         exponent.mul_add(self.splat_f64(LOG_F64_LN2_HI), m + y)
     }
 
-    /// `asinh(x)` for `x ≥ 0`, to a few ULP relative at every magnitude: `log1p(u)` with
+    /// `asinh(x)` for a finite `x ≥ 0`, within 2ε relative at every magnitude: `log1p(u)` with
     /// `u = x + x²/(1 + √(1 + x²))` — `√(1 + x²) + x − 1` without its cancellation — and
     /// `log1p(u) = ln(1 + u) · u / ((1 + u) − 1)`, whose ratio cancels the rounding of `1 + u`
     /// (Goldberg 1991); past [`ASINH_LOG_FROM`], `ln x + ln 2`. A negative `x` gives a value that
-    /// is not positive, or NaN.
+    /// is not positive, or NaN; +∞ a finite value, as [`Self::ln_f32`] gives one.
     #[inline(always)]
     fn asinh_f32(self, x: Self::F32) -> Self::F32 {
         let one = self.splat_f32(1.0);

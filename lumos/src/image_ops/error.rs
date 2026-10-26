@@ -29,6 +29,10 @@ pub enum OpError {
     /// normalize the model to.
     #[error("background division needs a positive model mean, got {mean}")]
     NonPositiveBg { mean: f64 },
+    /// Every pixel of the image holds a fill (`NO_DATA`): there is nothing to measure a statistic
+    /// of.
+    #[error("the image holds no data: every pixel is a fill")]
+    NoData,
     /// An auto stretch cannot map the measured background onto its target: the median sits at or
     /// below zero (nothing for a brightening curve to lift), or the curve's range does not reach
     /// the target from it.

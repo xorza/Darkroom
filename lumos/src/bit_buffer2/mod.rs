@@ -74,7 +74,7 @@ impl BitLayout {
 pub(crate) struct BitBuffer2 {
     /// Packed bit storage, 64 values per word, each row's padding clear.
     words: Vec<u64>,
-    pub(crate) size: Size2us,
+    size: Size2us,
     /// Bits per row including padding: the width rounded up to 128.
     stride: usize,
 }
@@ -97,6 +97,11 @@ impl Scratch for BitBuffer2 {
 }
 
 impl BitBuffer2 {
+    /// The pixels the mask covers.
+    pub(crate) const fn size(&self) -> Size2us {
+        self.size
+    }
+
     #[inline]
     pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
         let layout = BitLayout::of(size);

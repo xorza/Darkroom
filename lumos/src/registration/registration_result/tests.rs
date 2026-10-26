@@ -4,14 +4,13 @@ use crate::registration::error::{
     RansacFailure, RegistrationCatalog, RegistrationError, StarField,
 };
 use crate::registration::match_idxs::MatchIdxs;
-use crate::registration::registration_result::{RegistrationResult, StarMatch, rms_error};
+use crate::registration::registration_result::{RegistrationResult, StarMatch};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
 
 /// The result of `transform` fitted to `matches`.
 fn result(transform: Transform, matches: Vec<StarMatch>) -> RegistrationResult {
-    let rms = rms_error(&matches);
-    RegistrationResult::new(WarpTransform::new(transform), matches, rms)
+    RegistrationResult::new(WarpTransform::new(transform), matches)
 }
 
 fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
@@ -113,8 +112,11 @@ fn registration_error_messages_include_context() {
             "too few stars detected: found 5, need 10",
         ),
         (
-            RegistrationError::NoMatchingPatterns,
-            "no matching star patterns found between images",
+            RegistrationError::NoMatchingPatterns {
+                found: 3,
+                required: 8,
+            },
+            "too few matching star patterns between images: found 3, need 8",
         ),
         (
             RegistrationError::RansacFailed(RansacFailure {

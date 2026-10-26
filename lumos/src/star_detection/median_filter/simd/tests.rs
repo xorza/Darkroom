@@ -8,7 +8,7 @@ use crate::star_detection::median_filter::simd::internals::median9_scalar;
 #[test]
 fn median_filter_row_matches_scalar() {
     let widths: Vec<usize> = (3..10).chain(SWEEP_WIDTHS.iter().copied()).collect();
-    assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
+    assert_simd_matches_scalar(&widths, |tier, shape, width| {
         let above = shape.row(width, 0);
         let cur = shape.row(width, 1);
         let below = shape.row(width, 2);

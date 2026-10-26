@@ -14,7 +14,7 @@ mod tile;
 use common::CancelToken;
 
 use crate::error::Cancelled;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled;
@@ -91,10 +91,8 @@ fn estimate_green<S: Isa>(isa: S, center_lpf: S::F32, neighbour: Neighbour<S::F3
     let t = denominator.abs() / transition;
     let curve = t * (isa.splat_f32(3.0) - isa.splat_f32(2.0) * t);
     let ratio_weight = t * curve;
-    // `f32::signum`, whose −0 is −1: 1/x has the sign of x, a zero's included.
-    let signum = (one / denominator)
-        .lanes_lt(isa.splat_f32(0.0))
-        .select(isa.splat_f32(-1.0), one);
+    // `f32::signum`, whose −0 is −1, where `denominator` is not NaN; a NaN one takes `ratio`.
+    let signum = one.copysign(denominator);
     // Fold the reciprocal into smoothstep so exact cancellation cannot form 0/0.
     let weighted_ratio = numerator * signum * curve / transition;
     let blended = additive * (one - ratio_weight) + weighted_ratio;
@@ -146,7 +144,7 @@ fn pq_neighbourhood<S: Isa>(isa: S, [nw, ne, sw, se]: [S::F32; 4]) -> S::F32 {
 /// writes that part of itself, and the tiles overlap by twice the border. The pixels nearest the
 /// frame's edge come from their neighbours.
 pub(crate) fn demosaic(
-    bayer: &MosaicView<'_, CfaPattern>,
+    bayer: &MosaicView<'_, BayerPattern>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     let kernel = TileKernel {

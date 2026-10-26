@@ -1,6 +1,7 @@
 use std::array;
 
 use common::Buffer2;
+use imaginarium::PlanarImage;
 
 use crate::image_ops::ml::backend::*;
 use common::Size2us;
@@ -20,9 +21,9 @@ fn ramp(size: Size2us, channel: usize) -> Buffer2<f32> {
 fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
     // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
     let (side, tile) = (640usize, Vec2us::new(128, 96));
-    let planar = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
+    let planar = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
         ramp(Size2us::new(side, side), c)
-    }));
+    })));
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     fill_tile_input(&planar, tile, &mut input);
 
@@ -52,7 +53,7 @@ fn a_mono_master_replicates_into_all_three_model_channels() {
         (1, 0) => 1.5,
         _ => 0.5,
     });
-    let planar = LinearImage::from(plane);
+    let planar = LinearImage::from(PlanarImage::new_mono(plane));
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
     fill_tile_input(&planar, Vec2us::new(0, 0), &mut input);
 
@@ -113,8 +114,10 @@ fn feather_ramps_from_either_edge() {
 #[test]
 fn an_identity_model_reproduces_the_input() {
     let size = Size2us::new(700, 600);
-    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
-    let mono = LinearImage::from(ramp(size, 1));
+    let rgb = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
+        ramp(size, c)
+    })));
+    let mono = LinearImage::from(PlanarImage::new_mono(ramp(size, 1)));
     for image in [rgb, mono] {
         let mut output = image.clone();
         output.metadata.header.exposure_time = Some(30.0);
@@ -162,7 +165,10 @@ fn the_stride_must_cover_the_frame() {
         assert_eq!(validate_stride(stride), Ok(()), "{stride}");
     }
     for stride in [0, MAX_STRIDE + 1, WINDOW] {
-        let mut image = LinearImage::from(Buffer2::new_filled((WINDOW, WINDOW), 0.5f32));
+        let mut image = LinearImage::from(PlanarImage::new_mono(Buffer2::new_filled(
+            (WINDOW, WINDOW),
+            0.5f32,
+        )));
         let error = run_tiles(Planes::InPlace(&mut image), stride, |_, _| {
             panic!("a stride refused runs no tile")
         })
@@ -234,8 +240,10 @@ fn whole_frame_blend(
 #[test]
 fn a_band_blends_what_the_whole_frame_blended() {
     let size = Size2us::new(600, 1100);
-    let rgb = LinearImage::from(array::from_fn::<_, 3, _>(|c| ramp(size, c)));
-    let mono = LinearImage::from(ramp(size, 1));
+    let rgb = LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|c| {
+        ramp(size, c)
+    })));
+    let mono = LinearImage::from(PlanarImage::new_mono(ramp(size, 1)));
     let model = || {
         let mut count = 0.0f32;
         move |input: &[f32], output: &mut [f32]| {
@@ -260,9 +268,11 @@ fn a_band_blends_what_the_whole_frame_blended() {
         .unwrap();
         let zeroed = || Buffer2::new_filled(size, 0.0f32);
         let mut apart = if image.is_rgb() {
-            LinearImage::from(array::from_fn::<_, 3, _>(|_| zeroed()))
+            LinearImage::from(PlanarImage::new_rgb(array::from_fn::<_, 3, _>(|_| {
+                zeroed()
+            })))
         } else {
-            LinearImage::from(zeroed())
+            LinearImage::from(PlanarImage::new_mono(zeroed()))
         };
         let mut infer = model();
         run_tiles(

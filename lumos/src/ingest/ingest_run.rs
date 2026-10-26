@@ -1,10 +1,9 @@
 //! [`IngestRun`]: one run's memory reading, decode policy, storage and progress, taken once at its
 //! entry.
 
-use std::path::PathBuf;
-
 use common::{SystemMemory, par};
 
+use crate::frame_store::storage_params::StorageParams;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::load_ctx::LoadCtx;
 use crate::memory::budget::Budget;
@@ -19,10 +18,7 @@ pub(crate) struct IngestRun {
     pub(crate) budget: Budget,
     /// The run's FITS policy, null policy and cancel token.
     pub(crate) ctx: LoadCtx,
-    /// See [`IngestConfig::cache_dir`].
-    pub(crate) cache_dir: PathBuf,
-    /// See [`IngestConfig::keep_cache`].
-    pub(crate) keep_cache: bool,
+    pub(crate) storage: StorageParams,
     pub(crate) progress: ProgressCallback,
 }
 
@@ -48,8 +44,10 @@ impl IngestRun {
                 xtrans_passes: config.xtrans_passes,
                 decode_threads: budget.workers(),
             },
-            cache_dir: config.cache_dir.clone(),
-            keep_cache: config.keep_cache,
+            storage: StorageParams {
+                cache_dir: config.cache_dir.clone(),
+                keep_cache: config.keep_cache,
+            },
             progress,
         }
     }
@@ -139,8 +137,8 @@ mod tests {
         );
         assert_eq!(run.ctx.decode_threads, 3);
         assert_eq!(run.ctx.nulls, NullPolicy::Reject);
-        assert_eq!(run.cache_dir, Path::new("cache"));
-        assert!(run.keep_cache);
+        assert_eq!(run.storage.cache_dir, Path::new("cache"));
+        assert!(run.storage.keep_cache);
 
         assert!(!run.ctx.cancel.is_cancelled());
         cancel.cancel();

@@ -1,7 +1,8 @@
+use std::io::Cursor;
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
-use common::{CancelToken, TempDir, fs};
+use common::CancelToken;
 use fits_well::compress::{Compression, CompressionConfig, Quantization};
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Image, Scaling};
@@ -9,28 +10,31 @@ use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus};
 use fits_well::{FitsReader, FitsWriter};
 use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::frame::frame_info::DecoderBytes;
+use crate::image::cfa::bayer_pattern::BayerPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::frame_desc::MAX_SIDE;
 use crate::image::metadata::fits_checksum_provenance::FitsChecksumState;
 use crate::image::metadata::fits_transfer_provenance::FitsTransferProvenance;
 use crate::image::metadata::sample_domain::Pedestal;
 use crate::internals::cfa::make_cfa;
-use crate::internals::fits::{fits_refusal, fits_transfer, write_fits};
+use crate::internals::fits::{fits_bytes, fits_refusal, fits_transfer, load_linear, open_fits};
+use crate::io::decoder::Peek;
+use crate::io::error::ScientificRefusal;
 use crate::io::fits::cfa;
-use crate::io::fits::decode;
+use crate::io::fits::decode::fits_file::FitsFile;
+use crate::io::fits::decode::plan;
 use crate::io::fits::decode::plan::internals::HduSpec;
-use crate::io::fits::decode::*;
+use crate::io::fits::decode::selected_fits::SelectedFits;
+use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::fits::fits_load_config::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadConfig,
 };
-use crate::io::frame_info::DecoderBytes;
+use crate::io::load_ctx::LoadCtx;
 use common::Size2us;
-
-/// [`decode::load_linear`] of a run of its own, which shares its gain with no other frame.
-fn load_linear(path: &Path, ctx: &LoadCtx) -> Result<LinearImage, ImageError> {
-    decode::load_linear(path, ctx, &SharedGains::default())
-}
 
 fn load_ctx() -> LoadCtx {
     LoadCtx::new(CancelToken::never())
@@ -62,8 +66,9 @@ fn image_header(bitpix: i64, shape: &[usize]) -> Header {
     header
 }
 
-fn write_named_multi_image(path: &Path) {
-    let mut writer = FitsWriter::new(fs::create(path).unwrap());
+/// Two image extensions named `SCI`: a plane of two samples, then a cube of three such planes.
+fn named_multi_image() -> Vec<u8> {
+    let mut writer = FitsWriter::new(Vec::new());
     writer.write_empty_primary(None).unwrap();
 
     let mut first_header = Header::new();
@@ -93,6 +98,7 @@ fn write_named_multi_image(path: &Path) {
             Some(&second_header),
         )
         .unwrap();
+    writer.into_inner()
 }
 
 #[test]
@@ -239,13 +245,11 @@ fn preflight_sizes_the_source_the_output_and_the_peak() {
 /// with no `BLANK` has no flag plane.
 #[test]
 fn a_compressed_image_reads_whole_tile_rows_and_plans_what_its_reader_holds() {
-    let dir = TempDir::new("fits_compressed_plan");
     let (width, height) = (4096, 300);
     let samples: Vec<i16> = (0..width * height).map(|i| (i % 251) as i16).collect();
     let image = Image::new([width, height], samples, Scaling::IDENTITY).unwrap();
     for (tile_rows, rows_per_chunk) in [(1, 256), (100, 200), (300, 300)] {
-        let path = dir.join(format!("tiles_{tile_rows}.fits"));
-        let mut writer = FitsWriter::new(fs::create(&path).unwrap());
+        let mut writer = FitsWriter::new(Vec::new());
         writer.write_empty_primary(None).unwrap();
         #[expect(
             clippy::disallowed_methods,
@@ -258,14 +262,14 @@ fn a_compressed_image_reads_whole_tile_rows_and_plans_what_its_reader_holds() {
                 None,
             )
             .unwrap();
-        writer.into_inner().sync_all().unwrap();
+        let bytes = writer.into_inner();
 
         let ctx = load_ctx();
-        let mut reader = selected_fits::open(&path, &ctx).unwrap();
+        let mut reader = FitsReader::open(Cursor::new(bytes.as_slice())).unwrap();
         let plan = SelectedFits::select(&mut reader, &ctx).unwrap().plan;
         assert_eq!(plan.rows_per_chunk, rows_per_chunk, "{tile_rows}");
 
-        let mut fits = FitsReader::open(fs::open(&path).unwrap()).unwrap();
+        let mut fits = FitsReader::open(Cursor::new(bytes.as_slice())).unwrap();
         let regions: Vec<[Range<usize>; 2]> = (0..height)
             .step_by(rows_per_chunk)
             .map(|start| [0..width, start..(start + rows_per_chunk).min(height)])
@@ -285,55 +289,53 @@ fn a_compressed_image_reads_whole_tile_rows_and_plans_what_its_reader_holds() {
 
 #[test]
 fn truncated_data_is_an_error() {
-    let dir = TempDir::new("fits_preflight");
-    let path = dir.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0], Scaling::IDENTITY).unwrap();
-    write_fits(&path, image.view(), None);
-    let mut bytes = fs::read(&path).unwrap();
+    let mut bytes = fits_bytes(image.view(), None);
     bytes.truncate(BLOCK_SIZE);
-    fs::write(&path, bytes).unwrap();
 
     assert!(matches!(
-        load_linear(&path, &load_ctx()).unwrap_err(),
-        ImageError::Fits { .. }
+        load_linear(&bytes, &load_ctx()).unwrap_err(),
+        FitsLoadError::Fits(_)
     ));
 }
 
 #[test]
 fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
-    let dir = TempDir::new("fits_shape_and_rgb");
-    let zero_path = dir.join("zero.fits");
-    write_fits(
-        &zero_path,
+    let zero = fits_bytes(
         Image::new([0, 2], Vec::<f32>::new(), Scaling::IDENTITY)
             .unwrap()
             .view(),
         None,
     );
     let zero_axis = FitsRefusal::ZeroAxis { shape: vec![0, 2] };
-    let reason = fits_refusal(load_linear(&zero_path, &load_ctx()).unwrap_err());
+    let reason = fits_refusal(load_linear(&zero, &load_ctx()).unwrap_err());
     assert_eq!(reason, zero_axis);
-    let reason = fits_refusal(linear_peek(&zero_path, &load_ctx()).unwrap_err());
+    let reason = fits_refusal(
+        open_fits(&zero, &load_ctx())
+            .and_then(FitsFile::linear_peek)
+            .unwrap_err(),
+    );
     assert_eq!(reason, zero_axis, "the peek refuses what the load refuses");
 
-    let rgb_path = dir.join("rgb.fits");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
-    write_fits(
-        &rgb_path,
+    let rgb = fits_bytes(
         Image::new([2, 2, 3], planar, Scaling::IDENTITY)
             .unwrap()
             .view(),
         None,
     );
-    let loaded = load_linear(&rgb_path, &rgb_load_ctx()).unwrap();
+    let loaded = load_linear(&rgb, &rgb_load_ctx()).unwrap();
     assert_eq!(loaded.desc(), PlanarDesc::new((2, 2), ChannelLayout::Rgb));
     // The decode reads the two rows of the three planes at once: 12 samples of 4 bytes, swapped
     // into 48 B of words, beside the frame, the reader's section shape, 8 B for each of the
     // three axes, and the staging the checksum finish reads a stream's unit through, its
     // one padded block.
-    let peek = linear_peek(&rgb_path, &rgb_load_ctx()).unwrap().info;
+    let peek = open_fits(&rgb, &rgb_load_ctx())
+        .and_then(FitsFile::linear_peek)
+        .unwrap()
+        .info;
     assert_eq!(
         peek.desc,
         loaded.desc(),
@@ -347,22 +349,19 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
         }
     );
 
-    let mosaic_path = dir.join("mosaic.fits");
-    cfa::save(
-        &mosaic_path,
+    let mut mosaic = Cursor::new(Vec::new());
+    cfa::write(
         &make_cfa(
             Size2us::new(2, 2),
             vec![0.25; 4],
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         ),
+        &mut mosaic,
     )
     .unwrap();
     assert!(matches!(
-        linear_peek(&mosaic_path, &load_ctx()),
-        Err(ImageError::ScientificInputRejected {
-            reason: ScientificRefusal::MosaicFits,
-            ..
-        })
+        open_fits(mosaic.get_ref(), &load_ctx()).and_then(FitsFile::linear_peek),
+        Err(FitsLoadError::Scientific(ScientificRefusal::MosaicFits))
     ));
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(loaded.channel(1).pixels(), &[10.0, 20.0, 30.0, 40.0]);
@@ -371,22 +370,20 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
 
 /// A compressed cube loads plane by plane from tiles of one plane, and from tiles that span all
 /// three, which a chunk reads across every plane so each tile decodes once. The peek keeps the
-/// file and the tile index fits-well's reader read for it, which the load reads on from: the
-/// path it is given is only what an error reports, so one that names no file still loads.
+/// reader and the tile index fits-well's reader read for it, which the load reads on from.
 #[test]
 fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
-    let dir = TempDir::new("fits_compressed_rgb");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
     let image = Image::new([2, 2, 3], planar, Scaling::IDENTITY).unwrap();
     for tiles in [[2, 2, 1], [2, 2, 3], [2, 1, 3]] {
-        let path = dir.join(format!("rgb_{}_{}_{}.fits", tiles[0], tiles[1], tiles[2]));
+        let mut writer = FitsWriter::new(Vec::new());
         #[expect(
             clippy::disallowed_methods,
             reason = "the test's own write, outside every loop"
         )]
-        FitsWriter::new(fs::create(&path).unwrap())
+        writer
             .write_compressed_image(
                 image.view(),
                 &CompressionConfig::new(Compression::GZIP)
@@ -395,9 +392,12 @@ fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
                 None,
             )
             .unwrap();
+        let bytes = writer.into_inner();
 
-        let Peek { info, read: file } = linear_peek(&path, &rgb_load_ctx()).unwrap();
-        let index = FitsReader::open(fs::open(&path).unwrap())
+        let Peek { info, read: file } = open_fits(&bytes, &rgb_load_ctx())
+            .and_then(FitsFile::linear_peek)
+            .unwrap();
+        let index = FitsReader::open(Cursor::new(bytes.as_slice()))
             .unwrap()
             .image(1)
             .unwrap()
@@ -409,14 +409,10 @@ fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
             "{tiles:?}: a compressed image keeps its tile index"
         );
         assert_eq!(file.held_bytes() as u64, index, "{tiles:?}");
-        let from_peek = load_linear_file(
-            file,
-            &dir.join("absent.fits"),
-            &rgb_load_ctx(),
-            &SharedGains::default(),
-        )
-        .unwrap();
-        for loaded in [from_peek, load_linear(&path, &rgb_load_ctx()).unwrap()] {
+        let from_peek = file
+            .linear(&rgb_load_ctx(), &SharedGains::default())
+            .unwrap();
+        for loaded in [from_peek, load_linear(&bytes, &rgb_load_ctx()).unwrap()] {
             assert_eq!(loaded.desc(), info.desc, "{tiles:?}");
             assert_eq!(loaded.desc(), PlanarDesc::new((2, 2), ChannelLayout::Rgb));
             assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
@@ -428,11 +424,9 @@ fn compressed_rgb_loads_from_tiles_of_a_plane_or_of_every_plane() {
 
 #[test]
 fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
-    let dir = TempDir::new("fits_hdu_selection");
-    let path = dir.join("multi.fits");
-    write_named_multi_image(&path);
+    let multi = named_multi_image();
 
-    let reason = fits_refusal(load_linear(&path, &load_ctx()).unwrap_err());
+    let reason = fits_refusal(load_linear(&multi, &load_ctx()).unwrap_err());
     assert_eq!(reason, FitsRefusal::SeveralImageHdus { images: 2 });
 
     let ambiguous_name = LoadCtx {
@@ -445,7 +439,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         },
         ..load_ctx()
     };
-    let reason = fits_refusal(load_linear(&path, &ambiguous_name).unwrap_err());
+    let reason = fits_refusal(load_linear(&multi, &ambiguous_name).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::SeveralMatchingHdus {
@@ -466,7 +460,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         },
         ..load_ctx()
     };
-    let first = load_linear(&path, &first).unwrap();
+    let first = load_linear(&multi, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
     let FitsTransferProvenance { hdu, checksum, .. } = fits_transfer(&first);
     assert_eq!(hdu.idx, 1);
@@ -485,7 +479,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         },
         ..load_ctx()
     };
-    let reason = fits_refusal(load_linear(&path, &rejected_cube).unwrap_err());
+    let reason = fits_refusal(load_linear(&multi, &rejected_cube).unwrap_err());
     assert_eq!(reason, FitsRefusal::CubeNeedsRgb);
 
     let rgb = LoadCtx {
@@ -503,7 +497,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
         },
         ..load_ctx()
     };
-    let rgb = load_linear(&path, &rgb).unwrap();
+    let rgb = load_linear(&multi, &rgb).unwrap();
     assert_eq!(rgb.channel(0).pixels(), &[10.0, 20.0]);
     assert_eq!(rgb.channel(1).pixels(), &[30.0, 40.0]);
     assert_eq!(rgb.channel(2).pixels(), &[50.0, 60.0]);
@@ -511,12 +505,10 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
 
 #[test]
 fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity() {
-    let dir = TempDir::new("fits_checksum_policy");
-    let absent_path = dir.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0], Scaling::IDENTITY).unwrap();
-    write_fits(&absent_path, image.view(), None);
+    let absent = fits_bytes(image.view(), None);
 
-    let verified_absent = load_linear(&absent_path, &load_ctx()).unwrap();
+    let verified_absent = load_linear(&absent, &load_ctx()).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&verified_absent);
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
@@ -528,7 +520,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         },
         ..load_ctx()
     };
-    let reason = fits_refusal(load_linear(&absent_path, &require).unwrap_err());
+    let reason = fits_refusal(load_linear(&absent, &require).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::ChecksumRequired {
@@ -540,20 +532,16 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         }
     );
 
-    let valid_path = dir.join("valid.fits");
-    FitsWriter::new(fs::create(&valid_path).unwrap())
-        .with_checksums()
-        .write_image(image.view(), None)
-        .unwrap();
-    let valid = load_linear(&valid_path, &require).unwrap();
+    let mut writer = FitsWriter::new(Vec::new()).with_checksums();
+    writer.write_image(image.view(), None).unwrap();
+    let mut corrupt = writer.into_inner();
+    let valid = load_linear(&corrupt, &require).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&valid);
     assert_eq!(checksum.datasum, FitsChecksumState::Valid);
     assert_eq!(checksum.checksum, FitsChecksumState::Valid);
 
-    let mut corrupt = fs::read(&valid_path).unwrap();
     corrupt[BLOCK_SIZE] ^= 0x80;
-    fs::write(&valid_path, corrupt).unwrap();
-    let reason = fits_refusal(load_linear(&valid_path, &load_ctx()).unwrap_err());
+    let reason = fits_refusal(load_linear(&corrupt, &load_ctx()).unwrap_err());
     assert_eq!(
         reason,
         FitsRefusal::InvalidChecksum {
@@ -572,7 +560,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         },
         ..load_ctx()
     };
-    let ignored = load_linear(&valid_path, &ignore).unwrap();
+    let ignored = load_linear(&corrupt, &ignore).unwrap();
     let FitsTransferProvenance { checksum, .. } = fits_transfer(&ignored);
     assert_eq!(checksum.datasum, FitsChecksumState::NotChecked);
     assert_eq!(checksum.checksum, FitsChecksumState::NotChecked);
@@ -580,10 +568,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
 
 #[test]
 fn cancellation_prevents_fits_selection() {
-    let dir = TempDir::new("fits_cancel");
-    let path = dir.join("frame.fits");
-    write_fits(
-        &path,
+    let bytes = fits_bytes(
         Image::new([2, 1], vec![1.0f32, 2.0], Scaling::IDENTITY)
             .unwrap()
             .view(),
@@ -593,36 +578,99 @@ fn cancellation_prevents_fits_selection() {
     cancel.cancel();
     let ctx = LoadCtx::new(cancel);
     assert!(matches!(
-        load_linear(&path, &ctx),
-        Err(ImageError::Cancelled { .. })
+        load_linear(&bytes, &ctx),
+        Err(FitsLoadError::Cancelled)
     ));
 }
 
-/// `DATAMAX` is read once, for the scale and for the saturation level. A level of 0, a "not
-/// computed" placeholder, is no level: the float samples are taken as normalized, as with no
-/// `DATAMAX` at all, and nothing is flagged.
+/// `DATAMAX` is read once, for the scale and for the saturation level, and follows the samples
+/// into the normalized domain while leaving them as they decode: an integer frame divides both by
+/// its span, 65535 for `BITPIX = 16`. The level is 0.95 of it: DATAMAX 4000 flags 3800 and 4000
+/// but not 3799, DATAMAX 100 flags 300 and not 41, DATAMAX 65535 flags nothing. A level of 0, a
+/// "not computed" placeholder, is no level, as with no `DATAMAX` at all: a float frame is taken as
+/// normalized, and nothing is flagged.
 #[test]
-fn a_zero_datamax_is_no_saturation_level() {
-    let dir = TempDir::new("fits_datamax");
-    let path = dir.join("zero.fits");
-    let image = Image::new([2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
-    let mut header = Header::new();
-    header.set("DATAMAX", 0.0).unwrap();
-    write_fits(&path, image.view(), Some(&header));
-    let loaded = load_linear(&path, &load_ctx()).unwrap();
-    assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
-    assert_eq!(loaded.metadata.header.data_max, None);
-    assert!(loaded.flags().is_none());
-    assert!(!loaded.metadata.derived.saturation_flagged());
+fn datamax_follows_the_samples_and_flags_saturation() {
+    struct Row<'a> {
+        image: &'a Image,
+        datamax: Option<f64>,
+        pixels: Vec<f32>,
+        data_max: Option<f64>,
+        saturated: Option<[bool; 4]>,
+    }
+    let u16s = Image::from_u16(vec![4, 1], &[100, 3799, 3800, 4000]).unwrap();
+    let i16s = Image::new(vec![4, 1], vec![-7i16, 0, 41, 300], Scaling::IDENTITY).unwrap();
+    let f32s = Image::new(vec![2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
+    let span = 65_535.0;
+    let divided = |samples: &[f32]| samples.iter().map(|sample| sample / span as f32).collect();
+    let rows = [
+        Row {
+            image: &u16s,
+            datamax: Some(4000.0),
+            pixels: divided(&[100.0, 3799.0, 3800.0, 4000.0]),
+            data_max: Some(4000.0 / span),
+            saturated: Some([false, false, true, true]),
+        },
+        Row {
+            image: &u16s,
+            datamax: None,
+            pixels: divided(&[100.0, 3799.0, 3800.0, 4000.0]),
+            data_max: None,
+            saturated: None,
+        },
+        Row {
+            image: &i16s,
+            datamax: Some(100.0),
+            pixels: divided(&[-7.0, 0.0, 41.0, 300.0]),
+            data_max: Some(100.0 / span),
+            saturated: Some([false, false, false, true]),
+        },
+        Row {
+            image: &i16s,
+            datamax: Some(span),
+            pixels: divided(&[-7.0, 0.0, 41.0, 300.0]),
+            data_max: Some(1.0),
+            saturated: Some([false; 4]),
+        },
+        Row {
+            image: &f32s,
+            datamax: Some(0.0),
+            pixels: vec![0.25, 0.75],
+            data_max: None,
+            saturated: None,
+        },
+    ];
+    for (idx, row) in rows.iter().enumerate() {
+        let mut header = Header::new();
+        if let Some(datamax) = row.datamax {
+            header.set("DATAMAX", datamax).unwrap();
+        }
+        let loaded =
+            load_linear(&fits_bytes(row.image.view(), Some(&header)), &load_ctx()).unwrap();
+        assert_eq!(loaded.channel(0).pixels(), row.pixels, "row {idx}");
+        assert_eq!(loaded.metadata.header.data_max, row.data_max, "row {idx}");
+        assert_eq!(
+            loaded.metadata.derived.saturation_flagged(),
+            row.saturated.is_some(),
+            "row {idx}"
+        );
+        let saturated: Vec<bool> = (0..row.pixels.len())
+            .map(|pixel| {
+                loaded
+                    .flags()
+                    .is_some_and(|flags| flags.at(pixel).intersects(QualityFlags::SATURATED))
+            })
+            .collect();
+        let expected = row.saturated.unwrap_or_default();
+        assert_eq!(saturated, expected[..row.pixels.len()], "row {idx}");
+    }
 }
 
 /// `Auto` picks the one HDU that holds pixels: a header-only image extension (`NAXIS = 0`) beside
 /// it is no second candidate.
 #[test]
 fn a_header_only_image_extension_is_no_second_image() {
-    let dir = TempDir::new("fits_header_only");
-    let path = dir.join("one_image.fits");
-    let mut writer = FitsWriter::new(fs::create(&path).unwrap());
+    let mut writer = FitsWriter::new(Vec::new());
     let image = Image::new([2, 1], vec![0.25f32, 0.75], Scaling::IDENTITY).unwrap();
     writer.write_image(image.view(), None).unwrap();
     let mut empty = Header::new();
@@ -632,9 +680,8 @@ fn a_header_only_image_extension_is_no_second_image() {
     empty.set("PCOUNT", 0).unwrap();
     empty.set("GCOUNT", 1).unwrap();
     writer.write_raw_hdu(&empty, &[]).unwrap();
-    writer.into_inner().sync_all().unwrap();
 
-    let loaded = load_linear(&path, &load_ctx()).unwrap();
+    let loaded = load_linear(&writer.into_inner(), &load_ctx()).unwrap();
     assert_eq!(loaded.channel(0).pixels(), &[0.25, 0.75]);
     assert_eq!(fits_transfer(&loaded).hdu.idx, 0);
 }

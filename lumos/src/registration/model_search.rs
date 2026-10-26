@@ -6,7 +6,7 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 
 use crate::registration::distortion::sip::{SipConfig, SipModel};
-use crate::registration::error::{FailedModel, RegistrationError};
+use crate::registration::error::{FailedModel, ModelFailure, RegistrationError};
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
 use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitModel};
 use crate::registration::match_idxs::MatchIdxs;
@@ -58,10 +58,10 @@ impl ModelSearch<'_> {
         match model {
             TransformModel::Auto { sip: config } => self.select_by_gric(config.map(sip)),
             TransformModel::Fixed(transform) => {
-                self.estimate_and_refine(FitModel::Plain(transform))
+                Ok(self.estimate_and_refine(FitModel::Plain(transform))?)
             }
             TransformModel::FixedWithSip(linear, config) => {
-                self.estimate_and_refine(FitModel::WithSip(linear, sip(config)))
+                Ok(self.estimate_and_refine(FitModel::WithSip(linear, sip(config)))?)
             }
         }
     }
@@ -104,7 +104,7 @@ impl ModelSearch<'_> {
                     tracing::debug!(model = ?model.transform_type(), %error, "Auto candidate failed");
                     failures.push(FailedModel {
                         model: model.transform_type(),
-                        error: Box::new(error),
+                        failure: error,
                     });
                 }
             }
@@ -155,18 +155,15 @@ impl ModelSearch<'_> {
     pub(super) fn hypothesis(
         &self,
         transform_type: TransformType,
-    ) -> Result<RansacResult, RegistrationError> {
-        self.ransac
-            .estimate(&self.pairs, &self.confidences, transform_type)
-            .map_err(RegistrationError::from)
+    ) -> Result<RansacResult, ModelFailure> {
+        Ok(self
+            .ransac
+            .estimate(&self.pairs, &self.confidences, transform_type)?)
     }
 
     /// RANSAC's estimate of `model`'s transform, then the final fit of `model` over the full
     /// catalogs.
-    pub(super) fn estimate_and_refine(
-        &self,
-        model: FitModel,
-    ) -> Result<FinalFit, RegistrationError> {
+    pub(super) fn estimate_and_refine(&self, model: FitModel) -> Result<FinalFit, ModelFailure> {
         let t0 = Instant::now();
         let ransac_result = self.hypothesis(model.transform_type())?;
         let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -177,12 +174,12 @@ impl ModelSearch<'_> {
             .fit(ransac_result.transform, model, self.recovery_radius)
             .map_err(|failure| match failure {
                 FinalFitFailure::TooFewPairs { found, required } => {
-                    RegistrationError::TooFewInliers { found, required }
+                    ModelFailure::TooFewInliers { found, required }
                 }
                 FinalFitFailure::TooFewSipPairs { found, required } => {
-                    RegistrationError::TooFewSipPoints { found, required }
+                    ModelFailure::TooFewSipPoints { found, required }
                 }
-                FinalFitFailure::Degenerate => RegistrationError::DegenerateFit {
+                FinalFitFailure::Degenerate => ModelFailure::DegenerateFit {
                     model: model.transform_type(),
                 },
             })?;
@@ -192,7 +189,7 @@ impl ModelSearch<'_> {
         // pass it.
         let min_matches = self.min_matches;
         if fit.matches.len() < min_matches {
-            return Err(RegistrationError::TooFewInliers {
+            return Err(ModelFailure::TooFewInliers {
                 found: fit.matches.len(),
                 required: min_matches,
             });

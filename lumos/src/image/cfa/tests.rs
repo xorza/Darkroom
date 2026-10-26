@@ -1,16 +1,12 @@
 use std::f64::consts::FRAC_1_SQRT_2;
-use std::path::Path;
 use std::sync::Arc;
 
-use common::{Buffer2, TempDir, fs};
-use fits_well::FitsReader;
-use fits_well::header::Header;
-use fits_well::io::{ChecksumReport, ChecksumStatus};
-use imaginarium::{ChannelLayout, PlanarDesc};
+use arrayvec::ArrayVec;
+use common::Buffer2;
 
 use crate::frame::frame_stats::FrameStats;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_image::*;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::*;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -19,20 +15,11 @@ use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::FlatGain;
 use crate::image::flat_gain::frame_gain::FrameGain;
-use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::metadata::calibration_state::CalibrationState;
-use crate::image::metadata::derived_facts::DerivedFacts;
 use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::image_provenance::{ColorProvenance, DemosaicProvenance};
-use crate::image::metadata::observation_header::ObservationHeader;
-use crate::image::metadata::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::internals::fits::{fits_refusal, rewrite_fits};
 use crate::internals::test_rng::TestRng;
-use crate::io::fits::error::FitsRefusal;
-use crate::io::fits::lumos_extension::LumosExtension;
-use crate::io::fits::metadata::VERSION_KEYWORD;
-use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use common::{Size2us, Vec2us};
@@ -96,412 +83,6 @@ fn a_null_is_repaired_from_its_same_color_neighbours_before_demosaic() {
     assert_eq!(demosaiced.flags().unwrap().count(QualityFlags::NO_DATA), 1);
 }
 
-/// Every flag survives the trip. `NO_DATA` goes back as NaN, the blank of the float `BITPIX`, so
-/// any reader finds it; without it the repaired sample would reload as a measurement. All of them
-/// go back in the `LUMFLAGS` extension, which is written only when there is more than `NO_DATA`,
-/// but a null's `REPAIRED`: the NaN, not the repair, is what the file holds there.
-///
-/// The 3×2 plane holds, row-major: nothing, `NO_DATA | REPAIRED` (1 + 16 = 17), `SATURATED |
-/// DEFECT` (2 + 4 = 6), nothing, `COSMIC_RAY | REPAIRED` (8 + 16 = 24) and `FLAT_FLOOR` (32). It
-/// reloads with the null `NO_DATA` alone, 1.
-#[test]
-fn a_masters_flags_survive_the_fits_round_trip() {
-    let size = Size2us::new(3, 2);
-    let bytes = [0u8, 17, 6, 0, 24, 32];
-    let cfa = |bytes: [u8; 6]| {
-        let mut image = CfaImage::from_plane(
-            Buffer2::new((3, 2), vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
-            CfaType::Mono,
-            ImageMetadata::default(),
-        );
-        image.set_flags(PixelFlags::from_fn(size, |idx| {
-            QualityFlags::from_byte(bytes[idx])
-        }));
-        image
-    };
-    let dir = TempDir::new("lumos-cfa-flags");
-    let path = dir.join("master.fits");
-    let hdu_count = |path: &Path| {
-        let bytes = fs::read(path).unwrap();
-        FitsReader::from_bytes(&bytes).unwrap().hdus().len()
-    };
-
-    cfa(bytes).write_fits(&path).unwrap();
-    assert_eq!(hdu_count(&path), 2);
-    let loaded = LoadCtx::default().cfa(&path).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 6, 0, 24, 32]);
-    assert_eq!(loaded.flags().unwrap().count(QualityFlags::NO_DATA), 1);
-    // The measured samples are untouched by the trip; only the null's own value is not what was
-    // written, because what was written for it was "no measurement".
-    let data = loaded.data().to_vec();
-    assert_eq!(
-        [data[0], data[2], data[3], data[4], data[5]],
-        [0.1f32, 0.3, 0.4, 0.5, 0.6]
-    );
-
-    let nulls_path = dir.join("nulls.fits");
-    cfa([0u8, 17, 0, 0, 0, 0]).write_fits(&nulls_path).unwrap();
-    assert_eq!(hdu_count(&nulls_path), 1, "the NaN carries a lone NO_DATA");
-    let loaded = LoadCtx::default().cfa(&nulls_path).unwrap();
-    assert_eq!(loaded.flags().unwrap().bytes(), &[0, 1, 0, 0, 0, 0]);
-}
-
-/// A flat gain survives the trip in its `LUMGAIN` extension, node for node, so a light saved after
-/// calibration reloads with the gain its noise model reads, a source gain its run shares, under
-/// the key its header states. A 12×6 RGGB mosaic has 4×3 nodes per color. An extension Lumos did
-/// not write is refused, each behind a valid checksum: a node that is no gain, another step,
-/// another version, another grid, a key that is no hex digest, another gain's key, grids for
-/// another count of colors, and one that names no image of the file. One that states no key loads
-/// whole.
-#[test]
-fn a_flat_gain_survives_the_fits_round_trip() {
-    type Edit = fn(&mut Header, &mut Vec<u8>);
-    let size = Size2us::new(12, 6);
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
-        &bayer,
-        |_| false,
-    ));
-    let dir = TempDir::new("lumos-cfa-gain");
-    let path = dir.join("light.fits");
-    let write = || {
-        let mut image = CfaImage::from_plane(
-            Buffer2::new((12, 6), vec![0.25; size.pixel_count()]),
-            bayer,
-            ImageMetadata::default(),
-        );
-        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
-        image.write_fits(&path).unwrap();
-    };
-
-    write();
-    let loaded = LoadCtx::default().cfa(&path).unwrap();
-    let Some(FrameGain::Shared(reloaded)) = loaded.flat_gain() else {
-        panic!("a decoded gain is a source gain");
-    };
-    assert_eq!(reloaded.size(), size);
-    assert!(reloaded.planes().eq(gain.planes()));
-    assert_eq!(reloaded.key(), gain.key());
-
-    let extension = LumosExtension::Gain;
-    let cases: [(&str, Edit, FitsRefusal); 7] = [
-        (
-            "no gain",
-            |_, data| data[..4].copy_from_slice(&(-1.0f32).to_be_bytes()),
-            FitsRefusal::NotAGain {
-                node: 0,
-                value: -1.0,
-            },
-        ),
-        (
-            "another step",
-            |header, _| {
-                header.set("LUMGSTEP", 8).unwrap();
-            },
-            FitsRefusal::GainStep { step: Some(8) },
-        ),
-        (
-            "another version",
-            |header, _| {
-                header.set(VERSION_KEYWORD, 2).unwrap();
-            },
-            FitsRefusal::ExtensionFormat {
-                extension,
-                format: Some("FLATGAIN".to_owned()),
-                version: Some(2),
-            },
-        ),
-        (
-            "another grid",
-            |header, _| {
-                header.set("NAXIS1", 3).unwrap();
-                header.set("NAXIS2", 4).unwrap();
-            },
-            FitsRefusal::ExtensionShape {
-                extension,
-                shape: vec![3, 4, 3],
-                image: size,
-            },
-        ),
-        (
-            "a key of no hex",
-            |header, _| {
-                header.set("LUMGSUM", "x").unwrap();
-            },
-            FitsRefusal::GainKeyText {
-                text: "x".to_owned(),
-            },
-        ),
-        (
-            "another gain's key",
-            |header, _| {
-                header.set("LUMGSUM", "0f".repeat(32)).unwrap();
-            },
-            FitsRefusal::GainKeyMismatch,
-        ),
-        (
-            "no image named",
-            |header, _| {
-                header.set("LUMFOR", "SCI").unwrap();
-            },
-            FitsRefusal::ClaimsMissingImage {
-                extension,
-                hdu: 1,
-                image: "SCI".to_owned(),
-            },
-        ),
-    ];
-    for (name, edit, expected) in cases {
-        write();
-        rewrite_fits(&path, |idx, header, data| {
-            if idx == 1 {
-                edit(header, data);
-            }
-            true
-        });
-        let error = LoadCtx::default().cfa(&path).unwrap_err();
-        assert_eq!(fits_refusal(error), expected, "{name}");
-    }
-    write();
-    rewrite_fits(&path, |idx, header, _| {
-        if idx == 1 {
-            header.remove("LUMGSUM").unwrap();
-        }
-        true
-    });
-    let unkeyed = LoadCtx::default().cfa(&path).unwrap();
-    assert!(unkeyed.flat_gain().unwrap().planes().eq(gain.planes()));
-    assert_eq!(
-        FitsRefusal::ExtensionShape {
-            extension,
-            shape: vec![3, 4, 3],
-            image: size,
-        }
-        .to_string(),
-        "LUMGAIN: shape [3, 4, 3] is not one or three 4x3 grids over the image's 12x6"
-    );
-    // A keyword the header states reads as its value, one it leaves out as no value at all.
-    for (refusal, text) in [
-        (
-            FitsRefusal::GainStep { step: Some(8) },
-            "LUMGAIN: a node every 8 pixels; this reader takes 4",
-        ),
-        (
-            FitsRefusal::GainStep { step: None },
-            "LUMGAIN: no node spacing stated; this reader takes 4",
-        ),
-        (
-            FitsRefusal::ExtensionFormat {
-                extension,
-                format: None,
-                version: Some(1),
-            },
-            "LUMGAIN: format none version 1; expected FLATGAIN version 1",
-        ),
-    ] {
-        assert_eq!(refusal.to_string(), text);
-    }
-
-    // A mono frame's one plane under three colors' grids, through either loader: a file no image
-    // writes, as an image takes no gain over other colors, so the mosaic's header is made mono.
-    write();
-    rewrite_fits(&path, |idx, header, _| {
-        if idx == 0 {
-            header.set("CFATYPE", "MONO").unwrap();
-        }
-        true
-    });
-    for error in [
-        LoadCtx::default().cfa(&path).unwrap_err(),
-        LoadCtx::default().linear(&path).unwrap_err(),
-    ] {
-        assert_eq!(
-            fits_refusal(error),
-            FitsRefusal::GainChannels {
-                grids: 3,
-                channels: 1
-            }
-        );
-    }
-}
-
-/// Frames of one flat share its gain: a run holds it once, and a file whose `LUMGAIN` states the
-/// key of a gain the run holds is taken without its nodes being read. Two 12×6 RGGB mosaics of one
-/// gain, the second's nodes broken to −1 behind a valid checksum: through one run's gains both
-/// load with the first's gain, one allocation; through a run of its own the second is refused.
-#[test]
-fn a_gain_the_run_holds_is_not_read_again() {
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let gain = Arc::new(FlatGain::of_divisor(
-        &Buffer2::from_fn((12, 6), |x, _| 1.0 - 0.3 * x as f32 / 12.0),
-        &bayer,
-        |_| false,
-    ));
-    let dir = TempDir::new("lumos-cfa-shared-gain");
-    let paths = ["first.fits", "second.fits"].map(|name| {
-        let path = dir.join(name);
-        let mut image = CfaImage::from_plane(
-            Buffer2::new((12, 6), vec![0.25; 72]),
-            bayer,
-            ImageMetadata::default(),
-        );
-        image.set_flat_gain(Some(FrameGain::Shared(Arc::clone(&gain))));
-        image.write_fits(&path).unwrap();
-        path
-    });
-    rewrite_fits(&paths[1], |idx, _, data| {
-        if idx == 1 {
-            data[..4].copy_from_slice(&(-1.0f32).to_be_bytes());
-        }
-        true
-    });
-    let ctx = LoadCtx::default();
-    let gains = SharedGains::default();
-    let [first, second] = paths
-        .each_ref()
-        .map(|path| ctx.cfa_sharing(path, &gains).unwrap());
-    let (Some(FrameGain::Shared(first)), Some(FrameGain::Shared(second))) =
-        (first.flat_gain(), second.flat_gain())
-    else {
-        panic!("a decoded gain is a source gain");
-    };
-    assert!(Arc::ptr_eq(first, second));
-    assert!(first.planes().eq(gain.planes()));
-    assert_eq!(
-        fits_refusal(ctx.cfa(&paths[1]).unwrap_err()),
-        FitsRefusal::NotAGain {
-            node: 0,
-            value: -1.0
-        }
-    );
-}
-
-/// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
-/// the check behind it is what fires: a bit no flag has, a `NO_DATA` the NaNs do not state either
-/// way, another geometry, another version, and an extension that names no image of the file. Its
-/// checksum is judged before its bytes: a byte changed behind the stored checksum reads as that,
-/// not as the `NO_DATA` it also drops.
-#[test]
-fn a_flags_extension_lumos_did_not_write_is_refused() {
-    type Edit = fn(&mut Header, &mut Vec<u8>);
-    let size = Size2us::new(3, 2);
-    let bytes = [0u8, 1, 6, 0, 24, 32];
-    let dir = TempDir::new("lumos-cfa-flags-refused");
-    let path = dir.join("master.fits");
-    let write = || {
-        let image = {
-            let mut image = CfaImage::from_plane(
-                Buffer2::new((3, 2), vec![0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]),
-                CfaType::Mono,
-                ImageMetadata::default(),
-            );
-            image.set_flags(PixelFlags::from_fn(size, |idx| {
-                QualityFlags::from_byte(bytes[idx])
-            }));
-            image
-        };
-        image.write_fits(&path).unwrap();
-    };
-    let extension = LumosExtension::Flags;
-    let cases: [(&str, Edit, FitsRefusal); 6] = [
-        (
-            "unknown bit",
-            |_, data| data[5] |= 0x40,
-            FitsRefusal::UnknownFlagBits {
-                pixel: Vec2us::new(2, 1),
-                byte: 0x60,
-            },
-        ),
-        (
-            "NO_DATA lost",
-            |_, data| data[1] = 0,
-            FitsRefusal::NoDataDisagrees {
-                pixel: Vec2us::new(1, 0),
-            },
-        ),
-        (
-            "NO_DATA added",
-            |_, data| data[3] = 1,
-            FitsRefusal::NoDataDisagrees {
-                pixel: Vec2us::new(0, 1),
-            },
-        ),
-        (
-            "another geometry",
-            |header, _| {
-                header.set("NAXIS1", 2).unwrap();
-                header.set("NAXIS2", 3).unwrap();
-            },
-            FitsRefusal::ExtensionShape {
-                extension,
-                shape: vec![2, 3],
-                image: size,
-            },
-        ),
-        (
-            "another version",
-            |header, _| {
-                header.set(VERSION_KEYWORD, 2).unwrap();
-            },
-            FitsRefusal::ExtensionFormat {
-                extension,
-                format: Some("PIXFLAGS".to_owned()),
-                version: Some(2),
-            },
-        ),
-        (
-            "no image named",
-            |header, _| {
-                header.set("LUMFOR", "SCI").unwrap();
-            },
-            FitsRefusal::ClaimsMissingImage {
-                extension,
-                hdu: 1,
-                image: "SCI".to_owned(),
-            },
-        ),
-    ];
-    for (name, edit, expected) in cases {
-        write();
-        rewrite_fits(&path, |idx, header, data| {
-            if idx == 1 {
-                edit(header, data);
-            }
-            true
-        });
-        let error = LoadCtx::default().cfa(&path).unwrap_err();
-        assert_eq!(fits_refusal(error), expected, "{name}");
-    }
-    assert_eq!(
-        FitsRefusal::ExtensionFormat {
-            extension,
-            format: Some("PIXFLAGS".to_owned()),
-            version: Some(2),
-        }
-        .to_string(),
-        "LUMFLAGS: format PIXFLAGS version 2; expected PIXFLAGS version 1"
-    );
-
-    // The flags are the last HDU, and their 6 bytes open its one 2880-byte data block.
-    write();
-    let mut file = fs::read(&path).unwrap();
-    let flags_start = file.len() - 2880;
-    file[flags_start + 1] = 0;
-    fs::write(&path, &file).unwrap();
-    let error = LoadCtx::default().cfa(&path).unwrap_err();
-    assert_eq!(
-        fits_refusal(error),
-        FitsRefusal::ChecksumRequired {
-            hdu: 1,
-            report: ChecksumReport {
-                datasum: ChecksumStatus::Invalid,
-                checksum: ChecksumStatus::Invalid,
-            },
-        }
-    );
-}
-
 /// The demosaic measures each color's noise on the mosaic, before the interpolation correlates
 /// neighbours, and the frame's statistics take it from there: the demosaiced frame's noise, sky
 /// and quantization σ are the mosaic's own, bit for bit, though the demosaic cleared the frame's
@@ -512,7 +93,7 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
 #[test]
 fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     let size = Size2us::new(64, 64);
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let (level, sigma) = ([0.125f32, 0.25, 0.375], [0.02f32, 0.01, 0.03]);
     let mut rng = TestRng::new(7);
     let pixels = (0..size.pixel_count())
@@ -562,169 +143,6 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
     }
 }
 
-/// A master records its whole domain and its quantization σ, so a reload gives back exactly what
-/// was saved, for every origin and every pedestal: the σ is not divided by the span a second time
-/// (15360× too small for a RAW master), and an assumed scale reloads as assumed rather than as a
-/// scale of 1 the master would be refused for. The scale goes out as `BSCALE`, so a reader that
-/// knows nothing of lumos gets `0.25 × scale` in the stated `BUNIT`.
-#[test]
-fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
-    let dir = TempDir::new("lumos-cfa-domain");
-    let mut case = 0;
-    for origin in [ScaleOrigin::Declared, ScaleOrigin::Assumed] {
-        for pedestal in [Pedestal::Removed, Pedestal::Kept(2048.0), Pedestal::Unknown] {
-            for (scale, unit) in [
-                (15_360.0, None),
-                (1_234.567_8, Some("ADU")),
-                (65_535.0, None),
-            ] {
-                case += 1;
-                let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
-                let domain = SampleDomain {
-                    scale,
-                    origin,
-                    pedestal,
-                    unit: unit.map(str::to_owned),
-                };
-                master.metadata.derived.set_domain(Some(domain.clone()));
-                master
-                    .metadata
-                    .derived
-                    .set_quantization_sigma(Some(QUANTIZATION_SIGMA_PER_STEP / 15_360.0));
-                let path = dir.path().join(format!("master_{case}.fits"));
-                master.write_fits(&path).unwrap();
-                let bytes = fs::read(&path).unwrap();
-                let reader = FitsReader::from_bytes(&bytes).unwrap();
-                let header = &reader.hdus()[0].header;
-                assert_eq!(header.get_real("BSCALE").unwrap(), Some(scale), "{domain}");
-                assert_eq!(header.get_text("BUNIT").unwrap(), unit, "{domain}");
-                let loaded = LoadCtx::default().cfa(&path).unwrap();
-
-                assert_eq!(loaded.metadata.derived.domain(), Some(&domain), "{domain}");
-                assert_eq!(
-                    loaded.metadata.derived.quantization_sigma(),
-                    master.metadata.derived.quantization_sigma(),
-                    "{domain}"
-                );
-                assert_eq!(
-                    loaded.data().to_vec(),
-                    vec![0.25; 4],
-                    "samples are stored normalized"
-                );
-                assert_eq!(
-                    loaded
-                        .metadata
-                        .derived
-                        .domain()
-                        .unwrap()
-                        .conversion_to(&domain),
-                    Some(DomainMap::IDENTITY),
-                    "{domain}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn master_cfa_save_load_round_trips_data_and_pattern() {
-    let cfa = CfaImage::from_plane(
-        Buffer2::new((2, 2), vec![0.1f32, 0.2, 0.3, 0.4]),
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
-        ImageMetadata {
-            header: ObservationHeader {
-                camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
-                ..Default::default()
-            },
-            derived: DerivedFacts::builder()
-                .quantization_sigma(Some(0.000_01))
-                .build(),
-        },
-    );
-    let dir = TempDir::new("lumos-cfa-roundtrip");
-    let path = dir.join("master.fits");
-    cfa.write_fits(&path).unwrap();
-    let info = LoadCtx::default().cfa_peek(&path).unwrap().info;
-    assert_eq!(info.desc, PlanarDesc::new((2, 2), ChannelLayout::Mono));
-    assert_eq!(
-        info.cfa_type,
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))
-    );
-    let loaded = LoadCtx::default().cfa(&path).unwrap();
-
-    assert_eq!((loaded.data().width(), loaded.data().height()), (2, 2));
-    assert_eq!(loaded.data().to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
-    assert_eq!(
-        loaded.cfa_type(),
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr))
-    );
-    assert_eq!(
-        loaded.metadata.header.camera_white_balance,
-        Some([2.0, 1.0, 1.5, 1.0])
-    );
-    assert_eq!(loaded.metadata.derived.quantization_sigma(), Some(0.000_01));
-
-    let original = fs::read(&path).unwrap();
-    let mut invalid_version = original.clone();
-    let version_card = invalid_version
-        .windows(8)
-        .position(|window| window == VERSION_KEYWORD.as_str().as_bytes())
-        .unwrap();
-    let version_digit = invalid_version[version_card..version_card + 80]
-        .iter()
-        .rposition(u8::is_ascii_digit)
-        .unwrap();
-    invalid_version[version_card + version_digit] = b'0';
-    fs::write(&path, invalid_version).unwrap();
-    let error = LoadCtx::default().cfa(&path).unwrap_err();
-    assert_eq!(
-        fits_refusal(error),
-        FitsRefusal::CfaVersion { version: Some(0) }
-    );
-
-    let mut corrupted = original;
-    let sample = 0.1f32.to_be_bytes();
-    let offset = corrupted
-        .windows(sample.len())
-        .position(|window| window == sample)
-        .unwrap();
-    corrupted[offset] ^= 0x01;
-    fs::write(&path, corrupted).unwrap();
-    let error = LoadCtx::default().cfa(&path).unwrap_err();
-    assert_eq!(
-        fits_refusal(error),
-        FitsRefusal::ChecksumRequired {
-            hdu: 0,
-            report: ChecksumReport {
-                datasum: ChecksumStatus::Invalid,
-                checksum: ChecksumStatus::Invalid,
-            },
-        }
-    );
-}
-
-#[test]
-fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
-    let dir = TempDir::new("lumos-cfa-types");
-    for (name, cfa_type) in [
-        ("mono", CfaType::Mono),
-        ("xtrans", CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN))),
-    ] {
-        let image = CfaImage::from_plane(
-            Buffer2::new((2, 2), vec![0.1f32, 0.2, 0.3, 0.4]),
-            cfa_type,
-            ImageMetadata::default(),
-        );
-        let path = dir.join(format!("master_{name}.fits"));
-
-        image.write_fits(&path).unwrap();
-        let loaded = LoadCtx::default().cfa(path).unwrap();
-
-        assert_eq!(loaded.cfa_type(), cfa_type, "{name}");
-        assert_eq!(loaded.data().pixels(), image.data().pixels(), "{name}");
-    }
-}
-
 #[test]
 fn data_len() {
     let img = CfaImage::from_plane(
@@ -746,7 +164,7 @@ fn each_pattern_names_its_demosaic() {
             ColorProvenance::Monochrome,
         ),
         (
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             DemosaicProvenance::LumosRcd,
             ColorProvenance::SensorRgb,
         ),
@@ -768,7 +186,7 @@ fn each_pattern_names_its_demosaic() {
 }
 
 /// The color at every position of two periods, for each pattern, from each source that states it:
-/// the `BAYERPAT` spelling read letter by letter, LibRaw's `filters` word, `CfaPattern`, and
+/// the `BAYERPAT` spelling read letter by letter, LibRaw's `filters` word, `BayerPattern`, and
 /// `CfaType`; mono is red-index 0 everywhere and X-Trans is its rows, both wrapping.
 ///
 /// The photosites of each color, counted per phase, match a count of `color_at` over the frame. A
@@ -785,10 +203,10 @@ fn every_pattern_names_the_color_at_each_position() {
         }
     };
     for (pattern, filters) in [
-        (CfaPattern::Rggb, 0x9494_9494),
-        (CfaPattern::Bggr, 0x1616_1616),
-        (CfaPattern::Grbg, 0x6161_6161),
-        (CfaPattern::Gbrg, 0x4949_4949),
+        (BayerPattern::Rggb, 0x9494_9494),
+        (BayerPattern::Bggr, 0x1616_1616),
+        (BayerPattern::Grbg, 0x6161_6161),
+        (BayerPattern::Gbrg, 0x4949_4949),
     ] {
         let spelling = pattern.bayerpat().as_bytes();
         for y in 0..4 {
@@ -815,7 +233,7 @@ fn every_pattern_names_the_color_at_each_position() {
         }
     }
 
-    let bayer = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let bayer = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let xtrans = CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN));
     assert_eq!(
         bayer.photosites_per_color(Size2us::new(5, 3)).as_slice(),
@@ -864,7 +282,7 @@ fn the_demosaic_support_bounds_every_impulse_response() {
     const SIDE: usize = 64;
     for (cfa_type, passes) in [
         (
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             MarkesteijnPasses::One,
         ),
         (
@@ -918,7 +336,7 @@ fn demosaic_spreads_flags_by_its_support() {
     let mut cfa = make_cfa(
         size,
         vec![0.25; size.pixel_count()],
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     cfa.set_flags(PixelFlags::from_fn(size, |idx| match idx {
         idx if idx == 20 * 48 + 20 => QualityFlags::SATURATED,
@@ -963,7 +381,7 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
         |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).tanh();
     let scenes: [&dyn Fn(usize, usize) -> f32; 2] = [&star, &soft_edge];
     for cfa_type in [
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
     ] {
         for (scene_idx, scene) in scenes.iter().enumerate() {
@@ -1019,7 +437,7 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
     let mut bayer = make_cfa(
         size,
         pixels.clone(),
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     bayer.add_flags_where(QualityFlags::SATURATED, |idx| idx == 1);
     let proxy = bayer.green_proxy();
@@ -1066,7 +484,7 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         frame.metadata.derived.set_quantization_sigma(Some(0.25));
         frame
     };
-    let bayer = quantized(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))).green_proxy();
+    let bayer = quantized(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb))).green_proxy();
     assert_eq!(bayer.metadata.derived.quantization_sigma(), None);
     let mono = quantized(CfaType::Mono);
     let proxy = mono.green_proxy();
@@ -1076,4 +494,27 @@ fn the_green_proxy_fills_each_photosite_from_its_greens() {
         proxy.metadata.derived.provenance().map(|p| p.demosaic),
         mono.metadata.derived.provenance().map(|p| p.demosaic)
     );
+}
+
+/// A 2×1 frame holds 8 bytes of samples, 2 of flags, and the 8 bytes of a one-grid gain of its
+/// own: 18. A gain it shares is its owner's to count: 10.
+#[test]
+fn ram_bytes_counts_the_plane_the_flags_and_an_own_gain() {
+    let size = Size2us::new(2, 1);
+    let mut image = make_cfa(size, vec![0.1, 0.2], CfaType::Mono);
+    assert_eq!(image.ram_bytes(), 8);
+    image.set_flags(PixelFlags::from_fn(size, |idx| {
+        QualityFlags::from_byte(u8::from(idx == 0))
+    }));
+    assert_eq!(image.ram_bytes(), 10);
+    let gain = FlatGain::from_nodes(
+        size,
+        [Buffer2::new((2, 1), vec![1.5, 2.0])]
+            .into_iter()
+            .collect::<ArrayVec<_, 3>>(),
+    );
+    image.set_flat_gain(Some(FrameGain::Own(Box::new(gain.clone()))));
+    assert_eq!(image.ram_bytes(), 18);
+    image.set_flat_gain(Some(FrameGain::Shared(Arc::new(gain))));
+    assert_eq!(image.ram_bytes(), 10);
 }

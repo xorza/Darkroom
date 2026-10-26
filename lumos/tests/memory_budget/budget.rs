@@ -1,9 +1,6 @@
 //! [`Budget`]: the memory a run plans against, and the heap it may hold for it.
 
-use lumos::RunReport;
-
-/// The share of `memory_override` a run plans to commit: `memory::MEMORY_PERCENT`.
-const BUDGET_PERCENT: u64 = 75;
+use lumos::{RunReport, bench};
 
 /// The heap no plan charges: the combine's reduction scratch on each worker, the frame list and
 /// the result vectors, and each worker's own bookkeeping. None grows with a frame's pixels; at the
@@ -32,8 +29,8 @@ impl Budget {
     }
 
     /// The heap a run plans to hold at most.
-    pub(crate) const fn bytes(self) -> u64 {
-        self.memory_override * BUDGET_PERCENT / 100
+    pub(crate) fn bytes(self) -> u64 {
+        bench::usable_memory(self.memory_override)
     }
 
     /// Assert a run of `label` held at most `peak_bytes`: the budget, the `overcommit_bytes` it

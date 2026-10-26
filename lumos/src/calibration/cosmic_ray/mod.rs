@@ -41,8 +41,8 @@ use crate::calibration::cosmic_ray::error::CosmicRayError;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::quality_flags::QualityFlags;
@@ -68,7 +68,7 @@ const KEPT_OUT_BUILD_MASKS: usize = 3;
 #[derive(Debug, Clone, Copy)]
 enum Layout {
     Mono,
-    Bayer(CfaPattern),
+    Bayer(BayerPattern),
 }
 
 impl Layout {

@@ -13,9 +13,9 @@ use common::Buffer2;
 use crate::internals::synthetic::bg_map;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::statistics::median_mad::MedianMad;
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::bg_config::BgConfig;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 use crate::star_detection::tests::Scenario;
 
 /// One rendered field, matched-filtered at `kernel_fwhm`: each true star's response, inside a

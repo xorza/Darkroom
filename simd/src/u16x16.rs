@@ -36,4 +36,11 @@ pub trait U16x16: Copy + Debug + Add<Output = Self> {
     fn narrow_u8(self, high: Self) -> Self::U8;
 
     fn store(self, lanes: &mut [u16; U16_LANES]);
+
+    #[inline(always)]
+    fn to_array(self) -> [u16; U16_LANES] {
+        let mut lanes = [0; U16_LANES];
+        self.store(&mut lanes);
+        lanes
+    }
 }

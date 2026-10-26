@@ -23,8 +23,8 @@ use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::{CombineBudget, StorageTier};
 use crate::frame_store::stored_frame::{FrameWrite, SetKind};
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::error::FrameDimensionMismatch;
@@ -193,7 +193,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                     let cfa = if channels == 1 {
                         CfaType::Mono
                     } else {
-                        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb))
+                        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb))
                     };
                     image.set_flat_gain(Some(FrameGain::Shared(Arc::new(FlatGain::of_divisor(
                         &divisor,

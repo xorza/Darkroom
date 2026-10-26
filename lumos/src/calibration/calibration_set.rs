@@ -39,7 +39,7 @@ impl<T> CalibrationSet<T> {
         }
     }
 
-    /// The four roles in calibration order, each with the component that names it. The single
+    /// The four roles in bundle order, each with the component that names it. The single
     /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
     /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
     pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {

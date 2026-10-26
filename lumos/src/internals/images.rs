@@ -6,14 +6,14 @@
 //! three different things — wrapping them here would add a name without removing a choice.
 
 use common::Buffer2;
-use imaginarium::{ChannelLayout, PlanarDesc};
+use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 
 use crate::image::linear_image::LinearImage;
 use common::Size2us;
 
 /// Single-channel image from explicit pixel values, row-major.
 pub(crate) fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
-    LinearImage::from(Buffer2::new(size, pixels))
+    LinearImage::from(PlanarImage::new_mono(Buffer2::new(size, pixels)))
 }
 
 /// Three-channel image from planar values, one `Vec` per channel: red, green and blue.

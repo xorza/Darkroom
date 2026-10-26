@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::image::flat_gain::gain_bins::GainBins;
 use crate::image::metadata::bg_split::BgSplit;
 use crate::math::wavelet;
-use crate::noise::bg_split;
+use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::{BinnedSamples, Samples};
 use common::{Rect2us, Size2us, Vec2us};
 
@@ -262,7 +262,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
 
     /// The background under the flat `gains` names: the noise measured over each of its bins on
     /// its own — the support thresholds against the bin's own σ — and fitted by
-    /// [`bg_split::fit`]; unflattened, of [`Self::sigma`], for a plane no flat divided.
+    /// [`bg_from_gain::fit`]; unflattened, of [`Self::sigma`], for a plane no flat divided.
     pub(crate) fn bg(
         &self,
         gains: Option<PixelGains<'_, impl Fn(usize) -> f32 + Sync>>,
@@ -274,7 +274,7 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
         let binned = BinnedSamples::of(self.coefficients(), bins, |coefficients, pos| {
             gain(coefficients.idx[pos])
         });
-        bg_split::fit(&binned.measure_in_turn(|run| sigma(run, size).powi(2)))
+        bg_from_gain::fit(&binned.measure_in_turn(|run| sigma(run, size).powi(2)))
     }
 
     /// The coefficients of every tile's core pixels that `excluded` does not name, in tile order
@@ -401,17 +401,27 @@ impl<E: Fn(usize) -> bool + Sync> NoisePlane<'_, E> {
 /// The noise standard deviation the support iteration settles on over `coefficients`, of a `size`
 /// image, corrected for the method's response to white noise; `0` for fewer than two. Where the
 /// iteration leaves too few pixels outside the support or does not converge — a small frame whose
-/// coarse layers reach every pixel from one bright structure — the k-σ estimate of the first layer
-/// over the pixels its kernel lies inside the frame at, run to the same convergence and corrected
-/// for its own response; `0` when no two such pixels remain.
+/// coarse layers reach every pixel from one bright structure — or the frame is too small for the
+/// [`SCALES`] layers [`WHITE_NOISE_RESPONSE`] was measured with, the k-σ estimate of the first
+/// layer over the pixels its kernel lies inside the frame at, run to the same convergence and
+/// corrected for its own response; `0` when no two such pixels remain.
 fn sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
     let count = coefficients.idx.len();
     if count < 2 {
         return 0.0;
     }
-    if let Some(sigma) = support_sigma(coefficients) {
+    if wavelet::max_scales(size) >= SCALES
+        && let Some(sigma) = support_sigma(coefficients)
+    {
         return sigma / WHITE_NOISE_RESPONSE;
     }
+    k_sigma_sigma(coefficients, size)
+}
+
+/// The k-σ estimate [`sigma`] falls back to: the first layer's, over the pixels its kernel lies
+/// inside the frame at.
+fn k_sigma_sigma(coefficients: CoefficientRun<'_>, size: Size2us) -> f64 {
+    let count = coefficients.idx.len();
     let reach = FIRST_LAYER_REACH;
     let interior = |pos: usize| {
         let idx = coefficients.idx[pos];
@@ -700,8 +710,29 @@ impl Sums {
 mod tests {
     use statrs::distribution::{ContinuousCDF, Normal};
 
+    use common::Buffer2;
+
     use crate::math::wavelet;
-    use crate::noise::mrs_noise::{K, K_SIGMA_RESPONSE};
+    use crate::noise::mrs_noise::{K, K_SIGMA_RESPONSE, NoisePlane, k_sigma_sigma, sigma};
+
+    /// A frame too small for the four layers the support's response was measured with reads the
+    /// k-σ estimate: 15 × 15 holds three.
+    #[test]
+    fn a_frame_under_four_layers_reads_the_k_sigma_estimate() {
+        let samples = Buffer2::from_fn((15, 15), |x, y| {
+            ((x * 7 + y * 13) % 11) as f32 / 11.0 + if (x + y) % 2 == 0 { 0.05 } else { -0.05 }
+        });
+        assert_eq!(wavelet::max_scales(samples.size()), 3);
+        let plane = NoisePlane {
+            samples: &samples,
+            excluded: |_| false,
+        };
+        let coefficients = plane.coefficients();
+        assert_eq!(
+            sigma(coefficients.all(), samples.size()),
+            k_sigma_sigma(coefficients.all(), samples.size())
+        );
+    }
 
     /// The first layer's response, `δ − h` for the 2-D B3 kernel `h = b bᵀ` with
     /// `b = [1, 4, 6, 4, 1]/16`, summed in squares tap by tap rather than by the separable form

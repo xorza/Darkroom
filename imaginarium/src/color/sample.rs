@@ -13,7 +13,7 @@ use bytemuck::Pod;
 use crate::color::color_format::SampleType;
 
 /// A channel storage type.
-pub(crate) trait Sample: Pod + Debug + PartialEq + Send + Sync + 'static {
+pub(crate) trait Sample: Pod + Default + Debug + PartialEq + Send + Sync + 'static {
     const TYPE: SampleType;
     /// The value that stands for one: full intensity, and an opaque alpha.
     const FULL_SCALE: Self;

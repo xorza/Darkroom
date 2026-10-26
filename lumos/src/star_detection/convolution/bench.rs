@@ -13,9 +13,9 @@ use crate::bench::scene::{FRAME, Field};
 use crate::scratch_pool::ScratchPool;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::convolution::filter_kernels::FilterKernels;
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
+use crate::star_detection::detection_filter::Prefilter;
 use crate::star_detection::detection_filter::{DetectionFilter, FilterSource};
-use crate::star_detection::detection_plane::Prefilter;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let field = Field::Typical;

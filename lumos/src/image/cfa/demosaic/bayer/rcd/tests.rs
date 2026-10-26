@@ -1,6 +1,6 @@
 use common::{Buffer2, CancelToken};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::demosaic::bayer::rcd::tile::Tile;
 use crate::image::cfa::demosaic::bayer::rcd::{
     INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, Neighbour, TILE, demosaic, estimate_green,
@@ -208,10 +208,10 @@ fn rcd_matches_librtprocess_bit_for_bit() {
     ];
     let size = Size2us::new(WIDTH, HEIGHT);
     let patterns = [
-        CfaPattern::Rggb,
-        CfaPattern::Bggr,
-        CfaPattern::Grbg,
-        CfaPattern::Gbrg,
+        BayerPattern::Rggb,
+        BayerPattern::Bggr,
+        BayerPattern::Grbg,
+        BayerPattern::Gbrg,
     ];
     for ((name, scene), digests) in scenes.into_iter().zip(DIGESTS) {
         for (pattern, expected) in patterns.into_iter().zip(digests) {
@@ -242,7 +242,7 @@ fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
     let size = Size2us::new(TILE + 40, TILE + 30);
     let mut rng = TestRng::new(11);
     let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
-    for pattern in CfaPattern::ALL {
+    for pattern in BayerPattern::ALL {
         for place in [
             TilePlace {
                 top: 0,
@@ -286,7 +286,7 @@ fn a_balanced_demosaic_divides_the_balanced_one_by_the_gains() {
     let gains = [2.13, 1.0, 1.71];
     let mut rng = TestRng::new(5);
     let data = Buffer2::from_fn(size, |_, _| 0.1 + 0.8 * rng.next_f32());
-    for pattern in CfaPattern::ALL {
+    for pattern in BayerPattern::ALL {
         let color = |idx: usize| pattern.color_at(size.point_of(idx)).idx();
         let balanced = Buffer2::new(
             size,

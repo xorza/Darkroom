@@ -95,7 +95,7 @@ fn color_medians(
 mod tests {
     use common::Buffer2;
 
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
     use crate::noise::mosaic_noise_measure::{MosaicNoiseMeasure, color_medians};
@@ -108,7 +108,7 @@ mod tests {
     /// 14 pairs a row: 56 × 5 = 280 against 64 × 4 = 256.
     #[test]
     fn the_working_set_is_the_larger_of_the_pairs_and_the_medians() {
-        let rggb = Mosaic::Bayer(CfaPattern::Rggb);
+        let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         assert_eq!(
             MosaicSampling {
                 size: Size2us::new(8, 4),
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn a_sampled_mosaic_keeps_every_color() {
         let size = Size2us::new(64, 64);
-        let rggb = Mosaic::Bayer(CfaPattern::Rggb);
+        let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let levels = [0.2, 0.1, 0.05];
         let mosaic = Buffer2::from_fn((64, 64), |x, y| levels[rggb.slot_at(Vec2us::new(x, y))]);
         let sampling = MosaicSampling {

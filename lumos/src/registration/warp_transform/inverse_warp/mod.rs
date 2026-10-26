@@ -1,6 +1,6 @@
 //! [`InverseWarp`]: a registration warp run backwards, from target pixels to reference pixels.
 
-use glam::{DMat2, DVec2};
+use glam::DVec2;
 
 use crate::registration::distortion::sip::SipPolynomial;
 use crate::registration::transform::Transform;
@@ -32,38 +32,14 @@ pub struct InverseWarp {
     sip: Option<SipPolynomial>,
 }
 
-/// One point taken back through an [`InverseWarp`]: where it lands, and the Jacobian of the inverse
-/// map there.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct InverseMapped {
-    pub pos: DVec2,
-    /// Columns are the images of the x and y steps of the target point.
-    pub jacobian: DMat2,
-}
-
 impl InverseWarp {
     pub(crate) const fn new(to_reference: Transform, sip: Option<SipPolynomial>) -> Self {
         Self { to_reference, sip }
     }
 
-    /// The reference point `t` came from, and the Jacobian of the inverse there; `None` when the
-    /// correction cannot be inverted at `t` — the Newton iteration met a singular Jacobian, left
-    /// the finite numbers, or did not converge within its iteration cap. A position that
-    /// did not converge is never returned.
-    pub fn apply(&self, t: DVec2) -> Option<InverseMapped> {
-        let linear = self.to_reference.jacobian(t);
-        let pos = self.pos(t)?;
-        let jacobian = match &self.sip {
-            // `r ↦ r + c(r)` has Jacobian `I + ∂c`, so its inverse at `u` has the inverse of that,
-            // and the chain rule puts `T⁻¹`'s own Jacobian after it.
-            Some(sip) => sip.jacobian(pos).inverse() * linear,
-            None => linear,
-        };
-        Some(InverseMapped { pos, jacobian })
-    }
-
-    /// [`Self::apply`]'s position alone, without the Jacobian a caller that only places points
-    /// would discard.
+    /// The reference point `t` came from; `None` when the correction cannot be inverted at `t` —
+    /// the Newton iteration met a singular Jacobian, left the finite numbers, or did not converge
+    /// within its iteration cap. A position that did not converge is never returned.
     pub fn pos(&self, t: DVec2) -> Option<DVec2> {
         let u = self.to_reference.apply(t);
         let Some(sip) = &self.sip else {

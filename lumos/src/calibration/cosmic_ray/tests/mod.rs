@@ -3,6 +3,8 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
+mod scratch;
+
 use common::{Buffer2, PerWorker};
 use glam::Vec2;
 
@@ -213,7 +215,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
     }
-    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
     let count = reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data().pixels();
     for &p in &crs {
@@ -286,7 +288,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     for &p in &crs {
         data[size.idx_of(p)] = 0.95;
     }
-    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+    let mut img = cfa_from_plane(data, CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
     reject(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data().pixels();
     // CR rejection still works — the injected CRs are removed.

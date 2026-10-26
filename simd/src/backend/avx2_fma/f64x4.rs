@@ -75,7 +75,7 @@ impl F64x4 for Avx2F64 {
     #[inline(always)]
     fn pow2i(self) -> Self {
         unsafe {
-            let exponent = _mm256_cvtepi32_epi64(_mm256_cvtpd_epi32(self.0));
+            let exponent = _mm256_cvtepi32_epi64(_mm256_cvttpd_epi32(self.0));
             let biased = _mm256_add_epi64(exponent, _mm256_set1_epi64x(1023));
             Self(_mm256_castsi256_pd(_mm256_slli_epi64::<52>(biased)))
         }

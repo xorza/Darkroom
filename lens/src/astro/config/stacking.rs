@@ -86,19 +86,20 @@ pub(crate) struct DetectionKnobs {
 
 impl Default for DetectionKnobs {
     fn default() -> Self {
-        StarDetectionConfig::default().into()
+        Self::of(&StarDetectionConfig::default())
     }
 }
 
-impl From<StarDetectionConfig> for DetectionKnobs {
-    fn from(config: StarDetectionConfig) -> Self {
+impl DetectionKnobs {
+    /// The knobs of `config`, a config that runs a matched filter: the fields the editor offers,
+    /// the rest left behind.
+    const fn of(config: &StarDetectionConfig) -> Self {
         Self {
             sigma_threshold: config.extraction.sigma_threshold,
             expected_fwhm: config
                 .fwhm
                 .mode
-                .or_else(|| StarDetectionConfig::default().fwhm.mode)
-                .expect("the default config runs a matched filter")
+                .expect("a config the editor offers runs a matched filter")
                 .seed(),
             min_area: config.extraction.min_area,
             max_area: config.extraction.max_area,
@@ -140,12 +141,13 @@ pub(crate) struct RegistrationKnobs {
 
 impl Default for RegistrationKnobs {
     fn default() -> Self {
-        RegistrationConfig::default().into()
+        Self::of(&RegistrationConfig::default())
     }
 }
 
-impl From<RegistrationConfig> for RegistrationKnobs {
-    fn from(config: RegistrationConfig) -> Self {
+impl RegistrationKnobs {
+    /// The knobs of `config`: the fields the editor offers, the rest left behind.
+    const fn of(config: &RegistrationConfig) -> Self {
         Self {
             max_stars: config.matching.max_stars,
             min_matches: config.matching.min_matches,
@@ -197,26 +199,6 @@ impl Preset for CombineMethodChoice {
     }
 }
 
-/// How the lights are put on one scale before they combine: lumos's
-/// [`Normalization`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
-#[config(type_id = "a784ccc5-0139-4a2b-93ec-902d6212539d")]
-pub(crate) enum NormalizationChoice {
-    Global,
-    Multiplicative,
-    None,
-}
-
-impl From<NormalizationChoice> for Normalization {
-    fn from(choice: NormalizationChoice) -> Self {
-        match choice {
-            NormalizationChoice::Global => Self::Global,
-            NormalizationChoice::Multiplicative => Self::Multiplicative,
-            NormalizationChoice::None => Self::None,
-        }
-    }
-}
-
 /// How much each light counts in the combine: lumos's [`Weighting`], less the
 /// manual weights a graph has no frame list to give.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
@@ -246,18 +228,18 @@ impl From<WeightingChoice> for Weighting {
 pub(crate) struct CombineKnobs {
     method: CombineMethodChoice,
     sigma: f32,
-    normalization: NormalizationChoice,
+    normalization: Normalization,
     weighting: WeightingChoice,
 }
 
 impl Default for CombineKnobs {
-    /// Sigma-clipped at 3σ, should a rejecting method be picked, with the
-    /// policy of [`StackConfig::light`]: global normalization, noise weights.
+    /// [`StackConfig::light`] itself: sigma-clipped at [`StackConfig::LIGHT_SIGMA`], global
+    /// normalization, noise weights.
     fn default() -> Self {
         Self {
             method: CombineMethodChoice::SigmaClipped,
-            sigma: 3.0,
-            normalization: NormalizationChoice::Global,
+            sigma: StackConfig::LIGHT_SIGMA,
+            normalization: StackConfig::light().normalization,
             weighting: WeightingChoice::Noise,
         }
     }
@@ -273,7 +255,7 @@ impl From<CombineKnobs> for StackConfig {
         };
         Self {
             combine,
-            normalization: knobs.normalization.into(),
+            normalization: knobs.normalization,
             weighting: knobs.weighting.into(),
             ..Self::light()
         }
@@ -289,8 +271,7 @@ mod tests {
     use lumos::{FwhmMode, StarDetectionConfig};
 
     use crate::astro::config::stacking::{
-        CombineKnobs, CombineMethodChoice, DetectionKnobs, NormalizationChoice, RegistrationKnobs,
-        WeightingChoice,
+        CombineKnobs, CombineMethodChoice, DetectionKnobs, RegistrationKnobs, WeightingChoice,
     };
 
     /// A projection is only safe if every knob writes back to the field it read
@@ -307,7 +288,7 @@ mod tests {
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
 
-        let restored: StarDetectionConfig = DetectionKnobs::from(config).into();
+        let restored: StarDetectionConfig = DetectionKnobs::of(&config).into();
         assert_eq!(restored.extraction.sigma_threshold, 4.5);
         assert_eq!(restored.extraction.min_area, 7);
         assert_eq!(restored.extraction.max_area, 900);
@@ -325,7 +306,7 @@ mod tests {
         config.ransac.max_iterations = 1500;
         config.max_rms_error = 0.75;
 
-        let restored: RegistrationConfig = RegistrationKnobs::from(config).into();
+        let restored: RegistrationConfig = RegistrationKnobs::of(&config).into();
         assert_eq!(restored.matching.max_stars, 250);
         assert_eq!(restored.matching.min_matches, 9);
         assert_eq!(restored.matching.triangle.ratio_tolerance, 0.125);
@@ -341,7 +322,7 @@ mod tests {
             model: TransformModel::Auto { sip: None },
             ..RegistrationConfig::default()
         };
-        let off: RegistrationConfig = RegistrationKnobs::from(without).into();
+        let off: RegistrationConfig = RegistrationKnobs::of(&without).into();
         assert!(off.model.sip().is_none());
 
         let with = RegistrationConfig {
@@ -350,7 +331,7 @@ mod tests {
             },
             ..RegistrationConfig::default()
         };
-        let on: RegistrationConfig = RegistrationKnobs::from(with).into();
+        let on: RegistrationConfig = RegistrationKnobs::of(&with).into();
         assert!(on.model.sip().is_some());
     }
 
@@ -386,7 +367,7 @@ mod tests {
         );
 
         let unscaled = StackConfig::from(CombineKnobs {
-            normalization: NormalizationChoice::None,
+            normalization: Normalization::None,
             weighting: WeightingChoice::Equal,
             ..CombineKnobs::default()
         });
@@ -395,7 +376,7 @@ mod tests {
             (Normalization::None, Weighting::Equal)
         );
         let flat_scaled = StackConfig::from(CombineKnobs {
-            normalization: NormalizationChoice::Multiplicative,
+            normalization: Normalization::Multiplicative,
             ..CombineKnobs::default()
         });
         assert_eq!(flat_scaled.normalization, Normalization::Multiplicative);

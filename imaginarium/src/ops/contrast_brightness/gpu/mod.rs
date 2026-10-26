@@ -6,30 +6,23 @@ use crate::gpu::gpu_image::GpuImage;
 use crate::gpu::packed_layout::PackedLayout;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
-use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
+use crate::ops::contrast_brightness::pipeline;
 
 /// The GPU path behind [`ContrastBrightness::apply_gpu`].
-pub(super) fn apply(
-    params: ContrastBrightness,
-    ctx: &Gpu,
-    pipeline: &GpuContrastBrightnessPipeline,
-    input: &GpuImage,
-    output: &mut GpuImage,
-) {
-    input.desc.assert_same(output.desc, "input/output");
-    let affine = ChannelAffine::new(params, input.desc.color_format());
+pub(super) fn apply(params: ContrastBrightness, gpu: &Gpu, image: &mut GpuImage) {
+    let affine = ChannelAffine::new(params, image.desc.color_format());
     let uniform = Params {
         scale: affine.scale,
         offset: affine.offset,
         max: affine.max,
         _pad: 0,
-        layout: PackedLayout::new(input.desc),
+        layout: PackedLayout::new(image.desc),
     };
-    pipeline.kernel.run(
-        ctx,
+    pipeline::kernel(gpu).run(
+        gpu,
         KernelJob {
             params: bytemuck::bytes_of(&uniform),
-            buffers: &[input.read_buffer(), output.write_buffer()],
+            buffers: &[image.write_buffer()],
             invocations: uniform.layout.words(),
             output: OutputStart::AsIs,
         },

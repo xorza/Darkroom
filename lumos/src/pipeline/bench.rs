@@ -16,7 +16,7 @@ use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_image::StoredImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::ingest::ingest_config::IngestConfig;
@@ -42,7 +42,7 @@ pub(crate) fn integration(c: &mut Criterion) {
 /// configuration asks it, and demosaiced. The default configuration leaves cosmic rays in.
 fn prepare(c: &mut Criterion) {
     let field = Field::Typical;
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let masters = OnceCell::new();
     let mut group = Kind::Integration.group(c, "prepare", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
@@ -143,7 +143,7 @@ const SPILLED_MACHINE_BYTES: u64 = 4 << 30;
 /// combined. Resident, and spilled on the memory of a 4 GiB machine.
 fn end_to_end(c: &mut Criterion) {
     let field = Field::Typical;
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let masters = OnceCell::new();
     // The slowest bench's iteration, `rggb/spilled`'s median on a Ryzen 7 6800U, x86-64-v3.
     let iteration = Duration::from_millis(18_340);
@@ -154,7 +154,12 @@ fn end_to_end(c: &mut Criterion) {
     );
     group.throughput(Throughput::Elements((LIGHTS * FRAME.pixel_count()) as u64));
     let set = format!("{LIGHTS}x{}", field.name());
-    for (tier, memory_override) in [("resident", None), ("spilled", Some(SPILLED_MACHINE_BYTES))] {
+    // Resident plans against all the memory there is, so the case keeps its tier on a machine
+    // with little free RAM; spilled plans against a 4 GiB machine's.
+    for (tier, memory_override) in [
+        ("resident", Some(u64::MAX)),
+        ("spilled", Some(SPILLED_MACHINE_BYTES)),
+    ] {
         group.bench_function(BenchmarkId::new(format!("rggb/{tier}"), &set), |b| {
             let masters: &CalibrationMasters = masters.get_or_init(|| {
                 CalibrationMasters::from_images(

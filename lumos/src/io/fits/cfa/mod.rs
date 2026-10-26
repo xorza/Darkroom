@@ -1,3 +1,4 @@
+use std::io::{Seek, Write};
 use std::path::Path;
 
 use common::fs;
@@ -56,7 +57,16 @@ pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadErro
     Ok(is_lumos_cfa)
 }
 
+/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`].
 pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
+    fs::publish(path, fs::PublicationMode::Durable, |file| {
+        write(image, file)
+    })
+}
+
+/// Write `image`, a sensor-domain image, to `out` as a checksummed floating-point FITS file: the
+/// primary HDU, then its flags and its flat gain when it has them.
+pub(crate) fn write(image: &CfaImage, out: impl Write + Seek) -> Result<(), WriteError> {
     let primary = hdu(
         image,
         CfaFitsHduMetadata {
@@ -67,17 +77,15 @@ pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
     )?;
     let flags = flags_extension::encode(image.flags(), None, 1)?;
     let gain = gain_extension::encode(image.flat_gain().map(|gain| &**gain), None)?;
-    fs::publish(path, fs::PublicationMode::Durable, |file| {
-        let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        primary.write(&mut writer)?;
-        if let Some(flags) = &flags {
-            flags.write(&mut writer)?;
-        }
-        if let Some(gain) = &gain {
-            gain.write(&mut writer)?;
-        }
-        Ok(())
-    })
+    let mut writer = FitsWriter::new(out).with_checksums();
+    primary.write(&mut writer)?;
+    if let Some(flags) = &flags {
+        flags.write(&mut writer)?;
+    }
+    if let Some(gain) = &gain {
+        gain.write(&mut writer)?;
+    }
+    Ok(())
 }
 
 /// The HDU of `cfa`, with the per-HDU `hdu_metadata`: its mosaic, `NO_DATA` backed out as NaN, the
@@ -111,3 +119,6 @@ pub(crate) fn hdu<'a>(
         source: FloatPlanes::blanking([cfa.data().pixels()].into_iter().collect(), cfa.flags()),
     })
 }
+
+#[cfg(test)]
+mod tests;

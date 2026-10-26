@@ -18,7 +18,7 @@ fn eval_magnitude(segment: SplineSegment, t: f32) -> f32 {
 #[test]
 fn cubic_segment_matches_scalar() {
     let widths: Vec<usize> = SWEEP_WIDTHS.iter().copied().chain([256, 1024]).collect();
-    assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
+    assert_simd_matches_scalar(&widths, |tier, shape, width| {
         let p = shape.row(4, width);
         let segment = SplineSegment {
             f0: p[0],

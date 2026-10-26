@@ -2,7 +2,7 @@
 
 use libraw::ImageData;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
@@ -48,7 +48,7 @@ pub(crate) fn cfa_type(idata: &ImageData) -> Result<Option<CfaType>, XTransPatte
 ///
 /// Returns `None` when the word is not a 2×2 Bayer phase repeated down all eight rows —
 /// X-Trans, monochrome, and other exotic sensors all land here.
-fn bayer(filters: u32) -> Option<CfaPattern> {
+fn bayer(filters: u32) -> Option<BayerPattern> {
     // Each byte holds two rows; a 2-row period repeats the first byte through the word.
     if filters != (filters & 0xff) * 0x0101_0101 {
         return None;
@@ -66,16 +66,16 @@ fn bayer(filters: u32) -> Option<CfaPattern> {
     let is_blue = |c: usize| c == 2;
 
     if is_red(c00) && is_green(c01) && is_green(c10) && is_blue(c11) {
-        return Some(CfaPattern::Rggb);
+        return Some(BayerPattern::Rggb);
     }
     if is_blue(c00) && is_green(c01) && is_green(c10) && is_red(c11) {
-        return Some(CfaPattern::Bggr);
+        return Some(BayerPattern::Bggr);
     }
     if is_green(c00) && is_red(c01) && is_blue(c10) && is_green(c11) {
-        return Some(CfaPattern::Grbg);
+        return Some(BayerPattern::Grbg);
     }
     if is_green(c00) && is_blue(c01) && is_red(c10) && is_green(c11) {
-        return Some(CfaPattern::Gbrg);
+        return Some(BayerPattern::Gbrg);
     }
 
     None

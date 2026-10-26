@@ -6,7 +6,7 @@ use glam::DVec2;
 
 use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
 use crate::internals::test_rng::TestRng;
-use crate::registration::error::RegistrationError;
+use crate::registration::error::{ModelFailure, RegistrationError};
 use crate::registration::final_fit::FitModel;
 use crate::registration::final_fit::fit_catalogs::FitCatalogs;
 use crate::registration::match_idxs::MatchIdxs;
@@ -487,6 +487,32 @@ fn a_meridian_flip_registers_under_the_default_limits() {
     ]);
 }
 
+/// A mirrored field turns every triangle the other way, so no true triangle pair agrees: what
+/// matches is chance, too few pairs to stand, and the field is refused, under the affine model that
+/// could map it too.
+#[test]
+fn a_mirrored_field_is_refused() {
+    let scenario = Scenario::new(
+        "mirror",
+        TransformType::Affine,
+        Transform::affine([-1.0, 0.0, 2000.0, 0.0, 1.0, 0.0]),
+    );
+    let catalogs = scenario.catalogs();
+    let error = scenario
+        .config()
+        .registrar()
+        .unwrap()
+        .register(&catalogs.reference, &catalogs.target)
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            RegistrationError::NoMatchingPatterns { .. } | RegistrationError::TooFewInliers { .. }
+        ),
+        "{error}"
+    );
+}
+
 /// Missing and spurious stars are left out of the match, and the fit stays exact.
 #[test]
 fn missing_and_spurious_stars_are_left_out() {
@@ -773,7 +799,7 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
     assert!(
         matches!(
             error,
-            RegistrationError::TooFewInliers {
+            ModelFailure::TooFewInliers {
                 found: 3,
                 required: 8
             }

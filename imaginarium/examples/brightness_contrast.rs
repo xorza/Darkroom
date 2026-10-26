@@ -26,22 +26,19 @@ fn main() {
     save_image(&output, "contrast_brightness_cpu.png");
 }
 
-/// Residency is the caller's to manage: upload, run, read back. The shader reads and writes through
-/// separate bindings, so the op needs a distinct output image.
+/// Residency is the caller's to manage: upload, run, read back. The op runs in place on the
+/// upload, as it does on the CPU.
 #[cfg(feature = "wgpu")]
 fn on_gpu(input: &InterleavedImage) {
-    use imaginarium::{Gpu, GpuContrastBrightnessPipeline, GpuCtx, GpuImage};
+    use imaginarium::{Gpu, GpuImage};
 
     let Ok(gpu) = Gpu::new() else {
         println!("no GPU available, skipping the GPU example");
         return;
     };
-    let mut context = GpuCtx::new(gpu.clone());
-    let pipeline = context.get_or_create(GpuContrastBrightnessPipeline::new);
 
-    let uploaded = GpuImage::from_image(&gpu, input).expect("upload");
-    let mut rendered = GpuImage::new_empty(&gpu, input.desc()).expect("allocate");
-    ContrastBrightness::new(1.5, 0.1).apply_gpu(&gpu, pipeline, &uploaded, &mut rendered);
+    let mut rendered = GpuImage::from_image(&gpu, input).expect("upload");
+    ContrastBrightness::new(1.5, 0.1).apply_gpu(&gpu, &mut rendered);
 
     save_image(
         &rendered.to_image(&gpu).unwrap(),

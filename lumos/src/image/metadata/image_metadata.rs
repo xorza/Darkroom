@@ -66,4 +66,13 @@ mod tests {
             assert_eq!(metadata(egain, domain).electrons_per_unit(), None);
         }
     }
+
+    /// A default record states nothing: no object, no white balance, no provenance.
+    #[test]
+    fn a_default_record_states_nothing() {
+        let meta = ImageMetadata::default();
+        assert!(meta.header.object.is_none());
+        assert!(meta.header.camera_white_balance.is_none());
+        assert!(meta.derived.provenance().is_none());
+    }
 }

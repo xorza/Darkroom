@@ -11,7 +11,7 @@ use common::{Buffer2, CancelToken};
 use imaginarium::{ChannelLayout, PlanarDesc, PlanarImage};
 
 use crate::error::Cancelled;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::bayer::rcd;
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
@@ -27,7 +27,7 @@ use crate::memory::footprint::Footprint;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Demosaic {
     None,
-    Rcd(CfaPattern),
+    Rcd(BayerPattern),
     Markesteijn {
         pattern: XTransPattern,
         passes: MarkesteijnPasses,
@@ -54,7 +54,7 @@ impl Demosaic {
     ) -> Result<PlanarImage, Cancelled> {
         let desc = PlanarDesc::new(data.size(), ChannelLayout::Rgb);
         let planes = match self {
-            Self::None => return Ok(PlanarImage::from(data)),
+            Self::None => return Ok(PlanarImage::new_mono(data)),
             Self::Rcd(pattern) => {
                 rcd::demosaic(&MosaicView::new(&data, pattern).with_gains(gains), cancel)?
             }
@@ -115,7 +115,7 @@ pub(crate) mod bench;
 mod memory_tests {
     use imaginarium::{ChannelLayout, PlanarDesc};
 
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::demosaic::Demosaic;
     use crate::image::cfa::demosaic::bayer::rcd;
@@ -137,7 +137,7 @@ mod memory_tests {
 
         for (cfa_type, workspace) in [
             (
-                CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
                 rcd::internals::workspace_bytes(4),
             ),
             (

@@ -1,16 +1,15 @@
 //! [`SelectedFits`]: one image HDU of an open FITS file, selected and planned for a decode.
 
-use std::fs::File;
-use std::path::Path;
+use std::io::{Read, Seek};
 
 use arrayvec::ArrayVec;
-use common::fs;
+use fits_well::FitsError;
 use fits_well::error::ExpectedHdu;
 use fits_well::image::View as FitsView;
 use fits_well::io::StreamReader;
-use fits_well::{FitsError, FitsReader};
 
 use crate::error::Cancelled;
+use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::flat_gain::shared_gains::SharedGains;
@@ -28,7 +27,6 @@ use crate::io::fits::gain_extension::{self, LocatedGain};
 use crate::io::fits::lumos_extension::{DescribedImage, WeightUnits};
 use crate::io::fits::tile_parallel;
 use crate::io::fits::{cfa, linear, metadata};
-use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 
 /// One image HDU of an open FITS file: the HDU, its decode plan, the mosaic its header declares
@@ -70,19 +68,11 @@ pub(crate) enum Checksum {
     Verified(FitsChecksumProvenance),
 }
 
-/// The FITS file at `path`, open for reading.
-pub(crate) fn open(path: &Path, ctx: &LoadCtx) -> Result<StreamReader<File>, FitsLoadError> {
-    Cancelled::check(&ctx.cancel)?;
-    let reader = FitsReader::open(fs::open(path)?)?;
-    Cancelled::check(&ctx.cancel)?;
-    Ok(reader)
-}
-
 impl SelectedFits {
     /// The image of `reader`, a file of its own, that the context's options select. A Lumos
     /// container of another format is refused first.
-    pub(super) fn select(
-        reader: &mut StreamReader<File>,
+    pub(super) fn select<R: Read + Seek>(
+        reader: &mut StreamReader<R>,
         ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         cfa::validate_container_format(reader.hdus().first().map(|hdu| &hdu.header))?;
@@ -92,8 +82,8 @@ impl SelectedFits {
 
     /// The Lumos CFA image at HDU `idx` of `reader`, a calibration bundle; an HDU that is not
     /// one is refused.
-    pub(crate) fn lumos_cfa(
-        reader: &mut StreamReader<File>,
+    pub(crate) fn lumos_cfa<R: Read + Seek>(
+        reader: &mut StreamReader<R>,
         idx: usize,
         ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
@@ -105,16 +95,16 @@ impl SelectedFits {
     }
 
     /// The image at the primary HDU of `reader`, whatever else the file holds: a stack product's.
-    pub(crate) fn primary(
-        reader: &mut StreamReader<File>,
+    pub(crate) fn primary<R: Read + Seek>(
+        reader: &mut StreamReader<R>,
         ctx: &LoadCtx,
     ) -> Result<Self, FitsLoadError> {
         let selected = selection::selected_hdu(reader.hdus(), 0)?;
         Self::of(reader, selected, ctx.fits.cube, ctx)
     }
 
-    fn of(
-        reader: &mut StreamReader<File>,
+    fn of<R: Read + Seek>(
+        reader: &mut StreamReader<R>,
         selected: FitsHduProvenance,
         cube: FitsCubeInterpretation,
         ctx: &LoadCtx,
@@ -243,9 +233,9 @@ impl SelectedFits {
     /// settled as `checksum` says, then its flags and gain extensions, whose checksums are always
     /// required. The gain is the one `gains` holds of the key its extension states, read from no
     /// node, or the one it reads, shared through `gains`.
-    pub(crate) fn read(
+    pub(crate) fn read<R: Read + Seek>(
         self,
-        reader: &mut StreamReader<File>,
+        reader: &mut StreamReader<R>,
         ctx: &LoadCtx,
         checksum: Checksum,
         gains: &SharedGains,
@@ -272,7 +262,7 @@ impl SelectedFits {
         };
         if let Some(flags_hdu) = self.flags_hdu {
             Cancelled::check(&ctx.cancel)?;
-            let bytes = read_extension::<u8>(reader, flags_hdu)?
+            let bytes = read_extension::<u8, _>(reader, flags_hdu)?
                 .pop()
                 .expect("a flags extension is one plane");
             decoded.flags =
@@ -283,7 +273,7 @@ impl SelectedFits {
                 shared
             } else {
                 Cancelled::check(&ctx.cancel)?;
-                let nodes = read_extension::<f32>(reader, hdu)?;
+                let nodes = read_extension::<f32, _>(reader, hdu)?;
                 gains.share(gain_extension::decode(nodes, size, key)?)
             };
             decoded.flat_gain = Some(FrameGain::Shared(shared));
@@ -317,16 +307,16 @@ impl ExtensionSample for f32 {
 /// quality plane — one per slice of its third axis, or one for an image of two: read a chunk of
 /// rows of every plane at a time — see [`ExtensionChunks`] — summed as it is read, and refused
 /// unless the checksum is valid. No whole-unit buffer is read and copied out.
-pub(crate) fn read_extension<T: ExtensionSample>(
-    reader: &mut StreamReader<File>,
+pub(crate) fn read_extension<T: ExtensionSample, R: Read + Seek>(
+    reader: &mut StreamReader<R>,
     idx: usize,
 ) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
     read_extension_in_chunks(reader, idx, CHUNK_BYTES)
 }
 
 /// [`read_extension`], a chunk of rows of at most `chunk_bytes` at a time, one row at least.
-fn read_extension_in_chunks<T: ExtensionSample>(
-    reader: &mut StreamReader<File>,
+fn read_extension_in_chunks<T: ExtensionSample, R: Read + Seek>(
+    reader: &mut StreamReader<R>,
     idx: usize,
     chunk_bytes: usize,
 ) -> Result<ArrayVec<Vec<T>, 3>, FitsLoadError> {
@@ -357,7 +347,10 @@ fn read_extension_in_chunks<T: ExtensionSample>(
 
 /// What reading the extension at HDU `idx` of `reader` holds beside the frame, from its header
 /// — see [`ExtensionChunks::read_bytes`].
-fn extension_read_bytes(reader: &StreamReader<File>, idx: usize) -> Result<u64, FitsLoadError> {
+fn extension_read_bytes<R: Read + Seek>(
+    reader: &StreamReader<R>,
+    idx: usize,
+) -> Result<u64, FitsLoadError> {
     let metadata = reader.hdus()[idx].image_metadata()?;
     Ok(ExtensionChunks::of(metadata.shape, metadata.bitpix.elem_size(), CHUNK_BYTES).read_bytes())
 }
@@ -375,18 +368,16 @@ fn not_an_image(source: FitsError, idx: usize) -> FitsLoadError {
 
 #[cfg(test)]
 mod tests {
-    use common::{CancelToken, TempDir, fs};
-    use fits_well::FitsWriter;
+    use std::io::Cursor;
+
     use fits_well::compress::{Compression, CompressionConfig, Quantization};
     use fits_well::image::{Image, Scaling};
     use fits_well::io::{BLOCK_SIZE, ChecksumReport, ChecksumStatus};
+    use fits_well::{FitsReader, FitsWriter};
 
     use crate::internals::fits::fits_refusal;
-    use crate::io::fits::decode::selected_fits::{
-        self, extension_read_bytes, read_extension_in_chunks,
-    };
+    use crate::io::fits::decode::selected_fits::{extension_read_bytes, read_extension_in_chunks};
     use crate::io::fits::error::FitsRefusal;
-    use crate::io::load_ctx::LoadCtx;
 
     /// An extension is read a chunk of rows of every slice at a time straight into a plane per
     /// slice, and its checksum is summed across every chunk. A 3 × 5 × 3 cube of `f32`, 36 B a
@@ -396,12 +387,9 @@ mod tests {
     /// slice is refused, as every extension requires a valid checksum.
     #[test]
     fn an_extension_reads_in_chunks_into_a_plane_per_slice() {
-        let dir = TempDir::new("read_extension_chunks");
-        let ctx = LoadCtx::new(CancelToken::never());
         let samples: Vec<f32> = (0..45).map(|idx| idx as f32).collect();
         let bytes: Vec<u8> = (0..15).collect();
-        let path = dir.join("extension.fits");
-        let mut writer = FitsWriter::new(fs::create(&path).unwrap()).with_checksums();
+        let mut writer = FitsWriter::new(Vec::new()).with_checksums();
         writer
             .write_image(
                 Image::new([3, 5, 3], samples.clone(), Scaling::IDENTITY)
@@ -433,18 +421,18 @@ mod tests {
                 None,
             )
             .unwrap();
-        drop(writer);
+        let mut file = writer.into_inner();
 
-        let mut reader = selected_fits::open(&path, &ctx).unwrap();
-        let planes = read_extension_in_chunks::<f32>(&mut reader, 0, 72).unwrap();
+        let mut reader = FitsReader::open(Cursor::new(file.as_slice())).unwrap();
+        let planes = read_extension_in_chunks::<f32, _>(&mut reader, 0, 72).unwrap();
         assert_eq!(planes.len(), 3);
         for (slice, plane) in planes.iter().enumerate() {
             assert_eq!(plane, &samples[slice * 15..(slice + 1) * 15]);
         }
-        let planes = read_extension_in_chunks::<u8>(&mut reader, 1, 1).unwrap();
+        let planes = read_extension_in_chunks::<u8, _>(&mut reader, 1, 1).unwrap();
         assert_eq!(planes.as_slice(), [bytes]);
         // The cube again, compressed as one tile of all three slices, which each chunk decodes.
-        let planes = read_extension_in_chunks::<f32>(&mut reader, 2, 72).unwrap();
+        let planes = read_extension_in_chunks::<f32, _>(&mut reader, 2, 72).unwrap();
         for (slice, plane) in planes.iter().enumerate() {
             assert_eq!(plane, &samples[slice * 15..(slice + 1) * 15]);
         }
@@ -454,13 +442,11 @@ mod tests {
         assert_eq!(extension_read_bytes(&reader, 0).unwrap(), 184 + 180);
         assert_eq!(extension_read_bytes(&reader, 1).unwrap(), 16 + 15);
 
-        let mut corrupt = fs::read(&path).unwrap();
         // The last sample of the cube, 44.0, ends the first data block's 180 bytes.
-        corrupt[BLOCK_SIZE + 179] ^= 0x01;
-        fs::write(&path, corrupt).unwrap();
-        let mut reader = selected_fits::open(&path, &ctx).unwrap();
+        file[BLOCK_SIZE + 179] ^= 0x01;
+        let mut reader = FitsReader::open(Cursor::new(file.as_slice())).unwrap();
         assert_eq!(
-            fits_refusal(read_extension_in_chunks::<f32>(&mut reader, 0, 72).unwrap_err()),
+            fits_refusal(read_extension_in_chunks::<f32, _>(&mut reader, 0, 72).unwrap_err()),
             FitsRefusal::ChecksumRequired {
                 hdu: 0,
                 report: ChecksumReport {

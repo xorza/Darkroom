@@ -88,12 +88,12 @@ pub(crate) mod internals {
     use crate::ops::blend::{Blend, BlendMode};
 
     /// One channel value blended against its destination: both normalized, blended, scaled back
-    /// and clamped to the full scale, then narrowed by the crate's rounding rule. A NaN from a
-    /// float channel or alpha survives the clamp, as `f32::clamp` leaves it.
+    /// and narrowed by the crate's rounding rule, which saturates an integer to its full scale and
+    /// keeps an `f32`, a NaN included.
     #[inline]
     fn blend_value<T: Sample>(src: T, dst: T, mode: BlendMode, alpha: f32) -> T {
         let blended = mode.blend(src.to_unit(), dst.to_unit(), alpha);
-        T::from_f32((blended * T::FULL_SCALE_F32).clamp(0.0, T::FULL_SCALE_F32))
+        T::from_f32(blended * T::FULL_SCALE_F32)
     }
 
     /// Blends one pixel in place: `params.mode` over the leading `color_count` channels,

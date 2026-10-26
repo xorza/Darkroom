@@ -47,10 +47,12 @@ impl Kernel for AffineRow<'_, u8> {
         let lanes = Lanes::new(isa, self.affine, self.alpha);
         row_groups::in_place::<u8, U8_LANES>(self.row, |bytes| {
             let (octets, _) = bytes.as_chunks::<I32_LANES>();
-            let ints = [0, 1, 2, 3].map(|idx| {
-                let values = isa.load_u8_as_i32(&octets[idx]).to_f32();
-                isa.round_clamped_f32(lanes.affine(values), lanes.max)
-            });
+            let ints = [
+                lanes.rounded(isa, isa.load_u8_as_i32(&octets[0]).to_f32()),
+                lanes.rounded(isa, isa.load_u8_as_i32(&octets[1]).to_f32()),
+                lanes.rounded(isa, isa.load_u8_as_i32(&octets[2]).to_f32()),
+                lanes.rounded(isa, isa.load_u8_as_i32(&octets[3]).to_f32()),
+            ];
             isa.narrow_i32_to_u8(ints).store(bytes);
         });
     }
@@ -65,15 +67,14 @@ impl Kernel for AffineRow<'_, u16> {
         let lanes = Lanes::new(isa, self.affine, self.alpha);
         row_groups::in_place::<u16, U16_LANES>(self.row, |words| {
             let ints = isa.load_u16(words).widen();
-            let [low, high] = [ints.low, ints.high]
-                .map(|ints| isa.round_clamped_f32(lanes.affine(ints.to_f32()), lanes.max));
+            let low = lanes.rounded(isa, ints.low.to_f32());
+            let high = lanes.rounded(isa, ints.high.to_f32());
             low.narrow_u16(high).store(words);
         });
     }
 }
 
-/// Eight samples a step. `f32` storage clamps and keeps the value, a NaN included: `f32::clamp`'s
-/// two compares, `low > x ? low : x`, then `x > high ? high : x`.
+/// Eight samples a step. `f32` storage keeps the affine as it is, unbounded.
 impl Kernel for AffineRow<'_, f32> {
     type Output = ();
 
@@ -81,26 +82,19 @@ impl Kernel for AffineRow<'_, f32> {
     fn run<S: Isa>(self, isa: S) {
         let lanes = Lanes::new(isa, self.affine, self.alpha);
         row_groups::in_place::<f32, F32_LANES>(self.row, |samples| {
-            let adjusted = lanes.affine(isa.load_f32(samples));
-            lanes
-                .low
-                .max(adjusted)
-                .min_positive(lanes.high)
-                .store(samples);
+            lanes.affine(isa.load_f32(samples)).store(samples);
         });
     }
 }
 
-/// The affine's constants, lane by lane, set once per row. An alpha lane takes `x · 1 + (−0)`
-/// and the bounds `±∞`, which keep every value as it is, a signed zero and a NaN included: a
-/// select of the input there would let the compiler turn the select and its store into a masked
-/// store, which measured six times slower on Zen 3.
+/// The affine's constants, lane by lane, set once per row. An alpha lane takes `x · 1 + (−0)`,
+/// which keeps every value as it is, a signed zero and a NaN included: a select of the input there
+/// would let the compiler turn the select and its store into a masked store, which measured six
+/// times slower on Zen 3.
 #[derive(Debug, Clone, Copy)]
 struct Lanes<F: F32x8> {
     scale: F,
     offset: F,
-    low: F,
-    high: F,
     /// `max` in every lane: the integer kernels' round bound, an integer as the round takes it,
     /// which leaves an alpha lane's sample as it is.
     max: F,
@@ -119,8 +113,6 @@ impl<F: F32x8> Lanes<F> {
         Self {
             scale: lanes(scale, 1.0),
             offset: lanes(offset, -0.0),
-            low: lanes(0.0, f32::NEG_INFINITY),
-            high: lanes(max, f32::INFINITY),
             max: isa.splat_f32(max),
         }
     }
@@ -129,5 +121,12 @@ impl<F: F32x8> Lanes<F> {
     #[inline(always)]
     fn affine(self, values: F) -> F {
         values * self.scale + self.offset
+    }
+
+    /// [`Self::affine`] of `values`, clamped to `[0, max]` and rounded, as an integer kernel stores
+    /// it.
+    #[inline(always)]
+    fn rounded<S: Isa<F32 = F>>(self, isa: S, values: F) -> S::I32 {
+        isa.round_clamped_f32_to_i32(self.affine(values), self.max)
     }
 }

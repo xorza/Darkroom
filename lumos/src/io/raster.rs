@@ -4,13 +4,15 @@
 //! FITS and RAW have their own decoders under `fits/` and `raw/`; a raster is read through
 //! imaginarium in one call, so what is left here is what each product makes of it.
 
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufRead, BufWriter, Seek, Write};
 use std::path::Path;
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, Size2us, fs};
-use imaginarium::{ChannelCount, InterleavedImage, PlanarImage, RasterFormat};
+use common::{Size2us, SystemMemory, fs};
+use imaginarium::{ChannelCount, InterleavedImage, PlanarDesc, PlanarImage, RasterFormat};
 
+use crate::error::Cancelled;
+use crate::frame::frame_info::DecoderBytes;
 use crate::image::frame_desc::MAX_SIDE;
 use crate::image::linear_image::LinearImage;
 use crate::image::metadata::derived_facts::DerivedFacts;
@@ -21,20 +23,31 @@ use crate::image::metadata::image_provenance::{
 };
 use crate::image::metadata::observation_header::ObservationHeader;
 use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::error::{ImageError, ScientificRefusal, WriteError};
+use crate::io::error::{RasterLoadError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
-use crate::io::null_policy::NullSamples;
+use crate::io::null_policy::CountedPlane;
 
-/// The `format` image at `path`, decoded by imaginarium.
-fn read(path: &Path, format: RasterFormat) -> Result<InterleavedImage, ImageError> {
-    let file = fs::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    InterleavedImage::decode(BufReader::new(file), format).map_err(|source| ImageError::Image {
-        path: path.to_path_buf(),
-        source,
-    })
+/// The `format` image `source` holds, decoded by imaginarium, refused when its header states more
+/// samples than the process can allocate now.
+pub(crate) fn read(
+    source: impl BufRead + Seek,
+    format: RasterFormat,
+) -> Result<InterleavedImage, RasterLoadError> {
+    Ok(format.decode(source, SystemMemory::available())?)
+}
+
+/// What a raster decode of a frame of `desc` holds beside the planes it makes: the interleaved
+/// samples the codec decoded, which a mono frame's plane keeps as its own and a color frame's
+/// three planes are copied out of.
+pub(crate) const fn decoded_beside(desc: PlanarDesc) -> DecoderBytes {
+    DecoderBytes {
+        source: 0,
+        beside: if desc.channel_count() == 1 {
+            0
+        } else {
+            desc.byte_len()
+        },
+    }
 }
 
 /// What a raster decode of a `format` file records: imaginarium decoded it, it stores its first
@@ -54,35 +67,28 @@ const fn provenance(
     }
 }
 
-/// The `format` raster at `path` as a linear image: a floating-point TIFF, taken as linear, of no
-/// alpha and of sides a frame may have, its nulls resolved by the context's policy. Every other
+/// The `format` raster `source` holds as a linear image: a floating-point TIFF, taken as linear, of
+/// no alpha and of sides a frame may have, its nulls resolved by the context's policy. Every other
 /// raster is refused, an integer one among them: its samples are display-encoded.
 pub(crate) fn linear(
-    path: &Path,
+    source: impl BufRead + Seek,
     format: RasterFormat,
     ctx: &LoadCtx,
-) -> Result<LinearImage, ImageError> {
+) -> Result<LinearImage, RasterLoadError> {
     if format != RasterFormat::Tiff {
-        return Err(ImageError::scientific_rejection(
-            path,
+        return Err(RasterLoadError::Refused(
             ScientificRefusal::PreviewOnlyRaster { format },
         ));
     }
-    let decoded = read(path, format)?;
-    ctx.check_cancelled(path)?;
+    let decoded = read(source, format)?;
+    Cancelled::check(&ctx.cancel)?;
     let desc = decoded.desc();
-    check_side(path, desc.size())?;
+    check_side(desc.size())?;
     if !desc.color_format().sample_type.is_float() {
-        return Err(ImageError::scientific_rejection(
-            path,
-            ScientificRefusal::IntegerRaster,
-        ));
+        return Err(RasterLoadError::Refused(ScientificRefusal::IntegerRaster));
     }
     if desc.color_format().channel_count == ChannelCount::Rgba {
-        return Err(ImageError::scientific_rejection(
-            path,
-            ScientificRefusal::AlphaChannel,
-        ));
+        return Err(RasterLoadError::Refused(ScientificRefusal::AlphaChannel));
     }
 
     let color = if desc.color_format().channel_count == ChannelCount::Mono {
@@ -97,13 +103,9 @@ pub(crate) fn linear(
     let flags = {
         let mut planes = image
             .planes_mut()
-            .map(Buffer2::pixels_mut)
-            .collect::<ArrayVec<&mut [f32], 3>>();
-        ctx.nulls
-            .resolve(&mut planes, size)
-            .map_err(|NullSamples { count, first_idx }| {
-                ImageError::null_samples(path, count, first_idx)
-            })?
+            .map(|plane| CountedPlane::count(plane.pixels_mut()))
+            .collect::<ArrayVec<CountedPlane<'_>, 3>>();
+        ctx.nulls.resolve(&mut planes, size, None)?
     };
     image.set_flags(flags);
     // A float raster is taken as it stands, so one sample is one unit of whatever the file already
@@ -120,18 +122,17 @@ pub(crate) fn linear(
     Ok(image)
 }
 
-/// The `format` raster at `path` as a preview, in `f32` planes, an alpha channel dropped.
+/// The `format` raster `source` holds as a preview, in `f32` planes, an alpha channel dropped.
 pub(crate) fn preview(
-    path: &Path,
+    source: impl BufRead + Seek,
     format: RasterFormat,
     ctx: &LoadCtx,
-) -> Result<LinearImage, ImageError> {
-    let decoded = read(path, format)?;
-    ctx.check_cancelled(path)?;
-    check_side(path, decoded.desc().size())?;
+) -> Result<LinearImage, RasterLoadError> {
+    let decoded = read(source, format)?;
+    Cancelled::check(&ctx.cancel)?;
+    check_side(decoded.desc().size())?;
     let alpha_dropped = decoded.desc().color_format().has_alpha();
-    let planes =
-        PlanarImage::try_from(decoded.without_alpha()).expect("a raster without alpha has planes");
+    let planes = PlanarImage::without_alpha(&decoded);
     let mut image = LinearImage::from(planes);
     image.metadata = ImageMetadata {
         header: ObservationHeader::default(),
@@ -147,12 +148,9 @@ pub(crate) fn preview(
 }
 
 /// A raster of `size` refused when a side is past [`MAX_SIDE`], the longest a frame has.
-fn check_side(path: &Path, size: Size2us) -> Result<(), ImageError> {
+const fn check_side(size: Size2us) -> Result<(), RasterLoadError> {
     if size.width > MAX_SIDE || size.height > MAX_SIDE {
-        return Err(ImageError::RasterSideTooLong {
-            path: path.to_path_buf(),
-            size,
-        });
+        return Err(RasterLoadError::SideTooLong(size));
     }
     Ok(())
 }
@@ -170,49 +168,48 @@ pub(crate) fn write_image(path: &Path, image: &InterleavedImage) -> Result<(), W
     })?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
-        image.encode(&mut out, format)?;
+        format.encode(image, &mut out)?;
         Ok::<_, WriteError>(out.flush()?)
     })
 }
 
-#[cfg(all(test, feature = "real-data"))]
-pub(crate) mod internals {
-    use imaginarium::{InterleavedImage, RasterFormat};
-    use std::path::Path;
-
-    use crate::io::error::ImageError;
-    use crate::io::raster;
-
-    /// The dataset's raster at `path`, in the format its extension names.
-    pub(crate) fn read_image(path: &Path) -> Result<InterleavedImage, ImageError> {
-        let format = RasterFormat::from_path(path).expect("a dataset raster's extension names it");
-        raster::read(path, format)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use common::Size2us;
 
+    use crate::frame::frame_info::DecoderBytes;
     use crate::image::frame_desc::MAX_SIDE;
-    use crate::io::error::ImageError;
-    use crate::io::raster::check_side;
+    use crate::io::error::RasterLoadError;
+    use crate::io::raster::{check_side, decoded_beside};
+    use imaginarium::{ChannelLayout, PlanarDesc};
 
     /// A side of `MAX_SIDE` is a frame's, one more on either side is not, and the error names the
-    /// file and its size.
+    /// size.
     #[test]
     fn a_raster_side_past_the_frame_limit_is_refused() {
-        let path = Path::new("wide.tiff");
-        assert!(check_side(path, Size2us::new(MAX_SIDE, MAX_SIDE)).is_ok());
+        assert!(check_side(Size2us::new(MAX_SIDE, MAX_SIDE)).is_ok());
         for size in [Size2us::new(MAX_SIDE + 1, 1), Size2us::new(1, MAX_SIDE + 1)] {
-            let error = check_side(path, size).unwrap_err();
+            let error = check_side(size).unwrap_err();
             assert!(
-                matches!(&error, ImageError::RasterSideTooLong { path: at, size: refused }
-                    if at == path && *refused == size),
+                matches!(&error, RasterLoadError::SideTooLong(refused) if *refused == size),
                 "{error:?}"
             );
         }
+    }
+
+    /// A color raster's decode holds its interleaved samples, as many bytes as the frame's planes,
+    /// beside them: 4·3·6 = 72 for a 3×2 RGB frame. A mono frame's plane is the decoded buffer.
+    #[test]
+    fn a_color_raster_holds_its_interleaved_samples_beside_the_planes() {
+        let rgb = PlanarDesc::new((3, 2), ChannelLayout::Rgb);
+        assert_eq!(
+            decoded_beside(rgb),
+            DecoderBytes {
+                source: 0,
+                beside: 72
+            }
+        );
+        let mono = PlanarDesc::new((3, 2), ChannelLayout::Mono);
+        assert_eq!(decoded_beside(mono), DecoderBytes::default());
     }
 }

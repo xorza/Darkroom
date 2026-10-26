@@ -30,9 +30,9 @@ where
     let planar = Image::take_planar(value).map_err(|error| {
         InvokeError::invalid_input(0, "an image with no side past 2^30 px", error)
     })?;
-    task::spawn_blocking(move || op(planar))
+    task::run_blocking(move || op(planar))
         .await
-        .map_err(InvokeError::external)?
+        .map_err(|task::Shutdown| InvokeError::Cancelled)?
         .map_err(InvokeError::external)
 }
 
@@ -43,9 +43,9 @@ where
     T: Send + 'static,
 {
     let cancel_for_op = cancel.clone();
-    match task::spawn_blocking(move || op(cancel_for_op))
+    match task::run_blocking(move || op(cancel_for_op))
         .await
-        .map_err(InvokeError::external)?
+        .map_err(|task::Shutdown| InvokeError::Cancelled)?
     {
         Ok(value) => Ok(value),
         Err(_) if cancel.is_cancelled() => Err(InvokeError::Cancelled),

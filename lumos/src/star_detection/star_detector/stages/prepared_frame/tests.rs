@@ -127,20 +127,30 @@ fn the_median_filter_follows_interpolation() {
 
 /// Weights are `1/σ²` normalized: equal σ give a third each; σ 1/64, 1/64 and 1/16 give relative
 /// weights 1, 1 and 1/16, so 16/33, 16/33 and 1/33. A tiny σ does not overflow, since only the
-/// ratios enter. A channel with no noise takes the whole weight, shared among such channels.
+/// ratios enter. A channel with signal and no noise takes the whole weight, shared among such
+/// channels. A constant channel (`None`) weighs nothing: red alone of σ 0.25 beside two of one
+/// value takes it all, where reading their 0 as no noise gave them all of it; three constant
+/// channels share alike.
 #[test]
 fn detection_weights_are_inverse_variances() {
-    assert_eq!(inverse_variance_weights([0.25; 3]), [1.0 / 3.0; 3]);
+    let all = |sigmas: [f32; 3]| inverse_variance_weights(sigmas.map(Some));
+    assert_eq!(all([0.25; 3]), [1.0 / 3.0; 3]);
     assert_eq!(
-        inverse_variance_weights([1.0 / 64.0, 1.0 / 64.0, 1.0 / 16.0]),
+        all([1.0 / 64.0, 1.0 / 64.0, 1.0 / 16.0]),
         [16.0 / 33.0, 16.0 / 33.0, 1.0 / 33.0]
     );
+    assert_eq!(all([1e-30, 1e-30, 4e-30]), all([1.0, 1.0, 4.0]));
+    assert_eq!(all([0.0, 0.25, 0.0]), [0.5, 0.0, 0.5]);
+    assert_eq!(all([0.0; 3]), [1.0 / 3.0; 3]);
     assert_eq!(
-        inverse_variance_weights([1e-30, 1e-30, 4e-30]),
-        inverse_variance_weights([1.0, 1.0, 4.0])
+        inverse_variance_weights([Some(0.25), None, None]),
+        [1.0, 0.0, 0.0]
     );
-    assert_eq!(inverse_variance_weights([0.0, 0.25, 0.0]), [0.5, 0.0, 0.5]);
-    assert_eq!(inverse_variance_weights([0.0; 3]), [1.0 / 3.0; 3]);
+    assert_eq!(
+        inverse_variance_weights([Some(1.0 / 64.0), Some(1.0 / 16.0), None]),
+        [16.0 / 17.0, 1.0 / 17.0, 0.0]
+    );
+    assert_eq!(inverse_variance_weights([None; 3]), [1.0 / 3.0; 3]);
 }
 
 /// The weights read the white noise, not the spread: a red channel carrying a strong gradient on
@@ -205,7 +215,7 @@ fn prepare_rgb_red_star_survives() {
     r[5] = 0.90; // bright red star, off the symmetric background
     let g = channel_with_mad(0.10, 0.01);
     let b = channel_with_mad(0.10, 0.01);
-    let image = LinearImage::from_planar_channels(desc, vec![r, g, b]);
+    let image = LinearImage::from_planar_channels(desc, vec![r.clone(), g, b]);
 
     let pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &pool);
@@ -218,6 +228,12 @@ fn prepare_rgb_red_star_survives() {
         "red star pixel {}",
         out[5]
     );
+
+    // Green and blue of one value, a dead pair, hold nothing: red takes the whole weight, and the
+    // detection plane is red itself.
+    let red_only = LinearImage::from_planar_channels(desc, vec![r, vec![0.0; 16], vec![0.0; 16]]);
+    let out = prepare(&red_only, &pool);
+    assert_eq!(out[5], 0.90);
 }
 
 /// Without decoder flags the test runs per channel at 0.95 of the ceiling: a
@@ -254,7 +270,7 @@ fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
 /// A demosaiced frame of pure noise, as the demosaic correlates it: white noise of σ 0.01 on a sky
 /// of 0.1 laid out as an RGGB mosaic and interpolated by RCD.
 fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::cfa::make_cfa;
@@ -266,7 +282,7 @@ fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
     let mut image = make_cfa(
         size,
         pixels,
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     )
     .demosaic_measured(MarkesteijnPasses::One);
     image.metadata.derived.set_provenance(Some(ImageProvenance {

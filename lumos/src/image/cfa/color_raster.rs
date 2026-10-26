@@ -79,7 +79,7 @@ impl ColorRaster {
 
 #[cfg(test)]
 mod tests {
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::color_raster::ColorRaster;
     use crate::image::cfa::mosaic::Mosaic;
@@ -101,8 +101,8 @@ mod tests {
         ])
         .unwrap();
         for cfa in [
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg)),
             CfaType::Mosaic(Mosaic::XTrans(xtrans)),
         ] {
             for (width, height) in [(12, 12), (13, 7), (7, 13), (1, 1), (5, 2)] {

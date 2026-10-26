@@ -81,6 +81,13 @@ impl F64x4 for PortableF64 {
 
     #[inline(always)]
     fn pow2i(self) -> Self {
+        debug_assert!(
+            self.0
+                .iter()
+                .all(|&n| n.fract() == 0.0 && (-1022.0..=1023.0).contains(&n)),
+            "pow2i of {:?}, not every lane an integer in [−1022, 1023]",
+            self.0
+        );
         Self(
             self.0
                 .map(|n| f64::from_bits(((n as i64 + 1023) << 52).cast_unsigned())),

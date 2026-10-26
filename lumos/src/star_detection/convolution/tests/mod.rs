@@ -14,10 +14,10 @@ use crate::internals::synthetic::patterns;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
 use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, KernelShape};
 use crate::star_detection::convolution::internals::*;
 use crate::star_detection::convolution::*;
-use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
 
 /// `pixels` less `bg`: the residual the matched filter takes.
 fn less(pixels: &Buffer2<f32>, bg: &Buffer2<f32>) -> Buffer2<f32> {

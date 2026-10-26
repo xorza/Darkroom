@@ -1,6 +1,7 @@
 //! What share of the frames reached each output pixel.
 
 use common::Buffer2;
+use imaginarium::PlanarImage;
 
 use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
@@ -44,7 +45,9 @@ impl From<Coverage> for LinearImage {
     fn from(coverage: Coverage) -> Self {
         match coverage {
             Coverage::PerPixel(map) => map.into(),
-            uniform @ Coverage::Uniform { .. } => uniform.to_plane(0).into(),
+            uniform @ Coverage::Uniform { .. } => {
+                Self::from(PlanarImage::new_mono(uniform.to_plane(0)))
+            }
         }
     }
 }

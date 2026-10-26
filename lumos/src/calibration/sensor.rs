@@ -91,7 +91,7 @@ mod tests {
     use crate::calibration::error::CalibrationError;
     use crate::calibration::master_role::MasterRole;
     use crate::calibration::sensor::Sensor;
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::cfa::constant_cfa;
@@ -102,7 +102,7 @@ mod tests {
     /// no pattern, so only its extent is compared. None at all share no sensor.
     #[test]
     fn the_first_component_sets_the_sensor_the_rest_are_refused_against() {
-        let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+        let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
         let bias = constant_cfa(Size2us::new(2, 2), 0.1, rggb);
         let dark = constant_cfa(Size2us::new(4, 2), 0.1, CfaType::Mono);
         let master =

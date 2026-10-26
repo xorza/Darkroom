@@ -9,12 +9,11 @@ use std::f32::consts::PI;
 
 use common::Size2us;
 use glam::Vec2;
-use imaginarium::{AffineWarp, FilterMode, Gpu, GpuAffineWarpPipeline, GpuImage, InterleavedDesc};
+use imaginarium::{AffineWarp, FilterMode, Gpu, GpuImage, InterleavedDesc};
 use shared::{load_lena_rgba_u8, print_image_info, save_image};
 
 fn main() {
     let ctx = Gpu::new().expect("Failed to create GPU context");
-    let pipeline = GpuAffineWarpPipeline::new(&ctx);
 
     let input_cpu = load_lena_rgba_u8();
     print_image_info("Input", &input_cpu);
@@ -33,7 +32,7 @@ fn main() {
     .expect("allocate");
     AffineWarp::new()
         .scale(Vec2::new(0.5, 0.5))
-        .apply_gpu(&ctx, &pipeline, &input, &mut output);
+        .apply_gpu(&ctx, &input, &mut output);
     let output_cpu = output.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_scale_down.png");
 
@@ -44,27 +43,21 @@ fn main() {
     .expect("allocate");
     AffineWarp::new()
         .scale(Vec2::new(1.5, 1.5))
-        .apply_gpu(&ctx, &pipeline, &input, &mut output);
+        .apply_gpu(&ctx, &input, &mut output);
     let output_cpu = output.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_scale_up.png");
 
     let mut output = GpuImage::new_empty(&ctx, input_cpu.desc()).expect("allocate");
-    AffineWarp::new().rotate_around(PI / 4.0, center).apply_gpu(
-        &ctx,
-        &pipeline,
-        &input,
-        &mut output,
-    );
+    AffineWarp::new()
+        .rotate_around(PI / 4.0, center)
+        .apply_gpu(&ctx, &input, &mut output);
     let output_cpu = output.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_rotate_45.png");
 
     let mut output = GpuImage::new_empty(&ctx, input_cpu.desc()).expect("allocate");
-    AffineWarp::new().rotate_around(PI / 2.0, center).apply_gpu(
-        &ctx,
-        &pipeline,
-        &input,
-        &mut output,
-    );
+    AffineWarp::new()
+        .rotate_around(PI / 2.0, center)
+        .apply_gpu(&ctx, &input, &mut output);
     let output_cpu = output.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_rotate_90.png");
 
@@ -78,36 +71,30 @@ fn main() {
         .rotate(PI / 6.0)
         .translate(Vec2::new(200.0, 100.0))
         .filter(FilterMode::Bilinear)
-        .apply_gpu(&ctx, &pipeline, &input, &mut output);
+        .apply_gpu(&ctx, &input, &mut output);
     let output_cpu = output.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_combined.png");
 
     let mut buffer_a = input.clone_buffer(&ctx).expect("copy");
     let mut buffer_b = input.clone_buffer(&ctx).expect("copy");
 
-    AffineWarp::new().rotate_around(PI / 6.0, center).apply_gpu(
-        &ctx,
-        &pipeline,
-        &buffer_a,
-        &mut buffer_b,
-    );
+    AffineWarp::new()
+        .rotate_around(PI / 6.0, center)
+        .apply_gpu(&ctx, &buffer_a, &mut buffer_b);
 
     AffineWarp::new()
         .scale(Vec2::new(0.9, 0.9))
         .translate(center * 0.1)
-        .apply_gpu(&ctx, &pipeline, &buffer_b, &mut buffer_a);
+        .apply_gpu(&ctx, &buffer_b, &mut buffer_a);
 
-    AffineWarp::new().rotate_around(PI / 6.0, center).apply_gpu(
-        &ctx,
-        &pipeline,
-        &buffer_a,
-        &mut buffer_b,
-    );
+    AffineWarp::new()
+        .rotate_around(PI / 6.0, center)
+        .apply_gpu(&ctx, &buffer_a, &mut buffer_b);
 
     AffineWarp::new()
         .scale(Vec2::new(0.9, 0.9))
         .translate(center * 0.1)
-        .apply_gpu(&ctx, &pipeline, &buffer_b, &mut buffer_a);
+        .apply_gpu(&ctx, &buffer_b, &mut buffer_a);
 
     let output_cpu = buffer_a.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_multi_pass.png");
@@ -120,7 +107,7 @@ fn main() {
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Nearest)
-        .apply_gpu(&ctx, &pipeline, &input, &mut output_nearest);
+        .apply_gpu(&ctx, &input, &mut output_nearest);
     let output_cpu = output_nearest.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_upscale_nearest.png");
 
@@ -132,7 +119,7 @@ fn main() {
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Bilinear)
-        .apply_gpu(&ctx, &pipeline, &input, &mut output_bilinear);
+        .apply_gpu(&ctx, &input, &mut output_bilinear);
     let output_cpu = output_bilinear.to_image(&ctx).unwrap();
     save_image(&output_cpu, "affine_warp_upscale_bilinear.png");
 

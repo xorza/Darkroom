@@ -2,16 +2,8 @@
 
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
-use crate::star_detection::convolution::filter_kernels::KernelShape;
-
-/// The narrowest FWHM a star is taken to have, in px: anything narrower is a cosmic ray or a hot
-/// pixel.
-pub(crate) const MIN_FWHM: f32 = 0.5;
-
-/// The widest FWHM a star is taken to have, in px: anything broader is a galaxy, a nebula or an
-/// artifact. It bounds a configured matched filter as it bounds an estimated one, whose kernel
-/// reaches 3σ.
-pub(crate) const MAX_FWHM: f32 = 20.0;
+use crate::star_detection::convolution::filter_kernels::{KernelShape, MatchedFilter};
+use crate::star_detection::convolution::{MAX_FWHM, MIN_FWHM};
 
 /// Where the matched filter's FWHM comes from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -48,15 +40,6 @@ pub struct FwhmConfig {
     pub psf_axis_ratio: f32,
     /// Angle of the matched filter's PSF, in radians.
     pub psf_angle: f32,
-}
-
-/// The matched filter's PSF: a Gaussian of `fwhm` along its major axis, before the pixel integrates
-/// it, as [`Star::fwhm`](crate::star_detection::star::Star::fwhm) reports it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct MatchedFilter {
-    pub(crate) fwhm: f32,
-    pub(crate) axis_ratio: f32,
-    pub(crate) angle: f32,
 }
 
 impl Default for FwhmConfig {

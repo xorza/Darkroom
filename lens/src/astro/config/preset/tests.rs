@@ -142,10 +142,21 @@ fn each_pick_builds_the_preset_it_names() {
     ] {
         same(&pick.config(), &preset);
     }
-    // A pick sets the method; the lights keep their policy.
+    // A pick sets the method at the light preset's σ; the lights keep their policy, and the
+    // sigma-clipped pick is the light preset itself.
+    assert_eq!(
+        CombineMethodChoice::SigmaClipped.config(),
+        StackConfig::light()
+    );
     for (pick, combine) in [
-        (CombineMethodChoice::SigmaClipped, Combine::sigma_clip(3.0)),
-        (CombineMethodChoice::Winsorized, Combine::winsorized(3.0)),
+        (
+            CombineMethodChoice::SigmaClipped,
+            Combine::sigma_clip(StackConfig::LIGHT_SIGMA),
+        ),
+        (
+            CombineMethodChoice::Winsorized,
+            Combine::winsorized(StackConfig::LIGHT_SIGMA),
+        ),
         (CombineMethodChoice::Median, Combine::median()),
         (CombineMethodChoice::Mean, Combine::mean()),
     ] {

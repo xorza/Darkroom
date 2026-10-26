@@ -1,14 +1,11 @@
 //! Image resampling orchestration for registered frames.
 
-use std::slice;
-
 use arrayvec::ArrayVec;
 use common::{Buffer2, par};
 use imaginarium::{PlanarDesc, PlanarImage};
+use rayon::iter::Either;
 use rayon::prelude::*;
 
-use crate::frame::frame_quality::FrameQuality;
-use crate::frame_store::frame_buffers::{FrameBuffers, NewFrame};
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::frame_gain::FrameGain;
 use crate::image::linear_image::LinearImage;
@@ -22,7 +19,6 @@ use crate::registration::resample::source_image::SourceImage;
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::warp_transform::WarpTransform;
 use crate::scratch_pool::{ScratchPool, Shapeless};
-use crate::unsafe_send_ptr::UnsafeSendPtr;
 use common::Size2us;
 
 mod flagged_sources;
@@ -97,36 +93,12 @@ pub(crate) struct RowScratch {
 
 impl Shapeless for RowScratch {}
 
-/// A warped frame on its way to its tier: the resident tier keeps the set as the frame, and the
-/// spilled one hands it back for the next frame's warp.
-impl FrameBuffers for WarpResult {
-    type Image = LinearImage;
-
-    fn image(&self) -> &LinearImage {
-        &self.image
-    }
-
-    fn quality(&self) -> FrameQuality<&Buffer2<f32>> {
-        FrameQuality::Planes {
-            coverage: &self.coverage,
-            confidence: &self.confidence,
-        }
-    }
-
-    fn into_new(self) -> NewFrame<LinearImage> {
-        let Self {
-            image,
-            coverage,
-            confidence,
-        } = self;
-        NewFrame {
-            image,
-            quality: FrameQuality::Planes {
-                coverage,
-                confidence,
-            },
-        }
-    }
+/// One output row's quality: its coverage and confidence, and its flags when the frame carries any.
+#[derive(Debug)]
+struct QualityRow<'a> {
+    coverage: &'a mut [f32],
+    confidence: &'a mut [f32],
+    flags: Option<&'a mut [u8]>,
 }
 
 /// A warp to run: its transform, and how it samples.
@@ -205,20 +177,16 @@ impl WarpResult {
                 border: config.border_value,
             };
             let sampler = FrameSampler::new(rule, image, flagged.as_ref());
-            let flag_rows = flag_plane
-                .as_mut()
-                .map(|plane| UnsafeSendPtr::new(plane.pixels_mut().as_mut_ptr()));
-
             let warp_row = |scratch: &mut RowScratch,
                             y: usize,
                             channel_rows: &mut [&mut [f32]],
-                            coverage_row: &mut [f32],
-                            confidence_row: &mut [f32]| {
+                            QualityRow {
+                                coverage: coverage_row,
+                                confidence: confidence_row,
+                                flags,
+                            }: QualityRow<'_>| {
                 scratch.poss.fill(y, warp_transform, size);
                 let poss = scratch.poss.poss();
-                let flags = flag_rows.map(|rows| unsafe {
-                    slice::from_raw_parts_mut(rows.get().add(y * width), width)
-                });
                 sampler.sample_row(
                     poss,
                     &mut scratch.axes,
@@ -231,34 +199,37 @@ impl WarpResult {
                 );
             };
 
+            // A plane of flags is a row's like the others; with none, each row writes none.
+            let flag_rows = match flag_plane.as_mut() {
+                Some(plane) => Either::Left(par::chunks_mut(plane.pixels_mut(), width).map(Some)),
+                None => Either::Right(par::into_iter(0..size.height).map(|_| None)),
+            };
             let quality_rows = par::chunks_mut(coverage.pixels_mut(), width)
-                .zip(par::chunks_mut(confidence.pixels_mut(), width));
+                .zip(par::chunks_mut(confidence.pixels_mut(), width))
+                .zip(flag_rows)
+                .map(|((coverage, confidence), flags)| QualityRow {
+                    coverage,
+                    confidence,
+                    flags,
+                });
             let mut planes: ArrayVec<&mut Buffer2<f32>, 3> = warped.planes_mut().collect();
             match planes.as_mut_slice() {
                 [mono] => par::chunks_mut(mono.pixels_mut(), width)
                     .zip(quality_rows)
                     .enumerate()
-                    .for_each(|(y, (channel, (coverage_row, confidence_row)))| {
+                    .for_each(|(y, (channel, quality))| {
                         let scratch = &mut scratch.rows.acquire();
-                        warp_row(scratch, y, &mut [channel], coverage_row, confidence_row);
+                        warp_row(scratch, y, &mut [channel], quality);
                     }),
                 [red, green, blue] => par::chunks_mut(red.pixels_mut(), width)
                     .zip(par::chunks_mut(green.pixels_mut(), width))
                     .zip(par::chunks_mut(blue.pixels_mut(), width))
                     .zip(quality_rows)
                     .enumerate()
-                    .for_each(
-                        |(y, (((red, green), blue), (coverage_row, confidence_row)))| {
-                            let scratch = &mut scratch.rows.acquire();
-                            warp_row(
-                                scratch,
-                                y,
-                                &mut [red, green, blue],
-                                coverage_row,
-                                confidence_row,
-                            );
-                        },
-                    ),
+                    .for_each(|(y, (((red, green), blue), quality))| {
+                        let scratch = &mut scratch.rows.acquire();
+                        warp_row(scratch, y, &mut [red, green, blue], quality);
+                    }),
                 _ => unreachable!("an image has one channel or three"),
             }
             drop(planes);

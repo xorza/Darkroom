@@ -33,9 +33,10 @@ pub enum DarkScaleSource {
     /// The light's exposure over the dark's, 1 when they agree or either is not stated: the fit
     /// kept `fit_pixels` hot pixels, fewer than it needs, or there was none to fit.
     Exposure { fit_pixels: usize },
-    /// The least-squares slope of the light's excess at the hot pixels on the dark's, through the
-    /// origin, after a 3σ clip: from `pixels` of them, with `standard_error`. It corrects a dark
-    /// of another exposure or temperature alike, since it measures the dark current itself.
+    /// The slope of the light's excess at the hot pixels on the dark's, through the origin,
+    /// corrected for the dark's noise, after a 3σ clip: from `pixels` of them, with
+    /// `standard_error`. It corrects a dark of another exposure or temperature alike, since it
+    /// measures the dark current itself.
     Fitted { pixels: usize, standard_error: f64 },
 }
 
@@ -50,10 +51,12 @@ pub(crate) struct FitLight<'a> {
     pub(crate) dark_gain: f64,
 }
 
-/// One hot pixel's pair: the dark's excess in the light's units, and the light's.
+/// One hot pixel's pair: the dark's excess in the light's units, the variance of the dark's noise
+/// in it, and the light's excess.
 #[derive(Debug, Clone, Copy)]
 struct Pair {
     dark: f64,
+    dark_variance: f64,
     light: f64,
 }
 
@@ -64,13 +67,18 @@ impl DarkScale {
     ///
     /// A hot pixel takes part unless the light has no measurement there or saturated it, or a
     /// master did — a dark that saturated a hot pixel cut its excess short — and is chosen on the
-    /// dark's excess alone: selecting on the regressor leaves a least-squares slope
-    /// unbiased, where selecting on the light would bias it. The light's excess is its sample less
-    /// the bias, less the same reference the dark's excess was taken against — a robust plane
-    /// through the ring of its color's photosites — so the sky, a gradient and the dark's
-    /// uniform current cancel. The flat does not shade dark current, so the fit reads the light
-    /// before it. The fit is `l = k·d` through the origin, refitted on the pairs within 3σ of the
-    /// residuals' median until they settle; its standard error is that σ over `√Σd²`.
+    /// dark's excess alone, as selecting on the light would bias the slope. The light's excess is
+    /// its sample less the bias, less the same reference the dark's excess was taken against — a
+    /// robust plane through the ring of its color's photosites — so the sky, a gradient and the
+    /// dark's uniform current cancel. The flat does not shade dark current, so the fit reads the
+    /// light before it.
+    ///
+    /// The dark's excess carries the dark's noise, which least squares on it attenuates by
+    /// `Σσ²/Σd²` — about 4% for excesses near the detection's 5σ — so the fit is the moment
+    /// estimator that removes it, for a regressor of known error variance (Fuller, *Measurement
+    /// Error Models*, 1987, ch. 1): `k = Σd·l / (Σd² − Σσ²)` through the origin, refitted on the
+    /// pairs within 3σ of the residuals' median until they settle; its standard error is that σ
+    /// over `√(Σd² − Σσ²)`.
     pub(crate) fn fit(hot: &HotPixels, light: FitLight<'_>, exposure_ratio: f64) -> Self {
         let pairs = light.pairs(hot);
         match fit_through_origin(&pairs) {
@@ -118,7 +126,8 @@ impl FitLight<'_> {
         let rings = PerWorker::new(RingReference::default);
         par::iter(&hot.idxs)
             .zip(&hot.excess)
-            .map(|(&idx, &excess)| {
+            .zip(&hot.noise)
+            .map(|((&idx, &excess), &noise)| {
                 if unmeasured(idx) {
                     return None;
                 }
@@ -131,6 +140,7 @@ impl FitLight<'_> {
                     .at(frame, &image.cfa_type(), size.point_of(idx))?;
                 Some(Pair {
                     dark: f64::from(excess) * self.dark_gain,
+                    dark_variance: (f64::from(noise) * self.dark_gain).powi(2),
                     light: less_bias(idx) - f64::from(level),
                 })
             })
@@ -139,7 +149,7 @@ impl FitLight<'_> {
     }
 }
 
-/// A clipped least-squares slope through the origin.
+/// A clipped slope through the origin, corrected for the noise in its regressor.
 #[derive(Debug, Clone, Copy)]
 struct Fit {
     slope: f64,
@@ -147,9 +157,9 @@ struct Fit {
     pixels: usize,
 }
 
-/// The slope of `light = k·dark` through the origin over `pairs`, refitted on the pairs within
-/// [`FIT_CLIP_SIGMAS`] of the residuals' median, in their MAD's σ, until the kept set settles;
-/// `None` for no pair with a dark excess.
+/// The slope of `light = k·dark` through the origin over `pairs`, `Σd·l / (Σd² − Σσ²)`, refitted
+/// on the pairs within [`FIT_CLIP_SIGMAS`] of the residuals' median, in their MAD's σ, until the
+/// kept set settles; `None` for no pair whose dark excess stands above its noise.
 fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
     let mut kept = vec![true; pairs.len()];
     let mut residuals = Vec::with_capacity(pairs.len());
@@ -160,7 +170,7 @@ fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
             |(moment, energy, pixels), (pair, _)| {
                 (
                     moment + pair.dark * pair.light,
-                    energy + pair.dark * pair.dark,
+                    energy + pair.dark * pair.dark - pair.dark_variance,
                     pixels + 1,
                 )
             },
@@ -199,4 +209,52 @@ fn fit_through_origin(pairs: &[Pair]) -> Option<Fit> {
         }
     }
     fit
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::calibration::dark_scale::{Pair, fit_through_origin};
+    use crate::math::statistics;
+
+    fn pair(dark: f64, dark_variance: f64, light: f64) -> Pair {
+        Pair {
+            dark,
+            dark_variance,
+            light,
+        }
+    }
+
+    /// The noise in the dark's excess is taken out of the fit. Two hot pixels of true excess 10
+    /// read 11 and 9 in a dark of noise σ = 1, and 20 in a light of twice the current: least
+    /// squares gives `(220 + 180) / (121 + 81) = 400/202`, the corrected fit `400 / (202 − 2) = 2`,
+    /// exact. The residuals −2 and 2 have median 0 and MAD 2, so the standard error is that MAD's σ
+    /// over `√200`. A pair whose excess does not stand above its noise, `d² ≤ σ²`, leaves no fit.
+    #[test]
+    fn the_fit_removes_the_dark_s_noise() {
+        let fit = fit_through_origin(&[pair(11.0, 1.0, 20.0), pair(9.0, 1.0, 20.0)]).unwrap();
+        assert_eq!(fit.slope, 2.0);
+        assert_eq!(fit.pixels, 2);
+        assert_eq!(
+            fit.standard_error,
+            statistics::sigma_of_mad(2.0, 2) / 200f64.sqrt()
+        );
+        assert!(fit_through_origin(&[pair(1.0, 1.0, 5.0)]).is_none());
+        assert!(fit_through_origin(&[]).is_none());
+    }
+
+    /// The clip drops a pair far off the line and refits on the rest: four pairs on `l = 3d`, and
+    /// one at `d = 4` reading 100, far past 3σ of the residuals' MAD. Without noise the refit is
+    /// least squares, 3 exactly, over the four kept.
+    #[test]
+    fn the_clip_refits_without_the_outlier() {
+        let mut pairs: Vec<Pair> = [1.0, 2.0, 3.0, 5.0]
+            .into_iter()
+            .map(|dark| pair(dark, 0.0, 3.0 * dark))
+            .collect();
+        pairs.push(pair(4.0, 0.0, 100.0));
+        let fit = fit_through_origin(&pairs).unwrap();
+        assert_eq!(fit.slope, 3.0);
+        assert_eq!(fit.pixels, 4);
+        assert_eq!(fit.standard_error, 0.0);
+    }
 }

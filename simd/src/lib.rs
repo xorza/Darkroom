@@ -34,6 +34,7 @@ mod backend;
 mod f32x8;
 mod f64x4;
 mod frexp;
+mod full_scale;
 mod halves;
 mod i32x8;
 mod isa;
@@ -65,6 +66,7 @@ pub use crate::backend::portable::{
 pub use crate::f32x8::{F32_LANES, F32x8};
 pub use crate::f64x4::{F64_LANES, F64x4};
 pub use crate::frexp::Frexp;
+pub use crate::full_scale::FullScale;
 pub use crate::halves::Halves;
 pub use crate::i32x8::{I32_LANES, I32x8};
 pub use crate::isa::{Isa, Mask};

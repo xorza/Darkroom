@@ -43,8 +43,12 @@ impl ReferenceTriangles {
     /// tolerance, noise can swap their order, and with it the vertex roles and the orientation the
     /// triangle reads; every permutation that trades only such roles votes too, its orientation
     /// test reversed when it is odd.
-    pub(super) fn vote(&self, target_triangles: &[Triangle], config: &TriangleConfig) -> Votes {
-        let mut votes = Votes::default();
+    pub(super) fn vote(
+        &self,
+        target_triangles: &[Triangle],
+        config: &TriangleConfig,
+        mut votes: Votes,
+    ) -> Votes {
         let mut candidates: Vec<usize> = Vec::new();
         let tolerance = config.ratio_tolerance;
 
@@ -70,7 +74,7 @@ impl ReferenceTriangles {
                             || target_tri.ties(i, roles[i], tolerance)
                     });
                     let same_orientation = ref_tri.orientation == target_tri.orientation;
-                    if !admissible || (config.check_orientation && same_orientation == odd) {
+                    if !admissible || same_orientation == odd {
                         continue;
                     }
                     for (i, &role) in roles.iter().enumerate() {

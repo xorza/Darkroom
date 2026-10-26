@@ -1,26 +1,16 @@
-use crate::gpu::Gpu;
+//! The op's GPU kernel, compiled once per device.
+
 use crate::gpu::compute_kernel::ComputeKernel;
-use crate::gpu::gpu_ctx::GpuPipeline;
+use crate::gpu::{Gpu, GpuOp};
 
-/// Cached GPU pipeline for contrast/brightness operations.
-/// Create once and reuse for multiple executions.
-#[derive(Debug)]
-pub struct GpuContrastBrightnessPipeline {
-    pub(super) kernel: ComputeKernel,
+/// The op's kernel on `gpu`, compiled on its first use there.
+pub(super) fn kernel(gpu: &Gpu) -> &ComputeKernel {
+    gpu.kernel(GpuOp::ContrastBrightness, |gpu| {
+        ComputeKernel::new(
+            gpu,
+            "contrast_brightness",
+            include_str!("contrast_brightness.wgsl"),
+            1,
+        )
+    })
 }
-
-impl GpuContrastBrightnessPipeline {
-    /// Compiles the contrast/brightness shader for `ctx`'s device.
-    pub fn new(ctx: &Gpu) -> Self {
-        Self {
-            kernel: ComputeKernel::new(
-                ctx,
-                "contrast_brightness",
-                include_str!("contrast_brightness.wgsl"),
-                2,
-            ),
-        }
-    }
-}
-
-impl GpuPipeline for GpuContrastBrightnessPipeline {}

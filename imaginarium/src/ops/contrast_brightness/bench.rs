@@ -17,8 +17,6 @@ use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::cpu::AffineKernel;
-#[cfg(feature = "wgpu")]
-use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 
 /// Both knobs off their identity values, so no path can short-circuit and the fused
@@ -75,8 +73,6 @@ pub(crate) fn atomic(c: &mut Criterion) {
 /// Per pixel, reading the frame.
 pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
     let mut group = Kind::Integration.group(c, "contrast_brightness", Scale::Millis);
-    #[cfg(feature = "wgpu")]
-    let mut pipeline = None;
     for format in ColorFormat::ALL {
         let mut source = None;
         let bytes = FRAME.pixel_count() * format.byte_len();
@@ -102,13 +98,10 @@ pub(crate) fn integration(c: &mut Criterion, backends: &Backends) {
                     #[cfg(feature = "wgpu")]
                     Backend::Gpu => {
                         let gpu = backends.gpu();
-                        let pipeline =
-                            pipeline.get_or_insert_with(|| GpuContrastBrightnessPipeline::new(gpu));
                         b.iter_with_large_drop(|| {
-                            let input = GpuImage::from_image(gpu, frame).unwrap();
-                            let mut output = GpuImage::new_empty(gpu, frame.desc()).unwrap();
-                            OP.apply_gpu(gpu, pipeline, &input, &mut output);
-                            output.to_image(gpu).unwrap()
+                            let mut image = GpuImage::from_image(gpu, frame).unwrap();
+                            OP.apply_gpu(gpu, &mut image);
+                            image.to_image(gpu).unwrap()
                         });
                     }
                 }

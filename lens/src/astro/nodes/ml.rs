@@ -2,19 +2,20 @@
 
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
+use common::FileIdentity;
 use lumos::{MlDenoise, MlError, OnnxModel, RemoveStars};
 use scenarium::{
-    ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId, FuncInput,
-    FuncOutput, Invocation, Library, async_lambda,
+    AnyState, ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, Func, FuncId,
+    FuncInput, FuncOutput, Invocation, InvokeError, Library, async_lambda,
 };
 
 use crate::astro::nodes::{MlModelPaths, runtime};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
-const DENOISE_FUNC_ID: FuncId = FuncId::from_u128(0xace7_86f9_8a02_4ed1_93a0_ad67_bf06_80f8);
-const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::from_u128(0x60c3_1a76_eed4_467c_9ba3_5c89_d294_a91b);
+const DENOISE_FUNC_ID: FuncId = FuncId::literal("ace786f9-8a02-4ed1-93a0-ad67bf0680f8");
+const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::literal("60c31a76-eed4-467c-9ba3-5c89d294a91b");
 
 pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
     register_denoise(library, &model_paths.denoise);
@@ -27,16 +28,24 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
             DENOISE_FUNC_ID,
             "ML Denoise",
             async_lambda!(move |Invocation {
-                                    inputs, outputs, ..
+                                    inputs,
+                                    outputs,
+                                    state,
+                                    ..
                                 }| {
                 debug_assert_eq!(inputs.len(), 2);
                 debug_assert_eq!(outputs.len(), 1);
-                let model = PathBuf::from(inputs[1].required_fs_path());
-                let output = runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
-                    MlDenoise::new(OnnxModel::load(model)?).apply(&mut image)?;
-                    Ok::<_, MlError>(image)
-                })
-                .await?;
+                let path = PathBuf::from(inputs[1].required_fs_path());
+                let kept = KeptModel::<MlDenoise>::shared(state, &path);
+                let (output, kept) =
+                    runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
+                        let kept = KeptModel::current(kept, path, denoise)?;
+                        let output = kept.lock().apply(&mut image).map(|()| image);
+                        Ok::<_, MlError>((output, kept))
+                    })
+                    .await?;
+                state.set(kept);
+                let output = output.map_err(InvokeError::external)?;
                 outputs[0] = DynamicValue::from_custom(Image::from(output));
                 Ok(())
             }),
@@ -56,29 +65,37 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
         Func::builder(
             STAR_REMOVAL_FUNC_ID,
             "ML Star Removal",
-            async_lambda!(move |Invocation { inputs, demand: output_demand, outputs, .. }| {
+            async_lambda!(move |Invocation { inputs, demand: output_demand, outputs, state, .. }| {
                 need_stars = !output_demand[1].is_skip(),
             } => {
                 debug_assert_eq!(inputs.len(), 2);
                 debug_assert_eq!(outputs.len(), 2);
-                let model = PathBuf::from(inputs[1].required_fs_path());
+                let path = PathBuf::from(inputs[1].required_fs_path());
+                let kept = KeptModel::<RemoveStars>::shared(state, &path);
                 if need_stars {
-                    let result =
+                    let (result, kept) =
                         runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
-                            RemoveStars::new(OnnxModel::load(model)?).split(image)
+                            let kept = KeptModel::current(kept, path, star_removal)?;
+                            let result = kept.lock().split(image);
+                            Ok::<_, MlError>((result, kept))
                         })
                         .await?;
+                    state.set(kept);
+                    let result = result.map_err(InvokeError::external)?;
                     outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
                     outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
                 } else {
-                    let starless = runtime::run_on_planes(
+                    let (starless, kept) = runtime::run_on_planes(
                         mem::take(&mut inputs[0]),
                         move |mut image| {
-                            RemoveStars::new(OnnxModel::load(model)?).apply(&mut image)?;
-                            Ok::<_, MlError>(image)
+                            let kept = KeptModel::current(kept, path, star_removal)?;
+                            let starless = kept.lock().apply(&mut image).map(|()| image);
+                            Ok::<_, MlError>((starless, kept))
                         },
                     )
                     .await?;
+                    state.set(kept);
+                    let starless = starless.map_err(InvokeError::external)?;
                     outputs[0] = DynamicValue::from_custom(Image::from(starless));
                 }
                 Ok(())
@@ -108,4 +125,105 @@ fn model_input(name: &str, default: &Path) -> FuncInput {
     )
     .description("ONNX model file. Its file identity participates in the node cache key.")
     .default(ConstValue::FsPath(default.display().to_string()))
+}
+
+/// The denoise model at `path`, loaded now.
+fn denoise(path: &Path) -> Result<MlDenoise, MlError> {
+    Ok(MlDenoise::new(OnnxModel::load(path)?))
+}
+
+/// The star-removal model at `path`, loaded now.
+fn star_removal(path: &Path) -> Result<RemoveStars, MlError> {
+    Ok(RemoveStars::new(OnnxModel::load(path)?))
+}
+
+/// A model a node loaded, shared with its state while the file it read stays the same: a load
+/// reads some 125 MB and builds an ONNX session, which a run of the node with the same file skips.
+/// The state keeps its share whatever becomes of the run, a failed one included.
+#[derive(Debug)]
+struct KeptModel<T> {
+    path: PathBuf,
+    identity: FileIdentity,
+    model: Arc<Mutex<T>>,
+}
+
+impl<T: Send + 'static> KeptModel<T> {
+    /// A share of the model `state` keeps for `path`; none for another path.
+    fn shared(state: &AnyState, path: &Path) -> Option<Self> {
+        state
+            .get::<Self>()
+            .filter(|kept| kept.path == path)
+            .map(|kept| Self {
+                path: kept.path.clone(),
+                identity: kept.identity,
+                model: Arc::clone(&kept.model),
+            })
+    }
+
+    /// `kept` while the file at `path` is the one it read, else what `load` makes of the file now.
+    fn current(
+        kept: Option<Self>,
+        path: PathBuf,
+        load: impl FnOnce(&Path) -> Result<T, MlError>,
+    ) -> Result<Self, MlError> {
+        let identity = FileIdentity::of(&path).map_err(|source| MlError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        if let Some(kept) = kept.filter(|kept| kept.identity == identity) {
+            return Ok(kept);
+        }
+        let model = Arc::new(Mutex::new(load(&path)?));
+        Ok(Self {
+            path,
+            identity,
+            model,
+        })
+    }
+
+    /// The model, for one run: a node runs one at a time, so nothing waits on it.
+    fn lock(&self) -> MutexGuard<'_, T> {
+        self.model
+            .lock()
+            .expect("a model's run that panicked ended the process")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use common::{TempDir, fs};
+    use scenarium::AnyState;
+
+    use crate::astro::nodes::ml::KeptModel;
+
+    /// A model is loaded once and kept while its file stays the same: a second run of the same
+    /// file loads nothing, a rewritten file of another length loads again, and a node asked for
+    /// another path shares nothing from its state.
+    #[test]
+    fn a_kept_model_is_loaded_again_only_when_its_file_changes() {
+        let dir = TempDir::new("lens-kept-model");
+        let path = dir.join("model.onnx");
+        fs::write(&path, b"a").unwrap();
+        let loads = Cell::new(0);
+        let load = |_: &std::path::Path| {
+            loads.set(loads.get() + 1);
+            Ok(loads.get())
+        };
+        let mut state = AnyState::default();
+        let run = |state: &mut AnyState| {
+            let kept = KeptModel::<u32>::shared(state, &path);
+            let kept = KeptModel::current(kept, path.clone(), load).unwrap();
+            let model = *kept.lock();
+            state.set(kept);
+            model
+        };
+        assert_eq!(run(&mut state), 1);
+        assert_eq!(run(&mut state), 1);
+        fs::write(&path, b"bb").unwrap();
+        assert_eq!(run(&mut state), 2);
+        assert!(KeptModel::<u32>::shared(&state, &dir.join("other.onnx")).is_none());
+        assert_eq!(loads.get(), 2);
+    }
 }

@@ -1,6 +1,6 @@
 use crate::calibration::error::DarkMismatch;
 use crate::calibration::master_subtraction::*;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::dark_comparison::DarkComparison;
@@ -118,7 +118,7 @@ fn each_frame_loses_what_the_subtractor_holds() {
     )
     .unwrap()
     .unwrap();
-    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let mut mosaic = constant_cfa(Size2us::new(2, 2), 0.5, rggb);
     assert!(matches!(
         subtraction.apply(4, &mut mosaic),

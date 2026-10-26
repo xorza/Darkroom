@@ -160,8 +160,8 @@ fn apply_typed<T, const N: usize>(
 
     par::chunks_mut(output.bytes_mut(), out_stride)
         .enumerate()
-        .for_each(|(y, out_row_byte_len)| {
-            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_byte_len);
+        .for_each(|(y, out_bytes)| {
+            let out_row: &mut [T] = bytemuck::cast_slice_mut(out_bytes);
             for x in 0..out_w {
                 let src = map.position(x, y);
                 let rgba = match filter {

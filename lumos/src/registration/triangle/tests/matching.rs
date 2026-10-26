@@ -73,18 +73,12 @@ fn match_scaled_stars() {
 
 #[test]
 fn match_rotated_stars() {
-    // 90-degree rotation: (x,y) → (-y,x). Preserves ratios. Orientation check off
-    // for symmetric pattern to avoid ambiguous correspondence.
+    // 90-degree rotation: (x,y) → (-y,x). Preserves ratios and orientation.
     let ref_poss = SQUARE_AND_CENTRE.to_vec();
 
     let target_poss: Vec<DVec2> = ref_poss.iter().map(|p| DVec2::new(-p.y, p.x)).collect();
 
-    let config = TriangleConfig {
-        check_orientation: false,
-        ..Default::default()
-    };
-
-    let matches = match_points(&ref_poss, &target_poss, &config);
+    let matches = match_points(&ref_poss, &target_poss, &TriangleConfig::default());
     assert_eq!(matches.len(), 5);
 }
 
@@ -135,25 +129,13 @@ fn match_with_extra_stars() {
     }
 }
 
-/// A mirror image flips every triangle's orientation. `IRREGULAR` against its mirror: with the
-/// orientation check, no triangle pair agrees and nothing matches; without it each triangle meets
-/// its mirror, every point draws its six votes at itself, and all five match.
+/// A mirror image flips every triangle's orientation: `IRREGULAR` against its mirror, no triangle
+/// pair agrees and nothing matches.
 #[test]
-fn the_orientation_check_refuses_a_mirror_image() {
+fn a_mirror_image_matches_nothing() {
     let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
-    for (check_orientation, matched) in [(true, 0), (false, 5)] {
-        let config = TriangleConfig {
-            check_orientation,
-            ..Default::default()
-        };
-        let matches = match_points(&IRREGULAR, &mirrored, &config);
-        assert_eq!(
-            matches.len(),
-            matched,
-            "orientation check {check_orientation}"
-        );
-        assert!(matches.iter().all(|m| m.idxs.reference == m.idxs.target));
-    }
+    let matches = match_points(&IRREGULAR, &mirrored, &TriangleConfig::default());
+    assert!(matches.is_empty());
 }
 
 #[test]
@@ -236,14 +218,15 @@ fn match_permuted_idxs() {
 /// The ratio tolerance decides whether two triangles agree. The 3-4-5 triangle has ratios
 /// (0.6, 0.8); a triangle of sides 3, 4.05 and 5 has (0.6, 0.81). Its third vertex sits where
 /// circles of radius 3 about one end of the 5-side and 4.05 about the other meet:
-/// `x = (25 + 9 − 4.05²)/10`, `y = √(9 − x²)`. A tolerance of 0.005 refuses the pair and nothing
-/// matches; 0.02 accepts it and its three vertices match, a vote each.
+/// `x = (25 + 9 − 4.05²)/10`, `y = −√(9 − x²)`, below the 5-side so the triangle turns as the
+/// reference does. A tolerance of 0.005 refuses the pair and nothing matches; 0.02 accepts it and
+/// its three vertices match, a vote each.
 #[test]
 fn the_ratio_tolerance_decides_whether_triangles_agree() {
     let x = (25.0 + 9.0 - 4.05 * 4.05) / 10.0;
     let stretched = [
         DVec2::ZERO,
-        DVec2::new(x, (9.0 - x * x).sqrt()),
+        DVec2::new(x, -(9.0 - x * x).sqrt()),
         DVec2::new(5.0, 0.0),
     ];
     let reference = [DVec2::ZERO, DVec2::new(0.0, 3.0), DVec2::new(4.0, 0.0)];
@@ -251,7 +234,6 @@ fn the_ratio_tolerance_decides_whether_triangles_agree() {
         let config = TriangleConfig {
             ratio_tolerance,
             min_votes: 1,
-            check_orientation: false,
         };
         let matches = match_points(&reference, &stretched, &config);
         assert_eq!(matches.len(), matched, "tolerance {ratio_tolerance}");

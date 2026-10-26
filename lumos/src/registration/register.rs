@@ -77,10 +77,9 @@ impl<'a> PreparedPair<'a> {
         // over both, and RANSAC samples their matches for every model.
         let brightest = |stars: &[Star]| {
             KdTree::build(
-                stars
-                    .iter()
-                    .take(config.matching.max_stars)
-                    .map(|s| s.pos)
+                brightest_idxs(stars, config.matching.max_stars)
+                    .into_iter()
+                    .map(|idx| stars[idx].pos)
                     .collect(),
             )
             .expect("the star gates leave at least three stars in each set")
@@ -127,11 +126,14 @@ impl<'a> PreparedPair<'a> {
         let matches = self.matches();
         tracing::debug!(
             triangle_ms = start.elapsed().as_secs_f64() * 1000.0,
-            num_matches = matches.len(),
+            match_count = matches.len(),
             "Triangle matching complete"
         );
         if matches.len() < self.config.matching.min_matches {
-            return Err(RegistrationError::NoMatchingPatterns);
+            return Err(RegistrationError::NoMatchingPatterns {
+                found: matches.len(),
+                required: self.config.matching.min_matches,
+            });
         }
         let fit = self.search(&matches).fit(self.config.model, self.origin)?;
         tracing::debug!(
@@ -144,11 +146,7 @@ impl<'a> PreparedPair<'a> {
                 max_allowed: self.config.max_rms_error,
             });
         }
-        Ok(RegistrationResult::new(
-            fit.warp,
-            fit.matches,
-            fit.rms_error,
-        ))
+        Ok(RegistrationResult::new(fit.warp, fit.matches))
     }
 }
 
@@ -181,6 +179,21 @@ fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// The indices of the `count` brightest of `stars`, by flux, ties to the earlier, in their input
+/// order: a selection in `O(n)`, so a catalog in any order matches by its brightest stars, and one
+/// sorted brightest first keeps its order.
+fn brightest_idxs(stars: &[Star], count: usize) -> Vec<usize> {
+    let mut idxs: Vec<usize> = (0..stars.len()).collect();
+    if count < stars.len() {
+        idxs.select_nth_unstable_by(count, |&a, &b| {
+            stars[b].flux.total_cmp(&stars[a].flux).then(a.cmp(&b))
+        });
+        idxs.truncate(count);
+        idxs.sort_unstable();
+    }
+    idxs
 }
 
 /// The centre of the stars' bounding box: the SIP origin when none is configured, shared by every
@@ -219,5 +232,27 @@ pub(crate) mod internals {
         pub(crate) const fn origin(&self) -> DVec2 {
             self.origin
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::DVec2;
+
+    use crate::registration::register::brightest_idxs;
+    use crate::star_detection::star::Star;
+
+    /// The brightest stars by flux, in input order whatever order the catalog came in: of fluxes
+    /// 1, 5, 3, 5, 2, the two brightest are the 5s at 1 and 3, the three brightest add the 3 at 2,
+    /// and a count past the catalog takes it whole.
+    #[test]
+    fn the_brightest_stars_are_selected_in_input_order() {
+        let stars: Vec<Star> = [1.0, 5.0, 3.0, 5.0, 2.0]
+            .into_iter()
+            .map(|flux| Star::at(DVec2::ZERO).with_flux(flux))
+            .collect();
+        assert_eq!(brightest_idxs(&stars, 2), [1, 3]);
+        assert_eq!(brightest_idxs(&stars, 3), [1, 2, 3]);
+        assert_eq!(brightest_idxs(&stars, 9), [0, 1, 2, 3, 4]);
     }
 }

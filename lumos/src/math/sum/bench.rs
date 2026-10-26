@@ -26,10 +26,13 @@ pub(crate) fn atomic(c: &mut Criterion) {
             b.iter(|| scalar::sum_f32(black_box(&values)));
         });
         for &tier in &tiers {
-            group.bench_function(BenchmarkId::new(format!("sum_f32/{tier}"), len), |b| {
-                let values = fixture::gaussian(len, 1);
-                b.iter(|| tier.run(SumF32(black_box(&values))));
-            });
+            group.bench_function(
+                BenchmarkId::new(format!("sum_f32/{}", tier.id()), len),
+                |b| {
+                    let values = fixture::gaussian(len, 1);
+                    b.iter(|| tier.run(SumF32(black_box(&values))));
+                },
+            );
         }
         group.bench_function(BenchmarkId::new("sum_f32/dispatch", len), |b| {
             let values = fixture::gaussian(len, 1);

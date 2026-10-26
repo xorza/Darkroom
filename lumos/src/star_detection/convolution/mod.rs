@@ -12,7 +12,6 @@ use std::f64::consts::FRAC_PI_2;
 
 use crate::math::fwhm;
 use crate::math::pixel_gaussian::PixelGaussian;
-use crate::star_detection::star_detection_config::fwhm_config::MAX_FWHM;
 
 /// The quarter turns of `angle` when it is the f32 nearest a multiple of π/2, which is as near
 /// to the pixel axes as a stored angle comes.
@@ -20,6 +19,15 @@ fn quarter_turns(angle: f32) -> Option<i64> {
     let turns = (f64::from(angle) / FRAC_PI_2).round();
     ((turns * FRAC_PI_2) as f32 == angle).then_some(turns as i64)
 }
+
+/// The narrowest FWHM a star is taken to have, in px: anything narrower is a cosmic ray or a hot
+/// pixel.
+pub(crate) const MIN_FWHM: f32 = 0.5;
+
+/// The widest FWHM a star is taken to have, in px: anything broader is a galaxy, a nebula or an
+/// artifact. It bounds a configured matched filter as it bounds an estimated one, whose kernel
+/// reaches 3σ.
+pub(crate) const MAX_FWHM: f32 = 20.0;
 
 /// The widest kernel's half-width: a star's [`MAX_FWHM`] out to `3σ`, along an ellipse's major
 /// axis too.
@@ -54,12 +62,12 @@ pub(crate) mod internals {
     use common::{Buffer2, par};
     use rayon::prelude::*;
 
+    use crate::star_detection::convolution::filter_kernels::MatchedFilter;
     use crate::star_detection::convolution::filter_kernels::{EllipticalGaussian, FilterKernels};
     use crate::star_detection::convolution::simd::{
         Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing,
     };
     use crate::star_detection::convolution::{fill_gaussian_kernel_1d, kernel_radius};
-    use crate::star_detection::star_detection_config::fwhm_config::MatchedFilter;
     use ::simd::Kernel;
 
     /// The 1D kernel of `sigma` out to `3σ`.

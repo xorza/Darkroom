@@ -22,10 +22,15 @@ pub struct GpuImage {
 }
 
 impl GpuImage {
+    /// The image's dimensions and format.
+    pub const fn desc(&self) -> InterleavedDesc {
+        self.desc
+    }
+
     /// Uploads a CPU image: the bytes go straight into the mapped buffer, one copy.
-    pub fn from_image(ctx: &Gpu, image: &InterleavedImage) -> Result<Self, GpuError> {
+    pub fn from_image(gpu: &Gpu, image: &InterleavedImage) -> Result<Self, GpuError> {
         let desc = image.desc();
-        let buffer = Self::buffer(ctx, desc, true)?;
+        let buffer = Self::buffer(gpu, desc, true)?;
         {
             let mut mapped = buffer
                 .slice(..)
@@ -41,28 +46,28 @@ impl GpuImage {
     }
 
     /// Creates an empty GPU image with the given (packed) descriptor.
-    pub fn new_empty(ctx: &Gpu, desc: InterleavedDesc) -> Result<Self, GpuError> {
+    pub fn new_empty(gpu: &Gpu, desc: InterleavedDesc) -> Result<Self, GpuError> {
         Ok(Self {
-            buffer: Self::buffer(ctx, desc, false)?,
+            buffer: Self::buffer(gpu, desc, false)?,
             desc,
         })
     }
 
     /// A storage buffer for `desc`, or an error when the device cannot bind one that large.
     fn buffer(
-        ctx: &Gpu,
+        gpu: &Gpu,
         desc: InterleavedDesc,
         mapped_at_creation: bool,
     ) -> Result<wgpu::Buffer, GpuError> {
         let byte_len = buffer_byte_len(desc);
-        if byte_len > ctx.max_buffer_byte_len() {
+        if byte_len > gpu.max_buffer_byte_len() {
             return Err(GpuError::BufferTooLarge {
                 desc,
                 byte_len,
-                max: ctx.max_buffer_byte_len(),
+                max: gpu.max_buffer_byte_len(),
             });
         }
-        Ok(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        Ok(gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_buffer"),
             size: byte_len,
             usage: wgpu::BufferUsages::STORAGE
@@ -73,8 +78,8 @@ impl GpuImage {
     }
 
     /// Reads the image back to the CPU, blocking until the device has run it.
-    pub fn to_image(&self, ctx: &Gpu) -> Result<InterleavedImage, GpuError> {
-        let staging = self.start_readback(ctx).wait(ctx)?;
+    pub fn to_image(&self, gpu: &Gpu) -> Result<InterleavedImage, GpuError> {
+        let staging = self.start_readback(gpu).wait(gpu)?;
         Ok(self.finish_readback(&staging))
     }
 
@@ -82,20 +87,20 @@ impl GpuImage {
     ///
     /// The readback completes when the device is polled; the polling can happen
     /// from another thread, and the callback then wakes this future.
-    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<InterleavedImage, GpuError> {
-        let readback = self.start_readback(ctx);
+    pub async fn to_image_async(&self, gpu: &Gpu) -> Result<InterleavedImage, GpuError> {
+        let readback = self.start_readback(gpu);
         readback.mapped.await.expect("the map callback runs once")?;
         Ok(self.finish_readback(&readback.staging))
     }
 
     /// Copies the image into a staging buffer and asks for it mapped.
-    fn start_readback(&self, ctx: &Gpu) -> Readback {
-        Readback::start(ctx, &self.buffer, buffer_byte_len(self.desc))
+    fn start_readback(&self, gpu: &Gpu) -> Readback {
+        Readback::start(gpu, &self.buffer, buffer_byte_len(self.desc))
     }
 
     /// Copies the mapped staging buffer into a CPU image, the round-to-4 padding dropped.
     fn finish_readback(&self, staging: &wgpu::Buffer) -> InterleavedImage {
-        let mut image = InterleavedImage::new_black(self.desc);
+        let mut image = InterleavedImage::new_zeroed(self.desc);
         {
             let mapped = staging
                 .slice(..)
@@ -110,15 +115,15 @@ impl GpuImage {
     }
 
     /// Creates a copy of this GPU image with a new buffer.
-    pub fn clone_buffer(&self, ctx: &Gpu) -> Result<Self, GpuError> {
-        let copy = Self::new_empty(ctx, self.desc)?;
-        let mut encoder = ctx
+    pub fn clone_buffer(&self, gpu: &Gpu) -> Result<Self, GpuError> {
+        let copy = Self::new_empty(gpu, self.desc)?;
+        let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gpu_image_clone_encoder"),
             });
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &copy.buffer, 0, buffer_byte_len(self.desc));
-        ctx.queue.submit(iter::once(encoder.finish()));
+        gpu.queue.submit(iter::once(encoder.finish()));
         Ok(copy)
     }
 
@@ -146,20 +151,20 @@ struct Readback {
 
 impl Readback {
     /// Copies the first `byte_len` bytes of `buffer` into a staging buffer and asks for it mapped.
-    fn start(ctx: &Gpu, buffer: &wgpu::Buffer, byte_len: u64) -> Self {
-        let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+    fn start(gpu: &Gpu, buffer: &wgpu::Buffer, byte_len: u64) -> Self {
+        let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu_image_staging"),
             size: byte_len,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = ctx
+        let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gpu_image_readback_encoder"),
             });
         encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, byte_len);
-        ctx.queue.submit(iter::once(encoder.finish()));
+        gpu.queue.submit(iter::once(encoder.finish()));
 
         let (sender, mapped) = oneshot::channel();
         staging
@@ -171,8 +176,8 @@ impl Readback {
     }
 
     /// The mapped staging buffer, blocking until the device has run the copy.
-    fn wait(self, ctx: &Gpu) -> Result<wgpu::Buffer, GpuError> {
-        ctx.wait();
+    fn wait(self, gpu: &Gpu) -> Result<wgpu::Buffer, GpuError> {
+        gpu.wait();
         // A concurrent poll on a shared device may claim this callback and fire
         // it just after our wait returns — block on the handoff, not the poll.
         pollster::block_on(self.mapped).expect("the map callback runs once")?;
@@ -223,14 +228,14 @@ mod tests {
         };
         for format in ColorFormat::ALL {
             let image = create_test_image(format, Size2us::new(7, 3), 11);
-            let uploaded = GpuImage::from_image(&gpu, &image).unwrap();
+            let uploaded = GpuImage::from_image(gpu, &image).unwrap();
             assert_eq!(
-                uploaded.to_image(&gpu).unwrap().bytes(),
+                uploaded.to_image(gpu).unwrap().bytes(),
                 image.bytes(),
                 "{format}"
             );
 
-            let copy = uploaded.clone_buffer(&gpu).unwrap();
+            let copy = uploaded.clone_buffer(gpu).unwrap();
             let done = AtomicBool::new(false);
             let read_back = thread::scope(|scope| {
                 scope.spawn("gpu-poll", || {
@@ -238,7 +243,7 @@ mod tests {
                         gpu.device.poll(wgpu::PollType::Poll).unwrap();
                     }
                 });
-                let read_back = pollster::block_on(copy.to_image_async(&gpu)).unwrap();
+                let read_back = pollster::block_on(copy.to_image_async(gpu)).unwrap();
                 done.store(true, Ordering::Release);
                 read_back
             });

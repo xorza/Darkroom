@@ -6,7 +6,7 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::{array, slice, vec};
 
-use rayon::iter::ParallelIterator;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 use crate::par;
 use crate::size2us::Size2us;
@@ -154,18 +154,51 @@ impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
     }
 
     /// The `N` channel planes of this pixel buffer.
-    pub fn deinterleave(&self) -> [Buffer2<T>; N] {
-        array::from_fn(|channel| {
-            let plane = par::iter(&self.pixels)
-                .map(|pixel| pixel[channel])
-                .collect();
-            Buffer2::new(self.size, plane)
-        })
+    pub fn deinterleave(&self) -> [Buffer2<T>; N]
+    where
+        T: Default,
+    {
+        self.channel_planes(|sample| sample)
+    }
+
+    /// The first `C` channels of this pixel buffer as planes, each sample through `sample`: one
+    /// row-parallel pass that reads each pixel once and writes every plane.
+    pub fn channel_planes<U: Copy + Default + Send, const C: usize>(
+        &self,
+        sample: impl Fn(T) -> U + Sync,
+    ) -> [Buffer2<U>; C] {
+        const { assert!(C <= N, "a pixel's first channels") };
+        if self.pixels.is_empty() {
+            return array::from_fn(|_| Buffer2::new(self.size, Vec::new()));
+        }
+        let width = self.size.width;
+        let mut planes: [Vec<U>; C] = array::from_fn(|_| vec![U::default(); self.pixels.len()]);
+        let mut chunks = planes.each_mut().map(|plane| plane.chunks_mut(width));
+        let rows: Vec<[&mut [U]; C]> = (0..self.size.height)
+            .map(|_| {
+                chunks
+                    .each_mut()
+                    .map(|rows| rows.next().expect("a row of each plane"))
+            })
+            .collect();
+        par::into_iter(rows)
+            .zip(par::chunks(&self.pixels, width))
+            .for_each(|(mut out, pixels)| {
+                for (x, pixel) in pixels.iter().enumerate() {
+                    for (plane, &value) in out.iter_mut().zip(pixel) {
+                        plane[x] = sample(value);
+                    }
+                }
+            });
+        planes.map(|plane| Buffer2::new(self.size, plane))
     }
 
     /// [`Self::deinterleave`], taking the buffer: one channel keeps its allocation, as its pixels
     /// already are its plane.
-    pub fn into_planes(self) -> [Buffer2<T>; N] {
+    pub fn into_planes(self) -> [Buffer2<T>; N]
+    where
+        T: Default,
+    {
         if N > 1 {
             return self.deinterleave();
         }
@@ -383,7 +416,8 @@ mod tests {
     }
 
     /// RGB 2×1: R = [1, 4], G = [2, 5], B = [3, 6] ⟷ pixels [[1, 2, 3], [4, 5, 6]], borrowed or
-    /// taken; a one-channel buffer taken is its plane, in the same allocation.
+    /// taken; the first two channels, each times ten, are [10, 40] and [20, 50]; a one-channel
+    /// buffer taken is its plane, in the same allocation.
     #[test]
     fn interleave_and_deinterleave_are_inverse() {
         let planes = [
@@ -394,6 +428,8 @@ mod tests {
         let interleaved = Buffer2::interleave(planes.each_ref());
         assert_eq!(interleaved.pixels(), &[[1, 2, 3], [4, 5, 6]]);
         assert_eq!(interleaved.deinterleave(), planes);
+        let [red, green] = interleaved.channel_planes(|sample| u16::from(sample) * 10);
+        assert_eq!([red.pixels(), green.pixels()], [&[10, 40], &[20, 50]]);
         assert_eq!(interleaved.into_planes(), planes);
 
         let grey = Buffer2::new((3, 1), vec![[7.0f32], [8.0], [9.0]]);

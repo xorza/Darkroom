@@ -10,7 +10,7 @@ use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flat_gain::FlatGain;
 use crate::image::metadata::bg_split::BgSplit;
 use crate::math::statistics::median_mad::MedianMad;
-use crate::noise::bg_split;
+use crate::noise::bg_from_gain;
 use crate::noise::binned_samples::BinnedSamples;
 use common::{Size2us, Vec2us};
 
@@ -130,7 +130,7 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
 
     /// Each color's background under the flat `gain` divided `mosaic` by: the noise of
     /// [`Self::noise`] measured over each of the color's gain bins on its own, a pair at the mean
-    /// of its two photosites' gain, and fitted by [`bg_split::fit`]; unflattened, of
+    /// of its two photosites' gain, and fitted by [`bg_from_gain::fit`]; unflattened, of
     /// [`Self::noise`], for a mosaic no flat divided.
     pub(crate) fn bgs(
         &self,
@@ -160,7 +160,9 @@ impl<E: Fn(usize) -> bool> MosaicSampling<E> {
         binned
             .into_iter()
             .map(|color| {
-                bg_split::fit(&color.measure(|differences| f64::from(sigma(differences)).powi(2)))
+                bg_from_gain::fit(
+                    &color.measure(|differences| f64::from(sigma(differences)).powi(2)),
+                )
             })
             .collect()
     }
@@ -188,7 +190,7 @@ fn sigma(differences: &mut [f32]) -> f32 {
 mod tests {
     use common::Buffer2;
 
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::mosaic::Mosaic;
     use crate::internals::test_rng::TestRng;
     use crate::math::statistics::subsample::MAX_STATISTIC_SAMPLES;
@@ -204,7 +206,7 @@ mod tests {
     #[test]
     fn each_bayer_color_reads_its_own_noise() {
         let size = Size2us::new(512, 512);
-        let rggb = Mosaic::Bayer(CfaPattern::Rggb);
+        let rggb = Mosaic::Bayer(BayerPattern::Rggb);
         let sigmas = [0.01f32, 0.02, 0.03];
         let mut rng = TestRng::new(9);
         let mosaic = Buffer2::from_fn((512, 512), |x, y| {

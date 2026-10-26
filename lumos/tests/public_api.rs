@@ -3,9 +3,9 @@ use std::io::{Error, ErrorKind};
 use common::{Buffer2, CancelToken};
 use imaginarium::{ChannelLayout, PlanarDesc};
 use lumos::{
-    AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BgConfig,
-    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern,
-    Combine, CombineMethod, Coverage, DefectSummary, DerivedFacts, DetectionDiagnostics, DomainMap,
+    AlignStackConfig, AlignStackConfigError, AlignStackError, AlignStackResult, BayerPattern,
+    BgConfig, CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet, Combine,
+    CombineMethod, Coverage, DefectSummary, DerivedFacts, DetectionDiagnostics, DomainMap,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, ExtractionConfig, FilterConfig,
     FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadConfig, FitsTransferProvenance,
@@ -33,7 +33,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::RequireValid,
             float_scale: FitsFloatScale::FullScale(65_535.0),
-            unstated_bayer_pattern: Some(CfaPattern::Grbg),
+            unstated_bayer_pattern: Some(BayerPattern::Grbg),
             pedestal: Pedestal::Unknown,
         },
         nulls: NullPolicy::Reject,
@@ -132,7 +132,6 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             triangle: TriangleConfig {
                 ratio_tolerance: 0.02,
                 min_votes: 4,
-                check_orientation: false,
             },
         },
         ransac: RansacConfig {
@@ -163,7 +162,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         measurement: MeasurementConfig::default(),
         filter: FilterConfig::default(),
     };
-    StarDetector::from_config(detection).unwrap();
+    StarDetector::new(detection);
 
     // A drizzle frame has no per-pixel weights by default; its weight is the combine's.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
@@ -261,7 +260,7 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "scale must be finite and positive, got 0"
     );
 
-    let detection_error = StarDetector::from_config(StarDetectionConfig {
+    let detection_error = StarDetector::checked(StarDetectionConfig {
         extraction: ExtractionConfig {
             sigma_threshold: 0.0,
             ..Default::default()
@@ -371,14 +370,20 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         product,
         reference: 1,
         lights: [
-            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns {
+                found: 3,
+                required: 8,
+            }),
             FrameRegistration::Reference,
             FrameRegistration::Registered {
                 warp: Box::new(WarpTransform::new(Transform::identity())),
                 inliers: 40,
                 rms_error: 0.1,
             },
-            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns),
+            FrameRegistration::Dropped(RegistrationError::NoMatchingPatterns {
+                found: 3,
+                required: 8,
+            }),
         ]
         .into_iter()
         .map(|registration| LightOutcome {

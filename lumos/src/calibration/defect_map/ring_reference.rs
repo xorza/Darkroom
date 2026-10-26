@@ -4,6 +4,7 @@
 use common::Buffer2;
 
 use crate::image::cfa::cfa_type::CfaType;
+use crate::math::plane_moments::{Plane, PlaneMoments};
 use crate::math::statistics;
 use crate::math::statistics::median_mad::MedianMad;
 use common::{Size2us, Vec2us};
@@ -57,17 +58,8 @@ impl RingFrame<()> {
 /// One photosite of the ring: its offset from the pixel, and its value.
 #[derive(Debug, Clone, Copy)]
 struct RingSample {
-    dx: f64,
-    dy: f64,
+    offset: [i32; 2],
     value: f64,
-}
-
-/// `a + b·dx + c·dy`.
-#[derive(Debug, Clone, Copy)]
-struct Plane {
-    a: f64,
-    b: f64,
-    c: f64,
 }
 
 impl RingReference {
@@ -97,8 +89,7 @@ impl RingReference {
                 let at = Vec2us::new(x, y);
                 if x < size.width && y < size.height && cfa.slot_at(at) == color {
                     self.samples.push(RingSample {
-                        dx: dx as f64,
-                        dy: dy as f64,
+                        offset: [dx, dy].map(|d| i32::try_from(d).expect("a ring offset is small")),
                         value: value(size.idx_of(at)),
                     });
                 }
@@ -110,21 +101,24 @@ impl RingReference {
         // Robust from the start: the ring's median level clips what a third of the ring could tilt
         // a least-squares plane toward, and the plane through what is left clips again at the
         // noise about itself.
-        let mut level = Plane {
-            a: median_of(
+        let mut plane = Plane {
+            level: median_of(
                 &mut self.residuals,
                 self.samples.iter().map(|sample| sample.value),
             ),
-            b: 0.0,
-            c: 0.0,
+            slope: [0.0; 2],
         };
         for _ in 0..2 {
-            let cut = self.clip_cut(level);
-            level = Plane::fit(&self.samples, |sample| {
-                (sample.value - level.at(sample) - cut.centre).abs() <= cut.reach
-            })?;
+            let cut = self.clip_cut(plane);
+            let mut moments = PlaneMoments::default();
+            for sample in &self.samples {
+                if (sample.value - plane.at(sample.offset) - cut.centre).abs() <= cut.reach {
+                    moments.add(sample.offset, sample.value);
+                }
+            }
+            plane = moments.plane()?;
         }
-        Some(level.a as f32)
+        Some(plane.level as f32)
     }
 
     /// The clip about `plane`: the median of the samples' residuals from it, and [`CLIP_SIGMAS`]
@@ -134,7 +128,7 @@ impl RingReference {
         self.residuals.extend(
             self.samples
                 .iter()
-                .map(|sample| sample.value - plane.at(sample)),
+                .map(|sample| sample.value - plane.at(sample.offset)),
         );
         let residual = MedianMad::of_mut(&mut self.residuals);
         Clip {
@@ -156,54 +150,4 @@ fn median_of(scratch: &mut Vec<f64>, values: impl Iterator<Item = f64>) -> f64 {
     scratch.clear();
     scratch.extend(values);
     statistics::median_mut(scratch)
-}
-
-impl Plane {
-    /// The least-squares plane through the samples `keep` passes; `None` when they fix none.
-    fn fit(samples: &[RingSample], keep: impl Fn(&RingSample) -> bool) -> Option<Self> {
-        let mut n = 0.0;
-        let (mut sx, mut sy, mut sxx, mut syy, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
-        let (mut sz, mut sxz, mut syz) = (0.0, 0.0, 0.0);
-        for sample in samples.iter().filter(|sample| keep(sample)) {
-            let RingSample { dx, dy, value } = *sample;
-            n += 1.0;
-            sx += dx;
-            sy += dy;
-            sxx += dx * dx;
-            syy += dy * dy;
-            sxy += dx * dy;
-            sz += value;
-            sxz += dx * value;
-            syz += dy * value;
-        }
-        // Cramer's rule on the normal equations [n sx sy; sx sxx sxy; sy sxy syy]·[a b c] = [sz sxz
-        // syz].
-        let det3 = |m: [[f64; 3]; 3]| {
-            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-                - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
-        };
-        let matrix = [[n, sx, sy], [sx, sxx, sxy], [sy, sxy, syy]];
-        let det = det3(matrix);
-        if det == 0.0 || det.is_nan() || n < 3.0 {
-            return None;
-        }
-        let rhs = [sz, sxz, syz];
-        let with_col = |col: usize| {
-            let mut m = matrix;
-            for (row, value) in rhs.iter().enumerate() {
-                m[row][col] = *value;
-            }
-            det3(m) / det
-        };
-        Some(Self {
-            a: with_col(0),
-            b: with_col(1),
-            c: with_col(2),
-        })
-    }
-
-    fn at(self, sample: &RingSample) -> f64 {
-        self.a + self.b * sample.dx + self.c * sample.dy
-    }
 }

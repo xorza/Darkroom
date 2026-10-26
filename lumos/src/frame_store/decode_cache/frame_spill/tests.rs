@@ -14,7 +14,7 @@ use crate::frame_store::decode_cache::frame_spill::{
     Commit, Decoded, FrameSpill, KeptGain, PlaneDigests, SIDECAR_PIN,
 };
 use crate::frame_store::error::FrameStoreError;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
@@ -68,7 +68,7 @@ fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> Admitted {
             unit: Some("ADU".to_owned()),
         }),
         row_order: Some(RowOrder::BottomUp),
-        cfa_type: Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg))),
+        cfa_type: Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg))),
         saturation_flagged: true,
         conditions: CaptureConditions {
             exposure_time: Some(300.0),

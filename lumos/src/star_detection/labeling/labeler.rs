@@ -55,7 +55,7 @@ impl Labeler {
     /// One band for an image under [`MIN_ROWS_PER_STRIP`] rows, where the boundary stitch has
     /// nothing to do — small inputs take the same path as large ones.
     pub(crate) fn label(&mut self, mask: &BitBuffer2, connectivity: Connectivity) -> &LabelMap {
-        let height = mask.size.height;
+        let height = mask.size().height;
         let strip_count = (height / MIN_ROWS_PER_STRIP).clamp(1, par::threads());
         self.label_in_strips(mask, connectivity, strip_count)
     }
@@ -68,8 +68,8 @@ impl Labeler {
         connectivity: Connectivity,
         strip_count: usize,
     ) -> &LabelMap {
-        let width = mask.size.width;
-        let height = mask.size.height;
+        let width = mask.size().width;
+        let height = mask.size().height;
 
         let Self {
             union_find,
@@ -77,7 +77,7 @@ impl Labeler {
             mapping,
             map,
         } = self;
-        map.size = mask.size;
+        map.size = mask.size();
         map.components.clear();
         map.runs.clear();
         map.run_starts.clear();
@@ -203,7 +203,7 @@ impl Strip {
         let last = rows.end - 1;
         for y in rows {
             cur_runs.clear();
-            run::extract_runs_from_row(mask.row_words(y), mask.size.width, cur_runs);
+            run::extract_runs_from_row(mask.row_words(y), mask.size().width, cur_runs);
 
             if cur_runs.is_empty() {
                 prev_runs.clear();

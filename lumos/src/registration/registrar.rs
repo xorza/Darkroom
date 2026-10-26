@@ -23,9 +23,8 @@ impl<'a> Registrar<'a> {
     /// Register two sets of star positions: the transformation that maps the reference stars'
     /// positions onto the target's.
     ///
-    /// Stars should be sorted by brightness (flux) in descending order for best results. The
-    /// RANSAC noise scale is derived from the median FWHM of the stars, for the seeing they were
-    /// taken in.
+    /// Each set matches by its brightest stars, in any order. The RANSAC noise scale is derived
+    /// from the median FWHM of the stars, for the seeing they were taken in.
     ///
     /// # Errors
     ///

@@ -49,7 +49,7 @@ pub(super) struct MoffatFit {
 
 /// Strategy for computing `u^(-beta)` efficiently.
 /// Pre-computed at model construction to avoid per-pixel branching.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum PowStrategy {
     /// beta is a half-integer (n + 0.5): use `1 / (u^n * sqrt(u))`
     HalfInt { int_part: u32 },

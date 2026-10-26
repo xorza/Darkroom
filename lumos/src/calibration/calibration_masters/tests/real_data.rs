@@ -14,15 +14,18 @@ use std::path::PathBuf;
 use common::CancelToken;
 
 use crate::calibration::calibration_masters::internals::masters_from_files;
+use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
+use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
+use crate::combine::stack_config::StackConfig;
+use crate::image::cfa::cfa_image::CfaImage;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::{init_tracing, real_data};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::{CalibrationSet, CfaImage, MasterRole, StackConfig};
 use common::Size2us;
 
 #[test]

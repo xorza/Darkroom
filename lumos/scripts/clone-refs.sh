@@ -25,8 +25,7 @@ mkdir -p "$DEST"
 
 # name | git url | ref (blank = default branch) | lumos module it informs
 CORE=(
-  # --- actual native dependencies, pinned to Cargo.lock ---
-  "LibRaw|https://github.com/LibRaw/LibRaw|0.20.1|raw: unpack, adjust_bl() black levels, white balance"
+  # --- formats (LibRaw itself is the libraw/LibRaw submodule, at the tag the build uses) ---
   "cfitsio|https://github.com/HEASARC/cfitsio||io/fits: the FITS reference implementation, for the format rules fits-well reads"
 
   # --- calibration ---

@@ -21,21 +21,15 @@ use crate::astro::nodes::runtime;
 
 const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
 
+/// Why a master kept next to its frames could not be read or written.
 #[derive(Debug, thiserror::Error)]
-enum FrameSetKeyError {
+enum CacheError {
     #[error("failed to read metadata for '{path}': {source}", path = .path.display())]
-    Metadata {
+    FrameMetadata {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-}
-
-/// Why a master kept next to its frames could not be read or written.
-#[derive(Debug, thiserror::Error)]
-enum CacheError {
-    #[error(transparent)]
-    FrameSet(#[from] FrameSetKeyError),
     #[error("failed to write cached calibration master '{path}': {source}", path = .path.display())]
     WriteMaster {
         path: PathBuf,
@@ -283,11 +277,22 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
         Ok(CachedMaster::Missing(place))
     }
 
+    /// The marker goes first, so a store that fails before its own marker is written leaves the
+    /// master unmarked, never under the key of the master it replaced.
     fn store(
         &self,
         CachePlace { paths, key }: CachePlace,
         master: &CfaImage,
     ) -> Result<(), CacheError> {
+        match fs::remove_file(&paths.marker) {
+            Err(source) if source.kind() != io::ErrorKind::NotFound => {
+                return Err(CacheError::Write {
+                    path: paths.marker,
+                    source,
+                });
+            }
+            _ => {}
+        }
         master
             .write_fits(&paths.master)
             .map_err(|source| CacheError::WriteMaster {
@@ -303,14 +308,14 @@ impl MasterCache<PathBuf> for SourceDirCache<'_> {
     }
 }
 
-fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
+fn frame_set_key(frames: &[PathBuf]) -> Result<String, CacheError> {
     let mut hasher = blake3::Hasher::new();
     for frame in frames {
         let name = frame
             .file_name()
             .expect("raw frame path has a file name")
             .as_encoded_bytes();
-        let identity = FileIdentity::of(frame).map_err(|source| FrameSetKeyError::Metadata {
+        let identity = FileIdentity::of(frame).map_err(|source| CacheError::FrameMetadata {
             path: frame.clone(),
             source,
         })?;

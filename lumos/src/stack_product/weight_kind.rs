@@ -9,8 +9,9 @@ pub enum WeightKind {
     /// Unit weights: the plane counts the frames that formed a pixel, each a drizzled frame's
     /// share of its drops, and carries no units.
     Count,
-    /// Each frame's inverse noise variance: the plane is an inverse variance, in the image's units
-    /// to the power −2.
+    /// Each frame's inverse noise variance: the plane is the inverse variance of each mean pixel,
+    /// in the image's units to the power −2 (see
+    /// [`StackProduct::weight`](crate::StackProduct::weight) for a median pixel).
     InverseVariance,
     /// The caller's relative weights: the plane is relative too, and carries no units.
     Relative,

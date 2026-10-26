@@ -1,7 +1,7 @@
 //! [`WarpKernel`]: one output pixel's tap weights, from the filter a warp names, stretched where
 //! the warp shrinks the frame.
 
-use glam::{DMat2, DVec2};
+use glam::DVec2;
 
 use crate::image::flags::pixel_flags::Reach;
 use crate::math::floor_i32::FloorI32;
@@ -10,6 +10,7 @@ use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosLut, Lanc
 use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_config::InterpolationMethod;
 use crate::registration::transform::TransformType;
+use crate::registration::transform::local_geometry::LocalGeometry;
 use crate::registration::warp_transform::WarpTransform;
 use common::Size2us;
 use simd::{F32_LANES, F32x8, Isa, Mask8};
@@ -256,7 +257,7 @@ impl WarpKernel {
     #[inline(always)]
     pub(super) fn weight_lanes<S: Isa>(&self, isa: S, first: i32, frac: f32) -> S::F32 {
         let signed = isa.load_f32(&LANE_IDX) + isa.splat_f32(first as f32) - isa.splat_f32(frac);
-        let distance = signed.max(isa.splat_f32(0.0) - signed);
+        let distance = signed.abs();
         let weight = match self.shape {
             KernelShape::Lanczos(_, lut) => {
                 // The scalar `LanczosLut::at` read, lane by lane.
@@ -316,26 +317,17 @@ fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
 fn frame_stretch(warp: &WarpTransform, size: Size2us) -> f32 {
     let largest = if !warp.has_sip() && warp.transform.transform_type() != TransformType::Homography
     {
-        largest_singular_value(warp.jacobian(DVec2::ZERO))
+        LocalGeometry::of(warp.jacobian(DVec2::ZERO)).stretch[0]
     } else {
         grid::nodes(size.height, STRETCH_GRID)
             .flat_map(|y| {
                 grid::nodes(size.width, STRETCH_GRID).map(move |x| DVec2::new(x as f64, y as f64))
             })
             .filter(|&p| SourcePos::within(warp.apply(p), size).is_some())
-            .map(|p| largest_singular_value(warp.jacobian(p)))
+            .map(|p| LocalGeometry::of(warp.jacobian(p)).stretch[0])
             .fold(1.0, f64::max)
     };
     largest.max(1.0) as f32
-}
-
-/// The largest singular value of `m`: the square root of the larger eigenvalue of `mᵀm`, whose
-/// trace is the squared Frobenius norm `F` and whose determinant is `det(m)²`.
-fn largest_singular_value(m: DMat2) -> f64 {
-    let frobenius = m.x_axis.length_squared() + m.y_axis.length_squared();
-    let determinant = m.determinant();
-    let discriminant = (frobenius * frobenius - 4.0 * determinant * determinant).max(0.0);
-    f64::midpoint(frobenius, discriminant.sqrt()).sqrt()
 }
 
 #[cfg(test)]

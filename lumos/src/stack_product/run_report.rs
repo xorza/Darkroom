@@ -58,7 +58,7 @@ pub struct RunReport {
     /// included. `None` for frames handed over with no plan.
     pub planned_peak_bytes: Option<u64>,
     /// Input pixels, over every frame of a drizzle, whose position a warp's SIP correction could
-    /// not invert — see [`InverseWarp::apply`](crate::InverseWarp::apply). Each deposited nothing,
+    /// not invert — see [`InverseWarp::pos`](crate::InverseWarp::pos). Each deposited nothing,
     /// so the output pixels it would have reached record that frame's absence in their coverage.
     /// Zero for frames registered without SIP, and for a stack that drizzled nothing.
     pub unconverged_points: u64,

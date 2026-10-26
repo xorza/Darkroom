@@ -43,6 +43,8 @@ pub(crate) struct KeptFrame {
 pub(crate) struct KeptImage<I> {
     pub(crate) image: I,
     pub(crate) stored: StoredImage,
+    /// The statistics and facts committed with the image, measured on it when it was kept.
+    pub(crate) admitted: Admitted,
 }
 
 /// A kept frame's files as a [`PlaneSink`]: each plane published under the name of its role, and
@@ -274,6 +276,7 @@ impl KeptFrame {
         );
         Some(KeptImage {
             image,
+            admitted,
             stored: StoredImage {
                 metadata,
                 desc,

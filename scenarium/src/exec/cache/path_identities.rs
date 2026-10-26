@@ -73,12 +73,12 @@ impl PathIdentities {
             return Ok(());
         }
         let mut job = mem::take(&mut self.job);
-        let (job, resolved) = task::spawn_blocking(move || {
+        let (job, resolved) = task::run_blocking(move || {
             let resolved = job.run(&cancel);
             (job, resolved)
         })
         .await
-        .expect("resource stamping task panicked");
+        .expect("a run's stamping ends before its runtime");
         self.job = job;
         self.cur.extend(self.job.drain_stamped());
         resolved

@@ -5,7 +5,6 @@ use imaginarium::PlanarDesc;
 use std::path::Path;
 
 use crate::calibration::cosmic_ray;
-use crate::frame::frame_peek::FramePeek;
 use crate::frame::frame_stats::FrameStats;
 use crate::frame_store::file_set::{FileSet, Loaded, SetPeek};
 use crate::frame_store::run_storage::RunStorage;
@@ -21,14 +20,14 @@ use crate::pipeline::mosaic_preparation::MosaicPreparation;
 /// Lights read from files, each through what it goes through before its stars are detected, as
 /// the decoder that preparation reads them with takes them.
 #[derive(Debug)]
-pub(super) enum LightFiles<'a, P> {
+pub(super) enum LightFiles<'a> {
     /// Mosaics, read as such and prepared.
     Calibrate {
-        files: FileSet<'a, P, CfaDecoder>,
+        files: FileSet<'a, &'a Path, CfaDecoder>,
         mosaic: MosaicPreparation<'a>,
     },
     /// Images already calibrated, read as they decode.
-    Linear(FileSet<'a, P, LinearDecoder>),
+    Linear(FileSet<'a, &'a Path, LinearDecoder>),
 }
 
 /// What a light read from a file goes through before its stars are detected.
@@ -40,23 +39,23 @@ pub(super) enum Preparation<'a> {
     Linear,
 }
 
-impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
+impl<'a> LightFiles<'a> {
     /// The lights of `paths`, each through `preparation`, read through the storage of `run`.
     ///
     /// # Errors
     ///
     /// The decode cache cannot be opened.
     pub(super) fn new(
-        paths: &'a [P],
+        paths: &'a [&'a Path],
         preparation: Preparation<'a>,
         run: &IngestRun,
     ) -> Result<Self, AlignStackError> {
         Ok(match preparation {
             Preparation::Calibrate(mosaic) => Self::Calibrate {
-                files: FileSet::new(paths, run)?,
+                files: FileSet::new(paths, &run.storage, &run.ctx)?,
                 mosaic,
             },
-            Preparation::Linear => Self::Linear(FileSet::new(paths, run)?),
+            Preparation::Linear => Self::Linear(FileSet::new(paths, &run.storage, &run.ctx)?),
         })
     }
 
@@ -87,15 +86,14 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
                 let SetPeek {
                     info, held, gains, ..
                 } = files.peek(&run.ctx)?;
-                let peek = FramePeek::from(info);
                 return Ok(LightShape {
                     kept_writes: kept_writes(
                         files.uncached(),
-                        peek.resident_bytes() + info.gain_bytes,
+                        info.decoded().kept + info.gain_bytes,
                     ),
                     peeked: held,
                     gains,
-                    ..LightShape::decoded(peek, files.len(), workers)
+                    ..LightShape::decoded(info, files.len(), workers)
                 });
             }
         };
@@ -149,6 +147,7 @@ impl<'a, P: AsRef<Path> + Sync> LightFiles<'a, P> {
             Self::Calibrate { files, mosaic } => Ok(Loaded {
                 image: mosaic.prepare(files.decode(idx, ctx)?.image, files.path(idx), ctx)?,
                 kept: None,
+                measured: None,
             }),
             Self::Linear(files) => Ok(files.decode(idx, ctx)?),
         }

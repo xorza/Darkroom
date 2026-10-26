@@ -10,6 +10,8 @@ fn the_extension_names_the_decoder_in_any_case() {
     for (path, expected) in [
         ("a.fits", InputFormat::Fits),
         ("a.FIT", InputFormat::Fits),
+        ("a.fts", InputFormat::Fits),
+        ("a.fits.fz", InputFormat::Fits),
         ("dir.fits/a.Cr3", InputFormat::CameraRaw),
         ("a.raf", InputFormat::CameraRaw),
         ("a.TIF", InputFormat::Raster(RasterFormat::Tiff)),
@@ -37,10 +39,10 @@ fn the_extension_names_the_decoder_in_any_case() {
 #[test]
 fn preview_extensions_are_fits_then_raw_then_imaginarium() {
     let raw = RAW_EXTENSIONS;
-    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[..2], ["fits", "fit"]);
-    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[2..2 + raw.len()], raw);
+    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[..4], ["fits", "fit", "fts", "fz"]);
+    assert_eq!(&PREVIEW_IMAGE_EXTENSIONS[4..4 + raw.len()], raw);
     assert_eq!(
-        &PREVIEW_IMAGE_EXTENSIONS[2 + raw.len()..],
+        &PREVIEW_IMAGE_EXTENSIONS[4 + raw.len()..],
         ["png", "jpg", "jpeg", "tiff", "tif"]
     );
     for extension in [

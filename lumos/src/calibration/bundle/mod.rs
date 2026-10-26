@@ -8,7 +8,7 @@
 
 pub(crate) mod error;
 
-use std::fs::File;
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 
 use common::fs;
@@ -28,7 +28,7 @@ use crate::calibration::prepared_flat::PreparedFlat;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::metadata::fits_checksum_provenance::{FitsChecksumProvenance, FitsChecksumState};
-use crate::io::error::{ImageError, WriteError};
+use crate::io::error::WriteError;
 use crate::io::fits::cfa::{self, CfaFitsHduMetadata};
 use crate::io::fits::decode::selected_fits::{Checksum, SelectedFits};
 use crate::io::fits::error::FitsLoadError;
@@ -40,11 +40,12 @@ use common::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
-/// 6: each hot pixel of the defect map keeps its excess over the dark around it. Each master's
+/// 7: each hot pixel of the defect map keeps its excess over the dark around it and the dark's
+/// noise there. Each master's
 /// header records what calibration removed from it — the dark whether it lost its bias — and what
 /// a master of dark signal taken from it was compared on, and its flags sit in a `LUMFLAGS`
 /// extension. A bundle holds no flat-dark.
-const BUNDLE_VERSION: i64 = 6;
+const BUNDLE_VERSION: i64 = 7;
 /// A defect row's `KIND`.
 const HOT: u8 = 0;
 const COLD: u8 = 1;
@@ -60,45 +61,61 @@ struct BundleIdxs {
 pub(crate) fn save(path: &Path, masters: &CalibrationMasters) -> Result<(), BundleError> {
     let defects = masters.defect_map().map(encode_defect_map).transpose()?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
-        let mut writer = FitsWriter::new(&mut *file).with_checksums();
-        writer.write_empty_primary(Some(&bundle_primary_header()?))?;
-
-        let mut flags_written = 0;
-        for (role, image) in masters.masters() {
-            // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
-            // drift.
-            let image_type = role.extname().replace('_', " ");
-            cfa::hdu(
-                image,
-                CfaFitsHduMetadata {
-                    extname: Some(role.extname()),
-                    image_type: Some(&image_type),
-                    prepared: role.prepared(),
-                },
-            )?
-            .write(&mut writer)?;
-            if let Some(flags) =
-                flags_extension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
-            {
-                flags.write(&mut writer)?;
-                flags_written += 1;
-            }
-        }
-
-        if let Some(encoded) = &defects {
-            writer.write_table(&encoded.table, Some(&encoded.header))?;
-        }
-        Ok::<_, WriteError>(())
+        write(masters, defects.as_ref(), file)
     })?;
+    Ok(())
+}
+
+/// `masters` as a bundle into `out`, its defect map as `defects` encodes it.
+fn write(
+    masters: &CalibrationMasters,
+    defects: Option<&EncodedDefectMap>,
+    out: impl Write + Seek,
+) -> Result<(), WriteError> {
+    let mut writer = FitsWriter::new(out).with_checksums();
+    writer.write_empty_primary(Some(&bundle_primary_header()?))?;
+
+    let mut flags_written = 0;
+    for (role, image) in masters.masters() {
+        // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
+        // drift.
+        let image_type = role.extname().replace('_', " ");
+        cfa::hdu(
+            image,
+            CfaFitsHduMetadata {
+                extname: Some(role.extname()),
+                image_type: Some(&image_type),
+                prepared: role.prepared(),
+            },
+        )?
+        .write(&mut writer)?;
+        if let Some(flags) =
+            flags_extension::encode(image.flags(), Some(role.extname()), flags_written + 1)?
+        {
+            flags.write(&mut writer)?;
+            flags_written += 1;
+        }
+    }
+
+    if let Some(encoded) = defects {
+        writer.write_table(&encoded.table, Some(&encoded.header))?;
+    }
     Ok(())
 }
 
 pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, BundleError> {
     // Streamed, not mapped: a bundle is the user's file, and one rewritten in place while it is
     // read must fail the load, not fault the process.
+    read(fs::open(path)?, ctx)
+}
+
+/// The bundle `source` holds.
+pub(crate) fn read(
+    source: impl Read + Seek,
+    ctx: &LoadCtx,
+) -> Result<CalibrationMasters, BundleError> {
     let mut bundle = BundleReader {
-        reader: FitsReader::open(fs::open(path)?)?,
-        path,
+        reader: FitsReader::open(source)?,
         ctx,
     };
     bundle.validate_primary()?;
@@ -118,14 +135,16 @@ pub(crate) fn load(path: &Path, ctx: &LoadCtx) -> Result<CalibrationMasters, Bun
     };
     let bias = master(MasterRole::Bias)?;
     let dark = master(MasterRole::Dark)?;
-    let flat = master(MasterRole::Flat)?;
+    let flat = master(MasterRole::Flat)?
+        .map(PreparedFlat::checked_divisor)
+        .transpose()?;
     let defects = idxs.defects.map(|idx| bundle.defect_map(idx)).transpose()?;
     // The same coherence checks `from_images` runs, so a bundle read back from disk is exactly as
     // trustworthy as one just built — and neither can exist in a state the other would reject.
     let masters = CalibrationMasters::builder()
         .bias(bias)
         .dark(dark)
-        .flat(flat.map(PreparedFlat::from_divisor))
+        .flat(flat)
         .defect_map(defects)
         .build()?;
     Ok(masters)
@@ -139,15 +158,14 @@ fn bundle_primary_header() -> Result<Header, WriteError> {
     Ok(header)
 }
 
-/// A bundle being read: its file's HDUs, the path they were read from, and the load's context.
+/// A bundle being read: its file's HDUs, and the load's context.
 #[derive(Debug)]
-struct BundleReader<'a> {
-    reader: StreamReader<File>,
-    path: &'a Path,
+struct BundleReader<'a, R> {
+    reader: StreamReader<R>,
     ctx: &'a LoadCtx,
 }
 
-impl BundleReader<'_> {
+impl<R: Read + Seek> BundleReader<'_, R> {
     fn validate_primary(&self) -> Result<(), BundleError> {
         let primary = self.reader.hdus().first().ok_or(BundleError::NotABundle)?;
         if primary.kind != HduKind::Primary
@@ -184,8 +202,7 @@ impl BundleReader<'_> {
     /// Where each component's HDU sits.
     fn idxs(&self) -> Result<BundleIdxs, BundleError> {
         // Each master finds its own flags when it is read; this refuses one that names none.
-        flags_extension::check_claims(self.reader.hdus())
-            .map_err(|error| BundleError::Flags(ImageError::fits_load(self.path, error)))?;
+        flags_extension::check_claims(self.reader.hdus()).map_err(BundleError::Flags)?;
         let mut idxs = BundleIdxs::default();
         for (hdu, unit) in self.reader.hdus().iter().enumerate().skip(1) {
             let extname = unit
@@ -245,10 +262,7 @@ impl BundleReader<'_> {
         };
         master().map_err(|source| match source {
             FitsLoadError::Cancelled => BundleError::Cancelled,
-            source => BundleError::Master {
-                role,
-                source: ImageError::fits_load(self.path, source),
-            },
+            source => BundleError::Master { role, source },
         })
     }
 
@@ -269,12 +283,23 @@ impl BundleReader<'_> {
         let kinds: Vec<u8> = defect_column(&table, "KIND")?;
         let idxs: Vec<i64> = defect_column(&table, "INDEX")?;
         let excess: Vec<f32> = defect_column(&table, "EXCESS")?;
-        if kinds.len() != row_count || idxs.len() != row_count || excess.len() != row_count {
+        let noise: Vec<f32> = defect_column(&table, "NOISE")?;
+        if [idxs.len(), excess.len(), noise.len()]
+            .into_iter()
+            .chain([kinds.len()])
+            .any(|len| len != row_count)
+        {
             return Err(DefectTableError::ColLen.into());
         }
         let mut hot = HotPixels::default();
         let mut cold = Vec::new();
-        for (row, ((kind, idx), excess)) in kinds.into_iter().zip(idxs).zip(excess).enumerate() {
+        for (row, (((kind, idx), excess), noise)) in kinds
+            .into_iter()
+            .zip(idxs)
+            .zip(excess)
+            .zip(noise)
+            .enumerate()
+        {
             let Some(idx) = usize::try_from(idx)
                 .ok()
                 .filter(|&idx| idx < size.pixel_count())
@@ -282,11 +307,15 @@ impl BundleReader<'_> {
                 return Err(DefectTableError::Idx { row }.into());
             };
             match kind {
-                HOT if excess.is_finite() && excess > 0.0 => {
+                HOT if [excess, noise]
+                    .iter()
+                    .all(|value| value.is_finite() && *value > 0.0) =>
+                {
                     hot.idxs.push(idx);
                     hot.excess.push(excess);
+                    hot.noise.push(noise);
                 }
-                COLD if excess.is_nan() => cold.push(idx),
+                COLD if excess.is_nan() && noise.is_nan() => cold.push(idx),
                 HOT | COLD => return Err(DefectTableError::Excess { row }.into()),
                 kind => return Err(DefectTableError::Kind { row, kind }.into()),
             }
@@ -321,9 +350,14 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
     let mut kinds = Vec::with_capacity(rows);
     kinds.resize(hot.idxs.len(), HOT);
     kinds.resize(rows, COLD);
-    let mut excess = Vec::with_capacity(rows);
-    excess.extend_from_slice(&hot.excess);
-    excess.resize(rows, f32::NAN);
+    let hot_column = |values: &[f32]| {
+        let mut column = Vec::with_capacity(rows);
+        column.extend_from_slice(values);
+        column.resize(rows, f32::NAN);
+        column
+    };
+    let excess = hot_column(&hot.excess);
+    let noise = hot_column(&hot.noise);
     let idxs = hot
         .idxs
         .iter()
@@ -336,6 +370,7 @@ fn encode_defect_map(map: &DefectMap) -> Result<EncodedDefectMap, BundleError> {
             WriteColumn::scalar("KIND", ColumnData::U8(kinds)),
             WriteColumn::scalar("INDEX", ColumnData::I64(idxs)),
             WriteColumn::scalar("EXCESS", ColumnData::F32(excess)),
+            WriteColumn::scalar("NOISE", ColumnData::F32(noise)),
         ],
     )?;
     let mut header = Header::new();

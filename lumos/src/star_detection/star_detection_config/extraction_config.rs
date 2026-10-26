@@ -101,11 +101,12 @@ impl ExtractionConfig {
                 threshold_count,
                 min_contrast,
             } => {
-                ConfigField::count("deblend n_thresholds", threshold_count).must_be_against_count(
-                    "between 2 and the deblend level cap",
-                    MAX_DEBLEND_THRESHOLD_COUNT,
-                    (2..=MAX_DEBLEND_THRESHOLD_COUNT).contains(&threshold_count),
-                )?;
+                ConfigField::count("deblend threshold_count", threshold_count)
+                    .must_be_against_count(
+                        "between 2 and the deblend level cap",
+                        MAX_DEBLEND_THRESHOLD_COUNT,
+                        (2..=MAX_DEBLEND_THRESHOLD_COUNT).contains(&threshold_count),
+                    )?;
                 ConfigField::new("deblend min_contrast", min_contrast)
                     .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))?;
             }

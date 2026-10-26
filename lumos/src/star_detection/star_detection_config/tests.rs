@@ -252,14 +252,14 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| config.extraction.deblend = multi_threshold(1)),
-            "deblend n_thresholds",
+            "deblend threshold_count",
             1.0,
         ),
         (
             configured(|config| {
                 config.extraction.deblend = multi_threshold(MAX_DEBLEND_THRESHOLD_COUNT + 1);
             }),
-            "deblend n_thresholds",
+            "deblend threshold_count",
             (MAX_DEBLEND_THRESHOLD_COUNT + 1) as f64,
         ),
         (
@@ -360,7 +360,8 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
     assert_eq!(
         invalid.to_string(),
         format!(
-            "deblend n_thresholds must be between 2 and the deblend level cap ({MAX_DEBLEND_THRESHOLD_COUNT}), got 1"
+            "deblend threshold_count must be between 2 and the deblend level cap \
+             ({MAX_DEBLEND_THRESHOLD_COUNT}), got 1"
         )
     );
 }

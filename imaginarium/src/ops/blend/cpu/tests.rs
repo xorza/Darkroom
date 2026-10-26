@@ -13,51 +13,61 @@ use crate::ops::blend::{Blend, BlendMode};
 /// Blends `src` over `dst` into a fresh image through the public CPU entry
 /// point, i.e. through whatever vector kernel this CPU dispatches to.
 fn blend(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
-    let mut output = InterleavedImage::new_black(dst.desc());
+    let mut output = InterleavedImage::new_zeroed(dst.desc());
     params.apply_cpu(src, dst, &mut output);
     output
 }
 
+/// Hand-computed from the formulas on `BlendMode`, through the formula and through an `f32`
+/// image the CPU blends, whose store keeps every value, out of range included:
+///
+/// - At alpha 1 the mix is the blended value alone: Add 0.6 + 0.2 = 0.8, and 0.7 + 0.6 = 1.3 held
+///   at one; Subtract 0.2 − 0.6 = −0.4 held at zero, 0.6 − 0.2 = 0.4; Multiply 0.12, by white
+///   the destination, by black zero; Screen 1 − 0.4 · 0.8 = 0.68; Overlay below 0.5 doubles the
+///   product, 2 · 0.6 · 0.2 = 0.24, and above it the screen, 1 − 2 · 0.4 · 0.2 = 0.84. Normal
+///   passes −0.2 and 1.5 through.
+/// - The alpha mix rides on top, `blended · alpha + dst · (1 − alpha)`: Multiply at 0.5 is
+///   0.12 · 0.5 + 0.2 · 0.5 = 0.16, and alpha 0 is the destination.
+///
+/// The operands and the expected values are decimals, which f32 holds to within 6e-8 each; two
+/// products and a sum of them stay well inside 1e-6.
 #[test]
 fn blend_mode_formulas() {
-    // Hand-computed from the formulas on `BlendMode`, at alpha = 1 so the mix
-    // term is the blended value alone.
-    let cases = [
-        (BlendMode::Normal, 0.6, 0.2, 0.6),
-        (BlendMode::Add, 0.6, 0.2, 0.8),
-        // 0.7 + 0.6 = 1.3, clamped at one.
-        (BlendMode::Add, 0.7, 0.6, 1.0),
-        // 0.2 - 0.6 = -0.4, clamped at zero.
-        (BlendMode::Subtract, 0.6, 0.2, 0.0),
-        (BlendMode::Subtract, 0.2, 0.6, 0.4),
-        (BlendMode::Multiply, 0.6, 0.2, 0.12),
-        // 1 - (1 - 0.6) * (1 - 0.2) = 1 - 0.4 * 0.8 = 0.68
-        (BlendMode::Screen, 0.6, 0.2, 0.68),
-        // dst < 0.5, so Multiply doubled: 2 * 0.6 * 0.2 = 0.24
-        (BlendMode::Overlay, 0.6, 0.2, 0.24),
-        // dst >= 0.5, so Screen doubled: 1 - 2 * 0.4 * 0.2 = 0.84
-        (BlendMode::Overlay, 0.6, 0.8, 0.84),
+    let rows = [
+        (BlendMode::Normal, 1.0, 0.6, 0.2, 0.6),
+        (BlendMode::Normal, 1.0, -0.2, 0.5, -0.2),
+        (BlendMode::Normal, 1.0, 1.5, 0.5, 1.5),
+        (BlendMode::Add, 1.0, 0.6, 0.2, 0.8),
+        (BlendMode::Add, 1.0, 0.7, 0.6, 1.0),
+        (BlendMode::Subtract, 1.0, 0.6, 0.2, 0.0),
+        (BlendMode::Subtract, 1.0, 0.2, 0.6, 0.4),
+        (BlendMode::Multiply, 1.0, 0.6, 0.2, 0.12),
+        (BlendMode::Multiply, 1.0, 1.0, 0.4, 0.4),
+        (BlendMode::Multiply, 1.0, 0.0, 0.4, 0.0),
+        (BlendMode::Screen, 1.0, 0.6, 0.2, 0.68),
+        (BlendMode::Overlay, 1.0, 0.6, 0.2, 0.24),
+        (BlendMode::Overlay, 1.0, 0.6, 0.8, 0.84),
+        (BlendMode::Multiply, 0.5, 0.6, 0.2, 0.16),
+        (BlendMode::Multiply, 0.0, 0.6, 0.2, 0.2),
     ];
-    // The operands and the expected values are decimals, which f32 holds to within 6e-8 each;
-    // two products and a sum of them stay well inside 1e-6.
-    for (mode, src, dst, want) in cases {
-        let got = mode.blend(src, dst, 1.0);
-        assert!(
-            (got - want).abs() < 1e-6,
-            "{mode:?}(src={src}, dst={dst}) = {got}, want {want}"
-        );
+    let pixel = |value: f32| {
+        InterleavedImage::new_with_data(
+            InterleavedDesc::new(Size2us::new(1, 1), ColorFormat::MONO_F32),
+            value.to_ne_bytes().to_vec(),
+        )
+        .unwrap()
+    };
+    for (mode, alpha, src, dst, want) in rows {
+        let formula = mode.blend(src, dst, alpha);
+        let output = blend(Blend::new(mode, alpha), &pixel(src), &pixel(dst));
+        let image = f32::from_ne_bytes(output.bytes().try_into().unwrap());
+        for got in [formula, image] {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "{mode:?}(src={src}, dst={dst}, alpha={alpha}) = {got}, want {want}"
+            );
+        }
     }
-
-    // The alpha mix rides on top: blended * alpha + dst * (1 - alpha).
-    // Multiply(0.6, 0.2) = 0.12, so 0.12 * 0.5 + 0.2 * 0.5 = 0.16.
-    let mixed = BlendMode::Multiply.blend(0.6, 0.2, 0.5);
-    assert!(
-        (mixed - 0.16).abs() < 1e-6,
-        "alpha mix = {mixed}, want 0.16"
-    );
-    // Alpha zero drops the blend entirely.
-    let none = BlendMode::Multiply.blend(0.6, 0.2, 0.0);
-    assert!((none - 0.2).abs() < 1e-6, "alpha=0 = {none}, want dst 0.2");
 }
 
 /// Every `u8` and `u16` value blended over itself by `Normal` at alpha 0.3 is itself: the mix
@@ -90,75 +100,21 @@ fn blending_a_value_over_itself_keeps_it() {
     }
 }
 
+/// In every format, `Normal` at alpha 0 is the destination and at alpha 1 the source, exactly:
+/// `blended · 0 + dst · 1` is `dst`, and the integer formats round-trip their `/ max` and `· max`
+/// without loss.
 #[test]
-fn alpha_zero_returns_dst() {
+fn alpha_zero_returns_dst_and_alpha_one_returns_src() {
     for format in ColorFormat::ALL {
         let src = create_test_image(format, Size2us::new(8, 4), 0);
         let dst = create_test_image(format, Size2us::new(8, 4), 100);
-
-        let output = blend(Blend::new(BlendMode::Normal, 0.0), &src, &dst);
-
-        // `blended * 0 + dst * 1` is dst exactly, and the integer formats
-        // round-trip their `/ max` and `* max` without loss.
-        assert!(
-            pixels_equal(&dst, &output),
-            "alpha=0 must return dst for {format}, off by {}",
-            max_pixel_diff(&dst, &output)
-        );
-    }
-}
-
-#[test]
-fn alpha_one_normal_returns_src() {
-    for format in ColorFormat::ALL {
-        let src = create_test_image(format, Size2us::new(8, 4), 0);
-        let dst = create_test_image(format, Size2us::new(8, 4), 100);
-
-        let output = blend(Blend::new(BlendMode::Normal, 1.0), &src, &dst);
-
-        assert!(
-            pixels_equal(&src, &output),
-            "alpha=1 Normal must return src for {format}, off by {}",
-            max_pixel_diff(&src, &output)
-        );
-    }
-}
-
-#[test]
-fn multiply_by_white_keeps_dst_color() {
-    let format = ColorFormat::RGBA_U8;
-    let mut src = create_test_image(format, Size2us::new(8, 4), 50);
-    let dst = create_test_image(format, Size2us::new(8, 4), 100);
-    // White color channels, dst's alpha, so only the color result is under test.
-    for (i, byte) in src.bytes_mut().iter_mut().enumerate() {
-        *byte = if i % 4 == 3 { dst.bytes()[i] } else { u8::MAX };
-    }
-
-    let output = blend(Blend::new(BlendMode::Multiply, 1.0), &src, &dst);
-
-    for (i, (&want, &got)) in dst.bytes().iter().zip(output.bytes()).enumerate() {
-        if i % 4 != 3 {
-            assert_eq!(got, want, "channel {i}: multiply by white must return dst");
-        }
-    }
-}
-
-#[test]
-fn multiply_by_black_zeroes_color() {
-    let format = ColorFormat::RGBA_U8;
-    let mut src = create_test_image(format, Size2us::new(8, 4), 50);
-    for (i, byte) in src.bytes_mut().iter_mut().enumerate() {
-        if i % 4 != 3 {
-            *byte = 0;
-        }
-    }
-    let dst = create_test_image(format, Size2us::new(8, 4), 100);
-
-    let output = blend(Blend::new(BlendMode::Multiply, 1.0), &src, &dst);
-
-    for (i, &byte) in output.bytes().iter().enumerate() {
-        if i % 4 != 3 {
-            assert_eq!(byte, 0, "channel {i}: multiply by black must be black");
+        for (alpha, expected) in [(0.0, &dst), (1.0, &src)] {
+            let output = blend(Blend::new(BlendMode::Normal, alpha), &src, &dst);
+            assert!(
+                pixels_equal(expected, &output),
+                "alpha {alpha}, {format}: off by {}",
+                max_pixel_diff(expected, &output)
+            );
         }
     }
 }
@@ -192,7 +148,7 @@ fn every_tier_matches_the_scalar_reference() {
                 for mode in BlendMode::iter() {
                     for alpha in [0.0, 0.35, 1.0, f32::NAN] {
                         let params = Blend::new(mode, alpha);
-                        let mut output = InterleavedImage::new_black(dst.desc());
+                        let mut output = InterleavedImage::new_zeroed(dst.desc());
                         cpu::apply_on(tier, params, &src, &dst, &mut output);
                         let reference = scalar(params, &src, &dst);
 
@@ -222,7 +178,7 @@ fn clamps_take_nan_to_the_bound_and_negative_zero_to_positive() {
 
 /// The scalar reference over every row of `src` and `dst`, past the kernels.
 fn scalar(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
-    let mut output = InterleavedImage::new_black(dst.desc());
+    let mut output = InterleavedImage::new_zeroed(dst.desc());
     let format = src.desc().color_format();
     let stride = src.desc().row_byte_len();
     let rows = src.bytes().chunks(stride).zip(dst.bytes().chunks(stride));

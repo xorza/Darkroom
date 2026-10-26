@@ -5,7 +5,7 @@ use imaginarium::PlanarDesc;
 use crate::combine::frame_read::slots::Slots;
 use crate::combine::normalization::planned_normalization::SetCoverage;
 use crate::combine::stack::planned_combine::{PlannedCombine, PlannedFrames};
-use crate::frame::frame_peek::FramePeek;
+use crate::frame::frame_info::FrameInfo;
 use crate::frame_store::run_storage::{RunStorage, RunWrites};
 use crate::frame_store::stored_layout::StoredLayout;
 use crate::memory::footprint::Footprint;
@@ -43,7 +43,7 @@ impl LightShape {
 
     /// [`Self::decoded`], but for lights the caller holds, which the plan charges only what the run
     /// adds to them.
-    pub(super) fn held(peek: FramePeek, count: usize, workers: usize) -> Self {
+    pub(super) fn held(peek: FrameInfo, count: usize, workers: usize) -> Self {
         let decoded = Self::decoded(peek, count, workers);
         Self {
             held: decoded.prepared.kept,
@@ -53,7 +53,7 @@ impl LightShape {
 
     /// `count` linear lights decoded one at a time, as `peek` reads them on `workers`: a light's
     /// way is its decode and its statistics.
-    pub(super) fn decoded(peek: FramePeek, count: usize, workers: usize) -> Self {
+    pub(super) fn decoded(peek: FrameInfo, count: usize, workers: usize) -> Self {
         Self {
             count,
             desc: peek.desc,
@@ -188,8 +188,8 @@ mod tests {
 
     use crate::combine::normalization::Normalization;
     use crate::combine::stack_config::StackConfig;
-    use crate::frame::frame_peek::FramePeek;
-    use crate::io::frame_info::DecoderBytes;
+    use crate::frame::frame_info::{DecoderBytes, FrameInfo};
+    use crate::image::cfa::cfa_type::CfaType;
     use crate::memory::stage::{Stage, Units};
     use crate::pipeline::align_stack_config::AlignStackConfig;
     use crate::pipeline::light_shape::LightShape;
@@ -218,10 +218,11 @@ mod tests {
     /// is warped, then 224 − 80 = 144 B.
     #[test]
     fn a_light_is_kept_as_each_stage_leaves_it() {
-        let peek = FramePeek {
+        let peek = FrameInfo {
             desc: PlanarDesc::new((4, 4), ChannelLayout::Mono),
+            cfa_type: CfaType::Mono,
             decoder: DecoderBytes::default(),
-            mosaic: None,
+            gain_bytes: 0,
         };
         let config = AlignStackConfig {
             stack: StackConfig {

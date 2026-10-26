@@ -5,9 +5,16 @@
 //! Gated behind the `real-data` feature.
 
 use crate::image::linear_image::LinearImage;
+use crate::image_ops::color_calibration::neutralize_bg::NeutralizeBg;
+use crate::image_ops::color_calibration::scnr::Scnr;
+use crate::image_ops::denoise::Denoise;
+use crate::image_ops::hdr::Hdr;
+use crate::image_ops::local_contrast::LocalContrast;
+use crate::image_ops::stretch::ColorMode;
+use crate::image_ops::stretch::Stretch;
+use crate::image_ops::stretch::StretchMethod;
 use crate::internals::{init_tracing, real_data, visual};
 use crate::math::statistics;
-use crate::{ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBg, Scnr, Stretch, StretchMethod};
 
 fn median(image: &LinearImage) -> f32 {
     statistics::median_mut(&mut image.intensity_plane().into_vec())

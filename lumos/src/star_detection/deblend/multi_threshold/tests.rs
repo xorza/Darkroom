@@ -450,7 +450,7 @@ fn diagonal_star_pair() {
 }
 
 #[test]
-fn n_thresholds_effect() {
+fn threshold_count_effect() {
     // A 1.0 and a 0.9 star 8 px apart, σ 2.5: the saddle midway holds (1.0 + 0.9)·e^(−16/12.5) =
     // 0.528 and the peaks 1.006 and 0.906. The ladder runs from the faintest labelled pixel
     // (~0.001) to 1.006, a ratio of about 1000. At four levels the top two sit at 0.179 — below
@@ -779,7 +779,7 @@ fn bbox_contains_all_peaks() {
 
 #[test]
 fn single_threshold_level() {
-    // Test with n_thresholds = 1 (edge case)
+    // Test with threshold_count = 1 (edge case)
     let TestComponent {
         pixels,
         labels,

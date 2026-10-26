@@ -12,7 +12,7 @@ workspace = true
 [features]
 default = []
 wgpu = ["dep:wgpu", "dep:pollster", "dep:tokio"]
-internals = ["common/internals", "dep:criterion"]
+internals = ["common/internals", "dep:criterion", "simd/internals"]
 
 [dependencies]
 simd = { workspace = true }

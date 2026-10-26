@@ -2,7 +2,7 @@ mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
 #[cfg(feature = "wgpu")]
-pub(crate) mod pipeline;
+mod pipeline;
 
 use strum::{EnumIter, EnumString, VariantNames};
 
@@ -11,8 +11,6 @@ use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_image::InterleavedImage;
-#[cfg(feature = "wgpu")]
-use crate::ops::blend::pipeline::GpuBlendPipeline;
 
 /// How a source channel is combined with the destination channel under it.
 ///
@@ -98,15 +96,8 @@ impl Blend {
     /// # Panics
     /// Panics unless all three images share a descriptor.
     #[cfg(feature = "wgpu")]
-    pub fn apply_gpu(
-        &self,
-        ctx: &Gpu,
-        pipeline: &GpuBlendPipeline,
-        src: &GpuImage,
-        dst: &GpuImage,
-        output: &mut GpuImage,
-    ) {
-        gpu::apply(*self, ctx, pipeline, src, dst, output);
+    pub fn apply_gpu(&self, gpu: &Gpu, src: &GpuImage, dst: &GpuImage, output: &mut GpuImage) {
+        gpu::apply(*self, gpu, src, dst, output);
     }
 }
 

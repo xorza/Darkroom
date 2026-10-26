@@ -1,7 +1,7 @@
 use fits_well::header::Header;
 use fits_well::image::SampleType;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::calibration_state::CalibrationState;
@@ -29,7 +29,7 @@ fn bayer_header(bayerpat: &str, roworder: Option<&str>) -> Header {
     header
 }
 
-fn pattern_of(header: &Header, height: usize) -> CfaPattern {
+fn pattern_of(header: &Header, height: usize) -> BayerPattern {
     match Bayerpat::Required.read_cfa(header, height, None).unwrap() {
         Some(CfaType::Mosaic(Mosaic::Bayer(pattern))) => pattern,
         other => panic!("expected a Bayer pattern, got {other:?}"),
@@ -46,7 +46,7 @@ fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
     // gives GB then RG, which is GBRG.
     assert_eq!(
         pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP")), 4),
-        CfaPattern::Gbrg
+        BayerPattern::Gbrg
     );
 
     // H = 5: file row 0 is displayed row 4, which is phase 0 again, so the file reads RG then
@@ -54,7 +54,7 @@ fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
     // whole frame — and odd heights are real, LibRaw reporting 4015 for the EOS 1500D.
     assert_eq!(
         pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP")), 4015),
-        CfaPattern::Rggb
+        BayerPattern::Rggb
     );
 
     // Top-down, and a header that declares no order at all, leave the pattern alone whatever
@@ -62,12 +62,12 @@ fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
     for height in [4, 5] {
         assert_eq!(
             pattern_of(&bayer_header("RGGB", Some("TOP-DOWN")), height),
-            CfaPattern::Rggb,
+            BayerPattern::Rggb,
             "top-down, height {height}"
         );
         assert_eq!(
             pattern_of(&bayer_header("RGGB", None), height),
-            CfaPattern::Rggb,
+            BayerPattern::Rggb,
             "no ROWORDER, height {height}"
         );
     }
@@ -86,7 +86,7 @@ fn an_odd_bayer_row_offset_composes_with_the_row_order_flip() {
                 .unwrap(),
             4
         ),
-        CfaPattern::Rggb
+        BayerPattern::Rggb
     );
     assert_eq!(
         pattern_of(
@@ -95,7 +95,7 @@ fn an_odd_bayer_row_offset_composes_with_the_row_order_flip() {
                 .unwrap(),
             5
         ),
-        CfaPattern::Gbrg
+        BayerPattern::Gbrg
     );
 }
 
@@ -141,7 +141,7 @@ fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation()
     // The pattern is taken as written — flipping it again is what would mis-debayer the
     // reloaded frame, and is what reading `LUMROWO` here instead would have done.
     assert_eq!(read_declared_row_order(&header).unwrap(), RowOrder::TopDown);
-    assert_eq!(pattern_of(&header, 4), CfaPattern::Gbrg);
+    assert_eq!(pattern_of(&header, 4), BayerPattern::Gbrg);
 
     // ...while the orientation the combine compares survives the trip, so an original and a
     // copy of it written by this crate are not read as mirrored views of each other.
@@ -163,8 +163,8 @@ fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation()
 fn the_bayer_parity_follows_the_decoded_height_not_naxis2() {
     let mut header = bayer_header("RGGB", Some("BOTTOM-UP"));
     header.set("NAXIS2", 42).unwrap();
-    assert_eq!(pattern_of(&header, 4175), CfaPattern::Rggb);
-    assert_eq!(pattern_of(&header, 4176), CfaPattern::Gbrg);
+    assert_eq!(pattern_of(&header, 4175), BayerPattern::Rggb);
+    assert_eq!(pattern_of(&header, 4176), BayerPattern::Gbrg);
 }
 
 #[test]
@@ -208,25 +208,25 @@ fn an_unstated_bayer_phase_comes_from_the_options_or_refuses_the_frame() {
     );
     assert_eq!(
         Bayerpat::Required
-            .read_cfa(&header, 4, Some(CfaPattern::Grbg))
+            .read_cfa(&header, 4, Some(BayerPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Grbg)))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Grbg)))
     );
     // Bottom-up with an even height swaps GRBG's two rows: GR then BG becomes BG then GR, BGGR.
     let bottom_up = bayer_header("TRUE", Some("BOTTOM-UP"));
     assert_eq!(
         Bayerpat::Required
-            .read_cfa(&bottom_up, 4, Some(CfaPattern::Grbg))
+            .read_cfa(&bottom_up, 4, Some(BayerPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)))
     );
     // A stated phase wins over the option, which only stands in for 'TRUE'.
     let stated = bayer_header("BGGR", None);
     assert_eq!(
         Bayerpat::Required
-            .read_cfa(&stated, 4, Some(CfaPattern::Grbg))
+            .read_cfa(&stated, 4, Some(BayerPattern::Grbg))
             .unwrap(),
-        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)))
     );
 }
 

@@ -106,7 +106,7 @@ impl CrMasks {
         // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`. The
         // padding is clear in both, so whole words count no pixel past a row.
         let mut newly = 0usize;
-        for y in 0..accumulated.size.height {
+        for y in 0..accumulated.size().height {
             for (acc, &new) in accumulated
                 .row_words_mut(y)
                 .iter_mut()
@@ -150,7 +150,7 @@ impl<K: Fn(usize) -> bool + Sync> Growth<'_, K> {
             never_flagged,
             keep,
         } = self;
-        let Size2us { width, height } = source.size;
+        let Size2us { width, height } = source.size();
         let used_words = width.div_ceil(64);
         let last_word_mask = source.last_word_mask();
         dest.par_rows_mut().enumerate().for_each(|(y, out_row)| {

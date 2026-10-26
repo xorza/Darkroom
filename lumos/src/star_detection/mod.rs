@@ -45,7 +45,7 @@
 //! config.extraction.sigma_threshold = 3.0;
 //!
 //! // Detect stars
-//! let mut detector = StarDetector::from_config(config)?;
+//! let mut detector = StarDetector::checked(config)?;
 //! let result = detector.detect(image);
 //!
 //! println!("Found {} stars", result.stars.len());
@@ -59,7 +59,7 @@ mod convolution;
 mod deblend;
 pub(crate) mod detection_filter;
 pub(crate) mod detection_plane;
-pub(crate) mod duplicates;
+mod duplicates;
 mod labeling;
 mod median_filter;
 pub(crate) mod refined_bg;

@@ -14,9 +14,10 @@ use crate::error::InvalidConfigField;
 ///
 /// A later pass measures the robust scale with the rejected samples in their places: the window
 /// is fitted against the normal scores of every sample, as linear fit does, so the tails the
-/// earlier passes cut do not shrink σ. Siril measures the survivors' MAD as a complete sample,
-/// which on ten clean samples at 2.5σ rejects 5.5% over three passes; this rejects 3.7%, and 0.8%
-/// under the frames' noise floor, against the Gaussian tail share of 1.24%.
+/// earlier passes cut do not shrink σ. The survivors' MAD measured as a complete sample instead
+/// rejects 5.5% of ten clean samples at 2.5σ over three passes; this rejects 3.7%, and 0.8% under
+/// the frames' noise floor, against the Gaussian tail share of 1.24%. Siril clips about the median
+/// by the survivors' standard deviation and repeats until a pass rejects nothing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SigmaClipConfig {
     /// How far either side of the median a value may sit, in sigma.

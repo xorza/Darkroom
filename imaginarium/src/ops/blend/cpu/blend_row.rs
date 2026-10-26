@@ -91,8 +91,8 @@ impl Kernel for BlendRow<'_, u16> {
     }
 }
 
-/// Eight samples a step. The full scale is one, so the reference's multiply by it is exact and
-/// the clamp is the whole narrowing.
+/// Eight samples a step. The full scale is one, so the reference's multiply by it is exact, and
+/// `f32` storage keeps the blend as it is, unbounded.
 impl Kernel for BlendRow<'_, f32> {
     type Output = ();
 
@@ -100,12 +100,7 @@ impl Kernel for BlendRow<'_, f32> {
     fn run<S: Isa>(self, isa: S) {
         let splat = Splat::new(isa, self.params, self.alpha, f32::FULL_SCALE_F32);
         row_groups::zip::<f32, F32_LANES>(self.src, self.dst, self.out, |src, dst, out| {
-            let blended = splat.blend(isa.load_f32(src), isa.load_f32(dst));
-            splat
-                .zero
-                .max(blended)
-                .min_positive(splat.full_scale)
-                .store(out);
+            splat.blend(isa.load_f32(src), isa.load_f32(dst)).store(out);
         });
     }
 }
@@ -150,7 +145,7 @@ impl<F: F32x8> Splat<F> {
     /// narrowed by [`Sample::from_f32`]'s rule, as the clamped round takes it.
     #[inline(always)]
     fn blend_rounded<S: Isa<F32 = F>>(self, isa: S, src: F, dst: F) -> S::I32 {
-        isa.round_clamped_f32(self.blend(src, dst) * self.full_scale, self.full_scale)
+        isa.round_clamped_f32_to_i32(self.blend(src, dst) * self.full_scale, self.full_scale)
     }
 
     /// [`BlendMode::blend`] of normalized channels, `Normal` in the alpha lanes.

@@ -1,7 +1,9 @@
-//! [`FrameInfo`]: what a frame is, read from its file's header without decoding it.
+//! [`FrameInfo`]: what a frame is, read from its file's header without decoding it, and what it is
+//! worth to a memory estimate.
 
 use imaginarium::PlanarDesc;
 
+use crate::frame::frame_stats::FrameStats;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -47,12 +49,12 @@ impl DecoderBytes {
 }
 
 impl FrameInfo {
-    /// What `image`, decoded already, settles: its decoder is done, so what it held is not known.
-    pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
+    /// What `image`, decoded already, settles, its decoder having held `decoder` beside it.
+    pub(crate) fn of_decoded(image: &impl StackableImage, decoder: DecoderBytes) -> Self {
         Self {
             desc: image.desc(),
             cfa_type: image.cfa_type().unwrap_or(CfaType::Mono),
-            decoder: DecoderBytes::default(),
+            decoder,
             gain_bytes: image.flat_gain().map_or(0, |gain| gain.ram_bytes()),
         }
     }
@@ -65,6 +67,16 @@ impl FrameInfo {
             kept: frame,
             peak: self.decoder.peak(frame),
         }
+    }
+
+    /// What one such frame's way into a stack holds on `workers`: its decode, then its statistics
+    /// beside the frame.
+    pub(crate) fn footprint(self, workers: usize) -> Footprint {
+        self.decoded().beside(FrameStats::heap_bytes(
+            self.desc,
+            self.cfa_type.mosaic(),
+            workers,
+        ))
     }
 
     /// `way`, which ends on the frame's decoded mosaic, then the demosaic on `workers`, an X-Trans

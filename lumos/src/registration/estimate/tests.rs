@@ -3,33 +3,8 @@ use std::f64::consts::PI;
 use glam::DVec2;
 
 use crate::registration::estimate::Pairs;
+use crate::registration::tests::helpers::{apply_all, exact_fit_tolerance, make_grid};
 use crate::registration::transform::{Transform, TransformType};
-
-/// A `cols × rows` grid at `spacing`, row by row from the origin.
-fn make_grid(cols: usize, rows: usize, spacing: f64) -> Vec<DVec2> {
-    let mut points = Vec::with_capacity(cols * rows);
-    for r in 0..rows {
-        for c in 0..cols {
-            points.push(DVec2::new(c as f64 * spacing, r as f64 * spacing));
-        }
-    }
-    points
-}
-
-fn apply_all(transform: &Transform, points: &[DVec2]) -> Vec<DVec2> {
-    points.iter().map(|&p| transform.apply(p)).collect()
-}
-
-/// How far an exact fit of exact points may miss them: each solve is centred or
-/// Hartley-normalized, which holds its condition number to the hundreds for the point sets here,
-/// against coordinates up to 5000 px whose f64 rounding is 9e-13 px — so ~1e-9 px at worst, and
-/// 1e-8 leaves margin.
-fn exact_fit_tolerance(points: &[DVec2]) -> f64 {
-    let largest = points
-        .iter()
-        .fold(1.0f64, |m, p| m.max(p.abs().max_element()));
-    1e-8 * (largest / 5000.0).max(1.0)
-}
 
 /// Every model recovers its own transform from exact points, to rounding: from its minimal set,
 /// from more, and from points spread over 5000 px where an unnormalized solve would lose digits.
@@ -281,4 +256,36 @@ fn each_model_refuses_points_on_its_side_of_the_degeneracy_rule() {
             .estimate(TransformType::Affine)
             .is_some()
     );
+
+    // A homography needs four points no three of which share a line: four with three on the
+    // x-axis, or five with four, leave its system a null space of two dimensions, and any vector
+    // of it would be an arbitrary homography. A fifth point off the line makes it one.
+    let shift = |points: &[DVec2]| -> Vec<DVec2> {
+        points.iter().map(|&p| p + DVec2::new(3.0, -2.0)).collect()
+    };
+    let on_line = [0.0, 1.0, 2.0, 3.0].map(|x| DVec2::new(x, 0.0));
+    let three = [on_line[0], on_line[1], on_line[2], DVec2::new(0.0, 1.0)];
+    let four = [
+        on_line[0],
+        on_line[1],
+        on_line[2],
+        on_line[3],
+        DVec2::new(0.0, 1.0),
+    ];
+    let spread = [
+        on_line[0],
+        on_line[1],
+        on_line[2],
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1.0, 2.0),
+    ];
+    for (points, fits) in [(&three[..], false), (&four[..], false), (&spread[..], true)] {
+        assert_eq!(
+            Pairs::unit(points, &shift(points))
+                .estimate(TransformType::Homography)
+                .is_some(),
+            fits,
+            "{points:?}"
+        );
+    }
 }

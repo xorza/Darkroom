@@ -12,13 +12,13 @@ use common::fs;
 use imaginarium::{ChannelLayout, PlanarDesc};
 use libraw::{Libraw, SensorLayout};
 
+use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::linear_image::LinearImage;
 use crate::io::decoder::Peek;
 use crate::io::error::ImageError;
-use crate::io::frame_info::{DecoderBytes, FrameInfo};
 use crate::io::load_ctx::LoadCtx;
 use crate::io::raw::error::RawError;
 use crate::io::raw::raw_decoder::RawDecoder;

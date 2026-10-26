@@ -74,7 +74,7 @@ fn convolve_row_matches_scalar() {
             .chain(2 * radius + 1..2 * radius + 48)
             .filter(|&width| width > 2 * radius)
             .collect();
-        assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
+        assert_simd_matches_scalar(&widths, |tier, shape, width| {
             let input = shape.row(width, 0);
             let mut scalar = vec![0.0f32; width];
             let mut simd = vec![0.0f32; width];
@@ -250,7 +250,7 @@ fn convolve_cols_matches_scalar() {
     for radius in [1, 2, 3, 5] {
         let kernel = asymmetric_kernel(radius);
         let height = 2 * radius + 6;
-        assert_simd_matches_scalar(SWEEP_WIDTHS, 0.0, |tier, shape, width| {
+        assert_simd_matches_scalar(SWEEP_WIDTHS, |tier, shape, width| {
             let size = Size2us::new(width, height);
             let input = shape_image(shape, size);
             let mut scalar = vec![0.0f32; width * height];
@@ -290,7 +290,7 @@ fn convolve_2d_row_matches_scalar() {
         let kernel = Kernel2d::new(&weights, ksize);
         let height = 2 * radius + 6;
         let widths: Vec<usize> = (1..8).chain(SWEEP_WIDTHS.iter().copied()).collect();
-        assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
+        assert_simd_matches_scalar(&widths, |tier, shape, width| {
             let size = Size2us::new(width, height);
             let input = shape_image(shape, size);
             let mut scalar = Vec::new();

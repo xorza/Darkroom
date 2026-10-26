@@ -10,6 +10,8 @@ use common::Buffer2;
 use glam::DVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
+use crate::calibration::calibration_set::CalibrationSet;
+use crate::calibration::master_role::MasterRole;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::linear_image::LinearImage;
@@ -20,7 +22,6 @@ use crate::internals::synthetic::observe::{Observation, SimFrame, render};
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
 use crate::internals::test_rng::TestRng;
 use crate::registration::transform::Transform;
-use crate::{CalibrationSet, MasterRole};
 use common::Size2us;
 
 /// The standard frame: 6000 × 4000, an APS-C camera's 24 MP.

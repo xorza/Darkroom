@@ -30,7 +30,7 @@ fits-well = { workspace = true }
 libraw = { workspace = true }
 
 thiserror = { workspace = true }
-bytemuck = { workspace = true, features = ["derive", "extern_crate_alloc"] }
+bytemuck = { workspace = true, features = ["derive"] }
 rayon = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 glam = { workspace = true, features = ["f64", "serde", "std"] }
@@ -45,6 +45,7 @@ criterion = { workspace = true, optional = true, features = ["cargo_bench_suppor
 
 [dev-dependencies]
 simd = { workspace = true, features = ["internals"] }
+fits-well = { workspace = true, features = ["internals"] }
 libraw = { workspace = true, features = ["internals"] }
 imaginarium = { workspace = true, features = ["internals"] }
 common = { workspace = true, features = ["internals"] }

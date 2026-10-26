@@ -34,6 +34,15 @@ pub enum CalibrationError {
     /// Swapped roles (a dark given as the flat) and a subtractor at the wrong level both end here.
     #[error("the subtracted flat has no positive mean{}", color.map_or(String::new(), |color| format!(" in its {color} photosites")))]
     NonPositiveFlat { color: Option<CfaColor> },
+    /// Flat-darks were given and no flat: a flat-dark calibrates the flats and nothing else, so
+    /// they would be stacked for nothing. Frames of a light's exposure are darks.
+    #[error("{count} flat-darks were given and no flat for them to calibrate")]
+    FlatDarksWithoutFlats { count: usize },
+    /// A stored flat divisor holds a sample a prepared flat cannot: not finite, or below the floor
+    /// every prepared flat is raised to. Divided by, it would turn a light into infinities, flip
+    /// its sign, or amplify it past the floor's bound.
+    #[error("the stored flat divisor holds {value} at pixel {idx}, which no prepared flat holds")]
+    InvalidFlatDivisor { idx: usize, value: f32 },
     /// The flat still holds an additive offset — its pedestal is kept or unknown — and the set has
     /// no bias or flat-dark to remove it: divided by, it would add an inverse-vignetting pattern of
     /// the offset to every light.
