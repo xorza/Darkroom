@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use crate::bench::scene::{FRAME, Field};
 use crate::calibration::cosmic_ray;
 use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 
@@ -19,7 +19,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
         ("reject/mono", CfaType::Mono),
         (
             "reject/rggb",
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         ),
     ] {
         group.bench_function(BenchmarkId::new(operation, field.name()), |b| {

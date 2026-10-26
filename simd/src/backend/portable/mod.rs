@@ -20,7 +20,6 @@ use crate::f64x4::F64_LANES;
 use crate::halves::Halves;
 use crate::i32x8::I32_LANES;
 use crate::isa::Isa;
-use crate::kernel::Kernel;
 use crate::u8x32::U8_LANES;
 use crate::u16x16::U16_LANES;
 
@@ -42,11 +41,6 @@ impl Isa for Portable {
     type U8 = PortableU8;
     type U16 = PortableU16;
     type I32 = PortableI32;
-
-    #[inline(always)]
-    fn run<K: Kernel>(self, kernel: K) -> K::Output {
-        kernel.run(self)
-    }
 
     #[inline(always)]
     fn splat_f32(self, value: f32) -> PortableF32 {
@@ -88,7 +82,7 @@ impl Isa for Portable {
         clippy::cast_possible_truncation,
         reason = "each lane is clamped to [0, high], which i32 holds"
     )]
-    fn round_clamped_f32(self, values: PortableF32, high: PortableF32) -> PortableI32 {
+    fn round_clamped_f32_to_i32(self, values: PortableF32, high: PortableF32) -> PortableI32 {
         debug_assert!(
             high.0
                 .iter()
@@ -127,7 +121,7 @@ impl Isa for Portable {
         clippy::cast_possible_truncation,
         reason = "each lane is clamped to [0, high], which i32 holds"
     )]
-    fn round_clamped(self, f64s: Halves<PortableF64>, high: PortableF64) -> PortableI32 {
+    fn round_clamped_f64_to_i32(self, f64s: Halves<PortableF64>, high: PortableF64) -> PortableI32 {
         debug_assert!(
             high.0.iter().all(|&high| is_bound(high, i32::MAX.into())),
             "a high of {:?} past integers of at most i32::MAX",

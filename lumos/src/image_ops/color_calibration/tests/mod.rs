@@ -1,6 +1,8 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image_ops::color_calibration::neutralize_bg::*;
 use crate::image_ops::color_calibration::scnr::*;
 use crate::internals::assertions::{assert_close, assert_close_slice};
@@ -19,7 +21,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     let b = [vec![0.1; 7], vec![0.5, 0.5]].concat();
     let mut img = rgb_image(Size2us::new(3, 3), [r.clone(), g, b.clone()]);
 
-    let before = channel_bgs(&img);
+    let before = channel_bgs(&img).unwrap();
     assert_eq!((before.r, before.g, before.b), (0.1, 0.3, 0.1));
 
     NeutralizeBg.apply(&mut img).unwrap();
@@ -27,6 +29,22 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     assert_eq!(img.channel(0).pixels(), r.as_slice(), "red stays");
     assert_eq!(img.channel(2).pixels(), b.as_slice(), "blue stays");
     assert_close_slice!(img.channel(1).pixels(), r, f32::EPSILON, "green meets red");
+
+    // Eight fills of 0 ahead of the same pixels outnumber them, and would be the median; flagged
+    // `NO_DATA`, they are left out and the backgrounds read as before.
+    let filled = |plane: &[f32]| [&[0.0; 8], plane].concat();
+    let size = Size2us::new(17, 1);
+    let mut img = rgb_image(
+        size,
+        [filled(&r), filled(img.channel(1).pixels()), filled(&b)],
+    );
+    img.set_flags(PixelFlags::at_idxs(
+        size,
+        QualityFlags::NO_DATA,
+        &(0..8).collect::<Vec<_>>(),
+    ));
+    let bg = channel_bgs(&img).unwrap();
+    assert_eq!((bg.r, bg.b), (0.1, 0.1));
 }
 
 /// Average-neutral clamps green to the red/blue mean and nothing else: (0.2, 0.6, 0.2) takes the

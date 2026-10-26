@@ -5,13 +5,12 @@ use crate::gpu::compute_kernel::{KernelJob, OutputStart};
 use crate::gpu::gpu_image::GpuImage;
 use crate::gpu::packed_layout::PackedLayout;
 use crate::ops::blend::Blend;
-use crate::ops::blend::pipeline::GpuBlendPipeline;
+use crate::ops::blend::pipeline;
 
 /// The GPU path behind [`Blend::apply_gpu`].
 pub(super) fn apply(
     params: Blend,
-    ctx: &Gpu,
-    pipeline: &GpuBlendPipeline,
+    gpu: &Gpu,
     src: &GpuImage,
     dst: &GpuImage,
     output: &mut GpuImage,
@@ -26,8 +25,8 @@ pub(super) fn apply(
         _pad: [0; 2],
         layout: PackedLayout::new(src.desc),
     };
-    pipeline.kernel.run(
-        ctx,
+    pipeline::kernel(gpu).run(
+        gpu,
         KernelJob {
             params: bytemuck::bytes_of(&uniform),
             buffers: &[src.read_buffer(), dst.read_buffer(), output.write_buffer()],

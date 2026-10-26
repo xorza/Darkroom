@@ -316,22 +316,21 @@ impl WeightedTap<'_> {
     }
 }
 
-#[cfg(test)]
-pub(super) mod plane_ring {
+#[cfg(feature = "internals")]
+mod internals {
+    #[cfg(test)]
+    use crate::star_detection::convolution::simd::RowRing;
+    #[cfg(test)]
     use common::Buffer2;
 
-    use crate::star_detection::convolution::simd::RowRing;
-
+    #[cfg(test)]
     impl<'a> RowRing<'a> {
         /// Every row of `image`, each in its own slot.
         pub(crate) fn plane(image: &'a Buffer2<f32>) -> Self {
             Self::new(image.pixels(), image.size())
         }
     }
-}
 
-#[cfg(feature = "internals")]
-mod internals {
     #[cfg(test)]
     use crate::star_detection::convolution::simd::{Convolve2dRow, ConvolveColsRow, mirror_idx};
     use crate::star_detection::convolution::simd::{ConvolveRow, convolve_pixel_scalar};

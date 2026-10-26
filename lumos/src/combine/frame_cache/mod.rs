@@ -665,7 +665,7 @@ impl FrameCache {
             step: frames.step,
         };
         Ok(Self::from_tiered_paths(
-            loader::load_tiered::<CfaDecoder, _, E>(frames, combine, run)?,
+            LoadedCache::load::<CfaDecoder, _, E>(frames, combine, run)?,
             combine.normalization,
         )?)
     }
@@ -679,7 +679,7 @@ impl FrameCache {
         run: IngestRun,
     ) -> Result<Self, StackError> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearDecoder, _, StackError>(
+            LoadedCache::load::<LinearDecoder, _, StackError>(
                 SteppedPaths {
                     paths,
                     step: &None::<Infallible>,

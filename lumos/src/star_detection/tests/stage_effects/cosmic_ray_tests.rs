@@ -54,8 +54,7 @@ fn sharpness_rejects_isolated_cosmic_rays() {
     );
 
     let detect = |config: StarDetectionConfig| -> Vec<DVec2> {
-        StarDetector::from_config(config)
-            .unwrap()
+        StarDetector::new(config)
             .detect(&frame.image)
             .stars
             .iter()

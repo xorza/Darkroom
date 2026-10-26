@@ -3,17 +3,19 @@
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --nocapture`; set
 //! `DARKROOM_TEST_OUTPUT` to keep the annotated images.
 
-use std::path::PathBuf;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::internals::visual::drawing::{self, draw_circle};
-use common::internals;
+use common::{fs, internals};
 use glam::Vec2;
-use imaginarium::{ChannelLayout, ColorFormat, PlanarDesc};
+use imaginarium::{ChannelLayout, ColorFormat, InterleavedImage, PlanarDesc, RasterFormat};
 
 use crate::image::linear_image::LinearImage;
 use crate::internals::init_tracing;
 use crate::internals::real_data::{LightPair, dataset_path, first_and_last_lights};
+use crate::io::error::RasterLoadError;
 use crate::io::raster;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::transform_model::TransformModel;
@@ -29,7 +31,7 @@ fn rho_opiuchi_path() -> PathBuf {
 
 /// The dataset's `rho-opiuchi.jpg` as one luminance plane.
 pub(crate) fn rho_opiuchi() -> LinearImage {
-    let image = raster::internals::read_image(&rho_opiuchi_path())
+    let image = read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::MONO_F32);
     LinearImage::from_interleaved(
@@ -39,6 +41,12 @@ pub(crate) fn rho_opiuchi() -> LinearImage {
         ),
         bytemuck::cast_slice(image.bytes()).to_vec(),
     )
+}
+
+/// The dataset's raster at `path`, in the format its extension names.
+fn read_image(path: &Path) -> Result<InterleavedImage, RasterLoadError> {
+    let format = RasterFormat::from_path(path).expect("a dataset raster's extension names it");
+    raster::read(BufReader::new(fs::open(path)?), format)
 }
 
 #[test]
@@ -52,7 +60,7 @@ fn detect_rho_opiuchi() {
         linear_image.height()
     );
 
-    let mut detector = StarDetector::from_config(StarDetectionConfig::precise_ground()).unwrap();
+    let mut detector = StarDetector::new(StarDetectionConfig::precise_ground());
 
     let start = Instant::now();
     let result = detector.detect(&linear_image);
@@ -85,7 +93,7 @@ fn detect_rho_opiuchi() {
     }
 
     // Load original image for visualization (RGB_F32 for drawing functions)
-    let mut output_img = raster::internals::read_image(&rho_opiuchi_path())
+    let mut output_img = read_image(&rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::RGB_F32);
 
@@ -228,7 +236,7 @@ fn weighted_fit_registration_rms() {
         let mut config = StarDetectionConfig::precise_ground();
         config.measurement.centroid_method = CentroidMethod::GaussianFit;
         config.measurement.electrons_per_unit = noise;
-        let mut detector = StarDetector::from_config(config).unwrap();
+        let mut detector = StarDetector::new(config);
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let mut reg_config = RegistrationConfig {

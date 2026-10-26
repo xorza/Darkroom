@@ -5,7 +5,7 @@ use common::bench::{self, Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::scene::{FRAME, Field};
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
@@ -20,7 +20,7 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for (operation, cfa_type, passes) in [
         (
             "rcd/rggb",
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             MarkesteijnPasses::One,
         ),
         (

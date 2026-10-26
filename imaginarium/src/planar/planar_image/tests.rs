@@ -1,7 +1,7 @@
 use common::{Buffer2, Size2us};
 
-use crate::color::color_format::ColorFormat;
-use crate::error::PlanesError;
+use crate::color::color_format::{ColorFormat, SampleType};
+use crate::error::{DescError, PlanesError};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
@@ -66,7 +66,7 @@ fn planes_keep_their_allocations() {
         Buffer2::new((2, 1), vec![11.0, 12.0]),
     ];
     let green = planes[1].pixels().as_ptr();
-    let image = PlanarImage::from(planes);
+    let image = PlanarImage::new_rgb(planes);
     assert!(image.is_rgb());
     assert_eq!(image.desc(), PlanarDesc::new((2, 1), ChannelLayout::Rgb));
     assert_eq!(image.channel(1).pixels(), &[9.0, 10.0]);
@@ -84,20 +84,24 @@ fn a_channel_written_is_its_plane() {
     assert_eq!(image.channel(2).pixels(), &[0.0, 0.0, 0.0, 40.0]);
 }
 
+/// Planes that are no image are refused with what is wrong: an RGB plane of 1×1 beside a first of
+/// 2×1, and a plane 0 pixels wide.
 #[test]
-#[should_panic(expected = "all RGB planes must share a size")]
-fn rgb_planes_of_two_sizes_are_refused() {
-    let _image = PlanarImage::from([
+fn planes_that_are_no_image_are_refused() {
+    let mismatched = PlanarImage::checked_rgb([
         Buffer2::new((2, 1), vec![1.0, 2.0]),
         Buffer2::new((1, 1), vec![3.0]),
         Buffer2::new((2, 1), vec![4.0, 5.0]),
     ]);
-}
-
-#[test]
-#[should_panic(expected = "width must be positive")]
-fn an_empty_plane_is_refused() {
-    let _image = PlanarImage::from(Buffer2::<f32>::new((0, 4), vec![]));
+    assert_eq!(
+        mismatched.unwrap_err(),
+        DescError::PlaneSize {
+            expected: Size2us::new(2, 1),
+            got: Size2us::new(1, 1)
+        }
+    );
+    let empty = PlanarImage::checked_mono(Buffer2::<f32>::new((0, 4), vec![]));
+    assert_eq!(empty.unwrap_err(), DescError::ZeroWidth);
 }
 
 #[test]
@@ -111,11 +115,20 @@ fn a_fourth_plane_is_refused() {
 
 /// Every format planes hold goes into `f32` planes and back into its own format byte for byte,
 /// borrowed and taken: `u8` and `u16` values survive `f32` exactly. A format with alpha is
-/// refused.
+/// refused, and its named drop gives the planes of its color channels. Every format's planes are
+/// those of its `f32` conversion, bit for bit.
 #[test]
 fn each_format_round_trips_through_the_planes_or_is_refused() {
     for format in ColorFormat::ALL {
         let image = create_test_image(format, Size2us::new(5, 3), 7);
+        let f32_format = ColorFormat::new(format.without_alpha().channel_count, SampleType::F32);
+        let converted = image.convert_to(f32_format);
+        let dropped = PlanarImage::without_alpha(&image);
+        assert_eq!(
+            InterleavedImage::from(&dropped).bytes(),
+            converted.bytes(),
+            "{format}"
+        );
         if format.has_alpha() {
             for result in [
                 PlanarImage::try_from(&image),
@@ -146,14 +159,22 @@ fn each_format_round_trips_through_the_planes_or_is_refused() {
     }
 }
 
-/// A `MONO_F32` image taken hands its allocation to its plane.
+/// A `MONO_F32` image taken hands its allocation to its plane, and the plane taken back hands it
+/// to the image.
 #[test]
 fn a_mono_f32_image_taken_keeps_its_allocation() {
     let image = f32_image(ColorFormat::MONO_F32, Size2us::new(3, 1), &[0.5, 1.0, 2.0]);
     let pointer = image.bytes().as_ptr();
     let planes = PlanarImage::try_from(image).unwrap();
     assert_eq!(planes.channel(0).pixels(), &[0.5, 1.0, 2.0]);
-    assert_eq!(planes.into_mono().pixels().as_ptr().cast(), pointer);
+    assert_eq!(planes.channel(0).pixels().as_ptr().cast(), pointer);
+    let image = InterleavedImage::from(planes);
+    assert_eq!(image.desc().color_format(), ColorFormat::MONO_F32);
+    assert_eq!(image.bytes().as_ptr(), pointer);
+    assert_eq!(
+        image.bytes(),
+        bytemuck::cast_slice::<f32, u8>(&[0.5, 1.0, 2.0])
+    );
 }
 
 /// Dropping alpha keeps each color channel exactly, in the sample type it had: RGBA becomes RGB,

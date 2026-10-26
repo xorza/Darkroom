@@ -58,7 +58,9 @@ fn borrowing_is_free_in_the_matching_layout_and_repacks_in_the_other() {
     assert!(matches!(interleaved.planar(), Cow::Owned(_)));
     assert_eq!(interleaved.planar().channel(1).pixels(), &[0.25, 0.625]);
 
-    let planar = Image::from_planes((2, 1), planes());
+    let planar = Image::from(PlanarImage::new_rgb(
+        planes().map(|plane| Buffer2::new((2, 1), plane)),
+    ));
     assert!(matches!(planar.planar(), Cow::Borrowed(_)));
     assert_eq!(planar.planar().channel(2).pixels(), &[0.375, 0.75]);
     assert!(matches!(planar.interleaved(), Cow::Owned(_)));

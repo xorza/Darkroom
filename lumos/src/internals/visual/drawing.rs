@@ -160,7 +160,7 @@ mod tests {
     use crate::internals::visual::drawing::{GREEN, draw_circle, draw_cross, rgb};
 
     fn canvas(format: ColorFormat, side: usize) -> InterleavedImage {
-        InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(side, side), format))
+        InterleavedImage::new_zeroed(InterleavedDesc::new(Size2us::new(side, side), format))
     }
 
     /// The `(x, y)` of every pixel whose green channel was drawn.

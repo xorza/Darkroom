@@ -5,8 +5,9 @@ use std::array;
 
 use common::Buffer2;
 
-use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
-use crate::error::PlanesError;
+use crate::color::color_format::{ChannelCount, ColorFormat};
+use crate::error::{DescError, PlanesError};
+use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::planar::channel_layout::ChannelLayout;
 use crate::planar::planar_desc::PlanarDesc;
@@ -38,11 +39,57 @@ impl PlanarImage {
             desc.sample_count()
         );
         if desc.is_mono() {
-            return Buffer2::new(desc.size(), samples).into();
+            return Self::new_mono(Buffer2::new(desc.size(), samples));
         }
         let pixels: Vec<[f32; 3]> = bytemuck::try_cast_vec(samples)
             .unwrap_or_else(|(_, samples)| bytemuck::pod_collect_to_vec(&samples));
-        Buffer2::new(desc.size(), pixels).deinterleave().into()
+        Self::new_rgb(Buffer2::new(desc.size(), pixels).deinterleave())
+    }
+
+    /// A mono image of `plane`, its allocation kept.
+    ///
+    /// # Panics
+    /// When `plane` holds no pixel.
+    pub fn new_mono(plane: Buffer2<f32>) -> Self {
+        Self::checked_mono(plane).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// [`Self::new_mono`], or why `plane` is no image.
+    pub fn checked_mono(plane: Buffer2<f32>) -> Result<Self, DescError> {
+        PlanarDesc::checked(plane.size(), ChannelLayout::Mono)?;
+        Ok(Self {
+            planes: Planes::Mono(plane),
+        })
+    }
+
+    /// An RGB image of `planes`, each kept as its allocation.
+    ///
+    /// # Panics
+    /// Unless the planes share a size that holds a pixel.
+    pub fn new_rgb(planes: [Buffer2<f32>; 3]) -> Self {
+        Self::checked_rgb(planes).unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// [`Self::new_rgb`], or why `planes` are no image.
+    pub fn checked_rgb(planes: [Buffer2<f32>; 3]) -> Result<Self, DescError> {
+        let expected = planes[0].size();
+        PlanarDesc::checked(expected, ChannelLayout::Rgb)?;
+        if let Some(plane) = planes[1..].iter().find(|plane| plane.size() != expected) {
+            return Err(DescError::PlaneSize {
+                expected,
+                got: plane.size(),
+            });
+        }
+        Ok(Self {
+            planes: Planes::Rgb(planes),
+        })
+    }
+
+    /// The planes of `image` with its alpha channel dropped, each sample on the unit scale: the one
+    /// conversion to planes that loses data, which a caller names. An image with no alpha gives
+    /// what [`PlanarImage::try_from`] gives.
+    pub fn without_alpha(image: &InterleavedImage) -> Self {
+        image.unit_planes()
     }
 
     /// The planes `planes` holds, in channel order, each kept as its allocation.
@@ -68,8 +115,8 @@ impl PlanarImage {
                 .unwrap_or_else(|| panic!("{desc} needs more planes"))
         };
         let image = match desc.layout() {
-            ChannelLayout::Mono => next().into(),
-            ChannelLayout::Rgb => Self::from([next(), next(), next()]),
+            ChannelLayout::Mono => Self::new_mono(next()),
+            ChannelLayout::Rgb => Self::new_rgb([next(), next(), next()]),
         };
         assert!(planes.next().is_none(), "{desc} holds fewer planes");
         image
@@ -78,8 +125,10 @@ impl PlanarImage {
     /// Black planes of `desc`.
     pub fn new_zeroed(desc: PlanarDesc) -> Self {
         match desc.layout() {
-            ChannelLayout::Mono => Buffer2::new_default(desc.size()).into(),
-            ChannelLayout::Rgb => Self::from(array::from_fn(|_| Buffer2::new_default(desc.size()))),
+            ChannelLayout::Mono => Self::new_mono(Buffer2::new_default(desc.size())),
+            ChannelLayout::Rgb => {
+                Self::new_rgb(array::from_fn(|_| Buffer2::new_default(desc.size())))
+            }
         }
     }
 
@@ -171,49 +220,26 @@ impl PlanarImage {
     }
 }
 
-/// The `f32` format an image of `format` deinterleaves into, or why it has none: planes hold no
-/// alpha.
-const fn planar_format(format: ColorFormat) -> Result<ColorFormat, PlanesError> {
+/// An image of `format` refused as planes when it has alpha: planes hold none.
+const fn refuse_alpha(format: ColorFormat) -> Result<(), PlanesError> {
     match format.channel_count {
-        ChannelCount::Mono | ChannelCount::Rgb => {
-            Ok(ColorFormat::new(format.channel_count, SampleType::F32))
-        }
+        ChannelCount::Mono | ChannelCount::Rgb => Ok(()),
         ChannelCount::Rgba => Err(PlanesError::Alpha {
             color_format: format,
         }),
     }
 }
 
-/// A mono image of `plane`, its allocation kept.
-///
-/// # Panics
-/// When `plane` holds no pixel.
-impl From<Buffer2<f32>> for PlanarImage {
-    fn from(plane: Buffer2<f32>) -> Self {
-        if let Err(error) = PlanarDesc::checked(plane.size(), ChannelLayout::Mono) {
-            panic!("{error}");
-        }
-        Self {
-            planes: Planes::Mono(plane),
-        }
-    }
-}
-
-/// An RGB image of `planes`, each kept as its allocation.
-///
-/// # Panics
-/// Unless the planes share a size that holds a pixel.
-impl From<[Buffer2<f32>; 3]> for PlanarImage {
-    fn from(planes: [Buffer2<f32>; 3]) -> Self {
-        let size = planes[0].size();
-        if let Err(error) = PlanarDesc::checked(size, ChannelLayout::Rgb) {
-            panic!("{error}");
-        }
-        for plane in &planes[1..] {
-            assert_eq!(plane.size(), size, "all RGB planes must share a size");
-        }
-        Self {
-            planes: Planes::Rgb(planes),
+/// The planes interleaved, taking them: a mono image hands its plane over as its `MONO_F32`
+/// samples.
+impl From<PlanarImage> for InterleavedImage {
+    fn from(image: PlanarImage) -> Self {
+        match image.planes {
+            Planes::Mono(plane) => Self::from_samples(
+                InterleavedDesc::new(plane.size(), ColorFormat::MONO_F32),
+                Vec::from(plane),
+            ),
+            Planes::Rgb(planes) => Self::from(planes.each_ref()),
         }
     }
 }
@@ -228,23 +254,15 @@ impl From<&PlanarImage> for InterleavedImage {
     }
 }
 
-/// The planes of a mono or RGB image in any sample type, converted to `f32` first when it is not
-/// already, which every `u8` and `u16` value survives exactly. An image with alpha is refused:
-/// [`InterleavedImage::without_alpha`] names the drop.
+/// The planes of a mono or RGB image in any sample type, each sample on the unit scale, which
+/// every `u8` and `u16` value survives exactly. An image with alpha is refused:
+/// [`PlanarImage::without_alpha`] names the drop.
 impl TryFrom<&InterleavedImage> for PlanarImage {
     type Error = PlanesError;
 
     fn try_from(image: &InterleavedImage) -> Result<Self, PlanesError> {
-        let target = planar_format(image.desc().color_format())?;
-        if image.desc().color_format() != target {
-            return Self::try_from(image.convert_to(target));
-        }
-        Ok(if target.channel_count == ChannelCount::Mono {
-            let [plane] = image.planes::<f32, 1>().expect("a MONO_F32 image");
-            plane.into()
-        } else {
-            Self::from(image.planes::<f32, 3>().expect("an RGB_F32 image"))
-        })
+        refuse_alpha(image.desc().color_format())?;
+        Ok(image.unit_planes())
     }
 }
 
@@ -254,14 +272,12 @@ impl TryFrom<InterleavedImage> for PlanarImage {
     type Error = PlanesError;
 
     fn try_from(image: InterleavedImage) -> Result<Self, PlanesError> {
-        let target = planar_format(image.desc().color_format())?;
-        let image = image.convert(target);
-        Ok(if target.channel_count == ChannelCount::Mono {
-            let [plane] = image.into_planes::<f32, 1>().expect("a MONO_F32 image");
-            plane.into()
-        } else {
-            Self::from(image.into_planes::<f32, 3>().expect("an RGB_F32 image"))
-        })
+        refuse_alpha(image.desc().color_format())?;
+        if image.desc().color_format() != ColorFormat::MONO_F32 {
+            return Ok(image.unit_planes());
+        }
+        let [plane] = image.into_planes::<f32, 1>().expect("a MONO_F32 image");
+        Ok(Self::new_mono(plane))
     }
 }
 

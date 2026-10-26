@@ -26,6 +26,7 @@ mod windowed_stamp;
 use common::Buffer2;
 use glam::DVec2;
 
+use crate::bg_mesh::mesh_surface::SurfaceReader;
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::masked_plane::MaskedPlane;
 use crate::star_detection::bg::sky_noise::SkyNoise;
@@ -71,12 +72,16 @@ impl MeasurePlanes<'_> {
     /// Every star leaves with a position σ: the fit's, from `(JᵀWJ)⁻¹·χ²/(n − p)`, or the windowed
     /// centroid's, from the pixel noise.
     ///
+    /// `noise` reads the sky's noise map: one reader for every star a worker measures in turn, so
+    /// the stars of a row share the row's solve.
+    ///
     /// Returns `None` if the candidate fails quality checks during measurement.
     pub(super) fn measure_star(
         self,
         region: &Region,
         config: &MeasurementConfig,
         grid: &MeasureGrid,
+        noise: &mut SurfaceReader<'_>,
     ) -> Option<Star> {
         let MeasurePlanes {
             residual,
@@ -121,7 +126,7 @@ impl MeasurePlanes<'_> {
         };
         let start_annulus = annulus_at(start);
         let (local_offset, local_noise) = start_annulus.map_or_else(
-            || (0.0, sky.noise.reader().at(region.peak)),
+            || (0.0, noise.at(region.peak)),
             |local| (local.offset, local.noise),
         );
         let noise = StarNoise {

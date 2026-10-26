@@ -1,7 +1,7 @@
 //! [`PreparedFrame`]: a frame reduced to the planes detection and measurement read.
 
 use arrayvec::ArrayVec;
-use common::{Buffer2, par};
+use common::{Buffer2, PerWorker, par};
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -14,7 +14,8 @@ use crate::star_detection::centroid::MeasurePlanes;
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detection_filter::FilterSource;
-use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec, Prefilter};
+use crate::star_detection::detection_filter::Prefilter;
+use crate::star_detection::detection_plane::{DetectionPlane, PlaneSpec};
 use crate::star_detection::refined_bg::RefinedBg;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
@@ -190,8 +191,14 @@ impl PreparedFrame {
             saturation: &self.saturation,
             no_data: self.no_data.as_deref(),
         };
+        // A reader is made where it is first used, so only the workers that measure take one.
+        let readers = PerWorker::new(|| None);
         par::iter(regions)
-            .map(|region| planes.measure_star(region, config, &grid))
+            .map(|region| {
+                let mut slot = readers.get();
+                let noise = slot.get_or_insert_with(|| self.sky.noise.reader());
+                planes.measure_star(region, config, &grid, noise)
+            })
             .collect_into_vec(measured);
         out.clear();
         out.extend(measured.drain(..).flatten());
@@ -228,16 +235,23 @@ fn combine_channels(image: &LinearImage, output: &mut Buffer2<f32>) {
 }
 
 /// Each channel's white noise, by the multiresolution estimator over the pixels no flag names: the
-/// noise stacking weighs by, and not the MAD, which a red nebula inflates in red.
-fn channel_noise(image: &LinearImage) -> [f32; 3] {
+/// noise stacking weighs by, and not the MAD, which a red nebula inflates in red. `None` for a
+/// channel whose pixels all hold one value — a dead channel, or one a narrowband mapping left
+/// empty — which carries no star and no noise: nothing to detect in.
+fn channel_noise(image: &LinearImage) -> [Option<f32>; 3] {
     let flags = image.flags();
     let excluded = |idx: usize| flags.is_some_and(|flags| flags.is_flagged(idx));
     [0, 1, 2].map(|channel| {
-        NoisePlane {
-            samples: image.channel(channel),
-            excluded,
-        }
-        .sigma()
+        let samples = image.channel(channel);
+        let (least, most) = par::iter(samples.pixels())
+            .enumerate()
+            .filter(|&(idx, _)| !excluded(idx))
+            .map(|(_, &value)| (value, value))
+            .reduce(
+                || (f32::INFINITY, f32::NEG_INFINITY),
+                |(a, b), (c, d)| (a.min(c), b.max(d)),
+            );
+        (least < most).then(|| NoisePlane { samples, excluded }.sigma())
     })
 }
 
@@ -250,21 +264,34 @@ fn channel_noise(image: &LinearImage) -> [f32; 3] {
 /// blue-dominant stars stay detectable.
 ///
 /// Each weight is `(σ_min/σ)²` before the sum, which needs no `1/σ²` that a tiny σ could overflow.
-/// A channel with no measured noise is better than any with noise, so the channels at σ = 0 share
-/// the whole weight: the limit of `1/σ²`. Only synthetic data has one.
-fn inverse_variance_weights(sigmas: [f32; 3]) -> [f32; 3] {
-    let quiet = sigmas.iter().filter(|&&sigma| sigma == 0.0).count();
+/// A channel with no measured noise but some signal is better than any with noise, so the channels
+/// at σ = 0 share the whole weight: the limit of `1/σ²`. Only synthetic data has one. A channel of
+/// one value (`None`) holds no information and weighs nothing; with no other, the channels share
+/// alike.
+fn inverse_variance_weights(sigmas: [Option<f32>; 3]) -> [f32; 3] {
+    let informative = sigmas.iter().flatten().count();
+    if informative == 0 {
+        return [1.0 / 3.0; 3];
+    }
+    let quiet = sigmas
+        .iter()
+        .flatten()
+        .filter(|&&sigma| sigma == 0.0)
+        .count();
     if quiet > 0 {
         return sigmas.map(|sigma| {
-            if sigma == 0.0 {
+            if sigma == Some(0.0) {
                 1.0 / quiet as f32
             } else {
                 0.0
             }
         });
     }
-    let least = sigmas.into_iter().fold(f32::INFINITY, f32::min);
-    let relative = sigmas.map(|sigma| (least / sigma).powi(2));
+    let least = sigmas
+        .iter()
+        .flatten()
+        .fold(f32::INFINITY, |least, &sigma| least.min(sigma));
+    let relative = sigmas.map(|sigma| sigma.map_or(0.0, |sigma| (least / sigma).powi(2)));
     let sum: f32 = relative.iter().sum();
     relative.map(|weight| weight / sum)
 }

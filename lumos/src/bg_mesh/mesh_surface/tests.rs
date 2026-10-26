@@ -47,7 +47,9 @@ fn only_the_noise_is_held_to_the_tiles_range() {
 
 /// A pixel read alone is the value its row holds there, bit for bit, the σ's clip included: every
 /// pixel of a 100 × 70 frame of 32 px tiles, a sky of a tilted ramp and a σ that varies by tile,
-/// on whichever vector tier the row runs.
+/// on whichever vector tier the row runs. Read row by row, a reader solves each row once; read
+/// column by column, it solves a row for each pixel. One surface holds the sky, then the σ, so a
+/// reader of the σ starts from none of the rows the sky's readers solved.
 #[test]
 fn a_pixel_is_its_row_bit_for_bit() {
     let pixels = Buffer2::from_fn((100, 70), |x, y| {
@@ -56,19 +58,19 @@ fn a_pixel_is_its_row_bit_for_bit() {
     });
     let grid = BgMesh::computed(&pixels, None, PARAMS);
     let mut spline = MeshSpline::default();
+    let mut surface = MeshSurface::default();
     for component in [TileComponent::Sky, TileComponent::Sigma] {
-        let mut surface = MeshSurface::default();
         spline.solve(&grid, component, &mut surface);
         let plane = surface.plane();
         let mut reader = surface.reader();
-        for y in 0..70 {
-            for x in 0..100 {
-                assert_eq!(
-                    reader.at(Vec2us::new(x, y)).to_bits(),
-                    plane[(x, y)].to_bits(),
-                    "{component:?} at ({x}, {y})"
-                );
-            }
+        let rows = (0..70).flat_map(|y| (0..100).map(move |x| (x, y)));
+        let columns = (0..100).flat_map(|x| (0..70).map(move |y| (x, y)));
+        for (x, y) in rows.chain(columns) {
+            assert_eq!(
+                reader.at(Vec2us::new(x, y)).to_bits(),
+                plane[(x, y)].to_bits(),
+                "{component:?} at ({x}, {y})"
+            );
         }
     }
 }

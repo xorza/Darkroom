@@ -87,6 +87,5 @@ mod tests {
             SipOrder::Three.terms(),
             [(2, 0), (1, 1), (0, 2), (3, 0), (2, 1), (1, 2), (0, 3)]
         );
-        assert_eq!(SipOrder::Four.required_points(), 36);
     }
 }

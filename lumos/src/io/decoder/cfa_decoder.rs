@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use crate::frame::frame_info::DecoderBytes;
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::io::decoder::decoder_kind::DecoderKind;
@@ -51,5 +52,11 @@ impl Decoder for CfaDecoder {
     /// A RAW or FITS header answers without a decode; a RAW file is read whole for it.
     fn peek(path: &Path, ctx: &LoadCtx) -> Option<Peek<CfaRead>> {
         ctx.cfa_peek(path).ok()
+    }
+
+    /// Every format this reads has a header [`Self::peek`] answers from, so a frame decoded first
+    /// is one whose header did not read, and its load fails before it makes a frame.
+    fn decoded_beside(_: &Path, _: &CfaImage) -> DecoderBytes {
+        DecoderBytes::default()
     }
 }

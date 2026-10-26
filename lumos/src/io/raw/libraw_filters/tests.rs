@@ -1,4 +1,4 @@
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::error::XTransPatternError;
@@ -36,11 +36,11 @@ fn from_libraw_classifies_the_sensor() {
     );
     assert_eq!(
         classify(0x9494_9494, 3),
-        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)))
     );
     assert_eq!(
         classify(0x1616_1616, 3),
-        Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)))
+        Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)))
     );
     assert_eq!(classify(0x1234_5678, 3), None);
     for (filters, cdesc) in [(0x9c9c_9c9c, *b"RGBE"), (0x1e1e_1e1e, *b"CMYG")] {
@@ -95,10 +95,10 @@ fn from_libraw_classifies_the_sensor() {
 #[test]
 fn from_filters_decodes_the_libraw_word_and_rejects_the_rest() {
     // Standard LibRaw encodings: two bits per position, the 2x2 block repeated across the word.
-    assert_eq!(libraw_filters::bayer(0x9494_9494), Some(CfaPattern::Rggb));
-    assert_eq!(libraw_filters::bayer(0x1616_1616), Some(CfaPattern::Bggr));
-    assert_eq!(libraw_filters::bayer(0x6161_6161), Some(CfaPattern::Grbg));
-    assert_eq!(libraw_filters::bayer(0x4949_4949), Some(CfaPattern::Gbrg));
+    assert_eq!(libraw_filters::bayer(0x9494_9494), Some(BayerPattern::Rggb));
+    assert_eq!(libraw_filters::bayer(0x1616_1616), Some(BayerPattern::Bggr));
+    assert_eq!(libraw_filters::bayer(0x6161_6161), Some(BayerPattern::Grbg));
+    assert_eq!(libraw_filters::bayer(0x4949_4949), Some(BayerPattern::Gbrg));
     // filters == 0 is monochrome / no CFA; exotic patterns match nothing either.
     assert_eq!(libraw_filters::bayer(0), None);
     assert_eq!(libraw_filters::bayer(0x1234_5678), None);

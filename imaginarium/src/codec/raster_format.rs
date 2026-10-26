@@ -1,9 +1,14 @@
 //! [`RasterFormat`]: the image file formats imaginarium reads and writes.
 
 use std::fmt;
+use std::io::{BufRead, Seek, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+use crate::codec;
+use crate::error::CodecError;
+use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// An image file format imaginarium reads and writes, named by the file's extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +38,28 @@ impl RasterFormat {
                 .iter()
                 .any(|known| extension.eq_ignore_ascii_case(known))
         })
+    }
+
+    /// The image `input` holds in this format, decoded as it is read: a file whoever owns the
+    /// reading opened, or bytes in a [`Cursor`](std::io::Cursor). A header stating more than
+    /// `max_bytes` of samples is refused before they are allocated, as the image crate's
+    /// `Limits::max_alloc` refuses one: a few bytes of a corrupt or hostile file can state
+    /// gigabytes.
+    pub fn decode(
+        self,
+        mut input: impl BufRead + Seek,
+        max_bytes: u64,
+    ) -> Result<InterleavedImage, CodecError> {
+        codec::decode(&mut input, self, max_bytes)
+    }
+
+    /// `image` in this format, written into `out`, which the encoder may seek back over.
+    pub fn encode(
+        self,
+        image: &InterleavedImage,
+        mut out: impl Write + Seek,
+    ) -> Result<(), CodecError> {
+        codec::encode(image, self, &mut out)
     }
 
     /// The format the extension of `path` names, in any case.

@@ -23,8 +23,14 @@ use criterion::Criterion;
 
 use crate::{
     bg_mesh, bit_buffer2, calibration, combine, drizzle, frame, frame_store, image, image_ops, io,
-    math, noise, pipeline, registration, star_detection,
+    math, memory, noise, pipeline, registration, star_detection,
 };
+
+/// The bytes of `available` a run plans to commit, as the pipeline computes it: for the memory
+/// budget's integration test, which holds a run's peak to it.
+pub fn usable_memory(available: u64) -> u64 {
+    memory::usable(available)
+}
 
 /// Every bench, atomic first, a top-level module at a time.
 pub fn run(c: &mut Criterion) {

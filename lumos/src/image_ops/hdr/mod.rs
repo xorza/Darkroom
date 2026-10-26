@@ -56,11 +56,15 @@ impl Hdr {
     /// Compress the dynamic range of `image` in place.
     ///
     /// # Errors
-    /// [`OpError::Config`] on out-of-range parameters.
+    /// [`OpError::Config`] on out-of-range parameters; [`OpError::NoData`] when every pixel holds
+    /// a fill.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         if self.amount == 0.0 {
             return Ok(());
+        }
+        if image.intensity().fill_count() == image.pixel_count() {
+            return Err(OpError::NoData);
         }
         image.remap_intensity(|intensity| self.compress(intensity));
         Ok(())
@@ -95,8 +99,14 @@ impl Hdr {
         }
         let mut residual = c_cur;
 
-        // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
-        let mean = sum::mean_f32(residual.pixels());
+        // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents. The
+        // image's geometric mean is that of its data: a border no frame reached would set the
+        // brightness of the whole image.
+        let mean = if intensity.fill_count() == 0 {
+            sum::mean_f32(residual.pixels())
+        } else {
+            data_mean(residual.pixels(), intensity)
+        };
         let amount = self.amount;
         par::chunks_mut(residual.pixels_mut(), SAMPLES_PER_BLOCK)
             .enumerate()
@@ -114,6 +124,30 @@ impl Hdr {
         ConfigField::new("hdr amount", self.amount)
             .finite_and("finite and in [0, 1]", |value| (0.0..=1.0).contains(&value))
     }
+}
+
+/// The mean of the `values` at the pixels of `intensity` that hold data, accumulated in f64 over
+/// fixed blocks summed in order, so it does not depend on the thread count.
+fn data_mean(values: &[f32], intensity: Intensity<'_>) -> f32 {
+    let blocks: Vec<(f64, usize)> = par::chunks(values, SAMPLES_PER_BLOCK)
+        .enumerate()
+        .map(|(block, values)| {
+            let start = block * SAMPLES_PER_BLOCK;
+            (start..)
+                .zip(values)
+                .filter(|&(idx, _)| !intensity.is_fill(idx))
+                .fold((0.0, 0), |(sum, count), (_, &value)| {
+                    (sum + f64::from(value), count + 1)
+                })
+        })
+        .collect();
+    let (sum, count) = blocks
+        .into_iter()
+        .fold((0.0, 0), |(sum, count), (block_sum, block_count)| {
+            (sum + block_sum, count + block_count)
+        });
+    debug_assert!(count > 0, "an image of fills alone is refused before");
+    (sum / count as f64) as f32
 }
 
 #[cfg(test)]

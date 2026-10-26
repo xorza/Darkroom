@@ -27,7 +27,7 @@ pub enum MasterRole {
 }
 
 impl MasterRole {
-    /// The four roles, in calibration order. Adding a fifth is a compile error in
+    /// The four roles, in bundle order. Adding a fifth is a compile error in
     /// [`CalibrationSet`](crate::calibration::calibration_set::CalibrationSet)
     /// rather than a silent omission wherever roles are walked.
     pub const ALL: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];

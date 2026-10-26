@@ -2,7 +2,7 @@
 //!
 //! Two kinds, and every case is one. An `atomic` case times one kernel on the unit dispatch hands
 //! it, once for each variant: the scalar reference, and the kernel compiled for each tier this CPU
-//! has. A row kernel gets one row of the standard frame; transform's kernel, which takes an
+//! has. A row kernel gets one row of the standard frame; the affine warp's kernel, which takes an
 //! image, a 512 × 512 tile. An `integration` case times a public entry point on the standard
 //! frame, on each backend it has, as a caller pays: an allocation the API makes, and on the GPU
 //! the upload and the readback.

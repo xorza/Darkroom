@@ -34,13 +34,13 @@ fn completeness_and_reliability_high_for_bright_field() {
         "completeness {:.3} should be ≥ 0.95 ({}/{} found)",
         score.completeness(),
         score.matched,
-        score.n_truth
+        score.truth_count
     );
     assert!(
         score.reliability() >= 0.95,
         "reliability {:.3} should be ≥ 0.95 ({} detections)",
         score.reliability(),
-        score.n_recovered
+        score.recovered_count
     );
 }
 
@@ -119,8 +119,7 @@ fn negligible_false_positives_on_source_free_noise() {
                 &Camera::realistic(4.0),
                 &Observation::reference(seed),
             );
-            StarDetector::from_config(synthetic_config())
-                .unwrap()
+            StarDetector::new(synthetic_config())
                 .detect(&frame.image)
                 .stars
                 .len()

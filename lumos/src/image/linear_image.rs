@@ -221,33 +221,51 @@ impl LinearImage {
         if !self.is_rgb() {
             return;
         }
+        self.rgb_blocks_mut(|_, [r, g, b]| {
+            for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
+                let out = rgb(Rgb {
+                    r: *r,
+                    g: *g,
+                    b: *b,
+                });
+                *r = out.r;
+                *g = out.g;
+                *b = out.b;
+            }
+        });
+    }
+
+    /// `block` over the three planes of an RGB image in lockstep, in parallel, a block of
+    /// [`SAMPLES_PER_BLOCK`] pixels of every plane at a time, with the block's first pixel: one
+    /// band of every channel per task.
+    pub(crate) fn rgb_blocks_mut(&mut self, block: impl Fn(usize, [&mut [f32]; 3]) + Sync) {
+        debug_assert!(self.is_rgb(), "the blocks of an RGB image");
         let [r, g, b] = self.rgb_planes_mut();
         par::chunks_mut(r, SAMPLES_PER_BLOCK)
             .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
             .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
-            .for_each(|((r, g), b)| {
-                for ((r, g), b) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()) {
-                    let out = rgb(Rgb {
-                        r: *r,
-                        g: *g,
-                        b: *b,
-                    });
-                    *r = out.r;
-                    *g = out.g;
-                    *b = out.b;
-                }
-            });
+            .enumerate()
+            .for_each(|(idx, ((r, g), b))| block(idx * SAMPLES_PER_BLOCK, [r, g, b]));
     }
 
     /// The per-pixel combined intensity, read from the channels where it is needed: the channel
     /// itself for mono, `(r+g+b)/3` for RGB.
     pub(crate) fn intensity(&self) -> Intensity<'_> {
         let size = self.desc().size();
-        if self.is_rgb() {
+        let intensity = if self.is_rgb() {
             Intensity::rgb(size, array::from_fn(|c| self.channel(c).pixels()))
         } else {
             Intensity::mono(size, self.channel(0).pixels())
-        }
+        };
+        intensity.with_flags(self.flags())
+    }
+
+    /// The values of `channel`'s pixels holding data an image statistic is taken from — see
+    /// [`Intensity::statistic_values`].
+    pub(crate) fn statistic_values(&self, channel: usize) -> Vec<f32> {
+        Intensity::mono(self.desc().size(), self.channel(channel).pixels())
+            .with_flags(self.flags())
+            .statistic_values()
     }
 
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
@@ -266,26 +284,20 @@ impl LinearImage {
                 });
             return;
         }
-        let [r, g, b] = self.rgb_planes_mut();
-        par::chunks_mut(r, SAMPLES_PER_BLOCK)
-            .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
-            .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
-            .zip(par::chunks(mapped.pixels(), SAMPLES_PER_BLOCK))
-            .for_each(|(((r, g), b), mapped)| {
-                for (((r, g), b), &m) in
-                    r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).zip(mapped)
-                {
-                    let out = Rgb {
-                        r: *r,
-                        g: *g,
-                        b: *b,
-                    }
-                    .with_intensity(m);
-                    *r = out.r;
-                    *g = out.g;
-                    *b = out.b;
+        self.rgb_blocks_mut(|start, [r, g, b]| {
+            let mapped = &mapped.pixels()[start..start + r.len()];
+            for (((r, g), b), &m) in r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).zip(mapped) {
+                let out = Rgb {
+                    r: *r,
+                    g: *g,
+                    b: *b,
                 }
-            });
+                .with_intensity(m);
+                *r = out.r;
+                *g = out.g;
+                *b = out.b;
+            }
+        });
     }
 }
 
@@ -383,11 +395,11 @@ impl StackableImage for LinearImage {
             flat_gain,
         } = parts;
         let pixels = match planes.into_inner() {
-            Ok(rgb) => PlanarImage::from(rgb),
+            Ok(rgb) => PlanarImage::new_rgb(rgb),
             Err(mut mono) => {
                 let plane = mono.pop().expect("an image has one plane or three");
                 assert!(mono.is_empty(), "an image has one plane or three");
-                PlanarImage::from(plane)
+                PlanarImage::new_mono(plane)
             }
         };
         Self::from(LinearParts {
@@ -400,18 +412,6 @@ impl StackableImage for LinearImage {
 
     fn flat_gain(&self) -> Option<&FrameGain> {
         Self::flat_gain(self)
-    }
-}
-
-impl From<Buffer2<f32>> for LinearImage {
-    fn from(plane: Buffer2<f32>) -> Self {
-        Self::new(plane.into(), None, ImageMetadata::default())
-    }
-}
-
-impl From<[Buffer2<f32>; 3]> for LinearImage {
-    fn from(planes: [Buffer2<f32>; 3]) -> Self {
-        Self::new(planes.into(), None, ImageMetadata::default())
     }
 }
 

@@ -2,11 +2,11 @@
 //! before any registers, or each light through all of it in one pass.
 
 use std::mem;
-use std::path::Path;
 
 use common::{CancelToken, par};
 use imaginarium::PlanarDesc;
 
+use crate::frame::admitted::Admitted;
 use crate::frame_store::file_set::Loaded;
 use crate::frame_store::run_storage::RunStorage;
 use crate::image::linear_image::LinearImage;
@@ -16,7 +16,7 @@ use crate::memory::run_plan::RunPlan;
 use crate::pipeline::align_stack_config::{AlignStackConfig, Reference, ReferenceCandidate};
 use crate::pipeline::align_stack_result::AlignStackResult;
 use crate::pipeline::detected_frame::{DetectedFrame, DetectedLight};
-use crate::pipeline::error::{AlignStackConfigError, AlignStackError};
+use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_parking::StagePlan;
 use crate::pipeline::frame_registrar::{FrameRegistrar, LightSet, ParkedLight};
 use crate::pipeline::light_files::LightFiles;
@@ -63,14 +63,16 @@ struct LightIntake<'a> {
 }
 
 impl LightIntake<'_> {
-    /// Light `idx`, `image`, admitted to the set, its stars detected by `detector`.
+    /// Light `idx`, `image`, admitted to the set with what a decode cache `measured` of it, its
+    /// stars detected by `detector`.
     fn detect(
         &self,
         detector: &mut StarDetector,
         idx: usize,
         image: LinearImage,
+        measured: Option<Admitted>,
     ) -> Result<DetectedLight<LinearImage>, AlignStackError> {
-        let admitted = self.intake.admit(idx, &image)?;
+        let admitted = self.intake.admit_measured(idx, &image, measured)?;
         let result = detector.detect(&image);
         self.log(idx, &result);
         let DetectionResult { stars, diagnostics } = result;
@@ -109,9 +111,9 @@ impl AlignStackRun<'_> {
     /// detected, registered, warped and stored by one worker; otherwise every light is prepared
     /// and detected first — the reference is the sharpest, or the lights are already in memory —
     /// and parked until it registers.
-    pub(super) fn stack<P: AsRef<Path> + Sync>(
+    pub(super) fn stack(
         &self,
-        lights: LightSource<'_, P>,
+        lights: LightSource<'_>,
     ) -> Result<AlignStackResult, AlignStackError> {
         match (self.config.reference, lights) {
             (Reference::Idx(reference), LightSource::Files(files)) => {
@@ -130,10 +132,7 @@ impl AlignStackRun<'_> {
     /// The statistics are measured before the warp correlates neighbouring pixels, and while the
     /// frame is in hand: a spilled frame would otherwise be read back for them. A demosaiced
     /// light's noise is the one its demosaic measured on the mosaic.
-    fn detect<P: AsRef<Path> + Sync>(
-        &self,
-        lights: LightSource<'_, P>,
-    ) -> Result<DetectedLights, AlignStackError> {
+    fn detect(&self, lights: LightSource<'_>) -> Result<DetectedLights, AlignStackError> {
         let Self { config, ingest, .. } = self;
         let count = lights.len();
         debug_assert!(count > 0, "each entry refuses an empty set");
@@ -145,7 +144,7 @@ impl AlignStackRun<'_> {
             budget,
         );
         let storage = match &lights {
-            LightSource::Held(_) => RunStorage::holding(ingest),
+            LightSource::Held(_) => RunStorage::holding(&ingest.storage),
             LightSource::Files(files) => files.storage(),
         };
         let stage = shape.stage_plan(&plan, LightShape::WARP, storage)?;
@@ -162,7 +161,7 @@ impl AlignStackRun<'_> {
         // whole working set. The RAW decode is the one step that cannot stop midway, so the bound
         // is also what a cancel has to drain.
         let intake = self.intake(shape.desc, count, slots);
-        let mut detectors = self.detectors(slots)?;
+        let mut detectors = self.detectors(slots);
         let lights = match lights {
             // A held light stays where the caller put it, whatever the tier.
             LightSource::Held(frames) => {
@@ -170,7 +169,7 @@ impl AlignStackRun<'_> {
                     .intake
                     .map_owned(frames, &mut detectors, |detector, idx, image| {
                         let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, idx, image)?;
+                            intake.detect(detector, idx, image, None)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight {
                             frame: frame.resident(),
@@ -182,9 +181,13 @@ impl AlignStackRun<'_> {
                 intake
                     .intake
                     .map(0..count, &mut detectors, |detector, idx| {
-                        let Loaded { image, kept } = files.prepare(idx, intake.intake.ctx())?;
+                        let Loaded {
+                            image,
+                            kept,
+                            measured,
+                        } = files.prepare(idx, intake.intake.ctx())?;
                         let DetectedLight { frame, diagnostics } =
-                            intake.detect(detector, idx, image)?;
+                            intake.detect(detector, idx, image, measured)?;
                         let frame = frame.parked(&stage.parking, kept)?;
                         intake.intake.complete_one();
                         Ok::<_, AlignStackError>(DetectedLight { frame, diagnostics })
@@ -286,9 +289,9 @@ impl AlignStackRun<'_> {
     /// preparation, its detection, its registration, its warp and its store, so a light is
     /// written once and no prepared set is ever parked. The pass reports as one stage, a light
     /// counted once it is parked.
-    fn stack_in_one_pass<P: AsRef<Path> + Sync>(
+    fn stack_in_one_pass(
         &self,
-        files: &LightFiles<'_, P>,
+        files: &LightFiles<'_>,
         reference: usize,
     ) -> Result<AlignStackResult, AlignStackError> {
         let Self { config, ingest, .. } = self;
@@ -315,7 +318,7 @@ impl AlignStackRun<'_> {
         let slots = workers.min(count);
         let intake = self.intake(shape.desc, count, slots);
         let mut workers: Vec<PassWorker> = self
-            .detectors(slots)?
+            .detectors(slots)
             .into_iter()
             .map(|detector| PassWorker {
                 detector,
@@ -327,11 +330,15 @@ impl AlignStackRun<'_> {
             return Err(AlignStackError::Cancelled);
         }
         // The reference decodes alone, on every thread a decode may use.
-        let Loaded { image, kept } = files.prepare(reference, &ingest.ctx)?;
+        let Loaded {
+            image,
+            kept,
+            measured,
+        } = files.prepare(reference, &ingest.ctx)?;
         let DetectedLight {
             frame: mut first,
             diagnostics,
-        } = intake.detect(&mut workers[0].detector, reference, image)?;
+        } = intake.detect(&mut workers[0].detector, reference, image, measured)?;
         ReferenceCandidate {
             stars: first.stars.len(),
             median_fwhm: diagnostics.median_fwhm,
@@ -364,9 +371,11 @@ impl AlignStackRun<'_> {
             .intake
             .map(0..count - 1, &mut workers, |worker, other| {
                 let idx = other + usize::from(other >= reference);
-                let Loaded { image, .. } = files.prepare(idx, intake.intake.ctx())?;
+                let Loaded {
+                    image, measured, ..
+                } = files.prepare(idx, intake.intake.ctx())?;
                 let DetectedLight { frame, diagnostics } =
-                    intake.detect(&mut worker.detector, idx, image)?;
+                    intake.detect(&mut worker.detector, idx, image, measured)?;
                 let parked = registrar.park(&mut worker.warped, idx, frame.resident())?;
                 intake.intake.complete_one();
                 Ok::<_, AlignStackError>(ParkedLight {
@@ -408,14 +417,12 @@ impl AlignStackRun<'_> {
     }
 
     /// One detector for each of `slots` lights in flight, each carrying its warmed buffers from
-    /// one light to the next it picks up. Built up front, so an invalid configuration fails here
-    /// rather than from inside the parallel closure.
-    fn detectors(&self, slots: usize) -> Result<Vec<StarDetector>, AlignStackError> {
+    /// one light to the next it picks up, under the configuration the run validated at its start.
+    fn detectors(&self, slots: usize) -> Vec<StarDetector> {
         debug_assert!(slots > 0, "a run detects one light at a time at least");
         (0..slots)
-            .map(|_| StarDetector::from_config(self.config.detection.clone()))
-            .collect::<Result<_, _>>()
-            .map_err(|invalid| AlignStackConfigError::Detection(invalid).into())
+            .map(|_| StarDetector::new(self.config.detection.clone()))
+            .collect()
     }
 
     /// The stars a reference needs for the others to register to it.

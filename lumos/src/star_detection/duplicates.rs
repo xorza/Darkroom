@@ -50,7 +50,10 @@ impl Duplicates {
             return 0;
         }
         let min_sep_sq = f64::from(min_separation).powi(2);
-        let cell_size = f64::from(min_separation);
+        // A cell at least the separation wide is all the search needs; one pixel at the least keeps
+        // a frame's coordinates over the cell side within an `i64`, where a separation of 1e-30
+        // would carry them past it.
+        let cell_size = f64::from(min_separation).max(1.0);
         let cell_of = |star: &Star| Cell {
             y: (star.pos.y / cell_size).floor() as i64,
             x: (star.pos.x / cell_size).floor() as i64,

@@ -24,8 +24,10 @@ pub(crate) fn atomic(c: &mut Criterion) {
     for from in ColorFormat::ALL {
         let mut source = None;
         for to in pairs_from(from) {
-            let mut row =
-                InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), to));
+            let mut row = InterleavedImage::new_zeroed(InterleavedDesc::new(
+                Size2us::new(FRAME.width, 1),
+                to,
+            ));
             group.throughput(fixture::throughput(FRAME.width, from.byte_len()));
             for variant in Variant::all(VectorConversion::of(from, to)) {
                 let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), pair_id(from, to));

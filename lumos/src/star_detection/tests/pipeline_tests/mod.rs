@@ -14,9 +14,10 @@ use crate::internals::synthetic::observe::SimFrame;
 use crate::internals::visual::comparison::Comparison;
 use crate::internals::visual::report::{DetectionMetrics, save_metrics};
 use crate::internals::visual::{ToneMap, save};
+use crate::star_detection::convolution::filter_kernels::MatchedFilter;
 use crate::star_detection::convolution::internals::matched_filter_fresh;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
-use crate::star_detection::star_detection_config::fwhm_config::{FwhmMode, MatchedFilter};
+use crate::star_detection::star_detection_config::fwhm_config::FwhmMode;
 use crate::star_detection::star_detector::StarDetector;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
 
@@ -82,10 +83,7 @@ impl PipelineCase<'_> {
             ToneMap::Clamp,
         );
 
-        let stars = StarDetector::from_config(config.clone())
-            .unwrap()
-            .detect(&frame.image)
-            .stars;
+        let stars = StarDetector::new(config.clone()).detect(&frame.image).stars;
         let metrics = DetectionMetrics::measure(truth, &stars, MATCH_RADIUS);
         Comparison {
             ground_truth: truth,

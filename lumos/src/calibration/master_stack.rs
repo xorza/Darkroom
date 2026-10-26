@@ -9,7 +9,7 @@ use crate::calibration::subtractor::Subtractor;
 use crate::combine::frame_cache::FrameCache;
 use crate::combine::frame_cache::frame_step::SteppedPaths;
 use crate::combine::stack::planned_combine::PlannedCombine;
-use crate::combine::stack::{FrameOrigin, FrameSet};
+use crate::combine::stack::{CombineSource, FrameSet};
 use crate::combine::stack_config::StackConfig;
 use crate::frame::capture_conditions::CaptureConditions;
 use crate::image::cfa::cfa_image::CfaImage;
@@ -78,7 +78,7 @@ impl<P: AsRef<Path>> MasterStack<'_, P> {
             ..config
         };
         let set = FrameSet {
-            source: FrameOrigin::CfaPaths,
+            source: CombineSource::CfaPaths,
             count: paths.len(),
         };
         let product = config.combine_cached(set, || {

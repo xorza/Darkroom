@@ -1,11 +1,12 @@
 use common::WorkerPool;
 
-use crate::CfaType;
 use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::error::CalibrationError;
 use crate::calibration::prepared_flat::{MIN_NORMALIZED_FLAT, PreparedFlat};
 use crate::calibration::subtraction::internals::subtract_bias;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image::flags::quality_flags::QualityFlags;
@@ -111,7 +112,7 @@ fn a_flats_mean_leaves_out_what_it_did_not_measure() {
 #[test]
 fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
     for cfa_type in [
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         standard_xtrans(),
     ] {
         let size = match cfa_type {
@@ -167,7 +168,7 @@ fn preparation_does_not_depend_on_the_thread_count() {
         .collect();
     for cfa_type in [
         CfaType::Mono,
-        CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         standard_xtrans(),
     ] {
         let run = |threads: usize| {
@@ -176,5 +177,33 @@ fn preparation_does_not_depend_on_the_thread_count() {
             bits(pool.run(|| prepare(flat, None)).divisor().data().pixels())
         };
         assert_eq!(run(1), run(7), "{cfa_type:?}");
+    }
+}
+
+/// A stored divisor is taken only when every sample is one `new` could make: finite and at least
+/// the floor, 0.1. Each sample here at pixel 2 of a 2 × 2 mono divisor of 1.0 — 0, −0.3, 0.01 under
+/// the floor, NaN and ∞ — is refused there, with its value; the floor itself and 2.5 are taken.
+#[test]
+fn a_stored_divisor_holds_only_what_a_prepared_flat_can() {
+    let divisor = |value: f32| {
+        make_cfa(
+            Size2us::new(2, 2),
+            vec![1.0, 1.0, value, 1.0],
+            CfaType::Mono,
+        )
+    };
+    for value in [0.0, -0.3, 0.01, f32::NAN, f32::INFINITY] {
+        let refused = PreparedFlat::checked_divisor(divisor(value)).unwrap_err();
+        assert!(
+            matches!(refused, CalibrationError::InvalidFlatDivisor { idx: 2, value: at }
+                if at.to_bits() == value.to_bits()),
+            "{value}: {refused}"
+        );
+    }
+    for value in [MIN_NORMALIZED_FLAT, 2.5] {
+        assert!(
+            PreparedFlat::checked_divisor(divisor(value)).is_ok(),
+            "{value}"
+        );
     }
 }

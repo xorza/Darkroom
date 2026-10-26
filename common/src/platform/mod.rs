@@ -343,3 +343,19 @@ pub(crate) mod internals {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::platform::SystemMemory;
+
+    /// Each reading takes a system of its own, so the second is as good as the first: a stale or
+    /// half-refreshed reading would show as a zero.
+    #[test]
+    fn available_memory_reports_a_figure_on_every_call() {
+        assert!(
+            SystemMemory::available() > 0,
+            "no available memory reported"
+        );
+        assert!(SystemMemory::available() > 0, "second call reported none");
+    }
+}

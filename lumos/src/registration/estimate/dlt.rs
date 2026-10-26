@@ -1,9 +1,10 @@
 //! [`Dlt`]: the direct linear transform, a homography's algebraic solution.
 
 use glam::DVec2;
-use nalgebra::{Dim, Dyn, Matrix, OMatrix, RawStorageMut, SMatrix, SVD, U9};
+use nalgebra::{DMatrix, Dim, Matrix, RawStorageMut, SMatrix, SVD};
 
 use crate::math::dmat3::DMat3;
+use crate::math::lstsq::{self, Lstsq};
 use crate::registration::estimate::{Pair, Pairs};
 use crate::registration::point_normalization::PointNormalization;
 use crate::registration::transform::Transform;
@@ -11,8 +12,11 @@ use crate::registration::transform::Transform;
 /// The direct linear transform of a set of pairs: the homography `h` whose rows satisfy
 /// `A·h = 0` best in the weighted algebraic sense, solved on Hartley-normalized coordinates.
 ///
-/// Degenerate when the SVD finds no null vector or the denormalized matrix is not an invertible
-/// homography; a solve on points nearly in a degenerate configuration gives a matrix the RANSAC
+/// Degenerate when the system's null space is more than one line — its rank under the cutoff
+/// [`Lstsq`] decides rank by is below 8 — or the denormalized matrix is not an invertible
+/// homography: four pairs, three of them on one line, leave a null space of two dimensions, and any
+/// vector of it would be an arbitrary homography (Hartley & Zisserman, *Multiple View Geometry*,
+/// ch. 4). A solve on points nearly in a degenerate configuration gives a matrix the RANSAC
 /// plausibility gate and the final fit's reprojection error judge, not this.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Dlt {
@@ -30,22 +34,25 @@ impl Dlt {
     }
 
     /// The unit-norm null vector of the system each pair adds two rows to, each scaled by `√wᵢ`, in
-    /// normalized coordinates. A minimal set fills a fixed 9 × 9 matrix, its last row zero, and
-    /// allocates nothing; more pairs keep the whole rectangular system, whose SVD conditions as `κ`
+    /// normalized coordinates; `None` when the system's rank is below 8. A minimal set fills a
+    /// fixed 9 × 9 matrix, its last row zero, and allocates nothing; more pairs keep the whole
+    /// rectangular system, which [`Lstsq`] reduces by a QR before its SVD, conditioning as `κ`
     /// where the normal equations `AᵀA` would as `κ²`.
     pub(crate) fn solve(self, pairs: Pairs<'_>) -> Option<DMat3> {
         if pairs.len() * 2 <= 9 {
             let mut design = SMatrix::<f64, 9, 9>::zeros();
             self.fill(&mut design, pairs);
-            Some(null_vector(
-                SVD::new(design, false, true).v_t?.row(8).iter(),
-            ))
+            let svd = SVD::new(design, false, true);
+            let values = &svd.singular_values;
+            let tolerance = lstsq::rank_tolerance(9, 9, values.max());
+            if values.iter().filter(|&&value| value > tolerance).count() < 8 {
+                return None;
+            }
+            Some(null_vector(svd.v_t?.row(values.argmin().0).iter()))
         } else {
-            let mut design = OMatrix::<f64, Dyn, U9>::zeros(2 * pairs.len());
+            let mut design = DMatrix::<f64>::zeros(2 * pairs.len(), 9);
             self.fill(&mut design, pairs);
-            Some(null_vector(
-                SVD::new(design, false, true).v_t?.row(8).iter(),
-            ))
+            Some(null_vector(Lstsq::new(design).null_vector()?.iter()))
         }
     }
 
@@ -63,9 +70,9 @@ impl Dlt {
 
     /// The rows of the DLT system, two a pair, each scaled by `√wᵢ`:
     /// `[−x −y −1 0 0 0 x·x′ y·x′ x′]` and `[0 0 0 −x −y −1 x·y′ y·y′ y′]`.
-    fn fill<R: Dim, S: RawStorageMut<f64, R, U9>>(
+    fn fill<R: Dim, C: Dim, S: RawStorageMut<f64, R, C>>(
         self,
-        design: &mut Matrix<f64, R, U9, S>,
+        design: &mut Matrix<f64, R, C, S>,
         pairs: Pairs<'_>,
     ) {
         for (

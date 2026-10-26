@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::io::{Read, Seek};
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
@@ -37,8 +37,8 @@ pub(super) struct FitsHduDescription<'a> {
 
 /// What fits-well's reader of `image` holds viewing `regions` in turn and finishing the
 /// checksum: its bound, saturated at `u64::MAX`, which the plan then refuses as an overflow.
-pub(super) fn reader_bytes(
-    image: &ImageReader<'_, StreamSource<File>>,
+pub(super) fn reader_bytes<R: Read + Seek>(
+    image: &ImageReader<'_, StreamSource<R>>,
     regions: &[ArrayVec<Range<usize>, 3>],
 ) -> Result<u64, FitsError> {
     let views = image.view_bytes(regions.iter().map(|ranges| Region::from(ranges.as_slice())))?;
@@ -50,8 +50,8 @@ pub(super) fn reader_bytes(
 
 impl<'a> FitsHduDescription<'a> {
     /// The image `image` opens, its data unit `source_bytes` as stored.
-    pub(super) const fn of_image(
-        image: &ImageReader<'a, StreamSource<File>>,
+    pub(super) const fn of_image<R: Read + Seek>(
+        image: &ImageReader<'a, StreamSource<R>>,
         source_bytes: u64,
     ) -> Self {
         Self {

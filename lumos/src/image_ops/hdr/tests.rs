@@ -2,7 +2,11 @@ use std::mem;
 
 use common::Buffer2;
 
-use crate::image_ops::hdr::Hdr;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
+use crate::image::intensity::Intensity;
+use crate::image_ops::error::OpError;
+use crate::image_ops::hdr::{Hdr, data_mean};
 use crate::internals::assertions::assert_close_slice;
 use crate::internals::images::{mono_image, rgb_image};
 use crate::math::wavelet;
@@ -211,6 +215,29 @@ fn a_flat_plane_comes_back_as_itself() {
     for &v in img.channel(0).pixels() {
         assert!((v - 0.2).abs() <= bound, "{v}");
     }
+}
+
+/// The geometric mean HDR flattens toward is that of the image's data: of 1, 2, 3 and a fill of 10
+/// flagged `NO_DATA`, the mean is 2. An image of fills alone has none, and is refused.
+#[test]
+fn the_mean_leaves_fills_out() {
+    let size = Size2us::new(4, 1);
+    let values = [1.0, 2.0, 3.0, 10.0];
+    let flags = PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &[3]).unwrap();
+    let intensity = Intensity::mono(size, &values).with_flags(Some(&flags));
+    assert_eq!(intensity.fill_count(), 1);
+    assert_eq!(data_mean(&values, intensity), 2.0);
+
+    let mut img = mono_image(size, vec![0.0; 4]);
+    img.set_flags(PixelFlags::at_idxs(
+        size,
+        QualityFlags::NO_DATA,
+        &[0, 1, 2, 3],
+    ));
+    assert!(matches!(
+        Hdr::default().apply(&mut img),
+        Err(OpError::NoData)
+    ));
 }
 
 /// On color the compression stays in display range on its own — the remap divides by a channel

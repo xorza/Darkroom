@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::io::{Read, Seek};
 use std::mem;
 
 use arrayvec::ArrayVec;
@@ -28,7 +28,7 @@ use crate::io::fits::metadata;
 use crate::io::fits::metadata::domain_keywords;
 use crate::io::fits::tile_parallel;
 use crate::io::load_ctx::LoadCtx;
-use crate::io::null_policy::{self, NullPolicy, NullSamples};
+use crate::io::null_policy::{CountedPlane, PlaneNulls};
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 
 /// The decode of one image HDU: the HDU, its header and the plan its preflight made, and the file
@@ -47,9 +47,9 @@ impl HduDecode<'_> {
     /// Decode the HDU from `reader`, its checksum checked under `policy` from the bytes the decode
     /// reads, and judged before anything is returned: a refused checksum fails the load as before
     /// the decode it would, at the cost of the decode.
-    pub(super) fn read_stream(
+    pub(super) fn read_stream<R: Read + Seek>(
         self,
-        image: ImageReader<'_, StreamSource<File>>,
+        image: ImageReader<'_, StreamSource<R>>,
         policy: FitsChecksumPolicy,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let idx = self.hdu.idx;
@@ -66,11 +66,11 @@ impl HduDecode<'_> {
 
     /// Decode the HDU through `image`, and take its checksum provenance from `checksum` once the
     /// planes are read.
-    pub(super) fn read<'r>(
+    pub(super) fn read<'r, R: Read + Seek>(
         self,
-        mut image: ImageReader<'r, StreamSource<File>>,
+        mut image: ImageReader<'r, StreamSource<R>>,
         checksum: impl FnOnce(
-            ImageReader<'r, StreamSource<File>>,
+            ImageReader<'r, StreamSource<R>>,
         ) -> Result<FitsChecksumProvenance, FitsLoadError>,
     ) -> Result<DecodedFitsImage, FitsLoadError> {
         let Self {
@@ -176,90 +176,47 @@ impl HduDecode<'_> {
         })
     }
 
-    /// Apply the load's null policy to a decoded image's planes — reject the load, or fill the
-    /// nulls — and hand back the flags the samples settle: [`QualityFlags::NO_DATA`] where they
-    /// were null, and [`QualityFlags::SATURATED`] where a channel reaches `saturation`, a level in
-    /// the decoded domain.
-    ///
-    /// A frame with no nulls and no saturation level — most frames without a `DATAMAX` — returns
-    /// before any scan, so the feature costs one sum over at most three integers.
+    /// The load's null policy applied to a decoded image's planes, with the nulls the decode
+    /// counted and the saturation level — see
+    /// [`NullPolicy::resolve`](crate::NullPolicy::resolve).
     fn resolve_flags(
         &self,
         planes: &mut [DecodedPlane],
         saturation: Option<f32>,
     ) -> Result<Option<PixelFlags>, FitsLoadError> {
         let desc = self.plan.desc;
-        let policy = self.ctx.nulls;
-        let count: usize = planes
-            .iter()
-            .filter_map(|plane| plane.nulls)
-            .map(|nulls| nulls.count)
-            .sum();
-        if count == 0 && saturation.is_none() {
-            return Ok(None);
-        }
-
-        if count > 0 && policy == NullPolicy::Reject {
-            let first_idx = planes
-                .iter()
-                .enumerate()
-                .find_map(|(channel, plane)| {
-                    plane
-                        .nulls
-                        .map(|nulls| channel * desc.pixel_count() + nulls.first_idx)
-                })
-                .expect("a nonzero count means at least one plane reported a null");
-            // Samples, not pixels: this counts each channel's nulls separately, and the index is in
-            // the channel-major sample space the count belongs to. The pixel figure needs the mask,
-            // which this branch does not build.
-            return Err(NullSamples { count, first_idx }.into());
-        }
-
-        // Before the fill, which is what erases the evidence. A non-finite sample fails every
-        // comparison, so a null is never also saturated.
-        let flags = {
-            let samples = planes
-                .iter()
-                .map(|plane| plane.samples.as_slice())
-                .collect::<ArrayVec<&[f32], 3>>();
-            PixelFlags::from_fn(desc.size(), |idx| {
-                if samples.iter().any(|plane| !plane[idx].is_finite()) {
-                    QualityFlags::NO_DATA
-                } else if saturation
-                    .is_some_and(|level| samples.iter().any(|plane| plane[idx] >= level))
-                {
-                    QualityFlags::SATURATED
-                } else {
-                    QualityFlags::default()
-                }
+        let has_nulls = planes.iter().any(|plane| plane.nulls.is_some());
+        let mut counted: ArrayVec<CountedPlane<'_>, 3> = planes
+            .iter_mut()
+            .map(|plane| CountedPlane {
+                samples: &mut plane.samples,
+                nulls: plane.nulls,
             })
-        };
-        if count == 0 {
-            return Ok(flags);
+            .collect();
+        let flags = self
+            .ctx
+            .nulls
+            .resolve(&mut counted, desc.size(), saturation)?;
+        if has_nulls {
+            // Only for a frame that has them, and the samples the caller is about to read are
+            // partly fill with nothing in the frame itself to say so.
+            tracing::info!(
+                pixels = flags
+                    .as_ref()
+                    .map_or(0, |flags| flags.count(QualityFlags::NO_DATA)),
+                of = desc.pixel_count(),
+                "FITS image declares pixels with no measurement"
+            );
         }
-        for plane in planes.iter_mut() {
-            if let Some(nulls) = plane.nulls {
-                null_policy::fill(&mut plane.samples, nulls.count);
-            }
-        }
-        let flags =
-            flags.expect("a nonzero count means at least one plane holds a non-finite sample");
-        // Only for a frame that has them, and the samples the caller is about to read are partly
-        // fill with nothing in the frame itself to say so.
-        tracing::info!(
-            pixels = flags.count(QualityFlags::NO_DATA),
-            of = desc.pixel_count(),
-            "FITS image declares pixels with no measurement"
-        );
-        Ok(Some(flags))
+        Ok(flags)
     }
 
     /// Decode every plane from `image`, a chunk of rows of all of them at a time, each swapped
     /// into one buffer of words. A section is plane-major, so each plane's samples are one run of
     /// the chunk, and a tile that spans planes decodes once.
-    fn read_planes(
+    fn read_planes<R: Read + Seek>(
         &self,
-        image: &mut ImageReader<'_, StreamSource<File>>,
+        image: &mut ImageReader<'_, StreamSource<R>>,
     ) -> Result<ArrayVec<DecodedPlane, 3>, FitsLoadError> {
         let plan = self.plan;
         let ctx = self.ctx;
@@ -326,38 +283,12 @@ impl HduDecode<'_> {
 #[derive(Debug)]
 struct DecodedPlane {
     samples: Vec<f32>,
-    nulls: Option<NullSummary>,
+    nulls: Option<PlaneNulls>,
     scan: SampleScan,
 }
 
 /// Samples per parallel work item in the per-chunk passes below.
 const CHUNK_SAMPLES: usize = 64 * 1024;
-
-/// How many nulls a span of samples holds and where the first one is, in that span's own index
-/// space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct NullSummary {
-    count: usize,
-    first_idx: usize,
-}
-
-impl NullSummary {
-    /// Restate this summary in an index space `by` samples earlier — a chunk's, in its plane's.
-    const fn offset_by(self, by: usize) -> Self {
-        Self {
-            count: self.count,
-            first_idx: self.first_idx + by,
-        }
-    }
-
-    /// Fold in another span's summary. Both must already be in the same index space.
-    fn merge(self, other: Self) -> Self {
-        Self {
-            count: self.count + other.count,
-            first_idx: self.first_idx.min(other.first_idx),
-        }
-    }
-}
 
 /// What the normalize pass learns about the samples beside their nulls.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -372,7 +303,7 @@ struct SampleScan {
 /// A chunk's nulls and its [`SampleScan`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ChunkScan {
-    nulls: Option<NullSummary>,
+    nulls: Option<PlaneNulls>,
     scan: SampleScan,
 }
 
@@ -524,7 +455,9 @@ impl Conversion<'_> {
                     maximum = maximum.max(if finite { pixel } else { f32::NEG_INFINITY });
                 }
                 Ok(ChunkScan {
-                    nulls: nonfinite.then(|| summarize_nulls(out, chunk_idx * CHUNK_SAMPLES)),
+                    nulls: nonfinite
+                        .then(|| PlaneNulls::of(out, chunk_idx * CHUNK_SAMPLES))
+                        .flatten(),
                     scan: SampleScan { raw_bits, maximum },
                 })
             })
@@ -543,26 +476,6 @@ impl Conversion<'_> {
                     })
                 },
             )
-    }
-}
-
-/// Count a chunk's nulls and locate the first, in the whole-span index space `chunk_start` anchors
-/// it to.
-///
-/// Off the hot path by construction: [`Conversion::each_chunk`] only reaches this once a chunk is
-/// known to hold at least one null.
-fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
-    let mut count = 0;
-    let mut first_idx = None;
-    for (idx, pixel) in chunk.iter().enumerate() {
-        if !pixel.is_finite() {
-            count += 1;
-            first_idx.get_or_insert(chunk_start + idx);
-        }
-    }
-    NullSummary {
-        count,
-        first_idx: first_idx.expect("only called for a chunk already known to hold a null"),
     }
 }
 

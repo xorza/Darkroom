@@ -37,8 +37,8 @@ impl From<PlanarImage> for QualityMap {
 impl From<QualityMap> for LinearImage {
     fn from(map: QualityMap) -> Self {
         match map {
-            QualityMap::Shared(plane) => plane.into(),
-            QualityMap::PerChannel(planes) => planes.into(),
+            QualityMap::Shared(plane) => Self::from(PlanarImage::new_mono(plane)),
+            QualityMap::PerChannel(planes) => Self::from(PlanarImage::new_rgb(planes)),
         }
     }
 }

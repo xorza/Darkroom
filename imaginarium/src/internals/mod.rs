@@ -18,7 +18,7 @@ pub(crate) fn create_test_image(
     size: Size2us,
     seed: usize,
 ) -> InterleavedImage {
-    let mut img = InterleavedImage::new_black(InterleavedDesc::new(size, format));
+    let mut img = InterleavedImage::new_zeroed(InterleavedDesc::new(size, format));
     match format.sample_type {
         SampleType::F32 => {
             let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
@@ -45,7 +45,8 @@ pub(crate) fn lena(format: ColorFormat) -> InterleavedImage {
             env!("CARGO_MANIFEST_DIR"),
             "/test_resources/lena_895x551.tiff"
         );
-        InterleavedImage::decode(BufReader::new(fs::open(path).unwrap()), RasterFormat::Tiff)
+        RasterFormat::Tiff
+            .decode(BufReader::new(fs::open(path).unwrap()), u64::MAX)
             .unwrap()
     })
     .convert_to(format)
@@ -61,7 +62,7 @@ pub(crate) mod gpu {
     ///
     /// `None` on a host without a usable adapter, which the first caller reports on stderr —
     /// a GPU test that returns early on `None` would otherwise pass without having run.
-    pub(crate) fn test_gpu() -> Option<Gpu> {
+    pub(crate) fn test_gpu() -> Option<&'static Gpu> {
         static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
         TEST_GPU
             .get_or_init(|| match Gpu::new() {
@@ -71,6 +72,6 @@ pub(crate) mod gpu {
                     None
                 }
             })
-            .clone()
+            .as_ref()
     }
 }

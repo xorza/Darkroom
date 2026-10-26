@@ -1,6 +1,9 @@
 //! [`Intensity`]: an image's combined intensity, read where it is needed.
 
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::rgb::Rgb;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 use common::Size2us;
 
 /// An image's combined intensity, read a pixel at a time from its channels: the channel itself for
@@ -10,6 +13,8 @@ use common::Size2us;
 pub(crate) struct Intensity<'a> {
     size: Size2us,
     channels: Channels<'a>,
+    /// The flags of the image the channels are, which name the pixels that hold a fill.
+    flags: Option<&'a PixelFlags>,
 }
 
 /// The channels an [`Intensity`] is read from.
@@ -26,6 +31,7 @@ impl<'a> Intensity<'a> {
         Self {
             size,
             channels: Channels::Mono(pixels),
+            flags: None,
         }
     }
 
@@ -39,7 +45,14 @@ impl<'a> Intensity<'a> {
         Self {
             size,
             channels: Channels::Rgb([r, g, b]),
+            flags: None,
         }
+    }
+
+    /// This intensity, of an image whose pixels carry `flags`.
+    pub(crate) fn with_flags(self, flags: Option<&'a PixelFlags>) -> Self {
+        debug_assert!(flags.is_none_or(|flags| flags.size() == self.size));
+        Self { flags, ..self }
     }
 
     pub(crate) const fn size(&self) -> Size2us {
@@ -58,5 +71,32 @@ impl<'a> Intensity<'a> {
             }
             .intensity(),
         }
+    }
+
+    /// Whether the pixel at row-major `idx` holds a fill rather than data: it is flagged
+    /// [`QualityFlags::NO_DATA`]. A statistic of the image leaves it out.
+    #[inline]
+    pub(crate) fn is_fill(&self, idx: usize) -> bool {
+        self.flags
+            .is_some_and(|flags| flags.at(idx).intersects(QualityFlags::NO_DATA))
+    }
+
+    /// How many pixels hold a fill.
+    pub(crate) fn fill_count(&self) -> usize {
+        self.flags.map_or(0, |flags| {
+            usize::try_from(flags.count(QualityFlags::NO_DATA)).expect("a pixel count fits usize")
+        })
+    }
+
+    /// The values of the pixels holding data an image statistic is taken from: at most
+    /// [`MAX_STATISTIC_SAMPLES`], see [`Subsample::data_values`].
+    pub(crate) fn statistic_values(&self) -> Vec<f32> {
+        Subsample::data_values(
+            self.size.pixel_count(),
+            self.fill_count(),
+            MAX_STATISTIC_SAMPLES,
+            |idx| self.is_fill(idx),
+            |idx| self.at(idx),
+        )
     }
 }

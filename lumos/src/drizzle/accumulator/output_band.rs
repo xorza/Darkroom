@@ -7,7 +7,7 @@ use glam::DVec2;
 use crate::drizzle::accumulator::PlaneSpan;
 use crate::drizzle::accumulator::band_scan::BandScan;
 use crate::drizzle::accumulator::drop_quad::DropQuad;
-use crate::drizzle::accumulator::frame_source::{Drop, Fluxes, FrameSource, InputPixel};
+use crate::drizzle::accumulator::frame_source::{DropOutcome, Fluxes, FrameSource, InputPixel};
 use crate::drizzle::accumulator::kernel_plan::{KernelPlan, LANCZOS_ORDER};
 use crate::math::lanczos::lanczos_lut::LANCZOS_LUT_RESOLUTION;
 use crate::scratch_pool::{Scratch, ScratchPool, Shapeless};
@@ -179,7 +179,7 @@ impl OutputBand<'_> {
     fn scan<T>(
         &mut self,
         source: &FrameSource<'_>,
-        mut drop: impl FnMut(InputPixel) -> Drop<T>,
+        mut drop: impl FnMut(InputPixel) -> DropOutcome<T>,
         mut deposit: impl FnMut(&mut Self, InputPixel, T),
     ) -> usize {
         let width = source.width();
@@ -193,9 +193,9 @@ impl OutputBand<'_> {
                     idx: row + ix,
                 };
                 match drop(pixel) {
-                    Drop::Landed(landed) => deposit(self, pixel, landed),
-                    Drop::Empty => {}
-                    Drop::Unconverged => {
+                    DropOutcome::Landed(landed) => deposit(self, pixel, landed),
+                    DropOutcome::Empty => {}
+                    DropOutcome::Unconverged => {
                         unconverged += usize::from(
                             !self.scans[..self.idx]
                                 .iter()
@@ -268,7 +268,7 @@ impl OutputBand<'_> {
     fn distribute_square(
         &mut self,
         source: &FrameSource<'_>,
-        quad: impl FnMut(InputPixel) -> Drop<DropQuad>,
+        quad: impl FnMut(InputPixel) -> DropOutcome<DropQuad>,
     ) -> usize {
         self.scan(source, quad, |band, pixel, drop| {
             let min = drop
@@ -547,13 +547,14 @@ mod tests {
                 folds: true,
             },
         ];
-        let same = |a: Drop<DropQuad>, b: Drop<DropQuad>| match (a, b) {
-            (Drop::Landed(a), Drop::Landed(b)) => {
+        let same = |a: DropOutcome<DropQuad>, b: DropOutcome<DropQuad>| match (a, b) {
+            (DropOutcome::Landed(a), DropOutcome::Landed(b)) => {
                 a.corners.map(|c| c.to_array().map(f64::to_bits))
                     == b.corners.map(|c| c.to_array().map(f64::to_bits))
                     && a.weight.to_bits() == b.weight.to_bits()
             }
-            (Drop::Empty, Drop::Empty) | (Drop::Unconverged, Drop::Unconverged) => true,
+            (DropOutcome::Empty, DropOutcome::Empty)
+            | (DropOutcome::Unconverged, DropOutcome::Unconverged) => true,
             _ => false,
         };
         for LatticeCase { name, warp, folds } in warps {
@@ -573,7 +574,7 @@ mod tests {
                 let mut lattice = CornerLattice::build(size.width);
                 for (x, y) in walk {
                     let own = source.quad(pixel(x, y), 0.5);
-                    unconverged += usize::from(matches!(own, Drop::Unconverged));
+                    unconverged += usize::from(matches!(own, DropOutcome::Unconverged));
                     let shared = source.quad_of(pixel(x, y), |corner| {
                         let [dx, dy] = LATTICE_CORNERS[corner];
                         lattice.corner(&source, x + dx, y + dy)

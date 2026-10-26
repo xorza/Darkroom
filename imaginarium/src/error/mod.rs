@@ -1,4 +1,4 @@
-use std::{fmt, io};
+use std::fmt;
 
 use common::Size2us;
 use thiserror::Error;
@@ -16,6 +16,9 @@ pub enum DescError {
     ZeroHeight,
     #[error("only 1 (mono) or 3 (RGB) planes supported, got {count}")]
     Channels { count: usize },
+    /// An RGB image's plane of another size than its first.
+    #[error("an RGB plane of {got} beside a first of {expected}")]
+    PlaneSize { expected: Size2us, got: Size2us },
     /// The pixels of `size`, `pixel_byte_len` bytes each, have more bytes than a `usize` counts.
     #[error("{size} pixels of {pixel_byte_len} bytes overflow usize")]
     TooLarge {
@@ -51,8 +54,6 @@ pub enum PlanesError {
 /// Why bytes do not decode as a raster, or an image does not encode as one.
 #[derive(Debug, Error)]
 pub enum CodecError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
     #[error("PNG or JPEG codec error: {0}")]
     Image(#[from] image::ImageError),
     #[error("TIFF codec error: {0}")]
@@ -66,6 +67,17 @@ pub enum CodecError {
     /// A TIFF whose sample type no format holds.
     #[error("unsupported TIFF sample type {0}")]
     TiffSamples(TiffSampleType),
+    /// A TIFF of samples neither 8, 16 nor 32 bits wide, which no format holds unpacked at its
+    /// full scale.
+    #[error("unsupported TIFF sample width of {0} bits")]
+    TiffBitDepth(u8),
+    /// A TIFF that decodes to another count of samples than its color type and size state: a
+    /// planar file, or one with more samples to a pixel than its color type names.
+    #[error("a TIFF stating a {desc} image decodes to {decoded} samples")]
+    TiffLayout {
+        desc: InterleavedDesc,
+        decoded: usize,
+    },
     /// The file states a size no image has.
     #[error("the file states no image: {0}")]
     Desc(#[from] DescError),
@@ -75,6 +87,9 @@ pub enum CodecError {
         format: RasterFormat,
         color_format: ColorFormat,
     },
+    /// A file whose header states more bytes of samples than the caller allows a decode.
+    #[error("the file states {stated} bytes of samples, past the {max_bytes} a decode may take")]
+    Oversized { stated: u64, max_bytes: u64 },
     /// An image with a side past the `u32` an encoder takes.
     #[error("{desc} is larger than an image file can hold")]
     TooLarge { desc: InterleavedDesc },

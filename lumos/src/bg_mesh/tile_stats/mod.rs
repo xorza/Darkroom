@@ -6,6 +6,7 @@ use common::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::image::cfa::mosaic::Mosaic;
+use crate::math::plane_moments::PlaneMoments;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
 use crate::scratch_pool::Shapeless;
 use common::{Rect2us, Vec2us};
@@ -74,8 +75,9 @@ pub(crate) struct TileStats {
     /// fallback when strongly skewed) over the survivors of a clip about the tile's own plane.
     /// Computed by [`TileStats::compute`].
     pub(crate) sky: f32,
-    /// SExtractor's background RMS: the spread of the clip survivors of the raw samples, which
-    /// counts the sky's own change across the tile as well as the noise.
+    /// The background RMS: the spread of the clip survivors of the raw samples, which counts the
+    /// sky's own change across the tile as well as the noise. SExtractor takes the survivors'
+    /// standard deviation; this is their MAD's σ, which a star's wing the clip left does not move.
     pub(crate) sigma: f32,
     /// The spread of the clip survivors about the tile's plane: the noise alone, which a gradient
     /// across the tile does not inflate.
@@ -98,45 +100,16 @@ impl TileSlope {
     /// The least-squares slope of the `samples` whose value off this plane lies within `band` of
     /// `center`. `None` when those samples do not span a plane: fewer than three, or all on one
     /// line.
-    ///
-    /// The offsets are integers, so the position moments and the determinant are exact in `i128`,
-    /// and "on one line" is an exact zero rather than a tolerance.
     fn refit(self, samples: &TileSamples, center: f32, band: f32) -> Option<Self> {
-        let (mut n, mut sx, mut sy, mut sxx, mut syy, mut sxy) =
-            (0i128, 0i128, 0i128, 0i128, 0i128, 0i128);
-        let (mut sv, mut sxv, mut syv) = (0.0f64, 0.0f64, 0.0f64);
+        let mut moments = PlaneMoments::default();
         for (&value, &offset) in samples.values.iter().zip(&samples.offsets) {
             let value = f64::from(value);
-            if (value - self.at(offset) - f64::from(center)).abs() > f64::from(band) {
-                continue;
+            if (value - self.at(offset) - f64::from(center)).abs() <= f64::from(band) {
+                moments.add(offset, value);
             }
-            let (x, y) = (i128::from(offset[0]), i128::from(offset[1]));
-            n += 1;
-            sx += x;
-            sy += y;
-            sxx += x * x;
-            syy += y * y;
-            sxy += x * y;
-            sv += value;
-            sxv += x as f64 * value;
-            syv += y as f64 * value;
         }
-        // The centred normal equations, each scaled by n: `[cxx cxy; cxy cyy]·slope = [cxv; cyv]`.
-        let cxx = n * sxx - sx * sx;
-        let cyy = n * syy - sy * sy;
-        let cxy = n * sxy - sx * sy;
-        let det = cxx * cyy - cxy * cxy;
-        if n < 3 || det == 0 {
-            return None;
-        }
-        let (n, sx, sy) = (n as f64, sx as f64, sy as f64);
-        let cxv = n * sxv - sx * sv;
-        let cyv = n * syv - sy * sv;
-        let (cxx, cyy, cxy, det) = (cxx as f64, cyy as f64, cxy as f64, det as f64);
-        Some(Self {
-            x: (cxv * cyy - cyv * cxy) / det,
-            y: (cyv * cxx - cxv * cxy) / det,
-        })
+        let [x, y] = moments.plane()?.slope;
+        Some(Self { x, y })
     }
 }
 

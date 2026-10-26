@@ -49,9 +49,8 @@ use crate::image::SAMPLES_PER_BLOCK;
 use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
 use crate::image_ops::error::{AutoStretch, OpError};
-use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
+use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhOf, AsinhPlane};
 use crate::math::statistics::median_mad::MedianMad;
-use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 use ::simd::Kernel;
 
 mod simd;
@@ -158,7 +157,7 @@ impl Stretch {
                 // image).
                 let curve = match explicit_curve(self.method) {
                     Some(curve) => curve,
-                    None => build_curve(&mut subsample_intensity(image), self.method)?,
+                    None => build_curve(&mut image.intensity().statistic_values(), self.method)?,
                 };
                 apply_color_preserving_image(image, curve);
             }
@@ -241,10 +240,10 @@ fn ensure_black_point(black: f32) -> Result<(), InvalidConfigField> {
 /// out of reach leaves the whole image untouched.
 fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Result<(), OpError> {
     let mut curves = ArrayVec::<Curve, 3>::new();
-    for plane in image.planes_mut() {
+    for channel in 0..image.channel_count() {
         curves.push(match explicit_curve(method) {
             Some(curve) => curve,
-            None => build_curve(&mut Subsample::statistic_values(plane.pixels()), method)?,
+            None => build_curve(&mut image.statistic_values(channel), method)?,
         });
     }
     for (plane, curve) in image.planes_mut().zip(curves) {
@@ -274,22 +273,6 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
         }),
         StretchMethod::AutoStf { .. } | StretchMethod::AutoAsinh { .. } => None,
     }
-}
-
-/// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
-/// read from the planes through [`LinearImage::intensity`] — never materializing the full
-/// intensity plane just to throw all but every `stride`-th value away.
-fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
-    if !image.is_rgb() {
-        return Subsample::statistic_values(image.channel(0).pixels());
-    }
-    let intensity = image.intensity();
-    let sample = Subsample::new(intensity.size().pixel_count(), MAX_STATISTIC_SAMPLES);
-    // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
-    // pixel; running it in parallel hides that latency — the work is a pure map over indices.
-    par::into_iter(0..sample.count())
-        .map(|k| intensity.at(sample.idx(k)))
-        .collect()
 }
 
 /// The black point a curve moves to 0 first, keeping white at 1: `(x − black) / (1 − black)`.
@@ -391,14 +374,6 @@ impl AutoBg {
 /// above-unity highlights) yields a valid display value, and map NaN to 0.
 trait ToneCurve: Copy + Sync {
     fn eval(&self, x: f32) -> f32;
-
-    /// [`Self::eval`] after `black` over a block of samples, in place — where a curve with a vector
-    /// kernel takes it over.
-    fn eval_block(&self, black: BlackPoint, block: &mut [f32]) {
-        for value in block {
-            *value = self.eval(black.rescale(*value));
-        }
-    }
 }
 
 /// `x` held to `[0, 1]`, NaN to 0: `f32::max` takes the operand that is not NaN.
@@ -433,7 +408,10 @@ impl ToneCurve for MtfCurve {
     }
 }
 
-/// Normalized arcsinh: `asinh(x · inv_beta) · inv_norm`.
+/// Normalized arcsinh: `asinh(x · inv_beta) · inv_norm`, which its kernels clamp to `[0, 1]` for a
+/// raw stack's above-unity highlights and a subtraction's negative pixels. The curve, its norm and
+/// the solver's softening all take `asinh` by the kernels' steps ([`AsinhOf`]): `x = 1` maps to 1
+/// within ε, and a background lands on its target to the solver's resolution.
 #[derive(Debug, Clone, Copy)]
 struct AsinhCurve {
     inv_beta: f32,
@@ -449,26 +427,13 @@ impl AsinhCurve {
         let inv_beta = 1.0 / beta;
         Self {
             inv_beta,
-            inv_norm: 1.0 / inv_beta.asinh(),
+            inv_norm: 1.0 / AsinhOf(inv_beta).dispatch(),
         }
     }
-}
 
-impl ToneCurve for AsinhCurve {
-    #[inline]
-    fn eval(&self, x: f32) -> f32 {
-        // asinh maps [0,1] → [0,1] but is unbounded outside it; clamp so a raw stack's above-unity
-        // highlights (or negative post-subtraction pixels) still land in display range.
-        unit((x * self.inv_beta).asinh() * self.inv_norm)
-    }
-
-    fn eval_block(&self, black: BlackPoint, block: &mut [f32]) {
-        AsinhPlane {
-            plane: block,
-            black,
-            curve: *self,
-        }
-        .dispatch();
+    /// The curve at `x` before its clamp, which takes what it gives below 0 to 0.
+    fn curved(self, x: f32) -> f32 {
+        AsinhOf(x * self.inv_beta).dispatch() * self.inv_norm
     }
 }
 
@@ -635,7 +600,7 @@ fn solve_asinh_beta(median: f32, target_bg: f32) -> Option<f32> {
     if !(median > 0.0 && median < target_bg) {
         return None;
     }
-    let g = |beta: f32| (median / beta).asinh() / (1.0 / beta).asinh();
+    let g = |beta: f32| AsinhCurve::new(beta).curved(median);
     let (mut lo, mut hi) = (-30.0f32, 5.0f32);
     for _ in 0..60 {
         let mid = f32::midpoint(lo, hi);
@@ -646,8 +611,8 @@ fn solve_asinh_beta(median: f32, target_bg: f32) -> Option<f32> {
         }
     }
     let beta = 10.0f32.powf(f32::midpoint(lo, hi));
-    // A reachable target is met to the f32 accuracy of the two `asinh` evaluations (a few ulp,
-    // ~1e-6); a target past the range's end misses by far more than this.
+    // A reachable target is met to the f32 accuracy of the curve (a few ulp, ~1e-6); a target past
+    // the range's end misses by far more than this.
     ((g(beta) - target_bg).abs() <= 1e-4).then_some(beta)
 }
 
@@ -655,6 +620,9 @@ fn solve_asinh_beta(median: f32, target_bg: f32) -> Option<f32> {
 /// explicit methods are resolved by [`explicit_curve`] before any samples are materialized, so they
 /// never reach here.
 fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
+    if samples.is_empty() {
+        return Err(OpError::NoData);
+    }
     let measured = MedianMad::of_mut(samples);
     let bg = Bg {
         median: measured.median,
@@ -680,13 +648,24 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
     match curve.tone {
         Tone::Identity => map_plane(plane, curve.black, IdentityCurve),
         Tone::Mtf(c) => map_plane(plane, curve.black, c),
-        Tone::Asinh(c) => map_plane(plane, curve.black, c),
+        Tone::Asinh(c) => par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| {
+            AsinhPlane {
+                plane: block,
+                black: curve.black,
+                curve: c,
+            }
+            .dispatch();
+        }),
         Tone::Ghs(c) => map_plane(plane, curve.black, c),
     }
 }
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], black: BlackPoint, curve: C) {
-    par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| curve.eval_block(black, block));
+    par::chunks_mut(plane, SAMPLES_PER_BLOCK).for_each(|block| {
+        for value in block {
+            *value = curve.eval(black.rescale(*value));
+        }
+    });
 }
 
 /// Map one pixel under color-preserving stretch: every channel after the black point, `curve` on
@@ -724,27 +703,29 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
 /// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
 /// itself, and the kernel that evaluates it, live in [`simd`].
 fn apply_color_preserving_asinh(image: &mut LinearImage, black: BlackPoint, c: AsinhCurve) {
-    debug_assert!(image.is_rgb(), "caller dispatches mono to map_samples");
-    let [r, g, b] = image.rgb_planes_mut();
-    // The three planes split in lockstep so each task sees one band's worth of every channel.
-    par::chunks_mut(r, SAMPLES_PER_BLOCK)
-        .zip(par::chunks_mut(g, SAMPLES_PER_BLOCK))
-        .zip(par::chunks_mut(b, SAMPLES_PER_BLOCK))
-        .for_each(|((red, green), blue)| {
-            AsinhColorPreserve {
-                red,
-                green,
-                blue,
-                black,
-                curve: c,
-            }
-            .dispatch();
-        });
+    image.rgb_blocks_mut(|_, [red, green, blue]| {
+        AsinhColorPreserve {
+            red,
+            green,
+            blue,
+            black,
+            curve: c,
+        }
+        .dispatch();
+    });
 }
 
 #[cfg(test)]
 mod internals {
-    use crate::image_ops::stretch::{Curve, IdentityCurve, Tone, ToneCurve};
+    use crate::image_ops::stretch::{AsinhCurve, Curve, IdentityCurve, Tone, ToneCurve, unit};
+
+    /// The scalar curve the kernels are held to: the kernels' `asinh` on one value, then their
+    /// scale and clamp.
+    impl ToneCurve for AsinhCurve {
+        fn eval(&self, x: f32) -> f32 {
+            unit(self.curved(x))
+        }
+    }
 
     impl Curve {
         /// The curve at `x`, its black point first.

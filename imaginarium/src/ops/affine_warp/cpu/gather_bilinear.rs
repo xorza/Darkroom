@@ -44,7 +44,7 @@ impl Kernel for GatherBilinear<'_, u8, 4> {
                 isa.narrow_i32_to_u8([b0[2], b1[2], b2[2], b3[2]]),
                 isa.narrow_i32_to_u8([b0[3], b1[3], b2[3], b3[3]]),
             ];
-            isa.store_interleaved4_u8(channels, out);
+            isa.store_interleaved_u8(channels, out);
         });
     }
 }
@@ -73,7 +73,7 @@ impl Kernel for GatherBilinear<'_, u8, 3> {
                 isa.narrow_i32_to_u8([b0[1], b1[1], b2[1], b3[1]]),
                 isa.narrow_i32_to_u8([b0[2], b1[2], b2[2], b3[2]]),
             ];
-            isa.store_interleaved3_u8(channels, out);
+            isa.store_interleaved_u8(channels, out);
         });
     }
 }
@@ -92,7 +92,7 @@ fn block_u8<S: Isa, const N: usize>(
     let mixed = u8::mixed::<S, N>(isa, pixels, taps);
     let mut ints = [isa.splat_i32(0); N];
     for (ints, mixed) in ints.iter_mut().zip(mixed) {
-        *ints = isa.round_clamped_f32(mixed, full_scale);
+        *ints = isa.round_clamped_f32_to_i32(mixed, full_scale);
     }
     ints
 }
@@ -181,7 +181,12 @@ impl Gathered for u8 {
         let w11 = isa.gather_u32_le(pixels, taps.idx[3] * stride, taps.valid[3]);
         let mut mixed = [isa.splat_f32(0.0); N];
         for (k, mixed) in mixed.iter_mut().enumerate() {
-            let values = [w00, w10, w01, w11].map(|word| byte_of(word, k, byte).to_f32());
+            let values = [
+                byte_of(w00, k, byte).to_f32(),
+                byte_of(w10, k, byte).to_f32(),
+                byte_of(w01, k, byte).to_f32(),
+                byte_of(w11, k, byte).to_f32(),
+            ];
             *mixed = taps.mix(values);
         }
         mixed
@@ -216,7 +221,7 @@ impl EightPixels for u16 {
         let full_scale = isa.splat_f32(Self::FULL_SCALE_F32);
         let mut ints = [isa.splat_i32(0); N];
         for (ints, mixed) in ints.iter_mut().zip(mixed) {
-            *ints = isa.round_clamped_f32(mixed, full_scale);
+            *ints = isa.round_clamped_f32_to_i32(mixed, full_scale);
         }
         isa.store_interleaved_u16::<N, G>(ints, out);
     }

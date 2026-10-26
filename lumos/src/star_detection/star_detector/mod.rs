@@ -25,17 +25,25 @@ pub struct StarDetector {
 
 impl Default for StarDetector {
     fn default() -> Self {
-        Self::from_config(StarDetectionConfig::default()).unwrap()
+        Self::new(StarDetectionConfig::default())
     }
 }
 
 impl StarDetector {
-    /// Create a star detector from an existing configuration.
+    /// A star detector under `config`.
+    ///
+    /// # Panics
+    /// When a configuration parameter is invalid: a config a caller validated, or built itself.
+    pub fn new(config: StarDetectionConfig) -> Self {
+        Self::checked(config).unwrap_or_else(|invalid| panic!("{invalid}"))
+    }
+
+    /// [`Self::new`], or the configuration parameter that is invalid.
     ///
     /// # Errors
     ///
     /// Returns an error when any configuration parameter is invalid.
-    pub fn from_config(config: StarDetectionConfig) -> Result<Self, InvalidConfigField> {
+    pub fn checked(config: StarDetectionConfig) -> Result<Self, InvalidConfigField> {
         config.validate()?;
         Ok(Self {
             config,

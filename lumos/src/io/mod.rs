@@ -4,7 +4,6 @@
 pub(crate) mod decoder;
 pub(crate) mod error;
 pub(crate) mod fits;
-pub(crate) mod frame_info;
 pub(crate) mod input_format;
 pub(crate) mod load_ctx;
 pub(crate) mod null_policy;

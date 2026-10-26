@@ -7,7 +7,7 @@ use glam::DVec2;
 use crate::internals::synthetic::transforms::{StarScatter, add_star_noise};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::distortion::sip::sip_order::SipOrder;
-use crate::registration::error::RegistrationError;
+use crate::registration::error::{ModelFailure, RegistrationError};
 use crate::registration::ransac::ransac_config::RansacConfig;
 use crate::registration::registration_config::RegistrationConfig;
 use crate::registration::tests::helpers::{self, FWHM_TIGHT, FieldMotion, map_stars};
@@ -339,8 +339,8 @@ fn every_model_failing_reports_every_reason() {
     // model admits a different consensus set.
     let found: Vec<usize> = failures
         .iter()
-        .map(|failure| match failure.error.as_ref() {
-            RegistrationError::TooFewSipPoints { found, .. } => *found,
+        .map(|failure| match &failure.failure {
+            ModelFailure::TooFewSipPoints { found, .. } => *found,
             other => panic!("expected a SIP point-count failure, got {other}"),
         })
         .collect();

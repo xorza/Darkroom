@@ -56,8 +56,26 @@ impl InterleavedDesc {
         self.size
     }
 
+    pub const fn width(&self) -> usize {
+        self.size.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.size.height
+    }
+
     pub const fn color_format(&self) -> ColorFormat {
         self.color_format
+    }
+
+    /// The pixels of the image.
+    pub const fn pixel_count(&self) -> usize {
+        self.size.pixel_count()
+    }
+
+    /// The samples of every channel of every pixel.
+    pub const fn sample_count(&self) -> usize {
+        self.size.pixel_count() * self.color_format.channel_count.count()
     }
 
     /// Total packed byte length: `height * row_byte_len`.

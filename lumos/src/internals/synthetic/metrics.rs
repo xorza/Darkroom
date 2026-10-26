@@ -64,26 +64,26 @@ pub(crate) fn match_catalogs(
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DetectionScore {
     pub(crate) matched: usize,
-    pub(crate) n_truth: usize,
-    pub(crate) n_recovered: usize,
+    pub(crate) truth_count: usize,
+    pub(crate) recovered_count: usize,
 }
 
 impl DetectionScore {
     /// Fraction of true sources recovered (1.0 for an empty truth set).
     pub(crate) fn completeness(&self) -> f64 {
-        if self.n_truth == 0 {
+        if self.truth_count == 0 {
             1.0
         } else {
-            self.matched as f64 / self.n_truth as f64
+            self.matched as f64 / self.truth_count as f64
         }
     }
 
     /// Fraction of detections that are real — `1 - false_positive_rate` (1.0 for no detections).
     pub(crate) fn reliability(&self) -> f64 {
-        if self.n_recovered == 0 {
+        if self.recovered_count == 0 {
             1.0
         } else {
-            self.matched as f64 / self.n_recovered as f64
+            self.matched as f64 / self.recovered_count as f64
         }
     }
 }
@@ -96,8 +96,8 @@ pub(crate) fn score_detection(
 ) -> DetectionScore {
     DetectionScore {
         matched: match_catalogs(truth, recovered, max_dist).len(),
-        n_truth: truth.len(),
-        n_recovered: recovered.len(),
+        truth_count: truth.len(),
+        recovered_count: recovered.len(),
     }
 }
 

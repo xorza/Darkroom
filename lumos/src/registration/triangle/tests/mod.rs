@@ -67,9 +67,18 @@ fn triangles_of(points: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
 
 /// The votes `target`'s triangles cast against `reference`'s, under `config`.
 fn cast_votes(target: &[Triangle], reference: Vec<Triangle>, config: &TriangleConfig) -> Votes {
+    // Each side's star count: one past the largest index its triangles name.
+    let stars = |triangles: &[Triangle]| {
+        triangles
+            .iter()
+            .flat_map(|triangle| triangle.idxs)
+            .max()
+            .map_or(0, |idx| idx + 1)
+    };
+    let votes = Votes::new(stars(&reference), stars(target));
     ReferenceTriangles::new(reference)
         .expect("a fixture has triangles")
-        .vote(target, config)
+        .vote(target, config, votes)
 }
 
 /// `votes` for the pair of reference star `reference` and target star `target`.
@@ -81,8 +90,8 @@ const fn tally(reference: usize, target: usize, votes: usize) -> PairVotes {
 }
 
 /// Build a `Votes` that casts each entry's votes for its pair.
-fn votes_from_entries(entries: &[PairVotes]) -> Votes {
-    let mut vm = Votes::default();
+fn votes_from_entries(ref_count: usize, target_count: usize, entries: &[PairVotes]) -> Votes {
+    let mut vm = Votes::new(ref_count, target_count);
     for &PairVotes { pair, votes } in entries {
         for _ in 0..votes {
             vm.increment(pair.reference, pair.target);

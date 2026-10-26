@@ -39,7 +39,7 @@ fn register_two_lights() {
 
     // Detect stars with precise Moffat centroids
     let star_config = StarDetectionConfig::precise_ground();
-    let mut detector = StarDetector::from_config(star_config).unwrap();
+    let mut detector = StarDetector::new(star_config);
 
     let result1 = detector.detect(&img1);
     let result2 = detector.detect(&img2);

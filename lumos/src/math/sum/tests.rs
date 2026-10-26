@@ -5,9 +5,7 @@ use std::iter;
 use crate::internals::test_rng::TestRng;
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
-use simd::Isa;
 use simd::IsaTier;
-use simd::Portable;
 
 /// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
 /// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.
@@ -50,7 +48,7 @@ fn sum_f32_rounds_to_the_same_f32_as_a_sequential_reference() {
 /// gates: the lane split, the padded last vector and the fold are one choice on every CPU.
 #[test]
 fn every_tier_sums_to_the_same_bits() {
-    let portable = Portable::new();
+    let portable = IsaTier::portable();
     for len in LENGTHS {
         let values = cancelling_values(len);
         let weights: Vec<f32> = (0..len).map(|i| 1.0 + i as f32 * 0.001).collect();

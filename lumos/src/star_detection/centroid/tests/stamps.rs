@@ -62,63 +62,53 @@ fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit>
     })
 }
 
+/// The stamp about a position: `(2r + 1)²` samples from the pixel at the rounded position less
+/// `r`, the position within it, and its brightest sample, unweighted without a noise model. On a
+/// flat 0.5 with 0.9 at (32, 32): radius 5 about (32, 32) starts at (27, 27) and holds 121
+/// samples; radius 2 starts at (30, 30) with 25; (32.3, 32.7) rounds to (32, 33), so it starts at
+/// (30, 31) and sits at (2.3, 1.7) within it. A stamp past the frame's edge is none — the edges
+/// are `valid_stamp_position`'s to pin.
 #[test]
-fn extract_stamp_valid_center() {
-    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
-
-    let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
-    assert_eq!(fit.stamp.z.len(), 11 * 11);
-    // Coordinates live in the shared `StampGrid`; what the stamp itself pins is where its
-    // top-left pixel sits, which is what the grid's `0..2r` is relative to.
-    assert_eq!(fit.stamp.origin, DVec2::new(27.0, 27.0));
-    assert_eq!(fit.stamp.peak, 0.5);
-    // A flat stamp weights every pixel equally, so `local_pos` lands on the stamp's own centre.
-    assert_eq!(fit.local_pos, DVec2::splat(5.0));
-    assert!(
-        fit.weights.is_none(),
-        "unweighted unless a noise model is set"
-    );
-}
-
-#[test]
-fn extract_stamp_edge_invalid() {
-    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
-
-    assert!(extract(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
-    assert!(extract(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
-    assert!(extract(&pixels, DVec2::new(61.0, 32.0), 5).is_none());
-    assert!(extract(&pixels, DVec2::new(32.0, 61.0), 5).is_none());
-}
-
-#[test]
-fn extract_stamp_peak_value() {
-    let mut pixels = Buffer2::new_filled((64, 64), 0.1f32);
+fn a_stamp_is_the_square_about_the_rounded_position() {
+    let mut pixels = Buffer2::new_filled((64, 64), 0.5f32);
     pixels[(32, 32)] = 0.9;
-
-    let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
-    assert_eq!(fit.stamp.peak, 0.9);
-}
-
-#[test]
-fn extract_stamp_coordinates() {
-    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
-
-    // A radius-2 stamp about (32, 32) spans x, y 30..=34: its origin at (30, 30) plus the grid's
-    // own 0..=4.
-    let fit = extract(&pixels, DVec2::splat(32.0), 2).expect("stamp at centre");
-    assert_eq!(fit.stamp.z.len(), 25);
-    assert_eq!(fit.stamp.origin, DVec2::new(30.0, 30.0));
-}
-
-#[test]
-fn extract_stamp_fractional_pos() {
-    let pixels = Buffer2::new_filled((64, 64), 0.5f32);
-
-    // Fractional position 32.3, 32.7 rounds to 32, 33, so the top-left pixel is (30, 31) and the
-    // centre sits at (2.3, 1.7) within the stamp.
-    let fit = extract(&pixels, DVec2::new(32.3, 32.7), 2).expect("stamp at centre");
-    assert_eq!(fit.stamp.origin, DVec2::new(30.0, 31.0));
-    assert!((fit.local_pos - DVec2::new(2.3, 1.7)).length() < 1e-12);
+    for (pos, radius, expected) in [
+        (
+            DVec2::splat(32.0),
+            5,
+            Some((121, DVec2::splat(27.0), DVec2::splat(5.0))),
+        ),
+        (
+            DVec2::splat(32.0),
+            2,
+            Some((25, DVec2::splat(30.0), DVec2::splat(2.0))),
+        ),
+        (
+            DVec2::new(32.3, 32.7),
+            2,
+            Some((25, DVec2::new(30.0, 31.0), DVec2::new(2.3, 1.7))),
+        ),
+        (DVec2::new(3.0, 32.0), 5, None),
+    ] {
+        let fit = extract(&pixels, pos, radius);
+        match (fit, expected) {
+            (Some(fit), Some((len, origin, local_pos))) => {
+                assert_eq!(fit.stamp.z.len(), len, "{pos} r{radius}");
+                assert_eq!(fit.stamp.origin, origin, "{pos} r{radius}");
+                assert!(
+                    (fit.local_pos - local_pos).length() < 1e-12,
+                    "{pos} r{radius}"
+                );
+                assert_eq!(fit.stamp.peak, 0.9, "{pos} r{radius}");
+                assert!(
+                    fit.weights.is_none(),
+                    "unweighted unless a noise model is set"
+                );
+            }
+            (None, None) => {}
+            (fit, _) => panic!("{pos} r{radius}: {:?}", fit.map(|fit| fit.stamp.origin)),
+        }
+    }
 }
 
 #[test]

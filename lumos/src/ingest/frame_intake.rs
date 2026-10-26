@@ -78,6 +78,17 @@ impl<'a> FrameIntake<'a> {
         self.admission.admit(idx, image)
     }
 
+    /// Check frame `idx` and take what a decode cache measured of it — see
+    /// [`FrameAdmission::admit_measured`].
+    pub(crate) fn admit_measured(
+        &self,
+        idx: usize,
+        image: &impl StackableImage,
+        measured: Option<Admitted>,
+    ) -> Result<Admitted, AdmissionError> {
+        self.admission.admit_measured(idx, image, measured)
+    }
+
     /// Check the facts of frame `idx`, read back from a kept cache — see
     /// [`FrameAdmission::check_facts`].
     pub(crate) fn check_facts(&self, idx: usize, facts: &FrameFacts) -> Result<(), AdmissionError> {

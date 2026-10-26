@@ -18,12 +18,6 @@ impl U8x32 for NeonU8 {
 
     #[inline(always)]
     fn widen(self) -> Halves<NeonU16> {
-        let widen = |bytes: uint8x16_t| unsafe {
-            NeonU16 {
-                low: vmovl_u8(vget_low_u8(bytes)),
-                high: vmovl_high_u8(bytes),
-            }
-        };
         Halves {
             low: widen(self.low),
             high: widen(self.high),
@@ -38,6 +32,17 @@ impl U8x32 for NeonU8 {
         unsafe {
             vst1q_u8(halves[0].as_mut_ptr(), self.low);
             vst1q_u8(halves[1].as_mut_ptr(), self.high);
+        }
+    }
+}
+
+/// Sixteen bytes widened to sixteen words.
+#[inline(always)]
+fn widen(bytes: uint8x16_t) -> NeonU16 {
+    unsafe {
+        NeonU16 {
+            low: vmovl_u8(vget_low_u8(bytes)),
+            high: vmovl_high_u8(bytes),
         }
     }
 }

@@ -58,6 +58,17 @@ impl<'a> FrameAdmission<'a> {
         idx: usize,
         image: &impl StackableImage,
     ) -> Result<Admitted, AdmissionError> {
+        self.admit_measured(idx, image, None)
+    }
+
+    /// Check frame `idx` and take `measured`, what a decode cache measured of this very image,
+    /// rather than measuring it again — again only for a spread `measured` lacks.
+    pub(crate) fn admit_measured(
+        &self,
+        idx: usize,
+        image: &impl StackableImage,
+        measured: Option<Admitted>,
+    ) -> Result<Admitted, AdmissionError> {
         FrameDimensionMismatch::check(idx, self.desc, image.desc())?;
         let facts = FrameFacts::of(image);
         self.check_facts(idx, &facts)?;
@@ -66,7 +77,15 @@ impl<'a> FrameAdmission<'a> {
             cancel: self.cancel,
         }
         .samples(image)?;
-        let stats = FrameStats::measure_as(image, self.spreads);
+        let stats = match measured {
+            Some(measured)
+                if self.spreads == Spreads::Skipped || measured.stats.spread.is_some() =>
+            {
+                debug_assert_eq!(measured.facts, facts, "measured of another image");
+                measured.stats
+            }
+            _ => FrameStats::measure_as(image, self.spreads),
+        };
         if idx == 0 {
             self.first_facts
                 .set(SetFacts::of_first(&facts))
@@ -82,5 +101,37 @@ impl<'a> FrameAdmission<'a> {
             Some(first) => first.check(idx, facts),
             None => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::{CancelToken, Size2us};
+
+    use crate::frame::admitted::Admitted;
+    use crate::ingest::frame_admission::FrameAdmission;
+    use crate::internals::images::mono_image;
+
+    /// An admission takes what a decode cache measured of the image: a median the cache recorded
+    /// as 7 stays 7 on a frame of 0.5. One that measures spreads, which the record lacks, measures
+    /// the frame again, and reads 0.5.
+    #[test]
+    fn a_measured_frame_is_taken_unless_it_lacks_a_spread() {
+        let image = mono_image(Size2us::new(8, 8), vec![0.5; 64]);
+        let cancel = CancelToken::new();
+        let mut measured = Admitted::measure(&image);
+        measured.stats.medians[0] = 7.0;
+        let median = |admission: FrameAdmission<'_>| {
+            admission
+                .admit_measured(0, &image, Some(measured.clone()))
+                .unwrap()
+                .stats
+                .medians[0]
+        };
+        assert_eq!(median(FrameAdmission::new(image.desc(), &cancel)), 7.0);
+        assert_eq!(
+            median(FrameAdmission::new(image.desc(), &cancel).measuring_spread()),
+            0.5
+        );
     }
 }

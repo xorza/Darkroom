@@ -300,36 +300,21 @@ fn moffat_fit_rejects_what_the_data_cannot_support() {
     }
 }
 
+/// β picks its power's strategy, with the integer it carries: a whole β is `u^−n`, a half-integer
+/// `1/(uⁿ·√u)`, any other `exp(−β·ln u)`.
 #[test]
-fn select_pow_strategy_integers() {
-    for beta in [1.0, 2.0, 3.0, 4.0, 5.0] {
-        let strategy = select_pow_strategy(beta);
-        assert!(
-            matches!(strategy, PowStrategy::Int { .. }),
-            "beta={beta} should select Int strategy, got {strategy:?}"
-        );
-    }
-}
-
-#[test]
-fn select_pow_strategy_half_integers() {
-    for beta in [1.5, 2.5, 3.5, 4.5, 5.5] {
-        let strategy = select_pow_strategy(beta);
-        assert!(
-            matches!(strategy, PowStrategy::HalfInt { .. }),
-            "beta={beta} should select HalfInt strategy, got {strategy:?}"
-        );
-    }
-}
-
-#[test]
-fn select_pow_strategy_general() {
-    for beta in [2.3, 3.7, 1.1, PI] {
-        let strategy = select_pow_strategy(beta);
-        assert!(
-            matches!(strategy, PowStrategy::General { .. }),
-            "beta={beta} should select General strategy, got {strategy:?}"
-        );
+fn each_beta_selects_its_strategy() {
+    for (beta, expected) in [
+        (1.0, PowStrategy::Int { n: 1 }),
+        (3.0, PowStrategy::Int { n: 3 }),
+        (5.0, PowStrategy::Int { n: 5 }),
+        (1.5, PowStrategy::HalfInt { int_part: 1 }),
+        (2.5, PowStrategy::HalfInt { int_part: 2 }),
+        (5.5, PowStrategy::HalfInt { int_part: 5 }),
+        (2.3, PowStrategy::General { neg_beta: -2.3 }),
+        (PI, PowStrategy::General { neg_beta: -PI }),
+    ] {
+        assert_eq!(select_pow_strategy(beta), expected, "beta={beta}");
     }
 }
 
@@ -339,7 +324,9 @@ fn select_pow_strategy_general() {
 #[test]
 fn fast_pow_neg_accuracy_every_strategy() {
     let u_values = [1.000_001, 1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0, 1e4, 1e6];
-    let betas = [1.5, 2.5, 3.5, 4.5, 5.5, 3.0, 1.01, 2.3, 3.7, 9.9];
+    let betas = [
+        1.0, 2.0, 5.0, 1.5, 2.5, 3.5, 4.5, 5.5, 3.0, 1.01, 2.3, 3.7, 9.9,
+    ];
 
     for &beta in &betas {
         let strategy = select_pow_strategy(beta);
@@ -355,49 +342,21 @@ fn fast_pow_neg_accuracy_every_strategy() {
     }
 }
 
+/// Powers of 2.5 = 5/2 are exact in `f64` through the tenth, 5¹⁰/2¹⁰ = 9 765 625/1 024.
 #[test]
-fn fast_pow_neg_accuracy_integers() {
-    let u_values = [1.01, 1.1, 2.0, 5.0, 10.0];
-    let betas = [1.0, 2.0, 3.0, 4.0, 5.0];
-
-    for &beta in &betas {
-        let strategy = select_pow_strategy(beta);
-        for &u in &u_values {
-            let fast = fast_pow_neg(u, strategy);
-            let reference = u.powf(-beta);
-            let rel_err = ((fast - reference) / reference).abs();
-            assert!(
-                rel_err < 1e-14,
-                "fast_pow_neg(u={u}, beta={beta}) = {fast}, expected {reference}, rel_err={rel_err}"
-            );
-        }
+fn int_pow_is_exact_on_dyadic_powers() {
+    for (n, expected) in [
+        (0, 1.0),
+        (1, 2.5),
+        (2, 6.25),
+        (3, 15.625),
+        (4, 39.0625),
+        (5, 97.656_25),
+        (6, 244.140_625),
+        (10, 9_765_625.0 / 1_024.0),
+    ] {
+        assert_eq!(int_pow(2.5, n), expected, "2.5^{n}");
     }
-}
-
-#[test]
-fn fast_pow_neg_general_fallback() {
-    let beta = 2.3;
-    let strategy = select_pow_strategy(beta);
-    let u = 3.0;
-    let fast = fast_pow_neg(u, strategy);
-    let reference = u.powf(-beta);
-    assert!(
-        (fast - reference).abs() < 1e-15,
-        "General fallback should be identical to powf"
-    );
-}
-
-#[test]
-fn int_pow_correctness() {
-    let u = 2.5;
-    assert!((int_pow(u, 0) - 1.0).abs() < 1e-15);
-    assert!((int_pow(u, 1) - u).abs() < 1e-15);
-    assert!((int_pow(u, 2) - u * u).abs() < 1e-15);
-    assert!((int_pow(u, 3) - u * u * u).abs() < 1e-14);
-    assert!((int_pow(u, 4) - u.powi(4)).abs() < 1e-13);
-    assert!((int_pow(u, 5) - u.powi(5)).abs() < 1e-12);
-    assert!((int_pow(u, 6) - u.powi(6)).abs() < 1e-11);
-    assert!((int_pow(u, 10) - u.powi(10)).abs() < 1e-6);
 }
 
 #[test]

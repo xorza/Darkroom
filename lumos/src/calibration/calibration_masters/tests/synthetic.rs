@@ -8,8 +8,11 @@
 
 use common::CancelToken;
 
+use crate::calibration::calibration_masters::CalibrationMasters;
+use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::defect_map::DefectMap;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
+use crate::image::cfa::cfa_type::CfaType;
 use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::synthetic::bgs::Vignette;
 use crate::internals::synthetic::camera::{BiasField, Camera, FlatField, SensorDefects};
@@ -17,7 +20,6 @@ use crate::internals::synthetic::metrics::{pixel_stats, rms_diff};
 use crate::internals::synthetic::observe::{Observation, render};
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::scene::{BgField, Placement, Scatter, Scene};
-use crate::{CalibrationMasters, CalibrationSet, CfaType};
 use common::{Size2us, Vec2us};
 
 /// A uniformly lit sky seen through a vignette, with bias and dark on top, calibrates to the sky

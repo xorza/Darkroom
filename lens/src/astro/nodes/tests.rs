@@ -36,17 +36,6 @@ fn astro_raw_paths_are_a_filtered_multi_file_picker() {
     assert_eq!(cfg.extensions, RAW_EXTENSIONS);
 }
 
-#[test]
-fn load_astro_image_node_is_registered() {
-    let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("Load Astro Image").unwrap();
-    assert_eq!(f.category(), "Astro");
-    assert_eq!(f.inputs().len(), 1);
-    assert_eq!(f.outputs().len(), 1);
-    assert_eq!(f.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
-}
-
 /// The node keeps what the decoder stated, in planes for either file: a FITS's header and
 /// provenance, and a TIFF's provenance, which states no header.
 #[tokio::test]
@@ -101,35 +90,6 @@ async fn load_astro_image_keeps_the_decoded_metadata() {
             );
         }
     }
-}
-
-#[test]
-fn build_masters_node_is_registered() {
-    let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("Build Masters").unwrap();
-    assert_eq!(f.category(), "Astro");
-    // Pure: the digest folds each selected calibration file's identity.
-    assert_eq!(f.behavior(), FuncBehavior::Pure);
-    assert_eq!(f.outputs().len(), 1);
-    assert_eq!(f.outputs()[0].data_type, MASTERS_DATA_TYPE);
-
-    // Four optional calibration-frame sets, then sigma and cache.
-    assert_eq!(f.inputs().len(), 6);
-    let frame_names: Vec<&str> = f.inputs()[..4].iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(frame_names, ["Darks", "Flats", "Bias", "Flat Darks"]);
-    for input in &f.inputs()[..4] {
-        assert!(!input.required, "calibration frame sets are optional");
-        assert_eq!(input.data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
-    }
-    assert_eq!(f.inputs()[4].name, "Sigma");
-    assert_eq!(f.inputs()[4].data_type, DataType::Float);
-    assert_eq!(
-        f.inputs()[4].default_value,
-        Some(ConstValue::Float(f64::from(SigmaThreshold::DEFAULT.get()))),
-    );
-    assert_eq!(f.inputs()[5].name, "Cache");
-    assert_eq!(f.inputs()[5].data_type, DataType::Bool);
-    assert_eq!(f.inputs()[5].default_value, Some(ConstValue::Bool(true)));
 }
 
 /// Every preset input is one required, wireable input of its detailed config's
@@ -226,62 +186,6 @@ fn a_few_knobs_are_the_nodes_own_inputs() {
     );
 }
 
-#[test]
-fn stack_lights_node_is_registered() {
-    let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("Stack Lights").unwrap();
-    assert_eq!(f.category(), "Astro");
-    // Pure: the digest folds exactly the selected light files.
-    assert_eq!(f.behavior(), FuncBehavior::Pure);
-    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(
-        names,
-        [
-            "Lights",
-            "Masters",
-            "Detection",
-            "Registration",
-            "Combine",
-            "Reference"
-        ]
-    );
-    assert_eq!(f.inputs()[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
-    assert!(f.inputs()[0].required, "light frames are required");
-    assert_eq!(f.inputs()[1].data_type, MASTERS_DATA_TYPE);
-    assert!(!f.inputs()[1].required, "masters are genuinely optional");
-    // Unset picks the sharpest frame with enough stars; no sentinel stands in for it.
-    assert!(!f.inputs()[5].required);
-    assert_eq!(f.inputs()[5].default_value, None);
-
-    let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
-    for out in f.outputs() {
-        assert_eq!(out.data_type, IMAGE_DATA_TYPE);
-    }
-}
-
-#[test]
-fn processing_nodes_are_registered() {
-    let lib = astro_library(&MlModelPaths::default());
-    // Each in-place op: a required `image` Image in, an Image out.
-    for name in [
-        "Extract Background",
-        "Denoise",
-        "SCNR",
-        "Neutralize Background",
-        "HDR Compression",
-        "Local Contrast",
-    ] {
-        let f = lib.by_name(name).unwrap();
-        assert_eq!(f.category(), "Astro", "{name} category");
-        assert_eq!(f.inputs()[0].name, "Image", "{name} first input");
-        assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE, "{name} in type");
-        assert!(f.inputs()[0].required, "{name} image required");
-        assert_eq!(f.outputs().len(), 1, "{name} one output");
-        assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE, "{name} out type");
-    }
-}
-
 #[tokio::test]
 async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     let lib = astro_library(&MlModelPaths::default());
@@ -324,43 +228,124 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     );
 }
 
+/// Each astro node is registered in the Astro category under its inputs and outputs, every output
+/// an image but Build Masters', with what each states beside them: the picker types, the
+/// optional sets, the defaults and the purity a digest relies on.
 #[test]
-fn ml_denoise_node_is_registered() {
+fn astro_nodes_are_registered_with_their_ports() {
     let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("ML Denoise").unwrap();
-    assert_eq!(f.category(), "Astro");
-    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE);
-    let DataType::FsPath(model) = &f.inputs()[1].data_type else {
-        panic!("model is a file path");
-    };
-    assert_eq!(model.mode, FsPathMode::ExistingFile);
-    assert_eq!(model.extensions, ["onnx"]);
-    assert_eq!(
-        f.inputs()[1].default_value,
-        Some(ConstValue::FsPath("DeepSNR_weights_v2.onnx".to_string()))
-    );
-    assert_eq!(f.outputs().len(), 1);
-    assert_eq!(f.outputs()[0].name, "Image");
-    assert_eq!(f.outputs()[0].data_type, IMAGE_DATA_TYPE);
-}
+    let rows: [(&str, &[&str], &[&str]); 11] = [
+        ("Load Astro Image", &["Path"], &["Image"]),
+        (
+            "Build Masters",
+            &["Darks", "Flats", "Bias", "Flat Darks", "Sigma", "Cache"],
+            &["Masters"],
+        ),
+        (
+            "Stack Lights",
+            &[
+                "Lights",
+                "Masters",
+                "Detection",
+                "Registration",
+                "Combine",
+                "Reference",
+            ],
+            &["Image", "Coverage", "Weight"],
+        ),
+        ("Extract Background", &["Image", "Mode"], &["Image"]),
+        (
+            "Denoise",
+            &["Image", "Scales", "K", "Threshold", "Strength"],
+            &["Image"],
+        ),
+        ("SCNR", &["Image", "Protection"], &["Image"]),
+        ("Neutralize Background", &["Image"], &["Image"]),
+        (
+            "HDR Compression",
+            &["Image", "Scales", "Amount"],
+            &["Image"],
+        ),
+        (
+            "Local Contrast",
+            &["Image", "Tiles", "Clip Limit", "Strength"],
+            &["Image"],
+        ),
+        ("ML Denoise", &["Image", "Model"], &["Image"]),
+        (
+            "ML Star Removal",
+            &["Image", "Model"],
+            &["Starless", "Stars"],
+        ),
+    ];
+    for (name, inputs, outputs) in rows {
+        let f = lib.by_name(name).unwrap();
+        assert_eq!(f.category(), "Astro", "{name}");
+        let input_names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(input_names, inputs, "{name} inputs");
+        let output_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(output_names, outputs, "{name} outputs");
+        if inputs[0] == "Image" {
+            assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE, "{name}");
+            assert!(f.inputs()[0].required, "{name} image required");
+        }
+        let output_type = if name == "Build Masters" {
+            MASTERS_DATA_TYPE
+        } else {
+            IMAGE_DATA_TYPE
+        };
+        assert!(
+            f.outputs().iter().all(|o| o.data_type == output_type),
+            "{name} output types"
+        );
+    }
 
-#[test]
-fn remove_stars_node_has_starless_and_stars_outputs() {
-    let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("ML Star Removal").unwrap();
-    assert_eq!(f.category(), "Astro");
-    let names: Vec<&str> = f.inputs().iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs()[0].data_type, IMAGE_DATA_TYPE);
+    let load = lib.by_name("Load Astro Image").unwrap();
+    assert_eq!(load.inputs()[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
+
+    // Pure: the digest folds each selected calibration file's identity.
+    let masters = lib.by_name("Build Masters").unwrap();
+    assert_eq!(masters.behavior(), FuncBehavior::Pure);
+    for input in &masters.inputs()[..4] {
+        assert!(!input.required, "calibration frame sets are optional");
+        assert_eq!(input.data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+    }
+    assert_eq!(masters.inputs()[4].data_type, DataType::Float);
     assert_eq!(
-        f.inputs()[1].default_value,
-        Some(ConstValue::FsPath("StarNet2_weights.onnx".to_string()))
+        masters.inputs()[4].default_value,
+        Some(ConstValue::Float(f64::from(SigmaThreshold::DEFAULT.get()))),
     );
-    let out_names: Vec<&str> = f.outputs().iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(out_names, ["Starless", "Stars"]);
-    for o in f.outputs() {
-        assert_eq!(o.data_type, IMAGE_DATA_TYPE);
+    assert_eq!(masters.inputs()[5].data_type, DataType::Bool);
+    assert_eq!(
+        masters.inputs()[5].default_value,
+        Some(ConstValue::Bool(true))
+    );
+
+    // Pure: the digest folds exactly the selected light files. Masters are optional, and an unset
+    // reference picks the sharpest frame with enough stars, with no sentinel standing in for it.
+    let stack = lib.by_name("Stack Lights").unwrap();
+    assert_eq!(stack.behavior(), FuncBehavior::Pure);
+    assert_eq!(stack.inputs()[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
+    assert!(stack.inputs()[0].required, "light frames are required");
+    assert_eq!(stack.inputs()[1].data_type, MASTERS_DATA_TYPE);
+    assert!(!stack.inputs()[1].required, "masters are optional");
+    assert!(!stack.inputs()[5].required);
+    assert_eq!(stack.inputs()[5].default_value, None);
+
+    for (name, model) in [
+        ("ML Denoise", "DeepSNR_weights_v2.onnx"),
+        ("ML Star Removal", "StarNet2_weights.onnx"),
+    ] {
+        let f = lib.by_name(name).unwrap();
+        let DataType::FsPath(config) = &f.inputs()[1].data_type else {
+            panic!("{name}: the model is a file path");
+        };
+        assert_eq!(config.mode, FsPathMode::ExistingFile, "{name}");
+        assert_eq!(config.extensions, ["onnx"], "{name}");
+        assert_eq!(
+            f.inputs()[1].default_value,
+            Some(ConstValue::FsPath(model.to_owned())),
+            "{name}"
+        );
     }
 }

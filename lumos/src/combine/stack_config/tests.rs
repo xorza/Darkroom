@@ -9,8 +9,9 @@ use crate::combine::stack_config::*;
 use crate::pipeline::align_stack_config::AlignStackConfig;
 
 /// A pixel of fewer samples than the floor falls back; at and above it, the configured method
-/// runs. `none()` never falls back, even at 2, and a method that already equals the fallback is
-/// none to fall back from. The flat preset's stricter floor of 8 is honoured.
+/// runs. `none()` never falls back, even at 2, and neither a method that already equals the
+/// fallback nor one that rejects nothing — the median under a mean fallback — has anything to fall
+/// back from. The flat preset's stricter floor of 8 is honoured.
 #[test]
 fn small_n_falls_back_below_min_frames() {
     let sigma = CombineMethod::Mean(Rejection::sigma_clip(2.5));
@@ -22,6 +23,12 @@ fn small_n_falls_back_below_min_frames() {
     assert!(!SmallN::none().falls_back(win, 2));
     assert!(!floor5.falls_back(CombineMethod::Median, 1));
     assert!(!floor5.falls_back(CombineMethod::Mean(Rejection::None), 1));
+    let mean_below5 = SmallN {
+        min_frames: 5,
+        fallback: CombineMethod::Mean(Rejection::None),
+    };
+    assert!(!mean_below5.falls_back(CombineMethod::Median, 1));
+    assert!(mean_below5.falls_back(sigma, 4));
     let flat = StackConfig::flat().combine.small_n;
     assert!(flat.falls_back(sigma, 7));
     assert!(!flat.falls_back(sigma, 8));

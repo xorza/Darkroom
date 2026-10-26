@@ -5,18 +5,20 @@ use crate::error::InvalidConfigField;
 use crate::registration::kd_tree::KdTree;
 use crate::registration::triangle::matching;
 use crate::registration::triangle::reference_triangles::ReferenceTriangles;
-use crate::registration::triangle::voting::PointMatch;
+use crate::registration::triangle::voting::{PointMatch, Votes};
 
 /// Configuration for triangle matching.
+///
+/// A triangle matches only one of its own orientation, never its mirror image, as Astroalign
+/// matches: the estimators fit no reflection and RANSAC refuses a mirrored hypothesis, so a
+/// mirrored match could only vote for wrong pairs. A frame set of mixed row order, the usual
+/// source of a mirror, is refused at admission.
 #[derive(Debug, Clone)]
 pub struct TriangleConfig {
     /// How far two triangles' side ratios may differ and still match. Default: 0.01.
     pub ratio_tolerance: f64,
     /// The votes a star pair needs to be a match. Default: 3.
     pub min_votes: usize,
-    /// Whether a triangle matches only one of its own orientation, not its mirror image.
-    /// Default: true.
-    pub check_orientation: bool,
 }
 
 impl TriangleConfig {
@@ -31,15 +33,15 @@ impl TriangleConfig {
         target: &KdTree,
         noise_scale: f64,
     ) -> Vec<PointMatch> {
-        let n_ref = reference.len();
-        let n_target = target.len();
-        if n_ref < 3 || n_target < 3 {
+        let ref_count = reference.len();
+        let target_count = target.len();
+        if ref_count < 3 || target_count < 3 {
             return Vec::new();
         }
 
         // k = 10 gives C(10, 2) = 45 triangles per star, enough for robust matching (Astroalign
         // takes k = 5); the count grows as k², for diminishing returns (k = 20 gives 190).
-        let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 10);
+        let k_neighbors = (ref_count.min(target_count) / 3).clamp(5, 10);
 
         let ref_triangles = matching::form_triangles_kdtree(reference, k_neighbors, noise_scale);
         let target_triangles = matching::form_triangles_kdtree(target, k_neighbors, noise_scale);
@@ -50,8 +52,8 @@ impl TriangleConfig {
             return Vec::new();
         };
         reference_triangles
-            .vote(&target_triangles, self)
-            .resolve(n_ref, n_target, self.min_votes)
+            .vote(&target_triangles, self, Votes::new(ref_count, target_count))
+            .resolve(self.min_votes)
     }
 
     /// Validate the matching invariants this config owns.
@@ -67,7 +69,6 @@ impl Default for TriangleConfig {
         Self {
             ratio_tolerance: 0.01,
             min_votes: 3,
-            check_orientation: true,
         }
     }
 }

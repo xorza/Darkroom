@@ -10,7 +10,7 @@ use common::bench::{Kind, Scale};
 use criterion::{Bencher, BenchmarkId, Criterion, Throughput};
 
 use crate::bench::scene::{FRAME, Field};
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::cfa::mosaic::Mosaic;
@@ -45,7 +45,7 @@ pub(crate) fn integration(c: &mut Criterion) {
     }
     let rgb = || {
         field
-            .mosaic(FRAME, CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)))
+            .mosaic(FRAME, CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)))
             .demosaic_measured(MarkesteijnPasses::One)
     };
     let method = InterpolationMethod::default();

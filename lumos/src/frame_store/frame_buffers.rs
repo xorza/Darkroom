@@ -3,7 +3,9 @@
 use common::Buffer2;
 
 use crate::frame::frame_quality::FrameQuality;
+use crate::image::linear_image::LinearImage;
 use crate::image::stackable_image::StackableImage;
+use crate::registration::resample::WarpResult;
 
 /// A frame's buffers in RAM as a tier stores them: moved in whole on the resident tier, written
 /// and handed back on the spilled one, in the type they came in, for their producer to fill again.
@@ -39,5 +41,37 @@ impl<I: StackableImage> FrameBuffers for NewFrame<I> {
 
     fn into_new(self) -> Self {
         self
+    }
+}
+
+/// A warped frame on its way to its tier: the resident tier keeps the set as the frame, and the
+/// spilled one hands it back for the next frame's warp.
+impl FrameBuffers for WarpResult {
+    type Image = LinearImage;
+
+    fn image(&self) -> &LinearImage {
+        &self.image
+    }
+
+    fn quality(&self) -> FrameQuality<&Buffer2<f32>> {
+        FrameQuality::Planes {
+            coverage: &self.coverage,
+            confidence: &self.confidence,
+        }
+    }
+
+    fn into_new(self) -> NewFrame<LinearImage> {
+        let Self {
+            image,
+            coverage,
+            confidence,
+        } = self;
+        NewFrame {
+            image,
+            quality: FrameQuality::Planes {
+                coverage,
+                confidence,
+            },
+        }
     }
 }

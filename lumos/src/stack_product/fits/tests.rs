@@ -4,7 +4,7 @@ use fits_well::header::Header;
 use fits_well::image::{Bitpix, Scaling};
 use imaginarium::PlanarImage;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::flags::flag_counts::FlagCounts;
@@ -78,7 +78,7 @@ fn rgb_product() -> StackProduct {
     kept_flagged_samples[QualityFlags::DEFECT.idx()] = 3;
     StackProduct {
         image: image(
-            PlanarImage::from([plane(0.0), plane(1.0), plane(2.0)]),
+            PlanarImage::new_rgb([plane(0.0), plane(1.0), plane(2.0)]),
             flags,
         ),
         coverage: Some(Coverage::PerPixel(QualityMap::Shared(plane(30.0)))),
@@ -257,9 +257,9 @@ fn a_product_round_trips_every_plane_bit_for_bit() {
 fn a_mosaic_product_keeps_its_pattern_and_its_uniform_coverage() {
     let dir = TempDir::new("product-mosaic");
     let path = dir.join("product.fits");
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg));
     let written = StackProduct {
-        image: image(PlanarImage::from(plane(0.0)), None),
+        image: image(PlanarImage::new_mono(plane(0.0)), None),
         coverage: Some(Coverage::Uniform {
             value: 0.75,
             size: SIZE,

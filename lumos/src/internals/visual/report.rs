@@ -68,8 +68,8 @@ impl DetectionMetrics {
         Self {
             score: DetectionScore {
                 matched: pairs.len(),
-                n_truth: ground_truth.len(),
-                n_recovered: detected.len(),
+                truth_count: ground_truth.len(),
+                recovered_count: detected.len(),
             },
             centroid: ErrorSummary::of(
                 pairs
@@ -105,18 +105,18 @@ impl fmt::Display for DetectionMetrics {
         writeln!(f, "Detection Metrics")?;
         writeln!(f)?;
         writeln!(f, "Counts:")?;
-        writeln!(f, "  Ground truth stars:  {}", score.n_truth)?;
-        writeln!(f, "  Detected stars:      {}", score.n_recovered)?;
+        writeln!(f, "  Ground truth stars:  {}", score.truth_count)?;
+        writeln!(f, "  Detected stars:      {}", score.recovered_count)?;
         writeln!(f, "  True positives:      {}", score.matched)?;
         writeln!(
             f,
             "  False positives:     {}",
-            score.n_recovered - score.matched
+            score.recovered_count - score.matched
         )?;
         writeln!(
             f,
             "  False negatives:     {}",
-            score.n_truth - score.matched
+            score.truth_count - score.matched
         )?;
         writeln!(f)?;
         writeln!(f, "Rates:")?;
@@ -193,8 +193,8 @@ mod tests {
             assert_eq!(
                 (
                     metrics.score.matched,
-                    metrics.score.n_truth,
-                    metrics.score.n_recovered
+                    metrics.score.truth_count,
+                    metrics.score.recovered_count
                 ),
                 (matched, truth_stars.len(), detected.len())
             );

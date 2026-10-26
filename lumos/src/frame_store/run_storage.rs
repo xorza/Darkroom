@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::frame_store::decode_cache::DecodeCache;
 use crate::frame_store::error::FrameStoreError;
+use crate::frame_store::storage_params::StorageParams;
 use crate::frame_store::storage_tier::StorageTier;
-use crate::ingest::ingest_run::IngestRun;
 use crate::memory::run_plan::RunPlan;
 
 /// Where one run reads its frames from and writes them to: the decode cache, when the run keeps
@@ -35,8 +35,8 @@ impl<'a> RunStorage<'a> {
 
     /// The storage of a run whose frames the caller holds: it decodes nothing, so it keeps no
     /// decode cache.
-    pub(crate) fn holding(run: &'a IngestRun) -> Self {
-        Self::new(&run.cache_dir, None)
+    pub(crate) fn holding(storage: &'a StorageParams) -> Self {
+        Self::new(&storage.cache_dir, None)
     }
 
     /// The decode cache, when the run keeps one.
@@ -94,8 +94,8 @@ mod tests {
             ..IngestConfig::with_cache_dir(dir.path().to_path_buf())
         };
         let run = IngestRun::planned(1 << 30, &ingest);
-        let cache = DecodeCache::open(&run.cache_dir).unwrap();
-        let storage = RunStorage::new(&run.cache_dir, Some(&cache));
+        let cache = DecodeCache::open(&run.storage.cache_dir).unwrap();
+        let storage = RunStorage::new(&run.storage.cache_dir, Some(&cache));
         let free = FileSystem::free_space(dir.path()).expect("the test's disk is read");
         let share = free / 10 * 6;
         let frame = [Stage {

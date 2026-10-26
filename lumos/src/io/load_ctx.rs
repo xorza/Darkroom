@@ -1,8 +1,10 @@
 //! Shared decode policy: cancellation, resource ceilings, and format options.
 
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 
-use common::{CancelToken, par};
+use common::{CancelToken, fs, par};
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
@@ -10,9 +12,9 @@ use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
 use crate::io::decoder::Peek;
 use crate::io::decoder::cfa_decoder::CfaRead;
-use crate::io::error::{ImageError, ScientificRefusal};
-use crate::io::fits::decode as fits_decode;
+use crate::io::error::{ImageError, RasterLoadError, ScientificRefusal};
 use crate::io::fits::decode::fits_file::FitsFile;
+use crate::io::fits::error::FitsLoadError;
 use crate::io::fits::fits_load_config::FitsLoadConfig;
 use crate::io::input_format::InputFormat;
 use crate::io::null_policy::NullPolicy;
@@ -75,12 +77,14 @@ impl LoadCtx {
     ) -> Result<LinearImage, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_linear(path, self, gains),
+            InputFormat::Fits => self.fits(path, |file| file.linear(self, gains)),
             InputFormat::CameraRaw => Err(ImageError::scientific_rejection(
                 path,
                 ScientificRefusal::CameraRaw,
             )),
-            InputFormat::Raster(format) => raster::linear(path, format, self),
+            InputFormat::Raster(format) => {
+                self.raster(path, |source| raster::linear(source, format, self))
+            }
         }
     }
 
@@ -92,7 +96,8 @@ impl LoadCtx {
         gains: &SharedGains,
     ) -> Result<LinearImage, ImageError> {
         self.check_cancelled(path)?;
-        fits_decode::load_linear_file(file, path, self, gains)
+        file.linear(self, gains)
+            .map_err(|error| ImageError::fits_load(path, error))
     }
 
     /// Load an undemosaiced sensor image from camera RAW or mosaic FITS.
@@ -108,7 +113,7 @@ impl LoadCtx {
     ) -> Result<CfaImage, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_cfa(path, self, gains),
+            InputFormat::Fits => self.fits(path, |file| file.cfa(self, gains)),
             InputFormat::CameraRaw => raw::load_cfa(path, self),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
@@ -123,9 +128,11 @@ impl LoadCtx {
         let path = path.as_ref();
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => fits_decode::load_preview(path, self),
+            InputFormat::Fits => self.fits(path, |file| file.preview(self)),
             InputFormat::CameraRaw => raw::load_preview(path, self),
-            InputFormat::Raster(format) => raster::preview(path, format, self),
+            InputFormat::Raster(format) => {
+                self.raster(path, |source| raster::preview(source, format, self))
+            }
         }
     }
 
@@ -134,9 +141,9 @@ impl LoadCtx {
     pub(crate) fn cfa_peek(&self, path: &Path) -> Result<Peek<CfaRead>, ImageError> {
         self.check_cancelled(path)?;
         match InputFormat::of(path)? {
-            InputFormat::Fits => {
-                Ok(fits_decode::cfa_peek(path, self)?.map(|file| CfaRead::Fits(Box::new(file))))
-            }
+            InputFormat::Fits => Ok(self
+                .fits(path, FitsFile::cfa_peek)?
+                .map(|file| CfaRead::Fits(Box::new(file)))),
             InputFormat::CameraRaw => Ok(raw::cfa_peek(path, self)?.map(CfaRead::Raw)),
             InputFormat::Raster(_) => Err(ImageError::scientific_rejection(
                 path,
@@ -155,8 +162,31 @@ impl LoadCtx {
         self.check_cancelled(path)?;
         match read {
             CfaRead::Raw(file) => raw::load_cfa_read(file, path, self),
-            CfaRead::Fits(file) => fits_decode::load_cfa_file(*file, path, self, gains),
+            CfaRead::Fits(file) => file
+                .cfa(self, gains)
+                .map_err(|error| ImageError::fits_load(path, error)),
         }
+    }
+
+    /// `load` of the FITS file at `path`, open with the image this context selects.
+    pub(crate) fn fits<T>(
+        &self,
+        path: &Path,
+        load: impl FnOnce(FitsFile) -> Result<T, FitsLoadError>,
+    ) -> Result<T, ImageError> {
+        load(FitsFile::open(path, self)?).map_err(|error| ImageError::fits_load(path, error))
+    }
+
+    /// `load` of the raster at `path`, read through a buffer.
+    fn raster<T>(
+        &self,
+        path: &Path,
+        load: impl FnOnce(BufReader<File>) -> Result<T, RasterLoadError>,
+    ) -> Result<T, ImageError> {
+        fs::open(path)
+            .map_err(RasterLoadError::from)
+            .and_then(|file| load(BufReader::new(file)))
+            .map_err(|error| ImageError::raster_load(path, error))
     }
 
     pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {

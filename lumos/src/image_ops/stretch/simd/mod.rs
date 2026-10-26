@@ -2,7 +2,7 @@
 //!
 //! The per-sample `asinh` is the curve's hot spot. Every lane, the partial last vector's too,
 //! computes it by [`Math::asinh_f32`], so a sample's value does not depend on where in the band it
-//! falls; the scalar path calls libm's `asinhf`, and the two agree to a few ULP.
+//! falls, and so does [`AsinhOf`], the curve's one value at a time.
 
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use simd::Math;
@@ -88,6 +88,20 @@ impl Kernel for AsinhColorPreserve<'_> {
     }
 }
 
+/// `asinh` of one value by [`Math::asinh_f32`], the kernels' steps: the curve's norm and its solver
+/// take it, and the scalar reference the kernels are tested against.
+#[derive(Debug)]
+pub(super) struct AsinhOf(pub(super) f32);
+
+impl Kernel for AsinhOf {
+    type Output = f32;
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) -> f32 {
+        isa.asinh_f32(isa.splat_f32(self.0)).to_array()[0]
+    }
+}
+
 /// The curve's constants, splat across the lanes.
 #[derive(Debug, Clone, Copy)]
 struct SplatCurve<V> {
@@ -164,8 +178,8 @@ mod internals {
     use crate::image_ops::stretch::{ToneCurve, color_preserve_pixel};
 
     impl AsinhPlane<'_> {
-        /// The scalar plane curve the kernel is tested against: libm's `asinhf` through
-        /// `AsinhCurve::eval`, after the black point.
+        /// The scalar plane curve the kernel is tested against: `AsinhCurve::eval` after the black
+        /// point.
         pub(super) fn run_scalar(self) {
             for value in self.plane {
                 *value = self.curve.eval(self.black.rescale(*value));

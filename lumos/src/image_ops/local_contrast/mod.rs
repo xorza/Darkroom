@@ -196,10 +196,19 @@ impl TileGrid {
             let mut hist = [0u32; BIN_COUNT];
             for y in rows.bounds[ty]..rows.bounds[ty + 1] {
                 for idx in y * width + x0..y * width + x1 {
-                    hist[bin_of(intensity.at(idx))] += 1;
+                    if !intensity.is_fill(idx) {
+                        hist[bin_of(intensity.at(idx))] += 1;
+                    }
                 }
             }
             let count: u32 = hist.iter().sum();
+            // A tile of fills alone has no distribution to equalize, and keeps every level.
+            if count == 0 {
+                for (b, level) in lut.iter_mut().enumerate() {
+                    *level = b as f32 / BIN_COUNT as f32;
+                }
+                return;
+            }
             let clip = (clip_limit * count as f32 / BIN_COUNT as f32).max(1.0) as u32;
             clip_histogram(&mut hist, clip);
             let total: u32 = hist.iter().sum();

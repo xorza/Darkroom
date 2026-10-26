@@ -43,9 +43,9 @@ pub(crate) struct LanczosLut {
 
 impl LanczosLut {
     fn new(a: usize) -> Self {
-        let num_entries = a * LANCZOS_LUT_RESOLUTION + 1;
+        let entry_count = a * LANCZOS_LUT_RESOLUTION + 1;
         let a_f32 = a as f32;
-        let values = (0..num_entries)
+        let values = (0..entry_count)
             .map(|i| {
                 let x = i as f32 / LANCZOS_LUT_RESOLUTION as f32;
                 lanczos::kernel(x, a_f32)

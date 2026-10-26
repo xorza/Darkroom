@@ -38,6 +38,7 @@ pub(crate) fn register(library: &mut Library) {
             description: "Auto-stretches a linear frame to a viewable image (display tone curve).",
         },
         "Method",
+        Stretch::apply,
     ));
     library.add(preset_func::<BgMode>(
         NodeSpec {
@@ -46,6 +47,7 @@ pub(crate) fn register(library: &mut Library) {
             description: "Fits and removes a smooth sky-background gradient.",
         },
         "Mode",
+        ExtractBg::apply,
     ));
     library.add(preset_func::<ScnrProtection>(
         NodeSpec {
@@ -54,6 +56,7 @@ pub(crate) fn register(library: &mut Library) {
             description: "Removes the residual green cast (SCNR).",
         },
         "Protection",
+        Scnr::apply,
     ));
     let denoise = fields_func::<Denoise>(
         library,
@@ -62,6 +65,7 @@ pub(crate) fn register(library: &mut Library) {
             name: "Denoise",
             description: "Wavelet denoise (starlet coefficient thresholding).",
         },
+        Denoise::apply,
     );
     library.add(denoise);
     let hdr = fields_func::<Hdr>(
@@ -71,6 +75,7 @@ pub(crate) fn register(library: &mut Library) {
             name: "HDR Compression",
             description: "Compresses large-scale dynamic range (multiscale HDR).",
         },
+        Hdr::apply,
     );
     library.add(hdr);
     let local_contrast = fields_func::<LocalContrast>(
@@ -80,6 +85,7 @@ pub(crate) fn register(library: &mut Library) {
             name: "Local Contrast",
             description: "Local contrast enhancement (CLAHE).",
         },
+        LocalContrast::apply,
     );
     library.add(local_contrast);
     library.add(processing_func(
@@ -99,52 +105,14 @@ pub(crate) fn register(library: &mut Library) {
     ));
 }
 
-/// A `lumos` op that rewrites a frame in place.
-trait FrameOp: Send + 'static {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError>;
-}
+/// A `lumos` op that rewrites a frame in place: its config's `apply`.
+type FrameOp<C> = fn(&C, &mut LinearImage) -> Result<(), OpError>;
 
-impl FrameOp for Stretch {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-impl FrameOp for ExtractBg {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-impl FrameOp for Scnr {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-impl FrameOp for Denoise {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-impl FrameOp for Hdr {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-impl FrameOp for LocalContrast {
-    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
-        self.apply(image)
-    }
-}
-
-/// A node over `P`'s configs: the image, and `P`'s input named `name`.
-fn preset_func<P>(spec: NodeSpec, name: &str) -> Func
+/// A node over `P`'s configs: the image, and `P`'s input named `name`, each config run by `op`.
+fn preset_func<P>(spec: NodeSpec, name: &str, op: FrameOp<P::Config>) -> Func
 where
     P: Preset,
-    P::Config: FrameOp,
+    P::Config: Send + 'static,
 {
     processing_func(
         spec,
@@ -154,17 +122,17 @@ where
                             }| {
             let config = P::resolve(&inputs[1]);
             let value = mem::take(&mut inputs[0]);
-            outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
+            outputs[0] = runtime::run_frame_op(value, move |image| op(&config, image)).await?;
             Ok(())
         }),
     )
 }
 
 /// A node over a `T` of a few plain knobs: the image, and `T`'s fields as
-/// inputs of their own, each starting at the op's default.
-fn fields_func<T>(library: &mut Library, spec: NodeSpec) -> Func
+/// inputs of their own, each starting at the op's default, the config run by `op`.
+fn fields_func<T>(library: &mut Library, spec: NodeSpec, op: FrameOp<T>) -> Func
 where
-    T: FrameOp + Introspect + Clone + fmt::Debug + Sync,
+    T: Introspect + Clone + fmt::Debug + Send + Sync + 'static,
 {
     let fields = FieldInputs::<T>::new(library);
     let mut inputs = vec![Image::input("Image")];
@@ -179,7 +147,7 @@ where
         } => {
             let config = fields.build(&inputs[1..])?;
             let value = mem::take(&mut inputs[0]);
-            outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
+            outputs[0] = runtime::run_frame_op(value, move |image| op(&config, image)).await?;
             Ok(())
         }),
     )

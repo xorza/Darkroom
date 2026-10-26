@@ -1,13 +1,10 @@
-use std::io::{BufRead, Seek, Write};
-
-use crate::codec;
-use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::ColorFormat;
 use crate::color::sample::Sample;
-use crate::error::{ByteLenError, CodecError, PlanesError};
+use crate::error::{ByteLenError, PlanesError};
 use crate::interleaved::conversion::convert_image;
 use crate::interleaved::image_pixels::{ImagePixels, Stored};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::planar::planar_image::PlanarImage;
 use common::Buffer2;
 
 /// A runtime-format image backed by tightly packed, typed interleaved pixels.
@@ -39,8 +36,8 @@ impl InterleavedImage {
         self.pixels.bytes_mut()
     }
 
-    /// A black image of `desc`.
-    pub fn new_black(desc: InterleavedDesc) -> Self {
+    /// An image of `desc` with every sample zero: black, and transparent where it has alpha.
+    pub fn new_zeroed(desc: InterleavedDesc) -> Self {
         Self {
             pixels: ImagePixels::new_zeroed(desc.color_format(), desc.size()),
         }
@@ -68,30 +65,12 @@ impl InterleavedImage {
     pub(crate) fn from_samples<T: Sample>(desc: InterleavedDesc, samples: Vec<T>) -> Self {
         assert_eq!(
             samples.len(),
-            desc.size().pixel_count() * desc.color_format().channel_count.count(),
+            desc.sample_count(),
             "the samples of a {desc} image"
         );
         Self {
             pixels: ImagePixels::from_samples(desc.color_format(), desc.size(), samples),
         }
-    }
-
-    /// The image `input` holds, in `format`, decoded as it is read: a file whoever owns the
-    /// reading opened, or bytes in a [`Cursor`](std::io::Cursor).
-    pub fn decode(
-        mut input: impl BufRead + Seek,
-        format: RasterFormat,
-    ) -> Result<Self, CodecError> {
-        codec::decode(&mut input, format)
-    }
-
-    /// This image in `format`, written into `out`, which the encoder may seek back over.
-    pub fn encode(
-        &self,
-        mut out: impl Write + Seek,
-        format: RasterFormat,
-    ) -> Result<(), CodecError> {
-        codec::encode(self, format, &mut out)
     }
 
     /// This image in `color_format`: itself when the format already matches.
@@ -111,10 +90,9 @@ impl InterleavedImage {
         self.convert(format)
     }
 
-    /// Borrowing counterpart of [`convert`](Self::convert): converts into a freshly
-    /// allocated image, leaving `self` alone — a caller that only holds a view (e.g.
-    /// a CPU borrow of an `ImageBuffer`) skips the source deep-copy that `convert`'s
-    /// `self` receiver would force. The same format is a full copy.
+    /// Borrowing counterpart of [`convert`](Self::convert): converts into a freshly allocated
+    /// image, leaving `self` alone, so a caller that holds only a borrow skips the copy of the
+    /// source that `convert`'s `self` receiver would force. The same format is a full copy.
     #[must_use]
     pub fn convert_to(&self, color_format: ColorFormat) -> Self {
         let source = self.desc();
@@ -163,6 +141,35 @@ impl InterleavedImage {
             .map(Buffer2::into_planes)
             .ok_or_else(|| planes_refused::<T, N>(desc))
     }
+}
+
+impl InterleavedImage {
+    /// The image as `f32` planes on the unit scale, its alpha channel dropped: each pixel read
+    /// once, each sample by [`Sample::to_unit`], exactly what a conversion to `f32` gives.
+    pub(crate) fn unit_planes(&self) -> PlanarImage {
+        match &self.pixels {
+            ImagePixels::MONO_U8(pixels) => mono_planes(pixels),
+            ImagePixels::MONO_U16(pixels) => mono_planes(pixels),
+            ImagePixels::MONO_F32(pixels) => mono_planes(pixels),
+            ImagePixels::RGB_U8(pixels) => rgb_planes(pixels),
+            ImagePixels::RGB_U16(pixels) => rgb_planes(pixels),
+            ImagePixels::RGB_F32(pixels) => rgb_planes(pixels),
+            ImagePixels::RGBA_U8(pixels) => rgb_planes(pixels),
+            ImagePixels::RGBA_U16(pixels) => rgb_planes(pixels),
+            ImagePixels::RGBA_F32(pixels) => rgb_planes(pixels),
+        }
+    }
+}
+
+/// The one channel of `pixels` as a unit `f32` plane.
+fn mono_planes<T: Sample>(pixels: &Buffer2<[T; 1]>) -> PlanarImage {
+    let [plane] = pixels.channel_planes(T::to_unit);
+    PlanarImage::new_mono(plane)
+}
+
+/// The first three channels of `pixels` as unit `f32` planes.
+fn rgb_planes<T: Sample, const N: usize>(pixels: &Buffer2<[T; N]>) -> PlanarImage {
+    PlanarImage::new_rgb(pixels.channel_planes::<f32, 3>(T::to_unit))
 }
 
 /// Why an image of `desc` has no `N` planes of `T`.

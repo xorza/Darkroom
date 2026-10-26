@@ -26,11 +26,6 @@ fn only_a_wrapped_cause_is_reachable_through_source() {
             "truncated",
         ),
         (
-            CodecError::from(truncated()),
-            "I/O error: truncated",
-            "truncated",
-        ),
-        (
             CodecError::from(DescError::ZeroWidth),
             "the file states no image: width must be positive",
             "width must be positive",

@@ -26,11 +26,12 @@
 //!    which preserves the CFA pattern for demosaicing and carries no Gr/Gb imbalance into a repair.
 //!
 //! 4. **Broad dark structure:**
-//!    Per-color tile medians are bilinearly interpolated into a smooth dark-current model before
-//!    thresholding, which keeps isolated pixels and same-color clusters as positive residuals. A
-//!    pixel the model calls hot is confirmed against a robust plane through its color's photosites
-//!    6 to 8 pixels around it ([`RingReference`]), so amp glow that
-//!    curves faster than the tiles, or rises past the outer ones, does not become a defect.
+//!    Per-color tile skies (each tile's Pearson mode, see [`ColorMesh`]) are bilinearly
+//!    interpolated into a smooth dark-current model before thresholding, which keeps isolated
+//!    pixels and same-color clusters as positive residuals. A pixel the model calls hot is
+//!    confirmed against a robust plane through its color's photosites 6 to 8 pixels around it
+//!    ([`RingReference`]), so amp glow that curves faster than the tiles, or rises past the outer
+//!    ones, does not become a defect.
 //!
 //! 5. **Adaptive sampling for large images:**
 //!    Exact median computation is slow on full-resolution sensors. Each color receives up to 100K
@@ -71,6 +72,7 @@ use crate::image::cfa::cfa_type::CfaType;
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::masked_plane::MaskedPlane;
 use crate::math::statistics::median_mad::MedianMad;
+use crate::math::statistics::spread::Spread;
 use common::Size2us;
 
 /// A mask of defective pixels: **hot** pixels (abnormally high dark current) from a master
@@ -100,6 +102,10 @@ pub(crate) struct HotPixels {
     /// color's photosites around it, or over the color's mesh background where the ring has too
     /// few — the residual the detection tested. Always positive.
     pub(crate) excess: Vec<f32>,
+    /// Per index, in the dark's units: the dark's background noise there, the σ the detection's
+    /// cut was a multiple of. The noise in each excess, which a fit on the excesses corrects for.
+    /// Always positive.
+    pub(crate) noise: Vec<f32>,
 }
 
 impl DefectMap {
@@ -118,6 +124,7 @@ impl DefectMap {
     /// A map with these defect lists, or `None` when an index lies outside `size`.
     pub(crate) fn from_lists(size: Size2us, hot: HotPixels, cold_idxs: Vec<usize>) -> Option<Self> {
         debug_assert_eq!(hot.idxs.len(), hot.excess.len());
+        debug_assert_eq!(hot.idxs.len(), hot.noise.len());
         let pixel_count = size.pixel_count();
         if hot
             .idxs
@@ -154,7 +161,7 @@ impl DefectMap {
     pub(crate) const fn ram_bytes(&self) -> usize {
         self.hot.idxs.len() * (size_of::<usize>() + size_of::<f32>())
             + self.cold_idxs.len() * size_of::<usize>()
-            + BitBuffer2::heap_bytes(self.mask.size)
+            + BitBuffer2::heap_bytes(self.mask.size())
     }
 
     /// How many pixels the map names, in all and per color of `cfa`, the filter of the masters it
@@ -339,38 +346,44 @@ fn detect_hot_pixels(
     // What it calls hot must stand as far above the ring's plane, which follows the structure the
     // tiles cannot. A row a task, its worker's ring taken once for the row's pixels.
     let rings = PerWorker::new(RingReference::default);
-    let (idxs, excess) = par::into_iter(0..size.height)
-        .flat_map_iter(|y| {
-            let mut ring = rings.get();
-            let (stats, cfa_type, bg) = (&stats, &cfa_type, &bg);
-            (y * size.width..(y + 1) * size.width).filter_map(move |i| {
-                if cancel.is_cancelled() {
-                    return None;
-                }
-                let point = size.point_of(i);
-                let color = cfa_type.slot_at(point);
-                let ColorStats { median, sigma } = stats[color];
-                let local = bg.at(color, point);
-                let cut = sigma_threshold * sigma.max(local.noise);
-                let residual = data[i] - local.sky;
-                if residual <= median + cut {
-                    return None;
-                }
-                match ring.at(RingFrame::of(data), cfa_type, point) {
-                    Some(level) => {
-                        let excess = data[i] - level;
-                        (excess > cut).then_some((i, excess))
+    let (idxs, (excess, noise)): (Vec<usize>, (Vec<f32>, Vec<f32>)) =
+        par::into_iter(0..size.height)
+            .flat_map_iter(|y| {
+                let mut ring = rings.get();
+                let (stats, cfa_type, bg) = (&stats, &cfa_type, &bg);
+                (y * size.width..(y + 1) * size.width).filter_map(move |i| {
+                    if cancel.is_cancelled() {
+                        return None;
                     }
-                    None => Some((i, residual - median)),
-                }
+                    let point = size.point_of(i);
+                    let color = cfa_type.slot_at(point);
+                    let ColorStats { median, sigma } = stats[color];
+                    let local = bg.at(color, point);
+                    let noise = sigma.max(local.noise);
+                    let cut = sigma_threshold * noise;
+                    let residual = data[i] - local.sky;
+                    if residual <= median + cut {
+                        return None;
+                    }
+                    match ring.at(RingFrame::of(data), cfa_type, point) {
+                        Some(level) => {
+                            let excess = data[i] - level;
+                            (excess > cut).then_some((i, (excess, noise)))
+                        }
+                        None => Some((i, (residual - median, noise))),
+                    }
+                })
             })
-        })
-        .unzip();
+            .unzip();
 
     if cancel.is_cancelled() {
         return Err(CalibrationError::Cancelled);
     }
-    Ok(HotPixels { idxs, excess })
+    Ok(HotPixels {
+        idxs,
+        excess,
+        noise,
+    })
 }
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
@@ -382,12 +395,11 @@ fn residual_sigma_floor(image: &CfaImage) -> f32 {
     {
         return sigma;
     }
-    // One `f32` step at the frame's own magnitude — the smallest difference its samples can even
-    // represent, so nothing below it is measurable whatever span the decoder divided by.
+    // The smallest difference the frame's samples can even represent at its own magnitude.
     let magnitude = par::iter(image.data())
         .map(|value| value.abs())
         .reduce(|| 0.0, f32::max);
-    (magnitude * f32::EPSILON).max(f32::MIN_POSITIVE)
+    Spread::resolution(magnitude)
 }
 
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of

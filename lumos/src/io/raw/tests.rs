@@ -2,7 +2,7 @@ use common::{Buffer2, CancelToken, TempDir};
 use libraw::internals::BayerDump;
 use libraw::{LibrawCode, LibrawError, ProcessedSamples};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::image::flags::quality_flags::{QualityFlags, SATURATION_FRACTION};
 use crate::internals::cfa::XTRANS_PATTERN;
@@ -231,7 +231,7 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
 
 #[test]
 fn camera_white_balance_is_canonicalized() {
-    let bayer = Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+    let bayer = Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
     assert_eq!(
         camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], false),
         Some([2.0, 1.0, 1.5, 1.0])
@@ -277,7 +277,7 @@ fn invalid_camera_white_balance_is_absent() {
         [2.0, f32::NAN, 1.5, 1.0],
         [2.0, f32::INFINITY, 1.5, 1.0],
     ];
-    let cfa_type = Some(CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+    let cfa_type = Some(CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
 
     for input in invalid {
         assert!(

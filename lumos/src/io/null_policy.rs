@@ -33,51 +33,119 @@ pub enum NullPolicy {
 
 impl NullPolicy {
     /// This policy applied to the decoded `planes` of one image, each `size` pixels: the flags
-    /// that mark their null pixels, with every null filled ([`fill`]), or `None` when they hold
-    /// none.
+    /// that mark [`QualityFlags::NO_DATA`] where a plane is null and [`QualityFlags::SATURATED`]
+    /// where a channel reaches `saturation`, a level in the decoded domain, with every null filled
+    /// ([`fill`]); `None` when they hold neither.
+    ///
+    /// A frame with no nulls and no saturation level returns before any scan of its pixels.
     pub(crate) fn resolve(
         self,
-        planes: &mut [&mut [f32]],
+        planes: &mut [CountedPlane<'_>],
         size: Size2us,
+        saturation: Option<f32>,
     ) -> Result<Option<PixelFlags>, NullSamples> {
         let pixel_count = size.pixel_count();
-        let mut count = 0;
-        let mut first_idx = None;
-        for (channel, plane) in planes.iter().enumerate() {
-            #[expect(
-                clippy::debug_assert_with_mut_call,
-                reason = "`len` reads the `&mut [f32]` through a shared borrow"
-            )]
-            {
-                debug_assert_eq!(plane.len(), pixel_count);
-            }
-            for (idx, sample) in plane.iter().enumerate() {
-                if !sample.is_finite() {
-                    count += 1;
-                    first_idx.get_or_insert(channel * pixel_count + idx);
-                }
-            }
-        }
-        let Some(first_idx) = first_idx else {
+        debug_assert!(
+            planes
+                .iter()
+                .all(|plane| plane.samples.len() == pixel_count),
+            "every plane holds {pixel_count} samples"
+        );
+        let count: usize = planes
+            .iter()
+            .filter_map(|plane| plane.nulls)
+            .map(|nulls| nulls.count)
+            .sum();
+        if count == 0 && saturation.is_none() {
             return Ok(None);
-        };
-        if self == Self::Reject {
+        }
+        if count > 0 && self == Self::Reject {
+            // Samples, not pixels: each channel's nulls count apart, and the index is in the
+            // channel-major sample space the count belongs to.
+            let first_idx = planes
+                .iter()
+                .enumerate()
+                .find_map(|(channel, plane)| {
+                    plane
+                        .nulls
+                        .map(|nulls| channel * pixel_count + nulls.first_idx)
+                })
+                .expect("a nonzero count means at least one plane holds a null");
             return Err(NullSamples { count, first_idx });
         }
+        // Before the fill, which is what erases the evidence. A non-finite sample fails every
+        // comparison, so a null is never also saturated.
         let flags = PixelFlags::from_fn(size, |idx| {
-            if planes.iter().any(|plane| !plane[idx].is_finite()) {
+            if planes.iter().any(|plane| !plane.samples[idx].is_finite()) {
                 QualityFlags::NO_DATA
+            } else if saturation
+                .is_some_and(|level| planes.iter().any(|plane| plane.samples[idx] >= level))
+            {
+                QualityFlags::SATURATED
             } else {
                 QualityFlags::default()
             }
         });
         for plane in planes.iter_mut() {
-            let nulls = plane.iter().filter(|sample| !sample.is_finite()).count();
-            if nulls > 0 {
-                fill(plane, nulls);
+            if let Some(nulls) = plane.nulls {
+                fill(plane.samples, nulls.count);
             }
         }
         Ok(flags)
+    }
+}
+
+/// One decoded plane and its null samples, counted.
+#[derive(Debug)]
+pub(crate) struct CountedPlane<'a> {
+    pub(crate) samples: &'a mut [f32],
+    pub(crate) nulls: Option<PlaneNulls>,
+}
+
+impl<'a> CountedPlane<'a> {
+    /// `samples`, their nulls counted here: for a decoder that did not count them as it decoded.
+    pub(crate) fn count(samples: &'a mut [f32]) -> Self {
+        let nulls = PlaneNulls::of(samples, 0);
+        Self { samples, nulls }
+    }
+}
+
+/// How many nulls a span of samples holds and where the first one is, in that span's own index
+/// space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlaneNulls {
+    pub(crate) count: usize,
+    pub(crate) first_idx: usize,
+}
+
+impl PlaneNulls {
+    /// The nulls of `samples`, which start at `start` of the index space; `None` without one.
+    pub(crate) fn of(samples: &[f32], start: usize) -> Option<Self> {
+        let mut count = 0;
+        let mut first_idx = None;
+        for (idx, sample) in samples.iter().enumerate() {
+            if !sample.is_finite() {
+                count += 1;
+                first_idx.get_or_insert(start + idx);
+            }
+        }
+        first_idx.map(|first_idx| Self { count, first_idx })
+    }
+
+    /// These nulls restated in an index space `by` samples earlier — a chunk's, in its plane's.
+    pub(crate) const fn offset_by(self, by: usize) -> Self {
+        Self {
+            count: self.count,
+            first_idx: self.first_idx + by,
+        }
+    }
+
+    /// Fold in another span's nulls. Both must already be in the same index space.
+    pub(crate) fn merge(self, other: Self) -> Self {
+        Self {
+            count: self.count + other.count,
+            first_idx: self.first_idx.min(other.first_idx),
+        }
     }
 }
 
@@ -86,9 +154,9 @@ impl NullPolicy {
 /// apart, the first at `first_idx` of the channel-major sample space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{count} null/non-finite samples, first at linear index {first_idx}")]
-pub(crate) struct NullSamples {
-    pub(crate) count: usize,
-    pub(crate) first_idx: usize,
+pub struct NullSamples {
+    pub count: usize,
+    pub first_idx: usize,
 }
 
 /// Samples the fill's median is taken over, at most.
@@ -130,18 +198,12 @@ pub(super) fn fill_flagged(samples: &mut [f32], flags: &PixelFlags) {
 /// the others.
 fn fill_where(samples: &mut [f32], missing: impl Fn(usize, f32) -> bool, missing_count: usize) {
     debug_assert!(missing_count > 0 && missing_count <= samples.len());
-    // Every `stride`-th *measured* sample rather than every `stride`-th sample: missing pixels
-    // arrive in regions — a mosaic edge, a coverage gap — so striding the plane itself would draw
-    // its whole quota from one side of a frame that is masked down the other.
-    let sample = Subsample::new(samples.len() - missing_count, FILL_MEDIAN_SAMPLES);
-    let mut measured = Vec::with_capacity(sample.count());
-    measured.extend(
-        samples
-            .iter()
-            .enumerate()
-            .filter(|&(idx, &value)| !missing(idx, value))
-            .map(|(_, &value)| value)
-            .step_by(sample.stride()),
+    let mut measured = Subsample::data_values(
+        samples.len(),
+        missing_count,
+        FILL_MEDIAN_SAMPLES,
+        |idx| missing(idx, samples[idx]),
+        |idx| samples[idx],
     );
     // A wholly-missing plane has no level of its own to borrow, and no guess is better than any
     // other. The flags say every pixel of it is missing, which is the part that has to survive.
@@ -161,18 +223,28 @@ fn fill_where(samples: &mut [f32], missing: impl Fn(usize, f32) -> bool, missing
 mod tests {
     use crate::image::flags::pixel_flags::PixelFlags;
     use crate::image::flags::quality_flags::QualityFlags;
-    use crate::io::null_policy::{self, FILL_MEDIAN_SAMPLES, NullPolicy, NullSamples};
+    use crate::io::null_policy::{
+        self, CountedPlane, FILL_MEDIAN_SAMPLES, NullPolicy, NullSamples,
+    };
     use common::Size2us;
 
     /// Two 2×1 planes with one null each, at different pixels. `Mask` flags both pixels and fills
     /// each plane with its own finite sample (the median of one value); `Reject` counts 2 samples,
-    /// the first at index 1 of the channel-major space; planes with none give no flags.
+    /// the first at index 1 of the channel-major space; planes with none give no flags, unless a
+    /// saturation level of 0.6 flags the 0.75 at pixel 1 and not the 0.5 at pixel 0.
     #[test]
     fn a_policy_masks_or_rejects_the_nulls_of_every_plane() {
         let size = Size2us::new(2, 1);
         let (mut red, mut green) = ([0.5, f32::NAN], [f32::INFINITY, 0.25]);
         let flags = NullPolicy::Mask
-            .resolve(&mut [&mut red, &mut green], size)
+            .resolve(
+                &mut [
+                    CountedPlane::count(&mut red),
+                    CountedPlane::count(&mut green),
+                ],
+                size,
+                None,
+            )
             .unwrap()
             .unwrap();
         assert_eq!(flags.at(0), QualityFlags::NO_DATA);
@@ -181,7 +253,14 @@ mod tests {
 
         let (mut red, mut green) = ([0.5, f32::NAN], [f32::INFINITY, 0.25]);
         let refused = NullPolicy::Reject
-            .resolve(&mut [&mut red, &mut green], size)
+            .resolve(
+                &mut [
+                    CountedPlane::count(&mut red),
+                    CountedPlane::count(&mut green),
+                ],
+                size,
+                None,
+            )
             .unwrap_err();
         assert_eq!(
             refused,
@@ -192,8 +271,16 @@ mod tests {
         );
 
         let mut finite = [0.5, 0.75];
-        let flags = NullPolicy::Reject.resolve(&mut [&mut finite], size);
+        let flags = NullPolicy::Reject.resolve(&mut [CountedPlane::count(&mut finite)], size, None);
         assert!(flags.unwrap().is_none());
+        let saturated = NullPolicy::Reject
+            .resolve(&mut [CountedPlane::count(&mut finite)], size, Some(0.6))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            [saturated.at(0), saturated.at(1)],
+            [QualityFlags::default(), QualityFlags::SATURATED]
+        );
     }
 
     #[test]

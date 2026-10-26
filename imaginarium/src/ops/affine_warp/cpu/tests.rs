@@ -22,7 +22,7 @@ fn test_identity_is_exact_all_formats() {
         for format in ColorFormat::ALL {
             // Non-power-of-two dimensions to exercise edge rows/columns.
             let input = create_test_image(format, Size2us::new(13, 7), 0);
-            let mut output = InterleavedImage::new_black(input.desc());
+            let mut output = InterleavedImage::new_zeroed(input.desc());
 
             AffineWarp::new()
                 .filter(filter)
@@ -45,7 +45,7 @@ fn test_integer_translate_shifts_pixels() {
         ColorFormat::MONO_U8,
         vec![10, 20, 30, 40],
     );
-    let mut output = InterleavedImage::new_black(input.desc());
+    let mut output = InterleavedImage::new_zeroed(input.desc());
 
     AffineWarp::new()
         .translate(Vec2::new(1.0, 0.0))
@@ -64,7 +64,7 @@ fn test_nearest_downscale_picks_even_columns() {
         ColorFormat::MONO_U8,
         vec![10, 20, 30, 40],
     );
-    let mut output = InterleavedImage::new_black(InterleavedDesc::new(
+    let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
         Size2us::new(2, 1),
         ColorFormat::MONO_U8,
     ));
@@ -87,7 +87,7 @@ fn test_bilinear_half_pixel_average() {
         ColorFormat::MONO_F32,
         &[0.25, 0.75, 0.5],
     );
-    let mut output = InterleavedImage::new_black(InterleavedDesc::new(
+    let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
         Size2us::new(3, 1),
         ColorFormat::MONO_F32,
     ));
@@ -110,7 +110,7 @@ fn test_rgba_alpha_is_interpolated() {
         ColorFormat::RGBA_F32,
         &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
     );
-    let mut output = InterleavedImage::new_black(InterleavedDesc::new(
+    let mut output = InterleavedImage::new_zeroed(InterleavedDesc::new(
         Size2us::new(2, 1),
         ColorFormat::RGBA_F32,
     ));
@@ -131,7 +131,7 @@ fn test_rgba_alpha_is_interpolated() {
 fn test_fully_out_of_bounds_is_zero_all_formats() {
     for format in ColorFormat::ALL {
         let input = create_test_image(format, Size2us::new(3, 3), 0);
-        let mut output = InterleavedImage::new_black(input.desc());
+        let mut output = InterleavedImage::new_zeroed(input.desc());
 
         AffineWarp::new()
             .translate(Vec2::new(1000.0, 1000.0))
@@ -151,13 +151,13 @@ fn test_filter_modes_differ_on_upscale() {
     let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![0, 100]);
     let out_desc = InterleavedDesc::new(Size2us::new(4, 1), ColorFormat::MONO_U8);
 
-    let mut nearest = InterleavedImage::new_black(out_desc);
+    let mut nearest = InterleavedImage::new_zeroed(out_desc);
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Nearest)
         .apply_cpu(&input, &mut nearest);
 
-    let mut bilinear = InterleavedImage::new_black(out_desc);
+    let mut bilinear = InterleavedImage::new_zeroed(out_desc);
     AffineWarp::new()
         .scale(Vec2::new(2.0, 2.0))
         .filter(FilterMode::Bilinear)
@@ -192,8 +192,8 @@ fn every_tier_matches_the_scalar_reference() {
                 ] {
                     let warp = warp.filter(FilterMode::Bilinear);
                     let desc = InterleavedDesc::new(output, format);
-                    let mut scalar = InterleavedImage::new_black(desc);
-                    let mut kernel = InterleavedImage::new_black(desc);
+                    let mut scalar = InterleavedImage::new_zeroed(desc);
+                    let mut kernel = InterleavedImage::new_zeroed(desc);
 
                     apply_scalar(&warp, &input, &mut scalar);
                     apply_on(tier, &warp, &input, &mut kernel);
@@ -223,10 +223,10 @@ fn special_floats_interpolate_as_the_reference() {
         for (sample, special) in samples.iter_mut().step_by(7).zip(specials.iter().cycle()) {
             *sample = *special;
         }
-        let mut scalar = InterleavedImage::new_black(input.desc());
+        let mut scalar = InterleavedImage::new_zeroed(input.desc());
         apply_scalar(&warp, &input, &mut scalar);
         for tier in IsaTier::supported() {
-            let mut output = InterleavedImage::new_black(input.desc());
+            let mut output = InterleavedImage::new_zeroed(input.desc());
             apply_on(tier, &warp, &input, &mut output);
             assert!(pixels_equal(&scalar, &output), "{tier} {format}");
         }
@@ -242,7 +242,7 @@ fn bilinear_rounds_ties_to_even() {
         ColorFormat::MONO_U8,
         vec![10, 11, 11, 12],
     );
-    let mut output = InterleavedImage::new_black(input.desc());
+    let mut output = InterleavedImage::new_zeroed(input.desc());
     AffineWarp::new()
         .translate(Vec2::new(0.5, 0.0))
         .filter(FilterMode::Bilinear)
@@ -277,7 +277,7 @@ fn invertibility_needs_a_normal_determinant_and_a_finite_inverse() {
 #[should_panic(expected = "the transform is not invertible")]
 fn a_singular_transform_is_refused() {
     let input = image_u8(Size2us::new(2, 1), ColorFormat::MONO_U8, vec![1, 2]);
-    let mut output = InterleavedImage::new_black(input.desc());
+    let mut output = InterleavedImage::new_zeroed(input.desc());
     AffineWarp::new()
         .scale(Vec2::new(0.0, 1.0))
         .apply_cpu(&input, &mut output);

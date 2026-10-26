@@ -144,7 +144,12 @@ impl Measured {
             saturation: &self.saturation,
             no_data: None,
         }
-        .measure_star(region, config, &MeasureGrid::new(expected_fwhm))
+        .measure_star(
+            region,
+            config,
+            &MeasureGrid::new(expected_fwhm),
+            &mut self.sky.noise.reader(),
+        )
     }
 
     /// The windowed centroid from `start` with the grid of `expected_fwhm`, the global sky, the

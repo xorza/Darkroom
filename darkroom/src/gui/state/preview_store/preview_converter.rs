@@ -158,7 +158,7 @@ impl Job {
                 let image = source
                     .as_custom::<Image>()
                     .expect("a full raster is only asked of an image value");
-                Outcome::Full(rgba8_raster(&image.interleaved(), texels))
+                Outcome::Full(rgba8_raster(image, texels))
             }
         };
         Converted {
@@ -176,11 +176,10 @@ fn card(value: DynamicValue) -> Card {
         let Some(image) = value.as_custom::<Image>() else {
             return Card::Text(value.to_string());
         };
-        let cpu = image.interleaved();
-        let desc = cpu.desc();
+        let desc = image.desc();
         match native_size(desc) {
             Ok(native_size) => Thumbnail {
-                raster: rgba8_raster(&cpu, capped_target(native_size, Some(PREVIEW_TEXTURE_DIM))),
+                raster: rgba8_raster(image, capped_target(native_size, Some(PREVIEW_TEXTURE_DIM))),
                 native_size,
                 native_format: desc.color_format(),
             },

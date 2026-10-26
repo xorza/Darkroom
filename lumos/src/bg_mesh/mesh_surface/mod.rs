@@ -50,6 +50,9 @@ pub(crate) struct RowScratch {
     d2x: Vec<f32>,
     solve: Vec<f32>,
     row: Vec<f32>,
+    /// The image row `nodes` and `d2x` hold the spline of, for the reader that solved it: the
+    /// surface cannot change while a reader borrows it, and each reader starts with none.
+    solved_y: Option<usize>,
 }
 
 impl Scratch for RowScratch {
@@ -115,15 +118,21 @@ impl MeshSurface {
 
     /// A reader of the surface with the scratch of one worker.
     pub(crate) fn reader(&self) -> SurfaceReader<'_> {
+        let mut scratch = self.rows.acquire();
+        scratch.solved_y = None;
         SurfaceReader {
             surface: self,
-            scratch: self.rows.acquire(),
+            scratch,
         }
     }
 
     /// Into `scratch`, each tile column's y spline at image row `y`, and the x spline's second
-    /// derivatives through them.
+    /// derivatives through them; nothing when it holds that row already, so a reader taking pixel
+    /// after pixel of one row solves it once.
     fn solve_row(&self, y: usize, scratch: &mut RowScratch) {
+        if scratch.solved_y == Some(y) {
+            return;
+        }
         let fy = y as f32;
         let tiles_x = self.tiles_x();
         let tiles_y = self.centers_y.len();
@@ -145,6 +154,7 @@ impl MeshSurface {
             centers: &self.centers_x,
         }
         .second_derivatives(&mut scratch.d2x[..tiles_x], &mut scratch.solve);
+        scratch.solved_y = Some(y);
     }
 
     /// Each interval between tile centres along a row, in order.

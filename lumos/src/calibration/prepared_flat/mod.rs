@@ -45,8 +45,37 @@ impl PreparedFlat {
         Ok(Self::from_divisor(flat))
     }
 
-    /// A divisor prepared before, as a saved bundle holds it.
-    pub(crate) fn from_divisor(divisor: CfaImage) -> Self {
+    /// A divisor prepared before, as a saved bundle holds it: refused unless every sample is one
+    /// [`Self::new`] could have made, finite and at least [`MIN_NORMALIZED_FLAT`]. A checksum
+    /// proves only that the bytes are the ones written; a divisor of 0 or below would turn a
+    /// light into infinities or flip its sign.
+    ///
+    /// # Errors
+    /// [`CalibrationError::InvalidFlatDivisor`] at the first sample, in row-major order, that is
+    /// not.
+    pub(crate) fn checked_divisor(divisor: CfaImage) -> Result<Self, CalibrationError> {
+        let samples = divisor.data().pixels();
+        if let Some(idx) = par::iter(samples)
+            .position_first(|&value| !(value.is_finite() && value >= MIN_NORMALIZED_FLAT))
+        {
+            return Err(CalibrationError::InvalidFlatDivisor {
+                idx,
+                value: samples[idx],
+            });
+        }
+        Ok(Self::from_divisor(divisor))
+    }
+
+    /// A divisor [`normalize`] made, or one [`Self::checked_divisor`] checked.
+    fn from_divisor(divisor: CfaImage) -> Self {
+        debug_assert!(
+            divisor
+                .data()
+                .pixels()
+                .iter()
+                .all(|&value| value.is_finite() && value >= MIN_NORMALIZED_FLAT),
+            "a divisor normalize could not make"
+        );
         let floored = par::iter(divisor.data())
             .filter(|&&value| value <= MIN_NORMALIZED_FLAT)
             .count();

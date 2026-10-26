@@ -16,4 +16,11 @@ pub trait U8x32: Copy + Debug {
     fn widen(self) -> Halves<Self::U16>;
 
     fn store(self, lanes: &mut [u8; U8_LANES]);
+
+    #[inline(always)]
+    fn to_array(self) -> [u8; U8_LANES] {
+        let mut lanes = [0; U8_LANES];
+        self.store(&mut lanes);
+        lanes
+    }
 }

@@ -68,20 +68,52 @@ pub struct RansacFailure {
 }
 
 /// One model `Auto` tried and the reason it did not produce a fit.
-///
-/// Boxed because a model's failure is itself a [`RegistrationError`] — without it the enum would be
-/// infinitely sized.
 #[derive(Debug, Clone)]
 pub struct FailedModel {
     /// The model that was attempted.
     pub model: TransformType,
     /// Why it failed.
-    pub error: Box<RegistrationError>,
+    pub failure: ModelFailure,
 }
 
 impl Display for FailedModel {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}: {}", self.model, self.error)
+        write!(f, "{:?}: {}", self.model, self.failure)
+    }
+}
+
+/// Why one model's fit of a pair's matches failed: the cases a model's estimate and its refinement
+/// end in, each also a [`RegistrationError`] of a registration under that model alone.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ModelFailure {
+    /// RANSAC found no transformation.
+    #[error(transparent)]
+    RansacFailed(#[from] RansacFailure),
+    /// The fit, after match recovery, rests on fewer star pairs than
+    /// [`min_matches`](crate::RegistrationConfig) asks for.
+    #[error("too few inliers: found {found}, need {required}")]
+    TooFewInliers { found: usize, required: usize },
+    /// Not enough matched points are available for a stable SIP fit.
+    #[error("too few points for a SIP fit: found {found}, need {required}")]
+    TooFewSipPoints { found: usize, required: usize },
+    /// The final fit's matched pairs do not determine the model.
+    #[error("the matched pairs do not determine a {model:?} transform")]
+    DegenerateFit { model: TransformType },
+}
+
+/// A model's failure is the registration's when it was the one model asked for.
+impl From<ModelFailure> for RegistrationError {
+    fn from(failure: ModelFailure) -> Self {
+        match failure {
+            ModelFailure::RansacFailed(failure) => Self::RansacFailed(failure),
+            ModelFailure::TooFewInliers { found, required } => {
+                Self::TooFewInliers { found, required }
+            }
+            ModelFailure::TooFewSipPoints { found, required } => {
+                Self::TooFewSipPoints { found, required }
+            }
+            ModelFailure::DegenerateFit { model } => Self::DegenerateFit { model },
+        }
     }
 }
 
@@ -124,9 +156,10 @@ pub enum RegistrationError {
         field: StarField,
         value: f64,
     },
-    /// No matching star patterns found.
-    #[error("no matching star patterns found between images")]
-    NoMatchingPatterns,
+    /// Triangle matching paired fewer stars than [`min_matches`](crate::RegistrationConfig) asks
+    /// for.
+    #[error("too few matching star patterns between images: found {found}, need {required}")]
+    NoMatchingPatterns { found: usize, required: usize },
     /// The fit, after match recovery, rests on fewer star pairs than
     /// [`min_matches`](crate::RegistrationConfig) asks for.
     #[error("too few inliers: found {found}, need {required}")]

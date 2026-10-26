@@ -72,17 +72,6 @@ impl F32x8 for Avx2F32 {
         Self(unsafe { _mm256_min_ps(other.0, self.0) })
     }
 
-    /// Measured 0.64–0.70 of `vdivps` on the conversions to `f32` on Zen 3, where the divide is
-    /// the bottleneck; on NEON the divide is the faster.
-    #[inline(always)]
-    fn div_scale(self, divisor: Self, reciprocal: Self) -> Self {
-        unsafe {
-            let quotient = _mm256_mul_ps(self.0, reciprocal.0);
-            let residual = _mm256_fnmadd_ps(quotient, divisor.0, self.0);
-            Self(_mm256_fmadd_ps(residual, reciprocal.0, quotient))
-        }
-    }
-
     #[inline(always)]
     fn sqrt(self) -> Self {
         Self(unsafe { _mm256_sqrt_ps(self.0) })
@@ -91,6 +80,17 @@ impl F32x8 for Avx2F32 {
     #[inline(always)]
     fn abs(self) -> Self {
         Self(unsafe { _mm256_andnot_ps(_mm256_set1_ps(-0.0), self.0) })
+    }
+
+    #[inline(always)]
+    fn copysign(self, sign: Self) -> Self {
+        unsafe {
+            let sign_bit = _mm256_set1_ps(-0.0);
+            Self(_mm256_or_ps(
+                _mm256_andnot_ps(sign_bit, self.0),
+                _mm256_and_ps(sign_bit, sign.0),
+            ))
+        }
     }
 
     #[inline(always)]

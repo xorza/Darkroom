@@ -16,9 +16,16 @@ use rayon::prelude::*;
 use crate::bg_mesh::mesh_surface::{MeshSurface, SurfaceReader};
 use crate::scratch_pool::{ScratchPool, Shapeless};
 use crate::star_detection::convolution::filter_kernels::MatchedKernel;
-use crate::star_detection::detection_plane::Prefilter;
 use crate::star_detection::median_filter::MedianRows;
 use common::Size2us;
+
+/// What a detection plane's residual passes through before the matched filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prefilter {
+    None,
+    /// The 3×3 median, for a demosaiced frame: interpolation leaves artifacts a single pixel wide.
+    Median3x3,
+}
 
 /// The bands each worker takes of a plane on average: more than one, so a worker that finishes
 /// early takes another.

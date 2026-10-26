@@ -22,10 +22,10 @@ use crate::backend::avx2_fma::u8x32::Avx2U8;
 use crate::backend::avx2_fma::u16x16::Avx2U16;
 use crate::f32x8::{F32_LANES, F32x8};
 use crate::f64x4::F64_LANES;
+use crate::full_scale::FullScale;
 use crate::halves::Halves;
-use crate::i32x8::I32_LANES;
-use crate::isa::{Isa, lanes_of, lookup_last, pair_lanes, u32_le_lanes};
-use crate::kernel::Kernel;
+use crate::i32x8::{I32_LANES, I32x8};
+use crate::isa::{Isa, interleave_lanes, lookup_last, pair_lanes, u32_le_lanes};
 use crate::mask8::Mask8;
 use crate::u8x32::U8_LANES;
 use crate::u16x16::U16_LANES;
@@ -50,9 +50,17 @@ impl Isa for Avx2Fma {
     type U16 = Avx2U16;
     type I32 = Avx2I32;
 
+    /// Measured 0.64–0.70 of `vdivps` on the conversions to `f32` on Zen 3, where the divide is
+    /// the bottleneck; on NEON the divide is the faster.
     #[inline(always)]
-    fn run<K: Kernel>(self, kernel: K) -> K::Output {
-        kernel.run(self)
+    fn div_full_scale(self, values: Avx2F32, scale: FullScale) -> Avx2F32 {
+        unsafe {
+            let divisor = _mm256_set1_ps(scale.divisor());
+            let reciprocal = _mm256_set1_ps(scale.reciprocal());
+            let quotient = _mm256_mul_ps(values.0, reciprocal);
+            let residual = _mm256_fnmadd_ps(quotient, divisor, values.0);
+            Avx2F32(_mm256_fmadd_ps(residual, reciprocal, quotient))
+        }
     }
 
     #[inline(always)]
@@ -229,60 +237,29 @@ impl Isa for Avx2Fma {
         }
     }
 
-    /// Each 128-bit half interleaves its own sixteen pixels: each output block is three shuffles,
-    /// one from each channel, or-ed together, and the blocks go to their stores.
+    /// Three channels through [`store_rgb_u8`], four through [`store_rgba_u8`].
     #[inline(always)]
-    fn store_interleaved3_u8(self, channels: [Avx2U8; 3], bytes: &mut [u8; 3 * U8_LANES]) {
-        let (out, []) = bytes.as_chunks_mut::<32>() else {
-            unreachable!("ninety-six bytes are three stores of thirty-two")
-        };
-        let channels = [channels[0].0, channels[1].0, channels[2].0];
-        unsafe {
-            let p0 = gather3(channels, &SCATTER3[0]);
-            let p1 = gather3(channels, &SCATTER3[1]);
-            let p2 = gather3(channels, &SCATTER3[2]);
-            let stores = [
-                _mm256_permute2x128_si256::<0x20>(p0, p1),
-                _mm256_blend_epi32::<0xF0>(p2, p0),
-                _mm256_permute2x128_si256::<0x31>(p1, p2),
-            ];
-            _mm256_storeu_si256(out[0].as_mut_ptr().cast(), stores[0]);
-            _mm256_storeu_si256(out[1].as_mut_ptr().cast(), stores[1]);
-            _mm256_storeu_si256(out[2].as_mut_ptr().cast(), stores[2]);
-        }
-    }
-
-    /// Each 128-bit half interleaves its own sixteen pixels: a four-by-four transpose of the
-    /// channels' 32-bit groups, then one shuffle a block that puts each pixel's four bytes together.
-    #[inline(always)]
-    fn store_interleaved4_u8(self, channels: [Avx2U8; 4], bytes: &mut [u8; 4 * U8_LANES]) {
-        let (out, []) = bytes.as_chunks_mut::<32>() else {
-            unreachable!("a hundred and twenty-eight bytes are four stores of thirty-two")
-        };
-        let [r, g, b, a] = [channels[0].0, channels[1].0, channels[2].0, channels[3].0];
-        unsafe {
-            let (rg_low, rg_high) = (_mm256_unpacklo_epi32(r, g), _mm256_unpackhi_epi32(r, g));
-            let (ba_low, ba_high) = (_mm256_unpacklo_epi32(b, a), _mm256_unpackhi_epi32(b, a));
-            let group = mask(&TRANSPOSE4);
-            let p0 = _mm256_shuffle_epi8(_mm256_unpacklo_epi64(rg_low, ba_low), group);
-            let p1 = _mm256_shuffle_epi8(_mm256_unpackhi_epi64(rg_low, ba_low), group);
-            let p2 = _mm256_shuffle_epi8(_mm256_unpacklo_epi64(rg_high, ba_high), group);
-            let p3 = _mm256_shuffle_epi8(_mm256_unpackhi_epi64(rg_high, ba_high), group);
-            _mm256_storeu_si256(
-                out[0].as_mut_ptr().cast(),
-                _mm256_permute2x128_si256::<0x20>(p0, p1),
+    fn store_interleaved_u8<const C: usize, const G: usize>(
+        self,
+        channels: [Avx2U8; C],
+        bytes: &mut [u8; G],
+    ) {
+        const { assert!((C == 3 || C == 4) && G == C * U8_LANES) };
+        let c = channels.as_slice();
+        let bytes = bytes.as_mut_slice();
+        if C == 3 {
+            store_rgb_u8(
+                [c[0].0, c[1].0, c[2].0],
+                bytes
+                    .try_into()
+                    .expect("three channels fill ninety-six bytes"),
             );
-            _mm256_storeu_si256(
-                out[1].as_mut_ptr().cast(),
-                _mm256_permute2x128_si256::<0x20>(p2, p3),
-            );
-            _mm256_storeu_si256(
-                out[2].as_mut_ptr().cast(),
-                _mm256_permute2x128_si256::<0x31>(p0, p1),
-            );
-            _mm256_storeu_si256(
-                out[3].as_mut_ptr().cast(),
-                _mm256_permute2x128_si256::<0x31>(p2, p3),
+        } else {
+            store_rgba_u8(
+                [c[0].0, c[1].0, c[2].0, c[3].0],
+                bytes
+                    .try_into()
+                    .expect("four channels fill a hundred and twenty-eight bytes"),
             );
         }
     }
@@ -290,7 +267,7 @@ impl Isa for Avx2Fma {
     /// `maxps` returns its second operand where either is NaN, so a NaN goes to 0; `cvtps2dq`
     /// rounds under the default round-to-nearest-even mode.
     #[inline(always)]
-    fn round_clamped_f32(self, values: Avx2F32, high: Avx2F32) -> Avx2I32 {
+    fn round_clamped_f32_to_i32(self, values: Avx2F32, high: Avx2F32) -> Avx2I32 {
         unsafe {
             let clamped = _mm256_min_ps(_mm256_max_ps(values.0, _mm256_setzero_ps()), high.0);
             Avx2I32(_mm256_cvtps_epi32(clamped))
@@ -320,7 +297,7 @@ impl Isa for Avx2Fma {
         let reads = Reads::new(bytes.len(), 4, offset, valid);
         if reads.partial {
             return self.load_i32(
-                &u32_le_lanes(bytes, lanes_of(offset), valid.to_bitmask()).map(u32::cast_signed),
+                &u32_le_lanes(bytes, offset.to_array(), valid.to_bitmask()).map(u32::cast_signed),
             );
         }
         Avx2I32(unsafe {
@@ -346,7 +323,7 @@ impl Isa for Avx2Fma {
         let reads = Reads::new(table.len(), 8, start, first.or(second));
         if reads.partial {
             let bits = [first.to_bitmask(), second.to_bitmask()];
-            return pair_lanes::<f32, SPLIT>(table, lanes_of(start), bits)
+            return pair_lanes::<f32, SPLIT>(table, start.to_array(), bits)
                 .map(|lanes| self.load_f32(&lanes));
         }
         let starts = reads.starts(start);
@@ -378,21 +355,20 @@ impl Isa for Avx2Fma {
         let reads = Reads::new(table.len(), 8, start, first.or(second));
         if reads.partial {
             let bits = [first.to_bitmask(), second.to_bitmask()];
-            return pair_lanes::<u16, SPLIT>(table, lanes_of(start), bits)
+            return pair_lanes::<u16, SPLIT>(table, start.to_array(), bits)
                 .map(|lanes| self.load_i32(&lanes.map(i32::from)));
         }
         let starts = reads.starts(start);
         let at = table.as_ptr();
-        let words = |lane: usize| widened(unsafe { _mm_loadu_si128(at.add(starts[lane]).cast()) });
         let lanes = [
-            words(0),
-            words(1),
-            words(2),
-            words(3),
-            words(4),
-            words(5),
-            words(6),
-            words(7),
+            widened_at(at, starts[0]),
+            widened_at(at, starts[1]),
+            widened_at(at, starts[2]),
+            widened_at(at, starts[3]),
+            widened_at(at, starts[4]),
+            widened_at(at, starts[5]),
+            widened_at(at, starts[6]),
+            widened_at(at, starts[7]),
         ];
         pair_transposed::<SPLIT>(lanes, reads.whole, first, second)
             .map(|samples| Avx2I32(unsafe { _mm256_castps_si256(samples) }))
@@ -408,10 +384,7 @@ impl Isa for Avx2Fma {
     ) {
         const { assert!((C == 3 || C == 4) && G == C * F32_LANES) };
         if C == 3 {
-            let lanes = channels.map(F32x8::to_array);
-            for (idx, sample) in samples.iter_mut().enumerate() {
-                *sample = lanes[idx % 3][idx / 3];
-            }
+            interleave_lanes(&channels.map(F32x8::to_array), samples);
             return;
         }
         let c = channels.as_slice();
@@ -433,25 +406,25 @@ impl Isa for Avx2Fma {
     /// `maxpd` returns its second operand where either is NaN, so a NaN goes to 0; `cvtpd2dq`
     /// rounds under the default round-to-nearest-even mode.
     #[inline(always)]
-    fn round_clamped(self, f64s: Halves<Avx2F64>, high: Avx2F64) -> Avx2I32 {
+    fn round_clamped_f64_to_i32(self, f64s: Halves<Avx2F64>, high: Avx2F64) -> Avx2I32 {
         let [low, upper] = [f64s.low, f64s.high].map(|f64s| round4(f64s, high));
         Avx2I32(unsafe { _mm256_set_m128i(upper, low) })
     }
 
-    /// Each quad rounded into a 128-bit half and the halves packed there: one lane crossing for
-    /// the sixteen words, where packing the 256-bit [`Self::round_clamped`]s takes three.
+    /// Each quad rounded into a 128-bit half and the halves packed there: one lane crossing for the
+    /// sixteen words, where packing the 256-bit [`Self::round_clamped_f64_to_i32`]s takes three.
     #[inline(always)]
-    fn round_clamped_u16(self, f64s: [Halves<Avx2F64>; 2], high: Avx2F64) -> Avx2U16 {
+    fn round_clamped_f64_to_u16(self, f64s: [Halves<Avx2F64>; 2], high: Avx2F64) -> Avx2U16 {
         let [low, upper] = f64s.map(|f64s| unsafe {
             _mm_packus_epi32(round4(f64s.low, high), round4(f64s.high, high))
         });
         Avx2U16(unsafe { _mm256_set_m128i(upper, low) })
     }
 
-    /// As [`Self::round_clamped_u16`], two packs deeper: one lane crossing for the thirty-two
-    /// bytes, where packing the 256-bit [`Self::round_clamped`]s takes five.
+    /// As [`Self::round_clamped_f64_to_u16`], two packs deeper: one lane crossing for the
+    /// thirty-two bytes, where packing the 256-bit [`Self::round_clamped_f64_to_i32`]s takes five.
     #[inline(always)]
-    fn round_clamped_u8(self, f64s: [Halves<Avx2F64>; 4], high: Avx2F64) -> Avx2U8 {
+    fn round_clamped_f64_to_u8(self, f64s: [Halves<Avx2F64>; 4], high: Avx2F64) -> Avx2U8 {
         let words = f64s.map(|f64s| unsafe {
             _mm_packs_epi32(round4(f64s.low, high), round4(f64s.high, high))
         });
@@ -511,7 +484,7 @@ impl Reads {
     /// start whose `width` elements lie in the table, as [`Self::new`] found them.
     #[inline(always)]
     fn starts(self, start: Avx2I32) -> [usize; I32_LANES] {
-        let starts = lanes_of(Avx2I32(unsafe { _mm256_and_si256(start.0, self.whole) }));
+        let starts = Avx2I32(unsafe { _mm256_and_si256(start.0, self.whole) }).to_array();
         let mut lanes = [0; I32_LANES];
         for (lane, start) in lanes.iter_mut().zip(starts) {
             *lane = start.cast_unsigned() as usize;
@@ -533,6 +506,12 @@ fn in_range(end: usize, idx: Avx2I32, valid: Avx2Mask) -> __m256i {
             _mm256_andnot_si256(negative, below_end),
         )
     }
+}
+/// The eight words of `table` from `start`, widened: a function, not a closure, so the load stays
+/// in line however many lanes call it.
+#[inline(always)]
+fn widened_at(table: *const u16, start: usize) -> __m256 {
+    widened(unsafe { _mm_loadu_si128(table.add(start).cast()) })
 }
 
 /// Eight words widened, as `[words 0–3 | words 4–7]`.
@@ -597,7 +576,7 @@ fn transpose4(rows: [__m256; 4]) -> [__m256; 4] {
     }
 }
 
-/// [`Isa::round_clamped`] of one quad: max with zero first, so a NaN lane becomes 0.
+/// [`Isa::round_clamped_f64_to_i32`] of one quad: max with zero first, so a NaN lane becomes 0.
 #[inline(always)]
 fn round4(f64s: Avx2F64, high: Avx2F64) -> __m128i {
     unsafe {
@@ -740,5 +719,63 @@ fn pack_quads(sums: [__m128i; 4]) -> __m128i {
             _mm_packs_epi32(sums[0], sums[1]),
             _mm_packs_epi32(sums[2], sums[3]),
         )
+    }
+}
+
+/// Thirty-two pixels of three bytes: each 128-bit half interleaves its own sixteen pixels, each
+/// output block is three shuffles,
+/// one from each channel, or-ed together, and the blocks go to their stores.
+#[inline(always)]
+fn store_rgb_u8(channels: [__m256i; 3], bytes: &mut [u8; 3 * U8_LANES]) {
+    let (out, []) = bytes.as_chunks_mut::<32>() else {
+        unreachable!("ninety-six bytes are three stores of thirty-two")
+    };
+    unsafe {
+        let p0 = gather3(channels, &SCATTER3[0]);
+        let p1 = gather3(channels, &SCATTER3[1]);
+        let p2 = gather3(channels, &SCATTER3[2]);
+        let stores = [
+            _mm256_permute2x128_si256::<0x20>(p0, p1),
+            _mm256_blend_epi32::<0xF0>(p2, p0),
+            _mm256_permute2x128_si256::<0x31>(p1, p2),
+        ];
+        _mm256_storeu_si256(out[0].as_mut_ptr().cast(), stores[0]);
+        _mm256_storeu_si256(out[1].as_mut_ptr().cast(), stores[1]);
+        _mm256_storeu_si256(out[2].as_mut_ptr().cast(), stores[2]);
+    }
+}
+
+/// Each 128-bit half interleaves its own sixteen pixels: a four-by-four transpose of the
+/// channels' 32-bit groups, then one shuffle a block that puts each pixel's four bytes together.
+#[inline(always)]
+fn store_rgba_u8(channels: [__m256i; 4], bytes: &mut [u8; 4 * U8_LANES]) {
+    let (out, []) = bytes.as_chunks_mut::<32>() else {
+        unreachable!("a hundred and twenty-eight bytes are four stores of thirty-two")
+    };
+    let [r, g, b, a] = channels;
+    unsafe {
+        let (rg_low, rg_high) = (_mm256_unpacklo_epi32(r, g), _mm256_unpackhi_epi32(r, g));
+        let (ba_low, ba_high) = (_mm256_unpacklo_epi32(b, a), _mm256_unpackhi_epi32(b, a));
+        let group = mask(&TRANSPOSE4);
+        let p0 = _mm256_shuffle_epi8(_mm256_unpacklo_epi64(rg_low, ba_low), group);
+        let p1 = _mm256_shuffle_epi8(_mm256_unpackhi_epi64(rg_low, ba_low), group);
+        let p2 = _mm256_shuffle_epi8(_mm256_unpacklo_epi64(rg_high, ba_high), group);
+        let p3 = _mm256_shuffle_epi8(_mm256_unpackhi_epi64(rg_high, ba_high), group);
+        _mm256_storeu_si256(
+            out[0].as_mut_ptr().cast(),
+            _mm256_permute2x128_si256::<0x20>(p0, p1),
+        );
+        _mm256_storeu_si256(
+            out[1].as_mut_ptr().cast(),
+            _mm256_permute2x128_si256::<0x20>(p2, p3),
+        );
+        _mm256_storeu_si256(
+            out[2].as_mut_ptr().cast(),
+            _mm256_permute2x128_si256::<0x31>(p0, p1),
+        );
+        _mm256_storeu_si256(
+            out[3].as_mut_ptr().cast(),
+            _mm256_permute2x128_si256::<0x31>(p2, p3),
+        );
     }
 }

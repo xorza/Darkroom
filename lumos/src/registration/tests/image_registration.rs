@@ -123,7 +123,7 @@ fn detector() -> StarDetector {
     config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
     config.extraction.sigma_threshold = 3.0;
-    StarDetector::from_config(config).unwrap()
+    StarDetector::new(config)
 }
 
 #[test]

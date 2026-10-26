@@ -2,6 +2,8 @@
 mod real_data;
 mod synthetic;
 
+use std::io::Cursor;
+
 use common::{Size2us, TempDir, fs};
 use fits_well::image::SampleType;
 use imaginarium::{
@@ -11,24 +13,15 @@ use imaginarium::{
 use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::linear_image::LinearImage;
-use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::internals::assertions::assert_close;
 use crate::io::decoder::Decoder;
 use crate::io::decoder::linear_decoder::LinearDecoder;
-use crate::io::error::{ImageError, ScientificRefusal, WriteError};
+use crate::io::error::{ImageError, RasterLoadError, ScientificRefusal, WriteError};
 use crate::io::load_ctx::LoadCtx;
-use crate::io::null_policy::NullPolicy;
+use crate::io::null_policy::{NullPolicy, NullSamples};
 use crate::io::raster;
 use common::Vec2us;
-
-#[test]
-fn metadata_default() {
-    let meta = ImageMetadata::default();
-    assert!(meta.header.object.is_none());
-    assert!(meta.header.camera_white_balance.is_none());
-    assert!(meta.derived.provenance().is_none());
-}
 
 #[test]
 fn convert_fits_to_imaginarium_image() {
@@ -76,10 +69,10 @@ fn load_full_example_fits() {
     assert!(image.metadata.header.image_type.is_none());
 }
 
-/// A saved TIFF reloads with the same dimensions and the same f32 samples, mono and color.
+/// A TIFF written of an image reloads with the same dimensions and the same f32 samples, mono and
+/// color.
 #[test]
 fn saved_tiff_round_trips_its_samples() {
-    let dir = TempDir::new("lumos-save-tiff");
     for (name, image) in [
         (
             "mono.tiff",
@@ -96,9 +89,12 @@ fn saved_tiff_round_trips_its_samples() {
             ),
         ),
     ] {
-        let output_path = dir.join(name);
-        image.write_raster(&output_path).unwrap();
-        let loaded = LoadCtx::default().linear(&output_path).unwrap();
+        let loaded = raster::linear(
+            tiff(&InterleavedImage::from(&image)),
+            RasterFormat::Tiff,
+            &LoadCtx::default(),
+        )
+        .unwrap();
         assert_eq!(loaded.desc(), image.desc(), "{name}");
         for channel in 0..image.channel_count() {
             assert_eq!(
@@ -114,17 +110,13 @@ fn saved_tiff_round_trips_its_samples() {
 /// the finite samples (0.5) and flags it `NO_DATA`, and `Reject` refuses the load.
 #[test]
 fn a_float_tiffs_nulls_follow_the_load_policy() {
-    let dir = TempDir::new("lumos-tiff-nulls");
-    let path = dir.join("holes.tiff");
     let samples = vec![0.25f32, f32::NAN, 0.5, 0.75];
     let image = InterleavedImage::new_with_data(
         InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_F32),
         bytemuck::cast_slice(&samples).to_vec(),
     )
     .unwrap();
-    raster::write_image(&path, &image).unwrap();
-
-    let masked = LoadCtx::default().linear(&path).unwrap();
+    let masked = raster::linear(tiff(&image), RasterFormat::Tiff, &LoadCtx::default()).unwrap();
     assert_eq!(masked.channel(0).pixels(), &[0.25, 0.5, 0.5, 0.75]);
     let flags = masked.flags().unwrap();
     assert_eq!(flags.at(1), QualityFlags::NO_DATA);
@@ -134,18 +126,25 @@ fn a_float_tiffs_nulls_follow_the_load_policy() {
         nulls: NullPolicy::Reject,
         ..LoadCtx::default()
     };
-    let refused = strict.linear(&path).unwrap_err();
+    let refused = raster::linear(tiff(&image), RasterFormat::Tiff, &strict).unwrap_err();
     assert!(
         matches!(
             refused,
-            ImageError::NullSamples {
+            RasterLoadError::NullSamples(NullSamples {
                 count: 1,
                 first_idx: 1,
-                ..
-            }
+            })
         ),
         "{refused:?}"
     );
+}
+
+/// `image` as the bytes of a TIFF file, to read from the start.
+fn tiff(image: &InterleavedImage) -> Cursor<Vec<u8>> {
+    let mut bytes = Cursor::new(Vec::new());
+    RasterFormat::Tiff.encode(image, &mut bytes).unwrap();
+    bytes.set_position(0);
+    bytes
 }
 
 #[test]

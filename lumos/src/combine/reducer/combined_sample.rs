@@ -1,6 +1,8 @@
 //! [`CombinedSample`]: one reduced channel sample.
 
 use crate::combine::reducer::pixel_samples::PixelSamples;
+use crate::combine::reducer::sample_quality::SampleQuality;
+use crate::math::statistics;
 use crate::stack_product::PixelQuality;
 
 /// One reduced channel sample: the combined value, how many samples reached it, and — when the
@@ -74,15 +76,25 @@ impl CombinedSample {
         }
     }
 
-    /// The median of `weights.len()` samples, which keeps them all: its weight is their `Σwᵢ`. It
-    /// is no linear combination, so it has no inverse variance or dispersion to report.
-    pub(crate) fn median(value: f32, weights: &[f32]) -> Self {
-        Self {
-            value,
-            weight: weights.iter().sum(),
-            inverse_variance: PixelQuality::UNMEASURED.inverse_variance,
-            dispersion: PixelQuality::UNMEASURED.dispersion,
-            small_n_fallback: false,
+    /// The median of `samples`, which keeps them all: its weight is their `Σwᵢ`, as a mean's is.
+    /// It is no linear combination, so it has no inverse variance or dispersion to report, and its
+    /// weight is no inverse variance of it even where the frame weights are inverse variances.
+    pub(crate) fn of_median(samples: PixelSamples<'_>, quality: SampleQuality) -> Self {
+        let PixelSamples {
+            values, weights, ..
+        } = samples;
+        // Reorders the values in place, away from their weights: only the weights' sum, which no
+        // order changes, is read after it.
+        let value = statistics::median_mut(values);
+        match quality {
+            SampleQuality::Measured => Self {
+                value,
+                weight: weights.iter().sum(),
+                inverse_variance: PixelQuality::UNMEASURED.inverse_variance,
+                dispersion: PixelQuality::UNMEASURED.dispersion,
+                small_n_fallback: false,
+            },
+            SampleQuality::ValueOnly => Self::value_only(value),
         }
     }
 

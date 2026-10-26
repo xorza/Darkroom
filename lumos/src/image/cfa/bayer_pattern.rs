@@ -1,4 +1,4 @@
-//! [`CfaPattern`]: the phase of a 2×2 Bayer filter.
+//! [`BayerPattern`]: the phase of a 2×2 Bayer filter.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ use common::Vec2us;
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CfaPattern {
+pub enum BayerPattern {
     /// RGGB: Red at (0,0), Green at (0,1) and (1,0), Blue at (1,1)
     Rggb,
     /// BGGR: Blue at (0,0), Green at (0,1) and (1,0), Red at (1,1)
@@ -20,14 +20,14 @@ pub enum CfaPattern {
     Gbrg,
 }
 
-impl MosaicPattern for CfaPattern {
+impl MosaicPattern for BayerPattern {
     #[inline(always)]
     fn color_at(&self, pos: Vec2us) -> CfaColor {
         self.color_at(pos)
     }
 }
 
-impl CfaPattern {
+impl BayerPattern {
     /// The four phases, in `BAYERPAT` spelling order.
     pub const ALL: [Self; 4] = [Self::Rggb, Self::Bggr, Self::Grbg, Self::Gbrg];
 

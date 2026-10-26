@@ -24,7 +24,7 @@ fn neutralize_then_stretch_removes_green() {
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds
     // differ.
-    let before = neutralize_bg::channel_bgs(&image);
+    let before = neutralize_bg::channel_bgs(&image).unwrap();
     let spread_before = spread(before);
     eprintln!(
         "background before: R={} G={} B={}  (spread {spread_before:.6})",
@@ -37,7 +37,7 @@ fn neutralize_then_stretch_removes_green() {
 
     let mut img = image;
     NeutralizeBg.apply(&mut img).unwrap();
-    let after = neutralize_bg::channel_bgs(&img);
+    let after = neutralize_bg::channel_bgs(&img).unwrap();
     let spread_after = spread(after);
     eprintln!(
         "background after:  R={} G={} B={}  (spread {spread_after:.6})",

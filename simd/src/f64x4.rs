@@ -30,7 +30,8 @@ pub trait F64x4:
     #[must_use]
     fn floor(self) -> Self;
 
-    /// `2^self` for lanes that hold an integer in `[−1022, 1023]`; other lanes are garbage.
+    /// `2^self` for lanes that hold an integer in `[−1022, 1023]`; other lanes are garbage, which
+    /// `Portable` refuses in a debug build. Every Isa converts a lane toward zero.
     #[must_use]
     fn pow2i(self) -> Self;
 
@@ -43,4 +44,9 @@ pub trait F64x4:
     fn reduce_sum(self) -> f64;
 
     fn to_array(self) -> [f64; F64_LANES];
+
+    #[inline(always)]
+    fn store(self, lanes: &mut [f64; F64_LANES]) {
+        *lanes = self.to_array();
+    }
 }

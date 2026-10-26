@@ -6,7 +6,7 @@ use std::fmt::Display;
 use fits_well::header::{Header, Keyword, RecordName, keywords};
 use fits_well::image::SampleType;
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
@@ -381,7 +381,7 @@ pub(super) fn write_cfa(
 pub(super) fn read_cfa(
     header: &Header,
     height: usize,
-    unstated_bayer_pattern: Option<CfaPattern>,
+    unstated_bayer_pattern: Option<BayerPattern>,
 ) -> Result<Option<CfaType>, FitsLoadError> {
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
@@ -466,7 +466,7 @@ impl Bayerpat {
         self,
         header: &Header,
         height: usize,
-        unstated_bayer_pattern: Option<CfaPattern>,
+        unstated_bayer_pattern: Option<BayerPattern>,
     ) -> Result<Option<CfaType>, FitsLoadError> {
         let Some(bayerpat) = header.get_text("BAYERPAT")? else {
             return match self {
@@ -474,7 +474,7 @@ impl Bayerpat {
                 Self::Optional => Ok(None),
             };
         };
-        let stated = CfaPattern::from_bayerpat(bayerpat);
+        let stated = BayerPattern::from_bayerpat(bayerpat);
         let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");
         let mut pattern = match (stated, unstated, unstated_bayer_pattern) {
             (Some(pattern), _, _) | (None, true, Some(pattern)) => pattern,

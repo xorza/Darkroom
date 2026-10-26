@@ -114,7 +114,7 @@ fn planes_converted_in_a_parallel_body_panic() {
 
 #[test]
 fn deinterleaving_into_another_format_is_refused() {
-    let image = InterleavedImage::new_black(InterleavedDesc::new(
+    let image = InterleavedImage::new_zeroed(InterleavedDesc::new(
         Size2us::new(2, 2),
         ColorFormat::RGB_U8,
     ));

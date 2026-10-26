@@ -136,7 +136,7 @@ fn to_mono(pixels: &Buffer2<f32>, tone: ToneMap) -> GrayImage {
 #[cfg(feature = "real-data")]
 fn mask_to_mono(mask: &BitBuffer2) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|b| if b { 255 } else { 0 }).collect();
-    GrayImage::from_raw(mask.size.width as u32, mask.size.height as u32, bytes).unwrap()
+    GrayImage::from_raw(mask.size().width as u32, mask.size().height as u32, bytes).unwrap()
 }
 
 /// Convert labeled image to colored visualization.

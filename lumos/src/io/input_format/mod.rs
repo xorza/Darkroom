@@ -7,8 +7,9 @@ use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 
 use crate::io::error::ImageError;
 
-/// The extensions of a FITS file.
-const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
+/// The extensions of a FITS file: the three the FITS standard's users write, and fpack's `fz`, the
+/// last extension of a tile-compressed `.fits.fz`.
+const FITS_EXTENSIONS: &[&str] = &["fits", "fit", "fts", "fz"];
 
 /// Camera-RAW extensions accepted by this decoder: the formats LibRaw decodes, as digiKam's
 /// libkdcraw lists them, with Canon's CR3 that later LibRaw added. `.hdr`, which LibRaw reads for

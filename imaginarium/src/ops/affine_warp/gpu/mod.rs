@@ -3,17 +3,11 @@ use bytemuck::{Pod, Zeroable};
 use crate::gpu::Gpu;
 use crate::gpu::compute_kernel::{KernelJob, OutputStart};
 use crate::gpu::gpu_image::GpuImage;
-use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
+use crate::ops::affine_warp::pipeline;
 use crate::ops::affine_warp::{AffineWarp, FilterMode};
 
 /// The GPU path behind [`AffineWarp::apply_gpu`].
-pub(super) fn apply(
-    params: &AffineWarp,
-    ctx: &Gpu,
-    pipeline: &GpuAffineWarpPipeline,
-    input: &GpuImage,
-    output: &mut GpuImage,
-) {
+pub(super) fn apply(params: &AffineWarp, gpu: &Gpu, input: &GpuImage, output: &mut GpuImage) {
     let (input_desc, output_desc) = (input.desc, output.desc);
     assert_eq!(
         input_desc.color_format(),
@@ -43,8 +37,8 @@ pub(super) fn apply(
         },
         _pad: 0,
     };
-    pipeline.kernel.run(
-        ctx,
+    pipeline::kernel(gpu).run(
+        gpu,
         KernelJob {
             params: bytemuck::bytes_of(&uniform),
             buffers: &[input.read_buffer(), output.write_buffer()],

@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use crate::error::Cancelled;
 use crate::image::frame_desc::MAX_SIDE;
 use crate::io::fits::error::{FitsLoadError, FitsRefusal};
 use crate::io::null_policy::NullSamples;
@@ -88,6 +89,7 @@ impl ImageError {
             FitsLoadError::NullSamples(NullSamples { count, first_idx }) => {
                 Self::null_samples(path, count, first_idx)
             }
+            FitsLoadError::Scientific(reason) => Self::scientific_rejection(path, reason),
             FitsLoadError::Cancelled => Self::cancelled(path),
         }
     }
@@ -125,12 +127,52 @@ impl ImageError {
         }
     }
 
+    /// The raster load of `path` that failed for `error`.
+    pub(crate) fn raster_load(path: &Path, error: RasterLoadError) -> Self {
+        let path = path.to_path_buf();
+        match error {
+            RasterLoadError::Io(source) => Self::Io { path, source },
+            RasterLoadError::Codec(source) => Self::Image { path, source },
+            RasterLoadError::Refused(reason) => Self::ScientificInputRejected { path, reason },
+            RasterLoadError::SideTooLong(size) => Self::RasterSideTooLong { path, size },
+            RasterLoadError::NullSamples(NullSamples { count, first_idx }) => Self::NullSamples {
+                path,
+                count,
+                first_idx,
+            },
+            RasterLoadError::Cancelled => Self::Cancelled { path },
+        }
+    }
+
     /// An image at `path` refused as scientific input, for `reason`.
     pub(super) fn scientific_rejection(path: &Path, reason: ScientificRefusal) -> Self {
         Self::ScientificInputRejected {
             path: path.to_path_buf(),
             reason,
         }
+    }
+}
+
+/// Why a raster load failed, before the entry point names the file.
+#[derive(Debug, Error)]
+pub(crate) enum RasterLoadError {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("{0}")]
+    Codec(#[from] imaginarium::CodecError),
+    #[error("{0}")]
+    Refused(ScientificRefusal),
+    #[error("raster is {0}, which has a side past {max} px", max = MAX_SIDE)]
+    SideTooLong(Size2us),
+    #[error("{0}")]
+    NullSamples(#[from] NullSamples),
+    #[error("cancelled")]
+    Cancelled,
+}
+
+impl From<Cancelled> for RasterLoadError {
+    fn from(Cancelled: Cancelled) -> Self {
+        Self::Cancelled
     }
 }
 

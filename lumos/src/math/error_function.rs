@@ -3,7 +3,9 @@
 //!
 //! Each range has its own rational approximation: `x + x·P/Q` in `x²` near 0, `erx + P/Q` in
 //! `|x| − 1` about 1, and `exp(−x² − 0.5625 + R/S)/x` in `1/x²` beyond 1.25, with `x²` split so
-//! its rounding stays out of the exponential. fdlibm states an error under 1 ulp for `erf`.
+//! its rounding stays out of the exponential. fdlibm states an error under 1 ulp for `erf`. A port
+//! rather than statrs' `erf`, which errs by up to 5e-11, past the 2⁻²⁵ of the amplitude the pixel
+//! integrals of the profile fits are held to.
 #![expect(
     clippy::excessive_precision,
     reason = "fdlibm's coefficients as it publishes them, so each can be checked against the source"

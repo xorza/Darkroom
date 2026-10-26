@@ -8,8 +8,8 @@ use std::ops::Range;
 
 use common::Buffer2;
 
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_color::CfaColor;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::internals::test_rng::TestRng;
 use common::Vec2us;
 
@@ -69,7 +69,7 @@ impl CosmicRays {
 ///
 /// This simulates the checkerboard pattern visible in debayered images
 /// when color channels have different sensitivities.
-pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, pattern: CfaPattern) {
+pub(crate) fn add_bayer_pattern(pixels: &mut Buffer2<f32>, strength: f32, pattern: BayerPattern) {
     let (width, height) = (pixels.width(), pixels.height());
     let r_factor = 1.0 + strength * 0.5;
     let b_factor = 1.0 - strength * 0.3;

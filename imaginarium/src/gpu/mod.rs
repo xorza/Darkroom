@@ -1,17 +1,30 @@
 pub(crate) mod compute_kernel;
-pub(crate) mod gpu_ctx;
 pub(crate) mod gpu_image;
 pub(crate) mod packed_layout;
 
-use std::sync::Arc;
+use std::sync::OnceLock;
 
 use crate::error::GpuError;
+use crate::gpu::compute_kernel::ComputeKernel;
 
-/// GPU context holding wgpu device and queue for compute operations.
-#[derive(Debug, Clone)]
+/// A GPU device and its queue, and each op's compute kernel, compiled on its first use.
+#[derive(Debug)]
 pub struct Gpu {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    kernels: [OnceLock<ComputeKernel>; GpuOp::COUNT],
+}
+
+/// The ops with a GPU kernel: a closed set, each kernel cached in its slot of [`Gpu`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GpuOp {
+    ContrastBrightness,
+    Blend,
+    AffineWarp,
+}
+
+impl GpuOp {
+    const COUNT: usize = 3;
 }
 
 impl Gpu {
@@ -45,9 +58,19 @@ impl Gpu {
             }))?;
 
         Ok(Self {
-            device: Arc::new(device),
-            queue: Arc::new(queue),
+            device,
+            queue,
+            kernels: Default::default(),
         })
+    }
+
+    /// `op`'s kernel, compiled by `compile` on this device the first time it is asked for.
+    pub(crate) fn kernel(
+        &self,
+        op: GpuOp,
+        compile: impl FnOnce(&Self) -> ComputeKernel,
+    ) -> &ComputeKernel {
+        self.kernels[op as usize].get_or_init(|| compile(self))
     }
 
     /// Polls the device, blocking until all pending operations complete.
@@ -68,9 +91,25 @@ impl Gpu {
     /// The largest buffer this device binds as storage — the largest image it can process.
     pub(crate) fn max_buffer_byte_len(&self) -> u64 {
         let limits = self.device.limits();
-        limits
-            .max_buffer_size
-            .min(limits.max_storage_buffer_binding_size)
+        bindable_byte_len(
+            limits.max_buffer_size,
+            limits.max_storage_buffer_binding_size,
+        )
+    }
+}
+
+/// The largest buffer a device of these limits binds, at most `u32::MAX` bytes: the shaders index
+/// a buffer's bytes in a `u32`, which wraps past it, and Metal reports buffers past 4 GiB.
+const fn bindable_byte_len(max_buffer_size: u64, max_binding_size: u64) -> u64 {
+    let device = if max_buffer_size < max_binding_size {
+        max_buffer_size
+    } else {
+        max_binding_size
+    };
+    if device < u32::MAX as u64 {
+        device
+    } else {
+        u32::MAX as u64
     }
 }
 
@@ -90,7 +129,27 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use crate::gpu::bindable_byte_len;
     use crate::internals::gpu::test_gpu;
+
+    /// The smaller of the two limits, held to the `u32` the shaders index bytes in: 128 MiB
+    /// buffers bind as they are, and Metal's 8 GiB buffer behind a 4 GiB binding gives
+    /// `u32::MAX`, one byte short of the binding.
+    #[test]
+    fn the_bindable_length_is_the_smaller_limit_within_u32() {
+        for (buffer, binding, bindable) in [
+            (1 << 30, 128 << 20, 128 << 20),
+            (128 << 20, 1 << 30, 128 << 20),
+            (8 << 30, 4 << 30, u64::from(u32::MAX)),
+            (u64::MAX, u64::MAX, u64::from(u32::MAX)),
+        ] {
+            assert_eq!(
+                bindable_byte_len(buffer, binding),
+                bindable,
+                "{buffer} {binding}"
+            );
+        }
+    }
 
     /// A device exists when the host has a GPU, and it binds at least wgpu's downlevel
     /// 128 MiB storage buffer.

@@ -64,7 +64,7 @@ pub(super) struct Droplet {
 
 /// What became of one input pixel's drop.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Drop<T> {
+pub(super) enum DropOutcome<T> {
     /// The drop, to deposit.
     Landed(T),
     /// Nothing to deposit: no weight, or an area the transform collapsed.
@@ -142,14 +142,14 @@ impl<'a> FrameSource<'a> {
     /// computed — none of a homography's per pixel, nor the one a SIP inverse would add to its
     /// Newton steps — as STScI's point, turbo, Gaussian and Lanczos kernels compute none.
     #[inline]
-    pub(super) fn droplet(&self, pixel: InputPixel) -> Drop<Droplet> {
+    pub(super) fn droplet(&self, pixel: InputPixel) -> DropOutcome<Droplet> {
         let Some(weight) = self.deposit_weight(pixel) else {
-            return Drop::Empty;
+            return DropOutcome::Empty;
         };
         let pos = DVec2::new(pixel.pos.x as f64, pixel.pos.y as f64);
         match self.map.pos(pos) {
-            Some(centre) => Drop::Landed(Droplet { centre, weight }),
-            None => Drop::Unconverged,
+            Some(centre) => DropOutcome::Landed(Droplet { centre, weight }),
+            None => DropOutcome::Unconverged,
         }
     }
 
@@ -163,7 +163,7 @@ impl<'a> FrameSource<'a> {
     /// The drop at `pixel` as the quadrilateral its corners map to, shrunk by the pixel fraction to
     /// `half_drop` either side of its centre.
     #[inline]
-    pub(super) fn quad(&self, pixel: InputPixel, half_drop: f64) -> Drop<DropQuad> {
+    pub(super) fn quad(&self, pixel: InputPixel, half_drop: f64) -> DropOutcome<DropQuad> {
         let centre = DVec2::new(pixel.pos.x as f64, pixel.pos.y as f64);
         self.quad_of(pixel, |corner| {
             self.map.pos(centre + QUAD_CORNERS[corner] * half_drop)
@@ -177,14 +177,14 @@ impl<'a> FrameSource<'a> {
         &self,
         pixel: InputPixel,
         mut corner: impl FnMut(usize) -> Option<DVec2>,
-    ) -> Drop<DropQuad> {
+    ) -> DropOutcome<DropQuad> {
         let Some(weight) = self.deposit_weight(pixel) else {
-            return Drop::Empty;
+            return DropOutcome::Empty;
         };
         let mut corners = [DVec2::ZERO; 4];
         for (idx, mapped) in corners.iter_mut().enumerate() {
             let Some(pos) = corner(idx) else {
-                return Drop::Unconverged;
+                return DropOutcome::Unconverged;
             };
             *mapped = pos;
         }
@@ -193,9 +193,9 @@ impl<'a> FrameSource<'a> {
         // diagonals — measured rather than modelled, so it holds for any transform.
         let area = 0.5 * (corners[1] - corners[3]).perp_dot(corners[0] - corners[2]);
         if area.abs() < JACOBIAN_MIN {
-            return Drop::Empty;
+            return DropOutcome::Empty;
         }
-        Drop::Landed(DropQuad {
+        DropOutcome::Landed(DropQuad {
             corners,
             weight: weight / area.abs(),
         })

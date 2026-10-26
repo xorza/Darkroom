@@ -5,7 +5,8 @@ use std::io;
 
 use crate::calibration::error::CalibrationError;
 use crate::calibration::master_role::MasterRole;
-use crate::io::error::{ImageError, WriteError};
+use crate::io::error::WriteError;
+use crate::io::fits::error::FitsLoadError;
 
 /// Why [`CalibrationMasters::write_bundle`](crate::CalibrationMasters::write_bundle) could not
 /// write a bundle, or
@@ -56,7 +57,7 @@ pub enum BundleError {
     DefectsWithoutMaster,
     /// A flags extension names no image of the file, or is not this format's.
     #[error(transparent)]
-    Flags(ImageError),
+    Flags(FitsLoadError),
     /// A master's HDU is not an uncompressed 32-bit float image.
     #[error("the {role} master of the bundle is not an uncompressed BITPIX=-32 image")]
     MasterEncoding { role: MasterRole },
@@ -67,7 +68,7 @@ pub enum BundleError {
     #[error("the {role} master of the bundle: {source}")]
     Master {
         role: MasterRole,
-        source: ImageError,
+        source: FitsLoadError,
     },
     /// The defect map's table is not what a bundle writes.
     #[error("the bundle's defect map: {0}")]
@@ -101,7 +102,7 @@ pub enum DefectTableError {
     /// A row's index is negative or lies outside the sensor.
     #[error("row {row} indexes no pixel of the sensor")]
     Idx { row: usize },
-    /// A hot row's excess is not a positive finite number, or a cold row's is not NaN.
-    #[error("row {row} has an invalid excess")]
+    /// A hot row's excess or noise is not a positive finite number, or a cold row's is not NaN.
+    #[error("row {row} has an invalid excess or noise")]
     Excess { row: usize },
 }

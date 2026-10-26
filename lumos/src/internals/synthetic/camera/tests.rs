@@ -1,4 +1,4 @@
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::internals::synthetic::camera::*;
 
@@ -84,7 +84,7 @@ fn flat_field_color_gain_and_vignette() {
     // RGGB: R G on even rows, G B on odd ones.
     let rggb = ff.render(
         Size2us::new(4, 2),
-        &CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+        &CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
     );
     assert_eq!(rggb.pixels(), [0.9, 1.0, 0.9, 1.0, 1.0, 1.25, 1.0, 1.25]);
 
@@ -101,7 +101,7 @@ fn flat_field_color_gain_and_vignette() {
     // BGGR puts blue at every even row's even column, so at (32, 32) and (0, 0).
     let map = vig.render(
         Size2us::new(64, 64),
-        &CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
+        &CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
     );
     assert_eq!((map[32 * 64 + 32], map[0]), (1.25, 0.5 * 1.25));
 }

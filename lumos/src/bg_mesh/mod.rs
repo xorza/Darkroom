@@ -43,6 +43,12 @@ pub(crate) struct BgMesh {
 }
 
 impl BgMesh {
+    /// Whether tile `(tx, ty)` measured its own statistics rather than being filled from its
+    /// neighbours, every pixel of it masked.
+    pub(crate) fn is_measured(&self, tx: usize, ty: usize) -> bool {
+        self.measured[ty * self.stats.width() + tx]
+    }
+
     /// Create an uninitialized `BgMesh` with preallocated buffers.
     ///
     /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
@@ -142,44 +148,96 @@ impl BgMesh {
     /// Give each bad tile the median sky, σ and noise of the good tiles on the nearest square
     /// ring around it that holds any, as SExtractor fills a bad mesh from its neighbours. Read from
     /// the measured tiles only, so a fill never feeds another.
+    ///
+    /// The ring's radius is the tile's Chebyshev distance to the nearest good tile, which one
+    /// breadth-first pass over the grid from every good tile at once gives each, so a bad tile
+    /// reads only its ring's perimeter: `O(tiles + Σr)` where a search ring by ring reads each
+    /// square it passes, `O(r³)` a tile.
     fn fill_bad_tiles(&mut self) {
         let (tiles_x, tiles_y) = (self.stats.width(), self.stats.height());
-        let reach = tiles_x.max(tiles_y);
-        let mut skies = Vec::new();
-        let mut sigmas = Vec::new();
-        let mut noises = Vec::new();
-        for idx in 0..self.measured.len() {
-            if self.measured[idx] {
-                continue;
+        let radii = self.distances_to_measured();
+        let measured = &self.measured;
+        let stats = &self.stats;
+        let fills: Vec<(usize, TileStats)> = par::into_iter(0..measured.len())
+            .filter(|&idx| !measured[idx])
+            .map(|idx| {
+                let (tx, ty) = (idx % tiles_x, idx / tiles_x);
+                let radius = radii[idx];
+                let (x0, x1) = (tx.saturating_sub(radius), (tx + radius).min(tiles_x - 1));
+                let (y0, y1) = (ty.saturating_sub(radius), (ty + radius).min(tiles_y - 1));
+                let mut ring = Vec::with_capacity(8 * radius);
+                let mut take = |x: usize, y: usize| {
+                    if measured[y * tiles_x + x] {
+                        ring.push(stats[(x, y)]);
+                    }
+                };
+                for x in x0..=x1 {
+                    if ty >= radius {
+                        take(x, ty - radius);
+                    }
+                    if ty + radius < tiles_y {
+                        take(x, ty + radius);
+                    }
+                }
+                for y in y0.max(ty.saturating_sub(radius - 1))..=y1.min(ty + radius - 1) {
+                    if tx >= radius {
+                        take(tx - radius, y);
+                    }
+                    if tx + radius < tiles_x {
+                        take(tx + radius, y);
+                    }
+                }
+                debug_assert!(!ring.is_empty(), "a good tile lies on the ring");
+                let median = |get: fn(&TileStats) -> f32| {
+                    let mut values: Vec<f32> = ring.iter().map(get).collect();
+                    statistics::median_mut(&mut values)
+                };
+                let filled = TileStats {
+                    sky: median(|stats| stats.sky),
+                    sigma: median(|stats| stats.sigma),
+                    noise: median(|stats| stats.noise),
+                };
+                (idx, filled)
+            })
+            .collect();
+        for (idx, filled) in fills {
+            self.stats.pixels_mut()[idx] = filled;
+        }
+    }
+
+    /// Each tile's Chebyshev distance to the nearest measured tile, 0 for a measured one: a
+    /// breadth-first pass from every measured tile at once over the eight neighbours of each.
+    fn distances_to_measured(&self) -> Vec<usize> {
+        let (tiles_x, tiles_y) = (self.stats.width(), self.stats.height());
+        let mut distance = vec![usize::MAX; self.measured.len()];
+        let mut frontier: Vec<usize> = Vec::new();
+        for (idx, &measured) in self.measured.iter().enumerate() {
+            if measured {
+                distance[idx] = 0;
+                frontier.push(idx);
             }
-            let (tx, ty) = (idx % tiles_x, idx / tiles_x);
-            for radius in 1..=reach {
-                skies.clear();
-                sigmas.clear();
-                noises.clear();
-                let ring = ty.saturating_sub(radius)..=(ty + radius).min(tiles_y - 1);
-                for y in ring {
-                    for x in tx.saturating_sub(radius)..=(tx + radius).min(tiles_x - 1) {
-                        let on_ring = x.abs_diff(tx).max(y.abs_diff(ty)) == radius;
-                        if on_ring && self.measured[y * tiles_x + x] {
-                            let stats = self.stats[(x, y)];
-                            skies.push(stats.sky);
-                            sigmas.push(stats.sigma);
-                            noises.push(stats.noise);
+        }
+        debug_assert!(!frontier.is_empty(), "some tile is measured");
+        let mut next = Vec::new();
+        let mut radius = 0;
+        while !frontier.is_empty() {
+            radius += 1;
+            for &idx in &frontier {
+                let (tx, ty) = (idx % tiles_x, idx / tiles_x);
+                for y in ty.saturating_sub(1)..=(ty + 1).min(tiles_y - 1) {
+                    for x in tx.saturating_sub(1)..=(tx + 1).min(tiles_x - 1) {
+                        let neighbour = y * tiles_x + x;
+                        if distance[neighbour] == usize::MAX {
+                            distance[neighbour] = radius;
+                            next.push(neighbour);
                         }
                     }
                 }
-                if !skies.is_empty() {
-                    break;
-                }
             }
-            debug_assert!(!skies.is_empty(), "some tile is measured");
-            self.stats[(tx, ty)] = TileStats {
-                sky: statistics::median_mut(&mut skies),
-                sigma: statistics::median_mut(&mut sigmas),
-                noise: statistics::median_mut(&mut noises),
-            };
+            mem::swap(&mut frontier, &mut next);
+            next.clear();
         }
+        distance
     }
 
     /// The 3×3 median of every tile, to reject tiles a bright object spoiled.

@@ -13,6 +13,7 @@ use crate::error::Cancelled;
 use crate::image::error::XTransPatternError;
 use crate::image::flat_gain::{self, GainGrid};
 use crate::image::frame_desc::MAX_SIDE;
+use crate::io::error::ScientificRefusal;
 use crate::io::fits::cfa::{CFA_FITS_FORMAT, CFA_FITS_VERSION};
 use crate::io::fits::linear::LINEAR_FITS_VERSION;
 use crate::io::fits::lumos_extension::LumosExtension;
@@ -20,9 +21,10 @@ use crate::io::fits::metadata::domain_keywords::{PEDESTAL, PEDESTAL_LEVEL, SCALE
 use crate::io::null_policy::NullSamples;
 use common::{Size2us, Vec2us};
 
-/// Why a FITS load failed, before the entry point names the file.
+/// Why a FITS decode failed: the file's own failures, which a load of a path names the file for
+/// ([`ImageError`](crate::ImageError)).
 #[derive(Debug, Error)]
-pub(crate) enum FitsLoadError {
+pub enum FitsLoadError {
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
@@ -31,6 +33,8 @@ pub(crate) enum FitsLoadError {
     Refused(FitsRefusal),
     #[error("{0}")]
     NullSamples(#[from] NullSamples),
+    #[error("{0}")]
+    Scientific(ScientificRefusal),
     #[error("cancelled")]
     Cancelled,
 }

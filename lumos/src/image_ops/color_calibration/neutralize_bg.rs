@@ -4,7 +4,6 @@ use crate::image::linear_image::LinearImage;
 use crate::image::rgb::Rgb;
 use crate::image_ops::error::OpError;
 use crate::math::statistics::clipped_stats::{ClippedStats, SigmaClip};
-use crate::math::statistics::subsample::Subsample;
 
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BG_KAPPA: f32 = 2.5;
@@ -25,12 +24,12 @@ impl NeutralizeBg {
     /// bring to a common level.
     ///
     /// # Errors
-    /// Never — the signature keeps the shape the other ops have, and `lens` drives them uniformly.
+    /// [`OpError::NoData`] when every pixel of the image holds a fill.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         if !image.is_rgb() {
             return Ok(());
         }
-        let bg = channel_bgs(image);
+        let bg = channel_bgs(image)?;
         let target = bg.r.min(bg.g).min(bg.b);
         let (dr, dg, db) = (target - bg.r, target - bg.g, target - bg.b);
         image.map_rgb(move |px| Rgb {
@@ -42,26 +41,27 @@ impl NeutralizeBg {
     }
 }
 
-/// Per-channel sigma-clipped median background of an RGB image.
-pub(super) fn channel_bgs(image: &LinearImage) -> Rgb {
+/// Per-channel sigma-clipped median background of an RGB image, from the pixels holding data.
+pub(super) fn channel_bgs(image: &LinearImage) -> Result<Rgb, OpError> {
     let mut scratch = Vec::new();
-    Rgb {
-        r: channel_bg(image.channel(0), &mut scratch),
-        g: channel_bg(image.channel(1), &mut scratch),
-        b: channel_bg(image.channel(2), &mut scratch),
-    }
-}
-
-/// One channel's robust (sigma-clipped median) background, from a [`Subsample`] of the plane.
-fn channel_bg(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
-    let mut s = Subsample::statistic_values(plane);
-    ClippedStats::sigma_clipped(
-        &mut s,
-        scratch,
-        SigmaClip {
-            kappa: BG_KAPPA,
-            iterations: BG_ITERATIONS,
-        },
-    )
-    .median
+    let mut bg = |channel| {
+        let mut values = image.statistic_values(channel);
+        if values.is_empty() {
+            return Err(OpError::NoData);
+        }
+        Ok(ClippedStats::sigma_clipped(
+            &mut values,
+            &mut scratch,
+            SigmaClip {
+                kappa: BG_KAPPA,
+                iterations: BG_ITERATIONS,
+            },
+        )
+        .median)
+    };
+    Ok(Rgb {
+        r: bg(0)?,
+        g: bg(1)?,
+        b: bg(2)?,
+    })
 }

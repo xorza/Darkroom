@@ -181,7 +181,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 
     // Alignment check: every frame was warped back to the reference, so the reference's
     // brightest star must reappear at the same place in the combined image.
-    let mut det = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
+    let mut det = StarDetector::new(StarDetectionConfig::default());
     let ref_pos = det.detect(&base).stars[0].pos;
     let stack_stars = det.detect(&result.product.image).stars;
     let nearest = stack_stars

@@ -8,7 +8,7 @@ use crate::combine::rejection::Rejection;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack_config::combine_method::CombineMethod;
 use crate::combine::stack_config::small_n::SmallN;
-use crate::math::{statistics, sum};
+use crate::math::sum;
 
 /// What a [`CombineMethod::Mean`] reduces each pixel to: its samples rejected by `rejection`, which
 /// keeps at least `min_survivors` of them, then averaged by their weights, with `quality` reported
@@ -61,15 +61,9 @@ impl MeanCombine {
             debug_assert_eq!(count, samples.weights.len());
             let fallback = small_n.falls_back(method, count).then_some(fallback_kind);
             if fallback == Some(Fallback::Median) {
-                // Reorders the values in place, away from their weights: only the weights' sum,
-                // which no order changes, is read after it.
-                let value = statistics::median_mut(samples.values);
                 return CombinedSample {
                     small_n_fallback: true,
-                    ..match quality {
-                        SampleQuality::Measured => CombinedSample::median(value, samples.weights),
-                        SampleQuality::ValueOnly => CombinedSample::value_only(value),
-                    }
+                    ..CombinedSample::of_median(samples, quality)
                 };
             }
             if rejection == Rejection::None || fallback.is_some() || count <= min_survivors {

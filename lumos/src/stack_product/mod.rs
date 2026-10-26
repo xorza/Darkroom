@@ -13,6 +13,8 @@ use std::path::Path;
 
 use crate::image::cfa::cfa_image::CfaImage;
 use crate::image::cfa::cfa_type::CfaType;
+use crate::image::flags::pixel_flags::PixelFlags;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::flags::quality_map::QualityMap;
 use crate::image::linear_image::LinearImage;
 use crate::io::error::WriteError;
@@ -51,8 +53,11 @@ pub struct StackProduct {
     /// [`WarpResult`](crate::WarpResult). A drizzled frame's weight is multiplied by its drops'
     /// summed weight at the pixel: how much of its input pixels' flux landed there.
     ///
-    /// It is the denominator the image was divided by, under the same weights as
-    /// [`Self::inverse_variance`].
+    /// At a mean pixel it is the denominator the image was divided by, under the same weights as
+    /// [`Self::inverse_variance`]. A median pixel — of a median stack, or of the small-sample
+    /// fallback — divided by nothing; it reads its samples' `Σwᵢ` all the same, which overstates
+    /// the median's precision by up to `π/2` under `Noise` weighting, and its inverse variance
+    /// reads 0.
     pub weight: Option<QualityMap>,
     /// What the frame weights [`Self::weight`] sums were: a count, an inverse variance or relative
     /// weights. Stated whether the plane was asked for or not, as it is a fact of the combine.
@@ -136,7 +141,8 @@ impl StackProduct {
     /// Hold every pixel of each channel that `empty(channel, idx)` names at `fill_value`, a value
     /// no frame measured, and each quality plane there at [`PixelQuality::UNMEASURED`], so no plane
     /// claims a measurement there. A plane every channel shares holds none only where no channel
-    /// does.
+    /// does. A pixel with any channel filled is flagged [`QualityFlags::NO_DATA`], as the combine
+    /// flags one any channel of which no frame reached (see [`PixelFlags`]).
     pub(crate) fn fill_where(
         &mut self,
         empty: impl Fn(usize, usize) -> bool + Sync,
@@ -183,6 +189,20 @@ impl StackProduct {
                 None => {}
             }
         }
+        let filled = |idx: usize| (0..channels).any(|channel| empty(channel, idx));
+        let flags = if let Some(mut flags) = self.image.take_flags() {
+            flags.or_where(QualityFlags::NO_DATA, filled);
+            Some(flags)
+        } else {
+            PixelFlags::from_fn(self.image.desc().size(), |idx| {
+                if filled(idx) {
+                    QualityFlags::NO_DATA
+                } else {
+                    QualityFlags::default()
+                }
+            })
+        };
+        self.image.set_flags(flags);
     }
 
     /// Reinterpret a combined mosaic stack as the calibration master it is.
@@ -216,9 +236,10 @@ mod tests {
     use common::Buffer2;
     use imaginarium::{ChannelLayout, PlanarDesc};
 
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::cfa_type::CfaType;
     use crate::image::cfa::mosaic::Mosaic;
+    use crate::image::flags::quality_flags::QualityFlags;
     use crate::image::flags::quality_map::QualityMap;
     use crate::image::linear_image::LinearImage;
     use crate::stack_product::StackProduct;
@@ -251,7 +272,7 @@ mod tests {
     /// quantization σ all carry over.
     #[test]
     fn a_mosaic_stack_becomes_its_master() {
-        let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+        let pattern = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
         let master = product(1, Some(pattern)).into_cfa_master();
         assert_eq!(master.data().pixels(), &[0.0, 1.0]);
         assert_eq!(master.cfa_type(), pattern);
@@ -274,7 +295,8 @@ mod tests {
 
     /// Filling names each plane's own empty value: of a 2×1 RGB product whose pixel 1 is empty in
     /// every channel and pixel 0 in channel 0 alone, the image reads the fill value at each empty
-    /// sample, the per-channel planes 0 or NaN there, and the shared coverage only at pixel 1.
+    /// sample, the per-channel planes 0 or NaN there, the shared coverage only at pixel 1, and both
+    /// pixels are flagged `NO_DATA`, each holding a fill in some channel.
     #[test]
     fn filling_holds_each_plane_at_its_empty_value() {
         let measured =
@@ -311,6 +333,12 @@ mod tests {
             unreachable!()
         };
         assert_eq!(coverage.channel(0).pixels(), &[1.0, 0.0]);
+        let no_data = QualityFlags::NO_DATA.byte();
+        assert_eq!(filled.image.flags().unwrap().bytes(), &[no_data, no_data]);
+
+        let mut one_pixel = product(3, None);
+        one_pixel.fill_where(|channel, idx| idx == 1 && channel == 2, -1.0);
+        assert_eq!(one_pixel.image.flags().unwrap().bytes(), &[0, no_data]);
     }
 
     /// A uniform coverage becomes an image of its one value at its size.

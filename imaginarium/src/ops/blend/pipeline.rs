@@ -1,21 +1,11 @@
-use crate::gpu::Gpu;
+//! The op's GPU kernel, compiled once per device.
+
 use crate::gpu::compute_kernel::ComputeKernel;
-use crate::gpu::gpu_ctx::GpuPipeline;
+use crate::gpu::{Gpu, GpuOp};
 
-/// Cached GPU pipeline for blend operations.
-/// Create once and reuse for multiple executions.
-#[derive(Debug)]
-pub struct GpuBlendPipeline {
-    pub(super) kernel: ComputeKernel,
+/// The op's kernel on `gpu`, compiled on its first use there.
+pub(super) fn kernel(gpu: &Gpu) -> &ComputeKernel {
+    gpu.kernel(GpuOp::Blend, |gpu| {
+        ComputeKernel::new(gpu, "blend", include_str!("blend.wgsl"), 3)
+    })
 }
-
-impl GpuBlendPipeline {
-    /// Compiles the blend shader for `ctx`'s device.
-    pub fn new(ctx: &Gpu) -> Self {
-        Self {
-            kernel: ComputeKernel::new(ctx, "blend", include_str!("blend.wgsl"), 3),
-        }
-    }
-}
-
-impl GpuPipeline for GpuBlendPipeline {}

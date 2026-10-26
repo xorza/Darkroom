@@ -1,6 +1,7 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
+use crate::image::flags::pixel_flags::PixelFlags;
 use crate::image_ops::extract_bg::*;
 use crate::image_ops::stretch::{Stretch, StretchMethod};
 use crate::internals::assertions::assert_close;
@@ -88,6 +89,42 @@ fn subtract_removes_linear_gradients_per_channel() {
             "channel {c} is flat at {level}"
         );
     }
+}
+
+/// Fills flagged `NO_DATA` take no part in the fit: the plane with its first tile column held at 0
+/// and flagged is fitted from the other tiles, and the data come out flat at the plane's mean
+/// exactly. Unflagged, the zeros tilt the model and the data are no longer flat.
+#[test]
+fn subtract_fits_the_data_and_not_the_fills() {
+    let size = Size2us::new(200, 160);
+    let tile = 40;
+    let plane = |fill_flagged: bool| {
+        let mut img = mono_of(size, |x, y| if x < tile { 0.0 } else { dyadic_plane(x, y) });
+        if fill_flagged {
+            let fills: Vec<usize> = (0..size.pixel_count())
+                .filter(|idx| idx % size.width < tile)
+                .collect();
+            img.set_flags(PixelFlags::at_idxs(size, QualityFlags::NO_DATA, &fills));
+        }
+        ExtractBg {
+            degree: 1,
+            tile_size: tile,
+            ..Default::default()
+        }
+        .apply(&mut img)
+        .unwrap();
+        img
+    };
+    let data_flat = |img: &LinearImage| {
+        img.channel(0)
+            .pixels()
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| idx % size.width >= tile)
+            .all(|(_, &v)| v == dyadic_plane_mean(size))
+    };
+    assert!(data_flat(&plane(true)));
+    assert!(!data_flat(&plane(false)));
 }
 
 /// A flat sky has no gradient to remove: `Subtract` leaves it exactly as it was, lone star pixels

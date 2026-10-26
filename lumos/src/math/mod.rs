@@ -9,11 +9,11 @@
 //! - [`fwhm`]: FWHM/sigma conversion for Gaussian profiles
 //! - [`error_function`]: `erf` and `erfc`, after fdlibm
 //! - [`floor_i32`]: `floor` to an `i32`
-//! - [`linear_system`]: Dense `A·x = b` by Gaussian elimination with partial pivoting
 //! - [`lm_controller`]: Levenberg–Marquardt for small dense least-squares problems
 //! - [`lstsq`]: Linear least squares by the SVD, with one rank rule
 //! - [`pixel_quadrature`]: Gauss–Legendre quadrature over one pixel
 //! - [`pixel_gaussian`]: A Gaussian's mean over a pixel, in closed form
+//! - [`plane_moments`]: The least-squares plane through samples at integer offsets, exact
 //! - [`dmat3`]: A 3×3 `f64` matrix
 //! - [`grid`]: The nodes of a sampling grid over a frame's pixels
 
@@ -25,11 +25,11 @@ pub(crate) mod grid;
 pub(crate) mod wavelet;
 
 pub(crate) mod lanczos;
-pub(crate) mod linear_system;
 pub(crate) mod lm_controller;
 pub(crate) mod lstsq;
 pub(crate) mod pixel_gaussian;
 pub(crate) mod pixel_quadrature;
+pub(crate) mod plane_moments;
 pub(crate) mod statistics;
 pub(crate) mod sum;
 

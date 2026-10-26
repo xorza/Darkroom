@@ -109,7 +109,8 @@ impl CalibrationMasters {
     /// # Errors
     ///
     /// A role's stack fails ([`StackError`](crate::StackError)), the masters do not make a set
-    /// ([`CalibrationError`]), the cache fails, or the build is cancelled.
+    /// ([`CalibrationError`]) — flat-darks with no flat among them, before any frame is read —
+    /// the cache fails, or the build is cancelled.
     pub fn build<P: AsRef<Path>, C: MasterCache<P>>(
         build: MasterBuild<'_, P, C>,
         ingest: &IngestConfig,
@@ -120,6 +121,14 @@ impl CalibrationMasters {
             sigma_threshold,
             cache,
         } = build;
+        // A flat-dark calibrates the flats alone: without them it would be stacked and dropped.
+        if frames.flat.is_empty() && !frames.flat_dark.is_empty() {
+            return Err(MasterBuildError::Calibration(
+                CalibrationError::FlatDarksWithoutFlats {
+                    count: frames.flat_dark.len(),
+                },
+            ));
+        }
         let stack = |role: MasterRole, subtract: &[Subtractor<'_>]| {
             let paths = *frames.get(role);
             if paths.is_empty() {
@@ -190,7 +199,7 @@ impl CalibrationMasters {
         self.defect_map.as_ref()
     }
 
-    /// The present masters, with their roles, in calibration order.
+    /// The present masters, with their roles, in bundle order.
     pub(crate) fn masters(&self) -> impl Iterator<Item = (MasterRole, &CfaImage)> {
         [
             (MasterRole::Dark, self.dark.as_ref()),
@@ -204,7 +213,7 @@ impl CalibrationMasters {
         .filter_map(|(role, master)| master.map(|master| (role, master)))
     }
 
-    /// Components present in this bundle, in calibration order.
+    /// Components present in this bundle, in bundle order.
     pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
         self.masters()
             .map(|(role, _)| CalibrationComponent::Master(role))
@@ -314,7 +323,7 @@ impl CalibrationMasters {
         }
         // Before any of the work below, all of which combines the masters by flat pixel index and
         // asserts on only the pair it touches.
-        let desc = Sensor::shared(
+        let size = Sensor::shared(
             images
                 .iter()
                 .filter_map(|(role, master)| Some((role.into(), Sensor::of(master.as_ref()?)))),
@@ -386,7 +395,7 @@ impl CalibrationMasters {
         // exists. Detection must precede normalization's near-zero floor.
         let defect_map = if dark.is_some() || subtracted_flat.is_some() {
             let mut map =
-                DefectMap::new(desc.expect("a present master gives the set its dimensions"));
+                DefectMap::new(size.expect("a present master gives the set its dimensions"));
             if let Some(dark) = dark.as_ref() {
                 map = map.detect_hot(dark, sigma_threshold, cancel)?;
             }
@@ -673,6 +682,28 @@ const fn check_record(role: MasterRole, master: &CfaImage) -> Result<(), Calibra
     }
 }
 
+/// `master` without `bias`, when there is one and the master still holds it: a dark or a flat-dark
+/// keeps only the dark signal, which scales with exposure.
+fn without_bias(
+    mut master: CfaImage,
+    bias: Option<&CfaImage>,
+) -> Result<CfaImage, CalibrationError> {
+    if let Some(bias) = bias
+        && !master.metadata.derived.calibration().bias
+    {
+        let subtractors = [Subtractor {
+            role: MasterRole::Bias,
+            master: bias,
+        }];
+        Subtraction::resolve(&master, subtractors)?.apply(
+            &mut master,
+            subtraction::unmeasured(&subtractors).as_ref(),
+            Saturation::Kept,
+        );
+    }
+    Ok(master)
+}
+
 #[cfg(all(test, feature = "real-data"))]
 pub(crate) mod internals {
     use std::path::Path;
@@ -701,28 +732,6 @@ pub(crate) mod internals {
         )
         .expect("build the calibration masters")
     }
-}
-
-/// `master` without `bias`, when there is one and the master still holds it: a dark or a flat-dark
-/// keeps only the dark signal, which scales with exposure.
-fn without_bias(
-    mut master: CfaImage,
-    bias: Option<&CfaImage>,
-) -> Result<CfaImage, CalibrationError> {
-    if let Some(bias) = bias
-        && !master.metadata.derived.calibration().bias
-    {
-        let subtractors = [Subtractor {
-            role: MasterRole::Bias,
-            master: bias,
-        }];
-        Subtraction::resolve(&master, subtractors)?.apply(
-            &mut master,
-            subtraction::unmeasured(&subtractors).as_ref(),
-            Saturation::Kept,
-        );
-    }
-    Ok(master)
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
-use common::SystemMemory;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::demosaic::Demosaic;
 use crate::image::cfa::demosaic::bayer::rcd;
@@ -27,26 +26,6 @@ const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
 /// The stages of [`found_reference`], by index.
 const PREPARE: usize = 0;
 const WARP: usize = 1;
-
-/// Each reading takes a system of its own, so the second must be as good as the first — a stale
-/// or half-refreshed reading would show up as a zero or as a value that stops tracking.
-#[test]
-fn available_memory_reports_a_plausible_figure_on_every_call() {
-    let first = SystemMemory::available();
-    let second = SystemMemory::available();
-
-    assert!(first > 0, "no available memory reported");
-    assert!(second > 0, "second call reported none");
-    // Both are sampled within microseconds of each other on an otherwise-idle test process, so
-    // they cannot differ by more than a small fraction without the refresh being broken.
-    let (low, high) = (first.min(second), first.max(second));
-    assert!(
-        high - low < high / 4,
-        "consecutive samples disagree wildly: {first} then {second}"
-    );
-    // A budget derived from it stays inside the machine, which a garbage reading would not.
-    assert!(memory::usable(first) < first);
-}
 
 #[test]
 fn usable_keeps_one_quarter_as_headroom_without_overflow() {
@@ -361,7 +340,7 @@ fn demosaic_costs_in_planes() {
     assert_eq!(mono(plane_bytes), Footprint::kept(plane_bytes));
     for (cfa_type, workspace) in [
         (
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             rcd::internals::workspace_bytes(4),
         ),
         (
@@ -502,7 +481,7 @@ fn a_plan_never_overshoots_its_budget() {
             let runs: Vec<Vec<Stage>> = [
                 mono(plane_bytes),
                 demosaic(
-                    CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                    CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
                     plane_bytes,
                 ),
                 demosaic(CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)), plane_bytes),

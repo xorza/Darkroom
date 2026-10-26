@@ -31,9 +31,10 @@ use crate::drizzle::accumulator::{DrizzledPlanes, Drizzler, MAX_CHANNELS};
 use crate::drizzle::deposit::Deposit;
 use crate::drizzle::drizzle_config::DrizzleConfig;
 use crate::drizzle::drizzle_frame::DrizzleFrame;
-use crate::drizzle::drizzle_shape::{DrizzleShape, FrameOrigin};
+use crate::drizzle::drizzle_shape::{DrizzleShape, DrizzleSource};
 use crate::drizzle::error::DrizzleError;
 use crate::drizzle::output_grid::OutputGrid;
+use crate::frame::admitted::Admitted;
 use crate::frame::frame_quality::FrameQuality;
 use crate::frame_store::file_set::FileSet;
 use crate::frame_store::frame_buffers::NewFrame;
@@ -61,22 +62,34 @@ pub(super) struct DrizzleRun<'a> {
     pub(super) ingest: IngestRun,
 }
 
+/// A frame as it reaches the drizzle, and what a decode cache measured of its source, which its
+/// admission takes rather than measuring the source again.
+#[derive(Debug)]
+struct Arrival<I> {
+    frame: DrizzleFrame<I>,
+    measured: Option<Admitted>,
+}
+
 /// `frame`, frame `idx` of `files`, its source decoded under `ctx`.
 fn load_drizzle_frame<D: Decoder, P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
     idx: usize,
     files: &FileSet<'_, PathBuf, D>,
     ctx: &LoadCtx,
-) -> Result<DrizzleFrame<D::Image>, DrizzleError> {
+) -> Result<Arrival<D::Image>, DrizzleError> {
     let DrizzleFrame {
         warp,
         pixel_weight_map,
         ..
     } = frame;
-    Ok(DrizzleFrame {
-        source: files.decode(idx, ctx)?.image,
-        warp,
-        pixel_weight_map,
+    let loaded = files.decode(idx, ctx)?;
+    Ok(Arrival {
+        frame: DrizzleFrame {
+            source: loaded.image,
+            warp,
+            pixel_weight_map,
+        },
+        measured: loaded.measured,
     })
 }
 
@@ -94,9 +107,9 @@ impl DrizzleRun<'_> {
             .iter()
             .map(|frame| frame.source.as_ref().to_path_buf())
             .collect();
-        let files = FileSet::<_, D>::new(&sources, run)?;
+        let files = FileSet::<_, D>::new(&sources, &run.storage, &run.ctx)?;
         let peek = files.peek(&ctx)?;
-        let origin = FrameOrigin::Files {
+        let origin = DrizzleSource::Files {
             uncached: files.uncached(),
             gains: peek.gains,
             decoder: peek.info.decoder,
@@ -116,9 +129,14 @@ impl DrizzleRun<'_> {
     ) -> Result<StackProduct, DrizzleError> {
         self.validate(frames.len())?;
         self.accumulate(
-            frames.into_iter().map(Ok),
-            FrameOrigin::Memory,
-            RunStorage::holding(&self.ingest),
+            frames.into_iter().map(|frame| {
+                Ok(Arrival {
+                    frame,
+                    measured: None,
+                })
+            }),
+            DrizzleSource::Memory,
+            RunStorage::holding(&self.ingest.storage),
         )
     }
 
@@ -143,8 +161,8 @@ impl DrizzleRun<'_> {
     /// an item is produced, drizzled, stored, and dropped before the next is loaded.
     fn accumulate<I: StackableImage>(
         &self,
-        mut frames: impl ExactSizeIterator<Item = Result<DrizzleFrame<I>, DrizzleError>>,
-        origin: FrameOrigin,
+        mut frames: impl ExactSizeIterator<Item = Result<Arrival<I>, DrizzleError>>,
+        origin: DrizzleSource,
         storage: RunStorage<'_>,
     ) -> Result<StackProduct, DrizzleError> {
         let frame_count = frames.len();
@@ -157,8 +175,8 @@ impl DrizzleRun<'_> {
         let cancel = &run.ctx.cancel;
 
         let first = frames.next().expect("frame_count is non-zero")?;
-        let input_desc = first.source.desc();
-        let deposit = Deposit::of(&first.source);
+        let input_desc = first.frame.source.desc();
+        let deposit = Deposit::of(&first.frame.source);
         tracing::info!(
             ?origin,
             frame_count,
@@ -174,7 +192,7 @@ impl DrizzleRun<'_> {
         let grid = OutputGrid::new(drizzle.scale, input_desc.size());
         let output = frame_desc::checked(grid.size(), deposit.output_layout())?;
         let mut drizzler = Drizzler::new(
-            &first.source,
+            &first.frame.source,
             KernelPlan::new(drizzle.kernel, drizzle.pixfrac, drizzle.scale),
             grid,
         );
@@ -216,8 +234,10 @@ impl DrizzleRun<'_> {
             if cancel.is_cancelled() {
                 return Err(StackError::Cancelled.into());
             }
-            let frame = frame?;
-            let source_stats = intake.admit(idx, &frame.source)?.into_drizzled();
+            let Arrival { frame, measured } = frame?;
+            let source_stats = intake
+                .admit_measured(idx, &frame.source, measured)?
+                .into_drizzled();
             let DrizzledPlanes {
                 pixels,
                 drops,

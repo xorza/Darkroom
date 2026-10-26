@@ -67,3 +67,30 @@ impl FieldMotion {
         )
     }
 }
+
+/// A `cols × rows` grid at `spacing`, row by row from the origin.
+pub(crate) fn make_grid(cols: usize, rows: usize, spacing: f64) -> Vec<DVec2> {
+    let mut points = Vec::with_capacity(cols * rows);
+    for r in 0..rows {
+        for c in 0..cols {
+            points.push(DVec2::new(c as f64 * spacing, r as f64 * spacing));
+        }
+    }
+    points
+}
+
+/// `points` through `transform`.
+pub(crate) fn apply_all(transform: &Transform, points: &[DVec2]) -> Vec<DVec2> {
+    points.iter().map(|&p| transform.apply(p)).collect()
+}
+
+/// How far an exact fit of exact points may miss them: each solve is centred or
+/// Hartley-normalized, which holds its condition number to the hundreds for the point sets here,
+/// against coordinates up to 5000 px whose f64 rounding is 9e-13 px — so ~1e-9 px at worst, and
+/// 1e-8 leaves margin. Coordinates of a million pixels scale this with them.
+pub(crate) fn exact_fit_tolerance(points: &[DVec2]) -> f64 {
+    let largest = points
+        .iter()
+        .fold(1.0f64, |m, p| m.max(p.abs().max_element()));
+    1e-8 * (largest / 5000.0).max(1.0)
+}

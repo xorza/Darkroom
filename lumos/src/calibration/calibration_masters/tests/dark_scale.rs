@@ -194,7 +194,7 @@ fn the_fit_recovers_the_scale_of_the_lights_dark_signal() {
 }
 
 /// With 50 hot pixels, fewer than the 100 a fit needs, the dark is scaled by the exposures — 300 s
-/// over 300 s, then 300 s over 120 s — and the outcome says how many pixels the fit had.
+/// over 300 s, then 750 s over 300 s — and the outcome says how many pixels the fit had.
 #[test]
 fn too_few_hot_pixels_fall_back_to_the_exposures() {
     let HotDark { dark, hot } = dark(50, 0);

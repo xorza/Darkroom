@@ -6,7 +6,7 @@ pub(crate) mod capture_condition;
 pub(crate) mod capture_conditions;
 pub(crate) mod error;
 pub(crate) mod frame_facts;
-pub(crate) mod frame_peek;
+pub(crate) mod frame_info;
 pub(crate) mod frame_plane;
 pub(crate) mod frame_quality;
 pub(crate) mod frame_stats;

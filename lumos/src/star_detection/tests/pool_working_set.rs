@@ -89,7 +89,7 @@ fn warmed_pool_holds_the_pinned_working_set() {
     let warmed: Vec<BufferCounts> = presets
         .into_iter()
         .map(|config| {
-            let mut detector = StarDetector::from_config(config).unwrap();
+            let mut detector = StarDetector::new(config);
             for frame in &frames {
                 detector.detect(frame);
             }

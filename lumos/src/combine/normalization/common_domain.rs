@@ -269,7 +269,7 @@ mod tests {
     fn common_domain_mask_stays_one_bit_per_pixel() {
         for pixels in [1024 * 1024usize, 6144 * 6144] {
             let mask = CommonDomain::full_mask(pixels);
-            let packed = BitBuffer2::heap_bytes(mask.size);
+            let packed = BitBuffer2::heap_bytes(mask.size());
             let unpacked = pixels * size_of::<bool>();
             assert_eq!(CommonDomain::heap_bytes(pixels), packed, "{pixels} px");
 

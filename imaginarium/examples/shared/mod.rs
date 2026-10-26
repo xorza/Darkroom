@@ -17,7 +17,8 @@ pub(crate) fn load_lena_rgba_u8() -> InterleavedImage {
         "/test_resources/lena_895x551.tiff"
     );
     let file = fs::open(path).expect("Failed to open lena.tiff");
-    InterleavedImage::decode(BufReader::new(file), RasterFormat::Tiff)
+    RasterFormat::Tiff
+        .decode(BufReader::new(file), u64::MAX)
         .expect("Failed to load lena.tiff")
         .convert(ColorFormat::RGBA_U8)
 }
@@ -26,8 +27,8 @@ pub(crate) fn save_image(image: &InterleavedImage, filename: &str) {
     let path = output_path(&format!("imaginarium/{filename}"));
     let format = RasterFormat::from_path(&path).expect("an output name with a known extension");
     let mut out = BufWriter::new(fs::create(&path).expect("Failed to create the output file"));
-    image
-        .encode(&mut out, format)
+    format
+        .encode(image, &mut out)
         .expect("Failed to save image");
     out.flush().expect("Failed to save image");
     println!("Saved: {}", path.display());

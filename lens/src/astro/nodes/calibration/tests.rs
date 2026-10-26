@@ -9,8 +9,7 @@ use lumos::{
 };
 
 use crate::astro::nodes::calibration::{
-    CacheError, Caching, FrameSetKeyError, MastersRequest, RoleCachePaths, SourceDirCache,
-    frame_set_key,
+    CacheError, CachePlace, Caching, MastersRequest, RoleCachePaths, SourceDirCache, frame_set_key,
 };
 
 #[test]
@@ -68,7 +67,7 @@ fn master_source_key_changes_with_the_frame_set() {
     let error = frame_set_key(slice::from_ref(&first)).unwrap_err();
     assert!(matches!(
         error,
-        FrameSetKeyError::Metadata { path, source }
+        CacheError::FrameMetadata { path, source }
             if path == first && source.kind() == io::ErrorKind::NotFound
     ));
 }
@@ -119,6 +118,23 @@ fn a_master_is_kept_under_its_frames_as_read_before_the_stack() {
         CachedMaster::Kept(kept) if kept.data() == master.data()
     ));
 
+    // A store that fails leaves no marker, so no master is read under a key it was not written
+    // for: here the master's path is a directory, which the write cannot replace.
+    let place = CachePlace::of(&inputs).unwrap();
+    let master_path = dir.join("master_dark.fits");
+    fs::remove_file(&master_path).unwrap();
+    fs::create_dir(&master_path).unwrap();
+    assert!(matches!(
+        cache.store(place, &master),
+        Err(CacheError::WriteMaster { .. })
+    ));
+    assert!(!fs::exists(dir.join("master_dark.fits.source")));
+    fs::remove_dir(&master_path).unwrap();
+    assert!(matches!(
+        cache.load(&inputs).unwrap(),
+        CachedMaster::Missing(_)
+    ));
+
     // Another recipe over the same frames, as another lumos or other decode options give, finds
     // none.
     let mut strict = IngestConfig::default();
@@ -153,7 +169,7 @@ fn frame_set_key_runs_only_with_the_cache_on() {
     };
     assert!(matches!(
         build(Caching::BesideFrames),
-        MasterBuildError::Cache(CacheError::FrameSet(_))
+        MasterBuildError::Cache(CacheError::FrameMetadata { .. })
     ));
     assert!(matches!(build(Caching::Off), MasterBuildError::Stack(_)));
 }

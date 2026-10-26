@@ -1,4 +1,3 @@
-mod cosmic_ray_scratch;
 mod dark_scale;
 #[cfg(feature = "real-data")]
 mod real_data;
@@ -14,14 +13,24 @@ use fits_well::header::Header;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
 
+use crate::calibration::bundle::error::BundleError;
+use crate::calibration::bundle::error::DefectTableError;
+use crate::calibration::calibration_component::CalibrationComponent;
+use crate::calibration::calibration_masters::CalibrationMasters;
 use crate::calibration::calibration_masters::MasterBuild;
 use crate::calibration::calibration_outcome::CalibrationOutcome;
+use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::dark_scale::{DarkScale, DarkScaleSource};
+use crate::calibration::defect_map::defect_summary::ColorDefects;
+use crate::calibration::defect_map::defect_summary::ColorShares;
+use crate::calibration::defect_map::defect_summary::DefectSummary;
 use crate::calibration::defect_map::sigma_threshold::SigmaThreshold;
 use crate::calibration::defect_map::{DefectMap, HotPixels};
 use crate::calibration::error::MasterStackError;
 use crate::calibration::error::{CalibrationError, DarkMismatch, MasterBuildError};
+use crate::calibration::master_cache::NoMasterCache;
 use crate::calibration::master_cache::{CachedMaster, MasterCache, MasterInputs};
+use crate::calibration::master_role::MasterRole;
 use crate::calibration::master_stack::MasterStack;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::calibration::subtraction::internals::subtract_bias;
@@ -35,9 +44,9 @@ use crate::combine::stack_config::small_n::SmallN;
 use crate::combine::stack_config::weighting::Weighting;
 use crate::frame::capture_condition::CaptureCondition;
 use crate::frame::error::ConditionMismatch;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_color::CfaColor;
 use crate::image::cfa::cfa_image::CfaImage;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::cfa::xtrans_pattern::XTransPattern;
@@ -46,6 +55,7 @@ use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::metadata::calibration_state::CalibrationState;
 use crate::image::metadata::dark_comparison::DarkComparison;
 use crate::image::metadata::derived_facts::DerivedFacts;
+use crate::image::metadata::image_metadata::ImageMetadata;
 use crate::image::metadata::observation_header::ObservationHeader;
 use crate::image::metadata::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::image::metadata::temperature_difference::TemperatureDifference;
@@ -54,16 +64,13 @@ use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::assertions::{assert_close, bits};
 use crate::internals::cfa::{XTRANS_PATTERN, cfa_from_plane, constant_cfa, make_cfa};
 use crate::internals::fits::rewrite_fits;
+use crate::io::error::ImageError;
+use crate::io::fits::error::FitsRefusal;
 use crate::io::fits::metadata::{FORMAT_KEYWORD, VERSION_KEYWORD};
 use crate::io::load_ctx::LoadCtx;
 use crate::noise::QUANTIZATION_SIGMA_PER_STEP;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::progress::progress_monitor::ProgressMonitor;
-use crate::{
-    BundleError, CalibrationComponent, CalibrationMasters, CalibrationSet, ColorDefects,
-    ColorShares, DefectSummary, DefectTableError, FitsRefusal, ImageError, ImageMetadata,
-    MasterRole,
-};
 use common::{Size2us, Vec2us};
 
 /// The bundle `images` builds, at the default defect threshold.
@@ -108,7 +115,7 @@ fn a_flat_with_no_positive_mean_is_refused() {
         (CfaType::Mono, 0.0f32, None, None),
         (CfaType::Mono, 0.25, Some(0.5f32), None),
         (
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             0.25,
             Some(0.5),
             Some(CfaColor::Red),
@@ -136,12 +143,12 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         flat: Some(constant_cfa(
             Size2us::new(2, 2),
             0.5,
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
         )),
         flat_dark: Some(constant_cfa(
             Size2us::new(2, 2),
             0.1,
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
         )),
         ..CalibrationSet::default()
     };
@@ -149,8 +156,8 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         CalibrationMasters::from_images(images, SigmaThreshold::DEFAULT, &CancelToken::never()),
         Err(CalibrationError::CfaPatternMismatch {
             component: MasterRole::FlatDark,
-            expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
-            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
+            expected: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+            master: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
         })
     ));
 }
@@ -189,30 +196,30 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         Case {
             role: MasterRole::Dark,
             light: CfaType::Mono,
-            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            master: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Dark,
                 expected: CfaType::Mono,
-                master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                master: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             },
         },
         Case {
             role: MasterRole::Flat,
-            light: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
-            master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
+            light: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+            master: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Flat,
-                expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
-                master: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr)),
+                expected: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
+                master: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr)),
             },
         },
         Case {
             role: MasterRole::Bias,
-            light: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+            light: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
             master: xtrans_a,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Bias,
-                expected: CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)),
+                expected: CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)),
                 master: xtrans_a,
             },
         },
@@ -1069,7 +1076,7 @@ fn defect_detection_zero_median_no_false_positives() {
 #[test]
 fn calibrate_hot_pixel_correction() {
     let (w, h) = (6, 6);
-    let pattern = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let pattern = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let mut dark_pixels = Buffer2::new_filled((w, h), 0.0625_f32);
     dark_pixels[(2, 2)] = 0.9;
     let masters = bundle(CalibrationSet {
@@ -1132,7 +1139,7 @@ fn calibrate_hot_pixel_correction() {
 
 #[test]
 fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let flat = CfaImage::from_plane(
         Buffer2::new(
             (4, 4),
@@ -1172,6 +1179,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             HotPixels {
                 idxs: vec![5, 10],
                 excess: vec![0.1, 3.0e-5],
+                noise: vec![0.01, 2.0e-6],
             },
             vec![10],
         )
@@ -1281,7 +1289,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         CalibrationMasters::read_bundle(&path, &LoadCtx::default()),
         Err(BundleError::Version {
             found: 4,
-            expected: 6
+            expected: 7
         })
     ));
 
@@ -1357,8 +1365,8 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
     // Each way a bundle can be malformed, rewritten with fresh checksums so the check behind them
     // is what refuses it. The HDUs are the primary, the dark, its flags, the flat, the bias and the
-    // defect table, whose rows are 13 bytes — KIND, INDEX (8, big-endian), EXCESS (4) — hot 5 and
-    // 10, then cold 10.
+    // defect table, whose rows are 17 bytes — KIND, INDEX (8, big-endian), EXCESS (4), NOISE (4) —
+    // hot 5 and 10, then cold 10.
     let malformed = dir.join("malformed.fits");
     let refused = |edit: &mut dyn FnMut(usize, &mut Header, &mut Vec<u8>) -> bool| {
         fs::write(&malformed, &cache_bytes).unwrap();
@@ -1400,15 +1408,19 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     for (error, expected) in [
         (table(0, &[2]), DefectTableError::Kind { row: 0, kind: 2 }),
         (
-            table(2 * 13 + 1, &16i64.to_be_bytes()),
+            table(2 * 17 + 1, &16i64.to_be_bytes()),
             DefectTableError::Idx { row: 2 },
         ),
         (
-            table(13 + 9, &(-1.0f32).to_be_bytes()),
+            table(17 + 9, &(-1.0f32).to_be_bytes()),
             DefectTableError::Excess { row: 1 },
         ),
         (
-            table(2 * 13 + 9, &0.5f32.to_be_bytes()),
+            table(17 + 13, &0.0f32.to_be_bytes()),
+            DefectTableError::Excess { row: 1 },
+        ),
+        (
+            table(2 * 17 + 9, &0.5f32.to_be_bytes()),
             DefectTableError::Excess { row: 2 },
         ),
     ] {
@@ -1456,6 +1468,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
         HotPixels {
             idxs: vec![1, 2],
             excess: vec![0.5, 0.25],
+            noise: vec![0.0625, 0.0625],
         },
         vec![7],
     )
@@ -1467,11 +1480,10 @@ fn ram_bytes_sums_present_frames_and_defects() {
     let masters = CalibrationMasters {
         bias: None,
         dark: Some(dark),
-        flat: Some(PreparedFlat::from_divisor(constant_cfa(
-            Size2us::new(4, 4),
-            1.0,
-            CfaType::Mono,
-        ))),
+        flat: Some(
+            PreparedFlat::checked_divisor(constant_cfa(Size2us::new(4, 4), 1.0, CfaType::Mono))
+                .unwrap(),
+        ),
         defect_map: Some(defects),
         imposed: None,
     };
@@ -2361,6 +2373,35 @@ fn a_cancel_inside_a_stack_is_the_builds_cancel() {
     )
     .unwrap_err();
     assert!(matches!(error, MasterBuildError::Cancelled), "{error:?}");
+}
+
+/// Flat-darks with no flat are refused before any frame is read: the paths name no files.
+#[test]
+fn flat_darks_without_flats_are_refused() {
+    let dir = TempDir::new("lumos-master-build-flat-darks");
+    let flat_darks = [dir.join("a.fits"), dir.join("b.fits")];
+    let error = CalibrationMasters::build(
+        MasterBuild {
+            frames: CalibrationSet {
+                dark: &[],
+                flat: &[],
+                bias: &[],
+                flat_dark: flat_darks.as_slice(),
+            },
+            sigma_threshold: SigmaThreshold::DEFAULT,
+            cache: &NoMasterCache,
+        },
+        &IngestConfig::with_cache_dir(dir.join("cache")),
+        ProgressMonitor::unattended(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            MasterBuildError::Calibration(CalibrationError::FlatDarksWithoutFlats { count: 2 })
+        ),
+        "{error:?}"
+    );
 }
 
 /// A master states the exposure and temperature its frames share; the frames of a dark have to

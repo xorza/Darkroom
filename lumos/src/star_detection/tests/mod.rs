@@ -29,7 +29,7 @@ mod subpixel_accuracy;
 use glam::DVec2;
 use imaginarium::{ChannelLayout, PlanarDesc};
 
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::linear_image::LinearImage;
 use crate::internals::synthetic::artifacts::{CosmicRays, add_bayer_pattern};
 use crate::internals::synthetic::camera::{Camera, PsfModel};
@@ -93,8 +93,7 @@ fn truth_poss(frame: &SimFrame) -> Vec<DVec2> {
 
 /// Detect on `frame.image` with `config` and return the detected star positions.
 fn detected_poss(frame: &SimFrame, config: &StarDetectionConfig) -> Vec<DVec2> {
-    StarDetector::from_config(config.clone())
-        .unwrap()
+    StarDetector::new(config.clone())
         .detect(&frame.image)
         .stars
         .iter()
@@ -183,7 +182,7 @@ impl Scenario {
                 .add_to(&mut px);
             }
             if self.bayer {
-                add_bayer_pattern(&mut px, 0.08, CfaPattern::Rggb);
+                add_bayer_pattern(&mut px, 0.08, BayerPattern::Rggb);
             }
             for p in px.pixels_mut() {
                 *p = p.clamp(0.0, 1.0);

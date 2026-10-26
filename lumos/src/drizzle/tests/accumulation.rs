@@ -390,9 +390,8 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     let out = acc.finalize();
     let r = warp
         .inverse()
-        .apply(DVec2::new(t.x as f64, t.y as f64))
-        .unwrap()
-        .pos;
+        .pos(DVec2::new(t.x as f64, t.y as f64))
+        .unwrap();
     let landing = Vec2us::new(r.x.round() as usize, r.y.round() as usize);
     assert_eq!(
         out.image.channel(0)[(landing.x, landing.y)],
@@ -414,7 +413,7 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
     let inverse = warp.inverse();
     let failing = (0..size.height)
         .flat_map(|y| (0..size.width).map(move |x| DVec2::new(x as f64, y as f64)))
-        .filter(|&t| inverse.apply(t).is_none())
+        .filter(|&t| inverse.pos(t).is_none())
         .count();
     assert!(
         failing > 0 && failing < size.pixel_count(),

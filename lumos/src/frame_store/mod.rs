@@ -9,6 +9,7 @@ pub(crate) mod frame_buffers;
 pub(crate) mod plane_sink;
 pub(crate) mod run_scratch;
 pub(crate) mod run_storage;
+pub(crate) mod storage_params;
 pub(crate) mod storage_tier;
 pub(crate) mod stored_frame;
 pub(crate) mod stored_gain;

@@ -16,6 +16,7 @@ use common::Size2us;
 
 use crate::codec::raster_format::RasterFormat;
 use crate::color::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::color::sample::Sample;
 use crate::error::{CodecError, TiffSampleType};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
@@ -30,15 +31,26 @@ pub(crate) trait BufReadSeek: BufRead + Seek {}
 
 impl<T: BufRead + Seek> BufReadSeek for T {}
 
+/// The image `input` holds in `format`, refused before its samples are allocated when its header
+/// states more than `max_bytes` of them.
 pub(crate) fn decode(
     input: &mut dyn BufReadSeek,
     format: RasterFormat,
+    max_bytes: u64,
 ) -> Result<InterleavedImage, CodecError> {
     match format {
-        RasterFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png),
-        RasterFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg),
-        RasterFormat::Tiff => load_tiff(input),
+        RasterFormat::Png => load_png_jpeg(input, image_lib::ImageFormat::Png, max_bytes),
+        RasterFormat::Jpeg => load_png_jpeg(input, image_lib::ImageFormat::Jpeg, max_bytes),
+        RasterFormat::Tiff => load_tiff(input, max_bytes),
     }
+}
+
+/// `stated` bytes of decoded samples, when they are at most `max_bytes`.
+const fn check_stated(stated: u64, max_bytes: u64) -> Result<(), CodecError> {
+    if stated > max_bytes {
+        return Err(CodecError::Oversized { stated, max_bytes });
+    }
+    Ok(())
 }
 
 pub(crate) fn encode(
@@ -56,14 +68,17 @@ pub(crate) fn encode(
 fn load_png_jpeg(
     input: &mut dyn BufReadSeek,
     format: image_lib::ImageFormat,
+    max_bytes: u64,
 ) -> Result<InterleavedImage, CodecError> {
-    use image_lib::DynamicImage;
+    use image_lib::{DynamicImage, ImageDecoder};
 
     let mut reader = image_lib::ImageReader::with_format(input, format);
-    // A decode allocates what the header states, as a TIFF's does: the codec's default cap of
-    // 512 MiB would refuse a large image the machine can hold.
+    // The caller's cap replaces the codec's default of 512 MiB, which would refuse a large image
+    // the machine can hold.
     reader.no_limits();
-    let img = reader.decode()?;
+    let decoder = reader.into_decoder()?;
+    check_stated(decoder.total_bytes(), max_bytes)?;
+    let img = DynamicImage::from_decoder(decoder)?;
     let size = Size2us::new(img.width() as usize, img.height() as usize);
     let desc = |format| InterleavedDesc::checked(size, format);
     // Each decoded buffer is handed over whole. Mono with alpha has no format of its own here;
@@ -113,36 +128,38 @@ fn load_png_jpeg(
     }
 }
 
-fn load_tiff(input: &mut dyn BufReadSeek) -> Result<InterleavedImage, CodecError> {
-    // Use unlimited to support large astrophotography images
-    let limits = Limits::unlimited();
-    let mut decoder = Decoder::new(input)?.with_limits(limits);
+fn load_tiff(input: &mut dyn BufReadSeek, max_bytes: u64) -> Result<InterleavedImage, CodecError> {
+    // The caller's cap, checked against the header below, replaces the decoder's own.
+    let mut decoder = Decoder::new(input)?.with_limits(Limits::unlimited());
 
-    let channel_count = match decoder.colortype()? {
-        tiff::ColorType::Gray(_) => ChannelCount::Mono,
-        tiff::ColorType::RGB(_) => ChannelCount::Rgb,
-        tiff::ColorType::RGBA(_) => ChannelCount::Rgba,
+    let (channel_count, bits) = match decoder.colortype()? {
+        tiff::ColorType::Gray(bits) => (ChannelCount::Mono, bits),
+        tiff::ColorType::RGB(bits) => (ChannelCount::Rgb, bits),
+        tiff::ColorType::RGBA(bits) => (ChannelCount::Rgba, bits),
         color => return Err(CodecError::TiffColor(color)),
     };
+    // A sample of another width is packed, or scaled to no full scale of its type.
+    if !matches!(bits, 8 | 16 | 32) {
+        return Err(CodecError::TiffBitDepth(bits));
+    }
     let (width, height) = decoder.dimensions()?;
     let size = Size2us::new(width as usize, height as usize);
-    let desc =
-        |sample_type| InterleavedDesc::checked(size, ColorFormat::new(channel_count, sample_type));
+    let desc = |sample_type| {
+        InterleavedDesc::checked(size, ColorFormat::new(channel_count, sample_type))
+            .map_err(CodecError::from)
+    };
+    // Every sample type this reads is as wide as its bit depth states, so the header alone sets
+    // what the decode allocates.
+    let stated = size.pixel_count() as u64 * channel_count.count() as u64 * u64::from(bits / 8);
+    check_stated(stated, max_bytes)?;
 
-    // The decoded samples are handed over whole.
+    // The decoded samples are handed over whole, once they are the image's: the decoder reads only
+    // the first plane of a planar file, and every sample of a pixel with more than its color type
+    // names.
     match decoder.read_image()? {
-        DecodingResult::U8(samples) => Ok(InterleavedImage::from_samples(
-            desc(SampleType::U8)?,
-            samples,
-        )),
-        DecodingResult::U16(samples) => Ok(InterleavedImage::from_samples(
-            desc(SampleType::U16)?,
-            samples,
-        )),
-        DecodingResult::F32(samples) => Ok(InterleavedImage::from_samples(
-            desc(SampleType::F32)?,
-            samples,
-        )),
+        DecodingResult::U8(samples) => tiff_image(desc(SampleType::U8)?, samples),
+        DecodingResult::U16(samples) => tiff_image(desc(SampleType::U16)?, samples),
+        DecodingResult::F32(samples) => tiff_image(desc(SampleType::F32)?, samples),
         DecodingResult::U32(_) => Err(CodecError::TiffSamples(TiffSampleType::U32)),
         DecodingResult::U64(_) => Err(CodecError::TiffSamples(TiffSampleType::U64)),
         DecodingResult::I8(_) => Err(CodecError::TiffSamples(TiffSampleType::I8)),
@@ -152,6 +169,21 @@ fn load_tiff(input: &mut dyn BufReadSeek) -> Result<InterleavedImage, CodecError
         DecodingResult::F16(_) => Err(CodecError::TiffSamples(TiffSampleType::F16)),
         DecodingResult::F64(_) => Err(CodecError::TiffSamples(TiffSampleType::F64)),
     }
+}
+
+/// The image of `desc` the decoded `samples` are, when they are as many as it has.
+fn tiff_image<T: Sample>(
+    desc: InterleavedDesc,
+    samples: Vec<T>,
+) -> Result<InterleavedImage, CodecError> {
+    let expected = desc.sample_count();
+    if samples.len() != expected {
+        return Err(CodecError::TiffLayout {
+            desc,
+            decoded: samples.len(),
+        });
+    }
+    Ok(InterleavedImage::from_samples(desc, samples))
 }
 
 /// The size as the `u32`s the encoders take.

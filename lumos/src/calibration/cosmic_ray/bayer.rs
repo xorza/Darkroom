@@ -3,7 +3,7 @@
 //! A Bayer mosaic is 2×2-periodic, so every pixel sharing a `(x % 2, y % 2)` phase is behind the
 //! same filter and the four phases form dense same-color planes. Deinterleaving them turns the
 //! problem back into four mono detections, whose dense neighbours really are same-color in the
-//! mosaic. Pattern-independent: phase alone fixes the color, so no `CfaPattern` is needed.
+//! mosaic. Pattern-independent: phase alone fixes the color, so no `BayerPattern` is needed.
 
 use common::Buffer2;
 
@@ -12,8 +12,8 @@ use crate::calibration::cosmic_ray::cosmic_ray_config::CosmicRayConfig;
 use crate::calibration::cosmic_ray::kept_out::KeptOut;
 use crate::calibration::cosmic_ray::mono::MonoDetector;
 use crate::calibration::cosmic_ray::noise_model::{NoiseModel, PixelBgs};
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::bayer_phase::BayerPhase;
-use crate::image::cfa::cfa_pattern::CfaPattern;
 use common::Size2us;
 
 /// Phase-sized masks a phase's detection holds beside the mono detector's: the frame's [`KeptOut`]
@@ -28,7 +28,7 @@ const PHASE_MASKS: usize = 2;
 #[derive(Debug)]
 pub(super) struct BayerDetector<'a> {
     mono: MonoDetector<'a>,
-    pattern: CfaPattern,
+    pattern: BayerPattern,
     plane: Buffer2<f32>,
     /// The frame's [`KeptOut`] sampled to the phase at hand.
     plane_kept_out: KeptOut,
@@ -37,7 +37,11 @@ pub(super) struct BayerDetector<'a> {
 }
 
 impl<'a> BayerDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel, pattern: CfaPattern) -> Self {
+    pub(super) fn new(
+        config: &'a CosmicRayConfig,
+        noise: NoiseModel,
+        pattern: BayerPattern,
+    ) -> Self {
         Self {
             mono: MonoDetector::new(config, noise),
             pattern,

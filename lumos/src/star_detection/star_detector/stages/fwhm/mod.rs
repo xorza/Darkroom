@@ -4,12 +4,13 @@
 //! a manual value, auto-estimating from bright stars, or disabling.
 
 use crate::math::statistics;
+use crate::star_detection::convolution::{MAX_FWHM, MIN_FWHM};
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 use crate::star_detection::star_detection_config::StarDetectionConfig;
 use crate::star_detection::star_detection_config::extraction_config::ExtractionConfig;
 use crate::star_detection::star_detection_config::filter_config::FilterConfig;
-use crate::star_detection::star_detection_config::fwhm_config::{FwhmConfig, MAX_FWHM, MIN_FWHM};
+use crate::star_detection::star_detection_config::fwhm_config::FwhmConfig;
 use crate::star_detection::star_detector::detection_result::FwhmSource;
 use crate::star_detection::star_detector::stages::FwhmSpread;
 use crate::star_detection::star_detector::stages::detect::{Candidates, DetectionInput};

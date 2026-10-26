@@ -168,7 +168,7 @@ mod tests {
 
     use super::*;
     use crate::bit_buffer2::BitBuffer2;
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::internals::cfa::XTRANS_PATTERN;
 
     fn offsets(lattice: &CfaLattice, pos: Vec2us, count: usize) -> Vec<(i32, i32)> {
@@ -205,7 +205,7 @@ mod tests {
         };
         let mono = CfaLattice::new(&CfaType::Mono);
         assert_eq!(sorted(offsets(&mono, Vec2us::new(3, 3), 8)), ring(1, 1));
-        let bayer = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+        let bayer = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 0), 8)), ring(2, 2));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(1, 0), 8)), ring(2, 2));
         assert_eq!(sorted(offsets(&bayer, Vec2us::new(0, 1), 8)), ring(2, 2));
@@ -220,7 +220,7 @@ mod tests {
     fn every_stencil_is_whole_shells_with_headroom() {
         for cfa in [
             CfaType::Mono,
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Grbg)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Grbg)),
             CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
         ] {
             let lattice = CfaLattice::new(&cfa);
@@ -259,7 +259,7 @@ mod tests {
     fn the_median_reads_only_its_own_filter() {
         for cfa in [
             CfaType::Mosaic(Mosaic::XTrans(XTRANS_PATTERN)),
-            CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Gbrg)),
+            CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Gbrg)),
         ] {
             let lattice = CfaLattice::new(&cfa);
             let size = Size2us::new(25, 19);
@@ -340,7 +340,7 @@ mod tests {
     /// its diagonal Gb neighbours (0, 1) and (2, 1), at 1000, would make it 40.
     #[test]
     fn the_median_clips_at_the_border() {
-        let lattice = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb)));
+        let lattice = CfaLattice::new(&CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb)));
         let mut pixels = Buffer2::new_filled((4, 4), 10.0);
         pixels[(0, 0)] = 999.0;
         pixels[(2, 0)] = 50.0;

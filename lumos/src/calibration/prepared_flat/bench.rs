@@ -7,12 +7,12 @@ use crate::bench::scene::{self, FRAME};
 use crate::calibration::calibration_set::CalibrationSet;
 use crate::calibration::prepared_flat::PreparedFlat;
 use crate::calibration::subtraction::internals::subtract_bias;
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 
 pub(crate) fn atomic(c: &mut Criterion) {
-    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
+    let cfa_type = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
     let mut group = Kind::Atomic.group(c, "calibration/prepared_flat/frame", Scale::Millis);
     group.throughput(Throughput::Elements(FRAME.pixel_count() as u64));
     // The flat with its bias taken out, as `CalibrationMasters::from_images` prepares it.

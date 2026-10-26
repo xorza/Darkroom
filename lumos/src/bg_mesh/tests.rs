@@ -336,3 +336,47 @@ fn a_grid_under_three_tiles_is_not_filtered() {
         }
     }
 }
+
+/// Each bad tile takes the median of the good tiles on the nearest square ring around it that holds
+/// any, held against a search ring by ring over the whole square. An 8 × 6 grid of flat 4-pixel
+/// tiles, each at `tx + 10·ty`, keeps four good tiles; every other is masked whole.
+#[test]
+fn a_bad_tile_takes_the_nearest_ring_of_good_tiles() {
+    let (tiles_x, tiles_y, tile) = (8, 6, 4);
+    let pixels = Buffer2::from_fn((tiles_x * tile, tiles_y * tile), |x, y| {
+        (x / tile + 10 * (y / tile)) as f32
+    });
+    let good = [(0, 0), (5, 1), (2, 5), (7, 3)];
+    let mut mask = BitBuffer2::new_filled(pixels.size(), true);
+    for (tx, ty) in good {
+        for y in ty * tile..(ty + 1) * tile {
+            for x in tx * tile..(tx + 1) * tile {
+                mask.set_at(Vec2us::new(x, y), false);
+            }
+        }
+    }
+    let grid = BgMesh::computed(
+        &pixels,
+        Some(&mask),
+        MeshParams {
+            median_filter: MedianFilter::Skip,
+            ..params(tile)
+        },
+    );
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let expected = (1..)
+                .find_map(|radius: usize| {
+                    let mut ring: Vec<f32> = good
+                        .iter()
+                        .filter(|&&(gx, gy)| gx.abs_diff(tx).max(gy.abs_diff(ty)) == radius)
+                        .map(|&(gx, gy)| (gx + 10 * gy) as f32)
+                        .collect();
+                    (!ring.is_empty()).then(|| statistics::median_mut(&mut ring))
+                })
+                .filter(|_| !good.contains(&(tx, ty)))
+                .unwrap_or((tx + 10 * ty) as f32);
+            assert_eq!(grid.stats[(tx, ty)].sky, expected, "tile ({tx}, {ty})");
+        }
+    }
+}

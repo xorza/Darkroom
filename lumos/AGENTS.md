@@ -36,3 +36,18 @@ source extraction, error bars.
   the system cannot back stops the process. Refused: a ceiling of a share of
   the available memory, which blocked files the machine could load, and one of
   the physical RAM.
+
+## I/O
+
+- **A codec reads a reader and writes a writer; a path stays at the edge.**
+  FITS images, calibration bundles, stack products and rasters decode over
+  `Read + Seek` and encode over `Write + Seek`, and report path-free errors.
+  `LoadCtx`, `FileSet` and its decode cache, the pipeline's entry points and
+  the save fns that call `common::fs::publish` open the paths and name them in
+  the error. This is the `image` crate's split: `ImageReader::new(reader)` and
+  `write_to` under `open` and `save`. Tests decode from bytes. Refused: paths
+  through the codecs, which tie every test to a temporary file.
+- **A path-taking entry point stays a method of its config**, as
+  `StackConfig::stack_paths`: the frame cache reads files for it either way.
+  Refused: moving these entry points into `pipeline`, which needs free fns or a
+  type of its own for them.

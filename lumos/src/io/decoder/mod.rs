@@ -12,11 +12,11 @@ pub(crate) mod linear_decoder;
 use std::fmt::Debug;
 use std::path::Path;
 
+use crate::frame::frame_info::{DecoderBytes, FrameInfo};
 use crate::image::flat_gain::shared_gains::SharedGains;
 use crate::image::stackable_image::StackableImage;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::error::ImageError;
-use crate::io::frame_info::FrameInfo;
 use crate::io::load_ctx::LoadCtx;
 
 /// How a frame set's files decode, as one image type: what a run generic over its frames' type
@@ -50,6 +50,10 @@ pub(crate) trait Decoder {
     /// `None` when it cannot, or the header does not read, which leaves the caller to decode the
     /// frame and read the answer off it; the decode then reports what the header read did.
     fn peek(path: &Path, ctx: &LoadCtx) -> Option<Peek<Self::Read>>;
+
+    /// What [`Self::load`] of `path` held beside `image`, the frame it made, for a frame
+    /// [`Self::peek`] could not answer for before the decode.
+    fn decoded_beside(path: &Path, image: &Self::Image) -> DecoderBytes;
 }
 
 /// What a header read settles about a frame, and what it read that the frame's load takes.

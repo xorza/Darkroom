@@ -911,6 +911,7 @@ name = "fits-well"
 version = "0.5.0"
 dependencies = [
  "bitvec",
+ "criterion",
  "flate2",
  "num-complex",
  "rayon",

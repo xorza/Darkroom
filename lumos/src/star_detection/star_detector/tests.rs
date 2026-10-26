@@ -63,8 +63,7 @@ fn a_demosaiced_frame_measures_its_stars_unfiltered() {
     let mut config = StarDetectionConfig::default();
     config.filter.max_roundness = 2.0;
     let brightest = |image: &LinearImage| {
-        StarDetector::from_config(config.clone())
-            .unwrap()
+        StarDetector::new(config.clone())
             .detect(image)
             .stars
             .into_iter()
@@ -188,7 +187,7 @@ fn fwhm_source_distinguishes_measured_from_supplied() {
 
 #[test]
 fn constructor_rejects_invalid_configuration() {
-    let error = StarDetector::from_config(StarDetectionConfig {
+    let error = StarDetector::checked(StarDetectionConfig {
         extraction: ExtractionConfig {
             sigma_threshold: 0.0,
             ..Default::default()
@@ -221,9 +220,7 @@ fn auto_fwhm_recovers_wide_stars() {
         .frame();
         let mut config = StarDetectionConfig::default();
         config.fwhm.mode = Some(FwhmMode::Auto { fallback: 4.0 });
-        let result = StarDetector::from_config(config)
-            .unwrap()
-            .detect(&frame.image);
+        let result = StarDetector::new(config).detect(&frame.image);
         assert!(
             matches!(result.diagnostics.fwhm, FwhmSource::Estimated { .. }),
             "FWHM {fwhm}"
@@ -258,9 +255,7 @@ fn auto_estimated_fwhm_is_used_for_final_measurement() {
         auto_config.filter.max_fwhm_deviation = None;
         auto_config.filter.duplicate_min_separation = 0.0;
 
-        let auto_result = StarDetector::from_config(auto_config.clone())
-            .unwrap()
-            .detect(&frame.image);
+        let auto_result = StarDetector::new(auto_config.clone()).detect(&frame.image);
         assert!(
             matches!(auto_result.diagnostics.fwhm, FwhmSource::Estimated { .. }),
             "FWHM {actual_fwhm} fixture must produce a genuine estimate"
@@ -277,9 +272,7 @@ fn auto_estimated_fwhm_is_used_for_final_measurement() {
 
         let mut manual_config = auto_config;
         manual_config.fwhm.mode = Some(FwhmMode::Fixed(effective_fwhm));
-        let manual_result = StarDetector::from_config(manual_config)
-            .unwrap()
-            .detect(&frame.image);
+        let manual_result = StarDetector::new(manual_config).detect(&frame.image);
 
         assert_eq!(
             auto_result.stars.len(),

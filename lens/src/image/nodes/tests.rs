@@ -1,7 +1,7 @@
-use common::{Size2us, TempDir};
+use common::{Buffer2, Size2us, TempDir};
 use scenarium::internals::func_invoker::FuncInvoker;
 
-use imaginarium::ColorFormat;
+use imaginarium::{ColorFormat, PlanarImage};
 use scenarium::{ConstValue, DynamicValue};
 
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE};
@@ -71,6 +71,37 @@ async fn load_and_save_round_trip_exact_pixels() {
     let cpu = loaded.interleaved();
     assert_eq!(cpu.desc(), desc);
     assert_eq!(cpu.bytes(), pixels);
+
+    // A planar image saved as another format is interleaved and converted on the way out: RGB
+    // f32 planes of 0, 1 and 0.2 store as the bytes 0, 255 and round(0.2 · 255) = 51.
+    let planes =
+        PlanarImage::new_rgb([0.0, 1.0, 0.2].map(|level| Buffer2::new_filled((2, 1), level)));
+    let converted = dir.join("converted.png");
+    invoker
+        .call(
+            library.by_name("Save Image").unwrap(),
+            [
+                DynamicValue::from_custom(Image::from(planes)),
+                ConstValue::FsPath(converted.display().to_string()).into(),
+                ConstValue::Enum(ColorFormat::RGB_U8.to_string()).into(),
+            ],
+        )
+        .await
+        .unwrap();
+    let outputs = invoker
+        .call(
+            library.by_name("Load Image").unwrap(),
+            [ConstValue::FsPath(converted.display().to_string()).into()],
+        )
+        .await
+        .unwrap();
+    let cpu = outputs[0]
+        .as_custom::<Image>()
+        .unwrap()
+        .interleaved()
+        .into_owned();
+    assert_eq!(cpu.desc(), desc);
+    assert_eq!(cpu.bytes(), [0, 255, 51, 0, 255, 51]);
 }
 
 /// Source and destination are two independent wires, so a size or format mismatch is the user's
@@ -80,7 +111,7 @@ async fn load_and_save_round_trip_exact_pixels() {
 async fn blend_refuses_a_destination_of_another_size_or_format() {
     let library = image_library();
     let image = |width, format| {
-        DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_black(
+        DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
             imaginarium::InterleavedDesc::new(Size2us::new(width, 2), format),
         )))
     };
@@ -119,7 +150,7 @@ async fn transform_refuses_a_transform_with_no_inverse() {
     let transform = library.by_name("Transform").unwrap();
     let run = |values: [f64; 5]| {
         let image =
-            DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_black(
+            DynamicValue::from_custom(Image::from(imaginarium::InterleavedImage::new_zeroed(
                 imaginarium::InterleavedDesc::new(Size2us::new(2, 2), ColorFormat::MONO_U8),
             )));
         let inputs = [image]

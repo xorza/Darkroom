@@ -206,7 +206,7 @@ mod tests {
                 }
             }
         ";
-        let kernel = ComputeKernel::new(&gpu, "index", shader, 1);
+        let kernel = ComputeKernel::new(gpu, "index", shader, 1);
         let count = 7 * 256 + 5;
         for row_length in [1, 2, 3] {
             let output = gpu
@@ -218,7 +218,7 @@ mod tests {
                 });
             let params = [count, 0, 0, 0];
             kernel.dispatch(
-                &gpu,
+                gpu,
                 KernelJob {
                     params: bytemuck::cast_slice(&params),
                     buffers: &[&output],
@@ -227,7 +227,7 @@ mod tests {
                 },
                 row_length,
             );
-            let image = gpu_image::internals::read_back_words(&gpu, &output, count);
+            let image = gpu_image::internals::read_back_words(gpu, &output, count);
             assert_eq!(
                 image,
                 (0..count).collect::<Vec<_>>(),

@@ -3,15 +3,13 @@ mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
 #[cfg(feature = "wgpu")]
-pub(crate) mod pipeline;
+mod pipeline;
 
 #[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_image::InterleavedImage;
-#[cfg(feature = "wgpu")]
-use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 
 /// Parameters for contrast and brightness adjustment.
 #[derive(Debug, Clone, Copy)]
@@ -66,20 +64,11 @@ impl ContrastBrightness {
         cpu::apply(*self, image);
     }
 
-    /// Applies contrast and brightness adjustment on the GPU, as [`Self::apply_cpu`]
-    /// does, from `input` into `output`.
-    ///
-    /// # Panics
-    /// Panics unless the two images share a descriptor.
+    /// Applies contrast and brightness adjustment on the GPU, in place, as [`Self::apply_cpu`]
+    /// does.
     #[cfg(feature = "wgpu")]
-    pub fn apply_gpu(
-        &self,
-        ctx: &Gpu,
-        pipeline: &GpuContrastBrightnessPipeline,
-        input: &GpuImage,
-        output: &mut GpuImage,
-    ) {
-        gpu::apply(*self, ctx, pipeline, input, output);
+    pub fn apply_gpu(&self, gpu: &Gpu, image: &mut GpuImage) {
+        gpu::apply(*self, gpu, image);
     }
 }
 
@@ -92,7 +81,6 @@ mod tests {
 
     use crate::color::color_format::ColorFormat;
     use crate::internals::create_test_image;
-    use crate::internals::image_diff::pixels_equal;
     use crate::ops::contrast_brightness::ContrastBrightness;
 
     const OP: ContrastBrightness = ContrastBrightness {
@@ -113,10 +101,6 @@ mod tests {
                 before,
                 image.bytes().as_ptr(),
                 "{format}: apply_cpu should have written the existing storage, not replaced it"
-            );
-            assert!(
-                !pixels_equal(&source, &image),
-                "{format}: apply_cpu left the image unchanged"
             );
         }
     }

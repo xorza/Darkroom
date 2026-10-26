@@ -5,10 +5,9 @@ use crate::image::flags::pixel_flags::Reach;
 use crate::math::lanczos::lanczos_lut::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
 use crate::registration::resample::source_pos::{AxisPos, SourcePos};
 use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
-use crate::registration::resample::warp_kernel::{
-    Filter, TapAxis, TapRange, WarpKernel, largest_singular_value,
-};
+use crate::registration::resample::warp_kernel::{Filter, TapAxis, TapRange, WarpKernel};
 use crate::registration::transform::Transform;
+use crate::registration::transform::local_geometry::LocalGeometry;
 use crate::registration::warp_transform::WarpTransform;
 use common::Size2us;
 use simd::IsaTier;
@@ -172,9 +171,9 @@ fn a_window_holds_the_taps_within_the_stretched_radius() {
 ///
 /// - A similarity of scale 2 at any rotation has singular values 2 and 2: stretch 2.
 /// - Scale 0.5 enlarges the frame: stretch 1, the kernel as it is.
-/// - The affine map `[[3, 1], [0, 0.5]]` has `F = 9 + 1 + 0.25 = 10.25` and `det = 1.5`, so
-///   `σ² = (10.25 + √(10.25² − 9))/2` = `(10.25 + √96.0625)/2` = `(10.25 + 9.8011)/2` = 10.0256,
-///   σ = 3.16632.
+/// - The affine map `[[3, 1], [0, 0.5]]` splits into a conformal part of `‖(3 + 0.5, 0 − 1)‖ =
+///   √13.25` and an anticonformal one of `‖(3 − 0.5, 0 + 1)‖ = √7.25`, so
+///   `σ = (√13.25 + √7.25)/2` = 3.16632.
 /// - A homography of scale 0.5 at the origin grows its scale toward the far corner as its
 ///   denominator `1 − 10⁻³(x + y)` falls to 0.682, past 1 there (the corner still lands inside
 ///   the source, at (145.9, 87.2)); the corner is a node of the grid, so the stretch is that
@@ -197,14 +196,14 @@ fn the_stretch_is_the_largest_local_scale() {
     );
     assert_eq!(stretch(Transform::identity()), 1.0);
     let sheared = stretch(Transform::affine([3.0, 1.0, 0.0, 0.0, 0.5, 0.0]));
-    let expected = f64::midpoint(10.25, 96.0625f64.sqrt()).sqrt() as f32;
+    let expected = f64::midpoint(13.25f64.sqrt(), 7.25f64.sqrt()) as f32;
     assert_eq!(sheared, expected);
     assert!((sheared - 3.16632).abs() < 1e-5, "{sheared}");
 
     let homography = Transform::homography([0.5, 0.0, 0.0, 0.0, 0.5, 0.0, -1e-3, -1e-3]);
     let corner = DVec2::new(199.0, 119.0);
     let warp = WarpTransform::new(homography);
-    let at_corner = largest_singular_value(warp.jacobian(corner));
+    let at_corner = LocalGeometry::of(warp.jacobian(corner)).stretch[0];
     assert!(at_corner > 1.0, "{at_corner}");
     assert_eq!(stretch(homography), at_corner as f32);
 }

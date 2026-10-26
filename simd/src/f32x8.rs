@@ -40,20 +40,6 @@ pub trait F32x8:
     #[must_use]
     fn min(self, other: Self) -> Self;
 
-    /// `self / divisor`, as the divide rounds it, for lanes holding an integer in `[0, divisor]`
-    /// and a `divisor` of 255 or 65535, `reciprocal` its reciprocal rounded. A lane past it breaks
-    /// the contract, which `Portable` asserts in a debug build; the other Isas then give an
-    /// unspecified value. Where a vector divide is slow, as on x86, an Isa takes the reciprocal's
-    /// product and one fused correction, `q + r · (v − q · d)`: Markstein's correction of a
-    /// correctly rounded reciprocal, which gives the correctly rounded quotient for every such
-    /// lane, as the tests check exhaustively.
-    #[inline(always)]
-    #[must_use]
-    fn div_scale(self, divisor: Self, reciprocal: Self) -> Self {
-        let _ = reciprocal;
-        self / divisor
-    }
-
     /// [`Self::min`] with a `bound` that is positive, `+∞` allowed, in every lane: a NaN in
     /// `self` passes. A NaN or a zero bound breaks the contract, which `Portable` asserts in a
     /// debug build; there the min is unspecified. NEON's own `fmin` is that min only for such a
@@ -70,6 +56,11 @@ pub trait F32x8:
     /// Each lane with its sign bit cleared, as `f32::abs`: `−0` to `+0`, a NaN's payload kept.
     #[must_use]
     fn abs(self) -> Self;
+
+    /// Each lane's magnitude with the sign bit of `sign`'s lane, as `f32::copysign`: two bitwise
+    /// ops, where `sign` a NaN gives its own sign bit.
+    #[must_use]
+    fn copysign(self, sign: Self) -> Self;
 
     /// The largest integer at or below each lane, exact.
     #[must_use]

@@ -1,5 +1,8 @@
 //! [`Subsample`]: the uniform-stride sample the image statistics are estimated from.
 
+use common::par;
+use rayon::prelude::*;
+
 /// How many samples an image statistic — a median, a MAD, a sigma-clipped background — is taken
 /// from at most. The median of n samples scatters by `1.2533·σ/√n`: 0.13% of σ at a million, far
 /// under anything these estimates feed.
@@ -38,22 +41,49 @@ impl Subsample {
         k * self.stride
     }
 
-    /// The sampled indices, in order.
-    pub(crate) fn idxs(self) -> impl Iterator<Item = usize> {
-        (0..self.count).map(move |k| self.idx(k))
-    }
-
-    /// The sampled values of `plane`, which the sample was made for.
-    pub(crate) fn of(self, plane: &[f32]) -> impl Iterator<Item = f32> + '_ {
-        debug_assert!(self.count == 0 || self.idx(self.count - 1) < plane.len());
-        self.idxs().map(move |idx| plane[idx])
-    }
-
-    /// The values of `plane` an image statistic is taken from: at most [`MAX_STATISTIC_SAMPLES`].
-    pub(crate) fn statistic_values(plane: &[f32]) -> Vec<f32> {
-        Self::new(plane.len(), MAX_STATISTIC_SAMPLES)
-            .of(plane)
+    /// The values of `len` pixels a statistic is taken from, `value` reading each: at most `cap`,
+    /// every `stride`-th of the `len − fill_count` pixels `is_fill` does not name, as a fill holds
+    /// no data. Fills arrive in regions — a mosaic edge, a coverage gap — so striding the plane
+    /// itself would draw its whole quota from one side of a frame that is masked down the other.
+    pub(crate) fn data_values(
+        len: usize,
+        fill_count: usize,
+        cap: usize,
+        is_fill: impl Fn(usize) -> bool,
+        value: impl Fn(usize) -> f32 + Sync,
+    ) -> Vec<f32> {
+        debug_assert!(fill_count <= len);
+        let sample = Self::new(len - fill_count, cap);
+        if fill_count == 0 {
+            // A stride-`n` walk over several planes costs a cache line and a TLB stream per plane
+            // and sampled pixel; running it in parallel hides that latency.
+            return par::into_iter(0..sample.count())
+                .map(|k| value(sample.idx(k)))
+                .collect();
+        }
+        (0..len)
+            .filter(|&idx| !is_fill(idx))
+            .step_by(sample.stride())
+            .map(value)
             .collect()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::math::statistics::subsample::Subsample;
+
+    impl Subsample {
+        /// The sampled indices, in order.
+        pub(crate) fn idxs(self) -> impl Iterator<Item = usize> {
+            (0..self.count).map(move |k| self.idx(k))
+        }
+
+        /// The sampled values of `plane`, which the sample was made for.
+        pub(crate) fn of(self, plane: &[f32]) -> impl Iterator<Item = f32> + '_ {
+            debug_assert!(self.count == 0 || self.idx(self.count - 1) < plane.len());
+            self.idxs().map(move |idx| plane[idx])
+        }
     }
 }
 

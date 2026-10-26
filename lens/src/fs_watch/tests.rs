@@ -273,11 +273,10 @@ async fn watcher_signals_on_content_change() {
     let ws = WatchState::new(dir.path(), RecursiveMode::NonRecursive, Duration::ZERO).unwrap();
     let signal = Arc::clone(&ws.signal);
 
-    // Absorb any spurious event from creating the directory itself, so the
-    // assertion below measures the file write specifically.
-    timeout(Duration::from_millis(300), signal.notified())
-        .await
-        .ok();
+    // The directory existed before the watch began, so nothing it did fires the watcher; a
+    // permit stored before the write is taken now, without waiting, so the one awaited below can
+    // only be the write's.
+    while timeout(Duration::ZERO, signal.notified()).await.is_ok() {}
 
     fs::write(dir.join("new.txt"), b"hello").unwrap();
 

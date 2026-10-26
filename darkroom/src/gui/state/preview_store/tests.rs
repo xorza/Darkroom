@@ -1,3 +1,5 @@
+use imaginarium::InterleavedImage;
+
 use super::*;
 use palantir::internals::ui_harness::UiHarness;
 use std::sync::Arc;
@@ -71,7 +73,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     )
     .unwrap();
     assert_eq!(
-        rgba8_raster(&rgba, UVec2::new(2, 1)),
+        rgba8_raster(&Image::from(rgba), UVec2::new(2, 1)),
         Raster::from_srgba8(UVec2::new(2, 1), bytes).expect("2×1 RGBA8 is 8 bytes")
     );
 
@@ -81,7 +83,7 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     )
     .unwrap();
     assert_eq!(
-        rgba8_raster(&rgb, UVec2::new(1, 1)),
+        rgba8_raster(&Image::from(rgb), UVec2::new(1, 1)),
         Raster::from_srgba8(UVec2::ONE, vec![0, 0, 0, 255]).expect("1×1 RGBA8 is 4 bytes")
     );
 }

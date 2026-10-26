@@ -52,9 +52,9 @@ impl ThresholdParams {
         mask: &mut BitBuffer2,
         reader: impl Fn() -> R + Sync + Send,
     ) {
-        let width = mask.size.width;
+        let width = mask.size().width;
         debug_assert_eq!(width, residual.width());
-        debug_assert_eq!(mask.size.height, residual.height());
+        debug_assert_eq!(mask.size().height, residual.height());
         mask.par_rows_mut().enumerate().for_each(|(y, row_words)| {
             let mut noise = reader();
             ProcessWords {

@@ -14,6 +14,11 @@ use common::Vec2us;
 /// A tile mesh per color of a mosaic, one for a mono plane, read bilinearly between the tile
 /// centres.
 ///
+/// Bilinear rather than the bicubic [`MeshSurface`](crate::bg_mesh::mesh_surface::MeshSurface)
+/// star detection reads: its readers take one pixel at a time in no row order — a hot pixel's cut,
+/// a cosmic-ray candidate's noise — where the spline solves a whole row of tiles for each, and a
+/// local level for a k-σ cut needs no continuous slope.
+///
 /// Each color's tiles measure that color's photosites alone, so a flat-fielded frame whose colors
 /// sit at different levels gives each its own sky, and a color's σ is not inflated by the others'
 /// offsets. The 3×3 median over the tiles keeps a tile that a cluster of hot pixels or a bright

@@ -253,7 +253,7 @@ impl<'a, P: MosaicPattern> MosaicView<'a, P> {
 mod tests {
     use common::Buffer2;
 
-    use crate::image::cfa::cfa_pattern::CfaPattern;
+    use crate::image::cfa::bayer_pattern::BayerPattern;
     use crate::image::cfa::demosaic::mosaic_view::MosaicView;
     use crate::internals::cfa::XTRANS_PATTERN;
     use common::{Size2us, Vec2us};
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn a_view_reads_its_samples_and_balances_them_by_color() {
         let data = Buffer2::new_filled((6, 4), 0.5);
-        let bayer = MosaicView::new(&data, CfaPattern::Rggb).with_gains([2.0, 1.0, 4.0]);
+        let bayer = MosaicView::new(&data, BayerPattern::Rggb).with_gains([2.0, 1.0, 4.0]);
         assert_eq!(bayer.size, Size2us::new(6, 4));
         let blue = bayer.native(Vec2us::new(1, 1));
         assert_eq!((blue.idx, blue.native, blue.sample), (7, 2, 0.5));
@@ -277,7 +277,7 @@ mod tests {
         for size in [Size2us::new(0, 2), Size2us::new(2, 0)] {
             let data = Buffer2::new_default(size);
             let refused = std::panic::catch_unwind(|| {
-                MosaicView::new(&data, CfaPattern::Rggb);
+                MosaicView::new(&data, BayerPattern::Rggb);
             });
             assert!(refused.is_err(), "{size:?}");
         }

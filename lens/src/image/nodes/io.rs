@@ -7,7 +7,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use common::{fs, task};
+use common::{SystemMemory, fs, task};
 use imaginarium::{RasterFormat, SUPPORTED_EXTENSIONS};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
@@ -25,13 +25,11 @@ pub(super) fn register(library: &mut Library) {
     register_save(library);
 }
 
-/// The image in the file at `path`, in the format its extension names.
+/// The image in the file at `path`, in the format its extension names, refused when its header
+/// states more samples than the process can allocate now.
 fn read(path: &Path) -> Result<imaginarium::InterleavedImage, RasterFileError> {
     let format = raster_format(path)?;
-    Ok(imaginarium::InterleavedImage::decode(
-        BufReader::new(fs::open(path)?),
-        format,
-    )?)
+    Ok(format.decode(BufReader::new(fs::open(path)?), SystemMemory::available())?)
 }
 
 /// `image` written to `path` in the format its extension names, published durably: a reader sees
@@ -40,7 +38,7 @@ fn save(image: &imaginarium::InterleavedImage, path: &Path) -> Result<(), Raster
     let format = raster_format(path)?;
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         let mut out = BufWriter::new(file);
-        image.encode(&mut out, format)?;
+        format.encode(image, &mut out)?;
         Ok::<_, RasterFileError>(out.flush()?)
     })
 }
@@ -63,10 +61,10 @@ fn register_load(library: &mut Library) {
                 debug_assert_eq!(inputs.len(), 1);
                 debug_assert_eq!(outputs.len(), 1);
                 let path = PathBuf::from(inputs[0].required_fs_path());
-                let image =
-                    task::spawn_blocking(move || read(&path).map_err(InvokeError::external))
-                        .await
-                        .map_err(InvokeError::external)??;
+                let image = task::run_blocking(move || read(&path))
+                    .await
+                    .map_err(|task::Shutdown| InvokeError::Cancelled)?
+                    .map_err(InvokeError::external)?;
                 outputs[0] = DynamicValue::from_custom(Image::from(image));
                 Ok(())
             }),
@@ -93,18 +91,19 @@ fn register_save(library: &mut Library) {
                             .required_fs_path(),
                     );
                     let format = inputs[2].required_enum_as::<ConversionFormat>();
-                    // Saving needs the pixels by value anyway, so take them when this is the last
-                    // holder and copy only when it is not.
-                    let cpu_image = Image::take_interleaved(value);
-                    task::spawn_blocking(move || {
-                        match format.target(cpu_image.desc().color_format()) {
-                            Some(target) => save(&cpu_image.convert_to(target), &path),
-                            None => save(&cpu_image, &path),
+                    // Saving reads the pixels, so the value moves to the save and is read where it
+                    // lies: an interleaved image is not copied, a planar one is interleaved once.
+                    task::run_blocking(move || {
+                        let image = value.required_custom::<Image>();
+                        let pixels = image.interleaved();
+                        match format.target(pixels.desc().color_format()) {
+                            Some(target) => save(&pixels.convert_to(target), &path),
+                            None => save(&pixels, &path),
                         }
-                        .map_err(InvokeError::external)
                     })
                     .await
-                    .map_err(InvokeError::external)??;
+                    .map_err(|task::Shutdown| InvokeError::Cancelled)?
+                    .map_err(InvokeError::external)?;
                     Ok(())
                 }))
             .description("Writes an image to a file on disk.")

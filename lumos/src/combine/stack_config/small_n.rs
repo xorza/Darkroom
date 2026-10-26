@@ -37,11 +37,13 @@ impl SmallN {
     }
 
     /// Whether a pixel of `count` samples combines by `fallback` rather than `method`: there are
-    /// too few for its rejection. A plain mean (no rejection) has nothing to fall back *from*, and
-    /// a fallback equal to the method is none, so a method override inherited with a default
-    /// `min_frames` never turns a plain mean into a median at small N.
+    /// too few for its rejection. The median and a plain mean reject nothing, so they have nothing
+    /// to fall back *from*, and a fallback equal to the method is none: a method override that
+    /// inherits a preset's `min_frames` never turns a plain mean into a median at small N, or a
+    /// median into a mean.
     pub(crate) fn falls_back(&self, method: CombineMethod, count: usize) -> bool {
-        let does_rejection = !matches!(method, CombineMethod::Mean(Rejection::None));
+        let does_rejection =
+            matches!(method, CombineMethod::Mean(rejection) if rejection != Rejection::None);
         does_rejection && count < self.min_frames && method != self.fallback
     }
 }

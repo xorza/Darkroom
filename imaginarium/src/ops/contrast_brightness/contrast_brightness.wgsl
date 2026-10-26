@@ -6,8 +6,9 @@
 // read-modify-write, no data races. Element layout follows the packed pixel
 // bytes; `alpha_channel` (or NO_ALPHA) marks the channel copied through.
 //
-// Formula: out = clamp(in * scale + offset, 0, max) in the storage type's own
-// units — the CPU's `ChannelAffine`, whose values the uniform carries.
+// Formula: out = in * scale + offset in the storage type's own units — the CPU's
+// `ChannelAffine`, whose values the uniform carries — which `pack` saturates for
+// an integer type and an f32 keeps unbounded.
 
 struct Params {
     scale: f32,
@@ -21,8 +22,7 @@ struct Params {
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> input: array<u32>;
-@group(0) @binding(2) var<storage, read_write> output: array<u32>;
+@group(0) @binding(1) var<storage, read_write> data: array<u32>;
 
 @compute @workgroup_size(256)
 fn main(
@@ -42,12 +42,12 @@ fn main(
             break;
         }
         let shift = byte * 8u;
-        let value = unpack(input[w], shift, sample_byte_len);
+        let value = unpack(data[w], shift, sample_byte_len);
         var adjusted = value;
         if (offset / sample_byte_len) % params.channel_count != params.alpha_channel {
-            adjusted = clamp(value * params.scale + params.offset, 0.0, params.max);
+            adjusted = value * params.scale + params.offset;
         }
         out_word = out_word | pack(adjusted, shift, sample_byte_len);
     }
-    output[w] = out_word;
+    data[w] = out_word;
 }

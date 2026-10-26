@@ -85,26 +85,6 @@ impl F32x8 for PortableF32 {
     }
 
     #[inline(always)]
-    fn div_scale(self, divisor: Self, reciprocal: Self) -> Self {
-        debug_assert!(
-            self.0
-                .iter()
-                .zip(divisor.0)
-                .zip(reciprocal.0)
-                .all(|((&v, d), r)| {
-                    (d == 255.0 || d == 65535.0)
-                        && r == 1.0 / d
-                        && v.fract() == 0.0
-                        && (0.0..=d).contains(&v)
-                }),
-            "{:?} / {:?} past the contract",
-            self.0,
-            divisor.0
-        );
-        self / divisor
-    }
-
-    #[inline(always)]
     fn min_positive(self, bound: Self) -> Self {
         debug_assert!(
             bound.0.iter().all(|&bound| bound > 0.0),
@@ -122,6 +102,11 @@ impl F32x8 for PortableF32 {
     #[inline(always)]
     fn abs(self) -> Self {
         Self(self.0.map(f32::abs))
+    }
+
+    #[inline(always)]
+    fn copysign(self, sign: Self) -> Self {
+        self.zip(sign, f32::copysign)
     }
 
     #[inline(always)]

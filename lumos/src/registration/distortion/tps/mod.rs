@@ -20,8 +20,8 @@
 mod distortion_map;
 
 use glam::DVec2;
+use nalgebra::{DMatrix, DVector};
 
-use crate::math::linear_system::Lu;
 use crate::registration::point_normalization::PointNormalization;
 
 /// The pivot below which the spline's system is singular. Its coordinates are normalized to about
@@ -115,22 +115,27 @@ impl ThinPlateSpline {
             matrix[at(n + 2, i)] = p.y;
         }
 
-        let mut solution_x = vec![0.0; matrix_size];
-        let mut solution_y = vec![0.0; matrix_size];
+        let rhs = |axis: fn(DVec2) -> f64| {
+            DVector::from_fn(matrix_size, |i, _| {
+                tgt_norm.get(i).copied().map_or(0.0, axis)
+            })
+        };
 
-        for i in 0..n {
-            solution_x[i] = tgt_norm[i].x;
-            solution_y[i] = tgt_norm[i].y;
+        // One factorization by partial pivoting, solved per axis.
+        let lu = DMatrix::from_row_slice(matrix_size, matrix_size, &matrix).lu();
+        if lu
+            .u()
+            .diagonal()
+            .iter()
+            .any(|pivot| pivot.is_nan() || pivot.abs() < SINGULAR_THRESHOLD)
+        {
+            return None;
         }
+        let solution_x = lu.solve(&rhs(|p| p.x))?;
+        let solution_y = lu.solve(&rhs(|p| p.y))?;
 
-        // One factorization, solved per axis; each solution replaces its right-hand side.
-        let mut pivots = vec![0; matrix_size];
-        let lu = Lu::factor(&mut matrix, &mut pivots, SINGULAR_THRESHOLD)?;
-        lu.solve(&mut solution_x);
-        lu.solve(&mut solution_y);
-
-        let weights_x: Vec<f64> = solution_x[..n].to_vec();
-        let weights_y: Vec<f64> = solution_y[..n].to_vec();
+        let weights_x: Vec<f64> = solution_x.as_slice()[..n].to_vec();
+        let weights_y: Vec<f64> = solution_y.as_slice()[..n].to_vec();
 
         let affine_x = [solution_x[n], solution_x[n + 1], solution_x[n + 2]];
         let affine_y = [solution_y[n], solution_y[n + 1], solution_y[n + 2]];

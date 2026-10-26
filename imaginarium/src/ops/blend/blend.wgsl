@@ -68,7 +68,7 @@ fn main(
         let s = unpack(src[w], shift, sample_byte_len) / scale;
         let d = unpack(dst[w], shift, sample_byte_len) / scale;
         let is_alpha = (offset / sample_byte_len) % params.channel_count == params.alpha_channel;
-        let blended = clamp(blend_elem(s, d, is_alpha) * scale, 0.0, scale);
+        let blended = blend_elem(s, d, is_alpha) * scale;
         out_word = out_word | pack(blended, shift, sample_byte_len);
     }
     output[w] = out_word;

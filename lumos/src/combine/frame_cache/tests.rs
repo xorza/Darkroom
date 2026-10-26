@@ -16,7 +16,7 @@ use crate::frame::frame_quality::{DropPlanes, FrameQuality};
 use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::storage_tier::CombineBudget;
 use crate::frame_store::stored_frame::{FrameWrite, SetKind};
-use crate::image::cfa::cfa_pattern::CfaPattern;
+use crate::image::cfa::bayer_pattern::BayerPattern;
 use crate::image::cfa::cfa_type::CfaType;
 use crate::image::cfa::mosaic::Mosaic;
 use crate::image::metadata::bg_split::BgSplit;
@@ -283,8 +283,8 @@ fn stored_frames_must_share_one_cfa_pattern() {
         let stats = Admitted::measure(&image);
         StoredFrame::from_memory(image, FrameQuality::None, stats)
     };
-    let rggb = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Rggb));
-    let bggr = CfaType::Mosaic(Mosaic::Bayer(CfaPattern::Bggr));
+    let rggb = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Rggb));
+    let bggr = CfaType::Mosaic(Mosaic::Bayer(BayerPattern::Bggr));
 
     for (frames, actual, expected) in [
         (vec![mosaic(rggb), mosaic(bggr)], Some(bggr), Some(rggb)),

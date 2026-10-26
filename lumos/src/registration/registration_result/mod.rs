@@ -27,21 +27,17 @@ pub struct RegistrationResult {
 }
 
 impl RegistrationResult {
-    /// The fit of `warp` to `matched_stars`, whose residuals' RMS is `rms_error` ([`rms_error`]).
-    pub(crate) fn new(warp: WarpTransform, matched_stars: Vec<StarMatch>, rms_error: f64) -> Self {
+    /// The fit of `warp` to `matched_stars`, its RMS that of their residuals ([`rms_error`]).
+    pub(crate) fn new(warp: WarpTransform, matched_stars: Vec<StarMatch>) -> Self {
         debug_assert!(
             matched_stars
                 .iter()
                 .all(|star_match| star_match.residual.is_finite() && star_match.residual >= 0.0)
         );
-        debug_assert_eq!(
-            rms_error.to_bits(),
-            self::rms_error(&matched_stars).to_bits()
-        );
         Self {
             warp,
+            rms_error: rms_error(&matched_stars),
             matched_stars,
-            rms_error,
         }
     }
 

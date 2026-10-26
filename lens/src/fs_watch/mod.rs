@@ -19,7 +19,7 @@ use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, L
 use tokio::sync::Notify;
 use tokio::time::timeout;
 
-const WATCH_DIR_FUNC_ID: FuncId = FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
+const WATCH_DIR_FUNC_ID: FuncId = FuncId::literal("1318c24c-2ac7-4a9a-a454-281bdbdc4ffc");
 
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).
@@ -171,11 +171,11 @@ pub fn fs_watch_library() -> Library {
                             if needs_rebuild {
                                 let watch_path = PathBuf::from(&path);
                                 // Watch registration can block on slow or network filesystems.
-                                let replacement = task::spawn_blocking(move || {
+                                let replacement = task::run_blocking(move || {
                                     WatchState::new(&watch_path, mode, debounce)
                                 })
                                 .await
-                                .expect("filesystem watcher setup task panicked");
+                                .map_err(|task::Shutdown| InvokeError::Cancelled)?;
                                 let mut guard = event_state.lock().await;
                                 guard.clear();
                                 guard.set(replacement.map_err(InvokeError::external)?);

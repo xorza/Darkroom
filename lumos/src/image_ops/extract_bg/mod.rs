@@ -20,8 +20,10 @@ use rayon::prelude::*;
 use crate::bg_mesh::mesh_workspace::{
     DEFAULT_SIGMA_CLIP_MAX_ITERATIONS, MedianFilter, MeshParams, MeshWorkspace,
 };
+use crate::bit_buffer2::BitBuffer2;
 use crate::config_field::ConfigField;
 use crate::error::InvalidConfigField;
+use crate::image::flags::quality_flags::QualityFlags;
 use crate::image::linear_image::LinearImage;
 use crate::image_ops::error::OpError;
 use crate::math::lstsq::Lstsq;
@@ -96,8 +98,12 @@ impl ExtractBg {
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         let mut workspace = MeshWorkspace::default();
+        let fills = image
+            .flags()
+            .filter(|flags| flags.contains(QualityFlags::NO_DATA))
+            .map(|flags| flags.mask_of(QualityFlags::NO_DATA));
         let surfaces = (0..image.channel_count())
-            .map(|channel| self.fit_plane(image.channel(channel), &mut workspace))
+            .map(|channel| self.fit_plane(image.channel(channel), fills.as_ref(), &mut workspace))
             .collect::<Result<ArrayVec<Surface, 3>, OpError>>()?;
         for (plane, surface) in image.planes_mut().zip(&surfaces) {
             self.remove_from(plane, surface);
@@ -110,9 +116,10 @@ impl ExtractBg {
     fn fit_plane(
         &self,
         plane: &Buffer2<f32>,
+        fills: Option<&BitBuffer2>,
         workspace: &mut MeshWorkspace,
     ) -> Result<Surface, OpError> {
-        let samples = collect_samples(plane, self.tile_size, workspace);
+        let samples = collect_samples(plane, fills, self.tile_size, workspace);
         let terms = Monomial::up_to(self.degree);
         if terms.len() > samples.len() {
             return Err(OpError::TooFewSamples {
@@ -216,17 +223,20 @@ struct Sample {
 /// the shared [`crate::bg_mesh::BgMesh`] SExtractor-style sky estimate (per-tile
 /// ±σ-clip → Pearson mode), the estimator star detection reads its sky from. Its grid 3×3 median
 /// filter is **off** here, where the detector's is on: it would bias a real gradient's boundary
-/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. A `None`
-/// object mask for now — a star/bright-signal mask from the star detector belongs in that slot.
+/// tiles, and outlier tiles are instead rejected by the surface fit's residual clip. The mask is
+/// the pixels holding a fill, and a tile of fills alone gives no sample: the mesh fills it from its
+/// neighbours, which would weigh them twice. A star/bright-signal mask from the star detector
+/// belongs in that slot too.
 fn collect_samples(
     channel: &Buffer2<f32>,
+    fills: Option<&BitBuffer2>,
     tile: usize,
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
     let size = channel.size();
     let grid = workspace.measure(
         channel,
-        None,
+        fills,
         None,
         MeshParams {
             tile_size: tile,
@@ -239,6 +249,9 @@ fn collect_samples(
     for ty in 0..grid.stats.height() {
         let y = norm(f64::from(grid.centers_y[ty]), size.height);
         for (tx, &cx) in grid.centers_x.iter().enumerate() {
+            if !grid.is_measured(tx, ty) {
+                continue;
+            }
             samples.push(Sample {
                 x: norm(f64::from(cx), size.width),
                 y,

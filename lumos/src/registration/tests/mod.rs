@@ -11,7 +11,7 @@
 //! - `helpers`: shared fixtures (stars under a transform, a fit's deviation, the seeded `register`)
 
 mod auto_model;
-mod helpers;
+pub(super) mod helpers;
 mod image_registration;
 mod input;
 #[cfg(feature = "real-data")]
