@@ -10,9 +10,9 @@ use crate::registration::resample::warp_kernel::{
 };
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::isa_tier::IsaTier;
-use crate::simd::{Isa, Kernel};
 use common::Size2us;
+use simd::IsaTier;
+use simd::{Isa, Kernel};
 
 const FILTERS: [Filter; 5] = [
     Filter::Bilinear,

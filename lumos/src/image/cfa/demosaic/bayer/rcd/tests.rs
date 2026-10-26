@@ -8,9 +8,9 @@ use crate::image::cfa::demosaic::bayer::rcd::{
 use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled::{OutputPlanes, TilePlace};
 use crate::internals::test_rng::TestRng;
-use crate::simd::portable::Portable;
-use crate::simd::{F32_LANES, F32x8, Isa};
 use common::{Size2us, Vec2us};
+use simd::Portable;
+use simd::{F32_LANES, F32x8, Isa};
 
 /// [`estimate_green`] of one site, on [`Portable`], the model every hardware Isa is held to.
 fn estimate(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {

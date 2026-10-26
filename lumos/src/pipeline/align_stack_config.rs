@@ -194,11 +194,11 @@ impl AlignStackConfig {
     ) -> Result<AlignStackResult, AlignStackError> {
         self.linear()?;
         let run = self.begin(light_paths.len(), ingest, monitor)?;
-        run.stack(LightSource::Files(LightFiles::new(
+        run.stack(LightSource::Files(Box::new(LightFiles::new(
             light_paths,
             Preparation::Linear,
             &run.ingest,
-        )?))
+        )?)))
     }
 
     /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
@@ -238,11 +238,11 @@ impl AlignStackConfig {
             cosmic_ray: self.cosmic_ray.as_ref(),
             notes: &notes,
         });
-        let mut result = run.stack(LightSource::Files(LightFiles::new(
+        let mut result = run.stack(LightSource::Files(Box::new(LightFiles::new(
             light_paths,
             preparation,
             &run.ingest,
-        )?))?;
+        )?)))?;
         notes.report_into(&mut result.product.report, masters);
         Ok(result)
     }

@@ -114,13 +114,3 @@ fn convert_pixel<S: Luma, D: Sample, const FROM: usize, const TO: usize>(
         };
     }
 }
-
-/// Element by element through [`Sample::convert`] — the sub-vector tail of an element kernel,
-/// so a tail can never disagree with the reference.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-pub(crate) fn convert_elements<S: Sample, D: Sample>(src: &[S], dst: &mut [D]) {
-    debug_assert_eq!(src.len(), dst.len());
-    for (dst, &src) in dst.iter_mut().zip(src) {
-        *dst = src.convert();
-    }
-}

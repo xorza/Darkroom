@@ -6,10 +6,10 @@ use crate::ops::contrast_brightness::ContrastBrightness;
 /// contrast/brightness reduces to in a storage type's own units.
 ///
 /// Folding brightness and the mid-point recentering into one offset is what
-/// lets a row be a single multiply-add. The scalar reference and every SIMD
-/// kernel evaluate exactly this expression in exactly this order, so their
-/// integer results agree bit for bit rather than within a rounding tolerance;
-/// the GPU takes these values as its uniforms.
+/// lets a row be a single multiply-add. The scalar reference and every vector
+/// kernel evaluate exactly this expression in exactly this order, so they agree
+/// bit for bit rather than within a rounding tolerance; the GPU takes these
+/// values as its uniforms.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ChannelAffine {
     pub(crate) scale: f32,
@@ -31,31 +31,40 @@ impl ChannelAffine {
             max,
         }
     }
+}
 
-    /// One channel value adjusted: the affine, clamped to `[0, max]`, then narrowed by the
-    /// crate's rounding rule. A NaN survives the clamp, as `f32::clamp` leaves it.
-    #[inline]
-    pub(crate) fn apply<T: Sample>(self, value: T) -> T {
-        T::from_f32((value.to_f32() * self.scale + self.offset).clamp(0.0, self.max))
-    }
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::color::sample::Sample;
+    use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 
-    /// Every channel value of `values` adjusted in place: the scalar reference over a row with no
-    /// alpha, and the sub-vector tail of a contiguous kernel.
-    #[inline]
-    pub(crate) fn apply_all<T: Sample>(self, values: &mut [T]) {
-        for value in values {
-            *value = self.apply(*value);
+    /// The scalar reference, which the tests hold every kernel to.
+    impl ChannelAffine {
+        /// One channel value adjusted: the affine, clamped to `[0, max]`, then narrowed by the
+        /// crate's rounding rule. A NaN survives the clamp, as `f32::clamp` leaves it.
+        #[inline]
+        pub(crate) fn apply<T: Sample>(self, value: T) -> T {
+            T::from_f32((value.to_f32() * self.scale + self.offset).clamp(0.0, self.max))
         }
-    }
 
-    /// The color channels of whole RGBA pixels adjusted in place, alpha left as it is: the
-    /// scalar reference over an RGBA row, and the sub-vector tail of an alpha-preserving kernel.
-    #[inline]
-    pub(crate) fn apply_rgba<T: Sample>(self, pixels: &mut [T]) {
-        let (pixels, rest) = pixels.as_chunks_mut::<4>();
-        debug_assert!(rest.is_empty(), "a whole number of RGBA pixels");
-        for pixel in pixels {
-            self.apply_all(&mut pixel[..3]);
+        /// Every channel value of `values` adjusted in place: the scalar reference over a row with
+        /// no alpha.
+        #[inline]
+        pub(crate) fn apply_all<T: Sample>(self, values: &mut [T]) {
+            for value in values {
+                *value = self.apply(*value);
+            }
+        }
+
+        /// The color channels of whole RGBA pixels adjusted in place, alpha left as it is: the
+        /// scalar reference over an RGBA row.
+        #[inline]
+        pub(crate) fn apply_rgba<T: Sample>(self, pixels: &mut [T]) {
+            let (pixels, rest) = pixels.as_chunks_mut::<4>();
+            debug_assert!(rest.is_empty(), "a whole number of RGBA pixels");
+            for pixel in pixels {
+                self.apply_all(&mut pixel[..3]);
+            }
         }
     }
 }

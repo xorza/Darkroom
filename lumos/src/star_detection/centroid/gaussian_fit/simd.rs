@@ -1,9 +1,9 @@
 //! The Gaussian as a [`BatchModel`]: each lane evaluates `Gaussian2D`'s own unfused expressions,
 //! only its `exp` is [`Math::exp_f64`] rather than libm's.
 
-use crate::simd::Isa;
-use crate::simd::math::Math;
 use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
+use simd::Isa;
+use simd::Math;
 
 /// The Gaussian at `[x0, y0, amplitude, a, b, c, bg]`.
 #[derive(Debug, Clone, Copy)]

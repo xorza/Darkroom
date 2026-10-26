@@ -5,8 +5,8 @@ use std::f32::consts::LN_2;
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::image_ops::stretch::{AsinhCurve, BlackPoint};
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::simd::isa_tier::IsaTier;
-use crate::simd::math::ASINH_LOG_FROM;
+use simd::ASINH_LOG_FROM;
+use simd::IsaTier;
 
 /// Every tier over three planes drawn from each shape, after a black point of 0.02: the shapes put
 /// intensities below it (black on both paths), inside the curve, and above the highlight cap.

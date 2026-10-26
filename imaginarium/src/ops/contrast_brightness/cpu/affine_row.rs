@@ -1,0 +1,133 @@
+//! [`AffineRow`]: [`ChannelAffine`] over one row in place, as one vector kernel per sample type.
+//!
+//! A vector holds the channels as they lie in the row, and every lane takes an affine: the
+//! channel's, or in an RGBA row's alpha lanes one that keeps the value. The multiply and the add
+//! round apart, as the reference's do, so every kernel is bit-identical to it.
+
+use simd::{F32_LANES, F32x8, I32_LANES, I32x8, Isa, Kernel, U8_LANES, U8x32, U16_LANES, U16x16};
+
+use crate::color::sample::Sample;
+use crate::interleaved::row_groups;
+use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
+
+/// One row of `T` samples adjusted in place.
+#[derive(Debug)]
+pub(super) struct AffineRow<'a, T> {
+    pub(super) affine: ChannelAffine,
+    pub(super) alpha: Alpha,
+    pub(super) row: &'a mut [T],
+}
+
+/// What an [`AffineRow`] does to the fourth channel of each pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Alpha {
+    /// No pixel has an alpha channel: every channel is a color.
+    Absent,
+    /// The row is RGBA, and each pixel's alpha stays as it is.
+    Kept,
+}
+
+impl<'a, T: Sample> AffineRow<'a, T> {
+    /// A row of an image of `T` samples, as bytes.
+    pub(super) fn new(affine: ChannelAffine, alpha: Alpha, row: &'a mut [u8]) -> Self {
+        Self {
+            affine,
+            alpha,
+            row: bytemuck::cast_slice_mut(row),
+        }
+    }
+}
+
+/// Thirty-two bytes a step, through four vectors of `f32`.
+impl Kernel for AffineRow<'_, u8> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let lanes = Lanes::new(isa, self.affine, self.alpha);
+        row_groups::in_place::<u8, U8_LANES>(self.row, |bytes| {
+            let (octets, _) = bytes.as_chunks::<I32_LANES>();
+            let ints = [0, 1, 2, 3].map(|idx| {
+                let values = isa.load_u8_as_i32(&octets[idx]).to_f32();
+                isa.round_clamped_f32(lanes.affine(values), lanes.max)
+            });
+            isa.narrow_i32_to_u8(ints).store(bytes);
+        });
+    }
+}
+
+/// Sixteen words a step, through two vectors of `f32`.
+impl Kernel for AffineRow<'_, u16> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let lanes = Lanes::new(isa, self.affine, self.alpha);
+        row_groups::in_place::<u16, U16_LANES>(self.row, |words| {
+            let ints = isa.load_u16(words).widen();
+            let [low, high] = [ints.low, ints.high]
+                .map(|ints| isa.round_clamped_f32(lanes.affine(ints.to_f32()), lanes.max));
+            low.narrow_u16(high).store(words);
+        });
+    }
+}
+
+/// Eight samples a step. `f32` storage clamps and keeps the value, a NaN included: `f32::clamp`'s
+/// two compares, `low > x ? low : x`, then `x > high ? high : x`.
+impl Kernel for AffineRow<'_, f32> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let lanes = Lanes::new(isa, self.affine, self.alpha);
+        row_groups::in_place::<f32, F32_LANES>(self.row, |samples| {
+            let adjusted = lanes.affine(isa.load_f32(samples));
+            lanes
+                .low
+                .max(adjusted)
+                .min_positive(lanes.high)
+                .store(samples);
+        });
+    }
+}
+
+/// The affine's constants, lane by lane, set once per row. An alpha lane takes `x · 1 + (−0)`
+/// and the bounds `±∞`, which keep every value as it is, a signed zero and a NaN included: a
+/// select of the input there would let the compiler turn the select and its store into a masked
+/// store, which measured six times slower on Zen 3.
+#[derive(Debug, Clone, Copy)]
+struct Lanes<F: F32x8> {
+    scale: F,
+    offset: F,
+    low: F,
+    high: F,
+    /// `max` in every lane: the integer kernels' round bound, an integer as the round takes it,
+    /// which leaves an alpha lane's sample as it is.
+    max: F,
+}
+
+impl<F: F32x8> Lanes<F> {
+    #[inline(always)]
+    fn new<S: Isa<F32 = F>>(isa: S, affine: ChannelAffine, alpha: Alpha) -> Self {
+        let ChannelAffine { scale, offset, max } = affine;
+        let lanes = |color: f32, alpha_lane: f32| match alpha {
+            Alpha::Absent => isa.splat_f32(color),
+            Alpha::Kept => isa.load_f32(&[
+                color, color, color, alpha_lane, color, color, color, alpha_lane,
+            ]),
+        };
+        Self {
+            scale: lanes(scale, 1.0),
+            offset: lanes(offset, -0.0),
+            low: lanes(0.0, f32::NEG_INFINITY),
+            high: lanes(max, f32::INFINITY),
+            max: isa.splat_f32(max),
+        }
+    }
+
+    /// `x · scale + offset`, unclamped.
+    #[inline(always)]
+    fn affine(self, values: F) -> F {
+        values * self.scale + self.offset
+    }
+}

@@ -1,4 +1,5 @@
 use common::Size2us;
+use simd::IsaTier;
 use strum::IntoEnumIterator;
 
 use crate::color::color_format::{ColorFormat, SampleType};
@@ -10,7 +11,7 @@ use crate::ops::blend::cpu;
 use crate::ops::blend::{Blend, BlendMode};
 
 /// Blends `src` over `dst` into a fresh image through the public CPU entry
-/// point, i.e. through whatever SIMD kernel this CPU dispatches to.
+/// point, i.e. through whatever vector kernel this CPU dispatches to.
 fn blend(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
     let mut output = InterleavedImage::new_black(dst.desc());
     params.apply_cpu(src, dst, &mut output);
@@ -162,44 +163,71 @@ fn multiply_by_black_zeroes_color() {
     }
 }
 
-/// Every SIMD kernel must agree with the scalar reference it specializes,
-/// exactly: the vector path evaluates the same expression in the same order and
-/// the same units, down to dividing where the reference divides.
+/// Every tier's kernel agrees with the scalar reference exactly: the kernels evaluate the same
+/// expression in the same order and the same units, down to dividing where the reference
+/// divides.
 ///
-/// The widths straddle the four-pixel vector body: 3 is tail only, 17 is four
-/// vectors plus a tail, 64 is vectors only. The float images carry NaN, the
-/// infinities and out-of-range values, which every backend must pass through as
-/// the reference does, and a NaN alpha reaches the integer paths.
+/// A step is eight `u8` pixels or two `f32` ones. Width 1 is shorter than either step, 3 is
+/// shorter than a `u8` step and one past an `f32` one, 17 is whole steps and one pixel, 64 whole
+/// steps alone. The float images carry NaN, the infinities, out-of-range values and a negative
+/// zero, which every backend must pass through as the reference does, and a NaN alpha reaches
+/// the integer paths.
 #[test]
-fn simd_matches_scalar_reference() {
-    for format in ColorFormat::ALL {
-        for width in [3, 17, 64] {
-            let src = create_test_image(format, Size2us::new(width, 3), 0);
-            let mut dst = create_test_image(format, Size2us::new(width, 3), 100);
-            if format.sample_type == SampleType::F32 {
-                let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
-                let samples: &mut [f32] = bytemuck::cast_slice_mut(dst.bytes_mut());
-                for (sample, special) in samples.iter_mut().step_by(5).zip(specials.iter().cycle())
-                {
-                    *sample = *special;
+fn every_tier_matches_the_scalar_reference() {
+    for tier in IsaTier::supported() {
+        for format in ColorFormat::ALL {
+            for width in [1, 3, 17, 64] {
+                let src = create_test_image(format, Size2us::new(width, 3), 0);
+                let mut dst = create_test_image(format, Size2us::new(width, 3), 100);
+                if format.sample_type == SampleType::F32 {
+                    let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
+                    let samples: &mut [f32] = bytemuck::cast_slice_mut(dst.bytes_mut());
+                    for (sample, special) in
+                        samples.iter_mut().step_by(5).zip(specials.iter().cycle())
+                    {
+                        *sample = *special;
+                    }
                 }
-            }
 
-            for mode in BlendMode::iter() {
-                for alpha in [0.0, 0.35, 1.0, f32::NAN] {
-                    let params = Blend::new(mode, alpha);
-                    let dispatched = blend(params, &src, &dst);
-                    let mut reference = InterleavedImage::new_black(dst.desc());
-                    cpu::apply_scalar(params, &src, &dst, &mut reference);
+                for mode in BlendMode::iter() {
+                    for alpha in [0.0, 0.35, 1.0, f32::NAN] {
+                        let params = Blend::new(mode, alpha);
+                        let mut output = InterleavedImage::new_black(dst.desc());
+                        cpu::apply_on(tier, params, &src, &dst, &mut output);
+                        let reference = scalar(params, &src, &dst);
 
-                    assert!(
-                        pixels_equal(&reference, &dispatched),
-                        "{format} {mode:?} alpha={alpha} width={width}: \
-                         SIMD and scalar differ by {}",
-                        max_pixel_diff(&reference, &dispatched)
-                    );
+                        assert!(
+                            pixels_equal(&reference, &output),
+                            "{tier} {format} {mode:?} alpha={alpha} width={width}: \
+                             kernel and scalar reference differ by {}",
+                            max_pixel_diff(&reference, &output)
+                        );
+                    }
                 }
             }
         }
     }
+}
+
+/// `Add` and `Subtract` clamp by compare-select: a NaN goes to the bound, and a `−0` result of
+/// `Subtract` to `+0`, so `−0 − +0` blended at alpha one is `+0`, not `−0`.
+#[test]
+fn clamps_take_nan_to_the_bound_and_negative_zero_to_positive() {
+    assert_eq!(BlendMode::Add.blend(f32::NAN, 0.25, 1.0), 1.0);
+    assert_eq!(BlendMode::Subtract.blend(f32::NAN, 0.25, 1.0), 0.0);
+    // `blended · 1 + dst · 0`: `+0 · 1 + (−0) · 0 = +0 + −0 = +0`.
+    let zero = BlendMode::Subtract.blend(0.0, -0.0, 1.0);
+    assert_eq!(zero.to_bits(), 0.0f32.to_bits());
+}
+
+/// The scalar reference over every row of `src` and `dst`, past the kernels.
+fn scalar(params: Blend, src: &InterleavedImage, dst: &InterleavedImage) -> InterleavedImage {
+    let mut output = InterleavedImage::new_black(dst.desc());
+    let format = src.desc().color_format();
+    let stride = src.desc().row_byte_len();
+    let rows = src.bytes().chunks(stride).zip(dst.bytes().chunks(stride));
+    for ((src_row, dst_row), out_row) in rows.zip(output.bytes_mut().chunks_mut(stride)) {
+        cpu::internals::scalar_row(params, format, src_row, dst_row, out_row);
+    }
+    output
 }

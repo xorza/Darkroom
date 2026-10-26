@@ -9,11 +9,11 @@ use common::bench::{Kind, Scale};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::scene::{FRAME, Field};
-use crate::simd::Kernel;
-use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::threshold_mask::simd::{ProcessWords, WORD_PIXELS};
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
+use simd::IsaTier;
+use simd::Kernel;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();

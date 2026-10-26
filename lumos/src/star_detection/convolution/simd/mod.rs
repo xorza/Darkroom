@@ -9,8 +9,8 @@
 //! which a fused sum here would undo. The pixels whose window crosses an edge take the scalar
 //! per-pixel form.
 
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 use common::{Size2us, Vec2us};
+use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// The rows a column or 2D convolution reads its taps from: whole rows of an image of `size`, image
 /// row `n` in slot `n` modulo the slots held. A ring of a filter's tap count holds every row a band

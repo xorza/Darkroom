@@ -20,8 +20,8 @@ use crate::image::cfa::demosaic::mosaic_view::MosaicView;
 use crate::image::cfa::demosaic::tiled;
 use crate::image::cfa::demosaic::tiled::{TileKernel, Tiling};
 use crate::memory::footprint::Footprint;
-use crate::simd::{F32x8, Isa, Mask8};
 use common::Size2us;
+use simd::{F32x8, Isa, Mask8};
 
 /// Keeps an inverse-gradient weight finite where a gradient is zero, as librtprocess's `eps`.
 const EPS: f32 = 1e-5;

@@ -6,8 +6,8 @@ use std::cell::OnceCell;
 use std::fmt::Debug;
 use std::iter;
 
-use common::SimdTier;
 use criterion::Throughput;
+use simd::IsaTier;
 
 use crate::color::color_format::ColorFormat;
 #[cfg(feature = "wgpu")]
@@ -31,49 +31,30 @@ pub(crate) fn variant_id(value: impl Debug) -> String {
     format!("{value:?}").to_lowercase()
 }
 
-/// One variant of a kernel an atomic case times: the scalar reference when `kernel` is `None`,
-/// else the kernel compiled for one tier this CPU has, which the case may call.
-#[derive(Debug)]
-pub(crate) struct Variant<K> {
-    pub(crate) name: &'static str,
-    pub(crate) kernel: Option<K>,
+/// One variant of a vector kernel an atomic case times: the scalar reference, or the kernel on one
+/// tier.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Variant<K> {
+    Scalar,
+    Kernel { kernel: K, tier: IsaTier },
 }
 
-impl<K> Variant<K> {
-    /// The scalar reference, then the kernel `table` gives each tier this CPU has, narrowest
-    /// first: one variant for each kernel dispatch may pick.
-    pub(crate) fn all(table: impl Fn(SimdTier) -> Option<K>) -> Vec<Self> {
-        let scalar = Self {
-            name: "scalar",
-            kernel: None,
-        };
-        let tiers = SimdTier::ALL
+impl<K: Copy> Variant<K> {
+    /// The scalar reference, then `kernel` on each tier this CPU has: a case with no kernel times
+    /// the reference alone.
+    pub(crate) fn all(kernel: Option<K>) -> impl Iterator<Item = Self> {
+        let kernels = kernel
             .into_iter()
-            .filter(|tier| tier.is_supported())
-            .filter_map(|tier| {
-                table(tier).map(|kernel| Self {
-                    name: tier_id(tier),
-                    kernel: Some(kernel),
-                })
-            });
-        iter::once(scalar).chain(tiers).collect()
+            .flat_map(|kernel| IsaTier::supported().map(move |tier| Self::Kernel { kernel, tier }));
+        iter::once(Self::Scalar).chain(kernels)
     }
-}
 
-const fn tier_id(tier: SimdTier) -> &'static str {
-    match tier {
-        #[cfg(target_arch = "x86_64")]
-        SimdTier::Sse2 => "sse2",
-        #[cfg(target_arch = "x86_64")]
-        SimdTier::Ssse3 => "ssse3",
-        #[cfg(target_arch = "x86_64")]
-        SimdTier::Sse41 => "sse41",
-        #[cfg(target_arch = "x86_64")]
-        SimdTier::Avx2 => "avx2",
-        #[cfg(target_arch = "x86_64")]
-        SimdTier::Avx2Fma => "avx2_fma",
-        #[cfg(target_arch = "aarch64")]
-        SimdTier::Neon => "neon",
+    /// The variant's part of a case id: `scalar`, or the tier's.
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Self::Scalar => "scalar",
+            Self::Kernel { tier, .. } => tier.id(),
+        }
     }
 }
 

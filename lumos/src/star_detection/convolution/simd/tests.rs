@@ -4,12 +4,12 @@ use common::Buffer2;
 
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::simd::Kernel;
 use crate::star_detection::convolution::internals::convolve_cols;
 use crate::star_detection::convolution::simd::{
     Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, RowRing, mirror_idx,
 };
 use common::Size2us;
+use simd::Kernel;
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
 fn asymmetric_kernel(radius: usize) -> Vec<f32> {

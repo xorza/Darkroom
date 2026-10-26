@@ -19,6 +19,7 @@ use crate::color::color_format::ColorFormat;
 use crate::gpu::gpu_image::GpuImage;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
+use crate::ops::affine_warp::cpu::BilinearKernel;
 #[cfg(feature = "wgpu")]
 use crate::ops::affine_warp::pipeline::GpuAffineWarpPipeline;
 use crate::ops::affine_warp::{AffineWarp, FilterMode, cpu};
@@ -31,25 +32,25 @@ const GPU_ITERATION: Duration = Duration::from_millis(330);
 const FILTERS: [FilterMode; 2] = [FilterMode::Nearest, FilterMode::Bilinear];
 
 /// `atomic/affine_warp/cpu/<variant>/<filter>/<format>`: one 512 × 512 tile through the scalar
-/// reference and each tier's kernel. The kernel takes the image and fans its rows out on rayon,
-/// as dispatch hands it. Per output pixel, reading the tile.
+/// reference and, for a warp with a kernel, that kernel on each tier this CPU has. The rows fan
+/// out on rayon, as dispatch hands them. Per output pixel, reading the tile.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "affine_warp", Scale::Millis);
     for format in ColorFormat::ALL {
         let mut tile = None;
-        let mut output =
-            InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(TILE, TILE), format));
+        let desc = InterleavedDesc::new(Size2us::new(TILE, TILE), format);
+        let mut output = InterleavedImage::new_black(desc);
         group.throughput(fixture::throughput(TILE * TILE, format.byte_len()));
         for filter in FILTERS {
             let warp = rotation(Size2us::new(TILE, TILE), filter);
-            for variant in Variant::all(|tier| cpu::packed_kernel(tier, format, filter)) {
-                let id = BenchmarkId::new(Backend::Cpu.case(variant.name), case_id(filter, format));
+            for variant in Variant::all(BilinearKernel::of(&warp, desc, desc)) {
+                let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), case_id(filter, format));
                 group.bench_function(id, |b| {
                     let tile =
                         tile.get_or_insert_with(|| scene::sky(format, Size2us::new(TILE, TILE), 1));
-                    if let Some(kernel) = variant.kernel {
-                        b.iter(|| unsafe {
-                            kernel(&warp, black_box(tile), black_box(&mut output));
+                    if let Variant::Kernel { tier, .. } = variant {
+                        b.iter(|| {
+                            cpu::apply_on(tier, &warp, black_box(tile), black_box(&mut output));
                         });
                     } else {
                         b.iter(|| {

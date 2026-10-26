@@ -20,8 +20,8 @@ use crate::registration::resample::warp_kernel::internals::bicubic_kernel;
 use crate::registration::resample::warp_kernel::{Filter, WarpKernel};
 use crate::registration::transform::Transform;
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::isa_tier::IsaTier;
 use common::Size2us;
+use simd::IsaTier;
 
 /// One output pixel as the rules define it, in f64 from the f32 tap weights.
 #[derive(Debug, Clone)]

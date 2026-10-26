@@ -12,9 +12,9 @@ use crate::interleaved::interleaved_image::InterleavedImage;
 /// `T` side by side.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PackedSource<'a, T> {
-    /// The samples, which a SIMD kernel loads a tap's channels from at [`Self::tap`].
+    /// The samples, which a vector kernel gathers a tap's channels from.
     pub(super) pixels: &'a [T],
-    size: Size2us,
+    pub(super) size: Size2us,
 }
 
 impl<'a, T: Sample> PackedSource<'a, T> {
@@ -28,7 +28,7 @@ impl<'a, T: Sample> PackedSource<'a, T> {
 
     /// The index of the first of pixel `(x, y)`'s `N` channels, or `None` outside the image.
     #[inline]
-    pub(super) fn tap<const N: usize>(self, x: i32, y: i32) -> Option<usize> {
+    fn tap<const N: usize>(self, x: i32, y: i32) -> Option<usize> {
         let pos = Vec2us::new(usize::try_from(x).ok()?, usize::try_from(y).ok()?);
         self.size.contains(pos).then(|| self.size.idx_of(pos) * N)
     }
@@ -66,11 +66,13 @@ impl<'a, T: Sample> PackedSource<'a, T> {
         let fy = pos.y - fy0;
         let x0 = fx0 as i32;
         let y0 = fy0 as i32;
+        // Saturating: past `i32::MAX` a tap lies outside the image either way.
+        let (x1, y1) = (x0.saturating_add(1), y0.saturating_add(1));
 
         let c00 = self.read::<N>(x0, y0);
-        let c10 = self.read::<N>(x0 + 1, y0);
-        let c01 = self.read::<N>(x0, y0 + 1);
-        let c11 = self.read::<N>(x0 + 1, y0 + 1);
+        let c10 = self.read::<N>(x1, y0);
+        let c01 = self.read::<N>(x0, y1);
+        let c11 = self.read::<N>(x1, y1);
 
         let c0 = mix(c00, c10, fx);
         let c1 = mix(c01, c11, fx);

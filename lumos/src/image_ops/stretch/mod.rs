@@ -52,7 +52,7 @@ use crate::image_ops::error::{AutoStretch, OpError};
 use crate::image_ops::stretch::simd::{AsinhColorPreserve, AsinhPlane};
 use crate::math::statistics::median_mad::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
-use crate::simd::Kernel;
+use ::simd::Kernel;
 
 mod simd;
 

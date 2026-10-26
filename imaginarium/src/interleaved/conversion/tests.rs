@@ -1,5 +1,8 @@
+use simd::IsaTier;
+
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::interleaved::conversion::scalar::{self, Luma};
+use crate::interleaved::conversion::vector_conversion::VectorConversion;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 use crate::internals::create_test_image;
@@ -194,4 +197,123 @@ fn conversion_snapshot() {
         ],
         "a conversion snapshot moved: state why, or find the regression"
     );
+}
+
+/// Every `u8` and every `u16`; for `f32`, the values on both sides of every rounding tie of both
+/// integer scales — `(k + ½) / 255` and `(k + ½) / 65535`, two ulps either way — plus the
+/// values that saturate, NaN and the infinities.
+fn samples(sample_type: SampleType) -> Vec<u8> {
+    match sample_type {
+        SampleType::U8 => (0..=u8::MAX).collect(),
+        SampleType::U16 => bytemuck::cast_slice(&(0..=u16::MAX).collect::<Vec<_>>()).to_vec(),
+        SampleType::F32 => {
+            let mut values = vec![
+                0.0,
+                -0.0,
+                0.5,
+                1.0,
+                f32::MIN_POSITIVE,
+                1e-40,
+                -1e-30,
+                -0.5,
+                1.000_000_1,
+                2.0,
+                1e30,
+                -1e30,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NAN,
+            ];
+            for full_scale in [255.0f64, 65535.0] {
+                for k in 0..65535u32 {
+                    if f64::from(k) >= full_scale {
+                        break;
+                    }
+                    let tie = ((f64::from(k) + 0.5) / full_scale) as f32;
+                    let below = tie.next_down();
+                    let above = tie.next_up();
+                    values.extend([below.next_down(), below, tie, above, above.next_up()]);
+                }
+            }
+            bytemuck::cast_slice(&values).to_vec()
+        }
+    }
+}
+
+/// Widths around every vector width the kernels use (4, 8, 16 and 32 elements, 16 and 32
+/// pixels), so every tail length is reached.
+const WIDTHS: [usize; 17] = [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65];
+
+/// Every vector kernel on every tier this CPU has, against the scalar reference, bit for bit:
+/// once over every source value in one long row, and once per width so every tail length runs.
+#[test]
+fn every_tier_matches_the_scalar_reference() {
+    for tier in IsaTier::supported() {
+        for (from, to) in pairs() {
+            if let Some(kernel) = VectorConversion::of(from, to) {
+                assert_matches_scalar(&tier.to_string(), from, to, |src, dst, width| {
+                    kernel.convert_row(tier, src, dst, width);
+                });
+            }
+        }
+    }
+}
+
+/// The pairs with a vector kernel, on every arch: the six changes of sample type at each of the
+/// three channel counts, and the six changes of channel count in `u8`.
+#[test]
+fn every_vectorized_pair_has_one_kernel() {
+    let pairs = pairs().filter_map(|(from, to)| VectorConversion::of(from, to));
+    let (elements, channels): (Vec<_>, Vec<_>) =
+        pairs.partition(|kernel| matches!(kernel, VectorConversion::Elements(_)));
+    assert_eq!([elements.len(), channels.len()], [18, 6]);
+}
+
+/// Every ordered pair of distinct formats.
+fn pairs() -> impl Iterator<Item = (ColorFormat, ColorFormat)> {
+    ColorFormat::ALL
+        .into_iter()
+        .flat_map(|from| ColorFormat::ALL.map(|to| (from, to)))
+        .filter(|&(from, to)| from != to)
+}
+
+/// `convert`, a row kernel of `from` into `to`, against the scalar reference over [`samples`].
+fn assert_matches_scalar(
+    tier: &str,
+    from: ColorFormat,
+    to: ColorFormat,
+    convert: impl Fn(&[u8], &mut [u8], usize),
+) {
+    // Cycled to fit the widest row; the whole of it is one more row.
+    let mut source = samples(from.sample_type);
+    let widest = WIDTHS[WIDTHS.len() - 1] * from.byte_len();
+    while source.len() < widest {
+        source.extend_from_within(..);
+    }
+    source.truncate(source.len() - source.len() % from.byte_len());
+    let pixels = source.len() / from.byte_len();
+    let widths = WIDTHS.into_iter().chain([pixels]);
+    for (offset, width) in widths.enumerate() {
+        let start = (offset * 7 % (pixels - width + 1)) * from.byte_len();
+        let row = &source[start..start + width * from.byte_len()];
+        // A source row runs on to the end of the image; the kernel must stop at its own.
+        let padded = [row, &[0xA5; 64]].concat();
+        let mut expected = vec![0; width * to.byte_len()];
+        let mut actual = vec![0; width * to.byte_len()];
+        scalar::row_converter(from, to)(&padded, &mut expected, width);
+        convert(&padded, &mut actual, width);
+        assert!(
+            expected == actual,
+            "{tier} {from} -> {to}, width {width}: first difference at byte {}",
+            first_difference(&expected, &actual)
+        );
+    }
+}
+
+fn first_difference(expected: &[u8], actual: &[u8]) -> usize {
+    expected
+        .iter()
+        .zip(actual)
+        .position(|(expected, actual)| expected != actual)
+        .unwrap_or(expected.len())
 }

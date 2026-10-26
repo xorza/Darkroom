@@ -13,7 +13,7 @@ pub(crate) mod data_shape;
 
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::test_rng::TestRng;
-use crate::simd::isa_tier::IsaTier;
+use simd::IsaTier;
 
 /// The inputs every SIMD cross-check runs over. Adding one here covers every kernel at once,
 /// which is the point — the per-module copies could not do that.
@@ -182,7 +182,7 @@ mod tests {
     use crate::internals::simd_check::{
         DATA_SHAPES, SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar,
     };
-    use crate::simd::isa_tier::IsaTier;
+    use simd::IsaTier;
 
     #[test]
     fn every_shape_fills_the_requested_width_and_varies_with_seed() {

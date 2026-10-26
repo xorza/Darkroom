@@ -1,7 +1,7 @@
 use crate::bg_mesh::mesh_surface::simd::{InterpolateSegment, SegmentRamp};
 use crate::bg_mesh::spline::spline_segment::SplineSegment;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::simd::Kernel;
+use simd::Kernel;
 
 /// The absolute terms of `segment.eval(t)`, which bound its rounding error.
 fn eval_magnitude(segment: SplineSegment, t: f32) -> f32 {

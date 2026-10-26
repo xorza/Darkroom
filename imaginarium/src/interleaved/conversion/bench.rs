@@ -11,12 +11,14 @@ use common::bench::{Kind, Scale};
 use crate::bench::fixture::{self, Backend, Variant};
 use crate::bench::scene::{self, FRAME};
 use crate::color::color_format::ColorFormat;
-use crate::interleaved::conversion::{scalar, simd};
+use crate::interleaved::conversion::scalar;
+use crate::interleaved::conversion::vector_conversion::VectorConversion;
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
 
 /// `atomic/convert/cpu/<variant>/<from>/<to>`: one row of the standard frame through the scalar
-/// reference and each tier's kernel. Per pixel, reading the source row.
+/// reference and, for a pair with a vector kernel, that kernel on each tier this CPU has. Per
+/// pixel, reading the source row.
 pub(crate) fn atomic(c: &mut Criterion) {
     let mut group = Kind::Atomic.group(c, "convert", Scale::Micros);
     for from in ColorFormat::ALL {
@@ -25,16 +27,21 @@ pub(crate) fn atomic(c: &mut Criterion) {
             let mut row =
                 InterleavedImage::new_black(InterleavedDesc::new(Size2us::new(FRAME.width, 1), to));
             group.throughput(fixture::throughput(FRAME.width, from.byte_len()));
-            for variant in Variant::all(|tier| simd::tier_converter(tier, from, to)) {
-                let id = BenchmarkId::new(Backend::Cpu.case(variant.name), pair_id(from, to));
+            for variant in Variant::all(VectorConversion::of(from, to)) {
+                let id = BenchmarkId::new(Backend::Cpu.case(variant.id()), pair_id(from, to));
                 group.bench_function(id, |b| {
                     let src = source
                         .get_or_insert_with(|| scene::sky(from, Size2us::new(FRAME.width, 1), 1))
                         .bytes();
                     let dst = row.bytes_mut();
-                    if let Some(kernel) = variant.kernel {
-                        b.iter(|| unsafe {
-                            kernel(black_box(src), black_box(&mut *dst), FRAME.width);
+                    if let Variant::Kernel { kernel, tier } = variant {
+                        b.iter(|| {
+                            kernel.convert_row(
+                                tier,
+                                black_box(src),
+                                black_box(&mut *dst),
+                                FRAME.width,
+                            );
                         });
                     } else {
                         let convert = scalar::row_converter(from, to);

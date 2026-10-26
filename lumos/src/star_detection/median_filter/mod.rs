@@ -3,8 +3,8 @@
 
 pub(super) mod simd;
 
-use crate::simd::Kernel;
 use crate::star_detection::median_filter::simd::MedianRow;
+use ::simd::Kernel;
 
 /// One row's 3×3 neighbourhood: the row, and the rows above and below it where the image has them.
 ///

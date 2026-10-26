@@ -5,7 +5,7 @@
 //! bit for bit, the last partial vector's too.
 
 use crate::bg_mesh::spline::spline_segment::SplineSegment;
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
+use simd::{F32_LANES, F32x8, Isa, Kernel};
 
 /// The spline parameter ramp across a segment: t(i) = `start` + i · `step`.
 #[derive(Debug, Clone, Copy)]

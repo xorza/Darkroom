@@ -9,8 +9,11 @@ Palantir.
 Workspace members, each after the crates it uses:
 
 - **`common`** — the shared base: ids, serialization, cancellation, the 2D
-  grid, CPU features, and every I/O and thread call. A leaf: in-tree it uses
+  grid, and every I/O and thread call. A leaf: in-tree it uses
   only its own derive crate.
+- **`simd`** — every vector instruction of the workspace: the vector types,
+  their ops specified to the bit, and the kernel dispatch. A leaf.
+  `simd/AGENTS.md` holds its decisions.
 - **`scenarium`** — the node-graph framework: the authoring model and the
   compile → plan → execute pipeline.
 - **`imaginarium`** — pixels in both layouts, interleaved and planar, with
@@ -69,7 +72,7 @@ measures. An `atomic` case times one operation on the unit production hands
 it; an `integration` case times a pipeline stage, a frame or a public entry
 point end to end on a scene. An id is `<kind>/<group>/<case>`, and criterion's
 filter selects by it; a crate with GPU cases puts the backend first in every
-case, so `'/cpu/'` opens no device. An `atomic` case of a SIMD kernel runs
+case, so `'/cpu/'` opens no device. An `atomic` case of a vector kernel runs
 for the scalar reference and each tier the CPU has. `cargo drive bench` runs
 the benches of the root it runs in; each submodule runs its own.
 
@@ -85,7 +88,12 @@ the benches of the root it runs in; each submodule runs its own.
   another: rayon has no work isolation, so a worker that waits in an inner loop
   runs other jobs on its stack, and a per-thread scratch is not its own.
   `common::par`'s module doc gives the sources.
-- **Every SIMD kernel has a scalar reference** and a test comparing the two.
+- **Arch code lives in `simd` alone.** No other crate holds `std::arch`,
+  `#[target_feature]` or a `cfg(target_arch)`; `clippy.toml` refuses the
+  register types elsewhere. A kernel is generic over `simd::Isa`.
+- **Every vector kernel is bit-identical to its scalar reference**, and a test
+  holds each tier the CPU has to it, the special values of its inputs
+  included.
 - **`From` and `TryFrom` are lossless.** A conversion that loses data is a
   named method each caller names, as `InterleavedImage::without_alpha`.
 - **Errors are cases, each in its domain**, a foreign error kept as its own

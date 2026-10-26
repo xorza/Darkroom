@@ -1,4 +1,3 @@
-use super::{apply_kernel, row_kernel};
 use crate::color::color_format::{ColorFormat, SampleType};
 use crate::interleaved::interleaved_desc::InterleavedDesc;
 use crate::interleaved::interleaved_image::InterleavedImage;
@@ -6,7 +5,8 @@ use crate::internals::create_test_image;
 use crate::internals::image_diff::{max_pixel_diff, pixels_equal};
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
-use common::{SimdTier, Size2us};
+use common::Size2us;
+use simd::IsaTier;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> InterleavedImage {
@@ -19,9 +19,9 @@ fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Int
     InterleavedImage::new_with_data(desc, bytes).unwrap()
 }
 
-/// Long enough that every kernel the dispatch can pick runs at least one full vector body and then
-/// a tail. The widest contiguous body is 32 `u8` on AVX2, so 37 leaves 5 over; every other body,
-/// contiguous or alpha-preserving, is 16, 8 or 4 items wide, and 37 is one past a multiple of each.
+/// Long enough that every kernel runs whole steps and then a partial one: a step is 32 `u8`, 16
+/// `u16` or 8 `f32` samples, so 37 mono samples leave 5, 5 and 5 over, and 37 RGBA pixels (148
+/// samples) leave 20, 4 and 4.
 const SWEEP_LEN: usize = 37;
 
 /// `contrast = 2.0, brightness = 0.0` folds to `value * 2 - mid`, whose ties
@@ -273,45 +273,55 @@ fn channel_values(image: &InterleavedImage) -> Vec<f32> {
 /// Contrast-only, brightness-only, combined, and clamp-heavy.
 const PARAM_SWEEP: [(f32, f32); 4] = [(2.0, 0.0), (1.0, 0.2), (1.5, 0.1), (0.5, -0.8)];
 
+/// Every tier's kernel agrees with the scalar reference bit for bit, floats included: both
+/// evaluate the same affine in the same order. Width 3 is shorter than any step, 17 whole steps
+/// and a partial one. The float images carry NaN, the infinities, out-of-range values and a
+/// negative zero, in the alpha lanes too, which a kernel keeps as they are.
 #[test]
-fn simd_matches_the_scalar_reference_bit_for_bit() {
-    // Every ISA tier this CPU can run, not just the one dispatch would pick —
-    // otherwise the SSE4.1 kernels go untested on any AVX2 machine. 17x5
-    // exercises each kernel's tail (a width that is no vector's multiple).
-    // Both paths evaluate the same fused affine in the same order, so floats
-    // are held to equality here too, not an epsilon.
-    for tier in SimdTier::ALL {
-        if !tier.is_supported() {
-            eprintln!("SKIPPED: this CPU has no {tier}, so its kernels are not checked");
-            continue;
-        }
+fn every_tier_matches_the_scalar_reference() {
+    for tier in IsaTier::supported() {
         for format in ColorFormat::ALL {
-            let Some(kernel) = row_kernel(tier, format) else {
-                continue;
-            };
+            for width in [3, 17] {
+                let mut input = create_test_image(format, Size2us::new(width, 5), 0);
+                if format.sample_type == SampleType::F32 {
+                    let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
+                    let samples: &mut [f32] = bytemuck::cast_slice_mut(input.bytes_mut());
+                    for (sample, special) in
+                        samples.iter_mut().step_by(3).zip(specials.iter().cycle())
+                    {
+                        *sample = *special;
+                    }
+                }
+                for (contrast, brightness) in PARAM_SWEEP {
+                    let op = ContrastBrightness::new(contrast, brightness);
 
-            for (contrast, brightness) in PARAM_SWEEP {
-                let input = create_test_image(format, Size2us::new(17, 5), 0);
-                let op = ContrastBrightness::new(contrast, brightness);
+                    let mut actual = input.clone();
+                    cpu::apply_on(tier, op, &mut actual);
+                    let expected = scalar(op, &input);
 
-                let mut actual = input.clone();
-                unsafe { apply_kernel(kernel, op, &mut actual) };
-
-                let mut expected = input.clone();
-                cpu::apply_scalar(op, &mut expected);
-
-                let diff = max_pixel_diff(&expected, &actual);
-                assert!(
-                    pixels_equal(&expected, &actual),
-                    "{tier} diverges from the scalar reference for {format} \
-                     (contrast={contrast}, brightness={brightness}): diff={diff}"
-                );
-                // Sanity: the sweep actually transformed the pixels.
-                assert!(
-                    !pixels_equal(&input, &actual),
-                    "params ({contrast}, {brightness}) left {format} unchanged"
-                );
+                    assert!(
+                        pixels_equal(&expected, &actual),
+                        "{tier} diverges from the scalar reference for {format} width {width} \
+                         (contrast={contrast}, brightness={brightness}): diff={}",
+                        max_pixel_diff(&expected, &actual)
+                    );
+                    assert!(
+                        !pixels_equal(&input, &actual),
+                        "params ({contrast}, {brightness}) left {format} unchanged"
+                    );
+                }
             }
         }
     }
+}
+
+/// The scalar reference over every row of `input`, past the kernels.
+fn scalar(op: ContrastBrightness, input: &InterleavedImage) -> InterleavedImage {
+    let mut output = input.clone();
+    let format = input.desc().color_format();
+    let affine = ChannelAffine::new(op, format);
+    for row in output.bytes_mut().chunks_mut(input.desc().row_byte_len()) {
+        cpu::internals::scalar_row(affine, format, row);
+    }
+    output
 }

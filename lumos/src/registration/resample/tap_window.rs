@@ -9,8 +9,8 @@ use crate::registration::resample::flagged_sources::Validity;
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
 use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::warp_kernel::TapAxis;
-use crate::simd::{F32_LANES, F32x8, Isa, Mask8};
 use common::Size2us;
+use simd::{F32_LANES, F32x8, Isa, Mask8};
 
 /// Weight sums over the taps of a window that hold data, the weight of a tap being `L = wₓ·w_y`.
 #[derive(Debug, Clone, Copy, Default)]

@@ -10,11 +10,11 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::bench::scene::{FRAME, Field};
 use crate::math::fwhm;
-use crate::simd::Kernel;
-use crate::simd::isa_tier::IsaTier;
 use crate::star_detection::bench::Stages;
 use crate::star_detection::convolution;
 use crate::star_detection::convolution::simd::ConvolveRow;
+use simd::IsaTier;
+use simd::Kernel;
 
 pub(crate) fn atomic(c: &mut Criterion) {
     let stages = OnceCell::new();

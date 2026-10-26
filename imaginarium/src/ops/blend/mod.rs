@@ -38,34 +38,6 @@ pub enum BlendMode {
     Overlay,
 }
 
-impl BlendMode {
-    /// Combines two normalized `[0, 1]` channel values, then mixes the result
-    /// back over `dst` by `alpha`: `blended * alpha + dst * (1 - alpha)`.
-    ///
-    /// Every CPU backend routes through this: the scalar path per channel, the
-    /// SIMD kernels for their sub-vector tails, so a tail can never disagree
-    /// with the vector body it follows. The result is left unclamped — each
-    /// storage type clamps to its own range on write.
-    #[inline]
-    fn blend(self, src: f32, dst: f32, alpha: f32) -> f32 {
-        let blended = match self {
-            Self::Normal => src,
-            Self::Add => (src + dst).min(1.0),
-            Self::Subtract => (dst - src).max(0.0),
-            Self::Multiply => src * dst,
-            Self::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
-            Self::Overlay => {
-                if dst < 0.5 {
-                    2.0 * src * dst
-                } else {
-                    1.0 - 2.0 * (1.0 - src) * (1.0 - dst)
-                }
-            }
-        };
-        blended * alpha + dst * (1.0 - alpha)
-    }
-}
-
 /// Parameters for image blending.
 #[derive(Debug, Clone, Copy)]
 pub struct Blend {
@@ -140,3 +112,42 @@ impl Blend {
 
 #[cfg(feature = "internals")]
 pub(crate) mod bench;
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use crate::ops::blend::BlendMode;
+
+    impl BlendMode {
+        /// Combines two normalized `[0, 1]` channel values, then mixes the result
+        /// back over `dst` by `alpha`: `blended * alpha + dst * (1 - alpha)`.
+        ///
+        /// The scalar reference, which the vector kernels hold to the bit. The clamps of `Add` and
+        /// `Subtract` are compare-selects, which take a NaN to the bound and `−0` to `+0` on every
+        /// CPU, where `f32::min` and `f32::max` leave a signed zero's sign open. The result is left
+        /// unclamped — each storage type clamps to its own range on write.
+        #[inline]
+        pub(crate) fn blend(self, src: f32, dst: f32, alpha: f32) -> f32 {
+            let blended = match self {
+                Self::Normal => src,
+                Self::Add => {
+                    let sum = src + dst;
+                    if 1.0 > sum { sum } else { 1.0 }
+                }
+                Self::Subtract => {
+                    let difference = dst - src;
+                    if difference > 0.0 { difference } else { 0.0 }
+                }
+                Self::Multiply => src * dst,
+                Self::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
+                Self::Overlay => {
+                    if dst < 0.5 {
+                        2.0 * src * dst
+                    } else {
+                        1.0 - 2.0 * (1.0 - src) * (1.0 - dst)
+                    }
+                }
+            };
+            blended * alpha + dst * (1.0 - alpha)
+        }
+    }
+}

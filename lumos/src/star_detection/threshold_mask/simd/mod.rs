@@ -1,7 +1,7 @@
 //! The packed threshold kernel: each `u64` word holds 64 pixels' comparisons.
 
-use crate::simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
 use crate::star_detection::threshold_mask::threshold_params::ThresholdParams;
+use simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
 
 /// Pixels per packed word.
 const WORD_PIXELS: usize = 64;

@@ -12,17 +12,14 @@ use crate::pipeline::light_shape::LightShape;
 
 /// Where a registered stack's lights come from.
 #[derive(Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one per run; boxing the files would buy an indirection and save nothing"
-)]
 pub(super) enum LightSource<'a, P> {
     /// Frames the caller decoded and handed over. They were in memory before the run read the
     /// machine, so the plan charges them only what the run adds, and they stay resident whatever
     /// the tier: spilling them would be a write and a read-back for nothing.
     Held(Vec<LinearImage>),
-    /// Lights read from files, each made ready on a worker.
-    Files(LightFiles<'a, P>),
+    /// Lights read from files, each made ready on a worker. Boxed: the files' readers and
+    /// preparation are far larger than the held frames' `Vec`, by a margin that differs per target.
+    Files(Box<LightFiles<'a, P>>),
 }
 
 impl<P: AsRef<Path> + Sync> LightSource<'_, P> {

@@ -11,7 +11,7 @@ use crate::bg_mesh::mesh_surface::simd::{InterpolateSegment, SegmentRamp};
 use crate::bg_mesh::spline::natural_spline::NaturalSpline;
 use crate::bg_mesh::spline::spline_segment::{SplineNode, SplineSegment};
 use crate::scratch_pool::{Pooled, Scratch, ScratchPool, Shapeless};
-use crate::simd::Kernel;
+use ::simd::Kernel;
 use common::{Size2us, Vec2us};
 
 /// One component of a mesh — its sky or its σ — as the natural bicubic spline through the tile

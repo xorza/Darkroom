@@ -1,8 +1,9 @@
 use super::*;
-use crate::interleaved::interleaved_desc::InterleavedDesc;
+use crate::color::color_format::ColorFormat;
 use crate::internals::create_test_image;
 use crate::internals::image_diff::pixels_equal;
 use common::Size2us;
+use glam::Vec2;
 
 fn image_u8(size: Size2us, fmt: ColorFormat, bytes: Vec<u8>) -> InterleavedImage {
     InterleavedImage::new_with_data(InterleavedDesc::new(size, fmt), bytes).unwrap()
@@ -167,36 +168,68 @@ fn test_filter_modes_differ_on_upscale() {
     assert_ne!(nearest.bytes(), bilinear.bytes());
 }
 
-/// Every SIMD kernel is bit-identical to the scalar reference it specializes, at
-/// every tier the CPU has: the vector path interpolates in the same order and the
-/// same native units, so there is nothing to round differently.
+/// Every kernel is bit-identical to the scalar reference on every tier: it finds each position
+/// and tap as the reference does and interpolates in the same order and the same native units,
+/// so there is nothing to round differently.
 ///
-/// The rotation and the non-multiple-of-4 width hit interior, edge and
-/// out-of-bounds taps. Formats with no kernel here — mono, and everything when the
-/// CPU lacks SSE4.1 — dispatch to the reference itself and are skipped.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+/// The rotation hits interior, edge and out-of-bounds taps, the image's last pixel among them,
+/// whose reads run past the end; the scales sample into an output of another size, the upscale
+/// every edge pixel. The widths leave a partial group of every kernel, and 3 is shorter than
+/// any. Mono, which has no kernel, takes the reference itself.
 #[test]
-fn simd_matches_scalar_reference() {
+fn every_tier_matches_the_scalar_reference() {
+    let rotation = AffineWarp::new().rotate_around(0.7, Vec2::new(18.5, 9.5));
+    let upscale = AffineWarp::new().scale(Vec2::splat(2.0));
+    let downscale = AffineWarp::new().scale(Vec2::new(0.5, 0.75));
+    for tier in IsaTier::supported() {
+        for format in ColorFormat::ALL {
+            for width in [3, 13, 37, 70] {
+                let input = create_test_image(format, Size2us::new(width, 19), 7);
+                for (warp, output) in [
+                    (rotation, Size2us::new(width, 19)),
+                    (upscale, Size2us::new(2 * width, 38)),
+                    (downscale, Size2us::new(width.div_ceil(2), 15)),
+                ] {
+                    let warp = warp.filter(FilterMode::Bilinear);
+                    let desc = InterleavedDesc::new(output, format);
+                    let mut scalar = InterleavedImage::new_black(desc);
+                    let mut kernel = InterleavedImage::new_black(desc);
+
+                    apply_scalar(&warp, &input, &mut scalar);
+                    apply_on(tier, &warp, &input, &mut kernel);
+
+                    assert!(
+                        pixels_equal(&scalar, &kernel),
+                        "{tier} diverged from the scalar reference for {format}, width {width}, \
+                         {warp:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A float image's NaN, infinities and out-of-range samples interpolate as the reference
+/// interpolates them, in every lane of the transposed loads.
+#[test]
+fn special_floats_interpolate_as_the_reference() {
     let warp = AffineWarp::new()
-        .rotate_around(0.7, Vec2::new(18.5, 9.5))
+        .rotate_around(0.3, Vec2::new(10.0, 4.0))
         .filter(FilterMode::Bilinear);
-
-    let tiers = SimdTier::ALL.into_iter().filter(|tier| tier.is_supported());
-    for (tier, format) in tiers.flat_map(|tier| ColorFormat::ALL.map(|format| (tier, format))) {
-        let Some(kernel) = packed_kernel(tier, format, warp.filter) else {
-            continue;
-        };
-        let input = create_test_image(format, Size2us::new(37, 19), 7);
+    for format in [ColorFormat::RGB_F32, ColorFormat::RGBA_F32] {
+        let mut input = create_test_image(format, Size2us::new(21, 9), 3);
+        let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
+        let samples: &mut [f32] = bytemuck::cast_slice_mut(input.bytes_mut());
+        for (sample, special) in samples.iter_mut().step_by(7).zip(specials.iter().cycle()) {
+            *sample = *special;
+        }
         let mut scalar = InterleavedImage::new_black(input.desc());
-        let mut simd = InterleavedImage::new_black(input.desc());
-
         apply_scalar(&warp, &input, &mut scalar);
-        unsafe { kernel(&warp, &input, &mut simd) };
-
-        assert!(
-            pixels_equal(&scalar, &simd),
-            "{tier} diverged from the scalar reference for {format}"
-        );
+        for tier in IsaTier::supported() {
+            let mut output = InterleavedImage::new_black(input.desc());
+            apply_on(tier, &warp, &input, &mut output);
+            assert!(pixels_equal(&scalar, &output), "{tier} {format}");
+        }
     }
 }
 

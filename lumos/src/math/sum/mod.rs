@@ -14,7 +14,7 @@ mod weighted_sums;
 
 use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
 use crate::math::sum::weighted_sums::WeightedSums;
-use crate::simd::{F32_LANES, Kernel};
+use ::simd::{F32_LANES, Kernel};
 
 /// Sum f32 values, returning the unrounded f64 total.
 ///

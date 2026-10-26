@@ -32,8 +32,8 @@ use crate::registration::resample::tap_window::{TapWindow, WindowWeights};
 use crate::registration::resample::warp_config::WarpConfig;
 use crate::registration::resample::warp_kernel::{Filter, TapAxis, WarpKernel};
 use crate::registration::warp_transform::WarpTransform;
-use crate::simd::{Isa, Kernel};
 use common::Size2us;
+use simd::{Isa, Kernel};
 
 /// How a frame's pixels are sampled.
 #[derive(Debug, Clone, Copy)]

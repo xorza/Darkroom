@@ -6,7 +6,7 @@
 //! numerator, so unit weights reproduce the plain sum bit for bit.
 
 use crate::math::sum::weighted_sums::WeightedSums;
-use crate::simd::{F32_LANES, F32x8, F64x4, Isa, Kernel};
+use simd::{F32_LANES, F32x8, F64x4, Isa, Kernel};
 
 /// `Σ values` in f64, unrounded.
 #[derive(Debug)]
