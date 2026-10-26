@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use palantir::{HostHandle, Ui};
+use palantir::Ui;
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
@@ -12,16 +12,16 @@ use scenarium::NodeId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::error::PreferencesLoadError;
+use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{LaunchSource, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
-use crate::core::wake::Wake;
-use crate::gui::MAIN_WINDOW;
+use crate::gui::app::app_host::AppHost;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
-use crate::gui::dialogs;
+use crate::gui::dialogs::Dialogs;
 use crate::gui::frame::app_command::{
     AppCommand, EditCommand, FileCommand, MlModelKind, PathPick, PreferencesCommand, RunCommand,
 };
@@ -32,8 +32,11 @@ use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::{RunFeed, RunState};
 use crate::gui::theme::Theme;
 
+pub(crate) mod app_host;
 mod discard_dialog;
 mod error;
+#[cfg(feature = "internals")]
+pub(crate) mod offscreen_signals;
 pub(crate) mod session;
 
 /// The editor shell: it owns the open document and the runtime services
@@ -64,16 +67,17 @@ pub(crate) struct App {
     /// whoever is reporting.
     status: StatusLog,
     theme: Theme,
-    host_handle: HostHandle<Self>,
+    host: AppHost,
     /// Persisted session state: the last document, the window, the viewer
     /// and model choices. Written on every change through
     /// [`Self::save_preferences`], so the next launch reopens where the user
     /// left off.
     preferences: Preferences,
-    /// False when the preferences file existed but could not be read: the
-    /// file stays as the user has it, and this session's changes stay in
-    /// memory.
-    preferences_writable: bool,
+    /// Where [`Self::preferences`] persist: [`PreferencesStore::Memory`] when the file existed
+    /// but could not be read, so the file stays as the user has it.
+    preferences_store: PreferencesStore,
+    /// Where path picks are answered: native dialogs, or a harness script.
+    dialogs: Dialogs,
     /// The document-replacing transition waiting on the unsaved-changes
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
@@ -124,11 +128,15 @@ impl PendingTransition {
 /// What the app is launched with, read before its window exists.
 #[derive(Debug)]
 pub(crate) struct LaunchInputs {
-    /// The preferences as loaded; a failure leaves the session on defaults it
+    /// The preferences as `store` loaded them; a failure leaves the session on defaults it
     /// does not save.
     pub(crate) preferences: Result<Preferences, PreferencesLoadError>,
+    /// Where the preferences came from, and where they persist.
+    pub(crate) store: PreferencesStore,
     /// The document the command line named, if it named one.
     pub(crate) document: Option<PathBuf>,
+    /// Where path picks are answered.
+    pub(crate) dialogs: Dialogs,
 }
 
 impl App {
@@ -138,29 +146,28 @@ impl App {
     /// and are retained in the shared status log rather than blocking launch.
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
-    /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(ui: &mut Ui, handle: HostHandle<Self>, launch: LaunchInputs) -> Self {
+    /// `Ui` + host handle exist (before the first frame); the harness calls it over its own host.
+    pub(crate) fn new(ui: &mut Ui, host: AppHost, launch: LaunchInputs) -> Self {
         let LaunchInputs {
             preferences,
+            store,
             document,
+            dialogs,
         } = launch;
-        // The worker and the preview converter wake the winit loop via the
-        // host handle (see `crate::core::wake`).
-        let wake: Wake = {
-            let handle = handle.clone();
-            Arc::new(move || handle.request_repaint(MAIN_WINDOW))
-        };
-        // `preferences` is loaded in `run_gui` before the window exists, so
+        let wake = host.wake();
+        // `preferences` is loaded in `run` before the window exists, so
         // its saved geometry can size the window at creation.
         let mut status = StatusLog::default();
-        let preferences_writable = preferences.is_ok();
-        let mut preferences = preferences.unwrap_or_else(|error| {
-            status.error(
-                StatusFamily::Preferences,
-                format!("{error}; this session's settings are not saved"),
-            );
-            Preferences::default()
-        });
+        let (mut preferences, preferences_store) = match preferences {
+            Ok(preferences) => (preferences, store),
+            Err(error) => {
+                status.error(
+                    StatusFamily::Preferences,
+                    format!("{error}; this session's settings are not saved"),
+                );
+                (Preferences::default(), PreferencesStore::Memory)
+            }
+        };
         let run_state = RunState::new(Arc::clone(&wake));
         let mut runtime = RuntimeHost::new(wake, &preferences);
         let remembered = preferences.document_path.clone();
@@ -179,9 +186,10 @@ impl App {
             run_state,
             status,
             theme: Theme::default(),
-            host_handle: handle,
+            host,
             preferences,
-            preferences_writable,
+            preferences_store,
+            dialogs,
             confirm_discard: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
@@ -266,7 +274,7 @@ impl App {
     /// saves in [`Self::handle_close_request`] instead.
     fn quit(&mut self) {
         self.save_preferences();
-        self.host_handle.quit();
+        self.host.quit();
     }
 
     /// Whether a destructive transition has to prompt before proceeding:
@@ -381,10 +389,10 @@ impl App {
     fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let picked = match pick.config.mode {
-            FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions).map(fs_path),
-            FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(fs_paths),
-            FsPathMode::NewFile => dialogs::pick_new_file(&extensions).map(fs_path),
-            FsPathMode::Dir => dialogs::pick_dir().map(fs_path),
+            FsPathMode::ExistingFile => self.dialogs.existing_file(&extensions).map(fs_path),
+            FsPathMode::ExistingFiles => self.dialogs.existing_files(&extensions).map(fs_paths),
+            FsPathMode::NewFile => self.dialogs.new_file(&extensions).map(fs_path),
+            FsPathMode::Dir => self.dialogs.dir().map(fs_path),
         };
         let value = match picked {
             None => return Relayout::NotNeeded,
@@ -409,7 +417,10 @@ impl App {
     /// the guard cleared, so cancelling the unsaved-changes prompt never costs
     /// the user a file choice.
     fn load_picked_document(&mut self) {
-        if let Some(path) = dialogs::pick_project_open_path(self.session.open.path.as_deref()) {
+        if let Some(path) = self
+            .dialogs
+            .project_open_path(self.session.open.path.as_deref())
+        {
             self.load_document(&path);
         }
     }
@@ -483,7 +494,10 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = dialogs::pick_project_save_path(self.session.open.path.as_deref()) {
+        if let Some(path) = self
+            .dialogs
+            .project_save_path(self.session.open.path.as_deref())
+        {
             self.save_document(&path);
         }
     }
@@ -524,10 +538,10 @@ impl App {
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
     fn save_preferences(&mut self) {
-        if !self.preferences_writable {
+        let PreferencesStore::File(path) = &self.preferences_store else {
             return;
-        }
-        match self.preferences.save() {
+        };
+        match self.preferences.save_to(path) {
             Ok(()) => self.status.succeeded(StatusFamily::Preferences),
             Err(err) => self
                 .status
@@ -536,7 +550,7 @@ impl App {
     }
 
     fn pick_ml_model(&mut self, kind: MlModelKind) {
-        if let Some(path) = dialogs::pick_existing_file(&["onnx"]) {
+        if let Some(path) = self.dialogs.existing_file(&["onnx"]) {
             self.set_ml_model_path(kind, path);
         }
     }
@@ -767,5 +781,87 @@ mod tests {
         let held = pending.clone();
         assert_eq!(held, PendingTransition::OpenAt(path));
         assert_eq!(held, pending, "surviving the guard costs the path nothing");
+    }
+
+    /// An app on the harness's host: a scripted Open dialog opens the answered document; with a
+    /// file store the open is remembered in that file, and with the memory store nothing is
+    /// written. A file store whose load failed runs as the memory store, so the file stays as the
+    /// user has it, and the status line says so.
+    #[test]
+    fn a_scripted_open_loads_the_answer_and_the_store_decides_what_persists() {
+        use std::collections::VecDeque;
+
+        use std::io;
+
+        use common::{TempDir, fs};
+        use glam::UVec2;
+        use palantir::internals::ui_harness::UiHarness;
+
+        use crate::gui::app::offscreen_signals::OffscreenSignals;
+        use crate::gui::dialogs::DialogAnswer;
+
+        let dir = TempDir::new("darkroom-scripted-open");
+        let document = dir.join("scene.darkroom");
+        OpenDocument::default().save_to(&document).unwrap();
+        let preferences_file = dir.join("darkroom.preferences.ron");
+
+        let unreadable = || PreferencesLoadError::Read {
+            path: preferences_file.clone(),
+            source: io::Error::other("unreadable"),
+        };
+        for (store, preferences) in [
+            (
+                PreferencesStore::File(preferences_file.clone()),
+                Ok(Preferences::default()),
+            ),
+            (PreferencesStore::Memory, Ok(Preferences::default())),
+            (
+                PreferencesStore::File(preferences_file.clone()),
+                Err(unreadable()),
+            ),
+        ] {
+            let failed = preferences.is_err();
+            if store == PreferencesStore::Memory || failed {
+                // Left by the file store's round; gone, so any write would show.
+                fs::remove_file(&preferences_file).ok();
+            }
+            let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+            let mut app = App::new(
+                ui.ui(),
+                AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
+                LaunchInputs {
+                    preferences,
+                    store: store.clone(),
+                    document: None,
+                    dialogs: Dialogs::Scripted(VecDeque::from([DialogAnswer::Path(
+                        document.clone(),
+                    )])),
+                },
+            );
+            assert_eq!(app.session.open.path, None, "{store:?}: launched empty");
+            let _ = app.run_command(AppCommand::File(FileCommand::Open));
+            assert_eq!(app.session.open.path.as_ref(), Some(&document), "{store:?}");
+            if failed {
+                assert_eq!(app.preferences_store, PreferencesStore::Memory);
+                assert!(
+                    app.status
+                        .cur()
+                        .is_some_and(|message| message.line.contains("settings are not saved")),
+                    "the status line says the settings are not saved: {:?}",
+                    app.status.cur()
+                );
+            }
+            match store {
+                PreferencesStore::File(_) if !failed => assert_eq!(
+                    store.load().unwrap().document_path,
+                    Some(document.clone()),
+                    "the file store remembers the open"
+                ),
+                _ => assert!(
+                    !fs::exists(&preferences_file),
+                    "{store:?}, failed {failed}: nothing is written"
+                ),
+            }
+        }
     }
 }

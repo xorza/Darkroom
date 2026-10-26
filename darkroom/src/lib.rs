@@ -13,8 +13,11 @@ use common::is_debug;
 use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
 
 use crate::core::io::preferences::Preferences;
+use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::app_host::AppHost;
 use crate::gui::app::{App, LaunchInputs};
+use crate::gui::dialogs::Dialogs;
 
 /// Launch the Palantir desktop editor on `document` (the command-line
 /// argument, if there was one). The winit event loop owns the main thread, so
@@ -24,7 +27,8 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
-    let preferences = Preferences::load();
+    let store = PreferencesStore::user();
+    let preferences = store.load();
     // Reverse-DNS, and exactly the basename of
     // `packaging/linux/com.cssodessa.darkroom.desktop` — that equality is what
     // ties the window to its launcher entry, so the shell groups the two and
@@ -56,10 +60,12 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
 
             App::new(
                 ui,
-                handle,
+                AppHost::Window(handle),
                 LaunchInputs {
                     preferences,
+                    store,
                     document,
+                    dialogs: Dialogs::Native,
                 },
             )
         })?;

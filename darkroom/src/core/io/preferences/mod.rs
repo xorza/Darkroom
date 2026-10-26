@@ -1,4 +1,5 @@
 pub(crate) mod error;
+pub(crate) mod preferences_store;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -111,14 +112,9 @@ impl Default for Preferences {
 }
 
 impl Preferences {
-    /// Read the preferences from the configuration directory. A missing file
-    /// is a first run, and reads as the defaults; a file that cannot be read
-    /// or parsed is an error, so the caller can report it and leave the file
-    /// as the user has it.
-    pub(crate) fn load() -> Result<Self, PreferencesLoadError> {
-        Self::load_from(&path())
-    }
-
+    /// Read the preferences from `path`. A missing file is a first run, and
+    /// reads as the defaults; a file that cannot be read or parsed is an error,
+    /// so the caller can report it and leave the file as the user has it.
     fn load_from(path: &Path) -> Result<Self, PreferencesLoadError> {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
@@ -138,14 +134,9 @@ impl Preferences {
             })
     }
 
-    /// Write the preferences to the configuration directory. A failed
-    /// persist is the caller's to surface: it shouldn't interrupt the user's
-    /// session.
-    pub(crate) fn save(&self) -> Result<(), PreferencesSaveError> {
-        self.save_to(&path())
-    }
-
-    fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
+    /// Write the preferences to `path`. A failed persist is the caller's to
+    /// surface: it shouldn't interrupt the user's session.
+    pub(crate) fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
         let bytes = SerdeFormat::Ron.serialize(self)?;
         // Nothing has created the configuration directory on a first run, and
         // publication needs it to exist to place its temporary file beside the
