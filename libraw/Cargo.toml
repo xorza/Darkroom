@@ -2,7 +2,8 @@
 name = "libraw"
 version.workspace = true
 edition.workspace = true
-description = "A safe wrapper over LibRaw: a camera RAW file opened from memory, its sensor data unpacked, what LibRaw states of it, and LibRaw's own processing."
+description = "A safe wrapper over LibRaw, built statically from the vendored LibRaw submodule: a camera RAW file opened from memory, its sensor data unpacked, what LibRaw states of it, and LibRaw's own processing."
+links = "raw"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [lints]
@@ -15,8 +16,14 @@ internals = []
 
 [dependencies]
 common = { workspace = true }
-libraw-sys = { workspace = true }
 thiserror = { workspace = true }
+# zlib for LibRaw's `USE_ZLIB`: deflate-compressed DNG. Built from its own sources, so every
+# platform decodes the same files and the build needs no system zlib.
+libz-sys = { workspace = true, features = ["static"] }
+
+[build-dependencies]
+cc = { workspace = true }
+bindgen = { workspace = true, features = ["prettyplease", "runtime"] }
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }

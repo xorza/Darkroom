@@ -6,7 +6,6 @@ members = [
     "simd",
     "imaginarium",
     "lumos",
-    "libraw-sys",
     "libraw",
     "lens",
     "darkroom",
@@ -34,7 +33,7 @@ bench = "--features imaginarium/wgpu"
 
 # A host never compiles `simd`'s backend of the other architecture, so a change to it runs the
 # lint for that one: `lint-x86` from an arm64 host, `lint-aarch64` from an x86 one, each after
-# `rustup target add` of its target. Not `cross-lint`, which lints every member: `libraw-sys`
+# `rustup target add` of its target. Not `cross-lint`, which lints every member: `libraw`
 # builds LibRaw's C++ for the target. The target's own rustflags join the root's `target-cpu`,
 # where `RUSTFLAGS` would replace it.
 [workspace.metadata.drive.commands.lint-x86]
@@ -59,7 +58,6 @@ darkroom = { path = "darkroom" }
 palantir = { path = "palantir" }
 imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
-libraw-sys = { path = "libraw-sys" }
 libraw = { path = "libraw" }
 
 serde = { version = "1.0", default-features = false }
@@ -125,9 +123,6 @@ debug = "line-tables-only"
 [profile.dev.package.fits-well]
 opt-level = 1
 debug = "line-tables-only"
-
-[profile.dev.package.libraw-sys]
-opt-level = 3
 
 # `objc2` debug assertions allocate on every Metal message send.
 [profile.dev.package.objc2]

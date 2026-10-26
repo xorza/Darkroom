@@ -1,9 +1,9 @@
 //! [`SensorLayout`]: where a RAW file's visible window sits inside LibRaw's raw buffer.
 
 use common::{Size2us, Vec2us};
-use libraw_sys as sys;
 
 use crate::error::LibrawError;
+use crate::sys;
 
 /// The visible window inside a raw frame: where it starts, how big it is, and the extent of the
 /// buffer it sits in, which spans the masked margins as well.

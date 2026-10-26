@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, mem, slice};
 
 use common::CancelToken;
-use libraw_sys as sys;
 
 use crate::capture::Capture;
 use crate::codec_facts::{CodecFacts, CrxCoding};
@@ -18,6 +17,7 @@ use crate::image_data::{self, ImageData};
 use crate::process_params::ProcessParams;
 use crate::processed_image::ProcessedImage;
 use crate::sensor_layout::SensorLayout;
+use crate::{shim, sys};
 
 /// One open LibRaw instance, the file bytes it parses in place, and the state its callbacks
 /// write.
@@ -187,9 +187,10 @@ impl Libraw {
             };
             (
                 name,
-                sys::libraw_lumos_is_floating_point(handle) != 0,
-                sys::libraw_lumos_fuji_lossless(handle) != 0,
-                sys::libraw_lumos_crx_coding(handle, &raw mut enc_type, &raw mut image_levels) != 0,
+                shim::libraw_lumos_is_floating_point(handle) != 0,
+                shim::libraw_lumos_fuji_lossless(handle) != 0,
+                shim::libraw_lumos_crx_coding(handle, &raw mut enc_type, &raw mut image_levels)
+                    != 0,
             )
         };
         CodecFacts {
@@ -209,7 +210,7 @@ impl Libraw {
     pub fn camera_clock(&self) -> Option<String> {
         let mut text: [c_char; 20] = [0; 20];
         let written = unsafe {
-            sys::libraw_lumos_camera_clock(self.handle.as_ptr(), text.as_mut_ptr(), text.len())
+            shim::libraw_lumos_camera_clock(self.handle.as_ptr(), text.as_mut_ptr(), text.len())
         };
         (written != 0).then(|| {
             unsafe { CStr::from_ptr(text.as_ptr()) }
@@ -220,7 +221,7 @@ impl Libraw {
 
     /// Whether the sensor is a Fuji SuperCCD, its photosites laid out 45° to the rows.
     pub fn super_ccd(&self) -> bool {
-        unsafe { sys::libraw_lumos_fuji_width(self.handle.as_ptr()) != 0 }
+        unsafe { shim::libraw_lumos_fuji_width(self.handle.as_ptr()) != 0 }
     }
 
     /// Decode the sensor data, a decoder that parallelizes itself on `threads` threads.
@@ -232,7 +233,7 @@ impl Libraw {
     pub fn unpack(&mut self, threads: usize) -> Result<(), LibrawError> {
         let threads = c_int::try_from(threads.max(1)).unwrap_or(c_int::MAX);
         let code = unsafe {
-            sys::libraw_lumos_set_decode_threads(threads);
+            shim::libraw_lumos_set_decode_threads(threads);
             sys::libraw_unpack(self.handle.as_ptr())
         };
         if let Some(code) = LibrawCode::of(code) {
@@ -337,10 +338,10 @@ unsafe extern "C" fn poll_cancel(
 #[cfg(feature = "internals")]
 pub mod internals {
     use common::{Buffer2, CancelToken};
-    use libraw_sys as sys;
 
     use crate::error::{LibrawCode, LibrawError};
     use crate::libraw::Libraw;
+    use crate::sys;
 
     /// What LibRaw's `open_bayer` reads a synthetic sensor dump as, beside its samples.
     #[derive(Debug, Clone, Copy, Default)]

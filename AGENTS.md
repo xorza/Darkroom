@@ -18,8 +18,9 @@ Workspace members, each after the crates it uses:
   compile → plan → execute pipeline.
 - **`imaginarium`** — pixels in both layouts, interleaved and planar, with
   their codecs and ops, on the CPU and, behind a feature, the GPU.
-- **`libraw`** — a safe wrapper over LibRaw: every `unsafe` call into
-  `libraw-sys`, and LibRaw's state read as plain Rust values.
+- **`libraw`** — a safe wrapper over LibRaw: LibRaw built statically from its
+  submodule, every `unsafe` call into it, and LibRaw's state read as plain
+  Rust values.
 - **`lumos`** — the astronomical image-processing pipeline.
 - **`lens`** — the node-function library: application nodes and adapters from
   `imaginarium` and `lumos`.
@@ -32,7 +33,7 @@ profiles. Run cargo for them from their own directory, and keep their
 `Cargo.toml` valid in a standalone checkout — never inherit from this
 workspace.
 
-`libraw-sys/LibRaw` is upstream LibRaw at a release tag; never edit it.
+`libraw/LibRaw` is upstream LibRaw at a release tag; never edit it.
 Bindgen needs libclang: Xcode tools on macOS, `winget install LLVM.LLVM` on
 Windows, `libclang-dev` on Linux.
 
