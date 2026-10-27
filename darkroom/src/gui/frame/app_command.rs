@@ -12,6 +12,8 @@ use std::sync::Arc;
 use lens::MlModelPaths;
 use scenarium::{FsPathConfig, InputPort, NodeId};
 
+use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
+
 /// A command a UI surface (the menu bar, the keyboard chords, the graph
 /// toolbar, a node's header chips and context menu, an inline path-picker, the
 /// Preferences tab, a viewer's toolbar) hands to `App`. The producing UI never
@@ -31,8 +33,12 @@ pub(crate) enum AppCommand {
     Preferences(PreferencesCommand),
     /// Node edits raised via a dialog.
     Edit(EditCommand),
-    /// An image of the window.
+    /// An image of the window, and where the graph's camera looks.
     View(ViewCommand),
+    /// Take back the last entry of the undo history, as Ctrl+Z does.
+    Undo,
+    /// Replay the last undone entry, as Ctrl+Shift+Z does.
+    Redo,
     /// Quit the app, through the unsaved-changes prompt.
     Quit,
 }
@@ -53,13 +59,17 @@ pub(crate) enum FileCommand {
     SaveAsCompressed,
 }
 
-/// An image of the whole window as the next frame paints it.
+/// What the window shows: an image of it as the next frame paints it, and where the graph's
+/// camera looks.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ViewCommand {
-    /// Put it on the clipboard.
+    /// Put the image on the clipboard.
     CopyImage,
-    /// Prompt for a file and save it there as a PNG.
+    /// Prompt for a file and save the image there as a PNG.
     SaveImage,
+    /// Frame the graph as the canvas toolbar's button does, from a surface outside the canvas.
+    /// The canvas raises the camera move in its next prepass, over that frame's selection.
+    Frame(Framing),
 }
 
 /// Graph execution + the worker event loop. Commands only request work;

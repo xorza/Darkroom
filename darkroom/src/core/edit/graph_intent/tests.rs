@@ -414,6 +414,53 @@ fn duplicate_skips_a_selected_stub() {
         .expect("a duplicate leaves a valid document");
 }
 
+/// A new node whose name is taken takes the next free number, through an add and through a
+/// duplicate alike: the fixture's node, its copy, then a copy of both.
+#[test]
+fn a_new_node_takes_a_free_name() {
+    let mut fixture = DocumentFixture::default();
+    let original = fixture.node_at(Vec2::ZERO);
+    let DocumentFixture {
+        mut document,
+        library,
+    } = fixture;
+    let name = document.graph.find(original).unwrap().name.clone();
+    let names = |document: &Document| {
+        let mut names: Vec<String> = document
+            .graph
+            .iter()
+            .map(|node| node.name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+
+    let node = document.graph.find(original).unwrap().clone();
+    commit_all(
+        &mut document,
+        &library,
+        [GraphIntent::add_node(Vec2::ONE, NodeId::unique(), node)],
+    );
+    assert_eq!(names(&document), [name.clone(), format!("{name} 2")]);
+
+    document.main_view.selected = document
+        .graph
+        .iter()
+        .map(|node| ItemId::Node(node.node_id))
+        .collect();
+    let intents = GraphIntent::duplicate(&document, &library, IncomingWires::Drop, counter());
+    commit_all(&mut document, &library, intents);
+    assert_eq!(
+        names(&document),
+        [
+            name.clone(),
+            format!("{name} 2"),
+            format!("{name} 3"),
+            format!("{name} 4"),
+        ]
+    );
+}
+
 /// A new node's depth is fixed when its step is built, not when the step is
 /// written — so replaying history puts it back where it was rather than in
 /// front of whatever has arrived since.

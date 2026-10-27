@@ -97,14 +97,9 @@ pub(crate) fn preview_image(node_id: NodeId) -> WidgetId {
     of_node("preview_image", node_id)
 }
 
-/// Stable id for a node's inspector toggle chip in the header.
-pub(super) fn inspect_badge(node_id: NodeId) -> WidgetId {
-    of_node("inspect_badge", node_id)
-}
-
-/// Stable id for a node's floating inspection panel.
-pub(super) fn inspect_panel(node_id: NodeId) -> WidgetId {
-    of_node("inspect_panel", node_id)
+/// Stable id for a node's inspect button in the header.
+pub(super) fn inspect_button(node_id: NodeId) -> WidgetId {
+    of_node("inspect_button", node_id)
 }
 
 /// The hover and press target of `tie`'s band.

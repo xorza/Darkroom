@@ -5,7 +5,7 @@ use common::{TempDir, fs};
 use glam::{UVec2, Vec2};
 use palantir::{DockView, Modifiers, PointerButton, Rect};
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
-use tracing::subscriber;
+use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
@@ -209,8 +209,8 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
     assert_eq!(world, Vec2::new(screen[0], screen[1]));
 }
 
-/// A right-click on the empty canvas opens the new-node palette; typed text filters it, and a
-/// click on the func's row adds that node.
+/// A right-click on the empty canvas opens the new-node palette; typed text ranks it, and Enter
+/// adds the best match, which holds the focus.
 #[test]
 fn the_new_node_palette_adds_the_node_clicked() {
     let mut driver = driver();
@@ -225,11 +225,7 @@ fn the_new_node_palette_adds_the_node_clicked() {
                 mods: Modifiers::default(),
             },
             Action::Type("Convert".to_string()),
-            // The search field shows the typed text too; the row is the second match.
-            click(Locator::Nth(
-                Box::new(Locator::Text(CONVERT.to_string())),
-                1,
-            )),
+            key("enter"),
         ])
         .unwrap();
     let names: Vec<String> = driver
@@ -240,6 +236,38 @@ fn the_new_node_palette_adds_the_node_clicked() {
         .map(|node| node.name)
         .collect();
     assert_eq!(names, [BRIGHTNESS, CONVERT], "by name");
+}
+
+/// Down moves the palette's focus to the next ranked match and Enter adds that one: "con"
+/// ranks Convert (Image) before Concat (System), two names that start with it.
+#[test]
+fn down_then_enter_adds_the_next_ranked_match() {
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-palette-keys");
+    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
+    driver.open(&path, OpenMode::Copy).unwrap();
+    driver
+        .act(&[
+            Action::Click {
+                at: Locator::Screen(Vec2::new(1200.0, 800.0)),
+                button: PointerButton::Right,
+                mods: Modifiers::default(),
+            },
+            Action::Type("con".to_string()),
+            key("down"),
+            key("down"),
+            key("up"),
+            key("enter"),
+        ])
+        .unwrap();
+    let names: Vec<String> = driver
+        .state(Detail::Concise, None)
+        .unwrap()
+        .nodes
+        .into_iter()
+        .map(|node| node.name)
+        .collect();
+    assert_eq!(names, [BRIGHTNESS, "Concat"]);
 }
 
 /// A name no node has is not found, with the names there are; two nodes of one name are
@@ -392,6 +420,10 @@ fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
         ));
     }
 
+    // tracing-core caches each callsite's interest globally, and another test thread that hits
+    // the dialog's callsite can leave it cached as never for this thread's scoped subscriber:
+    // six of eight full runs dropped the line without this rebuild, none of eight with it.
+    callsite::rebuild_interest_cache();
     driver.act(&[key("ctrl+o")]).unwrap();
     let log = driver.state(Detail::Concise, None).unwrap().log;
     assert_eq!(
@@ -459,8 +491,8 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
 /// show the theme's colours exactly, and the legend's node rect is the rect `state` reports, as
 /// the scale is 1. A `max_side` of 100 scales it to 100 × 75 and the legend by 1/4, exactly. A
-/// node's shot is its body, clipped by the canvas to (40, 100) to (327.5, 278), with 24 px around
-/// it, clamped to the window and rounded out: (16, 76) to (352, 300), 336 × 224, the body at
+/// node's shot is its body, (40, 100) to (303.5, 245), with 24 px around it, clamped to the
+/// window and rounded out: (16, 76) to (328, 269), 312 × 193, the body at
 /// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
 /// body's corner, and one past the window or of negative size is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
@@ -473,7 +505,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
-    assert_eq!(screen, [40.0, 100.0, 287.4953, 178.0]);
+    assert_eq!(screen, [40.0, 100.0, 263.4953, 145.0]);
 
     let theme = Theme::default();
     let whole = driver.shot(&Region::Window, 400).unwrap();
@@ -522,7 +554,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
-    assert_eq!(node.size, UVec2::new(336, 224));
+    assert_eq!(node.size, UVec2::new(312, 193));
     assert_eq!(node.legend[0].rect[..2], [24.0, 24.0]);
     assert!(
         node.path
@@ -567,17 +599,17 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .offscreen()
         .with_app(|app, ui| {
             let layout = &app.open_document().document.layout;
-            ui.response_for(DockView::pane_id(layout, layout.primary().id))
+            ui.response_for(DockView::pane_id(layout, layout.primary().id()))
                 .rect
         })
         .unwrap();
     let pane = driver
-        .shot(&Region::Pane("main".to_string()), 1000)
+        .shot(&Region::Pane("Graph".to_string()), 1000)
         .unwrap();
     let rounded = rect.max().ceil() - rect.min.floor();
     assert_eq!(pane.size.as_vec2(), rounded, "{rect:?}");
     match driver.shot(&Region::Pane("missing".to_string()), 1000) {
-        Err(DriverError::NotFound { nearest, .. }) => assert_eq!(nearest, ["main"]),
+        Err(DriverError::NotFound { nearest, .. }) => assert_eq!(nearest, ["Graph"]),
         other => panic!("{other:?}"),
     }
 
@@ -819,8 +851,10 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
     driver
         .act(&[drag(output, Locator::Screen(Vec2::new(1100.0, 700.0)))])
         .unwrap();
+    // Picked by the keys: a row's text joins its name, category and description, and the
+    // library may scroll Convert out of view.
     driver
-        .act(&[click(Locator::Text(CONVERT.to_string()))])
+        .act(&[Action::Type(CONVERT.to_string()), key("enter")])
         .unwrap();
     let wires = |driver: &mut Driver| {
         driver

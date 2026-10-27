@@ -28,6 +28,7 @@
 pub(crate) mod error;
 pub(crate) mod graph_revision;
 pub(crate) mod graph_view;
+pub(crate) mod inspect_target;
 pub(crate) mod item_id;
 pub(crate) mod load_report;
 pub(crate) mod route;
@@ -51,6 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::graph_view::{GraphView, NodePlacement};
+use crate::core::document::inspect_target::InspectTarget;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::{DocumentRepair, LoadReport};
 use crate::core::document::route::Route;
@@ -108,11 +110,12 @@ impl Default for Document {
 
 impl Document {
     /// Drop a graph node from the document: the graph, its placement, its
-    /// selection membership and its viewer tab. Every removal — an edit, an
-    /// undo or a redo — comes through here, so no tab outlives its node.
+    /// selection membership and its viewer and inspector tabs. Every removal —
+    /// an edit, an undo or a redo — comes through here, so no tab outlives its
+    /// node.
     pub(crate) fn remove_node(&mut self, node_id: NodeId) -> DetachedNode {
         self.unplace(node_id);
-        self.close_viewer(node_id);
+        self.close_tabs(node_id);
         self.graph.detach_node(node_id)
     }
 
@@ -130,12 +133,16 @@ impl Document {
         self.main_view.selected.remove(&ItemId::Node(node_id));
     }
 
-    fn close_viewer(&mut self, node_id: NodeId) {
-        let viewer = TabRef::ImageViewer(node_id);
+    /// Close the tabs that show `node_id`: its viewer and an inspector pinned to it.
+    fn close_tabs(&mut self, node_id: NodeId) {
+        let shows = |tab: TabRef| {
+            tab == TabRef::ImageViewer(node_id)
+                || tab == TabRef::Inspector(InspectTarget::Node(node_id))
+        };
         // `retain_tabs` rebuilds the whole node tree, so it runs only when
         // there is a tab to close.
-        if self.layout.all_tabs().any(|tab| tab == viewer) {
-            self.layout.retain_tabs(|tab| tab != viewer);
+        if self.layout.all_tabs().any(shows) {
+            self.layout.retain_tabs(|tab| !shows(tab));
         }
     }
 
@@ -156,12 +163,17 @@ impl Document {
         self.graph.find(node_id).is_some() || self.stubs.contains(node_id)
     }
 
-    /// Whether a tab may be open: the graph pane and `Preferences` always,
-    /// and a viewer exactly while its node is a preview node in the graph.
+    /// Whether a tab may be open: the graph pane, `Preferences` and the
+    /// selection's inspector always, a viewer exactly while its node is a
+    /// preview node in the graph, and a pinned inspector while its node is in
+    /// the graph.
     pub(crate) fn holds_tab(&self, tab: TabRef) -> bool {
         match tab {
-            TabRef::Graph | TabRef::Preferences => true,
+            TabRef::Graph | TabRef::Preferences | TabRef::Inspector(InspectTarget::Selection) => {
+                true
+            }
             TabRef::ImageViewer(node_id) => self.holds_preview_node(node_id),
+            TabRef::Inspector(InspectTarget::Node(node_id)) => self.graph.find(node_id).is_some(),
         }
     }
 
@@ -502,22 +514,26 @@ fn repair_layout(
         *layout = new_layout();
         repairs.push(DocumentRepair::LayoutReset);
     } else {
-        let stale: Vec<NodeId> = layout
+        let stale: Vec<(TabRef, DocumentRepair)> = layout
             .all_tabs()
-            .filter_map(|tab| match tab {
-                TabRef::ImageViewer(node_id) if !is_preview_node(graph, node_id) => Some(node_id),
-                _ => None,
+            .filter_map(|tab| {
+                let repair = match tab {
+                    TabRef::ImageViewer(node_id) => (!is_preview_node(graph, node_id))
+                        .then_some(DocumentRepair::ViewerClosed { node_id }),
+                    TabRef::Inspector(InspectTarget::Node(node_id)) => graph
+                        .find(node_id)
+                        .is_none()
+                        .then_some(DocumentRepair::InspectorClosed { node_id }),
+                    TabRef::Graph
+                    | TabRef::Preferences
+                    | TabRef::Inspector(InspectTarget::Selection) => None,
+                }?;
+                Some((tab, repair))
             })
             .collect();
         if !stale.is_empty() {
-            layout.retain_tabs(
-                |tab| !matches!(tab, TabRef::ImageViewer(node_id) if stale.contains(&node_id)),
-            );
-            repairs.extend(
-                stale
-                    .into_iter()
-                    .map(|node_id| DocumentRepair::ViewerClosed { node_id }),
-            );
+            layout.retain_tabs(|tab| stale.iter().all(|(closed, _)| *closed != tab));
+            repairs.extend(stale.into_iter().map(|(_, repair)| repair));
         }
     }
 }

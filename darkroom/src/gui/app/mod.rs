@@ -60,7 +60,7 @@ pub(crate) struct App {
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
     /// The last completed run's per-node state, keyed by the document's
-    /// `NodeId`s: execution status (the glow + header time), log lines, and
+    /// `NodeId`s: execution status (the frame and the footer), log lines, and
     /// the values preview cards and viewers read. Owned here because `App` is
     /// its only writer — it fills as the worker is drained — and lent to the
     /// frame through [`AppCtx`]. Off the serialized state.
@@ -230,11 +230,14 @@ impl App {
             AppCommand::View(ViewCommand::CopyImage) => {
                 self.capture = Some(ViewCapture::new(CaptureTarget::Clipboard));
             }
+            AppCommand::View(ViewCommand::Frame(framing)) => self.session.frame_graph(framing),
             AppCommand::View(ViewCommand::SaveImage) => {
                 if let Some(path) = self.dialogs.save_path(SavedFile::PNG, None) {
                     self.capture = Some(ViewCapture::new(CaptureTarget::Png(path)));
                 }
             }
+            AppCommand::Undo => return Relayout::after(self.session.open.undo()),
+            AppCommand::Redo => return Relayout::after(self.session.open.redo()),
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
         }
         Relayout::NotNeeded
@@ -655,14 +658,13 @@ impl palantir::App for App {
         //
         // Two owners, so two calls: the run projection filters on the node
         // that published, and everything the window caches — canvas geometry,
-        // open inspectors, per-tab viewer framing — goes through the session.
+        // per-tab viewer framing — goes through the session.
         // A new cache gets a line here rather than a third call site.
         //
         // A node deleted later in the same frame's record is swept next frame.
         // Nothing reads a dead entry in between — the geometry is reached
-        // through a `NodeCtx` that only resolves for live nodes, and
-        // `draw_panels` skips a panel whose node is gone — so the lag costs
-        // memory and nothing else.
+        // through a `NodeCtx` that only resolves for live nodes — so the lag
+        // costs memory and nothing else.
         self.run_state.sync(
             RunFeed {
                 runtime: &self.runtime,

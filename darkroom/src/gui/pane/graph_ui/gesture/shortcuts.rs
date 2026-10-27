@@ -7,17 +7,15 @@
 //! chord names no pane of its own, so running only while a graph pane is up is what keeps Delete
 //! from removing nodes nobody is looking at.
 
-use palantir::{Key, Shortcut, Ui};
+use palantir::{Key, Ui};
 use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::requests::Requests;
+use crate::gui::frame::shortcuts;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::gesture::pan_zoom::Framing;
-
-const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
-const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 
 /// Turn this frame's canvas chords into intents.
 ///
@@ -33,9 +31,9 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// the canvas knows whether the Esc cancelled a gesture instead.
 pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
     let graph_ctx = ctx.graph_ctx();
-    let reset_zoom = ui.shortcut_pressed(RESET_ZOOM_SHORTCUT);
-    let duplicate = ui.shortcut_pressed(DUPLICATE_SHORTCUT);
-    let delete = ui.shortcut_pressed(Key::Delete) || ui.shortcut_pressed(Key::Backspace);
+    let reset_zoom = ui.shortcut_pressed(shortcuts::RESET_VIEW);
+    let duplicate = ui.shortcut_pressed(shortcuts::DUPLICATE);
+    let delete = ui.shortcut_pressed(shortcuts::DELETE) || ui.shortcut_pressed(Key::Backspace);
     let view = graph_ctx.view();
     if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());

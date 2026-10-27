@@ -42,6 +42,7 @@ use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
+use crate::gui::widgets::support;
 
 /// One const editor: the field it records as, and the literal it edits on
 /// a port of `data_type`.
@@ -163,15 +164,23 @@ impl ConstEditor<'_> {
                     _ => return field.unset(ui, value),
                 };
                 let label = fmt!(ui, "{preview}");
+                // A file name cut in the middle keeps its extension, which tells one model or
+                // frame from the next; the whole path is the tooltip.
+                let tooltip = match (&preview, value) {
+                    (PathPreview::Name(_), ConstValue::FsPath(path)) => Some(path.as_str()),
+                    _ => None,
+                };
                 // The blocking dialog runs after authoring, so this button only records its click.
-                Button::new()
+                let snapshot = Button::new()
                     .id(field.id)
                     .label(label)
                     .style(&field.theme.drag_value.chip)
-                    .text_wrap(TextWrap::Ellipsis)
+                    .text_wrap(TextWrap::EllipsisMiddle)
                     .size((Sizing::FILL, Sizing::FILL))
                     .min_size((field.theme.width, 0.0))
-                    .show(ui);
+                    .show(ui)
+                    .snapshot();
+                support::tooltip_after(ui, &snapshot, tooltip);
                 None
             }
             DataType::Enum(type_id) => {

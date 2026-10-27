@@ -39,8 +39,8 @@ enum Declaration<'a> {
 /// **Available for the whole frame**, unlike the passes above it: a
 /// [`GraphCtx`] is all it takes to resolve one, so the hit sweep at frame top,
 /// the prepass gestures, and the record all read nodes through this same type.
-/// The facts that only a *record* has settled — the effective selection, the
-/// open inspectors, the cull region — stay on
+/// The facts that only a *record* has settled — the effective selection and
+/// the cull region — stay on
 /// [`DrawCtx`](crate::gui::pane::graph_ui::draw_ctx::DrawCtx), which travels beside
 /// this rather than inside it, so a reader cannot reach for one in a phase
 /// where it does not exist yet.
@@ -154,7 +154,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// Human-readable type identity: the func's name, or for a stub whether its
-    /// func is gone or changed its ports. Shown by the inspection panel.
+    /// func is gone or changed its ports. Shown by the inspector pane.
     pub(crate) fn kind_label(self) -> &'a str {
         match self.declaration {
             Declaration::Func(func) => func.name(),
@@ -164,7 +164,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The func's description, empty for a stub or a func that declares none.
-    /// Shown by the inspection panel and the new-node palette tooltip.
+    /// Shown by the inspector pane and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
         self.func().and_then(Func::description).unwrap_or_default()
     }
@@ -245,7 +245,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// Outcome of the last graph run, with its detail. Drives the node's
-    /// status-glow shadow, the header time label, the inspector's status and
+    /// status frame, the footer's status, the inspector's status and
     /// error lines, and the highlight on the ports the run could not feed.
     pub(crate) fn exec_status(self) -> &'a ExecStatus {
         self.run.map_or(&ExecStatus::None, NodeRunState::status)

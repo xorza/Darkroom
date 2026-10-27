@@ -112,7 +112,7 @@ impl MainWindow {
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
                 // navigates its own texture.
-                TabRef::Preferences | TabRef::ImageViewer(_) => {}
+                TabRef::Preferences | TabRef::ImageViewer(_) | TabRef::Inspector(_) => {}
             }
         }
         request_relayout
@@ -154,7 +154,7 @@ impl MainWindow {
                     .child_align(Align::v(VAlign::Bottom))
                     .chrome(Chrome::fill(fill))
                     .show(ui, |ui| {
-                        menu_bar::show(ui, app.theme(), out);
+                        menu_bar::show(ui, ctx, out);
                     });
                 let mut panes = DockPanes {
                     ctx,
@@ -173,8 +173,8 @@ impl MainWindow {
                 for op in dock_ops.drain(..) {
                     out.push_view(op);
                 }
-                // Bottom surround band: the cache-memory readout, below the panes.
-                status_bar::show(ui, app);
+                // Bottom surround band: the run line and the memory readout, below the panes.
+                status_bar::show(ui, ctx, out);
             });
     }
 

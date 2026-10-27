@@ -1,6 +1,6 @@
 //! A preview node's body content: the value wired into it.
 //!
-//! Takes the slot an ordinary node's memory footer occupies. A preview holds no
+//! Takes the slot an ordinary node's footer occupies. A preview holds no
 //! cached output — it has no output at all — so there is nothing for that
 //! readout to report, and the value is the only thing worth the space.
 //!
@@ -19,16 +19,13 @@ use palantir::{CursorIcon, DockOperation, ImageFit, TextWrap};
 
 use crate::core::document::tab_ref::TabRef;
 use crate::gui::pane::graph_ui::node_ui::card;
-use crate::gui::pane::graph_ui::node_ui::card::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, LabeledValue,
-};
+use crate::gui::pane::graph_ui::node_ui::card::LabeledValue;
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
 use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::preview_store::{DrawablePreview, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::bytes::Bytes;
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::ROW_GAP;
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
 /// normal node's so a thumbnail has somewhere to be; the body still hugs
@@ -57,7 +54,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let content = Panel::vstack()
         .id(wid::preview_image(node.node_id))
         .size((Sizing::FILL, Sizing::fixed(PREVIEW_CONTENT_HEIGHT)))
-        .padding(Spacing::all(6.0))
+        .padding(Spacing::all(theme.space.sm))
         .child_align(Align::CENTER)
         .justify(Justify::Center)
         // Only an image opens a viewer, so only an image is clickable.
@@ -103,15 +100,15 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
 }
 
 /// The image's info footer: resolution, pixel format (channel layout + bit depth), and original
-/// source size — styled like a node body's memory footer
-/// ([`memory_row`](crate::gui::pane::graph_ui::node_ui::memory_row)), so every read-only fact strip
+/// source size — styled like a node body's footer
+/// ([`node_footer`](crate::gui::pane::graph_ui::node_ui::node_footer)), so every read-only fact strip
 /// in the app reads as the same kind of thing.
 fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
     Panel::hstack()
         .id_salt("preview_info")
         .size((Sizing::FILL, Sizing::HUG))
-        .padding(Spacing::xy(CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y))
-        .gap(10.0)
+        .padding(card::band_padding(theme))
+        .gap(theme.space.md)
         .line_gap(4.0)
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
@@ -124,7 +121,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &DrawablePreview) {
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
-                .gap(ROW_GAP)
+                .gap(theme.space.xs)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     LabeledValue {

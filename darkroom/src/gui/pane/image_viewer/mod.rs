@@ -48,9 +48,9 @@ use crate::gui::state::preview_store::{
 };
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::pan_drag;
 use crate::gui::widgets::pill;
-use crate::gui::widgets::pill::{BUTTON_GAP, TOOLBAR_MARGIN};
 use crate::gui::widgets::toggle::Toggle;
 use crate::gui::widgets::zoom_range;
 
@@ -82,7 +82,7 @@ pub(crate) struct ImageViewer {
 /// Drawn when a viewer's node has published nothing yet. An invitation rather
 /// than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and
 /// not a message.
-const NOTHING_YET_HINT: &str = "the preview's image appears here after the next graph run";
+const NOTHING_YET_HINT: &str = "Run the graph to see this image.";
 
 /// What [`StoredContent`] means to a viewer: a texture to paint, why there
 /// isn't one, or nothing published yet.
@@ -340,7 +340,12 @@ impl ImageViewer {
         Readout {
             panel: Panel::hstack()
                 .id_salt("viewer_header")
-                .margin(Spacing::new(TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0, 0.0)),
+                .margin(Spacing::new(
+                    shown.pane.theme.space.sm,
+                    shown.pane.theme.space.sm,
+                    0.0,
+                    0.0,
+                )),
             text: fmt!(ui, "{readout}").into(),
         }
         .show(ui, shown.pane.theme);
@@ -372,16 +377,13 @@ impl ImageViewer {
             .size((Sizing::HUG, Sizing::HUG))
             .align(Align::new(HAlign::Right, VAlign::Top))
             .child_align(Align::new(HAlign::Right, VAlign::Top))
-            .margin(Spacing::new(0.0, TOOLBAR_MARGIN, TOOLBAR_MARGIN, 0.0))
-            .gap(BUTTON_GAP)
+            .margin(Spacing::new(0.0, theme.space.sm, theme.space.sm, 0.0))
+            .gap(theme.space.sm)
             .show(ui, |ui| {
                 let framing = Panel::hstack().id(controls.wid("pill_framing"));
                 pill::dress(framing, theme).show(ui, |ui| {
-                    if Chip::new(controls.wid("fit"), "Fit to view").show(
-                        ui,
-                        theme,
-                        glyph::draw_fit,
-                    ) {
+                    if Chip::new(controls.wid("fit"), "Fit to view").show_icon(ui, theme, Icon::Fit)
+                    {
                         self.reset_framing();
                     }
                     if Chip::new(controls.wid("100"), "Zoom to 100%").show(

@@ -100,6 +100,10 @@ pub(crate) enum DocumentRepair {
     ViewerClosed {
         node_id: NodeId,
     },
+    /// An inspector tab pinned to a node the graph does not hold.
+    InspectorClosed {
+        node_id: NodeId,
+    },
 }
 
 impl LoadReport {
@@ -210,6 +214,9 @@ impl Display for DocumentRepair {
                 )
             }
             Self::LayoutReset => f.write_str("reset the pane layout"),
+            Self::InspectorClosed { node_id } => {
+                write!(f, "closed the inspector of {node_id:?}, which is no node")
+            }
             Self::ViewerClosed { node_id } => {
                 write!(
                     f,

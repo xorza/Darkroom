@@ -124,6 +124,11 @@ impl OpenDocument {
         self.history.can_undo()
     }
 
+    /// Whether a redo would replay an entry.
+    pub(crate) fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
     /// Apply a single `intent` and record it as its own undo entry. For edits
     /// raised outside a frame's drain — e.g. a file-picker result handled
     /// after the record. No-ops (and self-cancelling steps) are dropped, like

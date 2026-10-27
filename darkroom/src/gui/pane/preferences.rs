@@ -29,13 +29,6 @@ use crate::gui::widgets::support;
 /// window instead of a handful of controls in the corner of a bare sheet.
 const COL_WIDTH: f32 = 720.0;
 
-/// Gap between sections. Deliberately much larger than [`SECTION_GAP`] —
-/// proximity, not dividers, is what makes the groups read.
-const SECTIONS_GAP: f32 = 26.0;
-
-/// Gap between a section's label and its rows, and between the rows.
-const SECTION_GAP: f32 = 8.0;
-
 /// The preferences form for one record pass: the theme it paints with and
 /// the sink its edits queue into.
 #[derive(Debug)]
@@ -52,7 +45,12 @@ impl PreferencesForm<'_> {
         Panel::vstack()
             .id_salt("preferences_view")
             .size((Sizing::FILL, Sizing::FILL))
-            .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
+            .padding(Spacing::new(
+                theme.space.xl,
+                theme.space.xxl,
+                theme.space.xl,
+                theme.space.xl,
+            ))
             .child_align(Align::new(HAlign::Center, VAlign::Top))
             .chrome(Chrome::fill(theme.canvas.bg))
             .show(ui, |ui| {
@@ -60,7 +58,9 @@ impl PreferencesForm<'_> {
                     .id_salt("preferences_column")
                     .size((Sizing::FILL, Sizing::HUG))
                     .max_size((COL_WIDTH, f32::INFINITY))
-                    .gap(SECTIONS_GAP)
+                    // Sections stand well apart and their rows sit tight: proximity, not
+                    // dividers, is what makes the groups read.
+                    .gap(theme.space.xl)
                     .show(ui, |ui| {
                         // Behavior — the startup, exit and save toggles.
                         Section { title: "Behavior" }.show(ui, theme, |ui| {
@@ -150,12 +150,12 @@ impl PreferencesForm<'_> {
             Panel::vstack()
                 .id_salt(label)
                 .size((Sizing::FILL, Sizing::HUG))
-                .gap(4.0)
+                .gap(theme.space.xs)
                 .show(ui, |ui| {
                     Panel::hstack()
                         .id_salt("row")
                         .size((Sizing::FILL, Sizing::HUG))
-                        .gap(ML_ROW_GAP)
+                        .gap(ml_row_gap(theme))
                         .child_align(Align::v(VAlign::Center))
                         .show(ui, |ui| {
                             Panel::hstack()
@@ -213,7 +213,7 @@ impl PreferencesForm<'_> {
                         });
 
                     if let Some(problem) = problem {
-                        indented_line(ui, "problem", |ui| {
+                        indented_line(ui, theme, "problem", |ui| {
                             Text::new(problem)
                                 .style(&support::colored_text(
                                     ui,
@@ -231,8 +231,7 @@ impl PreferencesForm<'_> {
 }
 
 /// One settings section: a bold muted label with its rows grouped tight
-/// beneath it, the whole block spaced well apart from its neighbors
-/// ([`SECTIONS_GAP`] between sections vs. [`SECTION_GAP`] inside one).
+/// beneath it, the whole block spaced well apart from its neighbors.
 #[derive(Clone, Copy, Debug)]
 struct Section {
     title: &'static str,
@@ -244,7 +243,7 @@ impl Section {
         Panel::vstack()
             .id_salt(title)
             .size((Sizing::FILL, Sizing::HUG))
-            .gap(SECTION_GAP)
+            .gap(theme.space.sm)
             .show(ui, |ui| {
                 let style = TextStyle {
                     weight: FontWeight::BOLD,
@@ -273,9 +272,6 @@ const ML_PATH_FIELD_MIN: f32 = 280.0;
 
 /// Width of a model row's fixed label column.
 const ML_LABEL_WIDTH: f32 = 150.0;
-
-/// Gap between the label column and the path field.
-const ML_ROW_GAP: f32 = 8.0;
 
 /// What's wrong with a committed model path, or `None` when it's empty (a
 /// valid resting state — the ML nodes are optional) or healthy. Stats the
@@ -316,15 +312,26 @@ fn path_field_wid(label: &str) -> WidgetId {
 /// every model.
 const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .onnx file inside";
 
+/// Gap between a model row's label column and its path field, which the lines under the row
+/// indent past.
+const fn ml_row_gap(theme: &Theme) -> f32 {
+    theme.space.sm
+}
+
 /// A line under a model row, indented past the label column so it sits
 /// under the path field. `salt` keys the panel explicitly: the error line
 /// is conditional, and an auto id would re-key the hint line each time it
 /// appears (occurrence-counter shift).
-fn indented_line(ui: &mut Ui, salt: &'static str, body: impl FnOnce(&mut Ui)) {
+fn indented_line(ui: &mut Ui, theme: &Theme, salt: &'static str, body: impl FnOnce(&mut Ui)) {
     Panel::hstack()
         .id_salt(salt)
         .size((Sizing::FILL, Sizing::HUG))
-        .padding(Spacing::new(ML_LABEL_WIDTH + ML_ROW_GAP, 0.0, 0.0, 0.0))
+        .padding(Spacing::new(
+            ML_LABEL_WIDTH + ml_row_gap(theme),
+            0.0,
+            0.0,
+            0.0,
+        ))
         .gap(0.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, body);
@@ -348,7 +355,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, row: ModelRow) {
     } else {
         theme.colors.link
     };
-    indented_line(ui, "hint", |ui| {
+    indented_line(ui, theme, "hint", |ui| {
         let link = Panel::hstack()
             .id(wid)
             .size((Sizing::HUG, Sizing::HUG))
