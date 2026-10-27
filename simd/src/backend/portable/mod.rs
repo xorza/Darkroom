@@ -158,13 +158,13 @@ fn is_bound(high: f64, max: f64) -> bool {
     high.fract() == 0.0 && (0.0..=max).contains(&high)
 }
 
-/// [`F32x8::max`] on one lane.
+/// [`F32x8::max`](crate::F32x8::max) on one lane.
 #[inline(always)]
 pub(super) const fn compare_swap_max(a: f32, b: f32) -> f32 {
     if a > b { a } else { b }
 }
 
-/// [`F32x8::min`] on one lane.
+/// [`F32x8::min`](crate::F32x8::min) on one lane.
 #[inline(always)]
 pub(super) const fn compare_swap_min(a: f32, b: f32) -> f32 {
     if a > b { b } else { a }

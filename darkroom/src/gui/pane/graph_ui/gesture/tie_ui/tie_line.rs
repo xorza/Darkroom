@@ -5,6 +5,7 @@ use glam::Vec2;
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
 use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::gesture::segments;
 
 /// A line shorter than this on screen, in logical px, crosses nothing: a press that barely
 /// moved, which is as far at every zoom.
@@ -104,17 +105,9 @@ impl TieLine {
         self.is_long().then(|| self.crossing(a, b)).flatten()
     }
 
-    /// [`Self::crosses`] for a line already known to be long enough.
+    /// [`Self::crosses`] for a line already known to be long enough, by the strokes' one rule.
     fn crossing(&self, a: Vec2, b: Vec2) -> Option<f32> {
-        let (line, segment) = (self.end - self.start, b - a);
-        let denominator = line.perp_dot(segment);
-        if denominator == 0.0 {
-            return None;
-        }
-        let to_segment = a - self.start;
-        let along = to_segment.perp_dot(segment) / denominator;
-        let on_segment = to_segment.perp_dot(line) / denominator;
-        ((0.0..=1.0).contains(&along) && (0.0..=1.0).contains(&on_segment)).then_some(along)
+        segments::crossing([self.start, self.end], [a, b])
     }
 }
 
@@ -193,5 +186,16 @@ mod tests {
             })
         );
         assert_eq!(across.first_crossing(wire, &[vertical(20.0)]), None);
+
+        // A level wire from (0, 0) to (200, 0) has its middle sample at x = 100 exactly, the end
+        // of chord 7 and the start of chord 8: a line straight through it crosses the wire,
+        // halfway along the line.
+        let level = Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0));
+        let through = line(Vec2::new(100.0, -20.0), Vec2::new(100.0, 20.0), 1.0);
+        let crossing = through.first_crossing(wire, &[level]).expect("it crosses");
+        assert_eq!(
+            (crossing.along, crossing.point),
+            (0.5, Vec2::new(100.0, 0.0))
+        );
     }
 }

@@ -36,7 +36,7 @@ pub enum XTransPatternError {
 }
 
 /// Why a size and a channel layout make no frame: no planar image, or one with a side past
-/// [`MAX_SIDE`](crate::MAX_SIDE).
+/// [`MAX_SIDE`](crate::image::frame_desc::MAX_SIDE).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum FrameDescError {
     #[error(transparent)]

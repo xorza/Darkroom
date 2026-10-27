@@ -1,7 +1,8 @@
 //! [`Avx2Fma`]: the `x86_64` [`Isa`], one 256-bit register per vector.
 //!
 //! AVX2 and FMA are the x86 baseline, x86-64-v3: the crate does not build for x86 without them
-//! (see `backend`), so a token needs no detection and [`Isa::run`] no `#[target_feature]` entry,
+//! (see `backend`), so a token needs no detection and [`IsaTier::run`](crate::IsaTier::run) no
+//! `#[target_feature]` entry,
 //! and every intrinsic here is sound to call on any operands. Loads and stores take arrays of
 //! exactly one vector's width.
 
@@ -191,7 +192,7 @@ impl Isa for Avx2Fma {
     }
 
     /// Byte alignments bring each four-pixel quad to the bottom of a register; see
-    /// [`weighted_quad`].
+    /// `weighted_quad`.
     #[inline(always)]
     fn weighted_sum3_u8(self, pixels: &[u8; 3 * U8_LANES], weights: [u16; 3]) -> Avx2U8 {
         let (loads, []) = pixels.as_chunks::<16>() else {
@@ -215,7 +216,7 @@ impl Isa for Avx2Fma {
         }
     }
 
-    /// Each sixteen-byte load is a four-pixel quad already; see [`weighted_quad`].
+    /// Each sixteen-byte load is a four-pixel quad already; see `weighted_quad`.
     #[inline(always)]
     fn weighted_sum3_of4_u8(self, pixels: &[u8; 4 * U8_LANES], weights: [u16; 3]) -> Avx2U8 {
         let (loads, []) = pixels.as_chunks::<16>() else {
@@ -237,7 +238,7 @@ impl Isa for Avx2Fma {
         }
     }
 
-    /// Three channels through [`store_rgb_u8`], four through [`store_rgba_u8`].
+    /// Three channels through `store_rgb_u8`, four through `store_rgba_u8`.
     #[inline(always)]
     fn store_interleaved_u8<const C: usize, const G: usize>(
         self,
@@ -374,7 +375,7 @@ impl Isa for Avx2Fma {
             .map(|samples| Avx2I32(unsafe { _mm256_castps_si256(samples) }))
     }
 
-    /// Four channels transpose back into pixels by [`transpose4`] and leave as four 256-bit
+    /// Four channels transpose back into pixels by `transpose4` and leave as four 256-bit
     /// stores; three take the lane loop.
     #[inline(always)]
     fn store_interleaved_f32<const C: usize, const G: usize>(

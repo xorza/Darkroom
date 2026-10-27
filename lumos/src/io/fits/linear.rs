@@ -60,7 +60,7 @@ pub(crate) fn hdu(
     })
 }
 
-/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`].
+/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`](fn@write).
 pub(crate) fn save(path: &Path, image: &LinearImage) -> Result<(), WriteError> {
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         write(image, file)

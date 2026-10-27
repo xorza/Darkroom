@@ -11,7 +11,7 @@ use crate::par;
 ///
 /// A body takes its worker's slot with [`get`](Self::get). A slot has one user at a time because
 /// a body never starts parallel work, which is all that could put a second body on its worker's
-/// stack, and [`par`](crate::par) refuses that; the borrow is checked anyway, so a guard held across
+/// stack, and [`par`] refuses that; the borrow is checked anyway, so a guard held across
 /// a parallel call, or a submodule's own parallel call, panics rather than aliases.
 #[derive(Debug)]
 pub struct PerWorker<S> {

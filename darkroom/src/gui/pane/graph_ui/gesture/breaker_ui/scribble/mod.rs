@@ -5,6 +5,7 @@ use palantir::Rect;
 use scenarium::{InputPort, NodeId, Subscription};
 
 use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::gesture::segments;
 
 /// Polyline samples closer than this on screen, in logical px, are dropped — keeps the breaker
 /// from accumulating sub-pixel duplicates on a slow drag. On screen rather than in world units,
@@ -113,8 +114,8 @@ impl Scribble {
         max.x < self.lo.x || min.x > self.hi.x || max.y < self.lo.y || min.y > self.hi.y
     }
 
-    fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
-        self.points.windows(2).map(|w| (w[0], w[1]))
+    fn segments(&self) -> impl Iterator<Item = [Vec2; 2]> + '_ {
+        self.points.windows(2).map(|w| [w[0], w[1]])
     }
 
     /// True if the breaker polyline crosses `rect`: either any sample
@@ -134,20 +135,14 @@ impl Scribble {
         if self.points.iter().any(|&p| inside(p)) {
             return true;
         }
-        let wires = [
-            (Vec2::new(min.x, min.y), Vec2::new(max.x, min.y)),
-            (Vec2::new(max.x, min.y), Vec2::new(max.x, max.y)),
-            (Vec2::new(max.x, max.y), Vec2::new(min.x, max.y)),
-            (Vec2::new(min.x, max.y), Vec2::new(min.x, min.y)),
+        let edges = [
+            [Vec2::new(min.x, min.y), Vec2::new(max.x, min.y)],
+            [Vec2::new(max.x, min.y), Vec2::new(max.x, max.y)],
+            [Vec2::new(max.x, max.y), Vec2::new(min.x, max.y)],
+            [Vec2::new(min.x, max.y), Vec2::new(min.x, min.y)],
         ];
-        for (a, b) in self.segments() {
-            for &(e0, e1) in &wires {
-                if segments_intersect((a, b), (e0, e1)) {
-                    return true;
-                }
-            }
-        }
-        false
+        self.segments()
+            .any(|segment| edges.iter().any(|&edge| segments::cross(segment, edge)))
     }
 
     /// True if any chord of `wire` crosses any breaker segment. This runs once per wire per frame
@@ -159,27 +154,11 @@ impl Scribble {
         if self.points.len() < 2 || self.misses(hull.min, hull.max()) {
             return false;
         }
-        wire.chords().any(|[a, b]| {
+        wire.chords().any(|chord| {
             self.segments()
-                .any(|segment| segments_intersect((a, b), segment))
+                .any(|segment| segments::cross(chord, segment))
         })
     }
-}
-
-/// Standard 2D segment–segment intersection of `a` and `b`, each by its two
-/// ends: proper-crossing only (no collinear-overlap), which is enough for "did
-/// the breaker scribble cross this wire?".
-fn segments_intersect(a: (Vec2, Vec2), b: (Vec2, Vec2)) -> bool {
-    let ((a1, a2), (b1, b2)) = (a, b);
-    let o1 = orient(a1, a2, b1);
-    let o2 = orient(a1, a2, b2);
-    let o3 = orient(b1, b2, a1);
-    let o4 = orient(b1, b2, a2);
-    (o1 * o2 < 0.0) && (o3 * o4 < 0.0)
-}
-
-fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
-    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
 }
 
 #[cfg(test)]

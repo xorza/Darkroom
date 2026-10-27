@@ -48,15 +48,24 @@ jobs:
           # palantir, fits-well and LibRaw. The action fetches the `git@github.com:` URLs over
           # HTTPS, as no ssh-key is given.
           submodules: true
-      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`, and
+      # libclang for LibRaw's bindgen, OpenSSL for the ONNX Runtime download of `ort-sys`,
       # lavapipe, a software Vulkan adapter, so imaginarium's GPU tests run on a runner with no
-      # GPU instead of skipping. macOS exposes Metal and Windows ships WARP, so both need nothing.
+      # GPU instead of skipping, and gdb for the backtrace of a crashed test binary. macOS exposes
+      # Metal and Windows ships WARP, so both need nothing.
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libclang-dev libssl-dev pkg-config mesa-vulkan-drivers
+            libclang-dev libssl-dev pkg-config mesa-vulkan-drivers gdb
+      # A test binary that crashes takes every test in it down with no name and no backtrace, as
+      # libtest runs them in one process: its core goes to a known directory, where Ubuntu's
+      # default pipes it to apport.
+      - name: Keep core dumps
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p /tmp/cores
+          sudo sysctl -w kernel.core_pattern=/tmp/cores/core.%e.%p
       # Every hosted runner has rustup, so no action is needed to install the toolchain.
       - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -67,5 +76,19 @@ jobs:
       # versions move.
       - run: cargo install --locked --git https://github.com/xorza/drive --rev "$DRIVE_REV"
       - run: cargo install --locked cargo-nextest --version "$NEXTEST_VERSION"
-      # `--ci` runs past a failure, so one run reports every step.
-      - run: cargo drive gate --ci
+      # `--ci` runs past a failure, so one run reports every step. The core size limit is the
+      # shell's own, so it is raised in the step that runs the tests.
+      - run: |
+          if [ "$RUNNER_OS" = Linux ]; then ulimit -c unlimited; fi
+          cargo drive gate --ci
+      # The backtrace of every thread of each crashed binary, as gdb reads its core.
+      - name: Backtrace crashes
+        if: failure() && runner.os == 'Linux'
+        run: |
+          shopt -s nullglob
+          for core in /tmp/cores/core.*; do
+            exe=$(file -b "$core" | sed -n "s/.*execfn: '\([^']*\)'.*/\1/p")
+            echo "::group::$core ($exe)"
+            gdb -batch -ex 'thread apply all bt' "$exe" "$core"
+            echo "::endgroup::"
+          done
