@@ -466,7 +466,7 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
-    let mut driver = small(DisplayKind::Gpu);
+    let mut driver = small(DisplayKind::TestGpu);
     let dir = TempDir::new("darkroom-driver-shot");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();
@@ -598,7 +598,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
 /// window as a shot of it shows it.
 #[test]
 fn the_view_menu_copies_and_saves_the_window() {
-    let mut driver = small(DisplayKind::Gpu);
+    let mut driver = small(DisplayKind::TestGpu);
     let dir = TempDir::new("darkroom-driver-view");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     driver.open(&path, OpenMode::Copy).unwrap();

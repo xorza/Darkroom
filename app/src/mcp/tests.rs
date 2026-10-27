@@ -367,7 +367,7 @@ async fn a_panic_or_a_quit_ends_the_session() {
 async fn a_shot_is_an_image_and_its_legend() {
     let dir = TempDir::new("darkroom-mcp-shot");
     let project = fixture::project(dir.path(), &[BRIGHTNESS]);
-    let Connected { client, .. } = connect(DisplayKind::Gpu, Some(project)).await;
+    let Connected { client, .. } = connect(DisplayKind::TestGpu, Some(project)).await;
     let acted = call(
         &client,
         "darkroom_act",

@@ -46,11 +46,18 @@ pub const COPY_LIMIT: u64 = 256 * 1024 * 1024;
 /// Which display an offscreen driver renders through, chosen when it is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayKind {
-    /// A headless GPU device and an offscreen texture: pixels, and screenshots of them.
+    /// A headless GPU device and an offscreen texture: pixels, and screenshots of them. Tests
+    /// take `TestGpu`.
     Gpu,
     /// palantir's deviceless frontend: input, layout and hit tests, no pixels. Test code.
     #[cfg(feature = "internals")]
     Cpu,
+    /// [`DisplayKind::Gpu`] on the one device palantir's `headless_test_gpu` leases to the test
+    /// process, which panics where no adapter is. Test code: tests run in parallel in one
+    /// process, and a device created on one Vulkan instance while another enumerated its adapters
+    /// crashed in the Vulkan loader on lavapipe (CI run 40528808017).
+    #[cfg(feature = "internals")]
+    TestGpu,
 }
 
 /// Where [`Driver::open`] opens a project. `darkroom/AGENTS.md`, "The editor harness", "A

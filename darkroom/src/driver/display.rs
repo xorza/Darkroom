@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glam::UVec2;
 use palantir::{
-    FrameReport, GpuRequestError, HeadlessWindow, InputEvent, OffscreenTime, PowerPreference,
+    FrameReport, Gpu, GpuRequestError, HeadlessWindow, InputEvent, OffscreenTime, PowerPreference,
     RequestedGpu, Ui,
 };
 
@@ -41,17 +41,28 @@ impl Display {
                 )]
                 let gpu =
                     RequestedGpu::headless(PowerPreference::HighPerformance, Default::default())?;
-                let window = HeadlessWindow::builder(gpu.gpu)
-                    .time(OffscreenTime::Manual)
-                    .open(size, scale);
-                Self::Gpu(Box::new(window))
+                Self::gpu(gpu.gpu, size, scale)
             }
+            #[cfg(feature = "internals")]
+            #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
+            DisplayKind::TestGpu => Self::gpu(
+                palantir::internals::headless_test_gpu().handles(),
+                size,
+                scale,
+            ),
             #[cfg(feature = "internals")]
             #[expect(clippy::absolute_paths, reason = "a gated arm takes no gated import")]
             DisplayKind::Cpu => Self::Cpu(Box::new(
                 palantir::internals::ui_harness::UiHarness::with_text(size).scale(scale),
             )),
         })
+    }
+
+    fn gpu(gpu: Gpu, size: UVec2, scale: f32) -> Self {
+        let window = HeadlessWindow::builder(gpu)
+            .time(OffscreenTime::Manual)
+            .open(size, scale);
+        Self::Gpu(Box::new(window))
     }
 
     /// Whether frames paint pixels, which a screenshot copies.
