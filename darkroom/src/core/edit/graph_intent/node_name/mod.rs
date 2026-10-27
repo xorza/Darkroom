@@ -21,7 +21,7 @@ pub(super) fn free(graph: &CoreGraph, wanted: &str) -> String {
     };
     // The graph's nodes take at most one number each, so one of the node count plus one numbers
     // from 2 is free.
-    let node_count = graph.iter().count();
+    let node_count = graph.len();
     (2..=node_count + 2)
         .map(|n| format!("{base} {n}"))
         .find(|name| !taken(name))

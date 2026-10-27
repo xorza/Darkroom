@@ -8,6 +8,7 @@ use lens::MlModelPaths;
 use palantir::ImageFilter;
 
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
+use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::core::io::preferences::{Preferences, ViewerBg, ViewerPreferences, WindowState};
 
@@ -42,6 +43,7 @@ fn preferences_roundtrip() {
         load_last_document: false,
         confirm_unsaved_changes: false,
         relative_paths: false,
+        interface_size: InterfaceSize::OFFERED[4],
         window: Some(WindowState {
             size: UVec2::new(1440, 900),
             maximized: true,
@@ -61,19 +63,31 @@ fn preferences_roundtrip() {
         .expect("preferences RON serializes");
     let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
+    assert!(
+        text.contains("interface_size: 125"),
+        "a size saves as its percent"
+    );
 
     for preferences in [populated, Preferences::default()] {
         assert_eq!(roundtrip(&preferences), preferences);
     }
 }
 
-/// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads. A `window` entry
+/// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads, and a size no rung
+/// offers loads as the nearest one. A `window` entry
 /// with only a size defaults `maximized` to `false`, and with no `physical_pos` key the
 /// position stays `None`, as on Wayland.
 #[test]
 fn partial_preferences_fill_defaults() {
     for (text, expected) in [
         (&b"()"[..], Preferences::default()),
+        (
+            b"(interface_size: 117)",
+            Preferences {
+                interface_size: InterfaceSize::OFFERED[3],
+                ..Preferences::default()
+            },
+        ),
         (
             b"(confirm_unsaved_changes: false)",
             Preferences {

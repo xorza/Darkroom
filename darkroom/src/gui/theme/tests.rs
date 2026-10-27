@@ -30,7 +30,7 @@ fn default_wiring_and_menu_tweak() {
     assert_eq!(theme.card.header_fill, p.header_fill);
     assert_eq!(theme.ports.input, p.input_port);
     assert_eq!(theme.colors.badge_cache, p.badge_cache);
-    assert_eq!(theme.colors.badge_impure, p.badge_impure);
+    assert_eq!(theme.colors.badge_kind, p.badge_kind);
     assert_eq!(theme.status.busy, p.status_busy);
     // Each of those is a distinct role, so a palette that collapsed them
     // onto one color would pass every assertion above.
@@ -85,7 +85,8 @@ fn every_palantir_widget_resolves_to_the_body_tier() {
 }
 
 /// Every badge is legible against every other, because a node's head
-/// can carry several at once.
+/// can carry several at once; and the kind mark wears no status hue, as a
+/// kind is not a status.
 ///
 /// A badge sharing a hue with a wire type or a status is fine and
 /// common — the palette resolves both against one upstream semantic
@@ -98,9 +99,8 @@ fn badges_are_told_apart_from_each_other() {
     let c = Theme::default().colors;
     let badges = [
         ("badge_graph", c.badge_graph),
-        ("badge_sink", c.badge_sink),
         ("badge_cache", c.badge_cache),
-        ("badge_impure", c.badge_impure),
+        ("badge_kind", c.badge_kind),
     ];
     for (i, (name, color)) in badges.iter().enumerate() {
         for (other_name, other) in &badges[i + 1..] {
@@ -110,6 +110,12 @@ fn badges_are_told_apart_from_each_other() {
             );
         }
     }
+    let s = Theme::default().status;
+    let statuses = [s.success, s.info, s.busy, s.warning, s.error];
+    assert!(
+        !statuses.contains(&c.badge_kind),
+        "the kind mark wears a status hue"
+    );
 }
 
 /// The six surfaces stack in one view — a graph, the bar around

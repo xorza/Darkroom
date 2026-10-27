@@ -86,6 +86,25 @@ impl<'a> InputCtx<'a> {
     pub(crate) fn default(self) -> Option<ConstValue> {
         default_const_value(self.node.graph_ctx.library(), self.declared)
     }
+
+    /// Whether the input can hold a constant: [`Self::default`] is some, answered without
+    /// building it, for a reader that asks every frame.
+    pub(crate) fn takes_const(self) -> bool {
+        takes_const(self.node.graph_ctx.library(), self.declared)
+    }
+}
+
+/// See [`InputCtx::takes_const`]: the rule [`default_const_value`] follows, read off the port
+/// and the library alone.
+fn takes_const(library: &Library, input: &FuncInput) -> bool {
+    input.default_value.is_some()
+        || match &input.data_type {
+            DataType::Enum(id) => library
+                .enum_variants(*id)
+                .is_some_and(|variants| !variants.is_empty()),
+            DataType::Any => true,
+            data_type => data_type.default_value().is_some(),
+        }
 }
 
 /// See [`InputCtx::default`]. A free fn because the enum arm needs the
@@ -113,7 +132,7 @@ fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValu
 mod tests {
     use scenarium::{ConstValue, DataType, FuncInput, Library, TypeEntry, TypeId};
 
-    use crate::gui::graph_ctx::input_ctx::default_const_value;
+    use crate::gui::graph_ctx::input_ctx::{default_const_value, takes_const};
 
     /// A declared default wins; an enum without one takes its first registered variant, and an
     /// unregistered one has none; `Any` starts blank; a scalar takes its type's zero; a custom
@@ -146,6 +165,12 @@ mod tests {
             (input(DataType::Float), Some(ConstValue::Float(0.0))),
             (input(DataType::Custom(TypeId::from_u128(3))), None),
         ] {
+            assert_eq!(
+                takes_const(&library, &port),
+                expected.is_some(),
+                "{:?} takes a const exactly when it has a default",
+                port.data_type
+            );
             assert_eq!(
                 default_const_value(&library, &port),
                 expected,

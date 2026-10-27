@@ -18,6 +18,7 @@ use palantir::FontWeight;
 use palantir::prelude::*;
 
 use crate::core::io::preferences::Preferences;
+use crate::core::io::preferences::interface_size::InterfaceSize;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::{MlModelKind, PreferencesCommand};
 use crate::gui::frame::requests::Requests;
@@ -62,6 +63,13 @@ impl PreferencesForm<'_> {
                     // dividers, is what makes the groups read.
                     .gap(theme.space.xl)
                     .show(ui, |ui| {
+                        Section {
+                            title: "Appearance",
+                        }
+                        .show(ui, theme, |ui| {
+                            self.interface_size_row(ui, &mut preferences.interface_size);
+                        });
+
                         // Behavior — the startup, exit and save toggles.
                         Section { title: "Behavior" }.show(ui, theme, |ui| {
                             if Checkbox::new(&mut preferences.load_last_document)
@@ -118,11 +126,40 @@ impl PreferencesForm<'_> {
             });
     }
 
+    /// The interface size: a label in the model rows' label column and a dropdown of the offered
+    /// sizes. A pick writes `size` in place and queues [`PreferencesCommand::Changed`]; the app
+    /// applies it from the next frame.
+    fn interface_size_row(&mut self, ui: &mut Ui, size: &mut InterfaceSize) {
+        let theme = self.theme;
+        Panel::hstack()
+            .id_salt("interface_size")
+            .size((Sizing::FILL, Sizing::HUG))
+            .gap(ml_row_gap(theme))
+            .child_align(Align::v(VAlign::Center))
+            .show(ui, |ui| {
+                Text::new("Interface size")
+                    .style(&support::sized_text(ui, theme.text.body))
+                    .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
+                    .show(ui);
+                let before = size.offered_idx();
+                let mut picked = before;
+                ComboBox::labeled(&mut picked, &InterfaceSize::OFFERED, |size| size.label())
+                    .id(interface_size_wid())
+                    .show(ui);
+                if picked != before {
+                    *size = InterfaceSize::OFFERED[picked];
+                    self.out
+                        .push_app(AppCommand::Preferences(PreferencesCommand::Changed));
+                }
+            });
+    }
+
     /// One model-path row: a fixed-width label, an **editable** path field (type
     /// or paste a path; Enter or click-away commits it, Escape drops it), a
     /// "Browse…" button, and — beneath, indented under the field — an error line
     /// when the committed path is broken, then a download hint (a browser link to
     /// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
+    ///
     /// Writes the path `kind` names in `paths` in place and queues
     /// [`PreferencesCommand::Changed`] on an edited path, or
     /// [`PreferencesCommand::PickMlModel`] when Browse is clicked.
@@ -311,6 +348,10 @@ fn path_field_wid(label: &str) -> WidgetId {
 /// weights; only the `.onnx` matters to us, so the guidance is the same for
 /// every model.
 const DOWNLOAD_HINT: &str = " \u{2014} unzip and point the field above at the .onnx file inside";
+
+fn interface_size_wid() -> WidgetId {
+    WidgetId::from_hash("darkroom.preferences.interface_size")
+}
 
 /// Gap between a model row's label column and its path field, which the lines under the row
 /// indent past.

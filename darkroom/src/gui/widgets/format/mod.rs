@@ -1,10 +1,12 @@
 //! Small display formatters shared across the GUI. Every reader of a
-//! magnitude — the status bar, a node's memory footer and run-time label, the
-//! inspector's status line, a preview card's info strip — formats through here, so
-//! the same number never renders two ways.
+//! magnitude or a constant — the status bar, a node's footer and its fields,
+//! the inspector, a preview card's info strip — formats through here, so the
+//! same value never renders two ways.
 
 pub(crate) mod bytes;
 pub(crate) mod elapsed;
+pub(crate) mod path_preview;
+pub(crate) mod shown_value;
 
 use std::io::Cursor;
 use std::str;

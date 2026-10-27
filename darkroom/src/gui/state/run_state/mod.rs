@@ -315,6 +315,12 @@ impl RunState {
         }
     }
 
+    /// `id`'s last-run status, [`ExecStatus::None`] for a node the last run did not report.
+    pub(crate) fn exec_status(&self, id: NodeId) -> &ExecStatus {
+        self.node(id)
+            .map_or(&ExecStatus::None, NodeRunState::status)
+    }
+
     /// Everything the last run said about `id`, or `None` when it said
     /// nothing — one lookup for a reader that asks several things.
     pub(crate) fn node(&self, id: NodeId) -> Option<&NodeRunState> {

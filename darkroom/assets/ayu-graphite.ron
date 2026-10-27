@@ -41,9 +41,8 @@
 
     // Badges — what a node's head says about itself.
     badge_graph:         "#44b5ff",    // accent               blue_bright
-    badge_sink:          "#ff8b8c",    // error                red_bright
     badge_cache:         "#f6e055",    // warning              yellow_bright
-    badge_impure:        "#ebebeb",    // text                 gray_7
+    badge_kind:          "#ebebeb",    // text                 gray_7
 
     // Status — what a node's head says about its last run.
     status_success:      "#8bdd79",    // success              green_bright

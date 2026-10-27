@@ -1,4 +1,5 @@
 pub(crate) mod error;
+pub(crate) mod interface_size;
 pub(crate) mod preferences_store;
 
 use std::io;
@@ -11,6 +12,7 @@ use palantir::ImageFilter;
 
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
+use crate::core::io::preferences::interface_size::InterfaceSize;
 
 /// Preferences file name, resolved inside the platform's configuration
 /// directory. RON so it's hand-editable and matches every other file the app
@@ -40,6 +42,8 @@ pub(crate) struct Preferences {
     /// whole and its files go with it. When `false`, a save writes every path absolute. Defaults
     /// to `true`.
     pub(crate) relative_paths: bool,
+    /// The whole UI's size, on top of the platform's scale.
+    pub(crate) interface_size: InterfaceSize,
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
     /// (platform picks).
@@ -109,6 +113,7 @@ impl Default for Preferences {
             load_last_document: true,
             confirm_unsaved_changes: true,
             relative_paths: true,
+            interface_size: InterfaceSize::DEFAULT,
             window: None,
             viewer: ViewerPreferences::default(),
             ml_models: MlModelPaths::default(),

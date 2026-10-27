@@ -46,6 +46,7 @@ use crate::gui::state::preview_store::error::DrawablePreviewError;
 use crate::gui::state::preview_store::{
     DrawableImage, FullView, PreviewMessage, PreviewStore, StoredContent,
 };
+use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::icon::Icon;
@@ -79,10 +80,27 @@ pub(crate) struct ImageViewer {
     checker: Option<ImageHandle>,
 }
 
-/// Drawn when a viewer's node has published nothing yet. An invitation rather
-/// than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and
-/// not a message.
+/// Drawn when a viewer's node has published nothing yet and no run has said why. An invitation
+/// rather than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and not a
+/// message.
 const NOTHING_YET_HINT: &str = "Run the graph to see this image.";
+
+/// Drawn for nothing published when the last run skipped the node: it ran, so the invitation
+/// above would say the wrong thing.
+const STOPPED_BEFORE_HINT: &str = "The last run stopped before this node.";
+
+/// Drawn for nothing published when the node failed in the last run.
+const FAILED_HINT: &str = "This node failed in the last run.";
+
+/// Drawn for nothing published when the last run could not feed the node an input.
+const MISSING_INPUT_HINT: &str = "The last run could not feed this node an input.";
+
+/// Drawn for nothing published while the node runs.
+const RUNNING_HINT: &str = "Running\u{2026}";
+
+/// Drawn for nothing published after the node ran: its value is still on its way, or it
+/// published none.
+const NO_IMAGE_YET_HINT: &str = "The last run has published no image yet.";
 
 /// What [`StoredContent`] means to a viewer: a texture to paint, why there
 /// isn't one, or nothing published yet.
@@ -132,11 +150,19 @@ impl ShownSource {
         }
     }
 
-    const fn hint(&self) -> Option<PreviewMessage<'_>> {
+    /// The line drawn in place of an image; `status` says why nothing was published.
+    const fn hint(&self, status: &ExecStatus) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Image(_) => None,
             Self::NoImage(error) => Some(PreviewMessage::Failure(error)),
-            Self::Nothing => Some(PreviewMessage::Text(NOTHING_YET_HINT)),
+            Self::Nothing => Some(PreviewMessage::Text(match status {
+                ExecStatus::None => NOTHING_YET_HINT,
+                ExecStatus::Running(_) => RUNNING_HINT,
+                ExecStatus::Executed(_) | ExecStatus::Cached => NO_IMAGE_YET_HINT,
+                ExecStatus::MissingInputs(_) => MISSING_INPUT_HINT,
+                ExecStatus::Skipped => STOPPED_BEFORE_HINT,
+                ExecStatus::Errored(_) => FAILED_HINT,
+            })),
         }
     }
 }
@@ -148,6 +174,8 @@ pub(crate) struct ViewerPane<'a> {
     /// The tab's title, never empty — [`node_label`] supplies the fallback.
     pub(crate) title: &'a str,
     pub(crate) previews: &'a PreviewStore,
+    /// The node's last-run status, which says why a viewer with nothing to show has nothing.
+    pub(crate) status: &'a ExecStatus,
     /// The pane's size, `None` before it was ever arranged.
     pub(crate) size: Option<Vec2>,
 }
@@ -235,6 +263,7 @@ impl ImageViewer {
         let ViewerPane {
             theme,
             previews,
+            status,
             size: pane,
             ..
         } = pane_view;
@@ -291,7 +320,7 @@ impl ImageViewer {
                 // either/or the enum states — never a second thing drawn over
                 // the picture. On the frosted readout pill, so the line stays
                 // legible over the checker/white backdrops too.
-                if let Some(hint) = source.hint() {
+                if let Some(hint) = source.hint(status) {
                     Readout {
                         panel: Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
                         text: fmt!(ui, "{hint}").into(),

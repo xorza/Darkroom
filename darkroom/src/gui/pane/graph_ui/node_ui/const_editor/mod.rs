@@ -30,18 +30,14 @@
 //! frame, whose buffer still holds the user's text to commit — and parse
 //! only when the edit commits.
 
-use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Formatter;
-use std::fmt::{Display, Write as _};
-use std::path::Path;
-
 use palantir::TextWrap;
 use palantir::prelude::*;
-use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
+use scenarium::{ConstValue, DataType, Library, ValueVariant};
 
 use crate::gui::theme::const_editor_theme::ConstEditorTheme;
 use crate::gui::widgets::edit_buffer::{EditBuffer, Focus};
+use crate::gui::widgets::format::path_preview::PathPreview;
+use crate::gui::widgets::format::shown_value::{self, FLOAT_DECIMALS, UNSET};
 use crate::gui::widgets::support;
 
 /// One const editor: the field it records as, and the literal it edits on
@@ -176,6 +172,7 @@ impl ConstEditor<'_> {
                     .label(label)
                     .style(&field.theme.drag_value.chip)
                     .text_wrap(TextWrap::EllipsisMiddle)
+                    .text_align(Align::LEFT)
                     .size((Sizing::FILL, Sizing::FILL))
                     .min_size((field.theme.width, 0.0))
                     .show(ui)
@@ -251,29 +248,34 @@ impl Field<'_> {
     }
 
     /// An optional input left unset: `Null`, the one admitted literal outside
-    /// its port's coercion class. Shows its textual form in a read-only field;
-    /// clicks fall through to the surrounding row. Always returns `None`.
+    /// its port's coercion class. See [`Self::empty`]. Always returns `None`.
     fn unset(self, ui: &mut Ui, value: &ConstValue) -> Option<ConstValue> {
         debug_assert_eq!(
             *value,
             ConstValue::Null,
             "an admitted literal outside its port's class is `Null`"
         );
+        self.empty(ui);
+        None
+    }
+
+    /// An input with nothing in it — left unset, or bound to nothing: [`UNSET`] in a
+    /// read-only field the size of an editor; clicks fall through to the surrounding row.
+    pub(super) fn empty(self, ui: &mut Ui) {
         let Self { theme, id } = self;
         // The same retained buffer the editable fields keep under this id,
-        // refilled from the literal every frame — which is also what makes the
-        // field read-only: anything typed into it is gone by the next record.
+        // refilled every frame — which is also what makes the field read-only:
+        // anything typed into it is gone by the next record. "—" in the muted
+        // ink, as the inspector reads an input with nothing in it.
         ui.with_state::<EditBuffer, _>(id, |ui, buffer| {
-            let text = &mut buffer.text;
-            text.clear();
-            write!(text, "{}", value.value_text()).expect("writing to a String cannot fail");
-            TextEdit::new(text)
+            buffer.text.replace_range(.., UNSET);
+            TextEdit::new(&mut buffer.text)
                 .id(id)
                 .style(&theme.drag_value.editor)
+                .color(theme.unset)
                 .size((Sizing::fixed(theme.width), Sizing::FILL))
                 .show(ui);
         });
-        None
     }
 
     /// Render a `TextEdit` whose buffer survives across frames via palantir's
@@ -326,7 +328,8 @@ impl Field<'_> {
         let committed = DragValue::new(&mut draft)
             .editable(true)
             .speed(int_speed(cur))
-            .style(&self.theme.drag_value)
+            .style(&self.theme.number)
+            .text_align(Align::LEFT)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
             .id(self.id)
             .show(ui)
@@ -340,8 +343,9 @@ impl Field<'_> {
         let committed = DragValue::new(&mut draft)
             .editable(true)
             .speed(float_speed(cur))
-            .decimals(3)
-            .style(&self.theme.drag_value)
+            .decimals(FLOAT_DECIMALS)
+            .style(&self.theme.number)
+            .text_align(Align::LEFT)
             .size((Sizing::fixed(self.theme.width), Sizing::FILL))
             .id(self.id)
             .show(ui)
@@ -360,13 +364,7 @@ impl Field<'_> {
 ///
 /// Writes into the caller's cleared buffer — see [`Field::text`].
 fn format_any(value: &ConstValue, out: &mut String) {
-    match value {
-        ConstValue::Null => {}
-        ConstValue::Float(v) => format_float(*v, out),
-        other => {
-            write!(out, "{}", other.value_text()).expect("writing to a String cannot fail");
-        }
-    }
+    shown_value::write_untyped(value, out).expect("writing to a String cannot fail");
 }
 
 /// What committing `text` in an `Any` field showing `value` sets it to, or `None` for no change.
@@ -406,73 +404,9 @@ fn parse_any(text: &str) -> ConstValue {
     ConstValue::String(text.to_owned())
 }
 
-/// What an `FsPath` input's pick button reads: the mode's call to action
-/// while nothing is chosen, a single chosen path's own file name, or how many
-/// files a multi-pick holds.
-///
-/// Rendered on demand rather than assembled into a `String`: the button
-/// records every frame the node does, and the label goes straight into the
-/// record pass's text arena.
-#[derive(Debug)]
-enum PathPreview<'a> {
-    /// Nothing chosen — the prompt for the mode being picked for.
-    Prompt(&'static str),
-    /// The chosen path's final component (the whole path when it has none).
-    Name(Cow<'a, str>),
-    /// How many non-empty paths a multi-pick holds. Never zero — that reads
-    /// as a [`Prompt`](Self::Prompt).
-    Count(usize),
-}
-
-impl<'a> PathPreview<'a> {
-    /// The label for a single-path literal.
-    fn single(path: &'a str, mode: FsPathMode) -> Self {
-        if path.is_empty() {
-            return Self::Prompt(match mode {
-                FsPathMode::ExistingFile => "Choose file…",
-                FsPathMode::ExistingFiles => "Choose files…",
-                FsPathMode::NewFile => "Choose save path…",
-                FsPathMode::Dir => "Choose directory…",
-            });
-        }
-        Self::Name(
-            Path::new(path)
-                .file_name()
-                .map_or(Cow::Borrowed(path), |name| name.to_string_lossy()),
-        )
-    }
-
-    /// The label for a multi-path literal: a count, since no one file name
-    /// stands for the selection.
-    fn multi(paths: &[String]) -> Self {
-        match paths.iter().filter(|path| !path.is_empty()).count() {
-            0 => Self::Prompt("Choose files…"),
-            count => Self::Count(count),
-        }
-    }
-}
-
-impl Display for PathPreview<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Prompt(prompt) => f.write_str(prompt),
-            Self::Name(name) => f.write_str(name),
-            Self::Count(1) => f.write_str("1 file"),
-            Self::Count(count) => write!(f, "{count} files"),
-        }
-    }
-}
-
 /// The `String` port's mirror: its literal *is* the field's text, verbatim.
 fn format_string(value: &str, out: &mut String) {
     out.push_str(value);
-}
-
-/// `{}` on f64 prints `1` for whole numbers, which round-trips through
-/// `f64::parse` but reads as an integer to a user. `{:?}` keeps the
-/// trailing `.0` so the field looks like a float.
-fn format_float(v: f64, out: &mut String) {
-    write!(out, "{v:?}").expect("writing to a String cannot fail");
 }
 
 /// Drag speed for a float: ≈1% of the value's magnitude per logical pixel

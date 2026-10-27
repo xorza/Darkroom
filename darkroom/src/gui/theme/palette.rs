@@ -79,12 +79,10 @@ pub(crate) struct Palette {
     pub(crate) port_label: RgbaF32,
     /// Inspect chip and pinned-inspector outline.
     pub(crate) badge_graph: RgbaF32,
-    /// Sink chip.
-    pub(crate) badge_sink: RgbaF32,
     /// Persist-to-disk cache chip.
     pub(crate) badge_cache: RgbaF32,
-    /// Impure marker.
-    pub(crate) badge_impure: RgbaF32,
+    /// The kind mark: a sink, or a node recomputed every run.
+    pub(crate) badge_kind: RgbaF32,
     /// It worked / it ran.
     pub(crate) status_success: RgbaF32,
     /// It was reused from cache.

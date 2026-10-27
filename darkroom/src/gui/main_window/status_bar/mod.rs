@@ -2,14 +2,14 @@
 //! failed action's message or a warning (left, in the error or the warning
 //! color — run/save/load failures and what a load repaired, parked in the
 //! engine's `StatusLog` until a success of the same family clears it), else
-//! what the last run came to with a link to the node that failed; and the
-//! memory readout (right): this process's own resident footprint, plus the
-//! runtime cache's system + GPU bytes under one `Cache` clause, mirrored from
-//! the last completed `RunSummary` and shown only when the cache holds
-//! something.
-//! The footprint is never zero, so the bar is always present: a strip that
-//! appears and vanishes reads as layout jitter, and a permanent one keeps
-//! the dock from resizing when a run lands.
+//! what the last run came to with a link to the node that failed; then, at
+//! the right, the graph's node and selection counts and its zoom, and the
+//! memory readout: this process's own resident footprint, plus the runtime
+//! cache's system + GPU bytes under one `Cache` clause, mirrored from the last
+//! completed `RunSummary` and shown only when the cache holds something.
+//! The graph's line is always there, so the bar is one line tall on every
+//! frame: a strip that grew and shrank would read as layout jitter and resize
+//! the dock when a run lands.
 
 use palantir::prelude::*;
 use scenarium::RamUsage;
@@ -60,6 +60,14 @@ pub(crate) fn show(ui: &mut Ui, ctx: WindowCtx<'_>, out: &mut Requests) {
                 run_line(ui, ctx, outcome, out);
             }
             support::hspacer(ui, "status_spacer");
+            let view = &ctx.document().main_view;
+            let canvas = CanvasLine {
+                node_count: ctx.document().graph.len(),
+                selected_count: view.selected.len(),
+                zoom: view.viewport.zoom,
+            };
+            let style = support::muted_text(ui, theme, theme.text.body);
+            Text::new(fmt!(ui, "{canvas}")).style(&style).show(ui);
             if let Some(label) = ram {
                 let style = support::muted_text(ui, theme, theme.text.body);
                 Text::new(fmt!(ui, "{label}")).style(&style).show(ui);
@@ -160,6 +168,31 @@ impl Display for RunLine {
             write!(f, ", {cached_count} cached")?;
         }
         f.write_str(".")
+    }
+}
+
+/// The graph's line: how many nodes it holds, how many items are selected, and the camera's
+/// zoom, as `19 nodes · 1 selected · 62 %`.
+#[derive(Clone, Copy, Debug)]
+struct CanvasLine {
+    node_count: usize,
+    selected_count: usize,
+    zoom: f32,
+}
+
+impl Display for CanvasLine {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let Self {
+            node_count,
+            selected_count,
+            zoom,
+        } = *self;
+        write!(
+            f,
+            "{} \u{b7} {selected_count} selected \u{b7} {:.0} %",
+            Counted(node_count, "node", "nodes"),
+            zoom * 100.0
+        )
     }
 }
 

@@ -51,9 +51,9 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     );
 }
 
-/// The process footprint gives the bar something to say on every frame,
-/// so it is recorded on an untouched document — and stays recorded when no
-/// reading is available, rather than reappearing as the figure lands.
+/// The graph's line gives the bar something to say on every frame, so it is recorded on an
+/// untouched document, one body line tall with or without a memory reading: a bar that grew as
+/// the figure landed would move the dock.
 #[test]
 fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     let mut h = SessionHarness::new(DocumentFixture::default());
@@ -66,17 +66,33 @@ fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     h.prime(2);
     let with = h.ui.rect(id()).expect("status bar records");
 
-    // Padding alone without a reading, a row either way: a collapsed one would arrange to zero
-    // height and read as "no bar". A reading adds one body line, 13 px at the theme's factor,
-    // which the shaper measures up to a whole pixel: 15.59 to 16.
+    // One body line, 14 px at the theme's factor, which the shaper measures up to a whole
+    // pixel, inside the padding.
     let theme = Theme::default();
     let line = theme.palantir.text.line_height_for(theme.text.body).ceil();
     let pad = theme.space.xs;
-    assert_eq!(without.size.h, 2.0 * pad, "no reading");
+    assert_eq!(without.size.h, 2.0 * pad + line, "no reading");
     assert_eq!(with.size.h, 2.0 * pad + line, "a 3 MiB reading");
     for (rect, what) in [(without, "no reading"), (with, "3 MiB reading")] {
         assert_eq!(rect.size.w, 1200.0, "{what}: the bar spans the window");
     }
+}
+
+/// The graph's line counts its nodes, one noun singular, and its selection, and reads the zoom
+/// as a whole percent: 0.62 is 62 %, 0.625 rounds to even, 62 %.
+#[test]
+fn the_canvas_line_counts_and_reads_the_zoom() {
+    let line = |node_count, selected_count, zoom| {
+        CanvasLine {
+            node_count,
+            selected_count,
+            zoom,
+        }
+        .to_string()
+    };
+    assert_eq!(line(19, 1, 0.62), "19 nodes \u{b7} 1 selected \u{b7} 62 %");
+    assert_eq!(line(1, 0, 1.0), "1 node \u{b7} 0 selected \u{b7} 100 %");
+    assert_eq!(line(0, 0, 0.625), "0 nodes \u{b7} 0 selected \u{b7} 62 %");
 }
 
 /// The run line leads with the worst of the run and counts the rest, one noun singular.

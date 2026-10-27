@@ -491,8 +491,8 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
 /// show the theme's colours exactly, and the legend's node rect is the rect `state` reports, as
 /// the scale is 1. A `max_side` of 100 scales it to 100 × 75 and the legend by 1/4, exactly. A
-/// node's shot is its body, (40, 100) to (303.5, 245), with 24 px around it, clamped to the
-/// window and rounded out: (16, 76) to (328, 269), 312 × 193, the body at
+/// node's shot is its body, (40, 102) to (311.5, 253), with 24 px around it, clamped to the
+/// window and rounded out: (16, 78) to (336, 277), 320 × 199, the body at
 /// (24, 24) in it. A rect of the canvas at the node's place, 100 × 50 at zoom 1, starts at the
 /// body's corner, and one past the window or of negative size is empty. A pane's shot is its rect, rounded out; a name no visible tab shows lists those
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
@@ -505,7 +505,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
-    assert_eq!(screen, [40.0, 100.0, 263.4953, 145.0]);
+    assert_eq!(screen, [40.0, 102.0, 271.4953, 151.0]);
 
     let theme = Theme::default();
     let whole = driver.shot(&Region::Window, 400).unwrap();
@@ -554,7 +554,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
-    assert_eq!(node.size, UVec2::new(312, 193));
+    assert_eq!(node.size, UVec2::new(320, 199));
     assert_eq!(node.legend[0].rect[..2], [24.0, 24.0]);
     assert!(
         node.path
@@ -885,4 +885,22 @@ fn a_dropped_wire_floats_onto_the_node_its_palette_adds() {
         wires(&mut driver),
         [format!("{BRIGHTNESS}.Image -> {CONVERT}.Image")]
     );
+}
+
+/// The Preferences tab's interface size reaches the window: a pick of 125 % sets palantir's
+/// user scale to 1.25 from the next frame.
+#[test]
+fn an_interface_size_pick_scales_the_ui() {
+    let mut driver = driver();
+    let scale = |driver: &mut Driver| driver.offscreen().with_app(|_, ui| ui.user_scale().get());
+    assert_eq!(scale(&mut driver), 1.0, "premise: the default size");
+    driver
+        .act(&[
+            click(Locator::Text("File".to_string())),
+            click(Locator::Text("Preferences".to_string())),
+            click(Locator::Text("100 %".to_string())),
+            click(Locator::Text("125 %".to_string())),
+        ])
+        .unwrap();
+    assert_eq!(scale(&mut driver), 1.25);
 }
