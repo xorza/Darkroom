@@ -14,6 +14,19 @@ use crate::gui::widgets::support;
 const GRID: f32 = 24.0;
 const STROKE: f32 = 2.0;
 
+/// The span of [`Icon::Cross`]'s arms on the grid, centered.
+const CROSS_SPAN: f32 = 12.0;
+
+/// The stroke an icon drawn in a `side` box wears.
+pub(crate) const fn stroke_width(side: f32) -> f32 {
+    side / GRID * STROKE
+}
+
+/// The span of [`Icon::Cross`]'s arms in a `side` box, for a widget that draws the cross itself.
+pub(crate) const fn cross_span(side: f32) -> f32 {
+    side / GRID * CROSS_SPAN
+}
+
 /// One glyph of the editor's icon set: stroke artwork on a 24-unit grid, one stroke width, round
 /// caps and joins, painted in one ink. Refused: letters as icons (`R`, `D`, `i`), and font glyphs
 /// (`■`, `~`, `↻`), which sit on a font's baseline and weight rather than on the grid.
@@ -122,8 +135,10 @@ impl Icon {
             }
             Self::Check => pen.open(ui, &[(4.5, 12.5), (9.5, 17.5), (19.5, 6.5)]),
             Self::Cross => {
-                pen.line(ui, (6.0, 6.0), (18.0, 18.0));
-                pen.line(ui, (18.0, 6.0), (6.0, 18.0));
+                let (center, half) = (GRID * 0.5, CROSS_SPAN * 0.5);
+                let (near, far) = (center - half, center + half);
+                pen.line(ui, (near, near), (far, far));
+                pen.line(ui, (far, near), (near, far));
             }
             Self::Pin => {
                 pen.line(ui, (9.0, 3.5), (15.0, 3.5));

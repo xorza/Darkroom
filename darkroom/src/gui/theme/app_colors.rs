@@ -31,11 +31,6 @@ pub(crate) struct AppColors {
     /// and the nodes, so the surround recedes and the active tab (which
     /// uses `canvas.bg`) reads as continuous with the graph below it.
     pub(crate) surround_fill: RgbaF32,
-    /// Inactive tab-strip chip. A notch above `surround_fill` toward the card
-    /// surface, so an unselected tab reads as a resting chip rather than a
-    /// bare label; the active tab uses `canvas.bg` + a `selection_rect`
-    /// accent top-line instead.
-    pub(crate) tab_inactive: RgbaF32,
     /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
     /// VRAM half of a memory readout.
     pub(crate) badge_graph: RgbaF32,
@@ -58,7 +53,6 @@ impl AppColors {
             breaker_stroke: p.breaker_stroke,
             text_muted: p.text_muted,
             surround_fill: p.surround_fill,
-            tab_inactive: p.tab_inactive,
             badge_graph: p.badge_graph,
             link: p.badge_graph,
             link_hovered: color::toward(p.badge_graph, RgbaF32::WHITE, LINK_HOVER_LIFT),

@@ -300,6 +300,24 @@ layout only: the graph does not change, and the run does not read it.
 - **The inspector is a dock pane at UI scale**, following the selection; a pin opens a tab that
   keeps one node. Refused: a panel on the canvas, which zoomed with the nodes to about 6 px
   text and covered its neighbor, and a Closed → Open → Pinned chip the user must remember.
+- **The inspector is built from the node's parts**: the status as a chip in the header, an error
+  as a callout in the body ink, and inputs, outputs and log as cards with the node's fill,
+  shadow, port dots and field boxes, so a port reads the same on the canvas and in the pane.
+  Refused: text on the canvas color, which read as a log, and the status and error as red
+  prose, the loudest thing in the window.
+- **A tab is a ghost with a menu title's fills and a menu item's row**: no fill at rest,
+  `elem_hover` under the pointer, `elem_active` pressed, and the menu item's 12 · 8 inset from
+  one value in the bridge. Refused: a solid block per tab, the one control filled at rest, and
+  a hover of its own, which took the palette's `tab_inactive` rung with it. Chosen by the user
+  on 2026-10-27.
+- **A tab's close is the icon set's `Cross`**, drawn, on the selected tab and the one under the
+  pointer, its space kept on every tab, as VS Code's and Zed's strips do. Refused: a font "×",
+  which sat under the label's center, and a cross on every tab.
+- **One unsaved mark**, the dot beside the document's name in the menu bar. Refused: a second
+  dot on the Graph tab for the same fact.
+- **A wash composites as CSS does**: `Theme::wash` mixes an ink into the canvas on the encoded
+  values and makes it opaque, as the alphas a design picks assume. Refused: `with_alpha`, which
+  palantir blends in linear light, where a 10 % red wash read about three times as bright.
 - **A value reads as a field**, as Blender's and Unreal's node inputs do: a quiet box at rest, the
   value at the left of its column, numbers in the mono face, and "—" in the muted ink for an
   input with nothing in it that could hold a constant. Refused: plain text, which does not say

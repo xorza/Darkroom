@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::Spacing;
+use palantir::{Chrome, CloseShown, Spacing, SrgbaU8};
 use scenarium::TypeId;
 use static_assertions::assert_not_impl_any;
 
@@ -118,8 +118,8 @@ fn badges_are_told_apart_from_each_other() {
     );
 }
 
-/// The six surfaces stack in one view — a graph, the bar around
-/// it, an inactive tab, a node, a hovered control, a pressed one — so
+/// The five surfaces stack in one view — a graph, the bar around
+/// it, a node, a hovered control, a pressed one — so
 /// each must be lighter than the one under it. The palette's generator
 /// checks this before it writes the file; this is the half that would
 /// catch a hand-edited asset, and it is the one rule a table of colors
@@ -130,7 +130,6 @@ fn surfaces_stack_darkest_first() {
     let ladder = [
         ("canvas_bg", p.canvas_bg),
         ("surround_fill", p.surround_fill),
-        ("tab_inactive", p.tab_inactive),
         ("node_fill", p.node_fill),
         ("elem_hover", p.elem_hover),
         ("header_fill", p.header_fill),
@@ -293,6 +292,7 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
         ("menu", ui.context_menu.padding),
         ("tooltip", ui.tooltip.padding),
         ("tab chip", ui.tabs.chip_padding),
+        ("tab strip", ui.tabs.strip_padding),
         ("modal", ui.modal.padding),
     ];
     for (widget, padding) in paddings {
@@ -303,10 +303,19 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
             );
         }
     }
+    let gaps = [
+        ("tab strip gap", ui.tabs.gap),
+        ("tab label gap", ui.tabs.label_gap),
+        ("tab trailing inset", ui.tabs.trailing_inset),
+    ];
+    for (widget, gap) in gaps {
+        assert!([xs, sm, md, lg, xl, xxl].contains(&gap), "{widget} {gap}");
+    }
     let looks = [
         ("button", &ui.button.looks),
         ("text edit", &ui.text_edit.looks),
         ("menu item", &ui.context_menu.item.looks),
+        ("tab close", &ui.tabs.close),
     ];
     let mut corners = vec![
         ("tooltip", ui.tooltip.panel.corners),
@@ -332,6 +341,42 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.button.defaults.padding.as_array(), [md, xs, md, xs]);
     assert_eq!(ui.text_edit.defaults.padding.as_array(), [sm, xs, sm, xs]);
     assert_eq!(ui.context_menu.panel.corners.as_array(), [float; 4]);
+    assert_eq!(ui.tabs.strip_padding.as_array(), [sm, xs, sm, 0.0]);
+    assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
+    assert_eq!(ui.tabs.chip_padding.as_array(), [md, sm, md, sm]);
+    assert_eq!(
+        (ui.tabs.gap, ui.tabs.label_gap, ui.tabs.trailing_inset),
+        (xs, sm, xs)
+    );
+    assert_eq!(
+        ui.tabs.close.hovered.chrome.corners.as_array(),
+        [control; 4]
+    );
+}
+
+/// A tab chip is a ghost with a menu title's fills, as the two share the surround: no fill at
+/// rest, `element_mid` under the pointer and `element_strong` pressed; its close button lifts on
+/// `element_strong`, the one fill that shows on a hovered chip. Its close button is the icon set's `Cross` in a 12 px
+/// box, 12 of 24 grid units across at the set's 2-unit stroke: a 6 px cross of 1 px strokes, shown
+/// on the selected chip and the one under the pointer.
+#[test]
+fn a_tab_chip_and_its_close_button_are_ghosts() {
+    let theme = Theme::default();
+    let tabs = &theme.palantir.tabs;
+    let looks = &tabs.unselected;
+    assert_eq!(looks.normal.chrome, Chrome::NONE);
+    assert_eq!(looks.disabled.chrome, Chrome::NONE);
+    let titles = &theme.menu_button.looks;
+    assert_eq!(looks.hovered.chrome.fill, titles.hovered.chrome.fill);
+    assert_eq!(looks.active.chrome.fill, titles.active.chrome.fill);
+    assert_eq!(tabs.close.hovered.chrome.fill, titles.active.chrome.fill);
+    assert_ne!(tabs.close.hovered.chrome.fill, looks.hovered.chrome.fill);
+    assert_eq!(tabs.close.normal.chrome, Chrome::NONE);
+    assert_eq!(
+        (tabs.close_size, tabs.close_glyph, tabs.close_stroke),
+        (18.0, 6.0, 1.0)
+    );
+    assert_eq!(tabs.close_shown, CloseShown::SelectedOrHovered);
 }
 
 /// Only a status that asks for attention frames the node: one in progress, one the run could
@@ -392,4 +437,30 @@ fn no_untyped_port_borrows_a_status_or_a_type_hue() {
             "the {name} port wears a ramp hue"
         );
     }
+}
+
+/// A wash composites on the encoded values, as the review drew it: the error ink `#ff8b8c` at
+/// 14 % over the canvas `#141414` is `0.14·255 + 0.86·20 = 52.9`, `0.14·139 + 0.86·20 = 36.66`
+/// and `0.14·140 + 0.86·20 = 36.8`, so `#352525`, where a linear blend lands near `#653c3c`.
+#[test]
+fn a_wash_composites_on_the_encoded_values() {
+    let theme = Theme::default();
+    assert_eq!(
+        theme.status.error.to_srgba(),
+        SrgbaU8::hex(0xff8b8c),
+        "premise"
+    );
+    assert_eq!(
+        theme.canvas.bg.to_srgba(),
+        SrgbaU8::hex(0x141414),
+        "premise"
+    );
+    assert_eq!(
+        theme.wash(theme.status.error, 0.14).to_srgba(),
+        SrgbaU8::hex(0x352525)
+    );
+    assert_eq!(
+        theme.wash(theme.status.error, 0.0).to_srgba(),
+        SrgbaU8::hex(0x141414)
+    );
 }

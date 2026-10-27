@@ -37,6 +37,9 @@ pub(crate) struct CardTheme {
     pub(crate) min_height: f32,
 }
 
+/// The blur of a resting card's shadow.
+const RESTING_BLUR: f32 = 10.0;
+
 impl CardTheme {
     pub(super) const fn from_palette(p: &Palette, radius: &RadiusScale) -> Self {
         Self {
@@ -70,11 +73,10 @@ impl CardTheme {
         (self.corner_radius - self.border_width_total()).max(0.0)
     }
 
-    /// Ambient elevation shadow shared by every card — node bodies, inspector
-    /// panels — so they all read as the same kind of surface. Only the blur
-    /// scales with how high a surface sits; color and offset are fixed.
+    /// Ambient elevation shadow shared by every card at rest — node bodies,
+    /// inspector cards — so they all read as the same kind of surface.
     #[inline]
-    pub(crate) const fn elevation_shadow(&self, blur: f32) -> Shadow {
-        Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), blur)
+    pub(crate) const fn resting_shadow(&self) -> Shadow {
+        Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), RESTING_BLUR)
     }
 }

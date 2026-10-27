@@ -3,14 +3,15 @@
 
 use glam::Vec2;
 use palantir::{
-    ButtonTheme, Chrome, Corners, RgbaF32, Spacing, StatefulLook, Stroke, TextStyleOverrides,
-    WidgetLook,
+    ButtonTheme, Chrome, CloseShown, Corners, RgbaF32, Spacing, StatefulLook, Stroke,
+    TextStyleOverrides, WidgetLook,
 };
 
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::radius_scale::RadiusScale;
 use crate::gui::theme::space_scale::SpaceScale;
 use crate::gui::theme::type_scale::TypeScale;
+use crate::gui::widgets::icon;
 
 /// darkroom's roles as the [`palantir::Palette`] that
 /// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
@@ -38,19 +39,14 @@ pub(super) const fn palette(p: &Palette) -> palantir::Palette {
 /// the roles whose palantir counterpart lands on a different rung than
 /// darkroom wants.
 ///
-/// A bundle rather than five parameters: four of them are `RgbaF32`, so
-/// any two of them swap and still compile.
+/// A bundle rather than five parameters: two of them are `RgbaF32`, so
+/// they swap and still compile.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BridgeRoles<'a> {
     /// The band the menu bar, the status bar and every tab strip sit on.
     pub(super) surround_fill: RgbaF32,
-    /// Resting fill of an unselected tab chip.
-    pub(super) tab_inactive: RgbaF32,
-    /// The selection cap on a strip that does not hold focus, and the
-    /// chrome lift behind a hovered strip glyph.
+    /// The selection cap on a strip that does not hold focus.
     pub(super) header_fill: RgbaF32,
-    /// The unsaved-changes dot.
-    pub(super) warning: RgbaF32,
     pub(super) text: &'a TypeScale,
     pub(super) space: &'a SpaceScale,
     /// The tab chip is a card; menus and the modal float; the rest are controls.
@@ -91,12 +87,11 @@ pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Them
     theme
 }
 
-/// A menu as the review drew it: 32 px rows at the body size, the hint a gutter from its label,
-/// and a panel that floats on a soft shadow inside a rule in the separators' ink, not on
-/// palantir's lit border.
-fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceScale) {
+/// A menu as the review drew it: the hint a gutter from its label, and a panel that floats on a
+/// soft shadow inside a rule in the separators' ink, not on palantir's lit border. Its 32 px rows
+/// are [`scales`]'s row inset, which a tab shares.
+const fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceScale) {
     let menu = &mut theme.context_menu;
-    menu.item.defaults.padding = Spacing::xy(space.md, space.sm);
     menu.item.gap = space.xl;
     menu.min_width = MENU_MIN_WIDTH;
     menu.panel.border = Stroke::new(p.border_soft(), 1.0);
@@ -117,7 +112,10 @@ fn scales(theme: &mut palantir::Theme, space: &SpaceScale, radius: &RadiusScale)
     theme.text_edit.defaults.padding = control;
     theme.context_menu.padding = Spacing::all(space.xs);
     theme.tooltip.padding = control;
-    theme.tabs.chip_padding = Spacing::xy(space.md, space.xs);
+    // A tab and a menu item are one row: the same inset, so the same height at the body size.
+    let row = Spacing::xy(space.md, space.sm);
+    theme.context_menu.item.defaults.padding = row;
+    theme.tabs.chip_padding = row;
     theme.modal.padding = Spacing::all(space.xl);
 
     let round = |look: &mut StatefulLook, r: f32| {
@@ -133,43 +131,78 @@ fn scales(theme: &mut palantir::Theme, space: &SpaceScale, radius: &RadiusScale)
     theme.modal.panel.corners = Corners::all(radius.float);
 }
 
-/// The corner radius of the lift behind a hovered tab-close button: a small
-/// glyph's chip, rounder than a square and flatter than a pill.
-const CLOSE_LIFT_RADIUS: f32 = 3.0;
+/// The lift around the close button's icon box, each side.
+const CLOSE_LIFT: f32 = 3.0;
+
+/// A chip's width floor: its padding, label gap, close box and trailing inset take 42 px, so 64
+/// leaves a short name room.
+const TAB_MIN_WIDTH: f32 = 64.0;
 
 /// Darkroom's own tab chips over palantir's recipe.
 ///
 /// Palantir derives its strip from the palette alone, which lands the
-/// band on `element` and the idle cap on `element_strong`. Darkroom wants the
-/// strip to continue the surround band the menu bar rides, an unselected
-/// chip on its own `tab_inactive` rung, and the card radius every other
-/// elevated surface uses — so those five roles are set here and the rest
-/// of the recipe is left alone.
+/// band on `element`, the idle cap on `element_strong` and every chip on a
+/// fill. Darkroom wants the strip to continue the surround band the menu bar
+/// rides, ghost chips and close buttons as its other controls are, and the
+/// spacing and radius scales every other surface uses.
 fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<'_>) {
+    let BridgeRoles {
+        surround_fill,
+        header_fill,
+        text,
+        space,
+        radius,
+    } = r;
     let tabs = &mut theme.tabs;
-    tabs.strip = Chrome::fill(r.surround_fill);
-    tabs.radius = r.radius.card;
-    tabs.cap_unfocused = r.header_fill;
-    tabs.badge = r.warning;
-    // The selected chip keeps palantir's `window_bg` fill, which is
-    // darkroom's canvas: its bottom edge dissolves into the pane below.
-    let top = Corners::top(r.radius.card);
+    tabs.strip = Chrome::fill(surround_fill);
+    tabs.strip_padding = Spacing::new(space.sm, space.xs, space.sm, 0.0);
+    tabs.gap = space.xs;
+    tabs.label_gap = space.sm;
+    tabs.trailing_inset = space.xs;
+    tabs.min_width = TAB_MIN_WIDTH;
+    tabs.radius = radius.card;
+    tabs.cap_unfocused = header_fill;
+    // An unselected chip is a ghost with a menu title's fills, as the two share the surround: no
+    // fill at rest, `element_mid` under the pointer, `element_strong` pressed. The selected chip
+    // keeps palantir's `window_bg` fill, which is darkroom's canvas: its bottom edge dissolves
+    // into the pane below.
+    let top = Corners::top(radius.card);
     let chip = |fill: RgbaF32| Chrome::rounded(fill, top);
     // Destructured, so a state palantir adds fails here rather than keeping its default.
     let [normal, hovered, active, disabled] = tabs.unselected.each_mut();
-    normal.chrome = chip(r.tab_inactive);
+    normal.chrome = Chrome::NONE;
+    normal.text = TextStyleOverrides::NONE.with_color(p.text_muted);
     hovered.chrome = chip(p.element_mid);
+    hovered.text = TextStyleOverrides::NONE;
     active.chrome = chip(p.element_strong);
-    disabled.chrome = chip(p.element);
-    // The chrome lift behind a hovered close button is the one a hovered
-    // node or toolbar button wears.
-    let lift = Chrome::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
-    tabs.close.hovered.chrome = lift.clone();
-    tabs.close.active.chrome = lift;
+    active.text = TextStyleOverrides::NONE;
+    disabled.chrome = Chrome::NONE;
+    disabled.text = TextStyleOverrides::NONE.with_color(p.text_disabled);
+
+    // The close button is the icon set's `Cross`, so it strokes as every icon does, on a
+    // control-rounded lift. It shows on the selected chip and the chip under the pointer, as VS
+    // Code's and Zed's strips do. Its lift is the top rung, the one fill that shows on a hovered
+    // chip as on the canvas-filled selected one, pressed or not.
+    // The icon box is the label tier's, as a node footer's status icon is.
+    let close_icon = text.label;
+    tabs.close_size = close_icon + 2.0 * CLOSE_LIFT;
+    tabs.close_glyph = icon::cross_span(close_icon);
+    tabs.close_stroke = icon::stroke_width(close_icon);
+    tabs.close_shown = CloseShown::SelectedOrHovered;
+    let lift = |fill: RgbaF32| Chrome::rounded(fill, Corners::all(radius.control));
+    let [normal, hovered, active, disabled] = tabs.close.each_mut();
+    normal.chrome = Chrome::NONE;
+    normal.text = TextStyleOverrides::NONE.with_color(p.text_muted);
+    hovered.chrome = lift(p.element_strong);
+    hovered.text = TextStyleOverrides::NONE;
+    active.chrome = lift(p.element_strong);
+    active.text = TextStyleOverrides::NONE;
+    disabled.chrome = Chrome::NONE;
+    disabled.text = TextStyleOverrides::NONE.with_color(p.text_disabled);
 
     // The ghost chip trailing the pointer wears the surround band, so it
     // reads as a tab lifted off its strip rather than as a popup.
-    theme.dock.ghost.chrome = Chrome::rounded(r.surround_fill, Corners::all(r.radius.card))
+    theme.dock.ghost.chrome = Chrome::rounded(surround_fill, Corners::all(radius.card))
         .with_border(Stroke::new(p.accent, 1.0));
 }
 

@@ -28,7 +28,7 @@ const OUTLINE_WIDTH: f32 = 2.5;
 
 /// Stroke width of a hollow circle's ring: the 2 px of a wire, so the ring reads as the line
 /// that lands on it.
-const HOLLOW_WIDTH: f32 = 2.0;
+pub(crate) const HOLLOW_WIDTH: f32 = 2.0;
 
 /// What a glyph paints inside its box.
 #[derive(Clone, Copy, Debug)]

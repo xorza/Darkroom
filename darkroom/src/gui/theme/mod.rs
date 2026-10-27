@@ -154,6 +154,24 @@ pub(crate) enum CardTier {
 }
 
 impl Theme {
+    /// `ink` at `alpha` over the canvas, made opaque, composited on the sRGB-encoded values as
+    /// CSS and the design tools composite. A wash's alpha is a designer's, picked in that space:
+    /// palantir blends in linear light, where a 10 % wash of a light ink lands about three times
+    /// as bright.
+    pub(crate) fn wash(&self, ink: RgbaF32, alpha: f32) -> RgbaF32 {
+        debug_assert!(
+            (0.0..=1.0).contains(&alpha),
+            "a wash's alpha is a fraction: {alpha}"
+        );
+        let [ink, under] = [ink, self.canvas.bg].map(RgbaF32::to_srgba);
+        let over = |a: u8, b: u8| (alpha * f32::from(a) + (1.0 - alpha) * f32::from(b)) / 255.0;
+        RgbaF32::srgb(
+            over(ink.r, under.r),
+            over(ink.g, under.g),
+            over(ink.b, under.b),
+        )
+    }
+
     /// The color a port of `data_type` paints at rest, and the wires touching it; see
     /// [`Hover::lift`](crate::gui::widgets::hover::Hover::lift). The built-in scalars and the
     /// lens image type, the dominant payload on a darkroom canvas, take a fixed hue each from
@@ -267,9 +285,7 @@ impl Theme {
             &pal,
             BridgeRoles {
                 surround_fill: colors.surround_fill,
-                tab_inactive: colors.tab_inactive,
                 header_fill: card.header_fill,
-                warning: status.warning,
                 text: &text,
                 space: &space,
                 radius: &radius,
