@@ -105,7 +105,11 @@ impl Offscreen {
             return Err(DriverError::NoGpu);
         }
         let rect: Option<Rect> = region.rect(&self.app, self.display.ui())?;
-        let asked = self.display.ui().request_screenshot(rect);
+        let Some(asked) = self.display.ui().request_screenshot(rect) else {
+            return Err(DriverError::EmptyRegion {
+                region: format!("{region:?}"),
+            });
+        };
         // The frame paints the image; once the device's copy of it is back, the next frame lands
         // it, after any image an earlier ask is owed, one a frame.
         self.frame();
@@ -115,7 +119,7 @@ impl Offscreen {
             let ui = self.display.ui();
             if let Some(screenshot) = ui.screenshot_taken(asked) {
                 // The legend reads the frame the image landed in.
-                return Capture::of(screenshot, max_side, &self.app, ui);
+                return Ok(Capture::of(screenshot, max_side, &self.app, ui));
             }
         }
         Err(DriverError::Unsettled {

@@ -33,10 +33,9 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// the canvas knows whether the Esc cancelled a gesture instead.
 pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
     let graph_ctx = ctx.graph_ctx();
-    let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
-    let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
-    let delete =
-        ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
+    let reset_zoom = ui.shortcut_pressed(RESET_ZOOM_SHORTCUT);
+    let duplicate = ui.shortcut_pressed(DUPLICATE_SHORTCUT);
+    let delete = ui.shortcut_pressed(Key::Delete) || ui.shortcut_pressed(Key::Backspace);
     let view = graph_ctx.view();
     if ctx.deselects() && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());

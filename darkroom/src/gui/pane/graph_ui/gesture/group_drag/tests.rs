@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Key, PointerButton};
+use palantir::{Key, Modifiers, PointerButton};
 use scenarium::{InputPort, OutputPort};
 
 use crate::core::document::internals::DocumentFixture;
@@ -78,7 +78,8 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
 
 /// Esc cancels what is in flight, and deselects only when nothing was: a
 /// first Esc during a drag of the selection ends the drag and keeps the
-/// selection, and a second, with nothing left in flight, clears it.
+/// selection, and a second, with nothing left in flight, clears it. Deselect is
+/// a command, so Ctrl+Esc with nothing in flight leaves the selection.
 #[test]
 fn esc_cancels_a_drag_before_it_deselects() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
@@ -100,6 +101,16 @@ fn esc_cancels_a_drag_before_it_deselects() {
         "the first Esc only puts the drag back: {first:?}"
     );
     h.ui.release_button(PointerButton::Left);
+    h.frame();
+
+    h.ui.set_modifiers(Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    });
+    h.ui.key(Key::Escape);
+    let chord = h.frame();
+    assert!(chord.is_empty(), "Ctrl+Esc deselects nothing: {chord:?}");
+    h.ui.set_modifiers(Modifiers::default());
     h.frame();
 
     h.ui.key(Key::Escape);

@@ -332,6 +332,8 @@ impl Driver {
                     text: chord.text(),
                 });
                 frames += self.frame()?;
+                // A hand lets go, so no key reads as held after the action.
+                self.input(InputEvent::KeyUp { key: chord.key });
                 self.modifiers(Modifiers::default());
             }
             Action::Type(text) => self.input(InputEvent::ImeCommit(text)),

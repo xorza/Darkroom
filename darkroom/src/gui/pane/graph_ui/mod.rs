@@ -319,17 +319,21 @@ impl GraphUi {
         // read back — the classification is one response poll, and both
         // phases must agree on the winner.
         //
-        // One read for the whole frame. A controller with nothing in
+        // One classification for the whole frame. A controller with nothing in
         // flight has nothing to cancel, so each applies this to its own
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
-        // Esc cancels what is in flight, and deselects only when nothing was.
-        let escape = if !ui.key_pressed(Shortcut::key(Key::Escape)) {
-            Escape::Unpressed
-        } else if self.in_flight() {
+        // Esc cancels what is in flight, whatever the modifiers: Ctrl still held from a spawn
+        // drag's chord must not swallow the cancel. Deselect, a command, is plain Esc alone. Both
+        // read every frame, so each stays watched.
+        let cancel = ui.key_pressed(Key::Escape);
+        let plain = ui.shortcut_pressed(Key::Escape);
+        let escape = if self.in_flight() && cancel {
             Escape::Cancels
-        } else {
+        } else if plain {
             Escape::Deselects
+        } else {
+            Escape::Unpressed
         };
         let canvas = ui.response_for(canvas::outer_wid());
         if !canvas.right.held() && !canvas.right.released() {

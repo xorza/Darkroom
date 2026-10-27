@@ -161,16 +161,9 @@ pub(crate) struct Capture {
 impl Capture {
     /// `screenshot`, with the legend of `app`'s nodes as `ui`'s frame lays them out, placed in
     /// the picture a fit to `max_side` makes.
-    pub(crate) fn of(
-        screenshot: &Screenshot,
-        max_side: u32,
-        app: &App,
-        ui: &Ui,
-    ) -> Result<Self, DriverError> {
+    pub(crate) fn of(screenshot: &Screenshot, max_side: u32, app: &App, ui: &Ui) -> Self {
         let region = screenshot.region();
-        let image = screenshot.image().ok_or_else(|| DriverError::EmptyRegion {
-            region: format!("{region:?}"),
-        })?;
+        let image = screenshot.image();
         let physical = image.size();
         let size = fitted(physical, max_side);
         let legend = Legend {
@@ -180,10 +173,10 @@ impl Capture {
             bounds: Rect::new(0.0, 0.0, size.x as f32, size.y as f32),
         }
         .nodes(app, ui);
-        Ok(Self {
+        Self {
             image: view_capture::rgba_image(image),
             legend,
-        })
+        }
     }
 }
 
