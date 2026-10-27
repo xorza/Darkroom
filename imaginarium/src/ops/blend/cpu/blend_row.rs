@@ -5,7 +5,7 @@
 //! is the scalar reference's, operation for operation, so a kernel is bit-identical to it: the
 //! integer paths *divide* by the full scale, as [`Sample::to_unit`] does, where multiplying by
 //! the reciprocal would be cheaper but disagrees for 126 of the 256 byte values, and the alpha
-//! mix rounds its multiplies and its add apart. Refused: [`F32x8::div_scale`], exact and the
+//! mix rounds its multiplies and its add apart. Refused: a `div_scale` on `F32x8`, exact and the
 //! faster quotient for a conversion, which measured 1.00–1.16× slower here on Zen 3: the blend
 //! keeps the float pipes busy, and the divider runs beside them.
 
@@ -105,7 +105,8 @@ impl Kernel for BlendRow<'_, f32> {
     }
 }
 
-/// The blend's constants, splatted once per row, and [`BlendMode::blend`] on them.
+/// The blend's constants, splatted once per row, and `BlendMode::blend`, the scalar reference,
+/// on them.
 #[derive(Debug, Clone, Copy)]
 struct Splat<F: F32x8> {
     mode: BlendMode,
@@ -148,7 +149,7 @@ impl<F: F32x8> Splat<F> {
         isa.round_clamped_f32_to_i32(self.blend(src, dst) * self.full_scale, self.full_scale)
     }
 
-    /// [`BlendMode::blend`] of normalized channels, `Normal` in the alpha lanes.
+    /// `BlendMode::blend` of normalized channels, `Normal` in the alpha lanes.
     ///
     /// `max` and `min` are compare-selects, `a > b ? a : b` and `a > b ? b : a`, which the
     /// reference spells out, so each takes a NaN or a signed zero to the same side.

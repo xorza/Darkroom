@@ -157,15 +157,13 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
         b.points
             .iter()
             .any(|p| p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y)
-            || b.segments().any(|(a, c)| {
-                (0..4).any(|i| segments_intersect((a, c), (corners[i], corners[(i + 1) % 4])))
+            || b.segments().any(|segment| {
+                (0..4).any(|i| segments::cross(segment, [corners[i], corners[(i + 1) % 4]]))
             })
     };
     let brute_wire = |wire: &Wire| {
-        wire.chords().any(|[a, c]| {
-            b.segments()
-                .any(|segment| segments_intersect((a, c), segment))
-        })
+        wire.chords()
+            .any(|chord| b.segments().any(|segment| segments::cross(chord, segment)))
     };
 
     // Corners on a grid from well outside the box to well inside it, with the
@@ -204,4 +202,16 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
     // segment tests behind it alike.
     assert!(rect_hits > 0 && rect_hits < coords.len() * coords.len());
     assert!(cubic_hits > 0 && cubic_hits < coords.len() * coords.len());
+}
+
+/// A level wire from (0, 0) to (200, 0) has its middle sample at x = 100 exactly, the point two
+/// of its chords share; a scribble straight through it cuts the wire, as one beside it does.
+#[test]
+fn a_scribble_through_a_sample_point_cuts_the_wire() {
+    let level = Wire::data(Vec2::ZERO, Vec2::new(200.0, 0.0));
+    for x in [100.0, 90.0] {
+        let mut b = scribble_at(Vec2::new(x, -20.0));
+        b.add_point(Vec2::new(x, 20.0), 1.0);
+        assert!(b.intersects_wire(&level), "at x = {x}");
+    }
 }

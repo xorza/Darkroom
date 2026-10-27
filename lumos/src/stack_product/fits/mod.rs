@@ -71,7 +71,7 @@ const PLANES: [LumosExtension; 5] = [
     LumosExtension::Dispersion,
 ];
 
-/// Write `product` to `path` as one checksummed FITS file — see [`write`].
+/// Write `product` to `path` as one checksummed FITS file — see [`write`](fn@write).
 pub(crate) fn save(path: &Path, product: &StackProduct) -> Result<(), WriteError> {
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         write(product, file)

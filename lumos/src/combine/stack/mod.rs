@@ -1,4 +1,5 @@
-//! The one combine every stack goes through: [`combine`] reduces the cached frames to the stacked
+//! The one combine every stack goes through: [`CombinePlan::combine`] reduces the cached frames
+//! to the stacked
 //! product, under the settings [`StackConfig::combine_cached`] validated and resolved.
 //!
 //! [`StackConfig::combine_cached`]: crate::combine::stack_config::StackConfig::combine_cached

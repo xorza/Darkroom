@@ -57,7 +57,7 @@ pub(super) fn validate_image_header(image: &Header) -> Result<bool, FitsLoadErro
     Ok(is_lumos_cfa)
 }
 
-/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`].
+/// Write `image` to `path` as a checksummed floating-point FITS file — see [`write`](fn@write).
 pub(crate) fn save(path: &Path, image: &CfaImage) -> Result<(), WriteError> {
     fs::publish(path, fs::PublicationMode::Durable, |file| {
         write(image, file)
