@@ -294,6 +294,9 @@ layout only: the graph does not change, and the run does not read it.
   the user on 2026-10-27.
 - **Space and radius are scales on the theme**, beside `TypeScale`, and the bridge hands them to
   palantir. A literal size at a call site is a missing token.
+- **An icon button gives its icon 6 px a side**: a toolbar chip draws 18 in 30, a node header's
+  button 16 in 28, a step over the 14 px title. Refused: 15 in 22, whose 3.5 px read cramped.
+  Chosen by the user on 2026-10-27.
 - **One icon set.** Every glyph on a node and a toolbar is a stroke `Icon` at one stroke width,
   and an "on" control is a tint behind it. Refused: letters (`R`, `D`, `i`) and font glyphs
   (`■`, `~`, `↻`) beside drawn ones.
@@ -305,9 +308,9 @@ layout only: the graph does not change, and the run does not read it.
   shadow, port dots and field boxes, so a port reads the same on the canvas and in the pane.
   Refused: text on the canvas color, which read as a log, and the status and error as red
   prose, the loudest thing in the window.
-- **A tab is a ghost with a menu title's fills and a menu item's row**: no fill at rest,
-  `elem_hover` under the pointer, `elem_active` pressed, and the menu item's 12 · 8 inset from
-  one value in the bridge. Refused: a solid block per tab, the one control filled at rest, and
+- **A tab is a ghost with a menu title's fills, on one row with the menus**: no fill at rest,
+  `elem_hover` under the pointer, `elem_active` pressed. A tab, a menu-bar title and a menu item
+  take one 12 · 8 inset, the bridge's `row_inset`, so all three are 32 px at the body size. Refused: a solid block per tab, the one control filled at rest, and
   a hover of its own, which took the palette's `tab_inactive` rung with it. Chosen by the user
   on 2026-10-27.
 - **A tab's close is the icon set's `Cross`**, drawn, on the selected tab and the one under the

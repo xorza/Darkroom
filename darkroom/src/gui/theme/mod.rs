@@ -291,7 +291,7 @@ impl Theme {
                 radius: &radius,
             },
         );
-        let menu_button = palantir_bridge::menu_button(&pal);
+        let menu_button = palantir_bridge::menu_button(&pal, &space);
         let menu_button_open = palantir_bridge::menu_button_open(&menu_button);
         let path_field_error = error_bordered(&palantir.text_edit, status.error);
         let inline_rename = InlineRenameTheme::from_palette(&pal);

@@ -3,14 +3,15 @@
 use palantir::prelude::*;
 
 use crate::gui::theme::Theme;
+use crate::gui::widgets::icon;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
-/// Side of the button's box. The icon inside it is [`ICON_SIZE`], so the hover fill clears the
-/// artwork by 3.5 px a side.
-const BUTTON_SIZE: f32 = 22.0;
-const ICON_SIZE: f32 = 15.0;
+/// Side of the icon: a step over the 14 px title it sits beside, under the toolbar's 18.
+const ICON_SIZE: f32 = 16.0;
+/// Side of the button's box: the icon and [`icon::BUTTON_INSET`] around it, as a toolbar chip.
+const BUTTON_SIZE: f32 = ICON_SIZE + 2.0 * icon::BUTTON_INSET;
 
 /// The tint behind an "on" button's icon, in its own color: a tint, not a solid swatch, since a
 /// setting is passive configuration and solid fills belong to live status.
@@ -27,7 +28,7 @@ enum Kind {
     Mark,
 }
 
-/// One icon in a 22 px box with a tooltip. A control is a ghost button: no fill at rest, the
+/// One icon in a 28 px box with a tooltip. A control is a ghost button: no fill at rest, the
 /// hover fill when the pointer is over it, and a tint of its color while it is on. Its ink is
 /// the muted ink at rest and `color` while it is on or under the pointer; the hover fill is the
 /// one a toolbar chip lifts to. Builder chain ending in [`show`](Self::show), like a palantir
@@ -111,7 +112,7 @@ impl IconButton {
         if let Some(fill) = fill {
             chrome.fill = fill.into();
         }
-        let inset = (BUTTON_SIZE - ICON_SIZE) * 0.5;
+        let inset = icon::BUTTON_INSET;
         let button = Panel::zstack()
             .id(wid)
             .size((Sizing::fixed(BUTTON_SIZE), Sizing::fixed(BUTTON_SIZE)))

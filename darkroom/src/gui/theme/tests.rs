@@ -343,6 +343,11 @@ fn every_palantir_padding_and_radius_is_on_the_scale() {
     assert_eq!(ui.context_menu.panel.corners.as_array(), [float; 4]);
     assert_eq!(ui.tabs.strip_padding.as_array(), [sm, xs, sm, 0.0]);
     assert_eq!(ui.tabs.chip_padding, ui.context_menu.item.defaults.padding);
+    assert_eq!(theme.menu_button.defaults.padding, ui.tabs.chip_padding);
+    assert_eq!(
+        theme.menu_button_open.defaults.padding,
+        ui.tabs.chip_padding
+    );
     assert_eq!(ui.tabs.chip_padding.as_array(), [md, sm, md, sm]);
     assert_eq!(
         (ui.tabs.gap, ui.tabs.label_gap, ui.tabs.trailing_inset),

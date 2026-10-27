@@ -17,7 +17,8 @@ use crate::gui::pane::graph_ui::wid;
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
 /// The header is one row, left to right: run, the title, then the cache and inspect buttons
-/// pinned to the right edge, each centered on the same line.
+/// pinned to the right edge, each centered on the same line. A button is its 16 px icon with 6 px
+/// a side, 16 + 2 · 6 = 28 square at zoom 1.
 #[test]
 fn the_header_is_one_row_of_run_title_cache_and_inspect() {
     let mut h = CanvasHarness::sized(DocumentFixture::probes(1), SURFACE);
@@ -35,6 +36,9 @@ fn the_header_is_one_row_of_run_title_cache_and_inspect() {
         assert!(pair[0].max().x <= pair[1].min.x, "{pair:?}");
         let center = |r: palantir::Rect| r.min.y + r.size.h * 0.5;
         assert!((center(pair[0]) - center(pair[1])).abs() < 1.0, "{pair:?}");
+    }
+    for button in &row[2..] {
+        assert_eq!((button.size.w, button.size.h), (28.0, 28.0), "{button:?}");
     }
     let body = h.node_rect(node_id);
     assert_eq!(
