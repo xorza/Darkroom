@@ -1,6 +1,6 @@
-//! What the harness reports of the editor as text: [`State`] and [`UiList`].
+//! What the driver reports of the editor as text: [`State`] and [`UiList`].
 
-use palantir::internals::inspected_widget::InspectedWidget;
+use palantir::InspectedWidget;
 use palantir::{Rect, Sense, Ui};
 use scenarium::{Binding, Func, Graph, Library, NodeId, OutputPort};
 use serde::Serialize;

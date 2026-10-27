@@ -101,6 +101,13 @@ pub fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result
     platform::symlink(original.as_ref(), link.as_ref())
 }
 
+/// A link at `link` to the folder `original`, as `mklink /D` makes one on Windows, where a file
+/// link to a folder cannot be opened as one. Windows makes it only in Developer Mode or for an
+/// elevated process, and fails otherwise.
+pub fn symlink_dir(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    platform::symlink_dir(original.as_ref(), link.as_ref())
+}
+
 /// A watcher that hands `handler` each change under the paths it is told to watch, as
 /// `notify::recommended_watcher`.
 pub fn watcher(handler: impl notify::EventHandler) -> notify::Result<notify::RecommendedWatcher> {

@@ -7,6 +7,7 @@ use palantir::Ui;
 use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
+use scenarium::Library;
 use scenarium::NodeId;
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -18,8 +19,10 @@ use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::open_document::{LaunchSource, OpenDocument};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status_log::{StatusFamily, StatusLog};
+use crate::driver::error::DriverError;
 use crate::gui::app::app_host::AppHost;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::app::driven_requests::DrivenRequests;
 use crate::gui::app::error::NonUnicodePath;
 use crate::gui::app::session::Session;
 use crate::gui::app::view_capture::{CaptureTarget, ViewCapture};
@@ -37,8 +40,8 @@ use crate::gui::theme::Theme;
 
 pub(crate) mod app_host;
 mod discard_dialog;
+pub(crate) mod driven_requests;
 mod error;
-#[cfg(feature = "internals")]
 pub(crate) mod offscreen_signals;
 pub(crate) mod session;
 pub(crate) mod view_capture;
@@ -80,7 +83,7 @@ pub(crate) struct App {
     /// Where [`Self::preferences`] persist: [`PreferencesStore::Memory`] when the file existed
     /// but could not be read, so the file stays as the user has it.
     preferences_store: PreferencesStore,
-    /// Where path picks are answered: native dialogs, or a harness script.
+    /// Where path picks are answered: native dialogs, or a driver script.
     dialogs: Dialogs,
     /// The document-replacing transition waiting on the unsaved-changes
     /// prompt, and thus whether that prompt is up at all. Raised by
@@ -88,6 +91,8 @@ pub(crate) struct App {
     confirm_discard: Option<PendingTransition>,
     /// The image of the window a View command waits on; a second command replaces the first.
     capture: Option<ViewCapture>,
+    /// What a driver on another thread asked of the next frames.
+    driven: DrivenRequests,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
     /// `App` rather than `Editor` because it measures the process, not the
     /// document. Sampled where it is consumed rather than in `update`:
@@ -152,7 +157,7 @@ impl App {
     /// and are retained in the shared status log rather than blocking launch.
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
-    /// `Ui` + host handle exist (before the first frame); the harness calls it over its own host.
+    /// `Ui` + host handle exist (before the first frame); the driver calls it over its own host.
     pub(crate) fn new(ui: &mut Ui, host: AppHost, launch: LaunchInputs) -> Self {
         let LaunchInputs {
             preferences,
@@ -198,6 +203,7 @@ impl App {
             dialogs,
             confirm_discard: None,
             capture: None,
+            driven: DrivenRequests::default(),
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
@@ -323,7 +329,10 @@ impl App {
             PendingTransition::Quit => self.quit(),
             PendingTransition::New => self.new_document(),
             PendingTransition::OpenPicked => self.load_picked_document(),
-            PendingTransition::OpenAt(path) => self.load_document(&path),
+            // A failed load reports itself on the status line.
+            PendingTransition::OpenAt(path) => {
+                let _ = self.load_document(&path);
+            }
         }
     }
 
@@ -439,7 +448,7 @@ impl App {
             .dialogs
             .project_open_path(self.session.open.path.as_deref())
         {
-            self.load_document(&path);
+            let _ = self.load_document(&path);
         }
     }
 
@@ -486,19 +495,20 @@ impl App {
         self.status.succeeded(StatusFamily::Document);
     }
 
-    /// Load `path` into a fresh editor. A missing or corrupt file leaves the
-    /// open document intact and surfaces its reason in the status bar.
-    fn load_document(&mut self, path: &Path) {
+    /// Load `path` into a fresh editor, and say whether it loaded. A missing or corrupt file
+    /// leaves the open document intact and surfaces its reason in the status bar.
+    fn load_document(&mut self, path: &Path) -> bool {
         let loaded = match OpenDocument::load(path.to_path_buf(), self.runtime.library.cur()) {
             Ok(loaded) => loaded,
             Err(err) => {
                 self.status
                     .error(StatusFamily::Document, format!("load failed: {err:#}"));
-                return;
+                return false;
             }
         };
         self.adopt_document(loaded.open);
         loaded.report.report(&mut self.status);
+        true
     }
 
     /// Cmd+S: overwrite the current file, in the format it was opened in, if
@@ -680,6 +690,11 @@ fn unicode(path: PathBuf) -> Result<String, NonUnicodePath> {
 
 impl palantir::App for App {
     fn update(&mut self, _win: palantir::WindowToken, ui: &Ui) {
+        // First, so a driver reads the frame it saw, before this one changes anything.
+        let mut driven = self.driven.lend();
+        driven.serve(self, ui);
+        self.driven.restore(driven);
+
         // Keep the persisted window geometry current so a save on quit
         // captures the latest size / position.
         self.track_window_state(ui);
@@ -716,6 +731,12 @@ impl palantir::App for App {
     }
 
     fn record(&mut self, _win: palantir::WindowToken, ui: &mut Ui) {
+        self.driven.serve_record(ui);
+        // A request that waits, as for a screenshot to land, needs the frames to go on.
+        if self.driven.pending() {
+            ui.request_repaint();
+        }
+
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
@@ -767,40 +788,72 @@ impl palantir::App for App {
     }
 }
 
-#[cfg(feature = "internals")]
-pub(crate) mod internals {
-    use std::sync::Arc;
+/// What the driver reads of the app between frames, and the dialogs it answers.
+impl App {
+    pub(crate) const fn open_document(&self) -> &OpenDocument {
+        &self.session.open
+    }
 
-    use scenarium::Library;
+    pub(crate) const fn status(&self) -> &StatusLog {
+        &self.status
+    }
 
-    use crate::core::open_document::OpenDocument;
-    use crate::core::status_log::StatusLog;
-    use crate::gui::app::App;
-    use crate::gui::dialogs::Dialogs;
-    use crate::gui::state::run_state::RunState;
+    pub(crate) const fn run_state(&self) -> &RunState {
+        &self.run_state
+    }
 
-    /// What the harness reads of the app between frames, and the dialogs it answers.
-    impl App {
-        pub(crate) const fn open_document(&self) -> &OpenDocument {
-            &self.session.open
+    /// The library this session resolves the document's funcs against.
+    pub(crate) const fn library(&self) -> &Arc<Library> {
+        self.runtime.library.cur()
+    }
+
+    /// What a driver on another thread asks of the next frames.
+    pub(crate) const fn driven_mut(&mut self) -> &mut DrivenRequests {
+        &mut self.driven
+    }
+
+    /// Open `path` for a driver, as File ▸ Open does but refusing to discard unsaved edits,
+    /// which a person in the window may own: the driver says so instead of raising the prompt.
+    pub(crate) fn open_driven(&mut self, path: &Path) -> Result<(), DriverError> {
+        debug_assert!(path.is_absolute(), "{}", path.display());
+        self.refuse_unsaved()?;
+        // Read from the load, not the open path: a failed load of the open document's own file
+        // leaves that path open.
+        if self.load_document(path) {
+            Ok(())
+        } else {
+            Err(DriverError::NotOpened {
+                path: path.to_path_buf(),
+                status: self.status.cur().map(|message| message.line.to_string()),
+            })
         }
+    }
 
-        pub(crate) const fn status(&self) -> &StatusLog {
-            &self.status
-        }
+    /// Start a new document for a driver, as File ▸ New does but refusing to discard unsaved
+    /// edits.
+    pub(crate) fn new_driven(&mut self) -> Result<(), DriverError> {
+        self.refuse_unsaved()?;
+        self.new_document();
+        Ok(())
+    }
 
-        pub(crate) const fn run_state(&self) -> &RunState {
-            &self.run_state
+    fn refuse_unsaved(&self) -> Result<(), DriverError> {
+        if self.session.open.dirty {
+            Err(DriverError::Unsaved {
+                document: self.session.open.path.clone(),
+            })
+        } else {
+            Ok(())
         }
+    }
 
-        /// The library this session resolves the document's funcs against.
-        pub(crate) const fn library(&self) -> &Arc<Library> {
-            self.runtime.library.cur()
-        }
+    /// Whether a View ▸ Copy or Save of the view waits for its image.
+    pub(crate) const fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
 
-        pub(crate) const fn dialogs_mut(&mut self) -> &mut Dialogs {
-            &mut self.dialogs
-        }
+    pub(crate) const fn dialogs_mut(&mut self) -> &mut Dialogs {
+        &mut self.dialogs
     }
 }
 
@@ -862,14 +915,70 @@ mod tests {
         assert_eq!(held, pending, "surviving the guard costs the path nothing");
     }
 
-    /// An app on the harness's host: a scripted Open dialog opens the answered document; with a
+    /// A driver's open loads the file and reports a load that fails, also of the open document's
+    /// own file, which stays open; with unsaved edits it refuses, and a new document too, rather
+    /// than discard them.
+    #[test]
+    fn a_driven_open_reports_its_load_and_keeps_unsaved_edits() {
+        use common::{TempDir, fs};
+        use glam::UVec2;
+        use palantir::internals::ui_harness::UiHarness;
+
+        use crate::core::io::document::saved_paths::SavedPaths;
+        use crate::gui::app::offscreen_signals::OffscreenSignals;
+        use crate::gui::dialogs::DialogFallback;
+
+        let dir = TempDir::new("darkroom-driven-open");
+        let document = dir.join("scene.darkroom");
+        OpenDocument::default()
+            .save_to(&document, SavedPaths::Relative, DocumentFormat::Ron)
+            .unwrap();
+        let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+        let mut app = App::new(
+            ui.ui(),
+            AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
+            LaunchInputs {
+                preferences: Ok(Preferences::default()),
+                store: PreferencesStore::Memory,
+                document: None,
+                dialogs: Dialogs::new(DialogFallback::Refuse),
+            },
+        );
+        app.open_driven(&document).unwrap();
+        assert_eq!(app.session.open.path.as_ref(), Some(&document));
+
+        fs::write(&document, b"not a document").unwrap();
+        match app.open_driven(&document) {
+            Err(DriverError::NotOpened { path, status }) => {
+                assert_eq!(path, document);
+                assert!(status.is_some_and(|line| line.starts_with("load failed: ")));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            app.session.open.path.as_ref(),
+            Some(&document),
+            "still open"
+        );
+
+        app.session.open.dirty = true;
+        for refused in [app.open_driven(&document), app.new_driven()] {
+            match refused {
+                Err(DriverError::Unsaved { document: open }) => {
+                    assert_eq!(open.as_ref(), Some(&document));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(app.session.open.dirty, "the edits stay");
+    }
+
+    /// An app on the driver's host: a scripted Open dialog opens the answered document; with a
     /// file store the open is remembered in that file, and with the memory store nothing is
     /// written. A file store whose load failed runs as the memory store, so the file stays as the
     /// user has it, and the status line says so.
     #[test]
     fn a_scripted_open_loads_the_answer_and_the_store_decides_what_persists() {
-        use std::collections::VecDeque;
-
         use std::io;
 
         use common::{TempDir, fs};
@@ -877,8 +986,9 @@ mod tests {
         use palantir::internals::ui_harness::UiHarness;
 
         use crate::core::io::document::saved_paths::SavedPaths;
+        use crate::driver::action::DialogAnswer;
         use crate::gui::app::offscreen_signals::OffscreenSignals;
-        use crate::internals::harness::action::DialogAnswer;
+        use crate::gui::dialogs::DialogFallback;
 
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
@@ -908,6 +1018,8 @@ mod tests {
                 fs::remove_file(&preferences_file).ok();
             }
             let mut ui = UiHarness::with_text(UVec2::new(800, 600));
+            let mut dialogs = Dialogs::new(DialogFallback::Refuse);
+            dialogs.queue(DialogAnswer::Path(document.clone()));
             let mut app = App::new(
                 ui.ui(),
                 AppHost::Offscreen(Arc::new(OffscreenSignals::default())),
@@ -915,9 +1027,7 @@ mod tests {
                     preferences,
                     store: store.clone(),
                     document: None,
-                    dialogs: Dialogs::Scripted(VecDeque::from([DialogAnswer::Path(
-                        document.clone(),
-                    )])),
+                    dialogs,
                 },
             );
             assert_eq!(app.session.open.path, None, "{store:?}: launched empty");

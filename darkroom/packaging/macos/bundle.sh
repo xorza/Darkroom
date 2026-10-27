@@ -42,7 +42,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
   # the binary. The profile's own `off` would leave it in the object files,
   # which fat LTO does not keep.
   (cd "$ROOT" && CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed \
-    cargo build --profile "$PROFILE" -p darkroom)
+    cargo build --profile "$PROFILE" -p darkroom-app)
 fi
 
 BIN="$TARGET_DIR/darkroom"

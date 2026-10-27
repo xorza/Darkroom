@@ -270,6 +270,11 @@ pub(crate) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
     files::symlink(original, link)
 }
 
+/// A link at `link` to the folder `original`.
+pub(crate) fn symlink_dir(original: &Path, link: &Path) -> io::Result<()> {
+    files::symlink_dir(original, link)
+}
+
 /// Make the renames in `parent` durable, where the system needs a directory synced for that.
 #[cfg_attr(
     not(unix),

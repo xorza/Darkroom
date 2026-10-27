@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "darkroom": {
-      "command": "target/mcp/darkroom-mcp",
-      "args": []
+      "command": "target/mcp/darkroom",
+      "args": ["--mcp", "--headless"]
     }
   }
 }

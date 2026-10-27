@@ -185,6 +185,16 @@ pub(crate) struct DrawableImage {
 }
 
 impl PreviewStore {
+    /// Whether a card or a full raster is still converting.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.converting.is_empty()
+            || self.entries.values().any(|content| {
+                content.image().is_some_and(|image| {
+                    matches!(*image.full.borrow(), FullImage::Converting { .. })
+                })
+            })
+    }
+
     pub(crate) fn new(wake: Wake) -> Self {
         Self {
             entries: HashMap::new(),
@@ -510,16 +520,6 @@ pub(crate) mod internals {
         #[cfg(test)]
         pub(crate) fn is_empty(&self) -> bool {
             self.entries.is_empty()
-        }
-
-        /// Whether a card or a full raster is still converting.
-        pub(crate) fn in_flight(&self) -> bool {
-            !self.converting.is_empty()
-                || self.entries.values().any(|content| {
-                    content.image().is_some_and(|image| {
-                        matches!(*image.full.borrow(), FullImage::Converting { .. })
-                    })
-                })
         }
 
         /// Land `card` as `node_id`'s newest publish, on the calling thread —

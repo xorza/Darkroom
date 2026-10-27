@@ -9,34 +9,36 @@ use scenarium::{Binding, ConstValue, InputPort, NodeId};
 use crate::core::io::document as io_document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::saved_paths::SavedPaths;
+use crate::driver::action::{Action, DRAG_STEPS, DialogAnswer};
+use crate::driver::error::DriverError;
+use crate::driver::locator::{Locator, Side};
+use crate::driver::shot::{NODE_MARGIN, Region, Shot};
+use crate::driver::state::Detail;
+use crate::driver::{COPY_LIMIT, DisplayKind, Driver, OpenMode, SessionConfig};
 use crate::gui::state::preview_store::StoredContent;
 use crate::gui::theme::Theme;
-use crate::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
-use crate::internals::harness::error::HarnessError;
-use crate::internals::harness::fixture;
-use crate::internals::harness::locator::{Locator, Side};
-use crate::internals::harness::shot::{NODE_MARGIN, Region, Shot};
-use crate::internals::harness::state::Detail;
-use crate::internals::harness::{COPY_LIMIT, DisplayKind, Harness, SessionConfig};
+use crate::internals::fixture;
 
 const BRIGHTNESS: &str = "Brightness / Contrast";
 const CONVERT: &str = "Convert";
 
-fn harness() -> Harness {
-    Harness::new(SessionConfig {
+fn driver() -> Driver {
+    Driver::new(SessionConfig {
         display: DisplayKind::Cpu,
         size: UVec2::new(1600, 1000),
         scale: 1.0,
     })
+    .unwrap()
 }
 
 /// A 400 × 300 window at scale 1 on `display`.
-fn small(display: DisplayKind) -> Harness {
-    Harness::new(SessionConfig {
+fn small(display: DisplayKind) -> Driver {
+    Driver::new(SessionConfig {
         display,
         size: UVec2::new(400, 300),
         scale: 1.0,
     })
+    .unwrap()
 }
 
 fn decode(png: &[u8]) -> image::RgbaImage {
@@ -70,9 +72,9 @@ fn node(name: &str) -> Locator {
     Locator::Node(name.to_string())
 }
 
-fn node_id(harness: &Harness, name: &str) -> NodeId {
-    harness
-        .app
+fn node_id(driver: &Driver, name: &str) -> NodeId {
+    driver
+        .app()
         .open_document()
         .document
         .graph
@@ -87,33 +89,33 @@ fn node_id(harness: &Harness, name: &str) -> NodeId {
 /// Ctrl+Z takes the wire back.
 #[test]
 fn clicks_drags_and_keys_edit_the_document() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-edit");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-edit");
     let path = fixture::project(dir.path(), &[BRIGHTNESS, CONVERT]);
-    harness.open(&path, false).unwrap();
+    driver.open(&path, OpenMode::Copy).unwrap();
 
-    let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
+    let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
 
-    let id = node_id(&harness, BRIGHTNESS);
-    let placed = |harness: &Harness| {
-        harness
-            .app
+    let id = node_id(&driver, BRIGHTNESS);
+    let placed = |driver: &Driver| {
+        driver
+            .app()
             .open_document()
             .document
             .main_view
             .node_placements[&id]
             .pos
     };
-    let before = placed(&harness);
+    let before = placed(&driver);
     let header = Locator::NodeHeader(BRIGHTNESS.to_string());
-    harness
+    driver
         .act(&[drag(
             header.clone(),
             Locator::Offset(Box::new(header), Vec2::new(120.0, 60.0)),
         )])
         .unwrap();
-    assert_eq!(placed(&harness), before + Vec2::new(120.0, 60.0));
+    assert_eq!(placed(&driver), before + Vec2::new(120.0, 60.0));
 
     let wire = drag(
         Locator::Port {
@@ -127,8 +129,12 @@ fn clicks_drags_and_keys_edit_the_document() {
             port: "0".to_string(),
         },
     );
-    harness.act(&[wire]).unwrap();
-    let detail = harness.state(Detail::Detailed, None).details.unwrap();
+    driver.act(&[wire]).unwrap();
+    let detail = driver
+        .state(Detail::Detailed, None)
+        .unwrap()
+        .details
+        .unwrap();
     assert_eq!(detail.wires.len(), 1, "{:?}", detail.wires);
     assert!(
         detail.wires[0].starts_with(&format!("{BRIGHTNESS}.Image -> {CONVERT}.")),
@@ -136,8 +142,12 @@ fn clicks_drags_and_keys_edit_the_document() {
         detail.wires
     );
 
-    harness.act(&[Action::Key("ctrl+z".to_string())]).unwrap();
-    let detail = harness.state(Detail::Detailed, None).details.unwrap();
+    driver.act(&[Action::Key("ctrl+z".to_string())]).unwrap();
+    let detail = driver
+        .state(Detail::Detailed, None)
+        .unwrap()
+        .details
+        .unwrap();
     assert!(detail.wires.is_empty(), "undone: {:?}", detail.wires);
 }
 
@@ -145,22 +155,23 @@ fn clicks_drags_and_keys_edit_the_document() {
 /// world position has its body's corner there.
 #[test]
 fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-world");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-world");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
-    let id = node_id(&harness, BRIGHTNESS);
-    let pos = harness
-        .app
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let id = node_id(&driver, BRIGHTNESS);
+    let pos = driver
+        .app()
         .open_document()
         .document
         .main_view
         .node_placements[&id]
         .pos;
-    let world = Locator::World(pos)
-        .point(&harness.app, harness.display.ui())
+    let world = driver
+        .offscreen()
+        .read(|app, ui| Locator::World(pos).point(app, ui))
         .unwrap();
-    let screen = harness.state(Detail::Concise, None).nodes[0]
+    let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
     assert_eq!(world, Vec2::new(screen[0], screen[1]));
@@ -170,11 +181,11 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
 /// click on the func's row adds that node.
 #[test]
 fn the_new_node_palette_adds_the_node_clicked() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-palette");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-palette");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
-    harness
+    driver.open(&path, OpenMode::Copy).unwrap();
+    driver
         .act(&[
             Action::Click {
                 at: Locator::Screen(Vec2::new(1200.0, 800.0)),
@@ -189,8 +200,9 @@ fn the_new_node_palette_adds_the_node_clicked() {
             )),
         ])
         .unwrap();
-    let names: Vec<String> = harness
+    let names: Vec<String> = driver
         .state(Detail::Concise, None)
+        .unwrap()
         .nodes
         .into_iter()
         .map(|node| node.name)
@@ -203,31 +215,31 @@ fn the_new_node_palette_adds_the_node_clicked() {
 /// locator that cannot match several, are not found.
 #[test]
 fn a_node_locator_names_exactly_one_node() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-names");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-names");
     let path = fixture::project(dir.path(), &[BRIGHTNESS, BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
-    match harness.act(&[click(node("missing"))]) {
-        Err(HarnessError::NotFound { nearest, .. }) => {
+    driver.open(&path, OpenMode::Copy).unwrap();
+    match driver.act(&[click(node("missing"))]) {
+        Err(DriverError::NotFound { nearest, .. }) => {
             assert_eq!(nearest, [BRIGHTNESS, BRIGHTNESS]);
         }
         other => panic!("{other:?}"),
     }
-    match harness.act(&[click(node(BRIGHTNESS))]) {
-        Err(HarnessError::Ambiguous { matches, .. }) => assert_eq!(matches.len(), 2),
+    match driver.act(&[click(node(BRIGHTNESS))]) {
+        Err(DriverError::Ambiguous { matches, .. }) => assert_eq!(matches.len(), 2),
         other => panic!("{other:?}"),
     }
     let nth = |locator: Locator, n: usize| click(Locator::Nth(Box::new(locator), n));
-    let second = harness.act(&[nth(node(BRIGHTNESS), 1)]).unwrap();
+    let second = driver.act(&[nth(node(BRIGHTNESS), 1)]).unwrap();
     assert_eq!(second.selection, [BRIGHTNESS], "the second of the two");
-    match harness.act(&[nth(node(BRIGHTNESS), 2)]) {
-        Err(HarnessError::NotFound { nearest, .. }) => {
+    match driver.act(&[nth(node(BRIGHTNESS), 2)]) {
+        Err(DriverError::NotFound { nearest, .. }) => {
             assert!(nearest[0].ends_with("has 2 matches"));
         }
         other => panic!("{other:?}"),
     }
-    match harness.act(&[nth(Locator::NodeHeader(BRIGHTNESS.to_string()), 0)]) {
-        Err(HarnessError::NotFound { nearest, .. }) => {
+    match driver.act(&[nth(Locator::NodeHeader(BRIGHTNESS.to_string()), 0)]) {
+        Err(DriverError::NotFound { nearest, .. }) => {
             assert_eq!(nearest, ["Nth picks among Node or Text matches only"]);
         }
         other => panic!("{other:?}"),
@@ -238,11 +250,11 @@ fn a_node_locator_names_exactly_one_node() {
 /// session still settles with the field focused.
 #[test]
 fn a_focused_text_field_still_settles() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-focus");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-focus");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
-    let report = harness
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let report = driver
         .act(&[Action::DoubleClick(Locator::NodeHeader(
             BRIGHTNESS.to_string(),
         ))])
@@ -254,12 +266,12 @@ fn a_focused_text_field_still_settles() {
 /// the copy limit is refused, a single sparse file being enough to make one.
 #[test]
 fn a_copied_session_leaves_the_source_alone() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-copy");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-copy");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     let original = fs::read(&path).unwrap();
-    harness.open(&path, false).unwrap();
-    harness
+    driver.open(&path, OpenMode::Copy).unwrap();
+    driver
         .act(&[
             drag(
                 Locator::NodeHeader(BRIGHTNESS.to_string()),
@@ -268,14 +280,10 @@ fn a_copied_session_leaves_the_source_alone() {
             Action::Key("ctrl+s".to_string()),
         ])
         .unwrap();
-    let state = harness.state(Detail::Concise, None);
+    let state = driver.state(Detail::Concise, None).unwrap();
     assert!(!state.dirty, "saved: {state:?}");
     let copy = PathBuf::from(state.document.unwrap());
-    assert!(
-        copy.starts_with(harness.session_dir()),
-        "{}",
-        copy.display()
-    );
+    assert!(copy.starts_with(driver.session_dir()), "{}", copy.display());
     assert_ne!(fs::read(&copy).unwrap(), original, "the copy took the move");
     assert_eq!(
         fs::read(&path).unwrap(),
@@ -288,8 +296,8 @@ fn a_copied_session_leaves_the_source_alone() {
         .unwrap()
         .set_len(COPY_LIMIT + 1)
         .unwrap();
-    match harness.open(&path, false) {
-        Err(HarnessError::FolderTooLarge { bytes, .. }) => assert!(bytes > COPY_LIMIT),
+    match driver.open(&path, OpenMode::Copy) {
+        Err(DriverError::FolderTooLarge { bytes, .. }) => assert!(bytes > COPY_LIMIT),
         other => panic!("{other:?}"),
     }
 }
@@ -298,42 +306,44 @@ fn a_copied_session_leaves_the_source_alone() {
 /// button held; a pinch by no positive factor is refused, not dropped; and the error an unanswered dialog logs during `act` reaches the next `state`.
 #[test]
 fn a_failed_action_leaves_nothing_held_and_the_log_reaches_state() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-failed");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-failed");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
+    driver.open(&path, OpenMode::Copy).unwrap();
     assert!(matches!(
-        harness.act(&[drag(node(BRIGHTNESS), node("missing"))]),
-        Err(HarnessError::NotFound { .. })
+        driver.act(&[drag(node(BRIGHTNESS), node("missing"))]),
+        Err(DriverError::NotFound { .. })
     ));
-    let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
+    let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
     for factor in [0.0, -2.0] {
         assert!(matches!(
-            harness.act(&[Action::Pinch {
+            driver.act(&[Action::Pinch {
                 at: node(BRIGHTNESS),
                 factor
             }]),
-            Err(HarnessError::BadPinch { factor: refused }) if refused == factor
+            Err(DriverError::BadPinch { factor: refused }) if refused == factor
         ));
     }
 
-    harness.act(&[Action::Key("ctrl+o".to_string())]).unwrap();
-    let log = harness.state(Detail::Concise, None).log;
+    driver.act(&[Action::Key("ctrl+o".to_string())]).unwrap();
+    let log = driver.state(Detail::Concise, None).unwrap().log;
     assert!(
         log.iter()
-            .any(|line| line.contains("no scripted answer was left")),
+            .any(|line| line.contains("no queued answer was left")),
         "{log:?}"
     );
 }
 
 /// A copy that would break the project is refused: a document whose relative path climbs out of
 /// its folder, which would name another file beside the copy, and a link to a folder inside the
-/// project, which could copy the folder into itself. In place, the first opens.
+/// project, which could copy the folder into itself. In place, the first opens, and a document
+/// that does not load is refused with the editor's status line. A refused open leaves the editor
+/// on the project it had; a new document has no file and no nodes.
 #[test]
 fn a_folder_a_copy_would_break_is_refused() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-break");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-break");
     let path = fixture::project(dir.path(), &["Load Image"]);
     let mut document = io_document::load(&path).unwrap().document;
     let node_id = document.graph.iter().next().unwrap().node_id;
@@ -342,18 +352,41 @@ fn a_folder_a_copy_would_break_is_refused() {
         Binding::Const(ConstValue::FsPath("../x.tiff".to_string())),
     );
     io_document::internals::write_unchecked(&document, &path);
-    match harness.open(&path, false) {
-        Err(HarnessError::PathsLeaveFolder { paths, .. }) => assert_eq!(paths, ["../x.tiff"]),
+    match driver.open(&path, OpenMode::Copy) {
+        Err(DriverError::PathsLeaveFolder { paths, .. }) => assert_eq!(paths, ["../x.tiff"]),
         other => panic!("{other:?}"),
     }
-    harness.open(&path, true).unwrap();
+    driver.open(&path, OpenMode::InPlace).unwrap();
+    let first = path;
 
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    fs::symlink(dir.path(), dir.join("loop")).unwrap();
-    assert!(matches!(
-        harness.open(&path, false),
-        Err(HarnessError::LinkedFolder { .. })
-    ));
+    fs::symlink_dir(dir.path(), dir.join("loop")).unwrap();
+    match driver.open(&path, OpenMode::Copy) {
+        Err(DriverError::LinkedFolder { path }) => assert_eq!(path, dir.join("loop")),
+        other => panic!("{other:?}"),
+    }
+
+    let missing = dir.join("missing.darkroom");
+    match driver.open(&missing, OpenMode::InPlace) {
+        Err(DriverError::NotOpened {
+            path,
+            status: Some(status),
+        }) => {
+            assert_eq!(path, missing);
+            assert!(status.starts_with("load failed: "), "{status}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let state = driver.state(Detail::Concise, None).unwrap();
+    assert_eq!(
+        state.document.as_deref(),
+        first.to_str(),
+        "the refused opens leave the editor on the one that opened"
+    );
+
+    driver.new_document().unwrap();
+    let state = driver.state(Detail::Concise, None).unwrap();
+    assert_eq!((state.document, state.nodes.len()), (None, 0));
 }
 
 /// A shot of the whole 400 × 300 window is the frame: the canvas's ground and the node's body
@@ -366,17 +399,17 @@ fn a_folder_a_copy_would_break_is_refused() {
 /// that are. The CPU display lays the node out where the GPU one does, and has no shots.
 #[test]
 fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
-    let mut harness = small(DisplayKind::Gpu);
-    let dir = TempDir::new("darkroom-harness-shot");
+    let mut driver = small(DisplayKind::Gpu);
+    let dir = TempDir::new("darkroom-driver-shot");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
-    let screen = harness.state(Detail::Concise, None).nodes[0]
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let screen = driver.state(Detail::Concise, None).unwrap().nodes[0]
         .screen
         .unwrap();
     assert_eq!(screen, [40.0, 100.0, 287.4953, 178.0]);
 
     let theme = Theme::default();
-    let whole = harness.shot(&Region::Window, 400).unwrap();
+    let whole = driver.shot(&Region::Window, 400).unwrap();
     assert_eq!(whole.size, UVec2::new(400, 300));
     assert_eq!(whole.legend[0].name, BRIGHTNESS);
     assert_eq!(whole.legend[0].rect, screen);
@@ -398,7 +431,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         whole.path.display()
     );
 
-    let quarter = harness.shot(&Region::Window, 100).unwrap();
+    let quarter = driver.shot(&Region::Window, 100).unwrap();
     assert_eq!(quarter.size, UVec2::new(100, 75));
     assert_eq!(decode(&quarter.png).dimensions(), (100, 75));
     assert_eq!(quarter.legend[0].rect, screen.map(|v| v / 4.0));
@@ -418,7 +451,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
             .collect::<Vec<_>>()
     );
 
-    let node = harness
+    let node = driver
         .shot(&Region::Node(BRIGHTNESS.to_string()), 1000)
         .unwrap();
     assert_eq!(NODE_MARGIN, 24.0);
@@ -429,15 +462,15 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
             .ends_with("shots/003-node-brightness---contrast.png")
     );
 
-    let id = node_id(&harness, BRIGHTNESS);
-    let placed = harness
-        .app
+    let id = node_id(&driver, BRIGHTNESS);
+    let placed = driver
+        .app()
         .open_document()
         .document
         .main_view
         .node_placements[&id]
         .pos;
-    let world = harness
+    let world = driver
         .shot(
             &Region::World(Rect::new(placed.x, placed.y, 100.0, 50.0)),
             1000,
@@ -446,49 +479,50 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
     assert_eq!(world.size, UVec2::new(100, 50));
     assert_eq!(world.legend[0].rect, [0.0, 0.0, 100.0, 50.0]);
     assert!(matches!(
-        harness.shot(&Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)), 1000),
-        Err(HarnessError::EmptyRegion { .. })
+        driver.shot(&Region::World(Rect::new(1e4, 1e4, 10.0, 10.0)), 1000),
+        Err(DriverError::EmptyRegion { .. })
     ));
     assert!(matches!(
-        harness.shot(
+        driver.shot(
             &Region::World(Rect::new(placed.x, placed.y, -10.0, 10.0)),
             1000
         ),
-        Err(HarnessError::EmptyRegion { .. })
+        Err(DriverError::EmptyRegion { .. })
     ));
     assert!(
-        harness
+        driver
             .act(&[click(Locator::Node(BRIGHTNESS.to_string()))])
             .is_ok(),
         "settled after the failure"
     );
 
-    let layout = &harness.app.open_document().document.layout;
-    let rect = harness
-        .display
-        .ui()
-        .response_for(DockView::pane_id(layout, layout.primary().id))
-        .rect
+    let rect = driver
+        .offscreen()
+        .read(|app, ui| {
+            let layout = &app.open_document().document.layout;
+            ui.response_for(DockView::pane_id(layout, layout.primary().id))
+                .rect
+        })
         .unwrap();
-    let pane = harness
+    let pane = driver
         .shot(&Region::Pane("main".to_string()), 1000)
         .unwrap();
     let rounded = rect.max().ceil() - rect.min.floor();
     assert_eq!(pane.size.as_vec2(), rounded, "{rect:?}");
-    match harness.shot(&Region::Pane("missing".to_string()), 1000) {
-        Err(HarnessError::NotFound { nearest, .. }) => assert_eq!(nearest, ["main"]),
+    match driver.shot(&Region::Pane("missing".to_string()), 1000) {
+        Err(DriverError::NotFound { nearest, .. }) => assert_eq!(nearest, ["main"]),
         other => panic!("{other:?}"),
     }
 
     let mut cpu = small(DisplayKind::Cpu);
-    cpu.open(&path, false).unwrap();
+    cpu.open(&path, OpenMode::Copy).unwrap();
     assert_eq!(
-        cpu.state(Detail::Concise, None).nodes[0].screen,
+        cpu.state(Detail::Concise, None).unwrap().nodes[0].screen,
         Some(screen)
     );
     assert!(matches!(
         cpu.shot(&Region::Window, 100),
-        Err(HarnessError::NoGpu)
+        Err(DriverError::NoGpu)
     ));
 }
 
@@ -497,15 +531,15 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
 /// window as a shot of it shows it.
 #[test]
 fn the_view_menu_copies_and_saves_the_window() {
-    let mut harness = small(DisplayKind::Gpu);
-    let dir = TempDir::new("darkroom-harness-view");
+    let mut driver = small(DisplayKind::Gpu);
+    let dir = TempDir::new("darkroom-driver-view");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
+    driver.open(&path, OpenMode::Copy).unwrap();
     let view = || click(Locator::Text("View".to_string()));
 
-    let clipboard = harness.display.ui().clipboard();
+    let clipboard = driver.offscreen().read(|_, ui| ui.clipboard());
     clipboard.set_text("text").unwrap();
-    harness
+    driver
         .act(&[
             view(),
             click(Locator::Text("Copy View as Image".to_string())),
@@ -513,17 +547,17 @@ fn the_view_menu_copies_and_saves_the_window() {
         .unwrap();
     assert_eq!(clipboard.text().unwrap(), "");
 
-    harness
+    driver
         .act(&[
             Action::Answer(DialogAnswer::Path(dir.join("view"))),
             view(),
             click(Locator::Text("Save View as PNG…".to_string())),
         ])
         .unwrap();
-    let state = harness.state(Detail::Concise, None);
+    let state = driver.state(Detail::Concise, None).unwrap();
     assert_eq!((state.status, state.log), (None, Vec::<String>::new()));
     let saved = decode(&fs::read(dir.join("view.png")).unwrap());
-    let shot = harness.shot(&Region::Window, 400).unwrap();
+    let shot = driver.shot(&Region::Window, 400).unwrap();
     assert_eq!(saved, decode(&shot.png));
 }
 
@@ -532,8 +566,8 @@ fn the_view_menu_copies_and_saves_the_window() {
 /// and the menu row makes a zipped one again.
 #[test]
 fn a_save_keeps_the_file_format_and_save_as_names_one() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-format");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-format");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
     let file = io_document::load(&path).unwrap();
     io_document::save(
@@ -543,10 +577,10 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
         DocumentFormat::ZippedRon,
     )
     .unwrap();
-    harness.open(&path, true).unwrap();
+    driver.open(&path, OpenMode::InPlace).unwrap();
     let zipped = |path: &Path| fs::read(path).unwrap().starts_with(b"PK");
 
-    harness
+    driver
         .act(&[
             drag(
                 Locator::NodeHeader(BRIGHTNESS.to_string()),
@@ -558,7 +592,7 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
     assert!(zipped(&path), "the save kept the zipped format");
 
     let plain = dir.join("plain.darkroom");
-    harness
+    driver
         .act(&[
             Action::Answer(DialogAnswer::Path(plain.clone())),
             Action::Key("ctrl+shift+s".to_string()),
@@ -567,7 +601,7 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
     assert!(!zipped(&plain), "Save As writes plain RON");
 
     let again = dir.join("again.darkroom");
-    harness
+    driver
         .act(&[
             Action::Answer(DialogAnswer::Path(again.clone())),
             click(Locator::Text("File".to_string())),
@@ -586,13 +620,13 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
 /// 100 × 100 after Auto Stretch.
 #[test]
 fn the_sample_project_runs_to_its_previews() {
-    let mut harness = harness();
+    let mut driver = driver();
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("sample/sample.darkroom");
-    harness.open(&sample, false).unwrap();
-    harness.act(&[Action::Key("ctrl+r".to_string())]).unwrap();
-    harness.wait_run(Duration::from_secs(30)).unwrap();
+    driver.open(&sample, OpenMode::Copy).unwrap();
+    driver.act(&[Action::Key("ctrl+r".to_string())]).unwrap();
+    driver.wait_run(Duration::from_secs(30)).unwrap();
 
-    let state = harness.state(Detail::Detailed, None);
+    let state = driver.state(Detail::Detailed, None).unwrap();
     for node in &state.nodes {
         assert!(
             node.run
@@ -608,11 +642,11 @@ fn the_sample_project_runs_to_its_previews() {
         .iter()
         .filter(|node| node.name.starts_with("Preview"))
         .map(|node| {
-            let shown = harness
-                .app
+            let shown = driver
+                .app()
                 .run_state()
                 .previews
-                .get(node_id(&harness, &node.name))
+                .get(node_id(&driver, &node.name))
                 .and_then(StoredContent::image)
                 .unwrap_or_else(|| panic!("{} shows an image", node.name));
             (node.name.clone(), shown.preview.native_size)
@@ -635,12 +669,12 @@ fn the_sample_project_runs_to_its_previews() {
 /// refused, the action after it unplayed. A new open starts afresh.
 #[test]
 fn a_quit_ends_the_session() {
-    let mut harness = harness();
-    let dir = TempDir::new("darkroom-harness-quit");
+    let mut driver = driver();
+    let dir = TempDir::new("darkroom-driver-quit");
     let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    harness.open(&path, false).unwrap();
+    driver.open(&path, OpenMode::Copy).unwrap();
     let quit = || Action::Key("ctrl+q".to_string());
-    harness
+    driver
         .act(&[
             drag(
                 Locator::NodeHeader(BRIGHTNESS.to_string()),
@@ -651,25 +685,25 @@ fn a_quit_ends_the_session() {
         ])
         .unwrap();
     assert!(
-        harness.state(Detail::Concise, None).dirty,
+        driver.state(Detail::Concise, None).unwrap().dirty,
         "still open, still dirty"
     );
 
-    match harness.act(&[
+    match driver.act(&[
         quit(),
         click(Locator::Text("Don't Save".to_string())),
         click(node(BRIGHTNESS)),
     ]) {
-        Err(HarnessError::Quit) => {}
+        Err(DriverError::Quit) => {}
         other => panic!("{other:?}"),
     }
-    assert!(matches!(harness.act(&[]), Err(HarnessError::Quit)));
+    assert!(matches!(driver.act(&[]), Err(DriverError::Quit)));
     assert!(matches!(
-        harness.wait_run(Duration::from_secs(1)),
-        Err(HarnessError::Quit)
+        driver.wait_run(Duration::from_secs(1)),
+        Err(DriverError::Quit)
     ));
 
-    harness.open(&path, false).unwrap();
-    let report = harness.act(&[click(node(BRIGHTNESS))]).unwrap();
+    driver.open(&path, OpenMode::Copy).unwrap();
+    let report = driver.act(&[click(node(BRIGHTNESS))]).unwrap();
     assert_eq!(report.selection, [BRIGHTNESS]);
 }

@@ -1,26 +1,39 @@
+use std::path::PathBuf;
+
 use common::TempDir;
-use darkroom::internals::harness::fixture;
-use darkroom::internals::harness::{DisplayKind, SessionConfig};
+use darkroom::driver::{DisplayKind, SessionConfig};
+use darkroom::internals::fixture;
 use glam::UVec2;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use rmcp::serde_json::{self, Value, json};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::{ServiceError, ServiceExt as _};
 use tokio::io;
+use tokio::sync::oneshot;
 
-use crate::WindowSize;
-use crate::darkroom_server::DarkroomServer;
-use crate::session_thread::ToolError;
+use crate::mcp::check_config;
+use crate::mcp::darkroom_server::DarkroomServer;
+use crate::mcp::session_thread::{self, Ended, SessionThread, ToolError};
 
 const BRIGHTNESS: &str = "Brightness / Contrast";
 
-/// A server on `display`, and a client talking to it in process.
-async fn connect(display: DisplayKind) -> (DarkroomServer, RunningService<RoleClient, ()>) {
-    let server = DarkroomServer::new(SessionConfig {
+/// A connected server and client, and the receiver told when the session ends.
+struct Connected {
+    server: DarkroomServer,
+    client: RunningService<RoleClient, ()>,
+    ended: oneshot::Receiver<Ended>,
+}
+
+/// A server on `display` and `document`, and a client talking to it in process.
+async fn connect(display: DisplayKind, document: Option<PathBuf>) -> Connected {
+    let config = SessionConfig {
         display,
         size: UVec2::new(800, 600),
         scale: 1.0,
-    });
+    };
+    let (session, ended) =
+        SessionThread::start(move || session_thread::launch(config, document.as_deref())).unwrap();
+    let server = DarkroomServer::new(session);
     let (server_end, client_end) = io::duplex(1 << 16);
     let serving = server.clone();
     tokio::spawn(async move {
@@ -33,7 +46,11 @@ async fn connect(display: DisplayKind) -> (DarkroomServer, RunningService<RoleCl
             .ok();
     });
     let client = ().serve(client_end).await.expect("the client connects");
-    (server, client)
+    Connected {
+        server,
+        client,
+        ended,
+    }
 }
 
 async fn call(
@@ -58,7 +75,7 @@ fn text(result: &CallToolResult, idx: usize) -> &str {
 /// the fields an agent writes.
 #[tokio::test]
 async fn the_server_lists_its_six_tools_with_their_schemas() {
-    let (_server, client) = connect(DisplayKind::Cpu).await;
+    let Connected { client, .. } = connect(DisplayKind::Cpu, None).await;
     let mut tools = client.list_all_tools().await.unwrap();
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -89,10 +106,7 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
         keys.sort();
         keys
     };
-    assert_eq!(
-        properties("darkroom_open"),
-        ["in_place", "project", "scale", "size"]
-    );
+    assert_eq!(properties("darkroom_open"), ["copy", "project"]);
     assert_eq!(properties("darkroom_act"), ["actions", "shot"]);
     assert_eq!(properties("darkroom_state"), ["detail", "nodes"]);
     assert_eq!(properties("darkroom_ui"), ["filter", "limit"]);
@@ -100,19 +114,20 @@ async fn the_server_lists_its_six_tools_with_their_schemas() {
     assert_eq!(properties("darkroom_wait_run"), ["timeout_s"]);
 }
 
-/// A call before any open says to open first. An opened fixture reports the build and its
+/// A server started on no document is on a new one. An opened fixture reports the build and its
 /// nodes, and `darkroom_state` lists them; a click on a name two nodes share is a tool error
 /// that names the action it stopped at and lists both nodes, and `nth` picks one. The CPU
-/// display has no shots, and a window of no pixels is refused before a session starts. An open
-/// with no project is a new unsaved document; a project that does not open closes the session.
+/// display has no shots. An open with no project is a new unsaved document; a project that does
+/// not open leaves the open document as it was.
 #[tokio::test]
 async fn an_opened_project_is_driven_through_the_tools() {
-    let (_server, client) = connect(DisplayKind::Cpu).await;
+    let Connected { client, .. } = connect(DisplayKind::Cpu, None).await;
     let early = call(&client, "darkroom_state", json!({})).await.unwrap();
-    assert_eq!(early.is_error, Some(true));
+    let early: Value = serde_json::from_str(text(&early, 0)).unwrap();
     assert_eq!(
-        text(&early, 0),
-        "no project is open; call darkroom_open first"
+        (&early["document"], &early["nodes"]),
+        (&Value::Null, &json!([])),
+        "the session starts on a new document"
     );
 
     let dir = TempDir::new("darkroom-mcp-open");
@@ -176,20 +191,6 @@ async fn an_opened_project_is_driven_through_the_tools() {
     assert_eq!(shot.is_error, Some(true));
     assert!(text(&shot, 0).contains("GPU display"), "{}", text(&shot, 0));
 
-    let empty = call(
-        &client,
-        "darkroom_open",
-        json!({ "project": project, "size": [0, 600] }),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        text(&empty, 0),
-        "size is 0×600; give each side from 1 to 8192 pixels"
-    );
-    let still = call(&client, "darkroom_state", json!({})).await.unwrap();
-    assert_eq!(still.is_error, Some(false), "the open session stays");
-
     let new = call(&client, "darkroom_open", json!({})).await.unwrap();
     let new: Value = serde_json::from_str(text(&new, 0)).unwrap();
     assert_eq!(
@@ -206,26 +207,36 @@ async fn an_opened_project_is_driven_through_the_tools() {
     .await
     .unwrap();
     assert_eq!(missing.is_error, Some(true));
+    assert!(
+        text(&missing, 0).starts_with("the editor did not open "),
+        "{}",
+        text(&missing, 0)
+    );
     let after = call(&client, "darkroom_state", json!({})).await.unwrap();
+    let after: Value = serde_json::from_str(text(&after, 0)).unwrap();
     assert_eq!(
-        text(&after, 0),
-        "no project is open; call darkroom_open first",
-        "a project that does not open leaves no session"
+        after["document"],
+        Value::Null,
+        "a project that does not open leaves the new document open"
     );
 }
 
 /// A panic on the editor's thread answers its call with the message and where it was raised,
-/// closes the session, and leaves the server serving: the next call says the session ended and
-/// how, and an open starts a new one. A quit, which an action asks, closes the session too, and
-/// says so in place of the actions after it.
+/// and ends the session, which the server is told of; a call after it says how the session
+/// ended. A quit, which an action asks, ends the session too, and says so in place of the
+/// actions after it. A server starts on the document it is given.
 #[tokio::test]
-async fn a_panic_ends_the_session_and_not_the_server() {
-    let (server, client) = connect(DisplayKind::Cpu).await;
+async fn a_panic_or_a_quit_ends_the_session() {
     let dir = TempDir::new("darkroom-mcp-panic");
     let project = fixture::project(dir.path(), &[BRIGHTNESS]);
-    call(&client, "darkroom_open", json!({ "project": project }))
-        .await
-        .unwrap();
+    let Connected {
+        server,
+        client,
+        ended,
+    } = connect(DisplayKind::Cpu, Some(project.clone())).await;
+    let started = call(&client, "darkroom_state", json!({})).await.unwrap();
+    let started: Value = serde_json::from_str(text(&started, 0)).unwrap();
+    assert_eq!(started["document"], project.to_str().unwrap());
 
     let line = line!() + 1;
     let panicked = server.run(|_| -> Result<Vec<ContentBlock>, ToolError> { panic!("boom") });
@@ -233,23 +244,21 @@ async fn a_panic_ends_the_session_and_not_the_server() {
     assert_eq!(panicked.is_error, Some(true));
     let message = text(&panicked, 0);
     assert!(
-        message.contains(&format!("boom at mcp/src/tests.rs:{line}")),
+        message.contains(&format!("boom at {}:{line}", file!())),
         "{message}"
     );
-
+    assert!(
+        matches!(ended.await, Ok(Ended::Panic(panic)) if panic.starts_with("boom at ")),
+        "the server is told"
+    );
     let after = call(&client, "darkroom_state", json!({})).await.unwrap();
     assert!(
-        text(&after, 0).starts_with(
-            "no project is open: the last session ended when the editor panicked: boom"
-        ),
+        text(&after, 0).starts_with("the session ended when the editor panicked: boom"),
         "{}",
         text(&after, 0)
     );
-    let reopened = call(&client, "darkroom_open", json!({ "project": project }))
-        .await
-        .unwrap();
-    assert_eq!(reopened.is_error, Some(false), "{}", text(&reopened, 0));
 
+    let Connected { client, ended, .. } = connect(DisplayKind::Cpu, Some(project)).await;
     let quit = call(
         &client,
         "darkroom_act",
@@ -263,11 +272,11 @@ async fn a_panic_ends_the_session_and_not_the_server() {
         "{}",
         text(&quit, 0)
     );
+    assert!(matches!(ended.await, Ok(Ended::Quit)));
     let after = call(&client, "darkroom_state", json!({})).await.unwrap();
     assert_eq!(
         text(&after, 0),
-        "no project is open: the last session ended when an action quit the editor. Call \
-         darkroom_open to start a new one."
+        "the session ended when an action quit the editor; the server is ending"
     );
 }
 
@@ -275,12 +284,9 @@ async fn a_panic_ends_the_session_and_not_the_server() {
 /// node; an action can end in one.
 #[tokio::test]
 async fn a_shot_is_an_image_and_its_legend() {
-    let (_server, client) = connect(DisplayKind::Gpu).await;
     let dir = TempDir::new("darkroom-mcp-shot");
     let project = fixture::project(dir.path(), &[BRIGHTNESS]);
-    call(&client, "darkroom_open", json!({ "project": project }))
-        .await
-        .unwrap();
+    let Connected { client, .. } = connect(DisplayKind::Gpu, Some(project)).await;
     let acted = call(
         &client,
         "darkroom_act",
@@ -306,17 +312,41 @@ async fn a_shot_is_an_image_and_its_legend() {
     );
 }
 
-/// A size is `WxH` in whole pixels; anything else is refused with the form to write.
+/// A session refuses a window with a side of 0 or past 8192 pixels, and a scale under a quarter
+/// or not a number; the edges themselves are taken. A document that does not open keeps the
+/// session from starting.
 #[test]
-fn a_window_size_is_width_x_height() {
+fn a_window_no_one_can_read_or_a_document_that_does_not_open_is_refused() {
+    let config = |size: [u32; 2], scale: f32| SessionConfig {
+        display: DisplayKind::Cpu,
+        size: UVec2::from(size),
+        scale,
+    };
+    assert_eq!(check_config(config([1, 8192], 0.25)), Ok(()));
     assert_eq!(
-        "1600x1000".parse::<WindowSize>().unwrap().0,
-        UVec2::new(1600, 1000)
+        check_config(config([0, 600], 1.0)),
+        Err("size is 0×600; give each side from 1 to 8192 pixels".to_string())
     );
-    for bad in ["1600", "1600x", "x1000", "16o0x1000", "-1x1"] {
+    assert_eq!(
+        check_config(config([8193, 600], 1.0)),
+        Err("size is 8193×600; give each side from 1 to 8192 pixels".to_string())
+    );
+    for scale in [0.24, f32::NAN] {
         assert_eq!(
-            bad.parse::<WindowSize>().unwrap_err(),
-            format!("'{bad}' is not a size; write it as 1600x1000")
+            check_config(config([800, 600], scale)),
+            Err(format!(
+                "scale is {scale}; give the physical pixels per logical pixel, 0.25 or more"
+            ))
         );
     }
+
+    let dir = TempDir::new("darkroom-mcp-start");
+    let missing = dir.join("missing.darkroom");
+    let config = config([800, 600], 1.0);
+    let refused =
+        SessionThread::start(move || session_thread::launch(config, Some(&missing))).unwrap_err();
+    assert!(
+        refused.to_string().starts_with("the editor did not open "),
+        "{refused}"
+    );
 }

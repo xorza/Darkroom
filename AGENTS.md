@@ -24,11 +24,13 @@ Workspace members, each after the crates it uses:
 - **`lumos`** — the astronomical image-processing pipeline.
 - **`lens`** — the node-function library: application nodes and adapters from
   `imaginarium` and `lumos`.
-- **`darkroom`** — the editor, a thin `main.rs` over the `darkroom` library;
-  editor work may need a matching Palantir change. `darkroom/AGENTS.md` holds
-  its decisions, the editor harness, the document file and wire ties among them.
-- **`darkroom-mcp`** (`mcp/`) — the editor harness as an MCP server over
-  stdio, for an agent to open projects in, click through and look at.
+- **`darkroom`** — the editor's library: its core, its GUI and the driver that
+  plays input into it; editor work may need a matching Palantir change.
+  `darkroom/AGENTS.md` holds its decisions, the editor harness, the document
+  file and wire ties among them.
+- **`darkroom-app`** (`app/`) — the `darkroom` binary: the window, and with
+  `--mcp --headless` the editor as an MCP server over stdio, for an agent to
+  open projects in, click through and look at.
 
 The submodules `palantir` (GUI) and `fits-well` (FITS) are standalone
 projects, `exclude`d from this workspace with their own lockfiles and
@@ -56,8 +58,11 @@ cargo drive run <name> [args]  # a command of the root's own, from its drive tab
 ```
 
 An agent sees the editor through the `darkroom` MCP server: `cargo drive run mcp`
-builds it, and Claude Code starts it from `.mcp.json` on its next launch. Then
-`darkroom_open {"project": "darkroom/sample/sample.darkroom"}` and `darkroom_shot {}`.
+builds it, and Claude Code starts it, `darkroom --mcp --headless`, from
+`.mcp.json` on its next launch. Then
+`darkroom_open {"project": "darkroom/sample/sample.darkroom", "copy": true}` and
+`darkroom_shot {}`. A project opens in place, so leave out `copy` only to edit the
+file itself.
 
 ## Test code
 

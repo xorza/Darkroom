@@ -67,6 +67,12 @@ pub(crate) struct UndoHistory {
 }
 
 impl UndoHistory {
+    /// Whether [`UndoHistory::undo`] would take an entry back: a packed one,
+    /// or the open gesture unless sealing it would drop it.
+    pub(crate) fn can_undo(&self) -> bool {
+        self.cursor > 0 || self.open.as_ref().is_some_and(|open| !open.step.is_noop())
+    }
+
     pub(crate) fn new(max_bytes: usize) -> Self {
         assert!(max_bytes > 0, "undo history needs a positive byte budget");
         Self {
@@ -238,19 +244,6 @@ fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {
         .expect("bitcode serialize of in-memory undo steps is infallible");
     let end = buffer.len();
     start..end
-}
-
-#[cfg(feature = "internals")]
-pub(crate) mod internals {
-    use crate::core::edit::undo_history::UndoHistory;
-
-    impl UndoHistory {
-        /// Whether [`UndoHistory::undo`] would take an entry back: a packed one,
-        /// or the open gesture unless sealing it would drop it.
-        pub(crate) fn can_undo(&self) -> bool {
-            self.cursor > 0 || self.open.as_ref().is_some_and(|open| !open.step.is_noop())
-        }
-    }
 }
 
 #[cfg(test)]

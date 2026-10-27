@@ -2,4 +2,3 @@
 - stacking frames (outer, inner, reference)
 - auto chosen reference frame for stacking and manually specified
 - visual node groups
-- make darkroom start mcp and not otherwise

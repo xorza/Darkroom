@@ -1,15 +1,17 @@
-//! Why a harness call failed, each case with what an agent needs to correct the call.
+//! Why a driver call failed, each case with what an agent needs to correct the call.
 
 use std::io;
 use std::path::PathBuf;
 
-/// A harness call that could not do what it was asked.
+use palantir::GpuRequestError;
+
+/// A driver call that could not do what it was asked.
 #[expect(
     clippy::module_name_repetitions,
     reason = "an error carries its domain's name, as `ExecError` does"
 )]
 #[derive(Debug, thiserror::Error)]
-pub enum HarnessError {
+pub enum DriverError {
     #[error("{locator} matches nothing; the nearest are: {}", .nearest.join(", "))]
     NotFound {
         locator: String,
@@ -29,6 +31,8 @@ pub enum HarnessError {
     Quit,
     #[error("the editor did not settle within {frames} frames after {step}")]
     Unsettled { step: String, frames: u32 },
+    #[error("the editor did not settle within {seconds} s after {step}")]
+    UnsettledInTime { step: String, seconds: f32 },
     #[error("{region} covers none of the window; pick a region inside it")]
     EmptyRegion { region: String },
     #[error("a shot needs pixels, and this session has none: start it with the GPU display")]
@@ -67,6 +71,32 @@ pub enum HarnessError {
         document: PathBuf,
         paths: Vec<String>,
     },
+    #[error(
+        "the editor did not open {}: {}",
+        .path.display(),
+        .status.as_deref().unwrap_or("it said nothing")
+    )]
+    NotOpened {
+        path: PathBuf,
+        /// The editor's status line after the open, which names why: the load's error, as the
+        /// editor reports it to a person.
+        status: Option<String>,
+    },
+    #[error(
+        "{} has unsaved edits, which an open would discard; save them or undo them first",
+        .document
+            .as_ref()
+            .map_or_else(|| "the new document".into(), |path| path.display().to_string())
+    )]
+    Unsaved { document: Option<PathBuf> },
+    #[error(
+        "the editor waits on a native file dialog, which only the person at the window answers"
+    )]
+    NativeDialog,
+    #[error("the editor did not answer within {seconds} s")]
+    NoAnswer { seconds: f32 },
+    #[error("the GPU display needs an adapter, and none is usable: {0}")]
+    NoAdapter(#[from] GpuRequestError),
     #[error("{} has no parent folder to copy", .path.display())]
     NoFolder { path: PathBuf },
     #[error("{}: {source}", .path.display())]

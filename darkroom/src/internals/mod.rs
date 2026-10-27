@@ -1,3 +1,3 @@
-//! Non-shipping code: what tools and tests outside the crate drive the editor through.
+//! Non-shipping code: the projects tests and tools outside the crate open.
 
-pub mod harness;
+pub mod fixture;

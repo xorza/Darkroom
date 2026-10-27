@@ -1,18 +1,18 @@
-//! [`Action`]: one step of input the harness plays into the window, and the key chords it names.
+//! [`Action`]: one step of input the driver plays into the window, and the key chords it names.
 
 use std::path::PathBuf;
 
 use glam::Vec2;
 use palantir::{Key, Modifiers, PointerButton};
 
-use crate::internals::harness::error::HarnessError;
-use crate::internals::harness::locator::Locator;
+use crate::driver::error::DriverError;
+use crate::driver::locator::Locator;
 
 /// Pointer moves a drag takes from its start to its end when the call names none, enough to pass
 /// any drag threshold in small steps.
 pub const DRAG_STEPS: u32 = 8;
 
-/// One step of input. The harness runs frames until the editor settles after each.
+/// One step of input. The driver runs frames until the editor settles after each.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     /// Move the pointer there, as a hover.
@@ -67,8 +67,8 @@ impl Chord {
     /// `chord`: modifiers and one key joined by `+`, without regard to case. The modifiers are
     /// `ctrl` (Cmd on macOS, as palantir reads it), `shift`, `alt` and `meta`; the key is a named
     /// key or one character.
-    pub(crate) fn parse(chord: &str) -> Result<Self, HarnessError> {
-        let bad = || HarnessError::BadChord {
+    pub(crate) fn parse(chord: &str) -> Result<Self, DriverError> {
+        let bad = || DriverError::BadChord {
             chord: chord.to_string(),
         };
         let mut parts: Vec<&str> = chord.split('+').map(str::trim).collect();
@@ -143,7 +143,7 @@ mod tests {
     use glam::Vec2;
     use palantir::{Key, Modifiers};
 
-    use crate::internals::harness::action::{Chord, path};
+    use crate::driver::action::{Chord, path};
 
     /// Each modifier, named keys, one character in either case, and the plus key; a word that is
     /// no key and an unknown modifier are refused.

@@ -5,32 +5,71 @@ runs it with no desktop for an agent or a test.
 
 ## The editor harness
 
-`darkroom::internals::harness` drives the whole editor in a window no one sees: it opens a
-project, plays input into it, waits for it to settle, and reads back what it shows as text and as
-pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
+`darkroom::driver` drives the whole editor as a person at its window would: it opens a project,
+plays input into the window, waits for it to settle, and reads back what it shows as text and as
+pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `app/`
+(`darkroom-app`) serves it to an agent with `--mcp`.
 
+- **Flags on one binary.** `darkroom [FILE]` is the window. `darkroom --mcp [FILE]` is the window
+  and an MCP server on stdio: the person sees the window the agent drives and can take over at any
+  time. `darkroom --mcp --headless [--size WxH] [--scale S]` is no window. `--headless` requires
+  `--mcp`, as a run with no window and no driver has nothing to do. Playwright MCP and Chrome
+  DevTools MCP take the same shape
+  ([Playwright MCP](https://github.com/microsoft/playwright-mcp),
+  [Chrome DevTools MCP](https://raw.githubusercontent.com/ChromeDevTools/chrome-devtools-mcp/main/docs/configuration.md)).
+  Refused: a `darkroom mcp` subcommand, one more level for the same two choices; a separate
+  server binary beside the editor, two binaries that drift and a window no agent drives.
+- **The binary is its own crate.** `darkroom` is a library; `app/` builds the binary: the CLI,
+  the window or headless start, and the MCP server. Checks and tests of the library never build
+  rmcp. Refused: the server in the library, which every darkroom test build then compiles; the
+  server behind a library feature, which `--all-features` builds on every lint.
+- **The driver is product code, and palantir publishes what it reads.** The binary does not build
+  `internals`: palantir's `HeadlessWindow`, `Ui::inspect` with `InspectedWidget`, and
+  `Ui::double_click_window` are public API. iced and egui ship a headless runner as product API
+  ([iced_test](https://docs.rs/iced_test), [egui_kittest](https://docs.rs/egui_kittest)), and
+  iced_test selects a widget by its text as `inspect` does. The double-click window is a query, as
+  Qt's `QStyleHints::mouseDoubleClickInterval` and egui's `InputOptions::max_double_click_delay`
+  are, so it can follow the OS setting with no change to callers. Refused: an AccessKit tree for
+  locators, as egui_kittest reads, which waits for palantir to take on screen readers.
+- **One driver, two backends.** Actions, locators, state, shots and the settle rules are one
+  driver over a backend. Offscreen: the app on the driver's thread, a stepped clock, a
+  `HeadlessWindow`. Window: the app on the winit main thread; input goes in through
+  `HostHandle::send_input`, and what needs the `Ui` is a request the app serves in its next frame,
+  answered on a channel. A shot uses the product screenshot API in both.
+- **palantir puts input into a window as the OS does.** `HostHandle::send_input` delivers an
+  event before the next frame as OS input is, with the window's input clock, then runs a frame;
+  `HostHandle::last_frame` reads the window's last frame summary, which counts the sent events
+  before it. Test frameworks inject at this layer, past the platform: Qt's QTest creates events
+  "on the spot", egui_kittest feeds simulated events to its harness
+  ([qtestmouse.h](https://code.qt.io/cgit/qt/qtbase.git/tree/src/testlib/qtestmouse.h?h=5.14),
+  [kittest](https://docs.rs/kittest)). Refused: lending the `Ui` and making `Ui::on_input`
+  public, which skips the host's clock and repaint, as QTest's `sendEvent` skips logic a real
+  click runs.
 - **The harness drives the real `App`**, with its runtime host, worker, preview converter and
   every pane, so a project runs and its previews appear as in the window. Refused:
   `SessionHarness`, which has no runtime and no previews, and a fixture library, which cannot open
   a real project.
-- **The core is in darkroom, the MCP server is its own crate.** The core drives darkroom's private
-  `App`; the server only maps tools onto it, so darkroom's own build never compiles the MCP SDK.
-  Refused: the whole harness in a new crate, which would make `App` public; the server in darkroom
-  behind a feature, which `--all-features` would build on every check.
 - **An agent reaches it through MCP over stdio**, which Claude Code starts from `.mcp.json` and
   keeps for the agent's session, so a project opened once is clicked many times and a shot comes
-  back as an image the agent sees. Refused: a loopback server an agent must start and address by
-  hand; scripts, which replay the whole session for each step
-  ([Claude Code MCP](https://code.claude.com/docs/en/mcp)).
-- **`.mcp.json` starts a built binary**, `target/mcp/darkroom-mcp`, which `cargo drive run mcp`
-  builds under the `mcp` profile: `release-dev` that unwinds a panic, as `release` aborts and Cargo
-  sets `panic` per profile only. `darkroom_open` replies with the commit the binary was built from
-  and whether the tree differed, so a stale server says so. Refused: `cargo run` in `.mcp.json`,
-  whose cold build outlasts the client's startup timeout.
+  back as an image the agent sees. No port listens: HTTP waits for a need, when the spec asks the
+  server to check `Origin`, bind to 127.0.0.1 and authenticate
+  ([MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)).
+  Refused: a loopback server an agent must start and address by hand; HTTP only, as Figma's
+  desktop app serves, where the client cannot start the editor; scripts, which replay the whole
+  session for each step ([Claude Code MCP](https://code.claude.com/docs/en/mcp)).
+- **Nothing but MCP on stdout.** The stdio transport forbids any other byte there and allows logs
+  on stderr, so `init_tracing` writes to stderr in every mode. A release build on Windows is a
+  GUI-subsystem binary, which takes the pipes a parent hands it
+  ([rust#67159](https://github.com/rust-lang/rust/issues/67159)).
+- **`.mcp.json` starts a built binary**, `target/mcp/darkroom --mcp --headless`, which
+  `cargo drive run mcp` builds under the `mcp` profile: `release-dev` that unwinds a panic, as
+  `release` aborts and Cargo sets `panic` per profile only. `darkroom_open` replies with the
+  commit the binary was built from and whether the tree differed, so a stale server says so.
+  Refused: `cargo run` in `.mcp.json`, whose cold build outlasts the client's startup timeout.
 - **The server uses rmcp**, the protocol's official Rust SDK, which keeps the protocol version,
   the schemas and the content types in step with the spec. Refused: our own JSON-RPC loop
   ([rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)). The tools' JSON shapes are the
-  server's own types, converted to the harness's, so the harness carries no schema.
+  server's own types, converted to the driver's, so the driver carries no schema.
 - **Six consolidated tools**: `darkroom_open`, `darkroom_act` (a batch of actions, played one at
   a time so a failure names the action it stopped at, optionally ending in a shot),
   `darkroom_state`, `darkroom_ui`, `darkroom_shot`, `darkroom_wait_run`. Names come before ids,
@@ -45,16 +84,17 @@ pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
   side and name, a world point, then a widget's text, then a screen point. A locator that matches
   several is an error that lists them, and `Nth` picks one, as Playwright's strict locators and
   `nth` do ([Playwright locators](https://playwright.dev/docs/locators)).
-- **palantir lists what it drew**: under its `internals`, `Ui::inspect` lists the last frame's
-  widgets that sense input, with their rects and the text of their subtree. Refused: AccessKit, a
-  role and a label for every widget kind, a much larger palantir change than the harness needs.
-- **Each action waits until the editor settles**: frames run until one asks no repaint, the app
-  has no wake pending, and no preview is converting on its thread, bounded in frames and in real
-  time; a timer wake, as a caret blink asks, does not hold it. A wake from the worker or the
-  preview converter makes the next frame a full one, as the window host's repaint does: a frame
-  nothing asked for paints only and runs no `update`. `darkroom_wait_run` waits for the
-  worker too. This is Playwright's auto-wait. Refused: a fixed sleep or frame count, which breaks
-  when a frame or a conversion takes longer.
+- **Each action waits until the editor settles**, as Playwright's auto-wait does. Offscreen,
+  frames run until one asks no repaint, the app has no wake pending, and no preview is converting
+  on its thread, bounded in frames and in real time; a wake from the worker or the preview
+  converter makes the next frame a full one, as the window host's repaint does. In the window, the
+  settle waits for a frame that saw every sent event and asks no repaint, then for no preview
+  converting, bounded in real time. A timer wake, as a caret blink asks, holds neither. A shot's
+  image is copied back by the device: offscreen, the driver waits for the device, and the next
+  frame lands the image; in the window, the wait is bounded in real time.
+  `darkroom_wait_run` waits for the worker too. Refused: a fixed sleep or frame count, which
+  breaks when a frame, a conversion or a slow adapter takes longer, as a software adapter's copy
+  outlasted 600 offscreen frames on the CI runners.
 - **Text first, pixels when the look matters.** `darkroom_state` and `darkroom_ui` reply with
   text and the warnings and errors logged since the last call. `darkroom_shot` replies with a PNG
   scaled to `max_side` (1280 by default) and a legend of each visible node and port at its rect in
@@ -69,30 +109,36 @@ pixels. The member crate `mcp/` (`darkroom-mcp`) serves it to an agent.
   `ViewportCommand::Screenshot` does. Refused: a test-only readback beside a product capture, two
   paths to keep right
   ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
-- **The display is chosen when the harness is built**: `Gpu` renders into an offscreen texture
-  and panics with no adapter; `Cpu` runs the same frames on palantir's deviceless frontend, where
-  a shot is an error. Both shape text with the bundled fonts, so a locator resolves to the same
-  rect on both. Refused: a silent fallback, which turns a missing adapter into a test that passes
-  without having run.
-- **The harness steps its own clock**, 1/60 s a frame, and spaces separate clicks past the
-  double-click window, so animation and click timing repeat from run to run. The worker runs on
-  real time, which a run needs.
-- **A panic ends the session, not the server.** The server catches it at the editor thread's
-  edge, drops the session, and answers with the panic's message and location. Refused: a server
-  that dies with the editor, which the client shows only as a lost connection.
-- **A quit ends the session**, as it closes the window: once an action quits the editor (File ▸
-  Quit, or Ctrl+Q past the unsaved-changes prompt), every harness call that runs a frame is
-  refused with `HarnessError::Quit`, and the MCP server closes the session and says so. Refused: a
-  session that goes on after its editor asked to end, which a user never sees.
-- **A session works on a copy of the project's folder, in RAM**, under `common::env::temp_dir`,
-  tmpfs on Debian 13 and Arch, so saves, the runtime cache and the shots stay inside the session
-  and cost no disk writes. A folder over 256 MiB, one holding a link to a folder, or a document
-  whose relative paths climb out of its folder is refused with the reason; `in_place` opens the
-  project where it is. Cost: lumos's frame store refuses to spill into a memory-backed directory,
-  so a project whose run spills opens in place.
-- **Native dialogs are a seam.** `App` asks for a path through a `Dialogs` value: native in the
-  window, scripted in the harness, where each ask takes the next answer, made absolute as a native
-  dialog's is. A blocking native dialog would hang a session no one can see.
+- **No `cpu` display in the product.** `--headless` needs a GPU adapter, and a software one
+  (lavapipe, llvmpipe, WARP) counts, as a headless browser renders in software. With none, the
+  start fails with the adapter error. The `cpu` display, palantir's deviceless frontend, where a
+  shot is an error, stays a test backend. Both shape text with the bundled fonts, so a locator
+  resolves to the same rect on both. Refused: `--display cpu`, which makes palantir's test harness
+  public API for a mode with no shots; a silent fallback, which turns a missing adapter into a test
+  that passes without having run.
+- **The offscreen harness steps its own time**, `OffscreenTime::Manual` advanced 1/60 s a frame,
+  and spaces separate clicks past the double-click window, so animation and click timing repeat
+  from run to run. The worker runs on real time, which a run needs; the window runs on real time
+  throughout.
+- **The process is the session.** `darkroom_open` opens a project in the running editor, in place
+  of the open one; one that does not open leaves the editor as it was. A quit (File ▸ Quit, or
+  Ctrl+Q past the unsaved-changes prompt) ends the process, and the client sees the server end. A
+  panic ends the session: the server answers with the panic's message and location, then ends.
+  With a window, the window stays when the server ends, for the person at it. Refused: sessions
+  that start and stop inside one server, which a window cannot do.
+- **A project opens in place.** `darkroom_open` opens the file where it is, as a person's Open
+  does; `copy` opens a copy of its folder under `common::env::temp_dir`, tmpfs on Debian 13 and
+  Arch, so saves, the runtime cache and the shots stay inside the session. A copy refuses a folder
+  over 256 MiB, one holding a link to a folder, or a document whose relative paths climb out of
+  its folder, with the reason. In the window, an open refuses to discard unsaved edits, which the
+  person may own. Refused: a copy by default, whose saves a person watching the window would have
+  to find in a temp folder; a default that differs by mode.
+- **A dialog takes a queued answer, else asks the person.** `App` asks for a path through a
+  `Dialogs` value: an agent's `answer` action queues an answer, made absolute as a native dialog's
+  is, and the next ask takes it; with none queued, the window opens the native dialog and the
+  headless editor refuses. A native dialog blocks the main thread, so a call waiting on the window
+  says so rather than timing out. Refused: all dialogs scripted under `--mcp`, which cancels the
+  person's own; native only, where an agent cannot save or open through the menus.
 - **A sample project lives in the repo**, `darkroom/sample/`: `sample.darkroom` and the small
   inputs it reads by relative path. It is made and changed in the editor, through the harness or
   by hand, never generated, and a test opens it with no load repair and runs it to its previews,

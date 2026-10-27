@@ -4,25 +4,48 @@
 #![deny(unsafe_code)]
 
 mod core;
+pub mod driver;
 mod gui;
 mod platform;
 
+use std::io;
 use std::path::PathBuf;
 
 use common::is_debug;
 use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
+use crate::driver::log_ring::LogRing;
+use crate::driver::window_link::WindowLink;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::app_host::AppHost;
 use crate::gui::app::{App, LaunchInputs};
-use crate::gui::dialogs::Dialogs;
+use crate::gui::dialogs::{DialogFallback, Dialogs};
 
 /// Launch the Palantir desktop editor on `document` (the command-line
 /// argument, if there was one). The winit event loop owns the main thread, so
 /// this doesn't return until the window closes.
 pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
+    run_window(document, |_| {})
+}
+
+/// [`run`], handing `serve` the link a driver on another thread reaches the window through, on
+/// the main thread once the app exists and before its first frame.
+pub fn run_driven(
+    document: Option<PathBuf>,
+    serve: impl FnOnce(WindowLink) + 'static,
+) -> Result<(), WinitHostError> {
+    run_window(document, serve)
+}
+
+fn run_window(
+    document: Option<PathBuf>,
+    serve: impl FnOnce(WindowLink) + 'static,
+) -> Result<(), WinitHostError> {
     // Load preferences here, before the window exists, so a saved size /
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
@@ -58,16 +81,20 @@ pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
             overlay.frame_stats = is_debug();
             ui.set_debug_overlay(overlay);
 
-            App::new(
+            let dialogs = Dialogs::new(DialogFallback::Native);
+            let link = WindowLink::new(handle.clone(), dialogs.native_open());
+            let app = App::new(
                 ui,
                 AppHost::Window(handle),
                 LaunchInputs {
                     preferences,
                     store,
                     document,
-                    dialogs: Dialogs::Native,
+                    dialogs,
                 },
-            )
+            );
+            serve(link);
+            app
         })?;
 
     // Between `build` and `run` because that is the only window that works on
@@ -94,14 +121,34 @@ fn load_icon() -> Option<Image> {
 }
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
-/// `info`). `try_init` is a no-op if a subscriber is already installed.
+/// `info`). `try_init` is a no-op if a subscriber is already installed. Stderr in every mode:
+/// MCP's stdio transport forbids any byte on stdout but its messages and allows logs on stderr
+/// (<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>).
 pub fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    tracing_subscriber::registry()
+        .with(log_filter())
+        .with(fmt::layer().with_writer(io::stderr))
         .try_init()
         .ok();
+}
+
+/// [`init_tracing`], and a [`LogRing`] beside it that keeps the warnings and errors for a driver
+/// of the window to report: the window logs on the main thread, which no driver's own subscriber
+/// sees.
+pub fn init_driven_tracing() -> LogRing {
+    let log = LogRing::default();
+    tracing_subscriber::registry()
+        .with(log_filter())
+        .with(fmt::layer().with_writer(io::stderr))
+        .with(log.clone())
+        .try_init()
+        .ok();
+    log
+}
+
+/// `RUST_LOG`, or `info` without it.
+fn log_filter() -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
 }
 
 #[cfg(feature = "internals")]

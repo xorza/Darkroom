@@ -51,6 +51,11 @@ pub(super) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(original, link)
 }
 
+/// A link to a folder is a link as any other on Unix.
+pub(super) fn symlink_dir(original: &Path, link: &Path) -> io::Result<()> {
+    symlink(original, link)
+}
+
 pub(super) fn replace(source: &Path, destination: &Path, _mode: PublicationMode) -> io::Result<()> {
     fs::rename(source, destination)
 }

@@ -759,7 +759,6 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "darkroom"
 version = "0.1.0"
 dependencies = [
- "clap",
  "common",
  "criterion",
  "darkroom",
@@ -780,12 +779,11 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "winresource",
  "zip",
 ]
 
 [[package]]
-name = "darkroom-mcp"
+name = "darkroom-app"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -796,6 +794,8 @@ dependencies = [
  "rmcp",
  "serde",
  "tokio",
+ "tracing",
+ "winresource",
 ]
 
 [[package]]
