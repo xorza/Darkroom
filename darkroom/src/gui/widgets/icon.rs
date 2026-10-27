@@ -10,9 +10,13 @@ use crate::gui::widgets::support;
 /// The side of the grid an icon's artwork is drawn on, scaled to the box it paints in.
 ///
 /// 24 units with a 2-unit stroke, the grid and weight of the open icon sets (Lucide, Feather,
-/// Material Symbols at weight 400), so a 15 px icon strokes at 1.25 px and a 18 px one at 1.5 px.
+/// Material Symbols at weight 400), so a 16 px icon strokes at 1.33 px and a 18 px one at 1.5 px.
 const GRID: f32 = 24.0;
 const STROKE: f32 = 2.0;
+
+/// The room around an icon in a button, each side, so every icon button, a toolbar chip, a
+/// node header's button or the inspector's pin, gives its icon the same margin.
+pub(crate) const BUTTON_INSET: f32 = 6.0;
 
 /// The span of [`Icon::Cross`]'s arms on the grid, centered.
 const CROSS_SPAN: f32 = 12.0;

@@ -4,14 +4,15 @@ use palantir::TextInput;
 use palantir::prelude::*;
 
 use crate::gui::theme::Theme;
+use crate::gui::widgets::icon;
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
-/// Side of each square button, in px.
-const BUTTON_SIZE: f32 = 30.0;
 /// Side of an [`Icon`] inside the button: 18 px on its 24-unit grid strokes at 1.5 px.
 const ICON_SIZE: f32 = 18.0;
+/// Side of each square button: the icon and [`icon::BUTTON_INSET`] around it.
+const BUTTON_SIZE: f32 = ICON_SIZE + 2.0 * icon::BUTTON_INSET;
 
 /// One square chip button riding a group pill: an opaque rounded chip
 /// whose icon is painted by a caller closure, with a hover tooltip.

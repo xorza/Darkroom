@@ -89,7 +89,7 @@ pub(super) fn theme(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Them
 
 /// A menu as the review drew it: the hint a gutter from its label, and a panel that floats on a
 /// soft shadow inside a rule in the separators' ink, not on palantir's lit border. Its 32 px rows
-/// are [`scales`]'s row inset, which a tab shares.
+/// are the [`row_inset`].
 const fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceScale) {
     let menu = &mut theme.context_menu;
     menu.item.gap = space.xl;
@@ -103,6 +103,12 @@ const fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceS
 /// Graph menus open one width and a short menu does not read as a pill.
 const MENU_MIN_WIDTH: f32 = 240.0;
 
+/// The inset of a row a pointer picks from: a menu item, a menu-bar title and a tab are one row,
+/// so one height at the body size, 32 px.
+fn row_inset(space: &SpaceScale) -> Spacing {
+    Spacing::xy(space.md, space.sm)
+}
+
 /// The theme's spacing steps and radii over palantir's own literals, so a palantir control
 /// lines up with a darkroom one: a field and a button beside it share one height, and a menu
 /// rounds like every other floating surface.
@@ -112,10 +118,8 @@ fn scales(theme: &mut palantir::Theme, space: &SpaceScale, radius: &RadiusScale)
     theme.text_edit.defaults.padding = control;
     theme.context_menu.padding = Spacing::all(space.xs);
     theme.tooltip.padding = control;
-    // A tab and a menu item are one row: the same inset, so the same height at the body size.
-    let row = Spacing::xy(space.md, space.sm);
-    theme.context_menu.item.defaults.padding = row;
-    theme.tabs.chip_padding = row;
+    theme.context_menu.item.defaults.padding = row_inset(space);
+    theme.tabs.chip_padding = row_inset(space);
     theme.modal.padding = Spacing::all(space.xl);
 
     let round = |look: &mut StatefulLook, r: f32| {
@@ -215,10 +219,11 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
 /// palantir widget resolves against a menu-bar style: the bar hands this
 /// to [`palantir::Button::style`] at the call site.
 ///
-/// Pins color only; every other axis inherits the ambient style an
-/// unstyled label would have.
-pub(super) fn menu_button(p: &palantir::Palette) -> ButtonTheme {
+/// Pins color and the [`row_inset`]; every other axis inherits the ambient
+/// style an unstyled label would have.
+pub(super) fn menu_button(p: &palantir::Palette, space: &SpaceScale) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);
+    mb.defaults.padding = row_inset(space);
     let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         look.text = look.text.with_color(color);
     };
