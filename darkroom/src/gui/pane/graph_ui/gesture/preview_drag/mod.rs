@@ -16,6 +16,7 @@ use std::sync::Arc;
 use palantir::Ui;
 use scenarium::NodeId;
 
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview_sink;
 use crate::gui::frame::requests::Requests;
@@ -87,12 +88,12 @@ impl PreviewDrag {
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
         let members = Arc::from([DragStart {
-            node_id,
+            item: ItemId::Node(node_id),
             pos: center,
         }]);
         self.drag.latch(
             Grab {
-                node_id,
+                item: ItemId::Node(node_id),
                 members,
                 handle: port_row::port_circle_wid(port),
             },

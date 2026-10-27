@@ -13,6 +13,7 @@ use glam::Vec2;
 use scenarium::{Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, Subscription};
 
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::set_depth::SetDepth;
@@ -23,6 +24,7 @@ use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
+use crate::core::edit::step::set_ties::SetTies;
 use crate::core::edit::step::set_viewport::{SetViewport, VIEWPORT_EPS};
 use crate::core::edit::step::undo_step::UndoStep;
 
@@ -33,7 +35,7 @@ fn viewport(pan: Vec2, zoom: f32) -> Viewport {
 fn set_positions(node_id: NodeId, from: Vec2, to: Vec2) -> UndoStep {
     UndoStep::Positions(SetPositions {
         moves: vec![Move {
-            node_id,
+            item: ItemId::Node(node_id),
             pos: Change { from, to },
         }],
     })
@@ -43,6 +45,7 @@ fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> Un
     UndoStep::Input(SetInput {
         input,
         binding: Change { from, to },
+        ties: SetTies::default(),
     })
 }
 
@@ -58,6 +61,7 @@ fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
             from: false,
             to: true,
         },
+        ties: SetTies::default(),
     })
 }
 
@@ -77,7 +81,7 @@ fn node_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
     let entry = NodeEntry::capture(&fixture.document, node_id).expect("the fixture placed it");
-    UndoStep::Node(Box::new(SetNode::removal(entry)))
+    UndoStep::Node(Box::new(SetNode::removal(entry, SetTies::default())))
 }
 
 /// The exit prompt's split: camera, selection and stacking are navigation and
@@ -89,7 +93,7 @@ fn dirties_document_splits_edits_from_navigation() {
         UndoStep::Selection(SetSelection {
             selection: Change {
                 from: BTreeSet::new(),
-                to: BTreeSet::from([node_id]),
+                to: BTreeSet::from([ItemId::Node(node_id)]),
             },
         }),
         UndoStep::Viewport(SetViewport {
@@ -158,7 +162,7 @@ fn changes_node_set_splits_adds_and_removals_from_everything_else() {
             UndoStep::Selection(SetSelection {
                 selection: Change {
                     from: BTreeSet::new(),
-                    to: BTreeSet::from([node_id]),
+                    to: BTreeSet::from([ItemId::Node(node_id)]),
                 },
             }),
             false,
@@ -215,7 +219,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
         UndoStep::Selection(SetSelection {
             selection: Change {
                 from: BTreeSet::new(),
-                to: BTreeSet::from([node_id]),
+                to: BTreeSet::from([ItemId::Node(node_id)]),
             },
         }),
         UndoStep::Depth(SetDepth {
@@ -278,7 +282,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
 fn a_held_gesture_absorbs_its_next_frame_in_place() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
     let mv = |node_id, from, to| Move {
-        node_id,
+        item: ItemId::Node(node_id),
         pos: Change { from, to },
     };
     let mut open = UndoStep::Positions(SetPositions {
@@ -299,13 +303,13 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
     let halves: Vec<_> = folded
         .moves
         .iter()
-        .map(|moved| (moved.node_id, moved.pos.from, moved.pos.to))
+        .map(|moved| (moved.item, moved.pos.from, moved.pos.to))
         .collect();
     assert_eq!(
         halves,
         [
-            (a, Vec2::ZERO, Vec2::new(25.0, 0.0)),
-            (b, Vec2::ONE, Vec2::new(11.0, 1.0)),
+            (ItemId::Node(a), Vec2::ZERO, Vec2::new(25.0, 0.0)),
+            (ItemId::Node(b), Vec2::ONE, Vec2::new(11.0, 1.0)),
         ]
     );
 

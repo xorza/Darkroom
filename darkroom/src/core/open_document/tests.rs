@@ -7,6 +7,7 @@ use glam::Vec2;
 
 use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::DocumentRepair;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -303,11 +304,11 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
     let (node, other) = (fixture.node(0), fixture.node(1));
     let DocumentFixture { document, library } = fixture;
     let mut open = OpenDocument::over(document);
-    let start = open.document.main_view.item_placements[&node].pos;
+    let start = open.document.main_view.node_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();
     let members: Arc<[DragStart]> = Arc::from([DragStart {
-        node_id: node,
+        item: ItemId::Node(node),
         pos: start,
     }]);
     let frame = |x: f32| GraphIntent::MoveSelection {
@@ -331,13 +332,13 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
         vec![
             frame(12.0),
             GraphIntent::SetSelection {
-                to: BTreeSet::from([other]),
+                to: BTreeSet::from([ItemId::Node(other)]),
             },
         ],
     );
     drain(&mut open, vec![frame(20.0)]);
 
-    let pos = |open: &OpenDocument| open.document.main_view.item_placements[&node].pos - start;
+    let pos = |open: &OpenDocument| open.document.main_view.node_placements[&node].pos - start;
     assert_eq!(pos(&open), Vec2::new(20.0, 0.0));
     assert!(open.can_undo());
     assert_eq!(open.undo(), Relayout::NotNeeded);

@@ -49,7 +49,7 @@ struct DotKey {
 impl DotKey {
     fn from_theme(theme: &Theme) -> Self {
         Self {
-            color: theme.canvas.dot.to_srgba_u8(),
+            color: theme.canvas.dot.to_srgba(),
             radius_bits: theme.canvas.dot_radius.to_bits(),
             spacing_bits: theme.canvas.dot_spacing.to_bits(),
         }
@@ -124,7 +124,7 @@ fn wrap_multiplier(zoom: f32) -> f32 {
 fn build_tile(theme: &Theme) -> Image {
     let n = TILE_PX;
     let radius = (theme.canvas.dot_radius * n as f32 / theme.canvas.dot_spacing).max(0.5);
-    let c = theme.canvas.dot.to_srgba_u8();
+    let c = theme.canvas.dot.to_srgba();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
     let mut tile = Image::blank(UVec2::splat(n));

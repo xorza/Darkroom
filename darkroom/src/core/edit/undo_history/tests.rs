@@ -6,6 +6,7 @@ use scenarium::{Library, NodeId};
 
 use super::*;
 use crate::core::document::internals::{self, DocumentFixture};
+use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -53,7 +54,7 @@ impl Harness {
     }
 
     fn pos(&self, node_id: NodeId) -> Vec2 {
-        self.document.main_view.item_placements[&node_id].pos
+        self.document.main_view.node_placements[&node_id].pos
     }
 
     /// Push one graph edit, as a widget's single intent does.
@@ -99,7 +100,7 @@ impl Harness {
             members: members
                 .iter()
                 .map(|&node| DragStart {
-                    node_id: node,
+                    item: ItemId::Node(node),
                     pos: self.pos(node),
                 })
                 .collect(),
@@ -123,7 +124,7 @@ impl Harness {
 
     fn select(&mut self, to: impl IntoIterator<Item = NodeId>) {
         self.edit(GraphIntent::SetSelection {
-            to: to.into_iter().collect(),
+            to: to.into_iter().map(ItemId::Node).collect(),
         });
     }
 
@@ -221,7 +222,10 @@ fn another_edit_seals_the_open_gesture() {
         a0 + Vec2::new(4.0, 0.0),
         "the frames after the edit"
     );
-    assert_eq!(h.document.main_view.selected, BTreeSet::from([b]));
+    assert_eq!(
+        h.document.main_view.selected,
+        BTreeSet::from([ItemId::Node(b)])
+    );
     assert!(h.undo());
     assert!(h.document.main_view.selected.is_empty(), "the edit");
     assert!(h.undo());
@@ -281,7 +285,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     h.document
         .graph
         .set_input_binding(InputPort::new(b, 0), Binding::wire(a, 0));
-    h.document.main_view.selected = [a, b].into_iter().collect();
+    h.document.main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
     // The a->b edge is captured by a's step (before a is removed), so a
     // single undo can restore it once both nodes are back.

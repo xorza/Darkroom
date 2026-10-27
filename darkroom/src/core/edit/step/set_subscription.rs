@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::document::Document;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
+use crate::core::edit::step::set_ties::SetTies;
 
 /// Whether one `subscriber ← emitter.event` edge is wired, before and after.
 ///
@@ -16,6 +17,9 @@ use crate::core::edit::step::reversible::Reversible;
 pub(crate) struct SetSubscription {
     pub(crate) subscription: Subscription,
     pub(crate) subscribed: Change<bool>,
+    /// The route of the event wire an unsubscribe ends, and each tie that
+    /// only it held.
+    pub(crate) ties: SetTies,
 }
 
 impl Reversible for SetSubscription {
@@ -26,9 +30,11 @@ impl Reversible for SetSubscription {
         } else {
             document.graph.unsubscribe(event, subscriber);
         }
+        self.ties.write(document, dir);
     }
 
     /// Dropping an event wire on a pin that already carries it lands here.
+    /// The ties change only with the subscription.
     fn is_noop(&self) -> bool {
         self.subscribed.unchanged()
     }

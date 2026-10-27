@@ -1,9 +1,8 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
-use std::sync::Arc;
-
 use palantir::prelude::*;
 
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
@@ -77,7 +76,7 @@ impl<'a> NodeWidget<'a> {
         if broken {
             probe.mark_broken_node(node.node_id);
         }
-        let selected = draw_ctx.is_selected(node_ctx.node_id);
+        let selected = draw_ctx.is_selected(ItemId::Node(node_ctx.node_id));
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes: the breaker alarm wins,
@@ -178,7 +177,7 @@ impl<'a> NodeWidget<'a> {
             out.extend_graph(GraphIntent::click(
                 click_mode,
                 node_ctx.graph_ctx.selected(),
-                node.node_id,
+                ItemId::Node(node.node_id),
             ));
         }
 
@@ -201,16 +200,19 @@ impl<'a> NodeWidget<'a> {
                 out.extend_graph(GraphIntent::click(
                     ClickMode::Replace,
                     node_ctx.graph_ctx.selected(),
-                    node.node_id,
+                    ItemId::Node(node.node_id),
                 ));
-                Arc::from([DragStart {
-                    node_id: node.node_id,
-                    pos: node.pos,
-                }])
+                group_drag::with_inner_ties(
+                    node_ctx.graph_ctx.view(),
+                    vec![DragStart {
+                        item: ItemId::Node(node.node_id),
+                        pos: node.pos,
+                    }],
+                )
             };
             state.drag.latch(
                 Grab {
-                    node_id: node.node_id,
+                    item: ItemId::Node(node.node_id),
                     members,
                     handle,
                 },

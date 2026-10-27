@@ -160,7 +160,7 @@ impl State {
                 .main_view
                 .selected
                 .iter()
-                .filter_map(|id| graph.find(*id).map(|node| node.name.clone()))
+                .filter_map(|item| graph.find(item.node()?).map(|node| node.name.clone()))
                 .collect(),
             focus: ui.focus().map(|id| {
                 widgets

@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::Modifiers;
 
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
@@ -63,7 +64,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     assert!(
         matches!(
             intents[..],
-            [GraphIntent::SetSelection { ref to }] if to.len() == 1 && to.contains(&a),
+            [GraphIntent::SetSelection { ref to }] if to.len() == 1 && to.contains(&ItemId::Node(a)),
         ),
         "the next band selects only what it swept, with no residue from the \
          cancelled one: {intents:?} (b = {b:?})"
@@ -90,7 +91,7 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
     // `a` is already selected, and the band below sweeps *both* — so `a`
     // reaches the swept buffer twice, once from the base and once from the
     // sweep.
-    h.document_mut().main_view.selected.insert(a);
+    h.document_mut().main_view.selected.insert(ItemId::Node(a));
     h.prime(2);
 
     h.ui.set_modifiers(Modifiers {
@@ -115,7 +116,9 @@ fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
         matches!(
             intents[..],
             [GraphIntent::SetSelection { ref to }]
-                if to.len() == 2 && to.contains(&a) && to.contains(&b),
+                if to.len() == 2
+                    && to.contains(&ItemId::Node(a))
+                    && to.contains(&ItemId::Node(b)),
         ),
         "the shift band commits both nodes exactly once: {intents:?} (a = {a:?}, b = {b:?})"
     );

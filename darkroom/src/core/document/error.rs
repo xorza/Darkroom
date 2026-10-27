@@ -2,9 +2,12 @@
 
 use scenarium::{GraphValidationError, NodeId};
 
+use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tie::TieId;
+use crate::core::document::wire_key::WireKey;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum GraphViewValidationError {
     #[error("graph viewport must have finite pan and positive finite zoom")]
     InvalidViewport,
@@ -14,8 +17,33 @@ pub(crate) enum GraphViewValidationError {
     NodeCount,
     #[error("graph view missing a position for node {node_id:?}")]
     MissingNode { node_id: NodeId },
-    #[error("selected item {node_id:?} has no view item")]
-    MissingSelectedItem { node_id: NodeId },
+    #[error("the route of {wire:?} names no wire the graph holds")]
+    RouteToNoWire { wire: WireKey },
+    #[error("the route of {wire:?}: {source}")]
+    Route {
+        wire: WireKey,
+        #[source]
+        source: RouteError,
+    },
+    #[error("the route of {wire:?} names {tie:?}, which is no tie")]
+    RouteToNoTie { wire: WireKey, tie: TieId },
+    #[error("tie {tie:?} holds no wire")]
+    UnroutedTie { tie: TieId },
+    #[error("tie {tie:?} position must be finite")]
+    NonFiniteTiePos { tie: TieId },
+    #[error("tie {tie:?} pinned angle must be in [0, 360)")]
+    InvalidTieAngle { tie: TieId },
+    #[error("selected item {item:?} is not in the view")]
+    MissingSelectedItem { item: ItemId },
+}
+
+/// A rule a [`Route`](crate::core::document::route::Route) breaks.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RouteError {
+    #[error("a route names at least one tie")]
+    Empty,
+    #[error("a route names {tie:?} twice")]
+    RepeatedTie { tie: TieId },
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -22,7 +22,7 @@ impl Reversible for SetDepth {
     fn write(&self, document: &mut Document, dir: Direction) {
         document
             .main_view
-            .item_placements
+            .node_placements
             .get_mut(&self.node_id)
             .expect("history replays a raise against the item it recorded")
             .z = *self.z.half(dir);

@@ -1,11 +1,13 @@
 use glam::Vec2;
 use palantir::{DockOperation, Key, Modifiers};
-use scenarium::NodeId;
+use scenarium::{InputPort, NodeId, OutputPort};
 use std::sync::Arc;
 
 use crate::alloc_audit;
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tie::TieAngle;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview_sink;
 use crate::gui::app::session::internals::SessionHarness;
@@ -37,8 +39,9 @@ const AUDITED_FRAMES: usize = 64;
 /// happen to trip the allocator.
 ///
 /// The scene is the one the record path is widest over: a graph pane of
-/// nodes, a preview card holding an image, and the status bar's memory
-/// readout, which recomputes its whole line every frame.
+/// nodes, wires run through two ties, one selected and pinned, a preview
+/// card holding an image, and the status bar's memory readout, which
+/// recomputes its whole line every frame.
 ///
 /// Each frame is audited on its own rather than summed, so a
 /// grow-on-the-Nth-frame allocation — a `Vec` doubling, a map rehash —
@@ -46,6 +49,18 @@ const AUDITED_FRAMES: usize = 64;
 #[test]
 fn a_settled_frame_records_without_allocating() {
     let mut fixture = DocumentFixture::probes(6);
+    let probes: [NodeId; 6] = std::array::from_fn(|i| fixture.node(i));
+    let wires = [(0, 1), (1, 2), (0, 3)].map(|(from, to)| {
+        fixture.wire(
+            OutputPort::new(probes[from], 0),
+            InputPort::new(probes[to], 0),
+        )
+    });
+    let tie = fixture.tie(Vec2::new(300.0, 120.0), wires);
+    fixture.tie(Vec2::new(380.0, 140.0), [wires[0]]);
+    let view = &mut fixture.document.main_view;
+    view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
+    view.selected.insert(ItemId::Tie(tie));
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state
@@ -150,7 +165,7 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
 
     test.session.open.dirty = false;
     test.apply(GraphIntent::SetSelection {
-        to: [node_id].into_iter().collect(),
+        to: [ItemId::Node(node_id)].into_iter().collect(),
     });
     assert!(!test.session.open.dirty, "selecting is navigation");
 }
@@ -244,12 +259,10 @@ fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
 /// once the tab closes.
 #[test]
 fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
-    // A node the graph actually holds: a viewer tab names the preview node
-    // whose value it shows, and the drain below prunes a tab whose node is
-    // gone — as it must, since that is what closes a viewer when its node
-    // is deleted.
-    let fixture = DocumentFixture::probes(1);
-    let node_id = fixture.node(0);
+    // A preview node the graph holds: a viewer tab names the preview node
+    // whose value it shows, and a document holds no viewer on any other.
+    let mut fixture = DocumentFixture::default();
+    let node_id = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     let tab = TabRef::ImageViewer(node_id);
 

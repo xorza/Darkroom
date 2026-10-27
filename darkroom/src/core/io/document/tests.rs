@@ -25,7 +25,7 @@ fn document_round_trips_in_either_format() {
     // placement map, which would never exercise a `NodeId` as a key.
     let document = DocumentFixture::sample().document;
     assert!(
-        !document.main_view.item_placements.is_empty(),
+        !document.main_view.node_placements.is_empty(),
         "the fixture must place nodes for this to prove anything"
     );
 
@@ -300,7 +300,7 @@ fn relative_paths_that_leave_the_folder_are_listed() {
     let path = dir.join("scene.darkroom");
     internals::write_unchecked(&document, &path);
     assert_eq!(
-        paths_leaving_folder(&path).unwrap(),
+        internals::paths_leaving_folder(&path).unwrap(),
         ["../x.tiff", "a/../../y.tiff"]
     );
 }

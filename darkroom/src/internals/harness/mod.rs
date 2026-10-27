@@ -455,7 +455,7 @@ impl Harness {
             });
         };
         // A document the load cannot read is the open's to report, as it is for one in place.
-        if let Ok(paths) = io_document::paths_leaving_folder(document)
+        if let Ok(paths) = io_document::internals::paths_leaving_folder(document)
             && !paths.is_empty()
         {
             return Err(HarnessError::PathsLeaveFolder {

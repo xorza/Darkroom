@@ -41,12 +41,12 @@ fn a_success_clears_only_its_own_familys_failure() {
 
     // A warning parks in the same slot, painted as a warning, and its
     // family's success clears it too.
-    log.warn(StatusFamily::Document, "the load changed 2 item(s)".into());
+    log.warn(StatusFamily::Document, "the load made 2 repair(s)".into());
     assert_eq!(
         log.cur(),
         Some(StatusMessage {
             severity: Severity::Warning,
-            line: "the load changed 2 item(s)",
+            line: "the load made 2 repair(s)",
         })
     );
     log.succeeded(StatusFamily::Document);

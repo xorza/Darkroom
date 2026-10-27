@@ -21,25 +21,31 @@
 pub(crate) mod click_mode;
 pub(crate) mod drag_start;
 pub(crate) mod incoming_wires;
+pub(crate) mod route_insert;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::iter;
 use std::sync::Arc;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, InputPort, Library, Node,
-    NodeId, Subscription,
+    Binding, BindingEntry, DetachedNode, DetachedNodeParts, EventPort, Graph as CoreGraph,
+    InputPort, Library, Node, NodeId, OutputPort, Subscription,
 };
 
 use crate::core::document::Document;
-use crate::core::document::graph_view::ItemPlacement;
+use crate::core::document::graph_view::{GraphView, NodePlacement};
+use crate::core::document::item_id::ItemId;
+use crate::core::document::route::Route;
+use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::viewport::Viewport;
+use crate::core::document::wire_key::{DataWire, WireKey};
 use crate::core::edit::error::{MalformedIntent, Role};
 use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
@@ -49,6 +55,7 @@ use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
+use crate::core::edit::step::set_ties::TiesDraft;
 use crate::core::edit::step::set_viewport::SetViewport;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::unwired;
@@ -72,7 +79,7 @@ pub(crate) enum GraphIntent {
     /// Add one node that links state the document already resolves: a func in
     /// the library, or a built-in special.
     AddNode {
-        /// Where the node lands on the canvas; its view item is created
+        /// Where the node lands on the canvas; its placement is created
         /// alongside it, at the top of the paint stack.
         pos: Vec2,
         node_id: NodeId,
@@ -89,7 +96,7 @@ pub(crate) enum GraphIntent {
     RemoveNode {
         node_id: NodeId,
     },
-    /// One frame of a drag of one or more node bodies, in canvas-world
+    /// One frame of a drag of one or more node bodies and ties, in canvas-world
     /// coordinates: every member of `members` moves to its start plus
     /// `offset`. A multi-select drag moves the whole group; a plain drag
     /// carries just the grabbed item. The frames of one `gesture` fold into
@@ -112,11 +119,11 @@ pub(crate) enum GraphIntent {
     /// and Esc-deselect all funnel through this — the caller computes
     /// the desired final set and the undo layer captures the prior one.
     SetSelection {
-        to: BTreeSet<NodeId>,
+        to: BTreeSet<ItemId>,
     },
-    /// Lift an item — a node body or a pinned output's preview widget — to
+    /// Lift a node — its body or a pinned output's preview widget — to
     /// the top of its graph's paint stack, by setting its
-    /// [`ItemPlacement::z`] past every other. Emitted when either kind is
+    /// [`NodePlacement::z`] past every other. Emitted when either kind is
     /// clicked or grabbed, so clicking brings it forward. The depth is stored
     /// view state, so it persists across save/load and tab switches and walks
     /// with undo/redo.
@@ -142,12 +149,40 @@ pub(crate) enum GraphIntent {
         subscription: Subscription,
         subscribe: bool,
     },
+    /// Gather `wires` into a new tie at `pos`, which turns itself: what a tie
+    /// line across wires leaves.
+    TieWires {
+        tie: TieId,
+        pos: Vec2,
+        wires: Vec<RouteInsert>,
+    },
+    /// Add `wires` to `tie`: a tie line that also crossed the tie.
+    JoinTie {
+        tie: TieId,
+        wires: Vec<RouteInsert>,
+    },
+    /// Remove a tie: every wire through it leaves it.
+    RemoveTie {
+        tie: TieId,
+    },
+    /// Turn a tie's band. A frame of a held knob drag names its gesture, so
+    /// its frames fold into one undo entry; a one-shot turn names none.
+    SetTieAngle {
+        tie: TieId,
+        angle: TieAngle,
+        gesture: Option<GestureId>,
+    },
+    /// Take one wire out of a tie; a tie left with no wire goes with it.
+    ReleaseWire {
+        tie: TieId,
+        wire: WireKey,
+    },
 }
 
 impl GraphIntent {
-    /// The intents a click on `node_id` produces: the selection change, plus a
-    /// lift to the top of the paint stack so a clicked node comes to the
-    /// front. The raise is skipped only when a toggling click *removes* `node_id`
+    /// The intents a click on `item` produces: the selection change, plus, for
+    /// a node, a lift to the top of the paint stack so a clicked node comes to
+    /// the front. The raise is skipped when a toggling click *removes* `item`
     /// from the selection — a node you just deselected shouldn't jump
     /// forward. Shared by the node body, its header title and its port
     /// labels, so clicking any of them behaves like clicking the body.
@@ -157,26 +192,27 @@ impl GraphIntent {
     /// intents it builds instead of in the widget that raises them.
     pub(crate) fn click(
         mode: ClickMode,
-        selected: &BTreeSet<NodeId>,
-        node_id: NodeId,
+        selected: &BTreeSet<ItemId>,
+        item: ItemId,
     ) -> impl Iterator<Item = Self> {
-        let deselecting = mode == ClickMode::Toggle && selected.contains(&node_id);
-        iter::once(Self::select_click(mode, selected, node_id))
-            .chain((!deselecting).then_some(Self::Raise { node_id }))
+        let deselecting = mode == ClickMode::Toggle && selected.contains(&item);
+        let raise = item.node().filter(|_| !deselecting);
+        iter::once(Self::select_click(mode, selected, item))
+            .chain(raise.map(|node_id| Self::Raise { node_id }))
     }
 
-    /// The [`Self::SetSelection`] a click on `node_id` produces: a replacing click
+    /// The [`Self::SetSelection`] a click on `item` produces: a replacing click
     /// selects only it, a toggling one flips its membership. A click that
     /// changes nothing is dropped at commit as a no-op.
-    fn select_click(mode: ClickMode, selected: &BTreeSet<NodeId>, node_id: NodeId) -> Self {
+    fn select_click(mode: ClickMode, selected: &BTreeSet<ItemId>, item: ItemId) -> Self {
         let mut to = match mode {
             ClickMode::Replace => BTreeSet::new(),
             ClickMode::Toggle => selected.clone(),
         };
-        if mode == ClickMode::Toggle && selected.contains(&node_id) {
-            to.remove(&node_id);
+        if mode == ClickMode::Toggle && selected.contains(&item) {
+            to.remove(&item);
         } else {
-            to.insert(node_id);
+            to.insert(item);
         }
         Self::SetSelection { to }
     }
@@ -201,7 +237,8 @@ impl GraphIntent {
     /// Clone `document`'s current selection: each node gets a fresh id and an
     /// offset position, const-value bindings copy verbatim, the data and
     /// event wires *among* the selected nodes are recreated against the
-    /// clones, and the copies end up selected. A `Wire` whose source is
+    /// clones with the ties inside them, and the
+    /// copies end up selected. A `Wire` whose source is
     /// *outside* the selection goes as `incoming` says: dropped, leaving the
     /// input's declared default as a wire removed on its own does
     /// ([`unwired::binding`]), or kept pointing at the original external
@@ -216,8 +253,8 @@ impl GraphIntent {
     /// separately: every clone exists before anything binds to one, so no
     /// intent in the list names a producer that isn't there yet.
     ///
-    /// The selection is the only source of a duplicate set: Ctrl+D and the
-    /// node context menu's two Duplicate picks all act on it, the latter
+    /// The selection's nodes are the only source of a duplicate set: Ctrl+D and
+    /// the node context menu's two Duplicate picks all act on them, the latter
     /// because a right-click selects the node it landed on first. A selected
     /// stub is skipped: a copy of a node that cannot run has little use.
     pub(crate) fn duplicate(
@@ -231,16 +268,16 @@ impl GraphIntent {
         // so nothing can be authored until every member has one.
         let mut clones: HashMap<NodeId, NodeId> = HashMap::with_capacity(view.selected.len());
         let mut sources = Vec::with_capacity(view.selected.len());
-        for old_id in &view.selected {
-            if document.stubs.contains(*old_id) {
+        for old_id in view.selected.iter().filter_map(|item| item.node()) {
+            if document.stubs.contains(old_id) {
                 continue;
             }
             let node = graph
-                .find(*old_id)
+                .find(old_id)
                 .expect("a selected node is a graph node or a stub");
             let new_id = NodeId::unique();
-            clones.insert(*old_id, new_id);
-            sources.push((*old_id, new_id, node));
+            clones.insert(old_id, new_id);
+            sources.push((old_id, new_id, node));
         }
         let mut intents = Vec::new();
         if sources.is_empty() {
@@ -250,7 +287,7 @@ impl GraphIntent {
         let mut internal = Vec::new();
         for (old_id, new_id, node) in sources {
             let pos = view
-                .item_placements
+                .node_placements
                 .get(&old_id)
                 .expect("the view places every node the graph holds")
                 .pos
@@ -301,10 +338,90 @@ impl GraphIntent {
                 });
             }
         }
+        let tie_clones = Self::duplicate_ties(view, &clones, &mut intents);
         intents.push(Self::SetSelection {
-            to: clones.values().copied().collect(),
+            to: clones
+                .values()
+                .copied()
+                .map(ItemId::Node)
+                .chain(tie_clones.into_iter().map(ItemId::Tie))
+                .collect(),
         });
         intents
+    }
+
+    /// [`Self::duplicate`]'s ties: each tie whose every wire has both end
+    /// nodes among `clones`' keys, cloned at the duplicate's offset with its
+    /// angle, with each cloned wire's route through the clones in its
+    /// original's order. Pushes the intents after every cloned wire's, and
+    /// returns the clones' ids.
+    fn duplicate_ties(
+        view: &GraphView,
+        clones: &HashMap<NodeId, NodeId>,
+        intents: &mut Vec<Self>,
+    ) -> Vec<TieId> {
+        let tie_clones: BTreeMap<TieId, TieId> = view
+            .ties_within(|node_id| clones.contains_key(&node_id))
+            .into_iter()
+            .map(|tie| (tie, TieId::unique()))
+            .collect();
+        // Each cloned wire with the clones on its route, in route order. A
+        // tie that also holds a wire leaving the set is not cloned, so its
+        // step drops out.
+        let routes: Vec<(WireKey, Vec<TieId>)> = view
+            .routes
+            .iter()
+            .filter_map(|(&wire, route)| {
+                let steps: Vec<TieId> = route
+                    .iter()
+                    .filter_map(|tie| tie_clones.get(tie).copied())
+                    .collect();
+                (!steps.is_empty()).then(|| (cloned_wire(wire, clones), steps))
+            })
+            .collect();
+        let mut made = BTreeSet::new();
+        for (original, &tie) in &tie_clones {
+            let placed = view.ties[original];
+            // A clone joins each route behind the clones already made on it.
+            let wires = routes
+                .iter()
+                .filter_map(|(wire, steps)| {
+                    let idx = steps.iter().position(|&step| step == tie)?;
+                    Some(RouteInsert {
+                        wire: *wire,
+                        at: steps[..idx]
+                            .iter()
+                            .filter(|step| made.contains(*step))
+                            .count(),
+                    })
+                })
+                .collect();
+            intents.push(Self::TieWires {
+                tie,
+                pos: placed.pos + DUPLICATE_OFFSET,
+                wires,
+            });
+            if let TieAngle::Pinned(_) = placed.angle {
+                intents.push(Self::SetTieAngle {
+                    tie,
+                    angle: placed.angle,
+                    gesture: None,
+                });
+            }
+            made.insert(tie);
+        }
+        tie_clones.into_values().collect()
+    }
+
+    /// What Delete does to `view`'s selection: one removal per member, every
+    /// node before every tie, so a frame commits them as one undo entry. A tie
+    /// that a node's removal took with it is stale by its turn and gives no
+    /// step.
+    pub(crate) fn remove_selection(view: &GraphView) -> impl Iterator<Item = Self> + '_ {
+        view.selected.iter().map(|&item| match item {
+            ItemId::Node(node_id) => Self::RemoveNode { node_id },
+            ItemId::Tie(tie) => Self::RemoveTie { tie },
+        })
     }
 
     /// Read the state this intent overwrites out of `document` and fold the two
@@ -353,7 +470,7 @@ impl GraphIntent {
                 // The depth is fixed here rather than at write time, so a redo
                 // puts the node back at the depth the original add gave it
                 // instead of jumping it in front of whatever arrived since.
-                let placement = ItemPlacement {
+                let placement = NodePlacement {
                     pos,
                     z: view.front_z(),
                 };
@@ -370,7 +487,9 @@ impl GraphIntent {
                 let Some(entry) = NodeEntry::capture(document, node_id) else {
                     return Ok(None);
                 };
-                UndoStep::Node(Box::new(SetNode::removal(entry)))
+                let mut ties = TiesDraft::new(view);
+                ties.release(entry.wires());
+                UndoStep::Node(Box::new(SetNode::removal(entry, ties.finish())))
             }
             Self::MoveSelection {
                 members, offset, ..
@@ -380,16 +499,13 @@ impl GraphIntent {
                     let to = member.pos + offset;
                     validate::finite_pos(to, Role::MoveSelection)?;
                     // Drag-sourced (spans frames): a member whose item
-                    // vanished mid-gesture (node removed) drops quietly.
-                    let Some(placement) = view.item_placements.get(&member.node_id) else {
+                    // vanished mid-gesture drops quietly.
+                    let Some(from) = view.pos(member.item) else {
                         continue;
                     };
                     moves.push(Move {
-                        node_id: member.node_id,
-                        pos: Change {
-                            from: placement.pos,
-                            to,
-                        },
+                        item: member.item,
+                        pos: Change { from, to },
                     });
                 }
                 UndoStep::Positions(SetPositions { moves })
@@ -443,12 +559,19 @@ impl GraphIntent {
                         }
                     })?;
                 }
+                let from = graph.bindings.get(&input).cloned();
+                let mut ties = TiesDraft::new(view);
+                // A wire is both of its ends: one that leaves its output
+                // leaves its ties, while a bind to the same output keeps them.
+                if let Some(Binding::Wire(output)) = from
+                    && !matches!(to, Some(Binding::Wire(source)) if source == output)
+                {
+                    ties.release([WireKey::Data(DataWire { output, input })]);
+                }
                 UndoStep::Input(SetInput {
                     input,
-                    binding: Change {
-                        from: graph.bindings.get(&input).cloned(),
-                        to,
-                    },
+                    binding: Change { from, to },
+                    ties: ties.finish(),
                 })
             }
             Self::SetSelection { to } => UndoStep::Selection(SetSelection {
@@ -458,15 +581,12 @@ impl GraphIntent {
                     // starts, so an interleaved undo can remove one before
                     // release. Keep the members that still have a widget
                     // rather than recording a selection the view can't render.
-                    to: to
-                        .into_iter()
-                        .filter(|node_id| view.item_placements.contains_key(node_id))
-                        .collect(),
+                    to: to.into_iter().filter(|&item| view.holds(item)).collect(),
                 },
             }),
             Self::Raise { node_id } => {
                 let (Some(placement), Some(to)) =
-                    (view.item_placements.get(&node_id), view.raised_z(node_id))
+                    (view.node_placements.get(&node_id), view.raised_z(node_id))
                 else {
                     return Ok(None);
                 };
@@ -527,13 +647,82 @@ impl GraphIntent {
                             rejection,
                         })?;
                 }
+                let from = graph.is_subscribed(event, subscriber);
+                let mut ties = TiesDraft::new(view);
+                if from && !subscribe {
+                    ties.release([WireKey::Event(subscription)]);
+                }
                 UndoStep::Subscription(SetSubscription {
                     subscription,
                     subscribed: Change {
-                        from: graph.is_subscribed(event, subscriber),
+                        from,
                         to: subscribe,
                     },
+                    ties: ties.finish(),
                 })
+            }
+            Self::TieWires { tie, pos, wires } => {
+                validate::finite_pos(pos, Role::TieWires)?;
+                if view.ties.contains_key(&tie) {
+                    return Err(MalformedIntent::TieAlreadyExists { tie });
+                }
+                if wires.is_empty() {
+                    return Err(MalformedIntent::EmptyTie { tie });
+                }
+                let mut ties = TiesDraft::new(view);
+                ties.set_tie(
+                    tie,
+                    Some(Tie {
+                        pos,
+                        angle: TieAngle::Auto,
+                    }),
+                );
+                insert_routes(graph, &mut ties, tie, &wires)?;
+                UndoStep::Ties(ties.finish())
+            }
+            // A tie gone since the gesture started is stale: no step.
+            Self::JoinTie { tie, wires } => {
+                if !view.ties.contains_key(&tie) {
+                    return Ok(None);
+                }
+                let mut ties = TiesDraft::new(view);
+                insert_routes(graph, &mut ties, tie, &wires)?;
+                UndoStep::Ties(ties.finish())
+            }
+            Self::RemoveTie { tie } => {
+                if !view.ties.contains_key(&tie) {
+                    return Ok(None);
+                }
+                let mut ties = TiesDraft::new(view);
+                ties.remove_tie(tie);
+                UndoStep::Ties(ties.finish())
+            }
+            Self::SetTieAngle { tie, angle, .. } => {
+                if let TieAngle::Pinned(degrees) = angle
+                    && !angle.is_valid()
+                {
+                    return Err(MalformedIntent::InvalidTieAngle { tie, degrees });
+                }
+                let Some(&placed) = view.ties.get(&tie) else {
+                    return Ok(None);
+                };
+                let mut ties = TiesDraft::new(view);
+                ties.set_tie(tie, Some(Tie { angle, ..placed }));
+                UndoStep::Ties(ties.finish())
+            }
+            // A menu stays open across frames, so the wire may have left the
+            // tie since it opened.
+            Self::ReleaseWire { tie, wire } => {
+                if !view
+                    .routes
+                    .get(&wire)
+                    .is_some_and(|route| route.contains(tie))
+                {
+                    return Ok(None);
+                }
+                let mut ties = TiesDraft::new(view);
+                ties.leave(wire, tie);
+                UndoStep::Ties(ties.finish())
             }
         };
         Ok(Some(step))
@@ -543,7 +732,7 @@ impl GraphIntent {
     pub(crate) const fn gesture(&self) -> Option<GestureId> {
         match self {
             Self::MoveSelection { gesture, .. } => Some(*gesture),
-            Self::SetViewport { gesture, .. } => *gesture,
+            Self::SetViewport { gesture, .. } | Self::SetTieAngle { gesture, .. } => *gesture,
             _ => None,
         }
     }
@@ -597,6 +786,56 @@ impl GraphIntent {
         }
         Ok(())
     }
+}
+
+/// `wire` between the clones of its two ends.
+///
+/// # Panics
+///
+/// When `clones` holds no clone of an end.
+fn cloned_wire(wire: WireKey, clones: &HashMap<NodeId, NodeId>) -> WireKey {
+    let clone = |node_id: NodeId| clones[&node_id];
+    match wire {
+        WireKey::Data(DataWire { output, input }) => WireKey::Data(DataWire {
+            output: OutputPort::new(clone(output.node_id), output.port_idx),
+            input: InputPort::new(clone(input.node_id), input.port_idx),
+        }),
+        WireKey::Event(Subscription { event, subscriber }) => WireKey::Event(Subscription::new(
+            EventPort::new(clone(event.node_id), event.event_idx),
+            clone(subscriber),
+        )),
+    }
+}
+
+/// Put `tie` on each of `wires`' routes, at its crossed piece.
+fn insert_routes(
+    graph: &CoreGraph,
+    ties: &mut TiesDraft<'_>,
+    tie: TieId,
+    wires: &[RouteInsert],
+) -> Result<(), MalformedIntent> {
+    for &RouteInsert { wire, at } in wires {
+        if !wire.is_held_by(graph) {
+            return Err(MalformedIntent::WireAbsent { wire });
+        }
+        let mut steps: Vec<TieId> = ties
+            .route(wire)
+            .map(|route| route.iter().copied().collect())
+            .unwrap_or_default();
+        if steps.contains(&tie) {
+            return Err(MalformedIntent::TieAlreadyOnRoute { wire, tie });
+        }
+        if at > steps.len() {
+            return Err(MalformedIntent::RouteIndexOutOfRange {
+                wire,
+                at,
+                len: steps.len(),
+            });
+        }
+        steps.insert(at, tie);
+        ties.set_route(wire, Some(Route::new(steps)));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

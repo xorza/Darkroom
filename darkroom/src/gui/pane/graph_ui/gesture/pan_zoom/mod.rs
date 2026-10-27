@@ -9,6 +9,7 @@ pub(crate) mod camera_gesture;
 use glam::Vec2;
 use palantir::{Rect, Size, Ui};
 
+use crate::core::document::item_id::ItemId;
 use crate::core::document::viewport::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
@@ -95,7 +96,7 @@ fn node_bounds(
 ) -> Option<Rect> {
     let mut acc: Option<(Vec2, Vec2)> = None;
     for n in graph_ctx.nodes() {
-        if bounded == Bounded::Selected && !graph_ctx.is_selected(n.node_id) {
+        if bounded == Bounded::Selected && !graph_ctx.is_selected(ItemId::Node(n.node_id)) {
             continue;
         }
         let rect = geometry.node_world_rect(n).unwrap_or(Rect {

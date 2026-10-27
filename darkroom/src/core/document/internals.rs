@@ -16,15 +16,18 @@
 use glam::Vec2;
 use scenarium::internals::test_graph::TestGraph;
 use scenarium::{
-    DataType, DetachedNode, DetachedNodeParts, Func, FuncId, FuncInput, FuncOutput, Graph, Library,
-    Node, NodeId, internals,
+    Binding, DataType, DetachedNode, DetachedNodeParts, EventPort, Func, FuncId, FuncInput,
+    FuncOutput, Graph, InputPort, Library, Node, NodeId, OutputPort, Subscription, internals,
 };
 
 use palantir::DockOperation;
 
 use crate::core::document::Document;
-use crate::core::document::graph_view::{GraphView, ItemPlacement};
+use crate::core::document::graph_view::{GraphView, NodePlacement};
+use crate::core::document::route::Route;
 use crate::core::document::tab_ref::TabRef;
+use crate::core::document::tie::{Tie, TieAngle, TieId};
+use crate::core::document::wire_key::{DataWire, WireKey};
 
 /// Lay every placement out along a row so no node lands off-viewport and gets
 /// culled — [`GraphView::new`] seeds every item at the origin.
@@ -32,7 +35,7 @@ fn spread(view: &mut GraphView) {
     let mut order = Vec::new();
     view.paint_order(&mut order);
     for (i, item) in order.into_iter().enumerate() {
-        view.item_placements
+        view.node_placements
             .get_mut(&item.node_id)
             .expect("paint order lists only placed items")
             .pos = row_pos(i);
@@ -43,8 +46,8 @@ fn spread(view: &mut GraphView) {
 /// order its constructors added in, which is what [`DocumentFixture::node`] indexes.
 fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
     let z = view.front_z();
-    view.item_placements
-        .insert(node_id, ItemPlacement { pos, z });
+    view.node_placements
+        .insert(node_id, NodePlacement { pos, z });
 }
 
 /// The `i`th node in placement order — the order [`place`] adds in, and the
@@ -131,7 +134,7 @@ impl DocumentFixture {
             self.library.add(func.clone());
         }
         let node_id = self.document.graph.add_func_node(func);
-        let slot = self.document.main_view.item_placements.len();
+        let slot = self.document.main_view.node_placements.len();
         place(&mut self.document.main_view, node_id, row_pos(slot));
         node_id
     }
@@ -166,7 +169,7 @@ impl DocumentFixture {
     /// Keep `node`, which the library must not resolve, as a stub with no
     /// wiring at the next slot in the row.
     pub(crate) fn add_stub(&mut self, node: Node) -> NodeId {
-        let slot = self.document.main_view.item_placements.len();
+        let slot = self.document.main_view.node_placements.len();
         self.insert_stub(node, row_pos(slot))
     }
 
@@ -204,7 +207,7 @@ impl DocumentFixture {
     /// *which* node a gesture reaches rather than merely that all of them are
     /// on screen.
     pub(crate) fn placed(mut self, id: NodeId, at: Vec2) -> Self {
-        match self.document.main_view.item_placements.get_mut(&id) {
+        match self.document.main_view.node_placements.get_mut(&id) {
             // Repositioning a node the fixture already placed must not
             // restack it — `node(i)` indexes paint order, and several tests
             // move one node after adding others.
@@ -212,6 +215,44 @@ impl DocumentFixture {
             None => place(&mut self.document.main_view, id, at),
         }
         self
+    }
+
+    /// Wire `input` to `output`, with no check that the ports exist or the
+    /// types fit.
+    pub(crate) fn wire(&mut self, output: OutputPort, input: InputPort) -> WireKey {
+        self.document
+            .graph
+            .bindings
+            .insert(input, Binding::Wire(output));
+        WireKey::Data(DataWire { output, input })
+    }
+
+    /// Subscribe `subscriber` to `event`.
+    pub(crate) fn subscribe(&mut self, event: EventPort, subscriber: NodeId) -> WireKey {
+        self.document.graph.subscribe(event, subscriber);
+        WireKey::Event(Subscription::new(event, subscriber))
+    }
+
+    /// Run each of `wires` through a new tie at `pos` that turns itself, last
+    /// on the wire's route.
+    pub(crate) fn tie(&mut self, pos: Vec2, wires: impl IntoIterator<Item = WireKey>) -> TieId {
+        let tie = TieId::unique();
+        let view = &mut self.document.main_view;
+        view.ties.insert(
+            tie,
+            Tie {
+                pos,
+                angle: TieAngle::Auto,
+            },
+        );
+        for wire in wires {
+            let route = match view.routes.get(&wire) {
+                Some(route) => Route::new(route.iter().copied().chain([tie])),
+                None => Route::new([tie]),
+            };
+            view.routes.insert(wire, route);
+        }
+        tie
     }
 
     /// Open `tab` in the primary group and make it that group's active one —

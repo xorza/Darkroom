@@ -22,8 +22,8 @@ fn gradient(paint: &WirePaint) -> Option<(SrgbaU8, SrgbaU8)> {
     let ramp = paint.ramp?;
     assert_eq!(paint.color, RgbaF32::WHITE, "a ramp multiplies white");
     Some((
-        ramp.stops[0].color().into(),
-        ramp.stops[ramp.stops.len() - 1].color().into(),
+        ramp.stops[0].color().to_srgba(),
+        ramp.stops[ramp.stops.len() - 1].color().to_srgba(),
     ))
 }
 
@@ -100,13 +100,13 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
     // frame's tier — the rest-dim pull, not the raw color.
     let (start, end) = gradient(&rest.paint(WireTint::new(a, b), Tier::Rest))
         .expect("two different endpoint colors lower to a gradient");
-    assert_eq!(start, rest.tint(a, Tier::Rest).into());
-    assert_eq!(end, rest.tint(b, Tier::Rest).into());
+    assert_eq!(start, rest.tint(a, Tier::Rest).to_srgba());
+    assert_eq!(end, rest.tint(b, Tier::Rest).to_srgba());
     assert_ne!(start, end, "and the two ends stay distinguishable");
     // Emphasized keeps both stops at full strength.
     let (start, end) = gradient(&rest.paint(WireTint::new(a, b), Tier::Emphasized))
         .expect("still a gradient when emphasized");
-    assert_eq!((start, end), (a.into(), b.into()));
+    assert_eq!((start, end), (a.to_srgba(), b.to_srgba()));
 
     // Equal ends — an event wire, or a type-mismatched data wire — collapse to
     // one flat paint rather than a ramp between two identical stops.
@@ -134,13 +134,47 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
     let fading = WireEmphasis::resolve(canvas, WireSet::Faded);
     let (start, end) = gradient(&fading.paint(WireTint::new(a, b), Tier::Rest))
         .expect("a faded wire keeps its gradient");
-    assert_eq!(start, a.with_alpha(WIRE_DRAG_FADE).into());
-    assert_eq!(end, b.with_alpha(WIRE_DRAG_FADE).into());
+    assert_eq!(start, a.with_alpha(WIRE_DRAG_FADE).to_srgba());
+    assert_eq!(end, b.with_alpha(WIRE_DRAG_FADE).to_srgba());
     assert_eq!(
         solid(&fading.paint(WireTint::flat(a), Tier::Rest)).map(|c| c.a),
         Some(WIRE_DRAG_FADE),
         "and a flat one keeps painting solid"
     );
+}
+
+/// A piece of a ramped wire takes the whole ramp's colors at its two ends: the first half of red
+/// to green runs from red to the ramp's middle, the second half from that same middle to green,
+/// so the joint matches. A flat paint stays flat in every piece.
+#[test]
+fn a_piece_paints_its_share_of_the_wire_ramp() {
+    let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
+    let rest = WireEmphasis::resolve(canvas, WireSet::Standing);
+    let (a, b) = (
+        RgbaF32::new(1.0, 0.0, 0.0, 1.0),
+        RgbaF32::new(0.0, 1.0, 0.0, 1.0),
+    );
+    let whole = rest.paint(WireTint::new(a, b), Tier::Emphasized);
+    let ramp = whole.ramp.unwrap();
+    let middle = ramp.color_at(0.5).to_srgba();
+    assert_eq!(
+        gradient(&whole.between(0.0, 0.5)),
+        Some((a.to_srgba(), middle))
+    );
+    assert_eq!(
+        gradient(&whole.between(0.5, 1.0)),
+        Some((middle, b.to_srgba()))
+    );
+    assert_ne!(middle, a.to_srgba(), "the middle is no end");
+    let flat = rest.paint(WireTint::flat(a), Tier::Emphasized);
+    assert_eq!(solid(&flat.between(0.25, 0.5)), Some(a));
+}
+
+/// A wire's chord is the straight distance between its ends, whatever its handles.
+#[test]
+fn a_chord_runs_end_to_end() {
+    let wire = Wire::data(Vec2::new(0.0, 0.0), Vec2::new(30.0, 40.0));
+    assert_eq!(wire.chord(), 50.0);
 }
 
 #[test]

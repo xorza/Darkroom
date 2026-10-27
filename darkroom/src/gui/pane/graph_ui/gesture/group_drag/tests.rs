@@ -1,9 +1,12 @@
 use glam::Vec2;
 use palantir::{Key, PointerButton};
+use scenarium::{InputPort, OutputPort};
 
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::gui::pane::graph_ui::gesture::group_drag;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
@@ -18,7 +21,7 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let (dragged, bystander) = (h.node(0), h.node(1));
-    let start = h.document().main_view.item_placements[&dragged].pos;
+    let start = h.document().main_view.node_placements[&dragged].pos;
     h.prime(2);
 
     // Press the body, then travel past the drag threshold. The sweep sees
@@ -41,7 +44,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         (members, offset),
         (
             &[DragStart {
-                node_id: dragged,
+                item: ItemId::Node(dragged),
                 pos: start
             }][..],
             travel
@@ -49,7 +52,9 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         "the drag moves only the grabbed node, from its start by the travel"
     );
     assert!(
-        !members.iter().any(|member| member.node_id == bystander),
+        !members
+            .iter()
+            .any(|member| member.item == ItemId::Node(bystander)),
         "an unselected neighbour is not dragged along"
     );
 
@@ -78,7 +83,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
 fn esc_cancels_a_drag_before_it_deselects() {
     let mut h = CanvasHarness::new(DocumentFixture::probes(2));
     let dragged = h.node(0);
-    h.document_mut().main_view.selected = [dragged].into_iter().collect();
+    h.document_mut().main_view.selected = [dragged].map(ItemId::Node).into_iter().collect();
     h.prime(2);
 
     let grab = h.node_center(dragged);
@@ -113,4 +118,34 @@ fn moved(intents: &[GraphIntent]) -> Option<(&[DragStart], Vec2)> {
         } => Some((&**members, *offset)),
         _ => None,
     })
+}
+
+/// A drag of `a` and `b` takes `inner`, whose one wire runs `a → b`, after
+/// them at its position, and leaves `outer`, which also holds `a → c` to `c`
+/// outside the drag. A selected tie among the members is not added twice.
+#[test]
+fn a_drag_of_two_nodes_takes_the_tie_between_them() {
+    let mut fixture = DocumentFixture::default();
+    let [a, b, c] = [0.0, 220.0, 440.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
+    let ab = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let ac = fixture.wire(OutputPort::new(a, 0), InputPort::new(c, 0));
+    let inner = fixture.tie(Vec2::new(110.0, 30.0), [ab]);
+    fixture.tie(Vec2::new(200.0, 60.0), [ab, ac]);
+    let view = &fixture.document.main_view;
+    let start = |item, pos| DragStart { item, pos };
+    let nodes = vec![
+        start(ItemId::Node(a), Vec2::ZERO),
+        start(ItemId::Node(b), Vec2::new(220.0, 0.0)),
+    ];
+    let inner_start = start(ItemId::Tie(inner), Vec2::new(110.0, 30.0));
+    assert_eq!(
+        *group_drag::with_inner_ties(view, nodes.clone()),
+        [nodes[0], nodes[1], inner_start]
+    );
+    let with_selected_tie = vec![nodes[0], inner_start, nodes[1]];
+    assert_eq!(
+        *group_drag::with_inner_ties(view, with_selected_tie.clone()),
+        *with_selected_tie,
+        "a member already in the drag stays where it is, once"
+    );
 }

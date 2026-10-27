@@ -238,12 +238,21 @@ impl OpenDocument {
     }
 
     /// Land folded [`StepSignals`]. The one place each signal's *effect* is
-    /// spelled out, for both the commit path and undo/redo replay.
+    /// spelled out, for both the commit path and undo/redo replay, and so the
+    /// one place a debug build checks that the edits left the document
+    /// valid, as each step promises: a step that forgets part of what it
+    /// changes, as a wiring edit that keeps the route of the wire it ended,
+    /// fails at the edit rather than at the next save.
     ///
     /// Returns the one signal whose effect is a *call* rather than a stored
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
-    const fn land(&mut self, signals: &StepSignals) -> Relayout {
+    fn land(&mut self, signals: &StepSignals) -> Relayout {
+        debug_assert!(
+            self.document.validate().is_ok(),
+            "the edits left the document invalid: {:?}",
+            self.document.validate()
+        );
         // A content edit (or an undone/redone one) leaves the document differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state

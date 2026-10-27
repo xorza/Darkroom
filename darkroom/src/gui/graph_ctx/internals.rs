@@ -10,6 +10,7 @@ use std::sync::Arc;
 use scenarium::{Library, NodeId};
 
 use crate::core::document::internals::{self, DocumentFixture};
+use crate::core::document::item_id::ItemId;
 use crate::core::open_document::OpenDocument;
 use crate::core::wake;
 use crate::gui::frame::app_ctx::AppCtx;
@@ -59,7 +60,11 @@ impl GraphCtxFixture {
 
     /// Give the graph a committed selection.
     pub(crate) fn with_selection(mut self, selected: impl IntoIterator<Item = NodeId>) -> Self {
-        self.open.document.main_view.selected.extend(selected);
+        self.open
+            .document
+            .main_view
+            .selected
+            .extend(selected.into_iter().map(ItemId::Node));
         self
     }
 

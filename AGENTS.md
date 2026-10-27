@@ -26,7 +26,7 @@ Workspace members, each after the crates it uses:
   `imaginarium` and `lumos`.
 - **`darkroom`** — the editor, a thin `main.rs` over the `darkroom` library;
   editor work may need a matching Palantir change. `darkroom/AGENTS.md` holds
-  its decisions, the editor harness and the document file among them.
+  its decisions, the editor harness, the document file and wire ties among them.
 - **`darkroom-mcp`** (`mcp/`) — the editor harness as an MCP server over
   stdio, for an agent to open projects in, click through and look at.
 

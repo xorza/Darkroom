@@ -2,6 +2,7 @@ use glam::Vec2;
 use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
+use crate::core::document::wire_key::WireKey;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -10,6 +11,7 @@ use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
 use crate::gui::pane::graph_ui::draw::wire::{Wire, WireEnds, WirePass, WireTint};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget;
 use crate::gui::pane::graph_ui::node_ui::port_color;
 use crate::gui::widgets::gesture_slot::GestureSlot;
 use crate::gui::widgets::hover::Hover;
@@ -208,7 +210,7 @@ impl SubscriptionUi {
 /// Reads nothing but committed scene state off `pass`, so — like
 /// [`crate::gui::pane::graph_ui::gesture::wire_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUi`].
-pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
+pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_, '_>) {
     let (theme, graph_ctx, geometry) = (
         pass.draw_ctx.theme(),
         pass.draw_ctx.graph_ctx(),
@@ -221,17 +223,23 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         ) else {
             continue;
         };
+        let key = WireKey::Event(s);
         let hover = Hover::from(
-            geometry.events.is_hovered(s.event) || geometry.subs.is_hovered(s.subscriber),
+            geometry.events.is_hovered(s.event)
+                || geometry.subs.is_hovered(s.subscriber)
+                || pass.lit == Some(key)
+                || tie_widget::lights(ui, graph_ctx.view(), key),
         );
-        let wire = Wire::event(p0, p3);
+        let untied = [Wire::event(p0, p3)];
+        let pieces = pass.ties.pieces(key).unwrap_or(&untied);
         // Events carry no data type, so one neutral swatch runs the whole
         // curve rather than a per-end gradient.
         let ends = WireEnds {
+            wire: key,
             hover,
             tint: || WireTint::flat(port_color::event(theme)),
         };
-        if pass.draw_wire(ui, &wire, ends) {
+        if pass.draw_wire(ui, pieces, ends) {
             pass.probe.mark_broken_subscription(s);
         }
     }

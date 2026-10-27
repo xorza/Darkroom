@@ -14,6 +14,7 @@ use std::f32::consts::{FRAC_PI_4, PI};
 use palantir::prelude::*;
 use scenarium::{CacheMode, NodeId};
 
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::step::set_node_property::NodeProperty;
@@ -440,7 +441,7 @@ fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
         record.out.extend_graph(GraphIntent::click(
             mode,
             node.graph_ctx.selected(),
-            node.node_id,
+            ItemId::Node(node.node_id),
         ));
     }
     if let Some(to) = ev.committed {

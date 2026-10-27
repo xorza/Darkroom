@@ -67,21 +67,6 @@ pub(super) fn resolve(document: &mut Document, path: &Path) -> Result<(), Docume
     Ok(())
 }
 
-/// The relative paths of `document` that climb out of the folder they are relative to, as
-/// `../x.tiff` does: a copy of the folder alone would point them at other files. Sorted, each
-/// once, as the order of node ids is no order a reader follows.
-pub(super) fn leaving_folder(document: &Document) -> Vec<String> {
-    let mut leaving = Vec::new();
-    document.for_each_path(|_, value| {
-        if !absolute(value) && climbs_out(value) {
-            leaving.push(value.to_string());
-        }
-    });
-    leaving.sort_unstable();
-    leaving.dedup();
-    leaving
-}
-
 /// The folder a document at `path` lies in, absolute: a relative path is taken against the
 /// working directory, as opening it does.
 fn folder(path: &Path) -> PathBuf {
@@ -115,25 +100,48 @@ fn relative_to(value: &str, folder: &Path) -> Option<String> {
     })
 }
 
-/// Whether the relative `value`, read part by part, ever names a folder above its start.
-fn climbs_out(value: &str) -> bool {
-    let mut depth = 0_i32;
-    for part in Path::new(value).components() {
-        match part {
-            Component::ParentDir => depth -= 1,
-            Component::Normal(_) => depth += 1,
-            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
-        }
-        if depth < 0 {
-            return true;
-        }
-    }
-    false
-}
-
 /// Whether `map` changes any path of `document`.
 fn any_path<T>(document: &Document, mut map: impl FnMut(&str) -> Option<T>) -> bool {
     let mut any = false;
     document.for_each_path(|_, value| any |= map(value).is_some());
     any
+}
+
+#[cfg(feature = "internals")]
+pub(crate) mod internals {
+    use std::path::{Component, Path};
+
+    use crate::core::document::Document;
+    use crate::core::io::document::saved_paths::absolute;
+
+    /// The relative paths of `document` that climb out of the folder they are relative to, as
+    /// `../x.tiff` does: a copy of the folder alone would point them at other files. Sorted, each
+    /// once, as the order of node ids is no order a reader follows.
+    pub(crate) fn leaving_folder(document: &Document) -> Vec<String> {
+        let mut leaving = Vec::new();
+        document.for_each_path(|_, value| {
+            if !absolute(value) && climbs_out(value) {
+                leaving.push(value.to_string());
+            }
+        });
+        leaving.sort_unstable();
+        leaving.dedup();
+        leaving
+    }
+
+    /// Whether the relative `value`, read part by part, ever names a folder above its start.
+    fn climbs_out(value: &str) -> bool {
+        let mut depth = 0_i32;
+        for part in Path::new(value).components() {
+            match part {
+                Component::ParentDir => depth -= 1,
+                Component::Normal(_) => depth += 1,
+                Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+            }
+            if depth < 0 {
+                return true;
+            }
+        }
+        false
+    }
 }

@@ -106,7 +106,7 @@ fn luminance(c: RgbaF32) -> f32 {
             ((v + 0.055) / 1.055).powf(2.4)
         }
     };
-    let srgb = c.to_srgba_u8();
+    let srgb = c.to_srgba();
     0.2126 * channel(f32::from(srgb.r) / 255.0)
         + 0.7152 * channel(f32::from(srgb.g) / 255.0)
         + 0.0722 * channel(f32::from(srgb.b) / 255.0)

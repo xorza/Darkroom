@@ -1,10 +1,10 @@
-use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use glam::Vec2;
 use palantir::widget::Shape;
 use palantir::{Rect, Stroke, Ui};
 
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
@@ -14,9 +14,8 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; intersecting nodes highlight live as it moves and
-/// the set is committed on
-/// release. Holding Shift at drag-start *extends* the current selection
+/// sweeps a rectangle; the nodes it intersects and the ties whose centres it
+/// holds highlight live as it moves, and the set is committed on release. Holding Shift at drag-start *extends* the current selection
 /// instead of replacing it. Ctrl+LMB is the breaker and RMB opens the
 /// new-node menu / breaker, so this only claims unmodified left-drags
 /// that fall through to the bare canvas (node bodies hit-test first, so
@@ -34,7 +33,7 @@ pub(crate) struct SelectionUi {
     /// for the next frame, where a `BTreeSet` would drop its whole tree and
     /// rebuild it every frame of every drag.
     /// [`Self::preview`] is what says whether the contents mean anything.
-    swept: Vec<NodeId>,
+    swept: Vec<ItemId>,
     /// Whether the draw reads [`Self::swept`]. Empty when no band is in
     /// flight — draw falls back to the committed selection. A slot of
     /// its own, not the band's, because it deliberately outlives the band
@@ -59,7 +58,7 @@ struct RubberBand {
     /// Inside the band, not beside it: it is captured with the gesture
     /// and meaningless without one, and at struct level it outlived every
     /// commit as stale state.
-    base: BTreeSet<NodeId>,
+    base: BTreeSet<ItemId>,
 }
 
 impl RubberBand {
@@ -87,7 +86,7 @@ impl SelectionUi {
     /// The live swept set while a band is in flight, for node/pin draw to
     /// paint against; `None` when no band is active (the caller falls back to
     /// the committed selection).
-    pub(crate) fn preview(&self) -> Option<&[NodeId]> {
+    pub(crate) fn preview(&self) -> Option<&[ItemId]> {
         self.preview.get()?;
         Some(&self.swept)
     }
@@ -149,9 +148,18 @@ impl SelectionUi {
                 continue;
             };
             if rect.intersects(body) {
-                swept.push(n.node_id);
+                swept.push(ItemId::Node(n.node_id));
             }
         }
+        // A tie is swept when the band holds its centre.
+        swept.extend(
+            graph_ctx
+                .view()
+                .ties
+                .iter()
+                .filter(|(_, placed)| rect.contains(placed.pos))
+                .map(|(&tie, _)| ItemId::Tie(tie)),
+        );
         // The base arrives sorted (it came off a `BTreeSet`) but the sweep
         // appends in paint order and can re-add a node the base already held,
         // so both properties `Selection::Swept` promises are restored here.

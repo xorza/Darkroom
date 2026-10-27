@@ -51,7 +51,7 @@ impl CullRegion {
         self.keeps_rect(wire.hull())
     }
 
-    fn keeps_rect(self, rect: Rect) -> bool {
+    pub(crate) fn keeps_rect(self, rect: Rect) -> bool {
         self.visible.is_none_or(|visible| visible.intersects(rect))
     }
 }

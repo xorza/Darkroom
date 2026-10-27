@@ -35,6 +35,7 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::canvas_bg::CanvasBg;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph_ui::draw::inspectors::Inspectors;
+use crate::gui::pane::graph_ui::draw::tie::tie_layout::{Span, TieLayout};
 use crate::gui::pane::graph_ui::draw::wire::{WireEmphasis, WirePass, WireSet};
 use crate::gui::pane::graph_ui::draw_ctx::{DrawCtx, PaintFacts, Selection};
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
@@ -47,6 +48,9 @@ use crate::gui::pane::graph_ui::gesture::pan_zoom::camera_gesture::CameraGesture
 use crate::gui::pane::graph_ui::gesture::preview_drag::PreviewDrag;
 use crate::gui::pane::graph_ui::gesture::selection_ui::SelectionUi;
 use crate::gui::pane::graph_ui::gesture::subscription_ui::SubscriptionUi;
+use crate::gui::pane::graph_ui::gesture::tie_ui::TieUi;
+use crate::gui::pane::graph_ui::gesture::tie_ui::tie_menu_ui::TieMenuUi;
+use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget::{TiePass, TieWidgets};
 use crate::gui::pane::graph_ui::gesture::wire_ui::WireUi;
 use crate::gui::pane::graph_ui::gesture::{shortcuts, subscription_ui, wire_ui};
 use crate::gui::pane::graph_ui::node_ui::{NodeDrawOutcome, NodePass, NodeUi};
@@ -111,6 +115,9 @@ pub(crate) struct GraphUi {
     /// which is the only thing that pairs it with the gesture it was settled
     /// beside. Tests read it through `internals`' `GraphUi::geometry`.
     geometry: CanvasGeometry,
+    /// This frame's wire ties: each band and each tied wire's pieces, rebuilt
+    /// at the top of [`Self::record_canvas`] into the buffers it keeps.
+    ties: TieLayout,
     /// Open inspection panels, keyed by node. Outside the gesture group so
     /// they survive a tab switch — an open panel is a standing request about a
     /// node, not gesture state; panels only paint for nodes in the active
@@ -135,6 +142,9 @@ pub(crate) struct GraphUi {
     new_node_ui: NewNodeUi,
     node_menu: NodeMenuUi,
     selection_ui: SelectionUi,
+    tie_ui: TieUi,
+    tie_widgets: TieWidgets,
+    tie_menu: TieMenuUi,
     /// The camera's input in flight: a pan drag's latch, and the run of
     /// wheel or pinch input. Input bookkeeping, not viewport state.
     camera: CameraGesture,
@@ -178,12 +188,16 @@ impl GraphUi {
             new_node_ui,
             node_menu,
             selection_ui,
+            tie_ui,
+            tie_widgets,
+            tie_menu,
             camera,
             // Survivors: caches and panels that outlive the scene on purpose,
             // and the frame-local facts `prepass` rewrites before anything
             // reads them.
             bg: _,
             geometry: _,
+            ties: _,
             inspectors: _,
             last_prepass_frame: _,
             input: _,
@@ -196,6 +210,9 @@ impl GraphUi {
         new_node_ui.reset();
         node_menu.reset();
         selection_ui.reset();
+        tie_ui.reset();
+        tie_widgets.reset();
+        tie_menu.reset();
         camera.reset();
     }
 
@@ -214,9 +231,13 @@ impl GraphUi {
             new_node_ui,
             node_menu,
             selection_ui,
+            tie_ui,
+            tie_widgets,
+            tie_menu,
             camera,
             bg: _,
             geometry: _,
+            ties: _,
             inspectors: _,
             last_prepass_frame: _,
             input: _,
@@ -229,6 +250,9 @@ impl GraphUi {
             || new_node_ui.in_flight()
             || node_menu.in_flight()
             || selection_ui.in_flight()
+            || tie_ui.in_flight()
+            || tie_widgets.in_flight()
+            || tie_menu.in_flight()
             || camera.in_flight()
     }
 
@@ -303,6 +327,7 @@ impl GraphUi {
         let prepass = PrepassCtx::new(graph_ctx, self.input);
         self.camera.emit(ui, prepass, out);
         self.node_ui.prepass(ui, prepass, out);
+        self.tie_widgets.prepass(ui, prepass, out);
         // One walk, filling the geometry caches off the per-node and per-port
         // responses.
         self.geometry.rebuild(ui, graph_ctx);
@@ -401,6 +426,7 @@ impl GraphUi {
         // rebuild needed.
         self.selection_ui.apply(ui, ctx, out);
         self.breaker_ui.apply(ui, ctx, out);
+        self.tie_ui.apply(ui, ctx, out);
         // A wire released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
         // the wire controller holds the dropped wire's source.
@@ -419,6 +445,7 @@ impl GraphUi {
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
         self.node_menu.apply(ui, ctx, out);
+        self.tie_menu.apply(ui, ctx, &self.ties, out);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -426,6 +453,9 @@ impl GraphUi {
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        let geometry = &self.geometry;
+        self.ties
+            .rebuild(graph_ctx.view(), |wire| Span::of(geometry, wire));
         let ctx = CanvasCtx::new(PrepassCtx::new(graph_ctx, self.input), &self.geometry);
         let theme = ctx.theme();
         let viewport = graph_ctx.viewport();
@@ -442,6 +472,9 @@ impl GraphUi {
         // body clicks, both of which drive `Inspectors` — held shared below so
         // the panels can paint, and taken `&mut` once the draw is over.
         let mut outcome = NodeDrawOutcome::default();
+        // The tie a right-click landed on, whose menu opens once the draw is
+        // over, as a node's does.
+        let mut tie_menu_opened = None;
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -510,12 +543,15 @@ impl GraphUi {
                         );
                         {
                             let mut probe = self.breaker_ui.probe();
+                            let mut tie_line = self.tie_ui.probe();
                             // One emphasis resolution for both wire families:
-                            // any wire gesture — either drag controller or an
-                            // active breaker scribble — fades the standing set.
+                            // any wire gesture — either drag controller, an
+                            // active breaker scribble or a tie line — fades
+                            // the standing set.
                             let set = if self.wire_ui.is_dragging()
                                 || self.subscription_ui.in_flight()
                                 || probe.is_active()
+                                || tie_line.is_active()
                             {
                                 WireSet::Faded
                             } else {
@@ -532,10 +568,25 @@ impl GraphUi {
                             let mut wires = WirePass {
                                 draw_ctx,
                                 probe: &mut probe,
+                                tie_line: &mut tie_line,
+                                lit: self.tie_menu.lit(),
                                 emphasis: &emphasis,
+                                ties: &self.ties,
                             };
                             wire_ui::draw(ui, &mut wires);
                             subscription_ui::draw(ui, &mut wires);
+                            // Over the wires they gather, under the node
+                            // bodies, which cover a band as they cover wires
+                            // and win a press over it.
+                            tie_menu_opened = self.tie_widgets.record(
+                                ui,
+                                &mut TiePass {
+                                    draw_ctx,
+                                    ties: &self.ties,
+                                    line: &mut tie_line,
+                                    out,
+                                },
+                            );
                             // Node bodies paint back-to-front by each
                             // placement's depth (`GraphView::paint_order`), so
                             // a clicked node raises above its neighbours.
@@ -554,6 +605,7 @@ impl GraphUi {
                         // the inner-canvas transform.
                         self.inspectors.draw_panels(ui, draw_ctx);
                         self.breaker_ui.draw(ui, theme);
+                        self.tie_ui.draw(ui, theme);
                         self.wire_ui.draw_in_flight(ui, ctx, canvas_origin);
                         self.subscription_ui.draw_in_flight(ui, ctx, canvas_origin);
                     });
@@ -564,6 +616,8 @@ impl GraphUi {
         self.inspectors.apply(ui, &outcome);
         if let Some(node) = outcome.menu_opened {
             out.extend_graph(self.node_menu.open_on(ui, graph_ctx, node));
+        } else if let Some(tie) = tie_menu_opened {
+            out.extend_graph(self.tie_menu.open_on(ui, graph_ctx, tie));
         }
     }
 }

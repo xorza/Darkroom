@@ -54,10 +54,6 @@ pub(crate) fn emit(ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         ));
     }
     if delete {
-        out.extend_graph(
-            view.selected
-                .iter()
-                .map(|&node_id| GraphIntent::RemoveNode { node_id }),
-        );
+        out.extend_graph(GraphIntent::remove_selection(view));
     }
 }

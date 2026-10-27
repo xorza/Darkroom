@@ -43,6 +43,14 @@ impl GraphUi {
 /// that [`DocumentFixture`]'s row of nodes lands on screen uncropped.
 const SURFACE: UVec2 = UVec2::new(1200, 800);
 
+/// How far down from the anchor [`menu_rows`] sweeps, how far in from its
+/// left edge, and how fine its step. The sweep has to clear the whole menu,
+/// and the step has to be finer than its thinnest band (a separator) or a row
+/// would read as two.
+const PROBE_DEPTH: f32 = 320.0;
+const PROBE_INSET: f32 = 20.0;
+const PROBE_STEP: f32 = 2.0;
+
 #[derive(Debug)]
 pub(crate) struct CanvasHarness {
     /// The palantir side. `pub(crate)` so tests drive input and read geometry
@@ -168,6 +176,39 @@ impl CanvasHarness {
     /// The `i`th node in placement order.
     pub(crate) fn node(&self, i: usize) -> NodeId {
         self.ctx.node(i)
+    }
+
+    /// The clickable rows of the canvas menu open at `anchor`, top to bottom.
+    ///
+    /// [`MenuItem`](palantir::MenuItem) takes no caller-supplied id, so a test
+    /// finds the rows the way a pointer does: sweep a vertical line down the open
+    /// popup and keep every widget it lands on. The popup's own panel shows
+    /// through the padding above the first row, the gaps between rows, and every
+    /// separator, so it is the one widget the sweep meets repeatedly — and its
+    /// first and last sightings bracket exactly the rows.
+    pub(crate) fn menu_rows(&self, anchor: Vec2) -> Vec<WidgetId> {
+        let mut runs: Vec<WidgetId> = Vec::new();
+        let mut y = anchor.y;
+        while y < anchor.y + PROBE_DEPTH {
+            if let Some(id) = self.ui.hit_at(Vec2::new(anchor.x + PROBE_INSET, y))
+                && runs.last() != Some(&id)
+            {
+                runs.push(id);
+            }
+            y += PROBE_STEP;
+        }
+        let sightings = |id: &WidgetId| runs.iter().filter(|other| *other == id).count();
+        let panel = *runs
+            .iter()
+            .max_by_key(|id| sightings(id))
+            .expect("the sweep crossed the open menu");
+        let first = runs.iter().position(|id| *id == panel).unwrap();
+        let last = runs.iter().rposition(|id| *id == panel).unwrap();
+        runs[first..last]
+            .iter()
+            .copied()
+            .filter(|id| *id != panel)
+            .collect()
     }
 
     /// Where `node_id`'s body last painted — post-transform, so it is the rect

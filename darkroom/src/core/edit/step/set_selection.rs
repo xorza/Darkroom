@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use scenarium::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
@@ -14,7 +14,7 @@ use crate::core::edit::step::reversible::Reversible;
 /// wants and the step carries the one it replaced.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetSelection {
-    pub(crate) selection: Change<BTreeSet<NodeId>>,
+    pub(crate) selection: Change<BTreeSet<ItemId>>,
 }
 
 impl Reversible for SetSelection {

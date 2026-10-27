@@ -44,7 +44,7 @@ fn decode(png: &[u8]) -> image::RgbaImage {
 }
 
 fn srgb(color: palantir::RgbaF32) -> [u8; 4] {
-    let bytes = color.to_srgba_u8();
+    let bytes = color.to_srgba();
     [bytes.r, bytes.g, bytes.b, bytes.a]
 }
 
@@ -102,7 +102,7 @@ fn clicks_drags_and_keys_edit_the_document() {
             .open_document()
             .document
             .main_view
-            .item_placements[&id]
+            .node_placements[&id]
             .pos
     };
     let before = placed(&harness);
@@ -155,7 +155,7 @@ fn a_world_point_lands_on_the_canvas_where_nodes_are_placed() {
         .open_document()
         .document
         .main_view
-        .item_placements[&id]
+        .node_placements[&id]
         .pos;
     let world = Locator::World(pos)
         .point(&harness.app, harness.display.ui())
@@ -435,7 +435,7 @@ fn a_shot_is_the_frame_with_a_legend_of_what_it_shows() {
         .open_document()
         .document
         .main_view
-        .item_placements[&id]
+        .node_placements[&id]
         .pos;
     let world = harness
         .shot(

@@ -10,6 +10,9 @@ use scenarium::{
 };
 use thiserror::Error;
 
+use crate::core::document::tie::TieId;
+use crate::core::document::wire_key::WireKey;
+
 /// A payload no widget could legitimately have raised: a nil or colliding
 /// identity, a non-finite position, a link to state the document doesn't hold.
 ///
@@ -79,6 +82,29 @@ pub(crate) enum MalformedIntent {
     /// Same corruption path as [`Self::NonFinitePos`], one level up.
     #[error("viewport needs finite pan and positive finite zoom")]
     InvalidViewport,
+    /// A new tie under an id the view already holds.
+    #[error("tie {tie:?} already exists in the view")]
+    TieAlreadyExists { tie: TieId },
+    /// A new tie that holds no wire, which no view may hold.
+    #[error("new tie {tie:?} holds no wire")]
+    EmptyTie { tie: TieId },
+    /// A tie line reads the wires it crosses out of the live document, so a
+    /// wire the graph does not hold is no wire it crossed.
+    #[error("wire {wire:?} is not in the graph")]
+    WireAbsent { wire: WireKey },
+    /// A crossed piece past the wire's last one.
+    #[error("piece {at} of wire {wire:?} is past its route of {len} tie(s)")]
+    RouteIndexOutOfRange {
+        wire: WireKey,
+        at: usize,
+        len: usize,
+    },
+    /// A tie a wire already runs through: a route names a tie once.
+    #[error("wire {wire:?} already runs through tie {tie:?}")]
+    TieAlreadyOnRoute { wire: WireKey, tie: TieId },
+    /// A pinned angle outside `[0, 360)`, which the view refuses.
+    #[error("pinned angle {degrees} of tie {tie:?} is not in [0, 360)")]
+    InvalidTieAngle { tie: TieId, degrees: f32 },
 }
 
 /// Which identity or position of an intent a check was holding to — what a
@@ -98,6 +124,7 @@ pub(crate) enum Role {
     SetNodeProperty,
     SetSubscriptionEmitter,
     SetSubscriptionSubscriber,
+    TieWires,
 }
 
 impl Display for Role {
@@ -114,6 +141,7 @@ impl Display for Role {
             Self::SetNodeProperty => "SetNodeProperty",
             Self::SetSubscriptionEmitter => "SetSubscription emitter",
             Self::SetSubscriptionSubscriber => "SetSubscription subscriber",
+            Self::TieWires => "TieWires",
         })
     }
 }

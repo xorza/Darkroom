@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
-use glam::{UVec2, Vec2};
+use glam::UVec2;
 use palantir::WidgetId;
 use scenarium::{Binding, InputPort, NodeId};
 
 use crate::core::document::internals::DocumentFixture;
+use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
@@ -12,47 +13,6 @@ use crate::gui::pane::graph_ui::internals::CanvasHarness;
 
 /// Room for three nodes in a row *and* the opened menu below them.
 const SURFACE: UVec2 = UVec2::new(1600, 900);
-
-/// How far down from the anchor [`menu_rows`] sweeps, how far in from its
-/// left edge, and how fine its step. The sweep has to clear the whole menu,
-/// and the step has to be finer than its thinnest band (a separator) or a row
-/// would read as two.
-const PROBE_DEPTH: f32 = 320.0;
-const PROBE_INSET: f32 = 20.0;
-const PROBE_STEP: f32 = 2.0;
-
-/// The open node menu's clickable rows, top to bottom.
-///
-/// [`MenuItem`](palantir::MenuItem) takes no caller-supplied id, so a test
-/// finds the rows the way a pointer does: sweep a vertical line down the open
-/// popup and keep every widget it lands on. The popup's own panel shows
-/// through the padding above the first row, the gaps between rows, and every
-/// separator, so it is the one widget the sweep meets repeatedly — and its
-/// first and last sightings bracket exactly the rows.
-fn menu_rows(h: &CanvasHarness, anchor: Vec2) -> Vec<WidgetId> {
-    let mut runs: Vec<WidgetId> = Vec::new();
-    let mut y = anchor.y;
-    while y < anchor.y + PROBE_DEPTH {
-        if let Some(id) = h.ui.hit_at(Vec2::new(anchor.x + PROBE_INSET, y))
-            && runs.last() != Some(&id)
-        {
-            runs.push(id);
-        }
-        y += PROBE_STEP;
-    }
-    let sightings = |id: &WidgetId| runs.iter().filter(|other| *other == id).count();
-    let panel = *runs
-        .iter()
-        .max_by_key(|id| sightings(id))
-        .expect("the sweep crossed the open menu");
-    let first = runs.iter().position(|id| *id == panel).unwrap();
-    let last = runs.iter().rposition(|id| *id == panel).unwrap();
-    runs[first..last]
-        .iter()
-        .copied()
-        .filter(|id| *id != panel)
-        .collect()
-}
 
 /// Every row the menu offers over a runnable node, in layout order.
 const RUN: usize = 0;
@@ -85,7 +45,7 @@ fn open_menu(h: &mut CanvasHarness, on: NodeId) -> Vec<WidgetId> {
     let anchor = h.node_center(on);
     h.ui.right_click_at(anchor);
     h.prime(2);
-    menu_rows(h, anchor)
+    h.menu_rows(anchor)
 }
 
 /// A stub neither runs nor copies, so its menu offers only Remove — which
@@ -95,7 +55,7 @@ fn a_stubs_menu_offers_only_remove() {
     let mut fixture = DocumentFixture::probes(1);
     let stub = fixture.add_stub(DocumentFixture::stub_node());
     let mut h = CanvasHarness::shaping_text(fixture, SURFACE);
-    h.document_mut().main_view.selected = [stub].into_iter().collect();
+    h.document_mut().main_view.selected = [stub].map(ItemId::Node).into_iter().collect();
 
     let rows = open_menu(&mut h, stub);
     assert_eq!(rows.len(), 1, "Remove is the one row");
@@ -129,7 +89,7 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     assert!(
         matches!(
             intents[..],
-            [GraphIntent::SetSelection { ref to }] if to.len() == 1 && to.contains(&func),
+            [GraphIntent::SetSelection { ref to }] if to.len() == 1 && to.contains(&ItemId::Node(func)),
         ),
         "the right-click selects exactly the node it opened on: {intents:?}"
     );
@@ -143,7 +103,7 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
 fn remove_pick_removes_every_selected_node() {
     let mut h = CanvasHarness::shaping_text(DocumentFixture::probes(3), SURFACE);
     let (a, b) = (h.node(0), h.node(1));
-    h.document_mut().main_view.selected = [a, b].into_iter().collect();
+    h.document_mut().main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
     let intents = pick(&mut h, a, REMOVE);
     let removed: BTreeSet<NodeId> = intents
@@ -183,7 +143,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
         h.document_mut()
             .graph
             .set_input_binding(InputPort::new(b, 0), Binding::wire(c, 0));
-        h.document_mut().main_view.selected = [a, b].into_iter().collect();
+        h.document_mut().main_view.selected = [a, b].map(ItemId::Node).into_iter().collect();
 
         // Duplicating expands into ordinary intents: one add per clone, the
         // surviving wiring seeded onto the clone that consumes it, then the
@@ -238,7 +198,7 @@ fn run_pick_names_the_opened_node_and_edits_nothing() {
     let (a, b) = (h.node(0), h.node(1));
     // A different node selected, so "the node the menu opened on" and "the
     // selection" name different things and the assertion can tell them apart.
-    h.document_mut().main_view.selected = [b].into_iter().collect();
+    h.document_mut().main_view.selected = [b].map(ItemId::Node).into_iter().collect();
 
     let intents = pick(&mut h, a, RUN);
     assert!(
