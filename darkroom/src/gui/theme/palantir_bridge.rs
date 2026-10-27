@@ -99,8 +99,8 @@ const fn menu(theme: &mut palantir::Theme, p: &palantir::Palette, space: &SpaceS
     menu.panel.shadow.blur = space.lg;
 }
 
-/// A menu's width floor: room for "Save As Compressed…" and a gutter, so the File, Edit and
-/// Graph menus open one width and a short menu does not read as a pill.
+/// A menu's width floor: room for "Save As…" and its Ctrl+Shift+S hint a gutter apart, so the
+/// File, Edit and Graph menus open one width and a short menu does not read as a pill.
 const MENU_MIN_WIDTH: f32 = 240.0;
 
 /// The inset of a row a pointer picks from: a menu item, a menu-bar title and a tab are one row,

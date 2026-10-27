@@ -1,4 +1,5 @@
-//! Darkroom documents: one `.darkroom` file, the document's RON text as it is or zipped.
+//! Darkroom documents: one project file, the document's RON text as it is in a `.darkroom` file or
+//! zipped in a `.darkroomz` one.
 
 pub(crate) mod document_format;
 pub(crate) mod error;
@@ -14,29 +15,20 @@ use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError, DocumentWriteError};
 use crate::core::io::document::saved_paths::SavedPaths;
 
-pub(crate) const EXTENSION: &str = "darkroom";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
-
-/// A document as its file held it.
-#[derive(Debug)]
-pub(crate) struct DocumentFile {
-    pub(crate) document: Document,
-    /// The form the file had, which a save of the document keeps.
-    pub(crate) format: DocumentFormat,
-}
 
 /// Decode the document at `path`, in either format, each path it holds made absolute against its
 /// folder. What it holds is made consistent by [`Document::reconcile`], which the caller runs
 /// against its library.
-pub(crate) fn load(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
-    let mut file = decode(path)?;
-    saved_paths::resolve(&mut file.document, path)?;
-    Ok(file)
+pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
+    let mut document = decode(path)?;
+    saved_paths::resolve(&mut document, path)?;
+    Ok(document)
 }
 
-/// The document at `path` as its file holds it.
-fn decode(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
-    if !has_extension(path) {
+/// The document at `path` as its file holds it, in the format its bytes show.
+fn decode(path: &Path) -> Result<Document, DocumentLoadError> {
+    if DocumentFormat::of_path(path).is_none() {
         return Err(DocumentLoadError::InvalidExtension {
             path: path.to_path_buf(),
         });
@@ -60,30 +52,26 @@ fn decode(path: &Path) -> Result<DocumentFile, DocumentLoadError> {
             size: bytes.len() as u64,
         });
     }
-    let format = DocumentFormat::of(&bytes);
-    let ron = format.ron(&bytes, path)?;
-    let document =
-        SerdeFormat::Ron
-            .deserialize(&ron)
-            .map_err(|source| DocumentLoadError::Deserialize {
-                path: path.to_path_buf(),
-                source: Box::new(source),
-            })?;
-    Ok(DocumentFile { document, format })
+    let ron = DocumentFormat::of(&bytes).ron(&bytes, path)?;
+    SerdeFormat::Ron
+        .deserialize(&ron)
+        .map_err(|source| DocumentLoadError::Deserialize {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
 }
 
-/// Write `document` to `path` in `format`, its paths as `paths` says.
+/// Write `document` to `path` in the format its extension names, its paths as `paths` says.
 pub(crate) fn save(
     document: &Document,
     path: &Path,
     paths: SavedPaths,
-    format: DocumentFormat,
 ) -> Result<(), DocumentSaveError> {
-    if !has_extension(path) {
+    let Some(format) = DocumentFormat::of_path(path) else {
         return Err(DocumentSaveError::InvalidExtension {
             path: path.to_path_buf(),
         });
-    }
+    };
     debug_assert!(
         document.validate().is_ok(),
         "a saved document is consistent: {:?}",
@@ -115,12 +103,6 @@ pub(crate) fn save(
     })
 }
 
-fn has_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
-}
-
 /// Whether a `size`-byte document is within the limit — the one predicate a load and a save
 /// both hold a document to.
 const fn fits(size: u64) -> bool {
@@ -129,7 +111,7 @@ const fn fits(size: u64) -> bool {
 
 /// The relative paths the document at `path` holds that climb out of its folder.
 pub(crate) fn paths_leaving_folder(path: &Path) -> Result<Vec<String>, DocumentLoadError> {
-    Ok(saved_paths::leaving_folder(&decode(path)?.document))
+    Ok(saved_paths::leaving_folder(&decode(path)?))
 }
 
 #[cfg(test)]

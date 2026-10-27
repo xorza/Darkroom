@@ -3,23 +3,31 @@
   The shared-mime-info package for darkroom projects. Installed by
   `install.sh` as <data dir>/mime/packages/darkroom.xml.
 
-  A project is a zip. `sub-class-of` keeps archive handlers working and makes
-  the glob outrank the container's own `application/zip` sniff, so a named
-  file needs nothing else. The magic — `document.json` at offset 30, past the
-  signature and local file header — covers only the extensionless case, and
-  flatpak strips magic rules on export, leaving a flatpak install glob-only.
+  A `.darkroom` project is the document's RON text, so `sub-class-of
+  text/plain` keeps a text editor among its handlers. A `.darkroomz` project
+  is that text zipped: `sub-class-of application/zip` keeps archive handlers
+  working and makes the glob outrank the container's own `application/zip`
+  sniff, so a named file needs nothing else. Its magic — `document.ron` at
+  offset 30, past the signature and local file header — covers only the
+  extensionless case, and flatpak strips magic rules on export, leaving a
+  flatpak install glob-only.
 
   No `<icon>` element needed; the default lookup is the type with `/` as `-`.
-  `flatpak.sh` splices one in, anchored on the `sub-class-of` line below.
+  `flatpak.sh` splices one in, anchored on each `sub-class-of` line below.
 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-darkroom">
     <comment>Darkroom project</comment>
-    <sub-class-of type="application/zip"/>
+    <sub-class-of type="text/plain"/>
     <glob pattern="*.darkroom"/>
+  </mime-type>
+  <mime-type type="application/x-darkroom-compressed">
+    <comment>Compressed Darkroom project</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.darkroomz"/>
     <magic priority="60">
       <match type="string" value="PK\003\004" offset="0">
-        <match type="string" value="document.json" offset="30"/>
+        <match type="string" value="document.ron" offset="30"/>
       </match>
     </magic>
   </mime-type>

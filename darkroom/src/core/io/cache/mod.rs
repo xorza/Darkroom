@@ -9,18 +9,21 @@ use std::path::{Path, PathBuf};
 
 use common::fs;
 
-use crate::core::io::document::EXTENSION;
+use crate::core::io::document::document_format::DocumentFormat;
 
-/// The cache directory for a document: `<stem>.<EXTENSION>-cache/` beside the
-/// document file (e.g. `proj/scene.darkroom` → `proj/scene.darkroom-cache/`).
+/// The cache directory for a document: `<stem>.<extension>-cache/` beside the
+/// document file, the extension in its lower case (e.g. `proj/scene.darkroom` →
+/// `proj/scene.darkroom-cache/`, `proj/scene.darkroomz` → `proj/scene.darkroomz-cache/`).
 /// Per-document-named so two projects in one folder keep separate stores.
 /// Save-As / moving the project does *not* carry the cache along — each
 /// location keeps its own store, which refills lazily as nodes recompute.
 pub(crate) fn root(document_path: &Path) -> PathBuf {
+    let format = DocumentFormat::of_path(document_path)
+        .expect("a document's path carries a project extension");
     let stem = document_path.file_stem().unwrap_or_default();
     let mut name = stem.to_os_string();
     name.push(".");
-    name.push(EXTENSION);
+    name.push(format.extension());
     name.push("-cache");
     document_path.with_file_name(name)
 }

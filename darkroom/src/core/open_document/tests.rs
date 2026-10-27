@@ -15,7 +15,6 @@ use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::io::document;
-use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::open_document::{Launched, Loaded, OpenDocument};
@@ -53,13 +52,7 @@ fn empty_document_has_the_main_graph_tab() {
 fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     let dir = TempDir::new("darkroom-open-document");
     let path = dir.join("preferred.darkroom");
-    document::save(
-        &Document::default(),
-        &path,
-        SavedPaths::Relative,
-        DocumentFormat::Ron,
-    )
-    .unwrap();
+    document::save(&Document::default(), &path, SavedPaths::Relative).unwrap();
     let mut status = StatusLog::default();
     let launch = |remembered: Option<&Path>, status: &mut StatusLog| {
         let Launched {
@@ -82,7 +75,7 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     );
     assert_eq!(
         status.lines().collect::<Vec<_>>(),
-        ["load failed: invalid.json must use the .darkroom extension"]
+        ["load failed: invalid.json must use the .darkroom or .darkroomz extension"]
     );
 }
 
@@ -94,13 +87,7 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
 fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     let dir = TempDir::new("darkroom-open-document-argument");
     let named = dir.join("named.darkroom");
-    document::save(
-        &Document::default(),
-        &named,
-        SavedPaths::Relative,
-        DocumentFormat::Ron,
-    )
-    .unwrap();
+    document::save(&Document::default(), &named, SavedPaths::Relative).unwrap();
     // An unloadable remembered file: a named document wins over it untried.
     let remembered = Path::new("remembered.darkroom");
     let mut status = StatusLog::default();
@@ -213,13 +200,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     let into_dst = InputPort::new(dst_id, 0);
     graph.set_input_binding(into_mid, Binding::wire(src_id, 0));
     graph.set_input_binding(into_dst, Binding::wire(mid_id, 0));
-    document::save(
-        &Document::from(graph),
-        &first,
-        SavedPaths::Relative,
-        DocumentFormat::Ron,
-    )
-    .unwrap();
+    document::save(&Document::from(graph), &first, SavedPaths::Relative).unwrap();
 
     let same = OpenDocument::load(first.clone(), &library).unwrap();
     assert!(same.report.is_empty());
@@ -259,10 +240,7 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
         .document
         .graph
         .set_input_binding(into_dst, Binding::wire(src_id, 0));
-    loaded
-        .open
-        .save_to(&stubbed, SavedPaths::Relative, DocumentFormat::Ron)
-        .unwrap();
+    loaded.open.save_to(&stubbed, SavedPaths::Relative).unwrap();
 
     let reattached = OpenDocument::load(stubbed, &library).unwrap();
     assert_eq!(
@@ -523,13 +501,7 @@ fn wiring_the_library_refuses_is_removed_at_load() {
         graph.insert(producer, Node::from(&probe));
         graph.insert(consumer, Node::from(&probe));
         wire(&mut graph);
-        document::save(
-            &Document::from(graph),
-            &path,
-            SavedPaths::Relative,
-            DocumentFormat::Ron,
-        )
-        .unwrap();
+        document::save(&Document::from(graph), &path, SavedPaths::Relative).unwrap();
         OpenDocument::load(path.clone(), &library).unwrap()
     };
 
@@ -594,7 +566,6 @@ fn the_sample_project_opens_clean() {
     let library = RuntimeLibrary::new(&MlModelPaths::default());
     let Loaded { open, report } = OpenDocument::load(sample.clone(), library.cur()).unwrap();
     assert!(report.is_empty(), "{report:?}");
-    assert_eq!(open.format, DocumentFormat::Ron);
     let mut paths = Vec::new();
     open.document
         .for_each_path(|_, path| paths.push(PathBuf::from(path)));

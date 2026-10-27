@@ -9,7 +9,6 @@ use tracing::{callsite, subscriber};
 use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
-use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::driver::action::{Action, Chord, DRAG_STEPS};
 use crate::driver::error::{ActFailure, DriverError};
@@ -444,7 +443,7 @@ fn a_folder_a_copy_would_break_is_refused() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-break");
     let path = fixture::project(dir.path(), &["Load Image"]);
-    let mut document = io_document::load(&path).unwrap().document;
+    let mut document = io_document::load(&path).unwrap();
     let node_id = document.graph.iter().next().unwrap().node_id;
     document.graph.bindings.insert(
         InputPort::new(node_id, 0),
@@ -660,24 +659,25 @@ fn the_view_menu_copies_and_saves_the_window() {
     assert_eq!(saved, decode(&shot.png));
 }
 
-/// A save keeps the format the file was opened in, Save As writes plain RON, and Save As
-/// Compressed… writes it zipped: a zipped project saves zipped, Ctrl+Shift+S makes a plain copy,
-/// and the menu row makes a zipped one again.
+/// The extension names the format: a `.darkroomz` project saves zipped, and Save As to a bare
+/// name keeps the open project's format, so a copy of it is zipped too. A `.darkroom` name, the
+/// dialog's plain file type, writes plain RON, and a bare name from the menu's Save As… then
+/// keeps that.
 #[test]
-fn a_save_keeps_the_file_format_and_save_as_names_one() {
+fn a_save_writes_the_format_its_extension_names() {
     let mut driver = driver();
     let dir = TempDir::new("darkroom-driver-format");
-    let path = fixture::project(dir.path(), &[BRIGHTNESS]);
-    let file = io_document::load(&path).unwrap();
+    let fixture = fixture::project(dir.path(), &[BRIGHTNESS]);
+    let path = dir.join("scene.darkroomz");
     io_document::save(
-        &file.document,
+        &io_document::load(&fixture).unwrap(),
         &path,
         SavedPaths::Relative,
-        DocumentFormat::ZippedRon,
     )
     .unwrap();
     driver.open(&path, OpenMode::InPlace).unwrap();
     let zipped = |path: &Path| fs::read(path).unwrap().starts_with(b"PK");
+    assert!(zipped(&path), "premise: the project is zipped");
 
     driver
         .act(&[
@@ -690,27 +690,38 @@ fn a_save_keeps_the_file_format_and_save_as_names_one() {
         .unwrap();
     assert!(zipped(&path), "the save kept the zipped format");
 
+    let save_as = |driver: &mut Driver, name: &str| {
+        driver
+            .act(&[
+                Action::Answer(DialogAnswer::Path(dir.join(name))),
+                key("ctrl+shift+s"),
+            ])
+            .unwrap();
+    };
+    save_as(&mut driver, "copy");
+    assert!(
+        zipped(&dir.join("copy.darkroomz")),
+        "a bare name keeps the open project's format"
+    );
+    save_as(&mut driver, "plain.darkroom");
     let plain = dir.join("plain.darkroom");
-    driver
-        .act(&[
-            Action::Answer(DialogAnswer::Path(plain.clone())),
-            key("ctrl+shift+s"),
-        ])
-        .unwrap();
-    assert!(!zipped(&plain), "Save As writes plain RON");
+    assert!(!zipped(&plain), "the plain file type writes plain RON");
 
-    let again = dir.join("again.darkroom");
     driver
         .act(&[
-            Action::Answer(DialogAnswer::Path(again.clone())),
+            Action::Answer(DialogAnswer::Path(dir.join("again"))),
             click(Locator::Text("File".to_string())),
-            click(Locator::Text("Save As Compressed…".to_string())),
+            click(Locator::Text("Save As… Ctrl+Shift+S".to_string())),
         ])
         .unwrap();
-    assert!(zipped(&again), "Save As Compressed writes it zipped");
+    let again = dir.join("again.darkroom");
+    assert!(
+        !zipped(&again),
+        "and a bare name then keeps the plain format"
+    );
     assert_eq!(
-        io_document::load(&again).unwrap().document,
-        io_document::load(&plain).unwrap().document
+        io_document::load(&again).unwrap(),
+        io_document::load(&dir.join("copy.darkroomz")).unwrap()
     );
 }
 

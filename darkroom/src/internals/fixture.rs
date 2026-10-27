@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use lens::MlModelPaths;
 
 use crate::core::document::internals::DocumentFixture;
-use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::open_document::OpenDocument;
 use crate::core::runtime_library::RuntimeLibrary;
@@ -30,7 +29,7 @@ pub fn project(dir: &Path, funcs: &[&str]) -> PathBuf {
     }
     let path = dir.join("scene.darkroom");
     OpenDocument::over(fixture.document)
-        .save_to(&path, SavedPaths::Relative, DocumentFormat::Ron)
+        .save_to(&path, SavedPaths::Relative)
         .expect("a fixture project saves");
     path
 }

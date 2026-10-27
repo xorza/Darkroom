@@ -17,7 +17,8 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<!-- Version keys are absent by design: install.sh and bundle.sh stamp them
-	     from `darkroom --version`, so no copy lives here to drift. -->
+	     from what the binary reports as its version, so no copy lives here to
+	     drift. (Not the flag itself: XML refuses a double hyphen in a comment.) -->
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
 	<key>LSMinimumSystemVersion</key>
@@ -25,9 +26,10 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 
-	<!-- What the type *is*. Exported because darkroom owns the format; the zip
-	     conformance is what the file actually is, so archive tools keep
-	     working while this more specific type wins for us. -->
+	<!-- What the types *are*. Exported because darkroom owns the formats; the
+	     conformance is what each file actually is, plain text or a zip, so text
+	     editors and archive tools keep working while the more specific type wins
+	     for us. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -35,6 +37,25 @@
 			<string>com.cssodessa.darkroom.project</string>
 			<key>UTTypeDescription</key>
 			<string>Darkroom Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+			<key>UTTypeIconFile</key>
+			<string>darkroom.icns</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>darkroom</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.cssodessa.darkroom.compressed-project</string>
+			<key>UTTypeDescription</key>
+			<string>Compressed Darkroom Project</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>com.pkware.zip-archive</string>
@@ -45,7 +66,7 @@
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>darkroom</string>
+					<string>darkroomz</string>
 				</array>
 			</dict>
 		</dict>
@@ -65,6 +86,7 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.cssodessa.darkroom.project</string>
+				<string>com.cssodessa.darkroom.compressed-project</string>
 			</array>
 			<key>CFBundleTypeIconFile</key>
 			<string>darkroom.icns</string>

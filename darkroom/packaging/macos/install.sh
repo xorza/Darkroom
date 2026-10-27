@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Assemble Darkroom.app around the built binary and register the `.darkroom`
-# association. Run after `cargo build --release`; the bundle's executable is a
+# and `.darkroomz` associations. Run after `cargo build --release`; the bundle's executable is a
 # symlink onto the build output, so no binary is installed. Re-runnable.
 #
 # All users:  sudo APP_DIR=/Applications darkroom/packaging/macos/install.sh
@@ -8,9 +8,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# APP_ID and UTI must match Info.plist — nothing else ties the two together.
+# APP_ID and UTIS must match Info.plist — nothing else ties the two together.
 APP_ID=com.cssodessa.darkroom
-UTI=com.cssodessa.darkroom.project
+UTIS=(com.cssodessa.darkroom.project com.cssodessa.darkroom.compressed-project)
 APP="${APP_DIR:-$HOME/Applications}/Darkroom.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
@@ -28,7 +28,7 @@ if [ -z "$BIN" ]; then
   done
 fi
 # Fatal, where the Linux script only warns: a bundle with a missing executable
-# still claims the type, making every `.darkroom` file unopenable.
+# still claims the types, making every project file unopenable.
 if [ -z "$BIN" ]; then
   echo "error: no darkroom binary on PATH or in target/; run cargo build --release" >&2
   exit 1
@@ -62,19 +62,27 @@ fi
 # nothing. `duti` only matters once something else claims the type; without it
 # Info.plist's `LSHandlerRank: Owner` settles it.
 "$LSREGISTER" -f -lint "$APP"
-command -v duti >/dev/null && duti -s "$APP_ID" "$UTI" all 2>/dev/null || true
+if command -v duti >/dev/null; then
+  for uti in "${UTIS[@]}"; do
+    duti -s "$APP_ID" "$uti" all 2>/dev/null || true
+  done
+fi
 
 # Read the database back, so an unregistrable bundle cannot look installed.
 dump=$("$LSREGISTER" -dump 2>/dev/null || true)
 if ! grep -Fq "$APP" <<<"$dump"; then
   echo "warning: $APP never reached the database — is $BIN reachable?" >&2
-elif ! grep -Fq "$UTI" <<<"$dump"; then
-  echo "warning: nothing claims $UTI — check UTExportedTypeDeclarations" >&2
 else
-  echo "done: .darkroom -> $APP"
+  for uti in "${UTIS[@]}"; do
+    if grep -Fq "$uti" <<<"$dump"; then
+      echo "done: $uti -> $APP"
+    else
+      echo "warning: nothing claims $uti — check UTExportedTypeDeclarations" >&2
+    fi
+  done
 fi
 
 # Without this the first double-click reads as the install having failed.
-echo "note: Finder routes .darkroom here, but the app opens empty — the path"
+echo "note: Finder routes projects here, but the app opens empty — the path"
 echo "      arrives as an Apple Event winit swallows (see Info.plist). Pass it"
 echo "      on the command line meanwhile."

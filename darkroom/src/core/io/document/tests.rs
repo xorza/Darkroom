@@ -21,9 +21,9 @@ use crate::core::io::document::document_format::DOCUMENT_ENTRY;
 use crate::core::preview_sink;
 use crate::core::runtime_library::RuntimeLibrary;
 
-/// A document round-trips in each format, and a load reports the format it found. The plain
-/// file is the document's pretty RON text; the zipped one holds that text as its one deflated
-/// entry. The document holds every kind of view state: placements keyed by `NodeId`, a wire
+/// A document round-trips in each format its extension names, and a load reads the form the
+/// bytes show, so a misnamed file still opens. The plain file is the document's pretty RON text;
+/// the zipped one holds that text as its one deflated entry. The document holds every kind of view state: placements keyed by `NodeId`, a wire
 /// and a subscription through two ties in route order, a pinned angle, a selection of a node
 /// and a tie, and a dock split in two groups.
 #[test]
@@ -58,15 +58,15 @@ fn document_round_trips_in_either_format() {
     );
 
     let plain = dir.join("plain.darkroom");
-    let zipped = dir.join("zipped.darkroom");
-    for (path, format) in [
-        (&plain, DocumentFormat::Ron),
-        (&zipped, DocumentFormat::ZippedRon),
-    ] {
-        save(&document, path, SavedPaths::Relative, format).expect("save document");
-        let loaded = load(path).expect("load document");
-        assert_eq!((loaded.document, loaded.format), (document.clone(), format));
+    let zipped = dir.join("zipped.darkroomz");
+    for path in [&plain, &zipped] {
+        save(&document, path, SavedPaths::Relative).expect("save document");
+        assert_eq!(load(path).expect("load document"), document);
     }
+    // A load reads the form the bytes show, so a zipped file named as plain RON still opens.
+    let misnamed = dir.join("misnamed.darkroom");
+    fs::copy(&zipped, &misnamed).unwrap();
+    assert_eq!(load(&misnamed).unwrap(), document);
 
     let text = fs::read_to_string(&plain).unwrap();
     assert_eq!(ron::from_str::<Document>(&text).unwrap(), document);
@@ -94,7 +94,7 @@ fn document_extension_is_required_case_insensitively() {
     let dir = TempDir::new("darkroom-document-extension");
     let wrong = dir.join("wrong.json");
     assert!(matches!(
-        save(&document, &wrong, SavedPaths::Relative, DocumentFormat::Ron).unwrap_err(),
+        save(&document, &wrong, SavedPaths::Relative).unwrap_err(),
         DocumentSaveError::InvalidExtension { path } if path == wrong
     ));
     assert!(
@@ -106,14 +106,18 @@ fn document_extension_is_required_case_insensitively() {
     );
 
     let uppercase = dir.join("uppercase.DARKROOM");
-    save(
-        &document,
-        &uppercase,
-        SavedPaths::Relative,
-        DocumentFormat::Ron,
-    )
-    .expect("uppercase extension is valid");
-    assert_eq!(load(&uppercase).unwrap().document, document);
+    save(&document, &uppercase, SavedPaths::Relative).expect("uppercase extension is valid");
+    assert_eq!(load(&uppercase).unwrap(), document);
+    let uppercase_zipped = dir.join("uppercase.DARKROOMZ");
+    save(&document, &uppercase_zipped, SavedPaths::Relative).unwrap();
+    assert!(
+        fs::read(&uppercase_zipped).unwrap().starts_with(b"PK"),
+        "the extension names the format without regard to case"
+    );
+    assert!(
+        !fs::read(&uppercase).unwrap().starts_with(b"PK"),
+        "a .darkroom file is plain RON"
+    );
 }
 
 /// A file that is not a document's RON, and one that is missing, report their exact path, as do
@@ -138,21 +142,21 @@ fn load_rejects_malformed_documents_and_archives() {
         DocumentLoadError::Open { path, .. } if path == missing
     ));
 
-    let corrupt = dir.join("corrupt.darkroom");
+    let corrupt = dir.join("corrupt.darkroomz");
     fs::write(&corrupt, b"PK not a zip archive").unwrap();
     assert!(matches!(
         load(&corrupt).unwrap_err(),
         DocumentLoadError::InvalidArchive { path, .. } if path == corrupt
     ));
 
-    let other = dir.join("other.darkroom");
+    let other = dir.join("other.darkroomz");
     write_test_archive(&other, "other.ron", b"()");
     assert!(matches!(
         load(&other).unwrap_err(),
         DocumentLoadError::DocumentEntryCount { path, count: 0 } if path == other
     ));
 
-    let zipped_malformed = dir.join("zipped-malformed.darkroom");
+    let zipped_malformed = dir.join("zipped-malformed.darkroomz");
     write_test_archive(&zipped_malformed, DOCUMENT_ENTRY, b"{");
     assert!(matches!(
         load(&zipped_malformed).unwrap_err(),
@@ -265,7 +269,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     );
 
     let saved = first.join("scene.darkroom");
-    save(&document, &saved, SavedPaths::Relative, DocumentFormat::Ron).unwrap();
+    save(&document, &saved, SavedPaths::Relative).unwrap();
     assert_eq!(
         stored(&saved, nodes),
         [
@@ -280,7 +284,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
         ]
     );
     assert_eq!(
-        load(&saved).unwrap().document,
+        load(&saved).unwrap(),
         document,
         "read back where it was written"
     );
@@ -288,7 +292,7 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     let copy = second.join("scene.darkroom");
     fs::copy(&saved, &copy).unwrap();
     assert_eq!(
-        paths_of(&load(&copy).unwrap().document, nodes),
+        paths_of(&load(&copy).unwrap(), nodes),
         [
             inside(&second, "a.tiff"),
             inside(&second, "b.fit"),
@@ -302,17 +306,11 @@ fn paths_inside_the_folder_are_saved_relative_and_move_with_it() {
     );
 
     let absolute = first.join("absolute.darkroom");
-    save(
-        &document,
-        &absolute,
-        SavedPaths::Absolute,
-        DocumentFormat::Ron,
-    )
-    .unwrap();
+    save(&document, &absolute, SavedPaths::Absolute).unwrap();
     assert_eq!(stored(&absolute, nodes), paths_of(&document, nodes));
 
     let below = first.join("below").join("scene.darkroom");
-    save(&document, &below, SavedPaths::Relative, DocumentFormat::Ron).unwrap();
+    save(&document, &below, SavedPaths::Relative).unwrap();
     assert_eq!(
         stored(&below, nodes),
         paths_of(&document, nodes),

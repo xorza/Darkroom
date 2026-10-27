@@ -77,7 +77,7 @@ impl DarkroomServer {
     }
 
     #[tool(
-        description = "Open a .darkroom project in the editor, in place of the open document; \
+        description = "Open a .darkroom or .darkroomz project in the editor, in place of the open document; \
         with no project, a new unsaved document, which a Save As names. A project that does not \
         open leaves the open document as it was. The project opens where \
         it is, so saves reach the original; copy opens a copy of its folder in the session's own \

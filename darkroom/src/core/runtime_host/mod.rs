@@ -158,7 +158,7 @@ impl RuntimeHost {
         }
     }
 
-    /// Point the disk cache at `document_path`'s project-local store (`<stem>.darkroom-cache/` beside
+    /// Point the disk cache at `document_path`'s project-local store (`<stem>.<extension>-cache/` beside
     /// the file), so disk-backed (`Disk`/`Both`) nodes reload across sessions. `None` (an unsaved
     /// document) is memory-only. Explicit-path cache nodes are unaffected — they always use their
     /// own path.
