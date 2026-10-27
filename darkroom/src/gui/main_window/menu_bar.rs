@@ -101,7 +101,6 @@ fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
             ("Open…", Some(shortcuts::OPEN), FileCommand::Open),
             ("Save", Some(shortcuts::SAVE), FileCommand::Save),
             ("Save As…", Some(shortcuts::SAVE_AS), FileCommand::SaveAs),
-            ("Save As Compressed…", None, FileCommand::SaveAsCompressed),
         ];
         for (label, shortcut, command) in file {
             if item(ui, popup, label, shortcut, true) {

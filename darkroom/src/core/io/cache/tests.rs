@@ -13,9 +13,14 @@ fn cache_root_is_named_after_stem_beside_the_file() {
         root(Path::new("scene.darkroom")),
         PathBuf::from("scene.darkroom-cache")
     );
-    // No extension → the whole filename is the stem.
+    // The extension names the store in its lower case, so a zipped project beside a plain one
+    // of the same stem keeps a store of its own.
     assert_eq!(
-        root(Path::new("/proj/scene")),
+        root(Path::new("/proj/scene.darkroomz")),
+        PathBuf::from("/proj/scene.darkroomz-cache")
+    );
+    assert_eq!(
+        root(Path::new("/proj/scene.DARKROOM")),
         PathBuf::from("/proj/scene.darkroom-cache")
     );
     // Two projects in one dir get distinct stores.

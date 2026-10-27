@@ -32,10 +32,9 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::undo_history::UndoHistory;
-use crate::core::io::document::document_format::DocumentFormat;
+use crate::core::io::document;
 use crate::core::io::document::error::{DocumentLoadError, DocumentSaveError};
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::core::io::document::{self, DocumentFile};
 use crate::core::status_log::{StatusFamily, StatusLog};
 use scenarium::Library;
 
@@ -68,8 +67,6 @@ impl StepSignals {
 pub(crate) struct OpenDocument {
     pub(crate) document: Document,
     pub(crate) path: Option<PathBuf>,
-    /// The form of the file at `path`, which a plain save keeps; plain RON for a new document.
-    pub(crate) format: DocumentFormat,
     /// Whether `document` differs from what is at `path` — the pair that gives the flag its
     /// meaning, which is why it lives here rather than on a frontend. Set by any content-changing
     /// edit (new edits, undo/redo replay, direct graph mutations), cleared by [`Self::save_to`].
@@ -100,7 +97,6 @@ impl Default for OpenDocument {
         Self {
             document: Document::default(),
             path: None,
-            format: DocumentFormat::default(),
             dirty: false,
             revision: GraphRevision::default(),
             history: UndoHistory::new(UNDO_HISTORY_BYTES),
@@ -301,15 +297,11 @@ impl OpenDocument {
     /// [`Document::reconcile`]. A load that changed something leaves the
     /// document dirty, so a save accepts the changes.
     pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Loaded, DocumentLoadError> {
-        let DocumentFile {
-            mut document,
-            format,
-        } = document::load(&path)?;
+        let mut document = document::load(&path)?;
         let report = document.reconcile(library);
         let open = Self {
             document,
             path: Some(path),
-            format,
             dirty: !report.is_empty(),
             ..Self::default()
         };
@@ -392,18 +384,16 @@ impl OpenDocument {
         }
     }
 
-    /// Write the document to `path` in `format` and adopt both. Clears
+    /// Write the document to `path`, in the format its extension names, and adopt it. Clears
     /// [`dirty`](Self::dirty) — only on success, so a failed save leaves the
     /// unsaved work still flagged.
     pub(crate) fn save_to(
         &mut self,
         path: &Path,
         paths: SavedPaths,
-        format: DocumentFormat,
     ) -> Result<(), DocumentSaveError> {
-        document::save(&self.document, path, paths, format)?;
+        document::save(&self.document, path, paths)?;
         self.path = Some(path.to_path_buf());
-        self.format = format;
         self.dirty = false;
         Ok(())
     }

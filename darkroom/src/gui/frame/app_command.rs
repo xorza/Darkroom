@@ -50,13 +50,12 @@ pub(crate) enum FileCommand {
     New,
     /// Prompt for a file and open it.
     Open,
-    /// Save to the current file in the format it was opened in, or prompt (Save As) if there
+    /// Save to the current file in the format its extension names, or prompt (Save As) if there
     /// isn't one.
     Save,
-    /// Always prompt for a destination, and write the document's RON text there.
+    /// Always prompt for a destination, and write the document there in the format its file type
+    /// names: RON text, or the text zipped.
     SaveAs,
-    /// Always prompt for a destination, and write the RON text zipped there.
-    SaveAsCompressed,
 }
 
 /// What the window shows: an image of it as the next frame paints it, and where the graph's

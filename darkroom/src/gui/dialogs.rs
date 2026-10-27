@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::fs;
 
-use crate::core::io::document;
+use crate::core::io::document::document_format::DocumentFormat;
 
 /// Where `App`'s path picks are answered: the answers a driver queued, one per ask in order, then
 /// the fallback. A queued answer of the other shape reads as a cancel and logs an error, which the
@@ -47,33 +47,71 @@ pub(crate) enum DialogFallback {
     Refuse,
 }
 
-/// A kind of file a save names: the label of its dialog's filter, and the extension the save
-/// adds when the typed name lacks it, as the native dialogs do not.
+/// One file type a save dialog offers: the label of its filter, and its extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SavedFile<'a> {
+pub(crate) struct FileType<'a> {
     label: &'a str,
     extension: &'a str,
 }
 
-impl SavedFile<'_> {
-    pub(crate) const PROJECT: Self = Self {
-        label: "Darkroom project",
-        extension: document::EXTENSION,
-    };
+/// A kind of file a save names: the file types its dialog offers, of which the first is the one
+/// a typed name without any of their extensions takes, as the native dialogs add none. A kind
+/// of several forms offers each as a type, as Inkscape offers SVG and compressed SVG: rfd reports
+/// the path alone, not the filter picked, so the extension is what carries the choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SavedFile<'a> {
+    types: &'a [FileType<'a>],
+}
+
+const PLAIN_PROJECT: FileType<'static> = FileType {
+    label: "Darkroom project",
+    extension: DocumentFormat::Ron.extension(),
+};
+
+const COMPRESSED_PROJECT: FileType<'static> = FileType {
+    label: "Compressed Darkroom project",
+    extension: DocumentFormat::ZippedRon.extension(),
+};
+
+impl<'a> SavedFile<'a> {
+    /// A project, `format`'s type first: the dialog opens on it and a bare name takes it, so a
+    /// Save As of a compressed project stays compressed unless the person picks otherwise.
+    pub(crate) const fn project(format: DocumentFormat) -> Self {
+        match format {
+            DocumentFormat::Ron => Self {
+                types: &[PLAIN_PROJECT, COMPRESSED_PROJECT],
+            },
+            DocumentFormat::ZippedRon => Self {
+                types: &[COMPRESSED_PROJECT, PLAIN_PROJECT],
+            },
+        }
+    }
+
     pub(crate) const PNG: Self = Self {
-        label: "PNG image",
-        extension: "png",
+        types: &[FileType {
+            label: "PNG image",
+            extension: "png",
+        }],
     };
 
-    /// `path` with this kind's extension, which replaces any other; one that matches without
-    /// regard to case stays as typed.
+    /// The type a name without any of this kind's extensions takes.
+    const fn default_type(self) -> FileType<'a> {
+        self.types[0]
+    }
+
+    /// `path` with one of this kind's extensions: the first type's in place of any other, and one
+    /// that matches without regard to case kept as typed.
     fn extended(self, mut path: PathBuf) -> PathBuf {
         let has = path
             .extension()
             .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case(self.extension));
+            .is_some_and(|extension| {
+                self.types
+                    .iter()
+                    .any(|kind| extension.eq_ignore_ascii_case(kind.extension))
+            });
         if !has {
-            path.set_extension(self.extension);
+            path.set_extension(self.default_type().extension);
         }
         path
     }
@@ -117,7 +155,11 @@ impl Dialogs {
         kind: SavedFile<'_>,
         start: Option<&Path>,
     ) -> Option<PathBuf> {
-        self.save_as(&format!("save a {}", kind.label), kind, start)
+        self.save_as(
+            &format!("save a {}", kind.default_type().label),
+            kind,
+            start,
+        )
     }
 
     /// One existing file with one of `extensions`, or any file for none.
@@ -147,8 +189,10 @@ impl Dialogs {
             [extension] => self.save_as(
                 ASK,
                 SavedFile {
-                    label: "Files",
-                    extension,
+                    types: &[FileType {
+                        label: "Files",
+                        extension,
+                    }],
                 },
                 None,
             ),
@@ -227,7 +271,10 @@ fn file_dialog(start: Option<&Path>) -> rfd::FileDialog {
 
 fn pick_project_open_path(start: Option<&Path>) -> Option<PathBuf> {
     file_dialog(start)
-        .add_filter("Darkroom project", &[document::EXTENSION])
+        .add_filter(
+            "Darkroom project",
+            &DocumentFormat::ALL.map(DocumentFormat::extension),
+        )
         .pick_file()
 }
 
@@ -250,7 +297,9 @@ fn pick_save_path(kind: SavedFile<'_>, start: Option<&Path>) -> Option<PathBuf> 
 }
 
 fn save_dialog(kind: SavedFile<'_>, start: Option<&Path>) -> rfd::FileDialog {
-    file_dialog(start).add_filter(kind.label, &[kind.extension])
+    kind.types.iter().fold(file_dialog(start), |dialog, kind| {
+        dialog.add_filter(kind.label, &[kind.extension])
+    })
 }
 
 fn filtered_file_dialog(extensions: &[&str]) -> rfd::FileDialog {
@@ -289,6 +338,7 @@ mod tests {
 
     use common::{TempDir, fs};
 
+    use crate::core::io::document::document_format::DocumentFormat;
     use crate::gui::dialogs::{
         DialogAnswer, DialogFallback, Dialogs, SavedFile, normalize_file_selection,
     };
@@ -301,24 +351,51 @@ mod tests {
     fn only_an_existing_extended_name_needs_confirming_again() {
         let extended = |kind: SavedFile<'_>, name: &str| kind.extended(PathBuf::from(name));
         assert_eq!(
-            extended(SavedFile::PROJECT, "scene"),
+            extended(SavedFile::project(DocumentFormat::Ron), "scene"),
             PathBuf::from("scene.darkroom")
         );
         assert_eq!(
-            extended(SavedFile::PROJECT, "scene.json"),
+            extended(SavedFile::project(DocumentFormat::Ron), "scene.json"),
             PathBuf::from("scene.darkroom")
         );
         assert_eq!(
-            extended(SavedFile::PROJECT, "scene.DARKROOM"),
+            extended(SavedFile::project(DocumentFormat::Ron), "scene.DARKROOM"),
             PathBuf::from("scene.DARKROOM")
         );
+        assert_eq!(
+            extended(SavedFile::project(DocumentFormat::Ron), "scene.darkroomz"),
+            PathBuf::from("scene.darkroomz"),
+            "the compressed file type is the project's too"
+        );
+        assert_eq!(
+            extended(SavedFile::project(DocumentFormat::Ron), "scene.DARKROOMZ"),
+            PathBuf::from("scene.DARKROOMZ")
+        );
+        assert_eq!(
+            extended(SavedFile::project(DocumentFormat::ZippedRon), "scene"),
+            PathBuf::from("scene.darkroomz"),
+            "a bare name takes the open project's format"
+        );
+        assert_eq!(
+            extended(
+                SavedFile::project(DocumentFormat::ZippedRon),
+                "scene.darkroom"
+            ),
+            PathBuf::from("scene.darkroom"),
+            "and the other type stays the person's pick"
+        );
         assert_eq!(extended(SavedFile::PNG, "view"), PathBuf::from("view.png"));
+        assert_eq!(
+            extended(SavedFile::PNG, "view.darkroom"),
+            PathBuf::from("view.png"),
+            "another kind's extension is replaced"
+        );
         assert_eq!(
             extended(SavedFile::PNG, "view.PNG"),
             PathBuf::from("view.PNG")
         );
 
-        let project = SavedFile::PROJECT;
+        let project = SavedFile::project(DocumentFormat::Ron);
         let dir = TempDir::new("darkroom-save-target");
         let bare = dir.join("scene");
         let extended = dir.join("scene.darkroom");
@@ -389,7 +466,7 @@ mod tests {
             Some(abs("/p/scene.darkroom"))
         );
         assert_eq!(
-            dialogs.save_path(SavedFile::PROJECT, None),
+            dialogs.save_path(SavedFile::project(DocumentFormat::Ron), None),
             Some(abs("/p/copy.darkroom"))
         );
         assert_eq!(

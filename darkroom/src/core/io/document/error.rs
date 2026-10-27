@@ -6,12 +6,15 @@ use std::path::PathBuf;
 use common::{DeserializeError, SerializeError};
 use zip::result::ZipError;
 
-use crate::core::io::document::document_format::DOCUMENT_ENTRY;
-use crate::core::io::document::{EXTENSION, MAX_DOCUMENT_BYTES};
+use crate::core::io::document::MAX_DOCUMENT_BYTES;
+use crate::core::io::document::document_format::{DOCUMENT_ENTRY, RON_EXTENSION, ZIPPED_EXTENSION};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DocumentLoadError {
-    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
+    #[error(
+        "{path} must use the .{RON_EXTENSION} or .{ZIPPED_EXTENSION} extension",
+        path = .path.display()
+    )]
     InvalidExtension { path: PathBuf },
     #[error(
         "{path} holds paths relative to its folder, whose name is not valid Unicode",
@@ -72,7 +75,10 @@ pub(crate) enum DocumentLoadError {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DocumentSaveError {
-    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
+    #[error(
+        "{path} must use the .{RON_EXTENSION} or .{ZIPPED_EXTENSION} extension",
+        path = .path.display()
+    )]
     InvalidExtension { path: PathBuf },
     #[error("failed to serialize the document for {path}: {source}", path = .path.display())]
     Serialize {

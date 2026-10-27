@@ -217,10 +217,7 @@ impl App {
                 self.guard_discard(PendingTransition::OpenPicked);
             }
             AppCommand::File(FileCommand::Save) => self.save_cur(),
-            AppCommand::File(FileCommand::SaveAs) => self.save_document_as(DocumentFormat::Ron),
-            AppCommand::File(FileCommand::SaveAsCompressed) => {
-                self.save_document_as(DocumentFormat::ZippedRon);
-            }
+            AppCommand::File(FileCommand::SaveAs) => self.save_document_as(),
             AppCommand::Run(run) => self.run(run),
             AppCommand::Preferences(PreferencesCommand::Changed) => self.apply_preferences(),
             AppCommand::Preferences(PreferencesCommand::PickMlModel(kind)) => {
@@ -478,35 +475,35 @@ impl App {
         true
     }
 
-    /// Cmd+S: overwrite the current file, in the format it was opened in, if
+    /// Cmd+S: overwrite the current file, in the format its extension names, if
     /// there is one, else fall back to Save As (first save of a fresh document).
     fn save_cur(&mut self) {
-        let format = self.session.open.format;
         match self.session.open.path.clone() {
-            Some(path) => self.save_document(&path, format),
-            None => self.save_document_as(format),
+            Some(path) => self.save_document(&path),
+            None => self.save_document_as(),
         }
     }
 
-    /// Cmd+Shift+S / "Save As…" and "Save As Compressed…": always prompt for a destination,
-    /// and write `format` there.
-    fn save_document_as(&mut self, format: DocumentFormat) {
-        if let Some(path) = self
-            .dialogs
-            .save_path(SavedFile::PROJECT, self.session.open.path.as_deref())
-        {
-            self.save_document(&path, format);
+    /// Cmd+Shift+S / "Save As…": always prompt for a destination, whose file type names the
+    /// format, plain or compressed, the open project's first; a new document's is plain.
+    fn save_document_as(&mut self) {
+        let cur = self.session.open.path.as_deref();
+        let format = cur
+            .and_then(DocumentFormat::of_path)
+            .unwrap_or(DocumentFormat::Ron);
+        if let Some(path) = self.dialogs.save_path(SavedFile::project(format), cur) {
+            self.save_document(&path);
         }
     }
 
-    /// Write the document to `path` in `format` and adopt both as the save target. Save-As
+    /// Write the document to `path` and adopt it as the save target. Save-As
     /// moves the document, so the worker's disk cache repoints to the new
     /// location's store — the old one stays where it is.
-    fn save_document(&mut self, path: &Path, format: DocumentFormat) {
+    fn save_document(&mut self, path: &Path) {
         match self
             .session
             .open
-            .save_to(path, self.preferences.saved_paths(), format)
+            .save_to(path, self.preferences.saved_paths())
         {
             Ok(()) => {
                 self.runtime
@@ -900,7 +897,7 @@ mod tests {
         let dir = TempDir::new("darkroom-discard-prompt");
         let handed = dir.join("handed.darkroom");
         OpenDocument::default()
-            .save_to(&handed, SavedPaths::Relative, DocumentFormat::Ron)
+            .save_to(&handed, SavedPaths::Relative)
             .unwrap();
         for (choice, opened) in [
             (DiscardChoice::Discard, true),
@@ -971,7 +968,7 @@ mod tests {
         let dir = TempDir::new("darkroom-driven-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
-            .save_to(&document, SavedPaths::Relative, DocumentFormat::Ron)
+            .save_to(&document, SavedPaths::Relative)
             .unwrap();
         let mut ui = UiHarness::with_text(UVec2::new(800, 600));
         let mut app = App::offscreen(ui.ui());
@@ -1025,7 +1022,7 @@ mod tests {
         let dir = TempDir::new("darkroom-scripted-open");
         let document = dir.join("scene.darkroom");
         OpenDocument::default()
-            .save_to(&document, SavedPaths::Relative, DocumentFormat::Ron)
+            .save_to(&document, SavedPaths::Relative)
             .unwrap();
         let preferences_file = dir.join("darkroom.preferences.ron");
 

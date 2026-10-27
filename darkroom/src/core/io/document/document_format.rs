@@ -1,6 +1,7 @@
-//! [`DocumentFormat`]: the two forms a `.darkroom` file takes — the document's RON text, which a
-//! person or an agent reads and git diffs line by line, or that text zipped, a fifth of its size.
-//! `darkroom/AGENTS.md`, "The document file", holds the decision.
+//! [`DocumentFormat`]: the two forms a project file takes — the document's RON text in a
+//! `.darkroom` file, which a person or an agent reads and git diffs line by line, or that text
+//! zipped in a `.darkroomz` file, a fifth of its size. `darkroom/AGENTS.md`, "The document file",
+//! holds the decision.
 
 use std::borrow::Cow;
 use std::fs::File;
@@ -16,18 +17,42 @@ use crate::core::io::document::{MAX_DOCUMENT_BYTES, fits};
 /// The one entry a zipped document holds.
 pub(super) const DOCUMENT_ENTRY: &str = "document.ron";
 
-/// How a `.darkroom` file holds its document. A load tells them apart by the file's first bytes,
-/// so both share the extension and its file association.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The extension of a project file of RON text.
+pub(crate) const RON_EXTENSION: &str = "darkroom";
+
+/// The extension of a zipped project file.
+pub(crate) const ZIPPED_EXTENSION: &str = "darkroomz";
+
+/// How a project file holds its document. Its extension names the form a save writes, as `.svg`
+/// and `.svgz` do; a load reads the form its first bytes show, so a misnamed file still opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DocumentFormat {
     /// The RON text itself.
-    #[default]
     Ron,
     /// A ZIP archive of one deflated entry, [`DOCUMENT_ENTRY`], which holds the RON text.
     ZippedRon,
 }
 
 impl DocumentFormat {
+    pub(crate) const ALL: [Self; 2] = [Self::Ron, Self::ZippedRon];
+
+    /// The extension a file of this format takes.
+    pub(crate) const fn extension(self) -> &'static str {
+        match self {
+            Self::Ron => RON_EXTENSION,
+            Self::ZippedRon => ZIPPED_EXTENSION,
+        }
+    }
+
+    /// The format a file named `path` is saved in: the one its extension names, without regard to
+    /// case, or none for another extension.
+    pub(crate) fn of_path(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?;
+        Self::ALL
+            .into_iter()
+            .find(|format| extension.eq_ignore_ascii_case(format.extension()))
+    }
+
     /// The format of a file whose bytes are `bytes`: a ZIP's signature, `PK`, which no RON
     /// document starts with, or RON text.
     pub(super) fn of(bytes: &[u8]) -> Self {

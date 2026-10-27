@@ -10,7 +10,7 @@ Exec=darkroom %f
 Icon=com.cssodessa.darkroom
 Terminal=false
 Categories=Graphics;Development;
-MimeType=application/x-darkroom;
+MimeType=application/x-darkroom;application/x-darkroom-compressed;
 # Must equal the window's Wayland app_id / X11 WM_CLASS, which `main.rs` sets
 # to this file's basename — that pairing is what groups the window under this
 # entry and gives it the launcher's icon.

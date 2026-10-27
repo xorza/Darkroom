@@ -153,11 +153,14 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
 
 ## The document file
 
-- **A `.darkroom` file is the document's RON text, or that text zipped**, told apart by the
-  file's first bytes, so both share the extension and its file association. A save keeps the
-  format the file was opened in; Save As… writes plain RON, and Save As Compressed… writes it
-  zipped, a fifth of the size. Plain text is what a person, an agent and git read; the ZIP is for
-  size.
+- **A project is the document's RON text in a `.darkroom` file, or that text zipped in a
+  `.darkroomz` file**, a fifth of the size, as Inkscape writes `.svg` and `.svgz`. The extension
+  names the format a save writes, and Save As… offers both as the dialog's file types, the open
+  project's first, which a bare name takes; a load reads the form the first bytes show, so a misnamed file still
+  opens. Plain text is what a person, an agent and git read; the ZIP is for size. Refused: one
+  extension for both with a Save As Compressed… item, as rfd reports the path alone and the
+  dialog could not carry the choice; a native Compress checkbox, which needs a save dialog of
+  darkroom's own on each platform. Chosen by the user on 2026-10-27.
 
 ## Undo
 
