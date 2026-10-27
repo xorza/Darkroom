@@ -116,9 +116,11 @@ fn sync_source_refits_only_for_size_changes_or_removal() {
 }
 
 /// The ways a store entry yields no texture each carry their own reason,
-/// and the absent entry carries none — that last case is what draws the
-/// standing "after the next graph run" hint rather than an error, so it
-/// must stay distinguishable from a real failure.
+/// and the absent entry carries none — that last case draws a hint rather
+/// than an error, so it must stay distinguishable from a real failure. The
+/// hint says why from the node's last run: no run yet, the node running, a
+/// run that published nothing yet, one that could not feed it, one that
+/// stopped before it, or one in which it failed — each its own line.
 #[test]
 fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     let mut h = UiHarness::arena();
@@ -128,14 +130,42 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
         matches!(nothing, ShownSource::Nothing),
         "an absent entry is its own state, not a failure: {nothing:?}"
     );
-    assert_eq!(nothing.hint().unwrap().to_string(), NOTHING_YET_HINT);
+    for (status, hint) in [
+        (ExecStatus::None, NOTHING_YET_HINT),
+        (ExecStatus::Running(std::time::Instant::now()), RUNNING_HINT),
+        (ExecStatus::Executed(0.5), NO_IMAGE_YET_HINT),
+        (ExecStatus::Cached, NO_IMAGE_YET_HINT),
+        (ExecStatus::MissingInputs(vec![0]), MISSING_INPUT_HINT),
+        (ExecStatus::Skipped, STOPPED_BEFORE_HINT),
+        (ExecStatus::Errored(None), FAILED_HINT),
+    ] {
+        assert_eq!(
+            nothing.hint(&status).unwrap().to_string(),
+            hint,
+            "{status:?}"
+        );
+    }
+    let lines = [
+        NOTHING_YET_HINT,
+        RUNNING_HINT,
+        NO_IMAGE_YET_HINT,
+        MISSING_INPUT_HINT,
+        STOPPED_BEFORE_HINT,
+        FAILED_HINT,
+    ];
+    for (i, line) in lines.iter().enumerate() {
+        assert!(
+            !lines[i + 1..].contains(line),
+            "{line:?} reads for two reasons"
+        );
+    }
 
     let size = Size2us::new(1 << 33, 1);
     let errored = StoredContent::Error(DrawablePreviewError::EdgeTooLong { size });
     let resolved = ShownSource::resolve(Some(&errored), h.ui());
     assert!(resolved.image().is_none());
     assert_eq!(
-        resolved.hint().unwrap().to_string(),
+        resolved.hint(&ExecStatus::None).unwrap().to_string(),
         "image is 8589934592x1, past the longest texture edge"
     );
 
@@ -145,7 +175,7 @@ fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
     let resolved = ShownSource::resolve(Some(&text), h.ui());
     assert!(resolved.image().is_none());
     assert_eq!(
-        resolved.hint().unwrap().to_string(),
+        resolved.hint(&ExecStatus::None).unwrap().to_string(),
         "value is not an image"
     );
 }
@@ -190,6 +220,7 @@ fn the_frame_that_first_draws_a_viewer_frames_it_at_the_full_size() {
                 theme: &theme,
                 title: "img",
                 previews: store,
+                status: &ExecStatus::None,
                 size: pane,
             };
             viewer.show(
@@ -259,6 +290,7 @@ fn a_drag_starts_from_the_fit_and_a_double_click_fits_again() {
                 theme: &theme,
                 title: "img",
                 previews: &store,
+                status: &ExecStatus::None,
                 size: Some(Vec2::new(800.0, 600.0)),
             };
             viewer.show(

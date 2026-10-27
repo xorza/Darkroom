@@ -9,14 +9,9 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 
 use palantir::prelude::*;
 use palantir::{DockOperation, FontWeight, TextInput, TextWrap};
-use scenarium::DataType;
-use scenarium::Library;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 use scenarium::{Binding, ConstValue, ValueVariant};
@@ -28,9 +23,11 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::port_ref::PortKind;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::elapsed::Elapsed;
+use crate::gui::widgets::format::shown_value::{ShownValue, UNSET};
 use crate::gui::widgets::icon::Icon;
 use crate::gui::widgets::icon_button::IconButton;
 use crate::gui::widgets::support;
@@ -154,46 +151,74 @@ fn body(ui: &mut Ui, node: NodeCtx<'_>, target: InspectTarget, out: &mut Request
         line(ui, "Sink", muted_style(theme, ui));
     }
     if !node.description().is_empty() {
-        line(ui, node.description(), muted_style(theme, ui));
+        line(
+            ui,
+            node.description(),
+            TextStyle {
+                color: theme.ports.label,
+                ..body_style(theme, ui)
+            },
+        );
     }
 
     let library = node.graph_ctx.library();
     if node.inputs().len() > 0 {
         section(ui, theme, "Inputs");
-        for input in node.inputs() {
-            let val = value_str(ui, input);
+        for (idx, input) in node.inputs().enumerate() {
+            let value = value_str(ui, input);
             InspectedPort {
-                label: PortCaption::resolve(library, input.name(), input.data_type()),
-                value: Some(val),
+                wid: port_wid(PortKind::Input, idx),
+                name: input.name(),
+                type_name: library.type_name(input.data_type()),
+                value: Some(value),
             }
             .show(ui, theme);
         }
     }
     if node.outputs().len() > 0 {
         section(ui, theme, "Outputs");
-        for output in node.outputs() {
+        for (idx, output) in node.outputs().enumerate() {
             InspectedPort {
-                label: PortCaption::resolve(library, output.name(), output.data_type()),
+                wid: port_wid(PortKind::Output, idx),
+                name: output.name(),
+                type_name: library.type_name(output.data_type()),
                 value: None,
             }
             .show(ui, theme);
         }
     }
-    // This node's lines from the last run, level-colored, capped to the most recent few.
+    // This node's lines from the last run, level-colored, capped to the most recent few, in a
+    // box of their own so they read as the run's record, not as the node's fields.
     if !logs.is_empty() {
         section(ui, theme, "Log");
         let start = logs.len().saturating_sub(LOG_LINE_CAP);
-        for entry in &logs[start..] {
-            line(
-                ui,
-                &entry.message,
-                TextStyle {
-                    color: log_color(theme, ui, entry.level),
-                    ..body_style(theme, ui)
-                },
-            );
-        }
+        Panel::vstack()
+            .id_salt("inspector_log")
+            .size((Sizing::FILL, Sizing::HUG))
+            .padding(Spacing::xy(theme.space.sm, theme.space.xs))
+            .gap(theme.space.xs)
+            .chrome(Chrome::rounded(
+                theme.card.fill,
+                Corners::all(theme.radius.control),
+            ))
+            .show(ui, |ui| {
+                for entry in &logs[start..] {
+                    line(
+                        ui,
+                        &entry.message,
+                        TextStyle {
+                            color: log_color(theme, ui, entry.level),
+                            ..support::mono_text(ui, theme.text.label)
+                        },
+                    );
+                }
+            });
     }
+}
+
+/// The row of the `kind` port at `idx`.
+fn port_wid(kind: PortKind, idx: usize) -> WidgetId {
+    WidgetId::from_hash(("darkroom.inspector.port", kind, idx))
 }
 
 fn pin_wid() -> WidgetId {
@@ -228,62 +253,59 @@ fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
         .show(ui);
 }
 
-/// One port row, two tiers: a muted label line (the port name, plus its
-/// type when the two differ), then the value on its own full-strength
-/// line — so a long value wraps cleanly instead of orphaning its tail
-/// tokens mid-`name: type = value` string. A `None` value renders the label
-/// alone (an output).
+/// One port row on one line: the name in the muted ink at the left, its type the name's
+/// tooltip, and the value at the right, cut in the middle when it overruns so a path keeps its
+/// file's end. An output has no value.
 #[derive(Debug)]
 struct InspectedPort<'a> {
-    label: PortCaption<'a>,
+    wid: WidgetId,
+    name: &'a str,
+    type_name: Cow<'a, str>,
     value: Option<TextInput<'a>>,
 }
 
 impl InspectedPort<'_> {
     fn show(self, ui: &mut Ui, theme: &Theme) {
-        let text = fmt!(ui, "{}", self.label);
-        line(ui, text, muted_style(theme, ui));
-        if let Some(v) = self.value {
-            line(ui, v, body_style(theme, ui));
-        }
-    }
-}
-
-/// The label tier of a port row. Skips the type when it repeats the port
-/// name (`Image · Image`, the dominant case; `Path · path` likewise) —
-/// otherwise `name · type`, so even a valueless port announces its type.
-///
-/// Renders on demand into the record pass's text arena, which is where the
-/// name was headed anyway: an open pane builds no owned string per port per
-/// frame, in either case.
-#[derive(Debug)]
-struct PortCaption<'a> {
-    name: &'a str,
-    /// The declared type's display name, or `None` when it merely repeats
-    /// `name` and the row would read as a stutter.
-    type_name: Option<Cow<'a, str>>,
-}
-
-impl<'a> PortCaption<'a> {
-    fn resolve(library: &'a Library, name: &'a str, data_type: &DataType) -> Self {
-        let type_name = library.type_name(data_type);
-        let type_name = (!type_name.eq_ignore_ascii_case(name)).then_some(type_name);
-        Self { name, type_name }
-    }
-}
-
-impl Display for PortCaption<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name)?;
-        match &self.type_name {
-            Some(type_name) => write!(f, " · {type_name}"),
-            None => Ok(()),
-        }
+        let Self {
+            wid,
+            name,
+            type_name,
+            value,
+        } = self;
+        Panel::hstack()
+            .id(wid)
+            .size((Sizing::FILL, Sizing::HUG))
+            .gap(theme.space.md)
+            .child_align(Align::v(VAlign::Center))
+            .show(ui, |ui| {
+                let name = Text::new(name)
+                    .style(&TextStyle {
+                        color: theme.ports.label,
+                        ..body_style(theme, ui)
+                    })
+                    .sense(Sense::HOVER)
+                    .show(ui)
+                    .snapshot();
+                let type_name = fmt!(ui, "{type_name}");
+                support::tooltip_after(ui, &name, Some(type_name));
+                if let Some(value) = value {
+                    Text::new(value)
+                        .id(wid.with("value"))
+                        .style(&body_style(theme, ui))
+                        .text_wrap(TextWrap::EllipsisMiddle)
+                        .text_align(Align::RIGHT)
+                        .size((Sizing::FILL, Sizing::HUG))
+                        .show(ui);
+                }
+            });
     }
 }
 
 fn title_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    support::sized_text(ui, theme.text.title)
+    TextStyle {
+        weight: FontWeight::SEMI_BOLD,
+        ..support::sized_text(ui, theme.text.title)
+    }
 }
 
 /// The pane's de-emphasized ink: a port label's, so a port row reads as it does on the node.
@@ -295,21 +317,26 @@ fn body_style(theme: &Theme, ui: &Ui) -> TextStyle {
     support::sized_text(ui, theme.text.body)
 }
 
-/// The value tier of an input row: a constant one of the input's named variants holds reads by
-/// that variant's label, as the node's own dropdown shows it.
+/// The value tier of an input row, as the node's own field shows it: a constant one of the
+/// input's named variants holds reads by that variant's label, as the node's dropdown does, and
+/// any other through [`ShownValue`], the node's formatter.
 ///
 /// The fixed answers stay borrowed and the formatted one goes straight into the text arena, so
 /// an open pane builds no owned string per input per frame.
 fn value_str<'a>(ui: &mut Ui, input: InputCtx<'a>) -> TextInput<'a> {
     match input.binding() {
-        None => TextInput::Borrowed("—"),
+        None => TextInput::Borrowed(UNSET),
         Some(Binding::Wire(_)) => TextInput::Borrowed("wired"),
-        Some(Binding::Const(v)) => match variant_label(input.value_variants(), v) {
+        Some(Binding::Const(value)) => match variant_label(input.value_variants(), value) {
             Some(label) => TextInput::Borrowed(label),
-            // `ConstValue::Display` — the same formatter a preview node's
-            // value goes through via `DynamicValue::Display`, so a static
-            // binding and a live one can't render one float two ways.
-            None => TextInput::Interned(fmt!(ui, "{v}")),
+            None => TextInput::Interned(fmt!(
+                ui,
+                "{}",
+                ShownValue {
+                    value,
+                    data_type: input.data_type(),
+                }
+            )),
         },
     }
 }
@@ -344,39 +371,36 @@ fn status_text(ui: &mut Ui, status: &ExecStatus) -> TextInput<'static> {
 mod tests {
     use super::*;
 
+    /// A port row is one line, its value at the row's right edge: a probe node's input, read in
+    /// the inspector tab over the selected node.
     #[test]
-    fn port_label_dedups_the_type_and_reuses_the_scenes_own_handle() {
-        use scenarium::FsPathConfig;
-        use std::sync::Arc;
+    fn a_port_row_is_one_line_with_its_value_at_the_right() {
+        use crate::core::document::internals::DocumentFixture;
+        use crate::core::edit::graph_intent::GraphIntent;
+        use crate::gui::app::session::internals::SessionHarness;
 
-        let lib = Library::default();
-        let path_type = DataType::FsPath(Arc::new(FsPathConfig::default()));
-
-        // Type repeats the name (case-insensitively) → the name alone, no
-        // "Image · Image" stutter; distinct type → "name · type". A path
-        // port announces its type when the name differs, with no value
-        // shown or with one.
-        let cases: [(&str, &DataType, &str); 4] = [
-            ("Float", &DataType::Float, "Float"),
-            ("Brightness", &DataType::Float, "Brightness · float"),
-            ("Path", &path_type, "Path"),
-            ("Output", &path_type, "Output · path"),
-        ];
-        for (name, data_type, expected) in cases {
-            let label = PortCaption::resolve(&lib, name, data_type);
-            assert_eq!(label.to_string(), expected, "label for {name}");
-            // The deduped case is the dominant one, and it must resolve to the
-            // declaration's own `&str` with nothing appended: that is the whole
-            // reason an open panel renders a port row straight from the scene's
-            // own handles. Only the differing case carries a second piece.
-            let deduped = expected == name;
-            assert_eq!(
-                label.type_name.is_none(),
-                deduped,
-                "{name}: a deduped label is the declared name alone, a \
-                 combined one carries the type beside it",
-            );
-        }
+        let fixture =
+            DocumentFixture::probes(1).with_tab(TabRef::Inspector(InspectTarget::Selection));
+        let mut h = SessionHarness::new(fixture);
+        let node_id = h.session.open.document.graph.iter().next().unwrap().node_id;
+        let _relayout = h.apply(GraphIntent::SetSelection {
+            to: [ItemId::Node(node_id)].into(),
+        });
+        h.prime(3);
+        let row =
+            h.ui.rect(port_wid(PortKind::Input, 0))
+                .expect("the input row recorded");
+        let value =
+            h.ui.rect(port_wid(PortKind::Input, 0).with("value"))
+                .expect("the value recorded");
+        let theme = Theme::default();
+        let line = theme.palantir.text.line_height_for(theme.text.body).ceil();
+        assert!(
+            row.size.h <= line,
+            "{} against one line of {line}",
+            row.size.h
+        );
+        assert_eq!(value.max().x, row.max().x, "the value ends the row");
     }
 
     /// The selection's inspector shows its one node, ties aside; none or several nodes show the

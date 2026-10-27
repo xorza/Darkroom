@@ -43,13 +43,11 @@ pub(crate) struct AppColors {
     /// the pointer.
     pub(crate) link: RgbaF32,
     pub(crate) link_hovered: RgbaF32,
-    /// Sink chip — error red.
-    pub(crate) badge_sink: RgbaF32,
     /// `RuntimeCache` (persist-to-disk) chip — warning yellow.
     pub(crate) badge_cache: RgbaF32,
-    /// Impure marker. A read-only descriptor (the node recomputes every run
-    /// and is never cached), not an interactive toggle.
-    pub(crate) badge_impure: RgbaF32,
+    /// The kind mark: a read-only descriptor of what the node is (a sink, or
+    /// recomputed every run), in the title's white, as a kind is not a status.
+    pub(crate) badge_kind: RgbaF32,
 }
 
 impl AppColors {
@@ -64,9 +62,8 @@ impl AppColors {
             badge_graph: p.badge_graph,
             link: p.badge_graph,
             link_hovered: color::toward(p.badge_graph, RgbaF32::WHITE, LINK_HOVER_LIFT),
-            badge_sink: p.badge_sink,
             badge_cache: p.badge_cache,
-            badge_impure: p.badge_impure,
+            badge_kind: p.badge_kind,
         }
     }
 

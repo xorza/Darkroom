@@ -118,6 +118,7 @@ impl DockTabs for DockPanes<'_> {
                     theme: app.theme(),
                     title,
                     previews,
+                    status: app.run_state().exec_status(node_id),
                     size: size.map(Vec2::from),
                 };
                 viewer.show(

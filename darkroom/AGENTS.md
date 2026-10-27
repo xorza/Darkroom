@@ -266,20 +266,32 @@ layout only: the graph does not change, and the run does not read it.
   error line. A node `RunError::SkippedUpstream` stopped loses its frame, and its footer says
   "Skipped · input failed" in the muted ink. Refused: a red frame on each skipped node, which
   made one missing file into 15 frames of one weight.
-- **Status hues are for status only.** Red, green, amber and blue on a frame, a footer and the
-  status bar mean error, success, warning and info; a port or wire hue never stands for one.
-  An event port is white, as Unreal Blueprint draws its execution pins, and an untyped input a
-  hollow muted ring, as Blender 5 tells socket structure by shape. Refused: the event port in
-  the error red, to match a sink marker.
+- **A status and a type share a hue, never a form.** A status is a node's frame, its footer
+  word and the status bar; a type is a port dot and a wire. Bool is the error red, String the
+  success green, Path the info blue and Image the warning orange, as Blender and Unreal draw a
+  red Bool beside a red error. An event port is white, as Unreal Blueprint draws its execution
+  pins, and an untyped input a hollow muted ring, as Blender 5 tells socket structure by
+  shape. Refused: moving the four types to their light-row tints, which fall near the 3:1 floor
+  and under the 0.06 OKLab wire floor; moving the statuses, which costs the desktop's own alarm
+  red and green. Chosen by the user on 2026-10-27.
+- **A kind mark is not a status.** One mark after a node's title says what it is, a sink or
+  recomputed every run, in the title's white. Refused: the sink mark in the error red.
 - **Every port and wire hue clears 3:1 and APCA Lc 40 on a node's body**, the WCAG 2.2 bar for
   a graphic a user must see (SC 1.4.11) and the floor ayu-graphite holds its `light` row to;
   `build.py` checks both beside its wire separation floor. Refused: Lc 45, APCA's figure for
   icons, which no free hue past cyan reaches.
 - **A node keeps the `elem` fill**, and a 1 px rule divides its title from its ports. Refused:
   the `panel` fill, which breaks the generator's surface ladder.
-- **One type ladder for darkroom and palantir.** `TypeScale` sets palantir's ambient text, so no
-  palantir widget shows its 16 px default. Refused: an 8.5 px caption, too small at scale 1; a
-  12 px label, a point under the body.
+- **One type ladder for darkroom and palantir: title 16, body 14, label 12**, the Windows Fluent
+  2 ramp. `TypeScale` sets palantir's ambient text, so no palantir widget shows a size of its
+  own. Refused: 15/13/11, the macOS and KDE body size, which read small on a 57" screen at scale
+  1.5; an 8.5 px caption, too small at scale 1; a label a point under the body, which reads as
+  the same size. Chosen by the user on 2026-10-27.
+- **Interface size is a preference**, from 80 to 150 % on palantir's `UserScale` steps, as VS
+  Code's zoom and Blender's Resolution Scale scale a whole UI: text, spacing, icons and strokes
+  together, and the same on every monitor. Refused: a font size alone, which grows text inside
+  chrome that keeps its size; a free number, as each factor re-rasterizes every glyph. Chosen by
+  the user on 2026-10-27.
 - **Space and radius are scales on the theme**, beside `TypeScale`, and the bridge hands them to
   palantir. A literal size at a call site is a missing token.
 - **One icon set.** Every glyph on a node and a toolbar is a stroke `Icon` at one stroke width,
@@ -288,6 +300,13 @@ layout only: the graph does not change, and the run does not read it.
 - **The inspector is a dock pane at UI scale**, following the selection; a pin opens a tab that
   keeps one node. Refused: a panel on the canvas, which zoomed with the nodes to about 6 px
   text and covered its neighbor, and a Closed → Open → Pinned chip the user must remember.
+- **A value reads as a field**, as Blender's and Unreal's node inputs do: a quiet box at rest, the
+  value at the left of its column, numbers in the mono face, and "—" in the muted ink for an
+  input with nothing in it that could hold a constant. Refused: plain text, which does not say
+  it is editable.
+- **One formatter for each kind of value**, `ShownValue`, which the node's fields and the
+  inspector both read. Refused: the inspector's own `ConstValue` text, which showed `5.0000`
+  and "15 paths" beside the node's `5.000` and "15 files".
 - **A path shows its file name, cut in the middle**, with palantir's `TextWrap::EllipsisMiddle`
   and the whole path as tooltip, so the kept end holds the extension, as macOS, Qt and Pango
   cut a file name.

@@ -32,14 +32,14 @@ pub(crate) struct TypeScale {
 }
 
 impl TypeScale {
-    /// The authored scale. Three tiers, each a step the eye can actually
-    /// resolve: the 15/14 and 13/12 and 11/10.5 pairs this replaced sat a
-    /// half-step or a point apart and read as one size, so the smaller of
-    /// each was doing no work its neighbour wasn't. Label is the floor: an
-    /// 8.5 px caption below it was too small to read at scale 1.
+    /// The authored scale, the Windows Fluent 2 ramp (Body 14, Caption 12,
+    /// Subtitle 16): two points between tiers, a step the eye resolves, where a
+    /// point apart reads as one size. 15/13/11, the macOS and KDE body size, read
+    /// small on a large screen at scale 1.5; a whole-UI factor on top is the
+    /// interface size preference, not another tier.
     pub(super) const DEFAULT: Self = Self {
-        title: 15.0,
-        body: 13.0,
-        label: 11.0,
+        title: 16.0,
+        body: 14.0,
+        label: 12.0,
     };
 }

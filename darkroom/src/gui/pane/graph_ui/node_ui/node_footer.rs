@@ -70,9 +70,6 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
         // rounded bottom.
         .chrome(card::footer_chrome(theme, r))
         .show(ui, |ui| {
-            if let ExecStatus::Errored(Some(message)) = status {
-                error_line(ui, theme, message);
-            }
             Panel::hstack()
                 .id_salt("node_footer_row")
                 .size((Sizing::FILL, Sizing::HUG))
@@ -80,7 +77,11 @@ pub(super) fn show(ui: &mut Ui, node_ctx: NodeCtx<'_>) {
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     run_status(ui, node_ctx);
-                    support::hspacer(ui, "node_footer_spacer");
+                    // A failure's message takes the row's free width, where the spacer would.
+                    match status {
+                        ExecStatus::Errored(Some(message)) => error_line(ui, theme, message),
+                        _ => support::hspacer(ui, "node_footer_spacer"),
+                    }
                     for pool in Pool::held(theme, ram) {
                         pool.meter(ui, theme);
                     }
@@ -107,7 +108,8 @@ fn error_line(ui: &mut Ui, theme: &Theme, message: &str) {
 }
 
 /// The last run's word on the node, in its status ink: a check and the time when it ran, the
-/// spinner and the live time while it runs, and a word for the rest.
+/// spinner and the live time while it runs, a cross when it failed — "Failed" beside it only
+/// when no message came to say why — and a word for the rest.
 fn run_status(ui: &mut Ui, node: NodeCtx<'_>) {
     let theme = node.theme();
     let status = node.exec_status();
@@ -115,13 +117,7 @@ fn run_status(ui: &mut Ui, node: NodeCtx<'_>) {
     match status {
         ExecStatus::None => {}
         ExecStatus::Executed(secs) => {
-            let side = theme.text.label;
-            Panel::zstack()
-                .id_salt("node_footer_check")
-                .size((Sizing::fixed(side), Sizing::fixed(side)))
-                .show(ui, |ui| {
-                    Icon::Check.draw(ui, Rect::new(0.0, 0.0, side, side), color);
-                });
+            status_icon(ui, theme, Icon::Check, color);
             run_time(ui, theme, *secs, color);
         }
         ExecStatus::Running(at) => {
@@ -133,9 +129,25 @@ fn run_status(ui: &mut Ui, node: NodeCtx<'_>) {
         }
         ExecStatus::Cached => word(ui, theme, "Cached", color),
         ExecStatus::MissingInputs(_) => word(ui, theme, "Missing input", color),
-        ExecStatus::Errored(_) => word(ui, theme, "Failed", color),
+        ExecStatus::Errored(message) => {
+            status_icon(ui, theme, Icon::Cross, color);
+            if message.is_none() {
+                word(ui, theme, "Failed", color);
+            }
+        }
         ExecStatus::Skipped => word(ui, theme, "Skipped \u{b7} input failed", color),
     }
+}
+
+/// `icon` at the label tier's size, in `color`.
+fn status_icon(ui: &mut Ui, theme: &Theme, icon: Icon, color: RgbaF32) {
+    let side = theme.text.label;
+    Panel::zstack()
+        .id_salt("node_footer_icon")
+        .size((Sizing::fixed(side), Sizing::fixed(side)))
+        .show(ui, |ui| {
+            icon.draw(ui, Rect::new(0.0, 0.0, side, side), color);
+        });
 }
 
 fn run_time(ui: &mut Ui, theme: &Theme, secs: f64, color: RgbaF32) {
@@ -279,6 +291,48 @@ mod tests {
                 Elapsed::new(s),
             );
         }
+    }
+
+    /// A failed node's footer is one row: the cross and the message's first line, the whole
+    /// message its tooltip, one label line tall inside the band's padding, with no "Failed"
+    /// beside a message that says why.
+    #[test]
+    fn a_failed_node_says_why_on_one_row() {
+        use std::io;
+        use std::sync::Arc;
+
+        use scenarium::{InvokeError, NodeExecStatus, NodeStatus, RamUsage, RunError, RunSummary};
+
+        use crate::gui::pane::graph_ui::node_ui::card;
+
+        let mut h = CanvasHarness::new(DocumentFixture::probes(1));
+        let node_id = h.node(0);
+        h.ctx.run_state.complete(RunSummary {
+            nodes: vec![NodeStatus {
+                node_id,
+                status: Some(NodeExecStatus::Errored {
+                    error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
+                        "no light frames\nprovided",
+                    )))),
+                }),
+                ram: RamUsage::default(),
+            }],
+            ..RunSummary::default()
+        });
+        h.prime(2);
+        let footer =
+            h.ui.rect(footer_wid(node_id))
+                .expect("a failure has a footer");
+        let theme = Theme::default();
+        // One label line, 12 × 1.2 = 14.4 px, snapped to the 1/64 px grid the measurer keeps
+        // metrics on: 922 / 64.
+        let line = (theme.palantir.text.line_height_for(theme.text.label) * 64.0).round() / 64.0;
+        let pad = card::band_padding(&theme);
+        assert_eq!(footer.size.h, pad.sums().h + line, "one row");
+        let mut listed = Vec::new();
+        h.ui.ui().inspect(&mut listed);
+        let texts: Vec<&str> = listed.iter().map(|widget| widget.text.as_str()).collect();
+        assert!(!texts.contains(&"Failed"), "{texts:?}");
     }
 
     /// A node that never ran and holds no bytes has nothing to report, so it records no footer.

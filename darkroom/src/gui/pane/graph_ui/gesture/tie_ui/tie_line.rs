@@ -91,7 +91,9 @@ impl TieLine {
                         wire,
                         piece,
                         along,
-                        point: self.start.lerp(self.end, along),
+                        // Start plus the fraction of the run, not `lerp`'s weighted sum of
+                        // the ends, which rounds a straight line's own coordinate off it.
+                        point: self.start + (self.end - self.start) * along,
                     });
                 }
             }

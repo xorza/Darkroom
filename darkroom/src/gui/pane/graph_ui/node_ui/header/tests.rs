@@ -1,10 +1,12 @@
 use glam::{UVec2, Vec2};
 use scenarium::{CacheMode, NodeId};
 use std::mem;
+use std::sync::Arc;
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::node_property::NodeProperty;
+use crate::core::preview_sink;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
@@ -174,5 +176,26 @@ fn the_inspect_button_selects_its_node_and_opens_one_inspector() {
             BTreeSet::from([ItemId::Node(node_id)])
         );
         assert_eq!(inspectors(&h), 1, "one inspector tab");
+    }
+}
+
+/// A preview node is a sink recomputed every run, and says so with one kind mark between its
+/// title and the controls pinned right, not a mark for each kind.
+#[test]
+fn a_preview_node_shows_one_kind_mark_after_its_title() {
+    let mut fixture = DocumentFixture::default();
+    let preview = fixture.add(&preview_sink::func(Arc::default()));
+    let mut h = CanvasHarness::sized(fixture, SURFACE);
+    h.prime(2);
+    let title = h.ui.rect(wid::rename(preview)).expect("recorded");
+    let mark =
+        h.ui.rect(wid::of_node("kind_mark", preview))
+            .expect("a preview has a kind mark");
+    let disable =
+        h.ui.rect(wid::of_node("disable_button", preview))
+            .expect("a sink can be disabled");
+    assert!(title.max().x <= mark.min.x && mark.max().x <= disable.min.x);
+    for gone in ["sink_mark", "impure_mark"] {
+        assert_eq!(h.ui.rect(wid::of_node(gone, preview)), None, "{gone}");
     }
 }

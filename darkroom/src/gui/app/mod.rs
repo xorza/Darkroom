@@ -187,8 +187,10 @@ impl App {
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
-        // Onto the Ui before frame 1, so palantir's own widgets paint right.
+        // Onto the Ui before frame 1, so palantir's own widgets paint right and the first frame
+        // is at the remembered size.
         ui.set_theme(app.theme.palantir.clone());
+        ui.set_user_scale(app.preferences.interface_size.user_scale());
         // A remembered document that failed to load is forgotten, and that is
         // persisted, so the next launch does not fail on it again.
         if forgot_remembered {
@@ -718,6 +720,12 @@ impl palantir::App for App {
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
             needs_relayout |= self.run_command(command);
+        }
+        // The Preferences tab edits the size in place; palantir takes a new one from the next
+        // frame, and only a new one, as each re-rasterizes every glyph.
+        let interface = self.preferences.interface_size.user_scale();
+        if ui.user_scale() != interface {
+            ui.set_user_scale(interface);
         }
         if let Some(capture) = &mut self.capture {
             capture.ask(ui);

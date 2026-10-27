@@ -1,5 +1,5 @@
 //! Node header: the title and the node's controls, in one row. Which controls —
-//! run, the sink and impure marks, disable, the cache menu and inspect — and
+//! run, the kind mark, disable, the cache menu and inspect — and
 //! what each one does is this module's business; how one *looks* belongs to
 //! [`IconButton`]. Drawn as the first child of each node body by
 //! [`crate::gui::pane::graph_ui::node_ui::NodeUi`], over a 1 px rule that
@@ -68,10 +68,10 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     .show(ui);
 }
 
-/// The header row: the run button, the title, then — pinned to the right edge by a `FILL`
-/// spacer — the sink and impure marks, the disable button, the cache button and the inspect
-/// button. The sink nodes' event-subscription pin is *not* drawn here — it records at canvas
-/// level, before the node bodies, so it peeks out from behind the node's corner.
+/// The header row: the run button, the title and its kind mark, then — pinned to the right edge
+/// by a `FILL` spacer — the disable button, the cache button and the inspect button. The sink
+/// nodes' event-subscription pin is *not* drawn here — it records at canvas level, before the
+/// node bodies, so it peeks out from behind the node's corner.
 pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let (theme, node) = (record.node.theme(), record.node);
     Panel::hstack()
@@ -87,25 +87,8 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                     .push_app(AppCommand::Run(RunCommand::Node(node.node_id)));
             }
             title(ui, record);
+            kind_mark(ui, node);
             support::hspacer(ui, "header_spacer");
-            if node.sink() {
-                IconButton::mark(
-                    Icon::Sink,
-                    wid::of_node("sink_mark", node.node_id),
-                    theme.colors.badge_sink,
-                    "Sink — runs for its effect, not for a value",
-                )
-                .show(ui, theme);
-            }
-            if node.impure() {
-                IconButton::mark(
-                    Icon::Impure,
-                    wid::of_node("impure_mark", node.node_id),
-                    theme.colors.badge_impure,
-                    "Impure — recomputes every run, never cached",
-                )
-                .show(ui, theme);
-            }
             if node.can_disable() {
                 disable_button(ui, record);
             }
@@ -132,6 +115,29 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     Separator::horizontal()
         .color(theme.colors.border_soft())
         .show(ui);
+}
+
+/// The one mark that says what kind of node this is, after its title: the sink icon for a sink,
+/// else the impure icon, the tooltip naming every kind the node has. Nothing for a node of
+/// neither kind.
+fn kind_mark(ui: &mut Ui, node: NodeCtx<'_>) {
+    let (icon, tooltip) = match (node.sink(), node.impure()) {
+        (true, true) => (
+            Icon::Sink,
+            "Sink \u{b7} impure — runs for its effect and recomputes every run",
+        ),
+        (true, false) => (Icon::Sink, "Sink — runs for its effect, not for a value"),
+        (false, true) => (Icon::Impure, "Impure — recomputes every run, never cached"),
+        (false, false) => return,
+    };
+    let theme = node.theme();
+    IconButton::mark(
+        icon,
+        wid::of_node("kind_mark", node.node_id),
+        theme.colors.badge_kind,
+        tooltip,
+    )
+    .show(ui, theme);
 }
 
 /// Show the inspector that follows the selection: where it already sits, else in a pane split

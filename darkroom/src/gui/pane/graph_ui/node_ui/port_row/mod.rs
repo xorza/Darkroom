@@ -17,6 +17,7 @@ use palantir::InternedStr;
 use palantir::prelude::*;
 use scenarium::Binding;
 use scenarium::FuncEvent;
+use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{ConstValue, DataType, FsPathMode};
@@ -364,19 +365,34 @@ fn input_label_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCt
         });
 }
 
-/// Column 1: the inline const editor for an input bound to a `Const`. A
-/// hug-sized column, so every editor starts at the same x.
+/// Column 1: the inline const editor for an input bound to a `Const`, and
+/// [`UNSET`](crate::gui::widgets::format::shown_value::UNSET) for one bound to
+/// nothing that could hold one. A hug-sized column, so every editor starts at
+/// the same x.
 fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>) {
     let node_ctx = record.node;
-    // The one owner of the "only Const bindings get an inline editor"
-    // filter — wired and unbound inputs render no value cell.
-    let Some(Binding::Const(value)) = input.binding() else {
-        return;
-    };
     let port = input.port();
+    let editor_id = wid::const_editor(port);
+    // The one owner of the "only Const bindings get an inline editor" filter: a wired input's
+    // value is its wire, and one that takes only a wire has no field to leave empty, so neither
+    // renders a value cell.
+    let value = match input.binding() {
+        Some(Binding::Const(value)) => value,
+        Some(Binding::Wire(_)) => return,
+        None if !input.takes_const() => return,
+        None => {
+            value_column(ui, port, |ui| {
+                Field {
+                    theme: node_ctx.const_editor_theme(),
+                    id: editor_id,
+                }
+                .empty(ui);
+            });
+            return;
+        }
+    };
     let data_type = input.data_type();
     let value_variants = input.value_variants();
-    let editor_id = wid::const_editor(port);
     // An `FsPath` editor draws a pick button; clicking it raises a blocking
     // file dialog, which only `App` can run — so this is the app tier.
     //
@@ -396,32 +412,37 @@ fn value_cell(ui: &mut Ui, record: &mut NodeRecord<'_, '_>, input: InputCtx<'_>)
                 config: Arc::clone(config),
             })));
     }
-    // Fill the value column so every editor is the same width (the column
-    // hugs to the widest editor's content). `min_size` on the editors keeps
-    // a sensible floor; the editor fills this cell, this cell fills the col.
-    let edited = Panel::hstack()
-        .id_salt(("val", port.port_idx))
-        .grid_cell((grid_row(port.port_idx), COL_VALUE))
-        .size((Sizing::FILL, Sizing::FILL))
-        .child_align(Align::v(VAlign::Center))
-        .show(ui, |ui| {
-            ConstEditor {
-                field: Field {
-                    theme: node_ctx.const_editor_theme(),
-                    id: editor_id,
-                },
-                library: node_ctx.graph_ctx.library(),
-                value,
-                data_type,
-                value_variants,
-            }
-            .show(ui)
-        });
-    if let Some(new_value) = edited.inner {
+    let edited = value_column(ui, port, |ui| {
+        ConstEditor {
+            field: Field {
+                theme: node_ctx.const_editor_theme(),
+                id: editor_id,
+            },
+            library: node_ctx.graph_ctx.library(),
+            value,
+            data_type,
+            value_variants,
+        }
+        .show(ui)
+    });
+    if let Some(new_value) = edited {
         record
             .out
             .push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
     }
+}
+
+/// The value column's cell of the input at `port`: filled, so every editor is the same width
+/// (the column hugs to the widest editor's content). `min_size` on the editors keeps a sensible
+/// floor; the editor fills this cell, this cell fills the column.
+fn value_column<R>(ui: &mut Ui, port: InputPort, body: impl FnOnce(&mut Ui) -> R) -> R {
+    Panel::hstack()
+        .id_salt(("val", port.port_idx))
+        .grid_cell((grid_row(port.port_idx), COL_VALUE))
+        .size((Sizing::FILL, Sizing::FILL))
+        .child_align(Align::v(VAlign::Center))
+        .show(ui, body)
+        .inner
 }
 
 /// Column 3: the output label + circle, right-aligned (the fill column

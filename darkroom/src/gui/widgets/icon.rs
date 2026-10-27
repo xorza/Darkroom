@@ -45,6 +45,8 @@ pub(crate) enum Icon {
     Pixels,
     /// Done: a check mark.
     Check,
+    /// Failed: a cross.
+    Cross,
     /// Keep in place: a push pin.
     Pin,
 }
@@ -119,6 +121,10 @@ impl Icon {
                 pen.open(ui, &[(9.0, 20.0), (4.0, 20.0), (4.0, 15.0)]);
             }
             Self::Check => pen.open(ui, &[(4.5, 12.5), (9.5, 17.5), (19.5, 6.5)]),
+            Self::Cross => {
+                pen.line(ui, (6.0, 6.0), (18.0, 18.0));
+                pen.line(ui, (18.0, 6.0), (6.0, 18.0));
+            }
             Self::Pin => {
                 pen.line(ui, (9.0, 3.5), (15.0, 3.5));
                 pen.closed(

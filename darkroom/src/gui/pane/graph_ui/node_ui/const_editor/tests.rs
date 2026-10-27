@@ -61,11 +61,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
                 .text
                 .clone();
         });
-        assert_eq!(
-            buffered,
-            ConstValue::Null.value_text().to_string(),
-            "frame {frame}"
-        );
+        assert_eq!(buffered, UNSET, "frame {frame}");
     }
 }
 
@@ -226,34 +222,6 @@ fn format_any_round_trips_non_string_kinds() {
     assert_eq!(
         parse_any(&formatted_any(&ConstValue::String("42".into()))),
         ConstValue::Int(42)
-    );
-}
-
-#[test]
-fn path_previews_distinguish_single_modes_and_multi_selections() {
-    let single = |path, mode| PathPreview::single(path, mode).to_string();
-    let multi = |paths: &[String]| PathPreview::multi(paths).to_string();
-
-    assert_eq!(single("", FsPathMode::ExistingFile), "Choose file…");
-    assert_eq!(single("", FsPathMode::NewFile), "Choose save path…");
-    assert_eq!(single("", FsPathMode::Dir), "Choose directory…");
-    assert_eq!(
-        single("frames/light-01.raf", FsPathMode::ExistingFile),
-        "light-01.raf"
-    );
-    // The name is a slice of the path it came from, not a rebuild of it —
-    // which is what keeps a per-frame button label off the heap.
-    assert!(matches!(
-        PathPreview::single("frames/light-01.raf", FsPathMode::ExistingFile),
-        PathPreview::Name(Cow::Borrowed("light-01.raf"))
-    ));
-
-    assert_eq!(multi(&[]), "Choose files…");
-    assert_eq!(multi(&[String::new()]), "Choose files…");
-    assert_eq!(multi(&["frames/light-01.raf".to_string()]), "1 file");
-    assert_eq!(
-        multi(&["a.raf".to_string(), "b.raf".to_string()]),
-        "2 files"
     );
 }
 

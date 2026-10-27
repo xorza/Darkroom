@@ -125,10 +125,17 @@ fn release(line: &TieLine, view: &GraphView, out: &mut Requests) {
         None if line.wires.is_empty() => return,
         None => {
             let tie = TieId::unique();
-            let sum: Vec2 = line.wires.iter().map(|crossing| crossing.point).sum();
+            // The first crossing plus the mean offset from it: a plain sum of the points rounds
+            // (three of one x is not exactly 3x), which would set the tie a hair off the line.
+            let first = line.wires[0].point;
+            let offset: Vec2 = line
+                .wires
+                .iter()
+                .map(|crossing| crossing.point - first)
+                .sum();
             out.push_graph(GraphIntent::TieWires {
                 tie,
-                pos: sum / line.wires.len() as f32,
+                pos: first + offset / line.wires.len() as f32,
                 wires: line.wires.iter().map(insert).collect(),
             });
             tie
