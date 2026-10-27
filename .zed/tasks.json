@@ -5,13 +5,13 @@
     // shell syntax, and Zed spawns tasks through PowerShell on Windows, which
     // reads it as a command name and fails.
     "command": "cargo",
-    "args": ["run", "-p", "darkroom"],
+    "args": ["run", "-p", "darkroom-app"],
     "env": { "RUST_BACKTRACE": "1" },
   },
   {
     "label": "run darkroom release-dev",
     "command": "cargo",
-    "args": ["run", "--profile", "release-dev", "-p", "darkroom"],
+    "args": ["run", "--profile", "release-dev", "-p", "darkroom-app"],
     "env": { "RUST_BACKTRACE": "1" },
   },
   {
@@ -22,9 +22,9 @@
       "--profile",
       "bench",
       "-p",
-      "darkroom",
+      "darkroom-app",
       "--features",
-      "profile-with-tracy",
+      "darkroom/profile-with-tracy",
     ],
   },
   {
