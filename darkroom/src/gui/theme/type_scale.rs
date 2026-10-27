@@ -25,7 +25,7 @@ pub(crate) struct TypeScale {
     /// has a reason to win.
     pub(crate) body: f32,
     /// Labels on dense surfaces, where body would crowd: inspector port rows,
-    /// a node's preview row, the viewer's swatch caption, and the tabular
+    /// a node's preview row, and the tabular
     /// figures beside them (byte counts, dimensions) — the mono family comes
     /// from [`crate::gui::widgets::support::mono_text`], not from a tier of
     /// its own.

@@ -7,16 +7,19 @@ use glam::{IVec2, UVec2};
 use lens::MlModelPaths;
 use palantir::ImageFilter;
 
-use crate::core::io::preferences;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
+use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::core::io::preferences::{Preferences, ViewerBg, ViewerPreferences, WindowState};
 
 /// The file is named for the app, and lies in the OS's configuration directory
 /// (`platform/*` `resolve_config_dir` tests cover that resolution).
 #[test]
 fn the_preferences_file_is_named_for_the_app() {
+    let PreferencesStore::File(path) = PreferencesStore::user() else {
+        panic!("the user's store is a file");
+    };
     assert_eq!(
-        preferences::path().file_name(),
+        path.file_name(),
         Some(OsStr::new("darkroom.preferences.ron"))
     );
 }
@@ -42,7 +45,7 @@ fn preferences_roundtrip() {
         window: Some(WindowState {
             size: UVec2::new(1440, 900),
             maximized: true,
-            pos: Some(IVec2::new(120, -40)),
+            physical_pos: Some(IVec2::new(120, -40)),
         }),
         viewer: ViewerPreferences {
             bg: ViewerBg::Checker,
@@ -64,25 +67,37 @@ fn preferences_roundtrip() {
     }
 }
 
-/// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads.
+/// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads. A `window` entry
+/// with only a size defaults `maximized` to `false`, and with no `physical_pos` key the
+/// position stays `None`, as on Wayland.
 #[test]
 fn partial_preferences_fill_defaults() {
-    let empty: Preferences = SerdeFormat::Ron
-        .deserialize(b"()")
-        .expect("empty preferences");
-    assert_eq!(empty, Preferences::default());
-
-    let partial = b"(confirm_unsaved_changes: false)";
-    let preferences: Preferences = SerdeFormat::Ron
-        .deserialize(partial)
-        .expect("partial preferences deserializes");
-    assert_eq!(
-        preferences,
-        Preferences {
-            confirm_unsaved_changes: false,
-            ..Preferences::default()
-        }
-    );
+    for (text, expected) in [
+        (&b"()"[..], Preferences::default()),
+        (
+            b"(confirm_unsaved_changes: false)",
+            Preferences {
+                confirm_unsaved_changes: false,
+                ..Preferences::default()
+            },
+        ),
+        (
+            b"(window: Some((size: (800, 600))))",
+            Preferences {
+                window: Some(WindowState {
+                    size: UVec2::new(800, 600),
+                    maximized: false,
+                    physical_pos: None,
+                }),
+                ..Preferences::default()
+            },
+        ),
+    ] {
+        let preferences: Preferences = SerdeFormat::Ron
+            .deserialize(text)
+            .expect("partial preferences deserialize");
+        assert_eq!(preferences, expected, "{}", String::from_utf8_lossy(text));
+    }
 }
 
 /// The default reopens the last document and asks before it discards changes,
@@ -97,24 +112,9 @@ fn default_preferences() {
     assert_eq!(defaults.viewer.bg, ViewerBg::Theme);
     assert_eq!(defaults.viewer.mag_filter, ImageFilter::Nearest);
     assert_eq!(defaults.ml_models, MlModelPaths::default());
-}
-
-#[test]
-fn partial_window_entry_fills_missing_fields_and_omits_position() {
-    // A hand-edited `window` entry carrying only a size: the missing
-    // `maximized` defaults to `false` and, with no `pos` key, the
-    // physical position stays `None` (the Wayland case).
-    let partial = b"(window: Some((size: (800, 600))))";
-    let preferences: Preferences = SerdeFormat::Ron
-        .deserialize(partial)
-        .expect("partial window entry deserializes");
-    assert_eq!(
-        preferences.window,
-        Some(WindowState {
-            size: UVec2::new(800, 600),
-            maximized: false,
-            pos: None,
-        })
+    assert!(
+        defaults.relative_paths,
+        "paths inside the folder save relative"
     );
 }
 

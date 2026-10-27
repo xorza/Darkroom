@@ -7,7 +7,7 @@ use crate::core::document::graph_view::GraphView;
 use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::gui::pane::graph_ui::draw::tie::tie_layout::{Span, TieLayout};
+use crate::gui::pane::graph_ui::frame::tie_layout::{Span, TieLayout};
 
 /// A data wire of its own, from a fresh node to another.
 fn wire() -> WireKey {
@@ -17,12 +17,12 @@ fn wire() -> WireKey {
     })
 }
 
-/// A view with one tie at `centre`, turned by `angle`, through which each of `wires` runs, and
+/// A view with one tie at `center`, turned by `angle`, through which each of `wires` runs, and
 /// the layout of it with each wire's ends at its span.
-fn tied(centre: Vec2, angle: TieAngle, wires: &[(WireKey, Span)]) -> TieLayout {
+fn tied(center: Vec2, angle: TieAngle, wires: &[(WireKey, Span)]) -> TieLayout {
     let tie = TieId::unique();
     let mut view = GraphView::default();
-    view.ties.insert(tie, Tie { pos: centre, angle });
+    view.ties.insert(tie, Tie { pos: center, angle });
     for &(wire, _) in wires {
         view.routes.insert(wire, Route::new([tie]));
     }
@@ -71,7 +71,7 @@ fn the_barycenters_order_a_band() {
         "the strands run along x, the axis along +y: {band:?}"
     );
     for (wire, along) in [(m2, -13.5), (m1, -4.5), (m4, 4.5), (m3, 13.5)] {
-        assert_eq!(slot(&layout, wire), band.centre + band.axis * along);
+        assert_eq!(slot(&layout, wire), band.center + band.axis * along);
     }
 }
 
@@ -109,7 +109,7 @@ fn a_band_pinned_to_ninety_degrees_runs_its_strands_along_x() {
 /// Three level strands at y -10, 0 and 10 through a tie at the origin run along `x`, so the axis
 /// is `+y` and the slots sit `(rank - 1) · 9` along it: -9, 0 and +9.
 #[test]
-fn three_strands_sit_nine_apart_about_the_centre() {
+fn three_strands_sit_nine_apart_about_the_center() {
     let [low, mid, high] = [wire(), wire(), wire()];
     let layout = tied(
         Vec2::ZERO,
@@ -160,7 +160,7 @@ fn a_tied_wire_keeps_its_tangent_through_the_slot() {
 fn a_tied_event_wire_meets_its_pin_from_the_up_left() {
     use scenarium::{EventPort, Subscription};
 
-    use crate::gui::pane::graph_ui::draw::wire::Wire;
+    use crate::gui::pane::graph_ui::frame::wire::Wire;
 
     let event = WireKey::Event(Subscription::new(
         EventPort::new(NodeId::unique(), 0),
@@ -184,7 +184,7 @@ fn a_tied_event_wire_meets_its_pin_from_the_up_left() {
 
 /// Two ties in a chain keep one strand order. Both strands leave `t1` from different heights and
 /// meet `t2`'s far side at one point, so on the first pass `t2` sees equal barycenters and breaks
-/// them by wire key. The later passes read `t1`'s slots instead of its centre, so `t2` takes
+/// them by wire key. The later passes read `t1`'s slots instead of its center, so `t2` takes
 /// `t1`'s order, low over high, even with the keys the other way round.
 #[test]
 fn chained_ties_keep_one_strand_order() {

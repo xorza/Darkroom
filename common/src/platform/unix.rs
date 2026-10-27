@@ -1,11 +1,14 @@
 //! What Linux and macOS share: a scratch file unlinked while open, read-ahead advice, the free
 //! space of a file system; a rename that replaces in one step, a directory synced for its renames
-//! to last, and metadata that states the device, the inode and the change time.
+//! to last, metadata that states the device, the inode and the change time, and a program left
+//! running that leaves no zombie.
 
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::process::Command;
 
 use memmap2::{Advice, Mmap};
 use sysinfo::{Disk, Disks};
@@ -13,6 +16,19 @@ use sysinfo::{Disk, Disks};
 use crate::fs::PublicationMode;
 use crate::fs::file_identity::FileId;
 use crate::platform::{Observed, Stated};
+use crate::thread;
+
+/// Start `program` with `args` and leave it running: nothing reads its output, and a thread of
+/// its own waits for its exit, so the system reaps it rather than keep a zombie until this
+/// process ends.
+pub(super) fn spawn_detached(
+    program: impl AsRef<OsStr>,
+    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
+) -> io::Result<()> {
+    let mut child = Command::new(program).args(args).spawn()?;
+    thread::spawn("child-reaper", move || child.wait().ok());
+    Ok(())
+}
 
 /// A new file at `path`, unlinked as soon as it is created, before any data goes in. A crash in
 /// the instant between can leave it behind, empty.

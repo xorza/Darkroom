@@ -166,6 +166,11 @@ One word, one meaning, in the workspace crates; the submodules keep their own.
   mode name; `gray` and `grey`, which the crates spelled both ways.
 - **A descriptor is a `desc`, a `Size2us` a `size`.** Refused: `dimensions`,
   which named both.
+- **Bytes are KiB, MiB and GiB**, 1024-based as RAM is sized, the IEC 80000-13 names. Refused:
+  SI kB at 1000, and KB at 1024, which the standard reads as 1000
+  ([Ubuntu units policy](https://wiki.ubuntu.com/UnitsPolicy)).
+- **A run time under 1 µs reads in ns**, and one above 0 that prints as `0ns` reads `<1ns`, so
+  time taken never reads as none.
 - **The surround is the editor's menu bar, tab strip and status bar**;
   `chrome` is palantir's `Chrome` alone, a widget's fill, border, radii and
   shadow. Refused: chrome for the surround, and frame, which is one pass of the

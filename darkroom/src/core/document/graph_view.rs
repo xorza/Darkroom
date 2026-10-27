@@ -52,9 +52,9 @@ pub(crate) struct StackedNode {
 /// itself lives in the core `Graph`; this is purely how the editor presents
 /// and navigates it.
 ///
-/// **Everything here is persisted and undoable, by design** — reopening
-/// a file restores the exact camera and selection, and Ctrl+Z walks
-/// camera/selection changes alongside structural edits.
+/// Everything here is saved, so reopening a file restores the exact camera
+/// and selection. Ctrl+Z walks the selection with the structural edits but
+/// not the camera (`darkroom/AGENTS.md`, "The camera is outside the undo history").
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
     /// Every node body's placement. Exactly one entry per graph node and per
@@ -62,8 +62,7 @@ pub(crate) struct GraphView {
     ///
     /// Order-insensitive on purpose: paint order rides in each entry's
     /// [`NodePlacement::z`], so this map is free to be keyed and compared as a
-    /// set. Ten of the eleven callers that walk the nodes don't care about
-    /// stacking at all, and the one that does asks for [`Self::paint_order`].
+    /// set. A caller that needs the stacking asks for [`Self::paint_order`].
     pub(crate) node_placements: BTreeMap<NodeId, NodePlacement>,
     /// Every wire tie. Each holds at least one wire, a route that names it.
     pub(crate) ties: BTreeMap<TieId, Tie>,
@@ -227,7 +226,7 @@ impl GraphView {
     }
 
     /// Where `item` sits, the top-left corner of a node body or a tie's
-    /// centre, or `None` for an item the view does not hold.
+    /// center, or `None` for an item the view does not hold.
     pub(crate) fn pos(&self, item: ItemId) -> Option<Vec2> {
         match item {
             ItemId::Node(node_id) => self.node_placements.get(&node_id).map(|placed| placed.pos),

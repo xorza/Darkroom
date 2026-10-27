@@ -5,7 +5,7 @@ use common::FileIdentity;
 use serde::{Deserialize, Serialize};
 
 use crate::io::decoder::decode_params::DecodeParams;
-use crate::io::decoder::decode_pins::DECODE_VERSION;
+use crate::io::decoder::decode_version::DECODE_VERSION;
 use crate::io::decoder::decoder_kind::DecoderKind;
 use crate::io::load_ctx::LoadCtx;
 

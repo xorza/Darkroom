@@ -1,0 +1,86 @@
+([
+    (
+        label: "mono medians",
+        value: F32s([
+            0.100239635,
+        ]),
+    ),
+    (
+        label: "mono background sigmas",
+        value: F32s([
+            0.001411035,
+        ]),
+    ),
+    (
+        label: "mono sky",
+        value: F32s([
+            0.100239635,
+        ]),
+    ),
+    (
+        label: "mono quantization sigma",
+        value: F32s([
+            -1.0,
+        ]),
+    ),
+    (
+        label: "mosaic medians",
+        value: F32s([
+            0.10024844,
+            0.100246884,
+            0.1002127,
+        ]),
+    ),
+    (
+        label: "mosaic background sigmas",
+        value: F32s([
+            0.0016293434,
+            0.0016647542,
+            0.0016297222,
+        ]),
+    ),
+    (
+        label: "mosaic sky",
+        value: F32s([
+            0.10024844,
+            0.100246884,
+            0.1002127,
+        ]),
+    ),
+    (
+        label: "mosaic quantization sigma",
+        value: F32s([
+            -1.0,
+        ]),
+    ),
+    (
+        label: "demosaiced medians",
+        value: F32s([
+            0.10020753,
+            0.10018681,
+            0.10020399,
+        ]),
+    ),
+    (
+        label: "demosaiced background sigmas",
+        value: F32s([
+            0.0016293434,
+            0.0016647542,
+            0.0016297222,
+        ]),
+    ),
+    (
+        label: "demosaiced sky",
+        value: F32s([
+            0.10024844,
+            0.100246884,
+            0.1002127,
+        ]),
+    ),
+    (
+        label: "demosaiced quantization sigma",
+        value: F32s([
+            -1.0,
+        ]),
+    ),
+])

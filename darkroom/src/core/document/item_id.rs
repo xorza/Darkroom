@@ -23,3 +23,15 @@ impl ItemId {
         }
     }
 }
+
+impl From<NodeId> for ItemId {
+    fn from(node_id: NodeId) -> Self {
+        Self::Node(node_id)
+    }
+}
+
+impl From<TieId> for ItemId {
+    fn from(tie: TieId) -> Self {
+        Self::Tie(tie)
+    }
+}

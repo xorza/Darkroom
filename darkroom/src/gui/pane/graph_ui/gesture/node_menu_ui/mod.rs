@@ -1,8 +1,5 @@
-use std::collections::BTreeSet;
-
 use palantir::{MenuItem, MenuSeparator, Ui};
 
-use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
 use crate::gui::frame::app_command::AppCommand;
@@ -13,17 +10,17 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::draw::context_menu::ContextMenu;
+use crate::gui::pane::graph_ui::gesture::item_menu::ItemMenu;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
-/// [`ContextMenu`]'s. "Run to this node" needs only the clicked node's id
+/// [`ItemMenu`]'s. "Run to this node" needs only the clicked node's id
 /// and surfaces an [`AppCommand`]; the structural picks read the live
 /// selection off the context and push their intents onto the frame's queue,
 /// the same two builders the Ctrl+D and Delete chords drive.
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
-    menu: ContextMenu<NodeId>,
+    menu: ItemMenu<NodeId>,
 }
 
 /// A menu pick before routing. `Run` names the node the menu opened on; the
@@ -38,7 +35,7 @@ enum MenuChoice {
 
 impl NodeMenuUi {
     /// Close the menu.
-    pub(crate) fn reset(&mut self) {
+    pub(crate) const fn reset(&mut self) {
         self.menu.reset();
     }
 
@@ -47,23 +44,15 @@ impl NodeMenuUi {
         self.menu.is_open()
     }
 
-    /// Open the menu on `node`, which the record pass just saw right-clicked,
-    /// and select it if it isn't already part of the selection — so the chosen
-    /// action always targets a coherent set ("select then act"). A pick lands
-    /// frames later, so that selection is committed well before it is read
-    /// back.
-    ///
-    /// Returns the selection edit, when the node needs one.
+    /// Open the menu on `node`, which the record pass just saw right-clicked; see
+    /// [`ItemMenu::open_on`]. Returns the selection edit, when it needs one.
     pub(crate) fn open_on(
         &mut self,
         ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         node: NodeId,
     ) -> Option<GraphIntent> {
-        let select = self.menu.open_on(ui, node) && !graph_ctx.is_selected(ItemId::Node(node));
-        select.then(|| GraphIntent::SetSelection {
-            to: BTreeSet::from([ItemId::Node(node)]),
-        })
+        self.menu.open_on(ui, graph_ctx, node)
     }
 
     /// Record the menu and resolve this frame's pick onto `out` — a run as
@@ -73,6 +62,7 @@ impl NodeMenuUi {
     /// right-click; this only ever shows a menu already latched.
     pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = ctx.graph_ctx();
+        self.menu.retain(|node_id| graph_ctx.contains(node_id));
         let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
             let mut chosen = None;
             // "Run to this node" and the duplicates show only when the
@@ -119,6 +109,7 @@ impl NodeMenuUi {
                     graph_ctx.document(),
                     graph_ctx.library(),
                     incoming,
+                    || NodeId::unique().as_u128(),
                 ));
             }
             // One intent per member, batched into a single undo entry by the

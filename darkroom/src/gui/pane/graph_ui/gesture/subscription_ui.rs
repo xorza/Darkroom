@@ -1,26 +1,22 @@
-use glam::Vec2;
 use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
-use crate::core::document::wire_key::WireKey;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::draw::wire::glyph_drag::GlyphDrag;
-use crate::gui::pane::graph_ui::draw::wire::{Wire, WireEnds, WirePass, WireTint};
+use crate::gui::pane::graph_ui::draw::wire::WirePaint;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::gesture::tie_ui::tie_widget;
-use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::widgets::gesture_slot::GestureSlot;
-use crate::gui::widgets::hover::Hover;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
+use crate::gui::pane::graph_ui::gesture::glyph_drag::GlyphDrag;
 use scenarium::EventPort;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
-/// live on the authoring graph and are painted straight off it by the
-/// module-level [`draw`], which needs nothing from here.
+/// live on the authoring graph and are painted straight off it by
+/// [`WirePass::draw_event_wires`](crate::gui::pane::graph_ui::draw::wire::WirePass::draw_event_wires),
+/// which needs nothing from here.
 ///
 /// A sibling of [`crate::gui::pane::graph_ui::gesture::wire_ui::WireUi`] rather
 /// than a mode of it: an event wire carries no data type, runs no cycle /
@@ -34,13 +30,13 @@ use scenarium::EventPort;
 /// new-node spawn.
 #[derive(Default, Debug)]
 pub(crate) struct SubscriptionUi {
-    state: GestureSlot<InFlight>,
+    state: Option<InFlight>,
 }
 
 /// The in-flight event wire, discriminated by which end it started from —
 /// which is also what flips the drag's two glyph domains, so the two
 /// directions are distinct [`GlyphDrag`] types rather than one with a flag.
-/// Both commit the same `SetSubscription { subscribe: true }`.
+/// Both commit the same `SetSubscription { to: true }`.
 #[derive(Clone, Copy, Debug)]
 enum InFlight {
     /// Started on an emitter event glyph; snapping to a subscription pin.
@@ -62,8 +58,8 @@ impl InFlight {
 
 impl SubscriptionUi {
     /// Drop the in-flight event wire.
-    pub(crate) fn reset(&mut self) {
-        self.state.clear();
+    pub(crate) const fn reset(&mut self) {
+        self.state = None;
     }
 
     /// Whether a subscription wire is being dragged — the whole of this
@@ -71,20 +67,20 @@ impl SubscriptionUi {
     /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
     pub(crate) const fn in_flight(&self) -> bool {
-        self.state.get().is_some()
+        self.state.as_ref().is_some()
     }
 
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
-    /// end, and commit a `SetSubscription { subscribe: true }` on release over
+    /// end, and commit a `SetSubscription { to: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
+    pub(crate) fn prepass(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
-        if self.state.is_idle() {
+        if self.state.is_none() {
             // Every event glyph is an emitter, and only sink nodes render a
             // pin, so whatever glyph a drag started on can start this one.
             let latched = GlyphDrag::latch(&geometry.events, |_| true)
@@ -95,11 +91,11 @@ impl SubscriptionUi {
             if let Some(latched) = latched
                 && graph_ctx.contains(latched.node())
             {
-                self.state.latch(latched);
+                self.state = Some(latched);
             }
         }
         if ctx.cancelled() {
-            self.state.clear();
+            self.state = None;
         }
         let Some(mut state) = self.state.take() else {
             return;
@@ -122,7 +118,7 @@ impl SubscriptionUi {
                 !drag.held(&geometry.subs)
             }
         };
-        self.state.latch(state);
+        self.state = Some(state);
         if !released {
             return;
         }
@@ -138,11 +134,11 @@ impl SubscriptionUi {
                 snap: Some(emitter),
             }) => out.push_graph(GraphIntent::SetSubscription {
                 subscription: Subscription::new(emitter, subscriber),
-                subscribe: true,
+                to: true,
             }),
             _ => {}
         }
-        self.state.clear();
+        self.state = None;
     }
 
     /// Force the hover flag on the glyph the wire is currently snapped to —
@@ -152,7 +148,7 @@ impl SubscriptionUi {
     /// owner while a drag is live, so without this the snapped-but-not-
     /// captured target stays at its idle color.
     pub(crate) fn bake_snap_hover(&self, geometry: &mut CanvasGeometry) {
-        match self.state.get() {
+        match self.state.as_ref() {
             Some(InFlight::FromEmitter(drag)) => {
                 if let Some(sub) = drag.snap {
                     geometry.subs.set_hovered(sub);
@@ -172,12 +168,12 @@ impl SubscriptionUi {
     /// from is fixed to its glyph; the free end follows the snapped opposite
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
-    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: CanvasCtx<'_>, canvas_origin: Vec2) {
+    pub(crate) fn draw_in_flight(&self, ui: &mut Ui, ctx: CanvasCtx<'_>) {
         let (graph_ctx, geometry) = (ctx.graph_ctx(), ctx.geometry());
-        let Some(state) = self.state.get().copied() else {
+        let Some(state) = self.state.as_ref().copied() else {
             return;
         };
-        let pointer = canvas::world_pointer(ui, graph_ctx, canvas_origin);
+        let pointer = canvas::world_pointer(ui, graph_ctx.viewport());
         let (p0, p3) = match state {
             InFlight::FromEmitter(drag) => {
                 let Some(p0) = geometry.events.center(drag.from) else {
@@ -199,49 +195,7 @@ impl SubscriptionUi {
             }
         };
         let theme = graph_ctx.theme();
-        Wire::event(p0, p3).add(ui, theme.stroke_width, port_color::event(theme));
-    }
-}
-
-/// Paint every committed subscription wire on the current scene retained by
-/// the pass's cull region, marking those the active breaker crosses as broken
-/// via `probe.mark_broken_subscription` for the breaker's release-frame drain.
-///
-/// Reads nothing but committed scene state off `pass`, so — like
-/// [`crate::gui::pane::graph_ui::gesture::wire_ui::draw`] — it belongs to the module
-/// rather than [`SubscriptionUi`].
-pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_, '_>) {
-    let (theme, graph_ctx, geometry) = (
-        pass.draw_ctx.theme(),
-        pass.draw_ctx.graph_ctx(),
-        pass.draw_ctx.geometry(),
-    );
-    for s in graph_ctx.subscriptions() {
-        let (Some(p0), Some(p3)) = (
-            geometry.events.center(s.event),
-            geometry.subs.center(s.subscriber),
-        ) else {
-            continue;
-        };
-        let key = WireKey::Event(s);
-        let hover = Hover::from(
-            geometry.events.is_hovered(s.event)
-                || geometry.subs.is_hovered(s.subscriber)
-                || pass.lit == Some(key)
-                || tie_widget::lights(ui, graph_ctx.view(), key),
-        );
-        let untied = [Wire::event(p0, p3)];
-        let pieces = pass.ties.pieces(key).unwrap_or(&untied);
-        // Events carry no data type, so one neutral swatch runs the whole
-        // curve rather than a per-end gradient.
-        let ends = WireEnds {
-            wire: key,
-            hover,
-            tint: || WireTint::flat(port_color::event(theme)),
-        };
-        if pass.draw_wire(ui, pieces, ends) {
-            pass.probe.mark_broken_subscription(s);
-        }
+        WirePaint::from(theme.event_color()).stroke(ui, &Wire::event(p0, p3), theme.stroke_width);
     }
 }
 

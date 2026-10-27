@@ -30,7 +30,7 @@ pub(crate) struct PortTheme {
     pub(crate) size: f32,
     /// Horizontal inset on each side of the ports row. Circles overhang by
     /// `-Theme::port_overhang()` (which folds in this inset and the card
-    /// border) so their centre sits on the body edge regardless of it.
+    /// border) so their center sits on the body edge regardless of it.
     pub(crate) col_pad_x: f32,
     /// The column's vertical rhythm, spent twice over: the inset below the
     /// header band before the first port, and the gap between adjacent ports.

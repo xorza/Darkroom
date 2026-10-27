@@ -1,5 +1,6 @@
 //! Windows: a scratch file deleted when its last handle closes, the free space of a volume, the
-//! memory limits of the job object the process runs in, and the cache under `%LOCALAPPDATA%`;
+//! memory limits of the job object the process runs in, the cache under `%LOCALAPPDATA%`, and the
+//! shell's open of a URL;
 //! a replace in one step that holds when the destination is open and needs no directory sync, and
 //! the file's id and change time, which come from its handle, as `Metadata` does not expose them.
 
@@ -31,11 +32,39 @@ use windows::Win32::System::ProcessStatus::{
 use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows::core::{Error, HSTRING};
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::core::{Error, HSTRING, w};
 
 use crate::fs::PublicationMode;
 use crate::fs::file_identity::FileId;
 use crate::platform::{Observed, Stated};
+
+/// Open `url` through the shell, as Explorer opens it: no command line parses it, so `&`, `^` and
+/// `|` in a query stay part of it, where `cmd /C start` reads them as its own
+/// ([ShellExecuteW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew)).
+pub(super) fn open_url(url: &str) -> io::Result<()> {
+    let instance = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            &HSTRING::from(url),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Above 32 is success; at or below, the code is one of the shell's own `SE_ERR_*`, which no
+    // system error names.
+    let code = instance.0 as usize;
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "the shell did not open {url}: ShellExecuteW returned {code}"
+        )))
+    }
+}
 
 /// A new file at `path`, opened `FILE_FLAG_DELETE_ON_CLOSE` with every share mode, so the map can
 /// open the file beside the handle; the values are the Win32 headers'.

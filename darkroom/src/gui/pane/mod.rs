@@ -1,6 +1,6 @@
 //! The tab kinds a dock pane can show — one module per
 //! [`TabRef`](crate::core::document::tab_ref::TabRef) arm, which is also one arm of the
-//! match in [`MainWindow::frame`](crate::gui::main_window::MainWindow::frame).
+//! match in the dock's `DockPanes::content`.
 //! Adding a pane kind is a directory here and an arm there; nothing else in
 //! the tree has to learn about it.
 

@@ -10,9 +10,9 @@ use scenarium::NodeId;
 
 use crate::core::document::graph_revision::GraphRevision;
 use crate::core::document::tab_ref::TabRef;
-use crate::core::edit::relayout::Relayout;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::graph_ctx::GraphCtx;
@@ -42,7 +42,7 @@ const MIN_PANE: f32 = 220.0;
 /// [`WindowCtx`] — the frame's world *and* the document it is showing, settled
 /// by the time the caller reaches it, so the composition point and the call
 /// are the same instant — and derives its own [`GraphCtx`] from it. Keeping
-/// that here rather than in `Editor` means the editor shell never has to name
+/// that here rather than in `Session` means the editor shell never has to name
 /// the canvas subsystem's view type, and everything below this file takes that
 /// context alone rather than it *and* the levels it came from.
 #[derive(Default, Debug)]

@@ -22,7 +22,6 @@
 
 use std::collections::VecDeque;
 use std::ops::Range;
-use std::slice;
 
 use common::SerdeFormat;
 
@@ -31,11 +30,13 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::step::undo_step::UndoStep;
 
 /// The newest entry, while its gesture is still held: decoded, so each frame
-/// folds into it in place.
+/// folds into it in place. Its steps are what the gesture did in order — a
+/// preview spawn, then the drag that places it — each frame folding into the
+/// last step where it can.
 #[derive(Debug)]
 struct OpenGesture {
     id: GestureId,
-    step: UndoStep,
+    steps: Vec<UndoStep>,
 }
 
 #[derive(Debug)]
@@ -70,7 +71,11 @@ impl UndoHistory {
     /// Whether [`UndoHistory::undo`] would take an entry back: a packed one,
     /// or the open gesture unless sealing it would drop it.
     pub(crate) fn can_undo(&self) -> bool {
-        self.cursor > 0 || self.open.as_ref().is_some_and(|open| !open.step.is_noop())
+        self.cursor > 0
+            || self
+                .open
+                .as_ref()
+                .is_some_and(|open| open.steps.iter().any(|step| !step.is_noop()))
     }
 
     pub(crate) fn new(max_bytes: usize) -> Self {
@@ -89,32 +94,58 @@ impl UndoHistory {
     /// redoing replays the whole batch — and leave `steps` empty, its
     /// capacity kept for the next frame.
     ///
-    /// `gesture` names the held gesture a one-step batch is a frame of. A
-    /// frame of the open gesture folds into its entry; any other batch seals
-    /// that entry first.
+    /// `gesture` names the held gesture the whole batch is part of. Its steps
+    /// join the gesture's entry, each folding into the entry's last step where
+    /// that is a frame of the same kind; any other batch seals that entry
+    /// first.
     pub(crate) fn push(&mut self, steps: &mut Vec<UndoStep>, gesture: Option<GestureId>) {
         if steps.is_empty() {
             return;
         }
         if let Some(id) = gesture {
-            debug_assert_eq!(steps.len(), 1, "a gesture frame is one step");
-            let step = steps.pop().unwrap();
-            if let Some(open) = &mut self.open
-                && open.id == id
-            {
-                open.step.absorb(&step);
-                return;
+            if self.open.as_ref().is_none_or(|open| open.id != id) {
+                self.seal();
+                // A fresh edit makes the undone tail unreachable; drop it.
+                self.discard_redo();
+                self.open = Some(OpenGesture {
+                    id,
+                    steps: Vec::new(),
+                });
             }
-            self.seal();
-            // A fresh edit makes the undone tail unreachable; drop it.
-            self.discard_redo();
-            self.open = Some(OpenGesture { id, step });
+            let open = self.open.as_mut().expect("opened above");
+            for step in steps.drain(..) {
+                match open.steps.last_mut() {
+                    Some(last) if last.absorbs(&step) => last.absorb(&step),
+                    _ => open.steps.push(step),
+                }
+            }
             return;
         }
         self.seal();
         self.discard_redo();
         self.pack(steps);
         steps.clear();
+    }
+
+    /// Take back the held `gesture`'s entry whole and forget it, as Esc on it
+    /// does: each step replays backwards, newest first, so the gesture leaves
+    /// nothing, not even an entry. `false`, touching nothing, when the open
+    /// entry is not `gesture`'s — an edit in between sealed it.
+    pub(crate) fn withdraw(
+        &mut self,
+        gesture: GestureId,
+        document: &mut Document,
+        on_step: &mut dyn FnMut(&UndoStep),
+    ) -> bool {
+        if self.open.as_ref().is_none_or(|open| open.id != gesture) {
+            return false;
+        }
+        let open = self.open.take().expect("checked above");
+        for step in open.steps.iter().rev() {
+            step.revert(document);
+            on_step(step);
+        }
+        true
     }
 
     pub(crate) fn undo(
@@ -212,11 +243,12 @@ impl UndoHistory {
     /// Pack the open gesture's entry, if one is open: it is over. A gesture
     /// that ended where it started records nothing.
     fn seal(&mut self) {
-        let Some(open) = self.open.take() else {
+        let Some(mut open) = self.open.take() else {
             return;
         };
-        if !open.step.is_noop() {
-            self.pack(slice::from_ref(&open.step));
+        open.steps.retain(|step| !step.is_noop());
+        if !open.steps.is_empty() {
+            self.pack(&open.steps);
         }
     }
 

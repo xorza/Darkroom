@@ -5,20 +5,20 @@ use std::fmt;
 
 use crate::calibration::master_role::MasterRole;
 use crate::ingest::ingest_config::IngestConfig;
-use crate::io::decoder::decode_pins::DECODE_VERSION;
+use crate::io::decoder::decode_version::DECODE_VERSION;
 use crate::io::decoder::fnv1a;
 
-/// What `master_snapshot` (`internals::characterization`) pins of the master stack: a bias, a dark
-/// and a flat with the bias taken from each frame, stacked from mosaic FITS frames. A change that
-/// moves it states its reason and sets this to the new digest, which moves every
+/// The reference `master_snapshot` (`internals::characterization`) compares the master stack
+/// with: a bias, a dark and a flat with the bias taken from each frame, stacked from mosaic FITS
+/// frames. A change that moves the stack past the tolerance writes it anew, which moves every
 /// [`MasterRecipe`], so no master a cache kept from the older stack is reused.
-pub(crate) const MASTER_PIN: &str = "556359a1356643de";
+const MASTER_REFERENCE: &[u8] = include_bytes!("../../snapshots/master.ron");
 
-/// The version every [`MasterRecipe`] carries: derived from [`DECODE_VERSION`] and [`MASTER_PIN`],
-/// so a change to a decode or to the master stack moves it.
+/// The version every [`MasterRecipe`] carries: derived from [`DECODE_VERSION`] and
+/// [`MASTER_REFERENCE`], so a change to a decode or to the master stack moves it.
 const MASTER_VERSION: u64 = fnv1a::hash(
     fnv1a::hash(fnv1a::OFFSET, &DECODE_VERSION.to_le_bytes()),
-    MASTER_PIN.as_bytes(),
+    MASTER_REFERENCE,
 );
 
 /// How lumos stacks one role's master: the version of its decodes and of the master stack, the

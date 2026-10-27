@@ -116,13 +116,18 @@ impl LoadReport {
         for repair in &self.repairs {
             tracing::warn!(target: "darkroom::load", "{repair}");
         }
-        status.warn(
-            StatusFamily::Document,
-            format!(
-                "the load made {} repair(s) to the document; save to keep them",
-                self.repairs.len()
-            ),
-        );
+        status.warn(StatusFamily::Document, self.to_string());
+    }
+}
+
+/// The status line of a load that changed something: how many changes it made.
+impl Display for LoadReport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the load made {} repair(s) to the document; save to keep them",
+            self.repairs.len()
+        )
     }
 }
 

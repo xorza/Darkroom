@@ -10,6 +10,7 @@ use crate::core::document::item_id::ItemId;
 use crate::core::document::route::Route;
 use crate::core::document::tie::{Tie, TieId};
 use crate::core::document::wire_key::WireKey;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
@@ -100,13 +101,8 @@ impl Reversible for SetTies {
         true
     }
 
-    /// No node remeasures: a tie paints between bodies that keep their size.
-    fn invalidates_cached_geometry(&self) -> bool {
-        false
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+    fn facts(&self) -> EditFacts {
+        EditFacts::NONE
     }
 }
 

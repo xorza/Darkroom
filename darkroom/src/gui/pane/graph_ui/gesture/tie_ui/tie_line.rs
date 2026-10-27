@@ -4,10 +4,10 @@ use glam::Vec2;
 
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
-use crate::gui::pane::graph_ui::draw::wire::Wire;
-use crate::gui::pane::graph_ui::gesture::breaker_ui::scribble::BEZIER_SAMPLES;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 
-/// A line shorter than this, in world units, crosses nothing: a press that barely moved.
+/// A line shorter than this on screen, in logical px, crosses nothing: a press that barely
+/// moved, which is as far at every zoom.
 const MIN_LENGTH: f32 = 3.0;
 
 /// The tie line in flight, from where it latched to where the pointer holds it, in world units,
@@ -17,6 +17,8 @@ const MIN_LENGTH: f32 = 3.0;
 pub(crate) struct TieLine {
     pub(crate) start: Vec2,
     pub(crate) end: Vec2,
+    /// Screen px per world unit when the end last moved, which [`MIN_LENGTH`] is measured at.
+    pub(crate) zoom: f32,
     /// Each wire it crosses, at its first crossing along the line.
     pub(crate) wires: Vec<WireCrossing>,
     /// Each tie whose band it crosses.
@@ -41,11 +43,23 @@ pub(crate) struct TieCrossing {
 }
 
 impl TieLine {
-    /// Start a line at `at`, crossing nothing.
-    pub(super) fn restart(&mut self, at: Vec2) {
+    /// Start a line at `at`, drawn at `zoom`, crossing nothing.
+    pub(super) fn restart(&mut self, at: Vec2, zoom: f32) {
         self.start = at;
         self.end = at;
+        self.zoom = zoom;
         self.begin_pass();
+    }
+
+    /// Move the line's end to `at`, drawn at `zoom`.
+    pub(super) const fn reach(&mut self, at: Vec2, zoom: f32) {
+        self.end = at;
+        self.zoom = zoom;
+    }
+
+    /// Whether the line is long enough on screen to cross anything.
+    fn is_long(&self) -> bool {
+        self.start.distance(self.end) * self.zoom >= MIN_LENGTH
     }
 
     /// Forget last pass's crossings, before this pass's draw finds them again.
@@ -56,7 +70,7 @@ impl TieLine {
 
     /// The first crossing of the line with `pieces`, a wire from its output end, or `None`.
     pub(crate) fn first_crossing(&self, wire: WireKey, pieces: &[Wire]) -> Option<WireCrossing> {
-        if self.start.distance(self.end) < MIN_LENGTH {
+        if !self.is_long() {
             return None;
         }
         let (lo, hi) = (self.start.min(self.end), self.start.max(self.end));
@@ -68,10 +82,8 @@ impl TieLine {
             if hull.max().cmplt(lo).any() || hull.min.cmpgt(hi).any() {
                 continue;
             }
-            let mut prev = curve.p0;
-            for sample in 1..=BEZIER_SAMPLES {
-                let next = curve.at(sample as f32 / BEZIER_SAMPLES as f32);
-                if let Some(along) = self.crosses(prev, next)
+            for [a, b] in curve.chords() {
+                if let Some(along) = self.crossing(a, b)
                     && first.is_none_or(|first| along < first.along)
                 {
                     first = Some(WireCrossing {
@@ -81,18 +93,19 @@ impl TieLine {
                         point: self.start.lerp(self.end, along),
                     });
                 }
-                prev = next;
             }
         }
         first
     }
 
     /// How far along the line, from 0 at its start to 1 at its end, it crosses the segment from
-    /// `a` to `b`, or `None` when it misses it or runs parallel to it.
+    /// `a` to `b`, or `None` when it misses it, runs parallel to it, or is too short to cross.
     pub(crate) fn crosses(&self, a: Vec2, b: Vec2) -> Option<f32> {
-        if self.start.distance(self.end) < MIN_LENGTH {
-            return None;
-        }
+        self.is_long().then(|| self.crossing(a, b)).flatten()
+    }
+
+    /// [`Self::crosses`] for a line already known to be long enough.
+    fn crossing(&self, a: Vec2, b: Vec2) -> Option<f32> {
         let (line, segment) = (self.end - self.start, b - a);
         let denominator = line.perp_dot(segment);
         if denominator == 0.0 {
@@ -102,5 +115,83 @@ impl TieLine {
         let along = to_segment.perp_dot(segment) / denominator;
         let on_segment = to_segment.perp_dot(line) / denominator;
         ((0.0..=1.0).contains(&along) && (0.0..=1.0).contains(&on_segment)).then_some(along)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec2;
+    use scenarium::{InputPort, NodeId, OutputPort};
+
+    use crate::core::document::wire_key::{DataWire, WireKey};
+    use crate::gui::pane::graph_ui::frame::wire::Wire;
+    use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieLine, WireCrossing};
+
+    fn line(start: Vec2, end: Vec2, zoom: f32) -> TieLine {
+        let mut line = TieLine::default();
+        line.restart(start, zoom);
+        line.reach(end, zoom);
+        line
+    }
+
+    /// A line from (0, 0) to (10, 0) crosses the segment x = 5 halfway, misses one past its
+    /// end, and crosses none it runs parallel to. It crosses nothing until it is 3 px long on
+    /// screen: 3 world units at zoom 1, 30 at zoom 0.1.
+    #[test]
+    fn a_line_crosses_a_segment_at_its_fraction_once_it_is_long_on_screen() {
+        let across = line(Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
+        let at = |x: f32| (Vec2::new(x, -1.0), Vec2::new(x, 1.0));
+        let (a, b) = at(5.0);
+        assert_eq!(across.crosses(a, b), Some(0.5));
+        let (a, b) = at(12.0);
+        assert_eq!(across.crosses(a, b), None, "past the end");
+        assert_eq!(
+            across.crosses(Vec2::new(0.0, 1.0), Vec2::new(10.0, 1.0)),
+            None,
+            "parallel"
+        );
+
+        let segment = (Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0));
+        for (length, zoom, crosses) in [
+            (3.0, 1.0, true),
+            (2.9, 1.0, false),
+            (30.0, 0.1, true),
+            (29.0, 0.1, false),
+        ] {
+            let short = line(Vec2::ZERO, Vec2::new(length, 0.0), zoom);
+            assert_eq!(
+                short.crosses(segment.0, segment.1).is_some(),
+                crosses,
+                "{length} at {zoom}"
+            );
+        }
+    }
+
+    /// Over a wire of two pieces, the line's first crossing is its earliest along the line,
+    /// whichever piece it is on, at the point the fraction names.
+    #[test]
+    fn the_first_crossing_is_the_earliest_along_the_line() {
+        let wire = WireKey::Data(DataWire {
+            output: OutputPort::new(NodeId::unique(), 0),
+            input: InputPort::new(NodeId::unique(), 0),
+        });
+        // Two straight vertical pieces, the first at x = 6 and the second at x = 2.
+        let vertical = |x: f32| Wire {
+            p0: Vec2::new(x, -4.0),
+            p1: Vec2::new(x, -2.0),
+            p2: Vec2::new(x, 2.0),
+            p3: Vec2::new(x, 4.0),
+        };
+        let across = line(Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
+        assert_eq!(
+            across.first_crossing(wire, &[vertical(6.0), vertical(2.0)]),
+            Some(WireCrossing {
+                wire,
+                piece: 1,
+                along: 0.2,
+                point: Vec2::new(2.0, 0.0),
+            })
+        );
+        assert_eq!(across.first_crossing(wire, &[vertical(20.0)]), None);
     }
 }

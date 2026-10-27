@@ -1,10 +1,82 @@
-//! The unsaved-changes confirmation dialog. Rendered by
-//! [`App::record_discard_prompt`](crate::gui::app::App::record_discard_prompt)
-//! whenever a transition that would replace or discard the open document is
-//! requested while it has edits; the returned [`DiscardOutcome`] is applied
-//! immediately after the dialog finishes authoring.
+//! The unsaved-changes guard: the transition that would replace or discard the open document,
+//! held while its prompt is up, and the prompt itself, whose answer `App` applies right after the
+//! dialog records.
+
+use std::path::PathBuf;
 
 use palantir::prelude::*;
+
+/// The transition waiting on the unsaved-changes prompt, and so whether the prompt is up.
+#[derive(Debug, Default)]
+pub(super) struct DiscardGuard {
+    pending: Option<PendingTransition>,
+}
+
+/// An answer to the prompt and the transition it answers, taken off the guard.
+#[derive(Debug)]
+pub(super) struct Answered {
+    pub(super) transition: PendingTransition,
+    pub(super) outcome: DiscardOutcome,
+}
+
+impl DiscardGuard {
+    /// Raise the prompt for `transition`, in place of any it held.
+    pub(super) fn hold(&mut self, transition: PendingTransition) {
+        self.pending = Some(transition);
+    }
+
+    /// The prompt over this frame while it is up, naming the document `file_name` (`None` for
+    /// one never saved), and the answer given this frame. The window stays open while it is up.
+    pub(super) fn record(&mut self, ui: &mut Ui, file_name: Option<&str>) -> Option<Answered> {
+        let tail = self.pending.as_ref()?.prompt_tail();
+        if ui.close_requested() {
+            ui.keep_open();
+        }
+        let outcome = show(ui, file_name, tail);
+        self.answer(outcome)
+    }
+
+    /// The transition `outcome` answers, taken off the guard; `None` while no button is pressed.
+    pub(super) fn answer(&mut self, outcome: DiscardOutcome) -> Option<Answered> {
+        if outcome.choice == DiscardChoice::Stay {
+            return None;
+        }
+        let transition = self.pending.take()?;
+        Some(Answered {
+            transition,
+            outcome,
+        })
+    }
+}
+
+/// A transition that replaces or discards the open document. Held while
+/// the unsaved-changes prompt is up, then carried out (or dropped) by the
+/// answer.
+///
+/// The two open variants differ only in where the path comes from:
+/// [`Self::OpenPicked`] runs the file dialog *after* the prompt clears, so a
+/// cancelled prompt doesn't leave the user having chosen a file for nothing,
+/// while [`Self::OpenAt`] already holds one handed in from outside the editor
+/// (Finder, via [`crate::platform`]). Carrying that path is what
+/// costs this `Copy`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PendingTransition {
+    Quit,
+    New,
+    OpenPicked,
+    OpenAt(PathBuf),
+}
+
+impl PendingTransition {
+    /// How the prompt finishes "Save changes to X before …?".
+    const fn prompt_tail(&self) -> &'static str {
+        match self {
+            Self::Quit => "quitting",
+            Self::New => "closing it",
+            Self::OpenPicked | Self::OpenAt(_) => "opening another document",
+        }
+    }
+}
 
 /// The user's answer to the unsaved-changes prompt for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +138,7 @@ impl DiscardOutcome {
 /// sentence for the transition being guarded ("quitting", "closing it", …).
 /// Returns the choice the user made this frame plus the "Don't ask again"
 /// state.
-pub(super) fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
+fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardOutcome {
     let title = match file_name {
         Some(name) => ui.fmt(format_args!("Save changes to “{name}” before {tail}?")),
         None => ui.fmt(format_args!("Save changes before {tail}?")),
@@ -148,6 +220,18 @@ fn dont_ask_wid() -> WidgetId {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use crate::gui::app::discard_dialog::DiscardGuard;
+
+    impl DiscardGuard {
+        /// Whether the prompt is up, holding a transition.
+        pub(crate) const fn is_up(&self) -> bool {
+            self.pending.is_some()
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use palantir::internals::ui_harness::UiHarness;
 
@@ -185,6 +269,22 @@ mod tests {
             );
         });
         assert!(!open(&mut h), "the next open starts unchecked");
+    }
+
+    /// A document Finder hands over is guarded exactly like one the user
+    /// picked: same question, same wording. The two differ only in where the
+    /// path came from, and the prompt has no business exposing that.
+    #[test]
+    fn an_externally_opened_document_prompts_like_a_picked_one() {
+        let picked = PendingTransition::OpenPicked;
+        let handed = PendingTransition::OpenAt(PathBuf::from("/tmp/scene.darkroom"));
+        assert_eq!(picked.prompt_tail(), "opening another document");
+        assert_eq!(handed.prompt_tail(), picked.prompt_tail());
+
+        // The other two stay distinct — a shared tail would misdescribe what
+        // the user is about to lose the document to.
+        assert_eq!(PendingTransition::Quit.prompt_tail(), "quitting");
+        assert_eq!(PendingTransition::New.prompt_tail(), "closing it");
     }
 
     fn answer(choice: DiscardChoice, dont_ask_again: bool) -> DiscardOutcome {

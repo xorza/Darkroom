@@ -12,30 +12,29 @@
 use std::f32::consts::{FRAC_PI_4, PI};
 
 use palantir::prelude::*;
-use scenarium::{CacheMode, NodeId};
+use scenarium::CacheMode;
 
 use crate::core::document::item_id::ItemId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
-use crate::core::edit::step::set_node_property::NodeProperty;
+use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph_ui::draw::inspectors;
 use crate::gui::pane::graph_ui::draw::inspectors::InspectMode;
+use crate::gui::pane::graph_ui::node_ui::card;
+use crate::gui::pane::graph_ui::node_ui::card::{CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y};
 use crate::gui::pane::graph_ui::node_ui::node_record::NodeRecord;
-use crate::gui::pane::graph_ui::node_ui::node_widget;
-use crate::gui::pane::graph_ui::node_ui::port_color;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::badge::{BADGE_SIZE, Badge, BadgeFace};
+use crate::gui::widgets::badge::{Badge, BadgeFace};
 use crate::gui::widgets::format::elapsed::Elapsed;
 use crate::gui::widgets::hover::Hover;
-use crate::gui::widgets::inline_rename::InlineRename;
+use crate::gui::widgets::inline_rename::{InlineRename, RenameEvent};
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support;
-use crate::gui::widgets::support::{CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP};
+use crate::gui::widgets::support::ROW_GAP;
 use crate::gui::widgets::toggle::Toggle;
 
 /// Character cap for a node title in the inline rename editor.
@@ -72,7 +71,7 @@ const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
 
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
-/// incoming wire. Recorded by `NodeWidget::show` immediately *before* its
+/// incoming wire. Recorded by `NodeUi::draw_node` immediately *before* its
 /// node's body, so it peeks out from behind the corner while keeping the
 /// node stack's paint order (above lower nodes, below raised ones) and the
 /// cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
@@ -91,9 +90,9 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
     // there. Placed by its grown box's center rather than in flow, so it
     // straddles the node's top-left corner.
     PortGlyph::arrow(
-        subscription_glyph_wid(node.node_id),
+        wid::subscription_glyph(node.node_id),
         theme.ports.size,
-        hover.lift(port_color::event(theme)),
+        hover.lift(theme.event_color()),
     )
     .turn(PI + FRAC_PI_4)
     .centered_on(node.pos)
@@ -101,14 +100,6 @@ pub(super) fn subscription_pin(ui: &mut Ui, node: NodeCtx<'_>, hover: Hover) {
         "Event subscription — drag to an emitter, or drop an event wire here",
     ))
     .show(ui);
-}
-
-/// Stable id for a node's event-subscription pin. Keyed on the node (a
-/// subscription is whole-node, not per-port), so `CanvasGeometry` /
-/// `SubscriptionUi` reconstruct it to poll the pin's geometry as a wire
-/// drop target.
-pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
-    wid::node("subscription_glyph", node_id)
 }
 
 /// The header bar: the node title (left) and the descriptive cluster (right) —
@@ -134,7 +125,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
         .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
-        .chrome(support::header_chrome(theme, r))
+        .chrome(card::header_chrome(theme, r))
         .show(ui, |ui| {
             // The run affordance leads the band, ahead of the title — the
             // one control that *does* something with the node's output
@@ -186,7 +177,7 @@ pub(super) fn show(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) -> bool {
             };
             Badge::control(
                 BadgeFace::text("i", color, "Inspect — values, status, log"),
-                inspectors::inspect_badge_wid(node.node_id),
+                wid::inspect_badge(node.node_id),
                 Toggle::from(mode == Some(InspectMode::Pinned)),
             )
             .show(ui)
@@ -226,7 +217,7 @@ pub(super) fn status_row(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                 _ => None,
             };
             if let Some(secs) = elapsed {
-                let color = node_widget::exec_color(theme, node.exec_status())
+                let color = theme.exec_color(node.exec_status())
                     .unwrap_or(ui.theme().text.color);
                 // A comet spinner while computing, just left of the live time,
                 // so glow + spin + ticking time read as one "running" cue.
@@ -271,7 +262,7 @@ pub(super) fn status_row(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
                         theme.colors.badge_cache,
                         "Drop this node and downstream caches from RAM and disk",
                     ),
-                    wid::node("cache_eviction_badge", node.node_id),
+                    wid::of_node("cache_eviction_badge", node.node_id),
                     Toggle::Off,
                 )
                 .show(ui)
@@ -363,7 +354,7 @@ impl PropertyChip {
         };
         if Badge::control(
             BadgeFace::text(self.glyph, color, self.tooltip),
-            wid::node(self.tag, node.node_id),
+            wid::of_node(self.tag, node.node_id),
             self.state,
         )
         .show(ui)
@@ -384,7 +375,7 @@ impl PropertyChip {
 
 /// The header's play chip: run the graph up to this node and keep its
 /// outputs for preview — the same command as the context menu's "Run to
-/// this node". Control-family framing (bordered [`BADGE_SIZE`] square,
+/// this node". Control-family framing (bordered [`BADGE_SIZE`](crate::gui::widgets::badge::BADGE_SIZE) square,
 /// hover-lifted tint), but the glyph is the SDF play triangle rather than
 /// a font glyph, echoing the ports' triangle vocabulary and staying
 /// optically centered at any zoom. Quiet at rest — muted ink like the
@@ -402,19 +393,16 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
     };
     Badge::control(
         BadgeFace::drawn(draw_play_triangle, theme.colors.text_muted, tooltip),
-        wid::node("play_badge", node.node_id),
+        wid::of_node("play_badge", node.node_id),
         Toggle::Off,
     )
     .hover_color(theme.status.success)
     .show(ui)
 }
 
-/// Play triangle about the chip center, nudged right — a play mark's
-/// visual center sits left of its bounding box's. Points are inset by
-/// the rounding radius: the SDF rounds by dilating, so the glyph grows
-/// back out to the intended extents.
-fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
-    ui.add_shape(support::play_triangle(BADGE_SIZE, 0.5).fill(color));
+/// The play mark filling half of an `s`-sized badge; see [`support::play_triangle`].
+fn draw_play_triangle(ui: &mut Ui, s: f32, color: RgbaF32) {
+    ui.add_shape(support::play_triangle(s, 0.5).fill(color));
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
@@ -424,31 +412,31 @@ fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
 fn title(ui: &mut Ui, record: &mut NodeRecord<'_, '_>) {
     let node = record.node;
     let mode = ClickMode::with_shift(ui.modifiers().shift);
-    let id = wid::rename(node.node_id);
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
-    let rename = InlineRename::new(node.name(), &node.theme().inline_rename_title)
-        .id(id)
-        .max_chars(NODE_NAME_MAX_CHARS);
+    let rename = InlineRename::new(
+        wid::rename(node.node_id),
+        node.name(),
+        &node.theme().inline_rename_title,
+    )
+    .max_chars(NODE_NAME_MAX_CHARS);
     let rename = if node.stub() {
         rename.read_only()
     } else {
         rename
     };
-    let ev = rename.show(ui);
-    if ev.clicked {
-        record.out.extend_graph(GraphIntent::click(
+    match rename.show(ui) {
+        RenameEvent::Idle => {}
+        RenameEvent::Clicked => record.out.extend_graph(GraphIntent::click(
             mode,
             node.graph_ctx.selected(),
             ItemId::Node(node.node_id),
-        ));
-    }
-    if let Some(to) = ev.committed {
-        record.out.push_graph(GraphIntent::RenameNode {
+        )),
+        RenameEvent::Committed(to) => record.out.push_graph(GraphIntent::RenameNode {
             node_id: node.node_id,
             to,
-        });
+        }),
     }
 }
 
@@ -459,11 +447,11 @@ mod tests {
 
     use crate::core::document::internals::DocumentFixture;
     use crate::core::edit::graph_intent::GraphIntent;
-    use crate::core::edit::step::set_node_property::NodeProperty;
+    use crate::core::edit::graph_intent::node_property::NodeProperty;
     use crate::gui::frame::app_command::AppCommand;
     use crate::gui::frame::app_command::RunCommand;
     use crate::gui::pane::graph_ui::internals::CanvasHarness;
-    use crate::gui::pane::graph_ui::node_ui::wid;
+    use crate::gui::pane::graph_ui::wid;
     use crate::gui::theme::Theme;
     use crate::gui::widgets::format::elapsed::Elapsed;
 
@@ -520,7 +508,7 @@ mod tests {
         // Two frames so the node body — and with it the chip — has recorded
         // and carries a rect to aim at.
         h.prime(2);
-        h.ui.click_at(h.ui.center_of(wid::node("disk_badge", node_id)));
+        h.ui.click_at(h.ui.center_of(wid::of_node("disk_badge", node_id)));
         let intents = h.frame();
         ChipClick {
             node_id,

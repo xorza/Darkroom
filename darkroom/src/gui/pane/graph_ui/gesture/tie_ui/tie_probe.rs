@@ -4,7 +4,7 @@ use glam::Vec2;
 
 use crate::core::document::tie::TieId;
 use crate::core::document::wire_key::WireKey;
-use crate::gui::pane::graph_ui::draw::wire::Wire;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::pane::graph_ui::gesture::tie_ui::tie_line::{TieCrossing, TieLine, WireCrossing};
 
 /// The tie line in flight, threaded through the wire and band draws so each records what the

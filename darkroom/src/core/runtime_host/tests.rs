@@ -1,14 +1,13 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use common::{TempDir, fs};
 use lens::MlModelPaths;
 use scenarium::{CacheMode, ConstValue, Graph, NodeId};
 
 use crate::core::io::cache;
-use crate::core::io::preferences::Preferences;
+use crate::core::runtime_host::error::NoCompiledWork;
 use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
-use crate::core::status_log::StatusLog;
+use crate::core::wake;
 
 /// The default value seeded into `func`'s model-path input (index 1),
 /// read back through the published library.
@@ -23,7 +22,7 @@ fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
 /// program holds no work for.
 #[test]
 fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
-    let mut host = RuntimeHost::new(Arc::new(|| {}), &Preferences::default());
+    let mut host = RuntimeHost::new(wake::internals::noop(), &MlModelPaths::default());
     let func = host
         .library
         .cur()
@@ -32,15 +31,17 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
     let mut graph = Graph::default();
     let node = graph.add_func_node(func);
 
-    let mut status = StatusLog::default();
-    host.run_once(&graph, &mut status);
-    assert_eq!(host.evict_cache(&graph, node, &mut status), vec![node]);
-    assert!(
-        host.evict_cache(&graph, NodeId::unique(), &mut status)
-            .is_empty(),
+    host.run_once(&graph);
+    assert_eq!(host.evict_cache(&graph, node), Ok(vec![node]));
+    let gone = NodeId::unique();
+    assert_eq!(
+        host.evict_cache(&graph, gone),
+        Err(NoCompiledWork),
         "a node the program has no work for reaches nothing"
     );
-    assert_eq!(status.cur(), None);
+    assert_eq!(host.run_node(&graph, gone), Err(NoCompiledWork));
+    assert_eq!(host.flush_cache(&graph, gone), Err(NoCompiledWork));
+    assert_eq!(host.run_node(&graph, node), Ok(()));
 }
 
 #[test]
@@ -51,14 +52,11 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     let model = |name: &str| dir.join(name).to_str().unwrap().to_owned();
     let denoise_path = model("host-denoise.onnx");
     let star_removal_path = model("host-stars.onnx");
-    let mut preferences = Preferences {
-        ml_models: MlModelPaths {
-            denoise: denoise_path.as_str().into(),
-            star_removal: star_removal_path.as_str().into(),
-        },
-        ..Preferences::default()
+    let mut ml_models = MlModelPaths {
+        denoise: denoise_path.as_str().into(),
+        star_removal: star_removal_path.as_str().into(),
     };
-    let mut host = RuntimeHost::new(Arc::new(|| {}), &preferences);
+    let mut host = RuntimeHost::new(wake::internals::noop(), &ml_models);
 
     // Startup seeds the ML nodes' path inputs from the preferences.
     assert_eq!(
@@ -73,9 +71,9 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     // A later preferences edit republishes the library with the new paths.
     let updated_denoise_path = model("updated-denoise.onnx");
     let updated_star_removal_path = model("updated-stars.onnx");
-    preferences.ml_models.denoise = updated_denoise_path.as_str().into();
-    preferences.ml_models.star_removal = updated_star_removal_path.as_str().into();
-    host.configure_ml_model_defaults(&preferences);
+    ml_models.denoise = updated_denoise_path.as_str().into();
+    ml_models.star_removal = updated_star_removal_path.as_str().into();
+    host.set_ml_model_paths(&ml_models);
     assert_eq!(
         ml_model_default(&host, "ML Denoise"),
         Some(ConstValue::FsPath(updated_denoise_path))
@@ -93,15 +91,14 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     let first_path = dir.join("first.darkroom");
     let second_path = dir.join("second.darkroom");
     let (first_root, second_root) = (cache::root(&first_path), cache::root(&second_path));
-    assert_eq!(host.disk_root, None);
+    assert_eq!(root_of(&host), None);
     host.set_document_cache(Some(&first_path));
-    assert_eq!(host.disk_root.as_deref(), Some(first_root.as_path()));
+    assert_eq!(root_of(&host), Some(first_root.as_path()));
     assert!(
         !fs::exists(&first_root),
         "opening a document writes nothing"
     );
 
-    let mut status = StatusLog::default();
     let mut memory_only = Graph::default();
     let func = host
         .library
@@ -109,7 +106,7 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
         .by_name("ML Denoise")
         .expect("built-in present");
     let node = memory_only.add_func_node(func);
-    host.run_once(&memory_only, &mut status);
+    host.run_once(&memory_only);
     assert!(
         !fs::exists(&first_root),
         "a memory-only program writes nothing"
@@ -117,20 +114,38 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
 
     let mut disk_backed = memory_only;
     disk_backed.find_mut(node).unwrap().cache = CacheMode::Disk;
-    host.run_once(&disk_backed, &mut status);
+    host.run_once(&disk_backed);
     assert!(
         fs::is_file(first_root.join(".gitignore")),
         "a disk-backed program prepares the root before it can write"
     );
 
-    // A new root is prepared again, on its own next disk-backed compile.
+    // A new root under a disk-backed program is prepared at once: the
+    // program installed before the change writes into it from the next value.
     host.set_document_cache(Some(&second_path));
-    assert_eq!(host.disk_root.as_deref(), Some(second_root.as_path()));
-    assert!(!fs::exists(&second_root));
-    host.run_once(&disk_backed, &mut status);
+    assert_eq!(root_of(&host), Some(second_root.as_path()));
     assert!(fs::is_file(second_root.join(".gitignore")));
     host.set_document_cache(None);
-    assert_eq!(host.disk_root, None);
+    assert_eq!(root_of(&host), None);
+
+    // So is the root an unsaved document gains on its first save, which the
+    // flush of its resident values writes into.
+    let third_path = dir.join("third.darkroom");
+    host.set_document_cache(Some(&third_path));
+    assert!(fs::is_file(cache::root(&third_path).join(".gitignore")));
+
+    // A cleared program holds no disk-backed node, so a root after it waits.
+    host.clear_program();
+    let fourth_path = dir.join("fourth.darkroom");
+    host.set_document_cache(Some(&fourth_path));
+    assert!(
+        !fs::exists(cache::root(&fourth_path)),
+        "nothing can write there"
+    );
+}
+
+fn root_of(host: &RuntimeHost) -> Option<&Path> {
+    host.disk_root.as_ref().map(|root| root.path.as_path())
 }
 
 /// The whole policy behind what a root change tells the worker. Only the

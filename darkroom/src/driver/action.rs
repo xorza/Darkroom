@@ -1,12 +1,11 @@
 //! [`Action`]: one step of input the driver plays into the window, and the key chords it names.
 
-use std::path::PathBuf;
-
 use glam::Vec2;
-use palantir::{Key, Modifiers, PointerButton};
+use palantir::{Key, KeyText, Modifiers, PointerButton};
 
 use crate::driver::error::DriverError;
 use crate::driver::locator::Locator;
+use crate::gui::dialogs::DialogAnswer;
 
 /// Pointer moves a drag takes from its start to its end when the call names none, enough to pass
 /// any drag threshold in small steps.
@@ -38,36 +37,25 @@ pub enum Action {
     /// Pinch there by `factor`: above 1 zooms in.
     Pinch { at: Locator, factor: f32 },
     /// Press one key chord, as `ctrl+z`, `shift+delete`, `enter` or `a`.
-    Key(String),
+    Key(Chord),
     /// Type text into whatever holds the keyboard focus.
     Type(String),
     /// Queue the answer the next file dialog gets.
     Answer(DialogAnswer),
 }
 
-/// One scripted answer to a file dialog, which the next dialog the app opens takes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DialogAnswer {
-    /// One path, for every ask but the multi-file pick.
-    Path(PathBuf),
-    /// The multi-file pick's paths.
-    Paths(Vec<PathBuf>),
-    /// The user closed the dialog.
-    Cancel,
-}
-
 /// A key and the modifiers held for it, parsed from a chord such as `ctrl+shift+z`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Chord {
-    pub(crate) mods: Modifiers,
-    pub(crate) key: Key,
+pub struct Chord {
+    pub mods: Modifiers,
+    pub key: Key,
 }
 
 impl Chord {
     /// `chord`: modifiers and one key joined by `+`, without regard to case. The modifiers are
     /// `ctrl` (Cmd on macOS, as palantir reads it), `shift`, `alt` and `meta`; the key is a named
     /// key or one character.
-    pub(crate) fn parse(chord: &str) -> Result<Self, DriverError> {
+    pub fn parse(chord: &str) -> Result<Self, DriverError> {
         let bad = || DriverError::BadChord {
             chord: chord.to_string(),
         };
@@ -126,9 +114,19 @@ impl Chord {
         Ok(Self { mods, key })
     }
 
-    /// Whether the chord types its character: with no command modifier held, as a layout does.
-    pub(crate) const fn types(self) -> bool {
-        !(self.mods.ctrl || self.mods.alt || self.mods.meta)
+    /// The text the chord types, as a layout gives it: its character, upper case with Shift, and
+    /// nothing for a named key or with a command modifier held.
+    pub(crate) fn text(self) -> KeyText {
+        match self.key {
+            Key::Char(c) if !(self.mods.ctrl || self.mods.alt || self.mods.meta) => {
+                if self.mods.shift {
+                    KeyText::new(&c.to_uppercase().to_string())
+                } else {
+                    KeyText::from_char(c)
+                }
+            }
+            _ => KeyText::EMPTY,
+        }
     }
 }
 
@@ -141,12 +139,13 @@ pub(crate) fn path(from: Vec2, to: Vec2, steps: u32) -> impl Iterator<Item = Vec
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use palantir::{Key, Modifiers};
+    use palantir::{Key, KeyText, Modifiers};
 
     use crate::driver::action::{Chord, path};
 
     /// Each modifier, named keys, one character in either case, and the plus key; a word that is
-    /// no key and an unknown modifier are refused.
+    /// no key and an unknown modifier are refused. A chord types its character, upper case with
+    /// Shift, and nothing with a command modifier or for a named key.
     #[test]
     fn chords_parse_to_their_key_and_modifiers() {
         let chord = |mods: Modifiers, key: Key| Chord { mods, key };
@@ -178,8 +177,21 @@ mod tests {
         );
         assert_eq!(Chord::parse("escape").unwrap().key, Key::Escape);
         assert_eq!(Chord::parse("ctrl++").unwrap(), chord(ctrl, Key::Char('+')));
-        assert!(Chord::parse("a").unwrap().types());
-        assert!(!Chord::parse("ctrl+a").unwrap().types());
+        for (chord, text) in [
+            ("a", "a"),
+            ("shift+a", "A"),
+            ("shift+é", "É"),
+            ("space", " "),
+            ("ctrl+a", ""),
+            ("alt+shift+a", ""),
+            ("enter", ""),
+        ] {
+            assert_eq!(
+                Chord::parse(chord).unwrap().text(),
+                KeyText::new(text),
+                "{chord}"
+            );
+        }
         assert!(Chord::parse("ctrl+banana").is_err());
         assert!(Chord::parse("hyper+a").is_err());
         assert!(Chord::parse("").is_err());

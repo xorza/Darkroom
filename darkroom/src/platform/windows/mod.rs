@@ -2,22 +2,15 @@
 //! implements.
 
 use std::ffi::OsString;
-use std::io;
 use std::path::PathBuf;
 
-use common::{env, process};
+use common::env;
 
 use palantir::HostHandle;
 
 /// Nothing to arrange: a shell file association passes the path in argv,
 /// where the CLI already reads it.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
-
-pub(super) fn open_url(url: &str) -> io::Result<()> {
-    // `start` treats its first quoted argument as the window title, so an
-    // empty title has to go in before the URL.
-    process::spawn("cmd", ["/C", "start", "", url])
-}
 
 /// `%APPDATA%\Darkroom` — roaming, so settings follow a domain user.
 pub(super) fn config_dir() -> Option<PathBuf> {

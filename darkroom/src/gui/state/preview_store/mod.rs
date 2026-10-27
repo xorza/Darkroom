@@ -8,8 +8,8 @@
 //!
 //! [`PreviewConverter`]: preview_converter::PreviewConverter
 
-use common::Size2us;
 pub(crate) mod error;
+mod job_queue;
 pub(crate) mod preview_converter;
 
 use std::cell::RefCell;
@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU32;
 
+use common::Size2us;
 use glam::UVec2;
 use imaginarium::{ColorFormat, InterleavedDesc};
 use lens::Image;
@@ -26,8 +27,9 @@ use scenarium::{DynamicValue, NodeId};
 use crate::core::document::Document;
 use crate::core::wake::Wake;
 use crate::gui::state::preview_store::error::DrawablePreviewError;
+use crate::gui::state::preview_store::job_queue::Jobs;
 use crate::gui::state::preview_store::preview_converter::{
-    Card, Converted, Job, Jobs, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
+    Card, Converted, Job, Outcome, PreviewConverter, Thumbnail, Ticket, Work,
 };
 
 /// Longest edge of a preview card's thumbnail — the one size darkroom picks
@@ -126,8 +128,9 @@ pub(crate) struct DrawablePreview {
 /// The publishes of one node still converting: every ticket from `oldest` to
 /// `newest`.
 ///
-/// A node's results arrive in the order it published — one thread, one
-/// queue — so a result in this span is newer than what the card shows, and
+/// A node's results arrive in the order it published — one thread, and a
+/// queue where a newer publish replaces the one still waiting — so a result
+/// in this span is newer than what the card shows, and
 /// lands even while a newer publish converts. Waiting for the newest alone
 /// would starve a node that publishes faster than its frames convert: each
 /// publish would void the one before, and the card would never change.
@@ -493,6 +496,18 @@ pub(crate) mod internals {
         #[cfg(test)]
         pub(crate) fn land_next(&mut self, ui: &Ui) {
             let converted = self.converter.wait();
+            self.land_one(ui, converted);
+        }
+
+        /// Wait for the next finished conversion, and hold it unlanded.
+        #[cfg(test)]
+        pub(crate) fn next_converted(&self) -> Converted {
+            self.converter.wait()
+        }
+
+        /// Land `converted`, as a frame does.
+        #[cfg(test)]
+        pub(crate) fn land_one(&mut self, ui: &Ui, converted: Converted) {
             let Self {
                 entries,
                 converting,

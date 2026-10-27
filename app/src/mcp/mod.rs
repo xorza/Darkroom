@@ -7,8 +7,10 @@ mod session_thread;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, mpsc};
 
 use common::thread as threads;
+use darkroom::driver::log_ring::LogRing;
 use darkroom::driver::{DisplayKind, Driver, SessionConfig};
 use glam::UVec2;
 use rmcp::ServiceExt as _;
@@ -19,27 +21,22 @@ use tokio::sync::oneshot;
 use crate::mcp::darkroom_server::DarkroomServer;
 use crate::mcp::session_thread::{Ended, SessionThread};
 
-/// The largest window side a session takes, in physical pixels: wgpu's default
-/// `max_texture_dimension_2d`, which desktop adapters reach. palantir asks the adapter for its
-/// own limit, so an adapter below it panics on a larger window.
-const MAX_WINDOW_SIDE: u32 = 8192;
-/// The smallest scale a session takes: at a quarter, a 12 px label is 3 pixels high.
-const MIN_SCALE: f32 = 0.25;
-
 /// Serve the editor in an offscreen window of `size` physical pixels at `scale`, on `document`
-/// or a new one, until the client leaves or the editor ends. The process is the session:
-/// `darkroom/AGENTS.md`, "The editor harness", "The process is the session".
-pub(crate) fn serve_headless(document: Option<PathBuf>, size: UVec2, scale: f32) -> ExitCode {
+/// or a new one, until the client leaves or the editor ends, its logs kept in `log`. The process
+/// is the session: `darkroom/AGENTS.md`, "The editor harness", "The process is the session".
+pub(crate) fn serve_headless(
+    document: Option<PathBuf>,
+    size: UVec2,
+    scale: f32,
+    log: LogRing,
+) -> ExitCode {
     let config = SessionConfig {
         display: DisplayKind::Gpu,
         size,
         scale,
     };
-    if let Err(message) = check_config(config) {
-        tracing::error!("darkroom: {message}");
-        return ExitCode::FAILURE;
-    }
-    let started = SessionThread::start(move || session_thread::launch(config, document.as_deref()));
+    let started =
+        SessionThread::start(move || session_thread::launch(config, log, document.as_deref()));
     let (session, ended) = match started {
         Ok(started) => started,
         Err(error) => {
@@ -47,8 +44,8 @@ pub(crate) fn serve_headless(document: Option<PathBuf>, size: UVec2, scale: f32)
             return ExitCode::FAILURE;
         }
     };
-    match serve(session, ended) {
-        Ok(None | Some(Ended::Quit)) => ExitCode::SUCCESS,
+    match serve(Arc::new(session), ended) {
+        Ok(None | Some(Ended::Quit | Ended::Closed)) => ExitCode::SUCCESS,
         Ok(Some(Ended::Panic(_))) => ExitCode::FAILURE,
         Err(error) => {
             tracing::error!("darkroom: {error}");
@@ -58,17 +55,22 @@ pub(crate) fn serve_headless(document: Option<PathBuf>, size: UVec2, scale: f32)
 }
 
 /// Run the editor's window on `document` on this, the main thread, and serve it from another
-/// until the window closes. The server ends when the client leaves or the session ends; the
-/// window stays for the person at it, whose edits a quit from the server would discard.
-pub(crate) fn serve_window(document: Option<PathBuf>) -> ExitCode {
-    let log = darkroom::init_driven_tracing();
+/// until the window closes, its logs kept in `log`. The server ends when the client leaves or the
+/// session ends; the window stays for the person at it, whose edits a quit from the server would
+/// discard.
+pub(crate) fn serve_window(document: Option<PathBuf>, log: LogRing) -> ExitCode {
+    let (sessions, session) = mpsc::channel();
     let run = darkroom::run_driven(document, move |link| {
-        // Detached: the process ends with the window, whatever the server is doing.
+        // Detached: the server reads stdin, which nothing interrupts, so the process ends with
+        // the window whatever the server is doing. The session comes back here to end first.
         threads::spawn("darkroom-mcp", move || {
-            let started = SessionThread::start(move || Driver::window(link, log));
-            let ended = started
+            let ended = SessionThread::start(move || Driver::window(link, log))
                 .map_err(|error| error.to_string())
-                .and_then(|(session, ended)| serve(session, ended));
+                .and_then(|(session, ended)| {
+                    let session = Arc::new(session);
+                    sessions.send(Arc::clone(&session)).ok();
+                    serve(session, ended)
+                });
             match ended {
                 Ok(None) => tracing::info!("darkroom: the MCP client left; the window stays"),
                 Ok(Some(ended)) => tracing::info!("darkroom: the MCP session ended: {ended:?}"),
@@ -76,6 +78,11 @@ pub(crate) fn serve_window(document: Option<PathBuf>) -> ExitCode {
             }
         });
     });
+    // The window is gone. A session that started ends before the process, so its directory goes
+    // with it; one that did not start dropped the sender.
+    if let Ok(session) = session.recv() {
+        session.close();
+    }
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -87,7 +94,10 @@ pub(crate) fn serve_window(document: Option<PathBuf>) -> ExitCode {
 
 /// Serve `session` over stdio until the client leaves or the session ends, and say which ended
 /// it: `None` for the client, else how the session ended.
-fn serve(session: SessionThread, ended: oneshot::Receiver<Ended>) -> Result<Option<Ended>, String> {
+fn serve(
+    session: Arc<SessionThread>,
+    ended: oneshot::Receiver<Ended>,
+) -> Result<Option<Ended>, String> {
     let runtime = runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -108,25 +118,6 @@ fn serve(session: SessionThread, ended: oneshot::Receiver<Ended>) -> Result<Opti
         watch.abort();
         Ok(watch.await.ok().flatten())
     })
-}
-
-/// Refuse a window no device can make or no one can read: a side of 0 or past
-/// [`MAX_WINDOW_SIDE`], or a scale under [`MIN_SCALE`].
-fn check_config(config: SessionConfig) -> Result<(), String> {
-    let size = config.size;
-    if size.min_element() == 0 || size.max_element() > MAX_WINDOW_SIDE {
-        return Err(format!(
-            "size is {}×{}; give each side from 1 to {MAX_WINDOW_SIDE} pixels",
-            size.x, size.y
-        ));
-    }
-    if !(config.scale.is_finite() && config.scale >= MIN_SCALE) {
-        return Err(format!(
-            "scale is {}; give the physical pixels per logical pixel, {MIN_SCALE} or more",
-            config.scale
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

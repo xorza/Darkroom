@@ -1,8 +1,8 @@
-//! The indicator chip the node headers use: a small
+//! The indicator badge the node headers use: a small
 //! square or pill carrying one glyph, in one of two visual families so a
 //! toggle can't be mistaken for a fact.
 //!
-//! **Controls** are bordered, hover-lifting chips you act on; **markers** are
+//! **Controls** are bordered, hover-lifting badges you act on; **markers** are
 //! flat tinted pills that only describe what something *is*. Domain-agnostic
 //! like the rest of `widgets` — a caller supplies the glyph, color, id, and
 //! tooltip, and maps the returned click onto its own intent.
@@ -12,7 +12,7 @@ use palantir::prelude::*;
 use crate::gui::widgets::support;
 use crate::gui::widgets::toggle::Toggle;
 
-/// Side of an indicator chip (px), and its glyph font size. Public because a
+/// Side of an indicator badge (px), and its glyph font size. Public because a
 /// caller drawing a vector glyph ([`BadgeFace::drawn`]) paints into this box, and the
 /// node header sizes its run-time label and spinner to match.
 pub(crate) const BADGE_SIZE: f32 = 18.0;
@@ -22,17 +22,17 @@ pub(crate) const BADGE_FONT: f32 = 12.0;
 /// rounded ends.
 const MARKER_PAD_X: f32 = 5.0;
 
-/// Shared chip tint opacity: a marker's fill and a hollow control's hover-lift
+/// Shared badge tint opacity: a marker's fill and a hollow control's hover-lift
 /// both paint their color at this alpha, so the two families feel like one system.
-const CHIP_TINT_ALPHA: f32 = 0.20;
+const TINT_ALPHA: f32 = 0.20;
 
-/// Fill alpha of a toggled-on control chip (hover lifts it). Deliberately a
+/// Fill alpha of a toggled-on control badge (hover lifts it). Deliberately a
 /// tint, not a solid swatch: cache/disable state is passive configuration, and
 /// solid saturated fills are reserved for live status (the exec glows).
-const CHIP_ON_ALPHA: f32 = 0.35;
-const CHIP_ON_HOVER_ALPHA: f32 = 0.50;
+const ON_ALPHA: f32 = 0.35;
+const ON_HOVER_ALPHA: f32 = 0.50;
 
-/// Which visual family a chip belongs to, plus the per-family data — split in
+/// Which visual family a badge belongs to, plus the per-family data — split in
 /// here so a control can't carry a (dead) marker salt nor a marker a
 /// (meaningless) `filled`. The two read very differently so the user can tell a
 /// toggle from a fact at a glance.
@@ -48,7 +48,7 @@ enum BadgeKind {
     Marker { salt: &'static str },
 }
 
-/// What a chip shows whichever family it belongs to: its icon, the ink it is
+/// What a badge shows whichever family it belongs to: its icon, the ink it is
 /// drawn in, and its tooltip.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BadgeFace {
@@ -67,12 +67,12 @@ impl BadgeFace {
         }
     }
 
-    /// A vector glyph `draw` paints into the [`BADGE_SIZE`] box in the chip's
-    /// ink — the node header's run chip. `rest` is its idle ink; pair the chip
-    /// with [`Badge::hover_color`] for one that swings whole to the outcome it
-    /// delivers.
+    /// A vector glyph `draw` paints into the badge's box, of the side it is handed, in the
+    /// badge's ink, as a toolbar chip's glyph does — the node header's run badge. `rest` is its
+    /// idle ink; pair the badge with [`Badge::hover_color`] for one that swings whole to the
+    /// outcome it delivers.
     pub(crate) const fn drawn(
-        draw: fn(&mut Ui, RgbaF32),
+        draw: fn(&mut Ui, f32, RgbaF32),
         rest: RgbaF32,
         tooltip: &'static str,
     ) -> Self {
@@ -84,24 +84,24 @@ impl BadgeFace {
     }
 }
 
-/// A chip's icon: a bold font character (the common case) or a caller-
-/// drawn vector glyph painted into the `BADGE_SIZE` box in the chip's
+/// A badge's icon: a bold font character (the common case) or a caller-
+/// drawn vector glyph painted into the `BADGE_SIZE` box in the badge's
 /// ink (the play triangle). A plain `fn` pointer keeps `Badge`
 /// non-generic.
 #[derive(Debug, Clone, Copy)]
 enum BadgeGlyph {
     Char(&'static str),
-    Drawn(fn(&mut Ui, RgbaF32)),
+    Drawn(fn(&mut Ui, f32, RgbaF32)),
 }
 
-/// One header indicator chip; the two families render differently (see
+/// One header indicator badge; the two families render differently (see
 /// [`BadgeKind`]). Build one with [`Badge::control`] / [`Badge::marker`], then
 /// [`show`](Badge::show) — which returns whether a control was clicked this
 /// frame (always `false` for a marker).
 #[derive(Debug)]
 pub(crate) struct Badge {
     face: BadgeFace,
-    /// Ink to swap to while the pointer is over the chip, for a control whose
+    /// Ink to swap to while the pointer is over the badge, for a control whose
     /// whole face — border, glyph, hover fill — points at the outcome of the
     /// click rather than at a setting. `None` keeps the face's ink in every
     /// state. Caller-supplied like the rest, so this module still names no
@@ -111,7 +111,7 @@ pub(crate) struct Badge {
 }
 
 impl Badge {
-    /// An interactive chip, clickable through `wid`, showing `state`.
+    /// An interactive badge, clickable through `wid`, showing `state`.
     pub(crate) const fn control(face: BadgeFace, wid: WidgetId, state: Toggle) -> Self {
         Self {
             face,
@@ -120,7 +120,7 @@ impl Badge {
         }
     }
 
-    /// Swap the chip's ink to `color` while the pointer is over it.
+    /// Swap the badge's ink to `color` while the pointer is over it.
     pub(crate) const fn hover_color(mut self, color: RgbaF32) -> Self {
         self.hover_color = Some(color);
         self
@@ -146,13 +146,15 @@ impl Badge {
             hover_color,
             kind,
         } = self;
-        // Last frame's hover, the same read the fill lift below makes. Only a
+        // Last frame's hover, read once for the ink and the fill lift below. Only a
         // control can carry one — a marker senses `HOVER` for its tooltip but
         // never restyles.
-        if let (Some(hovered), BadgeKind::Control { wid, .. }) = (hover_color, kind)
-            && ui.response_for(wid).hovered()
-        {
-            color = hovered;
+        let hovered = match kind {
+            BadgeKind::Control { wid, .. } => ui.response_for(wid).hovered(),
+            BadgeKind::Marker { .. } => false,
+        };
+        if hovered && let Some(hover_color) = hover_color {
+            color = hover_color;
         }
         // The two families diverge on every axis but the glyph's ink, so one
         // match settles all of them: a marker is a flat tinted pill hugging
@@ -172,19 +174,19 @@ impl Badge {
         let panel = match kind {
             BadgeKind::Marker { salt } => panel
                 .chrome(Chrome::rounded(
-                    color.with_alpha(CHIP_TINT_ALPHA),
+                    color.with_alpha(TINT_ALPHA),
                     Corners::all(BADGE_SIZE * 0.5),
                 ))
                 .id_salt(salt)
                 .sense(Sense::HOVER)
                 .padding(Spacing::xy(MARKER_PAD_X, 0.0)),
             BadgeKind::Control { wid, state } => {
-                // Last-frame hover (`response_for`) lifts the fill so the chip
-                // reads as pressable — the same trick the tab-strip chips use.
-                let alpha = match (state, ui.response_for(wid).hovered()) {
-                    (Toggle::On, true) => CHIP_ON_HOVER_ALPHA,
-                    (Toggle::On, false) => CHIP_ON_ALPHA,
-                    (Toggle::Off, true) => CHIP_TINT_ALPHA,
+                // Last-frame hover lifts the fill so the badge reads as pressable — the same
+                // trick the tab-strip chips use.
+                let alpha = match (state, hovered) {
+                    (Toggle::On, true) => ON_HOVER_ALPHA,
+                    (Toggle::On, false) => ON_ALPHA,
+                    (Toggle::Off, true) => TINT_ALPHA,
                     (Toggle::Off, false) => 0.0,
                 };
                 let mut chrome = Chrome {
@@ -193,14 +195,14 @@ impl Badge {
                     ..Default::default()
                 };
                 // Left at the default (no fill at all) rather than a
-                // fully-transparent one, so a resting chip paints no quad.
+                // fully-transparent one, so a resting badge paints no quad.
                 if alpha > 0.0 {
                     chrome.fill = color.with_alpha(alpha).into();
                 }
                 panel.chrome(chrome).id(wid).sense(Sense::CLICK)
             }
         };
-        let chip = panel.show(ui, |ui| match glyph {
+        let badge = panel.show(ui, |ui| match glyph {
             BadgeGlyph::Char(glyph) => {
                 Text::new(glyph)
                     .color(color)
@@ -208,12 +210,12 @@ impl Badge {
                     .bold()
                     .show(ui);
             }
-            BadgeGlyph::Drawn(draw) => draw(ui, color),
+            BadgeGlyph::Drawn(draw) => draw(ui, BADGE_SIZE, color),
         });
-        // Take the owned snapshot + click result so the chip's `ui` borrow
+        // Take the owned snapshot + click result so the badge's `ui` borrow
         // ends before the tooltip records into `ui`.
-        let snapshot = chip.response.snapshot();
-        let clicked = chip.response.left.clicked();
+        let snapshot = badge.response.snapshot();
+        let clicked = badge.response.left.clicked();
         support::tooltip_after(ui, &snapshot, Some(tooltip));
         clicked
     }

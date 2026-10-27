@@ -4,6 +4,7 @@ use scenarium::NodeId;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
@@ -40,12 +41,7 @@ impl Reversible for SetDepth {
         false
     }
 
-    /// Reorders the paint stack; no node remeasures.
-    fn invalidates_cached_geometry(&self) -> bool {
-        false
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+    fn facts(&self) -> EditFacts {
+        EditFacts::NONE
     }
 }

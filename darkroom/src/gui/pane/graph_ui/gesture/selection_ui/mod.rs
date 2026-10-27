@@ -9,12 +9,11 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::frame::requests::Requests;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::canvas_ctx::CanvasCtx;
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
+use crate::gui::pane::graph_ui::prepass_ctx::CanvasGesture;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::gesture_slot::GestureSlot;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
-/// sweeps a rectangle; the nodes it intersects and the ties whose centres it
+/// sweeps a rectangle; the nodes it intersects and the ties whose centers it
 /// holds highlight live as it moves, and the set is committed on release. Holding Shift at drag-start *extends* the current selection
 /// instead of replacing it. Ctrl+LMB is the breaker and RMB opens the
 /// new-node menu / breaker, so this only claims unmodified left-drags
@@ -22,9 +21,9 @@ use crate::gui::widgets::gesture_slot::GestureSlot;
 /// a drag that starts on a node never reaches here).
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUi {
-    band: GestureSlot<RubberBand>,
+    band: Option<RubberBand>,
     /// The swept set while a band is active, **sorted and deduplicated** so
-    /// [`Selection::contains`](crate::gui::pane::graph_ui::draw_ctx::Selection::contains) can
+    /// [`Selection::contains`](crate::gui::pane::graph_ui::selection::Selection::contains) can
     /// binary-search it. Owned here rather than written into the document, which the gesture only
     /// touches once, on release.
     ///
@@ -39,7 +38,7 @@ pub(crate) struct SelectionUi {
     /// its own, not the band's, because it deliberately outlives the band
     /// by one frame: the release frame paints the final selection while
     /// the `SetSelection` is still draining.
-    preview: GestureSlot<()>,
+    preview: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,9 +62,7 @@ struct RubberBand {
 
 impl RubberBand {
     fn rect(&self) -> Rect {
-        let min = self.start.min(self.cur);
-        let max = self.start.max(self.cur);
-        Rect::new(min.x, min.y, max.x - min.x, max.y - min.y)
+        Rect::from_min_max(self.start.min(self.cur), self.start.max(self.cur))
     }
 }
 
@@ -73,21 +70,23 @@ impl SelectionUi {
     /// Drop the in-flight band and its preview. `swept` is cleared in place —
     /// keeping the allocation is the whole reason it is a `Vec`.
     pub(crate) fn reset(&mut self) {
-        self.band.clear();
+        self.band = None;
         self.swept.clear();
-        self.preview.clear();
+        self.preview = false;
     }
 
     /// Whether a band is in flight.
     pub(crate) const fn in_flight(&self) -> bool {
-        !self.band.is_idle()
+        self.band.is_some()
     }
 
     /// The live swept set while a band is in flight, for node/pin draw to
     /// paint against; `None` when no band is active (the caller falls back to
     /// the committed selection).
     pub(crate) fn preview(&self) -> Option<&[ItemId]> {
-        self.preview.get()?;
+        if !self.preview {
+            return None;
+        }
         Some(&self.swept)
     }
 
@@ -98,10 +97,17 @@ impl SelectionUi {
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
     /// committing `SetSelection` emitted on release. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
+    ///
+    /// A click on bare canvas clears the selection: node panels hit-test first, so it fires only
+    /// when the click missed every node, and an empty selection records no no-op entry. A *drag*
+    /// there is the rubber band.
     pub(crate) fn apply(&mut self, ui: &mut Ui, ctx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = ctx.graph_ctx();
+        if ctx.gesture() == Some(CanvasGesture::Deselect) && !graph_ctx.selected().is_empty() {
+            out.push_graph(GraphIntent::clear_selection());
+        }
         let resp = ui.response_for(canvas::outer_wid());
-        if self.band.is_idle()
+        if self.band.is_none()
             && ctx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
@@ -119,16 +125,16 @@ impl SelectionUi {
                     BTreeSet::new()
                 },
             };
-            self.band.latch(band);
+            self.band = Some(band);
         }
         if ctx.cancelled() {
-            self.band.clear();
+            self.band = None;
         }
         let Some(mut band) = self.band.take() else {
             // No band in flight — just cancelled, or committed last frame.
             // Either way drop the preview so node draw falls back to the
             // committed selection.
-            self.preview.clear();
+            self.preview = false;
             return;
         };
         if let Some(p) = resp.pointer_local {
@@ -151,7 +157,7 @@ impl SelectionUi {
                 swept.push(ItemId::Node(n.node_id));
             }
         }
-        // A tie is swept when the band holds its centre.
+        // A tie is swept when the band holds its center.
         swept.extend(
             graph_ctx
                 .view()
@@ -169,8 +175,8 @@ impl SelectionUi {
         // place (node draw reads it via `preview()` for live highlight).
         // A `None` delta is the release edge that commits.
         if resp.left.drag.delta().is_some() {
-            self.band.latch(band);
-            self.preview.latch(());
+            self.band = Some(band);
+            self.preview = true;
             return;
         }
         // Only the committing frame pays for the owned set the intent
@@ -181,14 +187,14 @@ impl SelectionUi {
         out.push_graph(GraphIntent::SetSelection {
             to: swept.iter().copied().collect(),
         });
-        self.preview.latch(());
+        self.preview = true;
     }
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active or the rect has no area yet.
     pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
-        let Some(band) = self.band.get() else {
+        let Some(band) = self.band.as_ref() else {
             return;
         };
         let rect = band.rect();

@@ -54,6 +54,21 @@ impl Requests {
         self.document.extend_graph(iter);
     }
 
+    /// Queue every graph edit `iter` yields as part of the held `gesture`; see
+    /// [`DocumentQueue::extend_graph_in`].
+    pub(crate) fn extend_graph_in(
+        &mut self,
+        gesture: GestureId,
+        iter: impl IntoIterator<Item = GraphIntent>,
+    ) {
+        self.document.extend_graph_in(gesture, iter);
+    }
+
+    /// Queue the cancel of the held `gesture`; see [`DocumentQueue::push_cancel`].
+    pub(crate) fn push_cancel(&mut self, gesture: GestureId, otherwise: GraphIntent) {
+        self.document.push_cancel(gesture, otherwise);
+    }
+
     /// Queue a mutation of the pane arrangement.
     pub(crate) fn push_view(&mut self, op: DockOperation<TabRef>) {
         self.document.push_view(op);
@@ -86,9 +101,9 @@ impl Requests {
         self.app.pop_front()
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.document.clear();
-        self.app.clear();
+    /// Whether no tier holds a request: so between two record passes, as each drains its own.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.document.is_empty() && self.app.is_empty()
     }
 }
 

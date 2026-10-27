@@ -1,6 +1,6 @@
 //! [`PreviewConverter`]: the thread that turns published values into rasters.
 
-use std::sync::mpsc::{self, Receiver, Sender, TryIter};
+use std::sync::mpsc::{self, Receiver, TryIter};
 
 use common::thread;
 
@@ -12,6 +12,7 @@ use scenarium::{DynamicValue, NodeId};
 
 use crate::core::wake::Wake;
 use crate::gui::state::preview_store::error::DrawablePreviewError;
+use crate::gui::state::preview_store::job_queue::{self, Jobs};
 use crate::gui::state::preview_store::{
     PREVIEW_TEXTURE_DIM, capped_target, native_size, rgba8_raster,
 };
@@ -29,21 +30,6 @@ use crate::gui::state::preview_store::{
 pub(crate) struct PreviewConverter {
     jobs: Jobs,
     results: Receiver<Converted>,
-}
-
-/// Where jobs are queued: the store's, and a clone in each stored image.
-#[derive(Debug, Clone)]
-pub(super) struct Jobs(Sender<Job>);
-
-impl Jobs {
-    /// Queue `job`. The thread only stops once every sender is gone, so a
-    /// refused send means it panicked — a broken invariant, not a condition
-    /// to carry on from.
-    pub(super) fn send(&self, job: Job) {
-        self.0
-            .send(job)
-            .expect("the preview converter thread panicked");
-    }
 }
 
 /// Which publish of a node a job converts, so a result can tell whether it is
@@ -115,7 +101,7 @@ pub(crate) struct Thumbnail {
 
 impl PreviewConverter {
     pub(super) fn new(wake: Wake) -> Self {
-        let (jobs, inbox) = mpsc::channel::<Job>();
+        let (jobs, inbox) = job_queue::queue();
         let (outbox, results) = mpsc::channel();
         thread::spawn("darkroom-preview", move || {
             for job in inbox {
@@ -127,10 +113,7 @@ impl PreviewConverter {
                 wake();
             }
         });
-        Self {
-            jobs: Jobs(jobs),
-            results,
-        }
+        Self { jobs, results }
     }
 
     /// Where jobs are queued — cloned into each image, which queues its own

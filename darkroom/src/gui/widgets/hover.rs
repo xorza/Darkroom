@@ -21,7 +21,7 @@ impl From<bool> for Hover {
 impl Hover {
     /// `c` as it paints in this state: lifted through
     /// [`color::hover_lift`] while hovered.
-    pub(crate) fn lift(self, c: RgbaF32) -> RgbaF32 {
+    pub(crate) const fn lift(self, c: RgbaF32) -> RgbaF32 {
         match self {
             Self::Over => color::hover_lift(c),
             Self::Rest => c,

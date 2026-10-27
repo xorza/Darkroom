@@ -1,8 +1,10 @@
 use super::*;
 
+use std::collections::BTreeSet;
 use std::io;
 
 use scenarium::InvokeError;
+use scenarium::LogEntry;
 use scenarium::NodeStatus;
 use scenarium::RunError;
 
@@ -308,17 +310,57 @@ fn completed_snapshot_replaces_the_previous_run() {
     );
     assert_eq!(rs.status(executed), ExecStatus::MissingInputs(vec![1]));
     assert_eq!(rs.status(errored), ExecStatus::None);
+
+    // Fourth run: a log line goes to the node it names, and a node with no status keeps an entry
+    // only for the RAM it holds.
+    let holding = node_id(3);
+    let idle = node_id(4);
+    let mut rs = run_state([executed, errored, holding, idle]);
+    rs.apply_report(
+        WorkerReport::Completed(Arc::new(RunSummary {
+            nodes: [(holding, 7), (idle, 0)]
+                .map(|(node_id, cpu)| NodeStatus {
+                    node_id,
+                    status: None,
+                    ram: RamUsage { cpu, gpu: 0 },
+                })
+                .into(),
+            logs: vec![LogEntry {
+                node_id: errored,
+                level: LogLevel::Warn,
+                message: "a warning".into(),
+            }],
+            ..RunSummary::default()
+        })),
+        &mut log,
+    );
+    assert_eq!(
+        rs.logs(errored),
+        [NodeLog {
+            level: LogLevel::Warn,
+            message: "a warning".into(),
+        }]
+    );
+    assert!(rs.logs(executed).is_empty(), "a log names one node");
+    assert_eq!(rs.ram(holding), RamUsage { cpu: 7, gpu: 0 });
+    assert_eq!(
+        rs.nodes.keys().copied().collect::<BTreeSet<_>>(),
+        BTreeSet::from([errored, holding]),
+        "the idle node holds nothing to keep"
+    );
 }
 
 /// A failed run leaves no results to show, so an execution error clears the
 /// last run's statuses. A panicking event lambda stops the loop but fails no
-/// run, so the statuses the last completed run left stand.
+/// run, so the statuses the last completed run left stand. A completed run and a failed one
+/// each end a run; the panic ends none.
 #[test]
 fn only_a_failed_run_clears_the_last_run_statuses() {
     let node = node_id(1);
     let mut rs = run_state([node]);
     let mut log = StatusLog::default();
     rs.apply_report(completed_status(&[(node, 1.0)], &[]), &mut log);
+    assert_eq!(rs.runs_ended(), 1);
 
     rs.apply_report(
         WorkerReport::Error(WorkerError::EventLambdaPanic {
@@ -328,6 +370,7 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
         &mut log,
     );
     assert_eq!(rs.status(node), ExecStatus::Executed(1.0));
+    assert_eq!(rs.runs_ended(), 1, "the panic ends no run");
 
     rs.apply_report(
         WorkerReport::Error(WorkerError::Exec {
@@ -336,4 +379,5 @@ fn only_a_failed_run_clears_the_last_run_statuses() {
         &mut log,
     );
     assert_eq!(rs.status(node), ExecStatus::None);
+    assert_eq!(rs.runs_ended(), 2);
 }

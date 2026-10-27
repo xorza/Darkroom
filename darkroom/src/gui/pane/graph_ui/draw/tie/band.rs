@@ -7,7 +7,7 @@ use glam::Vec2;
 use palantir::widget::{CircularArc, LineCap, Shape};
 use palantir::{Rect, RgbaF32, Size, Stroke, Ui};
 
-use crate::gui::pane::graph_ui::draw::tie::tie_layout::{Band, SLOT_SPACING};
+use crate::gui::pane::graph_ui::frame::tie_layout::{Band, SLOT_SPACING};
 use crate::gui::theme::tie_theme::TieTheme;
 
 /// The band's length past its outer two strands, half at each end.
@@ -57,10 +57,10 @@ pub(crate) enum BandInk {
 }
 
 /// One band's axes on the canvas: local `x` runs along the band axis, local `y` along the
-/// strands, both from the tie's centre.
+/// strands, both from the tie's center.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BandAxes {
-    centre: Vec2,
+    center: Vec2,
     axis: Vec2,
     dir: Vec2,
     /// Half the band's length.
@@ -68,10 +68,12 @@ pub(crate) struct BandAxes {
 }
 
 impl BandAxes {
+    /// The axes of `band`, which places at least one strand: an empty band has no length.
     pub(crate) fn of(band: &Band) -> Self {
+        debug_assert!(band.strand_count() > 0, "a band with axes places a strand");
         let span = (band.strand_count() - 1) as f32 * SLOT_SPACING;
         Self {
-            centre: band.centre,
+            center: band.center,
             axis: band.axis,
             dir: band.dir,
             half: f32::midpoint(span, BAND_OVERHANG),
@@ -79,7 +81,7 @@ impl BandAxes {
     }
 
     fn at(self, x: f32, y: f32) -> Vec2 {
-        self.centre + self.axis * x + self.dir * y
+        self.center + self.axis * x + self.dir * y
     }
 
     /// A square around everything the band paints, at any angle: the farthest reach is the
@@ -87,7 +89,7 @@ impl BandAxes {
     pub(crate) fn bounds(self) -> Rect {
         let reach = self.knob_x() + KNOB_RADIUS + KNOB_RIM;
         Rect {
-            min: self.centre - Vec2::splat(reach),
+            min: self.center - Vec2::splat(reach),
             size: Size::new(reach * 2.0, reach * 2.0),
         }
     }
@@ -107,14 +109,11 @@ impl BandAxes {
         let [a, b] = self.reach();
         let grow = HEAD_WIDTH * 0.5 + HIT_MARGIN;
         let (min, max) = (a.min(b) - Vec2::splat(grow), a.max(b) + Vec2::splat(grow));
-        Rect {
-            min,
-            size: Size::new(max.x - min.x, max.y - min.y),
-        }
+        Rect::from_min_max(min, max)
     }
 
-    /// The knob's centre, on the axis past the head.
-    pub(crate) fn knob_centre(self) -> Vec2 {
+    /// The knob's center, on the axis past the head.
+    pub(crate) fn knob_center(self) -> Vec2 {
         self.at(self.knob_x(), 0.0)
     }
 
@@ -192,10 +191,10 @@ impl BandAxes {
     /// itself, filled with `pinned` for one a drag pinned.
     fn knob(self, ui: &mut Ui, ring: RgbaF32, halo: RgbaF32, pinned: Option<RgbaF32>) {
         let ring_end = self.half - HEAD_OVERLAP + HEAD_LENGTH + RING_PAST_HEAD;
-        let centre = self.knob_centre();
+        let center = self.knob_center();
         ui.add_shape(Shape::line(
             self.at(ring_end, 0.0),
-            centre,
+            center,
             Stroke::new(ring, RING_WIDTH),
         ));
         let (fill, rim) = match pinned {
@@ -204,9 +203,9 @@ impl BandAxes {
         };
         // A disk as a circle stroked as wide as its radius.
         let disk = KNOB_RADIUS * 0.5;
-        ui.add_shape(Shape::circle(centre, disk, Stroke::new(fill, KNOB_RADIUS)));
+        ui.add_shape(Shape::circle(center, disk, Stroke::new(fill, KNOB_RADIUS)));
         ui.add_shape(Shape::circle(
-            centre,
+            center,
             KNOB_RADIUS,
             Stroke::new(rim, KNOB_RIM),
         ));

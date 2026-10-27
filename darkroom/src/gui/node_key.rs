@@ -23,3 +23,37 @@ impl NodeKey for EventPort {
         self.node_id
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use scenarium::{EventPort, NodeId};
+
+    use crate::gui::node_key::NodeKey;
+    use crate::gui::port_ref::{PortKind, PortRef};
+
+    /// A port and an emitter event belong to their node, and a subscription pin *is* its node,
+    /// since a subscription is whole-node: that identity is what lets one glyph drag span all
+    /// three.
+    #[test]
+    fn a_node_key_names_the_node_its_glyph_hangs_off() {
+        let node = NodeId::unique();
+        assert_eq!(
+            PortRef {
+                node_id: node,
+                kind: PortKind::Input,
+                port_idx: 3,
+            }
+            .node(),
+            node
+        );
+        assert_eq!(
+            EventPort {
+                node_id: node,
+                event_idx: 1,
+            }
+            .node(),
+            node
+        );
+        assert_eq!(node.node(), node);
+    }
+}

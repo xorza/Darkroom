@@ -8,14 +8,14 @@ use glam::Vec2;
 use crate::core::document::graph_view::GraphView;
 use crate::core::document::tie::{TieAngle, TieId};
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::gui::pane::graph_ui::draw::wire::Wire;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 use crate::gui::port_ref::PortRef;
 
 /// World units between two strands of a band, and the band's length past its outer strands.
 pub(crate) const SLOT_SPACING: f32 = 9.0;
 
-/// Slot passes: the first orders each band from its neighbours' tie centres, the later ones from
+/// Slot passes: the first orders each band from its neighbours' tie centers, the later ones from
 /// the slots the pass before gave them, so the bands of chained ties settle on one order.
 const SLOT_PASSES: usize = 3;
 
@@ -61,7 +61,7 @@ pub(crate) struct TieLayout {
 pub(crate) struct Band {
     pub(crate) tie: TieId,
     pub(crate) angle: TieAngle,
-    pub(crate) centre: Vec2,
+    pub(crate) center: Vec2,
     /// The way the strands run through the band, a unit vector.
     pub(crate) dir: Vec2,
     /// The band's own direction, square to [`Self::dir`]: `dir.perp()`.
@@ -142,7 +142,7 @@ impl TieLayout {
             .extend(view.ties.iter().map(|(&tie, placed)| Band {
                 tie,
                 angle: placed.angle,
-                centre: placed.pos,
+                center: placed.pos,
                 dir: Vec2::X,
                 axis: Vec2::Y,
                 strands: 0..0,
@@ -253,7 +253,7 @@ impl TieLayout {
     }
 
     /// Point each band's strands: a pinned angle, or the mean direction of its strands' chords
-    /// between their neighbouring tie centres or ends.
+    /// between their neighbouring tie centers or ends.
     fn turn_bands(&mut self) {
         for band_idx in 0..self.bands.len() {
             let band = &self.bands[band_idx];
@@ -278,7 +278,7 @@ impl TieLayout {
     }
 
     /// Give each strand its slot: ordered in its band by the barycenter of its two neighbouring
-    /// points along the axis, equal ones by wire key, [`SLOT_SPACING`] apart and centred.
+    /// points along the axis, equal ones by wire key, [`SLOT_SPACING`] apart and centered.
     fn place_slots(&mut self) {
         let count = self.strands.len();
         self.slots.resize(count, Vec2::ZERO);
@@ -293,7 +293,7 @@ impl TieLayout {
                     let slots = use_slots.then_some(self.slots.as_slice());
                     let mid = (self.before(strand, slots) + self.after(strand, slots)) * 0.5;
                     self.order.push(Ordered {
-                        along: (mid - band.centre).dot(band.axis),
+                        along: (mid - band.center).dot(band.axis),
                         key: self.wires[strand.wire as usize].key,
                         strand: strand_idx as u32,
                     });
@@ -304,7 +304,7 @@ impl TieLayout {
                 let middle = (self.order.len() as f32 - 1.0) * 0.5;
                 for (rank, ordered) in self.order.iter().enumerate() {
                     self.next_slots[ordered.strand as usize] =
-                        band.centre + band.axis * ((rank as f32 - middle) * SLOT_SPACING);
+                        band.center + band.axis * ((rank as f32 - middle) * SLOT_SPACING);
                 }
             }
             std::mem::swap(&mut self.slots, &mut self.next_slots);
@@ -313,7 +313,7 @@ impl TieLayout {
 
     /// Each routed wire's cubics: port to tie, tie to tie, tie to port. At a tie the tangent runs
     /// along the band's strand direction, signed by the wire's travel, so the curve is G1 there;
-    /// a ribbon piece between two ties takes its handles from the chord between their centres, so
+    /// a ribbon piece between two ties takes its handles from the chord between their centers, so
     /// its strands share their handles.
     fn lay_pieces(&mut self) {
         for wire_idx in 0..self.wires.len() {
@@ -323,8 +323,8 @@ impl TieLayout {
                 let from = self.point(wire_idx, piece);
                 let to = self.point(wire_idx, piece + 1);
                 let chord = if piece > 0 && piece < steps {
-                    self.centre_of_step(wire_idx, piece)
-                        .distance(self.centre_of_step(wire_idx, piece - 1))
+                    self.center_of_step(wire_idx, piece)
+                        .distance(self.center_of_step(wire_idx, piece - 1))
                 } else {
                     from.distance(to)
                 };
@@ -371,9 +371,9 @@ impl TieLayout {
         }
     }
 
-    /// The centre of the tie at step `step` of a wire.
-    fn centre_of_step(&self, wire_idx: usize, step: u32) -> Vec2 {
-        self.bands[self.strand_at(wire_idx, step).band as usize].centre
+    /// The center of the tie at step `step` of a wire.
+    fn center_of_step(&self, wire_idx: usize, step: u32) -> Vec2 {
+        self.bands[self.strand_at(wire_idx, step).band as usize].center
     }
 
     fn strand_at(&self, wire_idx: usize, step: u32) -> Strand {
@@ -382,7 +382,7 @@ impl TieLayout {
     }
 
     /// The point before `strand` on its wire: the wire's start, or the previous tie's slot when
-    /// `slots` holds them, else its centre.
+    /// `slots` holds them, else its center.
     fn before(&self, strand: Strand, slots: Option<&[Vec2]>) -> Vec2 {
         let wire = &self.wires[strand.wire as usize];
         if strand.step == 0 {
@@ -391,7 +391,7 @@ impl TieLayout {
         self.neighbour(strand.wire, strand.step - 1, slots)
     }
 
-    /// The point after `strand` on its wire: the wire's end, or the next tie's slot or centre.
+    /// The point after `strand` on its wire: the wire's end, or the next tie's slot or center.
     fn after(&self, strand: Strand, slots: Option<&[Vec2]>) -> Vec2 {
         let wire = &self.wires[strand.wire as usize];
         if strand.step + 1 == wire.steps.end - wire.steps.start {
@@ -404,7 +404,7 @@ impl TieLayout {
         let strand_idx = self.step_strand[(self.wires[wire as usize].steps.start + step) as usize];
         match slots {
             Some(slots) => slots[strand_idx as usize],
-            None => self.bands[self.strands[strand_idx as usize].band as usize].centre,
+            None => self.bands[self.strands[strand_idx as usize].band as usize].center,
         }
     }
 }
@@ -412,3 +412,6 @@ impl TieLayout {
 const fn range(range: &Range<u32>) -> Range<usize> {
     range.start as usize..range.end as usize
 }
+
+#[cfg(test)]
+mod tests;

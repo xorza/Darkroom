@@ -4,7 +4,7 @@ use scenarium::Binding;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::preview_sink;
 use crate::gui::pane::graph_ui::internals::CanvasHarness;
-use crate::gui::pane::graph_ui::node_ui::port_row;
+use crate::gui::pane::graph_ui::wid;
 use std::sync::Arc;
 
 /// Ctrl+drag off an output port spawns a preview node already reading it, as
@@ -44,7 +44,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         ..Default::default()
     });
     let from = h.port_center(out_port);
-    h.ui.press_on(port_row::port_circle_wid(out_port));
+    h.ui.press_on(wid::port_circle(out_port));
     h.frame();
     // `first_drag_started` polls the *drag* edge, not the press, so the
     // pointer has to actually move past palantir's threshold.
@@ -75,4 +75,45 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         )),
         "and it is already reading the port the drag came off: {spawned:?}"
     );
+}
+
+/// Esc on a spawn-and-place drag takes the spawn back with the drag: the card is gone and there
+/// is nothing to undo, where a drag released in place keeps its card.
+#[test]
+fn esc_on_a_preview_spawn_takes_the_card_back() {
+    use palantir::{Key, Modifiers, PointerButton};
+
+    use crate::core::preview_sink::PreviewSink;
+    use crate::gui::port_ref::PortRef;
+
+    let spawn = |cancel: bool| {
+        let mut fixture = DocumentFixture::probes(1);
+        fixture
+            .library
+            .add(preview_sink::func(Arc::<PreviewSink>::default()));
+        let out_port = PortRef::output(fixture.node(0), 0);
+        let mut h = CanvasHarness::new(fixture);
+        h.prime(2);
+        h.ui.set_modifiers(Modifiers {
+            ctrl: true,
+            ..Default::default()
+        });
+        let from = h.port_center(out_port);
+        h.ui.press_on(wid::port_circle(out_port));
+        h.frame_applied();
+        h.ui.drag_to(from + Vec2::new(90.0, 40.0));
+        h.frame_applied();
+        // The chord matters only at the latch; Esc reads with no modifier held.
+        h.ui.set_modifiers(Modifiers::default());
+        h.frame_applied();
+        if cancel {
+            h.ui.key(Key::Escape);
+            h.frame_applied();
+        }
+        h.ui.release_button(PointerButton::Left);
+        h.frame_applied();
+        (h.document().graph.len(), h.ctx.open.can_undo())
+    };
+    assert_eq!(spawn(false), (2, true), "a placed card stays, undoable");
+    assert_eq!(spawn(true), (1, false), "a cancelled one leaves nothing");
 }

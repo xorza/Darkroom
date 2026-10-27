@@ -91,8 +91,8 @@ impl<'a> AppCtx<'a> {
     }
 }
 
-/// The two status-bar inputs `App` owns, bundled because they travel
-/// together and nothing between here and the bar reads either.
+/// The status-bar inputs `App` owns beside the run projection, whose cache figure the bar reads
+/// too: bundled because they travel together and only the bar reads them.
 #[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct StatusInputs<'a> {
     pub(crate) message: Option<StatusMessage<'a>>,

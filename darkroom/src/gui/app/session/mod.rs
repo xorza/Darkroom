@@ -15,11 +15,11 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use crate::core::edit::relayout::Relayout;
 use crate::core::open_document::OpenDocument;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
+use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::frame::window_ctx::WindowCtx;
 use crate::gui::main_window::MainWindow;
@@ -91,6 +91,9 @@ impl Session {
             preferences,
             requests,
         } = writes;
+        // Each pass drains the document tier and its caller the app tier, so a second pass of the
+        // frame inherits nothing the first ran.
+        debug_assert!(requests.is_empty(), "the last pass left requests behind");
         // The frame's relayout accumulator, owned here for exactly as long as
         // the frame it describes. Every pass that can strand
         // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
@@ -120,7 +123,8 @@ impl Session {
         let mut needs_relayout = self.apply_undo_redo(ui);
         self.main_window
             .scan_navigation(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |= self.open.drain_requests(requests.document(), ctx.library());
+        needs_relayout |=
+            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
 
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
         //    projection, then emit the input-derived graph mutations (drag,
@@ -133,7 +137,8 @@ impl Session {
         needs_relayout |= self
             .main_window
             .prepass(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |= self.open.drain_requests(requests.document(), ctx.library());
+        needs_relayout |=
+            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
 
         // 3. RECORD — author the widget tree. The file/run/quit chords are
         //    read just ahead of it: unlike undo/redo they only queue an
@@ -150,7 +155,8 @@ impl Session {
         );
         // Graph edits the record surfaced (node select, cache toggle, const
         // edit), plus the tab strip's dock ops.
-        needs_relayout |= self.open.drain_requests(requests.document(), ctx.library());
+        needs_relayout |=
+            Relayout::after(self.open.drain_requests(requests.document(), ctx.library()));
 
         // Resizes driven by something other than an `UndoStep` — the header's
         // elapsed-time label growing as a run reports — are not covered: they
@@ -178,9 +184,9 @@ impl Session {
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
-            self.open.undo()
+            Relayout::after(self.open.undo())
         } else if redo {
-            self.open.redo()
+            Relayout::after(self.open.redo())
         } else {
             Relayout::NotNeeded
         }

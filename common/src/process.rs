@@ -4,12 +4,12 @@ use std::ffi::OsStr;
 use std::io;
 use std::process::{Command, Output};
 
-/// Start `program` with `args` and leave it running: nothing waits for it or reads its output.
-pub fn spawn(
-    program: impl AsRef<OsStr>,
-    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-) -> io::Result<()> {
-    Command::new(program).args(args).spawn().map(drop)
+use crate::platform;
+
+/// Open `url` with the program the user's desktop opens it with, a browser for a web address,
+/// and leave that program running.
+pub fn open_url(url: &str) -> io::Result<()> {
+    platform::open_url(url)
 }
 
 /// Run `program` with `args` and the environment it inherits plus `envs`, wait for it to exit,

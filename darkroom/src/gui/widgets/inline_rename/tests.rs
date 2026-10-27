@@ -9,20 +9,19 @@ use palantir::internals::ui_harness::UiHarness;
 #[test]
 fn the_idle_name_sits_on_the_panels_leading_edge() {
     let theme = Theme::default();
-    let id = WidgetId::from_hash("rename-leading-edge");
+    let wid = WidgetId::from_hash("rename-leading-edge");
     let surface = UVec2::new(300, 100);
     let mut h = UiHarness::new(surface);
     h.set_display(Display {
+        physical: surface,
         pixel_snap: false,
-        ..Display::from_physical(surface, 1.0)
+        ..Display::default()
     });
     h.frame(|ui| {
-        InlineRename::new("Ab", &theme.inline_rename)
-            .id(id)
-            .show(ui);
+        InlineRename::new(wid, "Ab", &theme.inline_rename).show(ui);
     });
-    let panel = h.rect(id).expect("label panel arranged");
-    let label = h.rect(label_wid(id)).expect("name text arranged");
+    let panel = h.rect(wid).expect("label panel arranged");
+    let label = h.rect(label_wid(wid)).expect("name text arranged");
     assert_eq!(label.min.x, panel.min.x);
 }
 
@@ -36,33 +35,31 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
 /// some splice of the old name and the new character.
 #[test]
 fn entering_edit_mode_selects_the_whole_name() {
-    fn render(ui: &mut Ui, id: WidgetId, theme: &Theme) -> RenameEvent {
-        InlineRename::new("Alpha", &theme.inline_rename)
-            .id(id)
-            .show(ui)
+    fn render(ui: &mut Ui, wid: WidgetId, theme: &Theme) -> RenameEvent {
+        InlineRename::new(wid, "Alpha", &theme.inline_rename).show(ui)
     }
 
     let theme = Theme::default();
-    let id = WidgetId::from_hash("rename-select-all");
+    let wid = WidgetId::from_hash("rename-select-all");
     let mut h = UiHarness::new(UVec2::new(300, 100));
 
     // Lay the label out, then double-click it to open the editor.
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
-    let hit = h.rect(id).expect("label arranged").center();
+    let hit = h.rect(wid).expect("label arranged").center();
     h.click_at(hit);
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
     h.click_at(hit);
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
 
     // The editor's first frame: focus lands and the draft selects.
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
 
     // One character replaces the selection outright; the next appends,
@@ -71,18 +68,18 @@ fn entering_edit_mode_selects_the_whole_name() {
     // than copying it out.
     h.key(Key::Char('X'));
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
     h.key(Key::Char('Y'));
     h.frame(|ui| {
-        render(ui, id, &theme);
+        render(ui, wid, &theme);
     });
 
     h.key(Key::Enter);
-    let committed = h.frame_value(|ui| render(ui, id, &theme).committed);
+    let committed = h.frame_value(|ui| render(ui, wid, &theme));
     assert_eq!(
-        committed.as_deref(),
-        Some("XY"),
+        committed,
+        RenameEvent::Committed("XY".to_string()),
         "the first keystroke must replace the whole name, not splice into \
          it — and the draft must carry across frames from there",
     );
@@ -90,8 +87,7 @@ fn entering_edit_mode_selects_the_whole_name() {
     // A read-only label opens no editor, so the same gesture commits nothing.
     let locked = WidgetId::from_hash("rename-read-only");
     let render_locked = |ui: &mut Ui| {
-        InlineRename::new("Alpha", &theme.inline_rename)
-            .id(locked)
+        InlineRename::new(locked, "Alpha", &theme.inline_rename)
             .read_only()
             .show(ui)
     };
@@ -107,8 +103,12 @@ fn entering_edit_mode_selects_the_whole_name() {
     }
     h.key(Key::Char('X'));
     h.key(Key::Enter);
-    let committed = h.frame_value(|ui| render_locked(ui).committed);
-    assert_eq!(committed, None, "a read-only name never commits");
+    let committed = h.frame_value(|ui| render_locked(ui));
+    assert_eq!(
+        committed,
+        RenameEvent::Idle,
+        "a read-only name never commits"
+    );
     assert!(
         h.rect(label_wid(locked)).is_some(),
         "the label stays a label"

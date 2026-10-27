@@ -1,4 +1,5 @@
-//! [`EditBuffer`]: the cross-frame state behind the node const editors' buffered text fields.
+//! [`EditBuffer`]: the cross-frame state behind a buffered text field, as the node const editors
+//! and the preferences' path fields keep it.
 
 use palantir::prelude::*;
 
@@ -19,9 +20,9 @@ pub(crate) enum Focus {
 }
 
 impl Focus {
-    /// The focus of the field `id` as `ui` resolved it this frame.
-    pub(crate) fn of(ui: &Ui, id: WidgetId) -> Self {
-        if ui.focus() == Some(id) {
+    /// The focus of the field `wid` as `ui` resolved it this frame.
+    pub(crate) fn of(ui: &Ui, wid: WidgetId) -> Self {
+        if ui.focus() == Some(wid) {
             Self::Held
         } else {
             Self::Elsewhere

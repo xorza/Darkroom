@@ -4,13 +4,13 @@
 
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::{self, Cursor, Read as _, Write as _};
+use std::io::{Cursor, Read as _, Write as _};
 use std::path::Path;
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::core::io::document::error::DocumentLoadError;
+use crate::core::io::document::error::{DocumentLoadError, DocumentWriteError};
 use crate::core::io::document::{MAX_DOCUMENT_BYTES, fits};
 
 /// The one entry a zipped document holds.
@@ -51,18 +51,16 @@ impl DocumentFormat {
     }
 
     /// Write `ron`, a document's text, to `file` in this format.
-    pub(super) fn write(self, file: &mut File, ron: &[u8]) -> io::Result<()> {
+    pub(super) fn write(self, file: &mut File, ron: &[u8]) -> Result<(), DocumentWriteError> {
         match self {
-            Self::Ron => file.write_all(ron),
+            Self::Ron => Ok(file.write_all(ron)?),
             Self::ZippedRon => {
                 let options =
                     SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
                 let mut archive = ZipWriter::new(file);
-                archive
-                    .start_file(DOCUMENT_ENTRY, options)
-                    .map_err(io::Error::other)?;
+                archive.start_file(DOCUMENT_ENTRY, options)?;
                 archive.write_all(ron)?;
-                archive.finish().map_err(io::Error::other)?;
+                archive.finish()?;
                 Ok(())
             }
         }
@@ -120,10 +118,9 @@ fn unzip(bytes: &[u8], path: &Path) -> Result<Vec<u8>, DocumentLoadError> {
             size: entry.size(),
         });
     }
-    let mut ron = Vec::with_capacity(
-        usize::try_from(entry.size()).expect("`fits` bounds the entry to an addressable size"),
-    );
-    // One byte past the limit: the size the entry states is the archive's word, not a bound.
+    // Grown as it reads, and one byte past the limit: the size the entry states is the archive's
+    // word, which a reserve would trust with up to the whole limit for a file of a few bytes.
+    let mut ron = Vec::new();
     (&mut entry)
         .take(MAX_DOCUMENT_BYTES + 1)
         .read_to_end(&mut ron)

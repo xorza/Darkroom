@@ -40,7 +40,7 @@ use common::Size2us;
 const SIDECAR_PIN: &str = "63678a06bb280341";
 
 /// The tag every commit carries.
-const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN]);
+const SIDECAR_FORMAT: u64 = fnv1a::fingerprint(&[SIDECAR_PIN.as_bytes()]);
 
 /// The files one kept frame occupies in the decode cache: one plane per channel, its flags and its
 /// stratified samples when it has them, and its [`Commit`] — under a name of the whole decode it

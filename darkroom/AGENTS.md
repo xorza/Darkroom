@@ -35,7 +35,8 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   driver over a backend. Offscreen: the app on the driver's thread, a stepped clock, a
   `HeadlessWindow`. Window: the app on the winit main thread; input goes in through
   `HostHandle::send_input`, and what needs the `Ui` is a request the app serves in its next frame,
-  answered on a channel. A shot uses the product screenshot API in both.
+  answered on a channel. A shot uses the product screenshot API in both, and an open the app's
+  driven open: File ▸ Open, with no prompt.
 - **palantir puts input into a window as the OS does.** `HostHandle::send_input` delivers an
   event before the next frame as OS input is, with the window's input clock, then runs a frame;
   `HostHandle::last_frame` reads the window's last frame summary, which counts the sent events
@@ -70,16 +71,17 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   the schemas and the content types in step with the spec. Refused: our own JSON-RPC loop
   ([rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)). The tools' JSON shapes are the
   server's own types, converted to the driver's, so the driver carries no schema.
-- **Six consolidated tools**: `darkroom_open`, `darkroom_act` (a batch of actions, played one at
-  a time so a failure names the action it stopped at, optionally ending in a shot),
+- **Six consolidated tools**: `darkroom_open`, `darkroom_act` (a batch of actions, checked whole
+  and then played in order, a failure naming the action it stopped at, optionally ending in a
+  shot whose failure keeps the actions' report),
   `darkroom_state`, `darkroom_ui`, `darkroom_shot`, `darkroom_wait_run`. Names come before ids,
   `darkroom_state` has a concise and a detailed form, and an error says how to correct the call.
   Refused: one tool per action, which makes a four-step gesture four results; tools that edit
   through `GraphIntent`, which skip the UI under test
   ([Writing tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents)).
 - **Every reply fits the client's budget**: Claude Code warns at 10,000 tokens of tool output and
-  cuts at 25,000, so `darkroom_ui` takes a filter and a limit, 50 by default, and says how many it
-  left out. Refused: whole dumps that the client truncates where it chooses.
+  cuts at 25,000, so `darkroom_ui` takes a filter and a limit, 50 by default, `darkroom_state`
+  a node filter and a cap of 100 nodes, and each says how many it left out. Refused: whole dumps that the client truncates where it chooses.
 - **Locators by meaning, then by text, then by position**: a node by name or id, a port by node,
   side and name, a world point, then a widget's text, then a screen point. A locator that matches
   several is an error that lists them, and `Nth` picks one, as Playwright's strict locators and
@@ -106,7 +108,9 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
 - **A screenshot is product API, and the harness shoots through it**: View ▸ Copy View as Image
   and Save View as PNG… take the window through `Ui::request_screenshot`, and `darkroom_shot`
   asks the same way, so an agent sees what a user's capture gives, as egui's
-  `ViewportCommand::Screenshot` does. Refused: a test-only readback beside a product capture, two
+  `ViewportCommand::Screenshot` does. Each ask gets a `ScreenshotId`, and
+  `Ui::screenshot_taken` reads the image by it, so a person's capture and a shot that ask
+  together each take their own. Refused: a test-only readback beside a product capture, two
   paths to keep right
   ([egui ViewportCommand](https://docs.rs/egui/latest/egui/viewport/enum.ViewportCommand.html)).
 - **No `cpu` display in the product.** `--headless` needs a GPU adapter, and a software one
@@ -117,27 +121,30 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   public API for a mode with no shots; a silent fallback, which turns a missing adapter into a test
   that passes without having run.
 - **The offscreen harness steps its own time**, `OffscreenTime::Manual` advanced 1/60 s a frame,
-  and spaces separate clicks past the double-click window, so animation and click timing repeat
+  and spaces each press past the double-click window from the last one, whatever actions came
+  between them, so animation and click timing repeat
   from run to run. The worker runs on real time, which a run needs; the window runs on real time
   throughout.
 - **The process is the session.** `darkroom_open` opens a project in the running editor, in place
   of the open one; one that does not open leaves the editor as it was. A quit (File ▸ Quit, or
   Ctrl+Q past the unsaved-changes prompt) ends the process, and the client sees the server end. A
   panic ends the session: the server answers with the panic's message and location, then ends.
-  With a window, the window stays when the server ends, for the person at it. Refused: sessions
+  With a window, the window stays when the server ends, for the person at it, and a panic in a
+  request the window serves ends that request alone, its message passed to the session. Refused: sessions
   that start and stop inside one server, which a window cannot do.
 - **A project opens in place.** `darkroom_open` opens the file where it is, as a person's Open
   does; `copy` opens a copy of its folder under `common::env::temp_dir`, tmpfs on Debian 13 and
   Arch, so saves, the runtime cache and the shots stay inside the session. A copy refuses a folder
   over 256 MiB, one holding a link to a folder, or a document whose relative paths climb out of
   its folder, with the reason. In the window, an open refuses to discard unsaved edits, which the
-  person may own. Refused: a copy by default, whose saves a person watching the window would have
+  person may own; offscreen, where no person edits, it discards them. Refused: a copy by default, whose saves a person watching the window would have
   to find in a temp folder; a default that differs by mode.
 - **A dialog takes a queued answer, else asks the person.** `App` asks for a path through a
   `Dialogs` value: an agent's `answer` action queues an answer, made absolute as a native dialog's
   is, and the next ask takes it; with none queued, the window opens the native dialog and the
   headless editor refuses. A native dialog blocks the main thread, so a call waiting on the window
-  says so rather than timing out. Refused: all dialogs scripted under `--mcp`, which cancels the
+  says so rather than timing out, as it does for a minimized or occluded window, which
+  `HostHandle::is_hidden` reports. Refused: all dialogs scripted under `--mcp`, which cancels the
   person's own; native only, where an agent cannot save or open through the menus.
 - **A sample project lives in the repo**, `darkroom/sample/`: `sample.darkroom` and the small
   inputs it reads by relative path. It is made and changed in the editor, through the harness or
@@ -152,12 +159,31 @@ pixels. The window is offscreen, or the desktop one. The `darkroom` binary of `a
   zipped, a fifth of the size. Plain text is what a person, an agent and git read; the ZIP is for
   size.
 
+## Undo
+
+- **The camera is outside the undo history.** Pan and zoom are saved with the document and do
+  not dirty it, but Ctrl+Z never moves them, so a view move never stands between the person and
+  their last edit, and a zoom during a drag never splits the drag's entry. Refused: an entry per
+  camera gesture, and one merged into the drag. Photoshop keeps zoom and scroll out of History
+  because they change no pixels
+  ([Adobe](https://helpx.adobe.com/photoshop-elements/desktop/workspace-and-environment/undo-redo-cancel-actions.html)),
+  and Blender records a view move only when it moves the camera object
+  ([T92099](https://lists.blender.org/pipermail/bf-blender-cvs/2022-August/176504.html)).
+- **A held gesture is one entry, and Esc takes it back whole.** What a gesture does joins its
+  entry, a preview spawn and the drag that places it alike, and Esc reverts that entry and drops
+  it, so a cancelled spawn leaves no card and no entry. Refused: Blender's Shift+D rule, where Esc
+  cancels only the move and the copy stays
+  ([manual](https://docs.blender.org/manual/en/latest/modeling/meshes/editing/mesh/duplicate.html)),
+  which here leaves a card on its producer's port.
+
 ## Paths in a document
 
 - **The file holds the paths inside its folder relative; memory holds every path absolute.** A
   load joins each relative path to the file's folder, part by part, so the separators are the
   system's own; a save writes each path inside the document's folder relative to it, `/` between
-  its parts, and never with `..`, so the folder moves or is copied whole. The preference "Save
+  its parts, and never with `..`, so the folder moves or is copied whole; a path that reaches
+  its place through `..` stays absolute, as only the file system knows where `..` leads past a
+  link. The preference "Save
   paths inside the project folder as relative", on by default, turns it off. Refused: relative
   paths in memory, resolved at run time — the undo history holds the path values of earlier edits,
   so after Save As to another folder an undo would put back a path that names another file, and

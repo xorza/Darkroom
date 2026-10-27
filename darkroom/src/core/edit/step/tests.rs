@@ -1,36 +1,31 @@
 //! The per-step predicates the undo history and the frame pipeline read off a
 //! step.
 //!
-//! The frame-cost questions — whether a step dirties the document, whether
-//! it strands the canvas caches, whether it changes the node set — are swept
-//! over one representative of *every* kind, so a kind whose answer is wrong
-//! shows up here rather than as a save prompt that never fires, a drag that
-//! pays for two record passes, or a removed node's cache entries left behind.
+//! The frame-cost questions are swept over one representative of every kind,
+//! and a held gesture's fold is checked on the kinds that fold.
 
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use scenarium::{Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, Subscription};
+use scenarium::{
+    Binding, CacheMode, ConstValue, EventPort, InputPort, NodeId, OutputPort, Subscription,
+};
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
-use crate::core::document::viewport::Viewport;
+use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
 use crate::core::edit::step::set_node_name::SetNodeName;
-use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
+use crate::core::edit::step::set_node_property::{PropertyChange, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
-use crate::core::edit::step::set_viewport::{SetViewport, VIEWPORT_EPS};
 use crate::core::edit::step::undo_step::UndoStep;
-
-fn viewport(pan: Vec2, zoom: f32) -> Viewport {
-    Viewport { pan, zoom }
-}
 
 fn set_positions(node_id: NodeId, from: Vec2, to: Vec2) -> UndoStep {
     UndoStep::Positions(SetPositions {
@@ -53,30 +48,18 @@ fn constant(v: f64) -> Binding {
     Binding::Const(ConstValue::Float(v))
 }
 
-/// `subscriber` subscribing to `emitter`'s first event.
-fn subscribed(emitter: NodeId, subscriber: NodeId) -> UndoStep {
-    UndoStep::Subscription(SetSubscription {
-        subscription: Subscription::new(EventPort::new(emitter, 0), subscriber),
-        subscribed: Change {
-            from: false,
-            to: true,
-        },
-        ties: SetTies::default(),
-    })
-}
-
-fn node_property(node_id: NodeId, from: CacheMode, to: CacheMode) -> UndoStep {
-    UndoStep::NodeProperty(SetNodeProperty {
+fn renamed(node_id: NodeId, from: &str, to: &str) -> UndoStep {
+    UndoStep::NodeName(SetNodeName {
         node_id,
-        property: Change {
-            from: NodeProperty::RuntimeCache(from),
-            to: NodeProperty::RuntimeCache(to),
+        name: Change {
+            from: from.into(),
+            to: to.into(),
         },
     })
 }
 
-/// A removal of a real node — the one kind that can only be built by reading a
-/// document, since it carries everything the graph held about the node.
+/// A removal of a stub — the one kind that can only be built by reading a
+/// document, since it carries everything the document held about the node.
 fn node_removal() -> UndoStep {
     let mut fixture = DocumentFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
@@ -84,194 +67,150 @@ fn node_removal() -> UndoStep {
     UndoStep::Node(Box::new(SetNode::removal(entry, SetTies::default())))
 }
 
-/// The exit prompt's split: camera, selection and stacking are navigation and
-/// must not flip the unsaved flag; graph data and node layout must.
-#[test]
-fn dirties_document_splits_edits_from_navigation() {
-    let node_id = NodeId::unique();
-    let navigation = [
-        UndoStep::Selection(SetSelection {
-            selection: Change {
-                from: BTreeSet::new(),
-                to: BTreeSet::from([ItemId::Node(node_id)]),
-            },
-        }),
-        UndoStep::Viewport(SetViewport {
-            viewport: Change {
-                from: viewport(Vec2::ZERO, 1.0),
-                to: viewport(Vec2::new(10.0, 20.0), 2.0),
-            },
-        }),
-        UndoStep::Depth(SetDepth {
-            node_id,
-            z: Change { from: 0, to: 7 },
-        }),
-    ];
-    for step in &navigation {
-        assert!(
-            !step.dirties_document(),
-            "navigation step must not dirty: {step:?}",
-        );
-    }
-
-    let content = [
-        node_removal(),
-        UndoStep::NodeName(SetNodeName {
-            node_id,
-            name: Change {
-                from: "a".into(),
-                to: "b".into(),
-            },
-        }),
-        set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-        set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
-        node_property(node_id, CacheMode::None, CacheMode::Ram),
-        subscribed(node_id, NodeId::unique()),
-    ];
-    for step in &content {
-        assert!(step.dirties_document(), "content step must dirty: {step:?}");
-    }
+/// A removal of a tie, read off a document that holds one over a wire.
+fn tie_removal() -> UndoStep {
+    let mut fixture = DocumentFixture::default();
+    let [a, b] = [0.0, 200.0].map(|x| fixture.node_at(Vec2::new(x, 0.0)));
+    let wire = fixture.wire(OutputPort::new(a, 0), InputPort::new(b, 0));
+    let tie = fixture.tie(Vec2::new(100.0, 0.0), [wire]);
+    GraphIntent::RemoveTie { tie }
+        .commit_one(&mut fixture.document, &fixture.library)
+        .unwrap()
+        .expect("a held tie's removal is a step")
 }
 
-/// Only a node coming or going changes the node set; every other kind leaves
-/// the canvas's node caches as they were, so a drag frame sweeps nothing.
+/// The frame-cost questions, over one representative of *every* kind — a
+/// kind whose answer is wrong shows up here rather than as a save prompt that
+/// never fires, a drag that pays for two record passes, or a removed node's
+/// cache entries left behind:
+///
+/// - **dirties**: navigation (selection, stacking) leaves the unsaved flag
+///   alone; graph data and layout flip it.
+/// - **facts**: only a node coming or going changes the node set, so a drag frame
+///   sweeps no node cache; only a rename renames; and only an input that turns between a const
+///   and a wire or nothing changes its binding kind, which a value edit does not.
+///
+/// The cases are matched against every variant, so a new kind does not
+/// compile until it has one here.
 #[test]
-fn changes_node_set_splits_adds_and_removals_from_everything_else() {
+fn every_kind_answers_the_frame_questions() {
     let node_id = NodeId::unique();
-    let every_kind = [
-        (node_removal(), true),
+    let port = InputPort::new(node_id, 0);
+    // (what, step, [dirties, changes node set, invalidates geometry])
+    let cases = [
         (
-            set_input(InputPort::new(node_id, 0), None, Some(constant(1.0))),
-            false,
+            "node removal",
+            node_removal(),
+            (
+                true,
+                EditFacts {
+                    node_set: true,
+                    ..EditFacts::NONE
+                },
+            ),
         ),
         (
+            "move",
             set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-            false,
+            (true, EditFacts::NONE),
         ),
         (
-            UndoStep::NodeName(SetNodeName {
-                node_id,
-                name: Change {
-                    from: "a".into(),
-                    to: "b".into(),
+            "rename",
+            renamed(node_id, "a", "a-much-longer-title"),
+            (
+                true,
+                EditFacts {
+                    renamed: true,
+                    ..EditFacts::NONE
                 },
-            }),
-            false,
+            ),
         ),
         (
+            "value edit",
+            set_input(port, Some(constant(1.0)), Some(constant(2.0))),
+            (true, EditFacts::NONE),
+        ),
+        (
+            "const editor appears",
+            set_input(port, None, Some(constant(1.0))),
+            (
+                true,
+                EditFacts {
+                    binding_kind: true,
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
+        (
+            "const editor leaves, as a wire commit does",
+            set_input(port, Some(constant(1.0)), None),
+            (
+                true,
+                EditFacts {
+                    binding_kind: true,
+                    ..EditFacts::NONE
+                },
+            ),
+        ),
+        (
+            "selection",
             UndoStep::Selection(SetSelection {
-                selection: Change {
-                    from: BTreeSet::new(),
-                    to: BTreeSet::from([ItemId::Node(node_id)]),
-                },
+                toggled: BTreeSet::from([ItemId::Node(node_id)]),
             }),
-            false,
+            (false, EditFacts::NONE),
         ),
         (
+            "depth",
             UndoStep::Depth(SetDepth {
                 node_id,
                 z: Change { from: 0, to: 7 },
             }),
-            false,
+            (false, EditFacts::NONE),
         ),
         (
-            node_property(node_id, CacheMode::None, CacheMode::Ram),
-            false,
-        ),
-        (
-            UndoStep::Viewport(SetViewport {
-                viewport: Change {
-                    from: viewport(Vec2::ZERO, 1.0),
-                    to: viewport(Vec2::new(10.0, 20.0), 2.0),
-                },
+            "cache mode",
+            UndoStep::NodeProperty(SetNodeProperty {
+                node_id,
+                property: PropertyChange::RuntimeCache(Change {
+                    from: CacheMode::None,
+                    to: CacheMode::Ram,
+                }),
             }),
-            false,
+            (true, EditFacts::NONE),
         ),
-        (subscribed(node_id, NodeId::unique()), false),
+        (
+            "subscription",
+            UndoStep::Subscription(SetSubscription {
+                subscription: Subscription::new(EventPort::new(node_id, 0), NodeId::unique()),
+                subscribed: Change {
+                    from: false,
+                    to: true,
+                },
+                ties: SetTies::default(),
+            }),
+            (true, EditFacts::NONE),
+        ),
+        ("tie removal", tie_removal(), (true, EditFacts::NONE)),
     ];
-    for (step, changes) in &every_kind {
-        assert_eq!(step.changes_node_set(), *changes, "{step:?}");
-    }
-}
-
-/// A true arm here costs a whole extra record pass, and the step most at risk
-/// — a node drag — emits one per *gesture frame*, so a spurious true doubles
-/// the editor pipeline for the length of the drag. The split under test: only
-/// a step that changes a widget's measured size, or introduces a node with no
-/// cached port offsets, may return true.
-#[test]
-fn invalidates_cached_geometry_splits_resizes_from_moves() {
-    let node_id = NodeId::unique();
-    let port = InputPort::new(node_id, 0);
-
-    // Nothing remeasures: a port center is `node.pos + cached offset`, and
-    // every one of these leaves that offset valid.
-    let moves = [
-        // The node drag. Emits one step per gesture frame, drains pre-record,
-        // and Pass A already arranges at the cursor.
-        set_positions(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-        UndoStep::Viewport(SetViewport {
-            viewport: Change {
-                from: viewport(Vec2::ZERO, 1.0),
-                to: viewport(Vec2::new(10.0, 20.0), 2.0),
-            },
-        }),
-        UndoStep::Selection(SetSelection {
-            selection: Change {
-                from: BTreeSet::new(),
-                to: BTreeSet::from([ItemId::Node(node_id)]),
-            },
-        }),
-        UndoStep::Depth(SetDepth {
-            node_id,
-            z: Change { from: 0, to: 7 },
-        }),
-        // Value-only: the editor stays present at its `Fixed` size.
-        set_input(port, Some(constant(1.0)), Some(constant(2.0))),
-        // A dimmed body and a filled badge keep the same rect...
-        node_property(node_id, CacheMode::None, CacheMode::Ram),
-        // ...and an event wire paints between glyphs that are already there.
-        subscribed(node_id, NodeId::unique()),
-    ];
-    for step in &moves {
+    let kind = |step: &UndoStep| match step {
+        UndoStep::Node(_) => 0,
+        UndoStep::Positions(_) => 1,
+        UndoStep::NodeName(_) => 2,
+        UndoStep::Input(_) => 3,
+        UndoStep::Selection(_) => 4,
+        UndoStep::Depth(_) => 5,
+        UndoStep::NodeProperty(_) => 6,
+        UndoStep::Subscription(_) => 7,
+        UndoStep::Ties(_) => 8,
+    };
+    let covered: BTreeSet<u8> = cases.iter().map(|(_, step, _)| kind(step)).collect();
+    assert_eq!(covered.len(), 9, "a case for every kind");
+    for (what, step, answers) in &cases {
         assert!(
             !step.is_noop(),
-            "a degenerate step would pin nothing: {step:?}"
+            "{what}: a degenerate step would pin nothing"
         );
-        assert!(
-            !step.invalidates_cached_geometry(),
-            "a move must not cost a second record pass: {step:?}",
-        );
-    }
-
-    // Each of these changes a measured size: a wider title reflows the header,
-    // and the inline const editor appearing or leaving shifts every port row
-    // below it.
-    let resizes = [
-        UndoStep::NodeName(SetNodeName {
-            node_id,
-            name: Change {
-                from: "a".into(),
-                to: "a-much-longer-title".into(),
-            },
-        }),
-        set_input(port, None, Some(constant(1.0))),
-        // ...and removing it is the wire commit, the case Pass B has
-        // always existed for.
-        set_input(port, Some(constant(1.0)), None),
-        // A node arriving — or coming back on an undo — has no cached port
-        // offsets for its wires to anchor to.
-        node_removal(),
-    ];
-    for step in &resizes {
-        assert!(
-            !step.is_noop(),
-            "a degenerate step would pin nothing: {step:?}"
-        );
-        assert!(
-            step.invalidates_cached_geometry(),
-            "a resize strands the offset cache: {step:?}",
-        );
+        assert_eq!((step.dirties_document(), step.facts()), *answers, "{what}");
     }
 }
 
@@ -312,29 +251,6 @@ fn a_held_gesture_absorbs_its_next_frame_in_place() {
             (ItemId::Node(b), Vec2::ONE, Vec2::new(11.0, 1.0)),
         ]
     );
-
-    let camera = |from, to| {
-        UndoStep::Viewport(SetViewport {
-            viewport: Change { from, to },
-        })
-    };
-    let (start, mid, end) = (
-        viewport(Vec2::ZERO, 1.0),
-        viewport(Vec2::new(5.0, 0.0), 1.0),
-        viewport(Vec2::new(5.0, 0.0), 2.0),
-    );
-    let mut open = camera(start, mid);
-    open.absorb(&camera(mid, end));
-    let UndoStep::Viewport(folded) = &open else {
-        panic!("a folded camera move stays one: {open:?}");
-    };
-    assert_eq!(
-        folded.viewport,
-        Change {
-            from: start,
-            to: end
-        }
-    );
 }
 
 /// A gesture emits one kind of intent for its whole life, so a frame of
@@ -348,35 +264,4 @@ fn a_gesture_refuses_a_frame_of_another_kind() {
         node_id: a,
         z: Change { from: 0, to: 1 },
     }));
-}
-
-/// The camera compares with a tolerance rather than for equality: a pan of a
-/// thousandth of a pixel is the same camera, and recording it would put a
-/// Ctrl+Z between the user and their last real edit.
-#[test]
-fn viewport_noop_is_measured_not_exact() {
-    let same = |from, to| {
-        UndoStep::Viewport(SetViewport {
-            viewport: Change { from, to },
-        })
-        .is_noop()
-    };
-    let base = viewport(Vec2::new(3.0, 4.0), 1.5);
-
-    assert!(same(base, base), "an unmoved camera is a no-op");
-    // Half the threshold on each axis in turn is inside it, and twice it is
-    // outside.
-    for (scale, expected) in [(0.5, true), (2.0, false)] {
-        let d = VIEWPORT_EPS * scale;
-        assert_eq!(
-            same(base, viewport(base.pan + Vec2::new(d, 0.0), 1.5)),
-            expected,
-            "pan by {d}"
-        );
-        assert_eq!(
-            same(base, viewport(base.pan, 1.5 + d)),
-            expected,
-            "zoom by {d}"
-        );
-    }
 }

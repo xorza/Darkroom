@@ -11,7 +11,6 @@ use palantir::ImageFilter;
 
 use crate::core::io::document::saved_paths::SavedPaths;
 use crate::core::io::preferences::error::{PreferencesLoadError, PreferencesSaveError};
-use crate::platform;
 
 /// Preferences file name, resolved inside the platform's configuration
 /// directory. RON so it's hand-editable and matches every other file the app
@@ -89,7 +88,7 @@ impl Default for ViewerPreferences {
 
 /// Persisted main-window geometry. `size` is logical pixels (DPI-independent,
 /// so it restores to the same apparent size on a differently-scaled
-/// monitor); `pos` is physical pixels, absent when the platform
+/// monitor); `physical_pos` is physical pixels, absent when the platform
 /// doesn't report it (Wayland). `maximized` restores the maximized state
 /// while `size` remains what to return to when un-maximized. glam vecs
 /// serialize as `[x, y]` arrays.
@@ -100,7 +99,7 @@ pub(crate) struct WindowState {
     pub(crate) size: UVec2,
     pub(crate) maximized: bool,
     /// Physical outer position `[x, y]`; `None` on Wayland.
-    pub(crate) pos: Option<IVec2>,
+    pub(crate) physical_pos: Option<IVec2>,
 }
 
 impl Default for Preferences {
@@ -151,7 +150,7 @@ impl Preferences {
 
     /// Write the preferences to `path`. A failed persist is the caller's to
     /// surface: it shouldn't interrupt the user's session.
-    pub(crate) fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
+    fn save_to(&self, path: &Path) -> Result<(), PreferencesSaveError> {
         let bytes = SerdeFormat::Ron.serialize(self)?;
         // Nothing has created the configuration directory on a first run, and
         // publication needs it to exist to place its temporary file beside the
@@ -172,26 +171,6 @@ impl Preferences {
             }
         })
     }
-}
-
-/// The preferences file, in the OS's own configuration directory (see
-/// [`crate::platform::config_dir`]) — so the same user reads back the same
-/// settings however the editor was launched and wherever it is installed.
-///
-/// Resolving beside the executable instead would tie the file to the
-/// install location, and every packaged install puts that somewhere the
-/// user cannot write: the flatpak's `/app/bin` is a read-only mount, a
-/// `PREFIX=/usr` install needs root, and writing inside a macOS `.app`
-/// invalidates its code signature.
-///
-/// A platform that can name no home leaves the file name bare, which
-/// resolves against the working directory. Degrading beats panicking:
-/// everything else here already falls back rather than block a launch
-/// over settings.
-fn path() -> PathBuf {
-    platform::config_dir()
-        .unwrap_or_default()
-        .join(PREFERENCES_FILE)
 }
 
 #[cfg(test)]

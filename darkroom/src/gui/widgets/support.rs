@@ -3,8 +3,6 @@
 //! and layout spacers. Chrome-level composition (pills, chips) lives in
 //! [`pill`](crate::gui::widgets::pill).
 
-use std::fmt::Display;
-
 use palantir::prelude::*;
 use palantir::widget::{RectShape, Shape, TriangleShape};
 use palantir::{FontFamily, ResponseSnapshot, TextInput};
@@ -42,87 +40,20 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
     }
 }
 
-/// One mono-styled value, unlabeled — for a figure whose own shape
-/// (`1920×1080`, `RGBA · 8-bit`) already says what it is.
-///
-/// `value` renders on demand — a `Display` figure, or a `format_args!` the
-/// caller assembles at the call site — and lands in the record pass's text
-/// arena, so a per-frame fact strip builds no `String`.
-pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
-    let style = mono_text(ui, theme.text.label);
-    Text::new(fmt!(ui, "{value}")).style(&style).show(ui);
-}
-
-/// A value behind a muted micro-label.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LabeledValue<'a, V> {
-    pub(crate) label: &'a str,
-    pub(crate) value: V,
-}
-
-impl<V: Display> LabeledValue<'_, V> {
-    /// The value as [`bare_value`] behind its label, as two direct `Text` widgets
-    /// (no wrapping panel — draw it inside the caller's own panel so its `gap`
-    /// spaces the pair like any other sibling). Shared shape behind a node body's
-    /// memory footer (`gui::pane::graph_ui::node_ui::memory_row`) and a preview node's
-    /// image-info footer (`gui::pane::graph_ui::node_ui::preview_row`).
-    pub(crate) fn show(self, ui: &mut Ui, theme: &Theme) {
-        Text::new(self.label)
-            .style(&muted_text(ui, theme, theme.text.caption))
-            .show(ui);
-        bare_value(ui, theme, self.value);
-    }
-}
-
-/// A read-only "fact strip" footer's chrome: the surround fill, rounded
-/// on only its bottom two corners so it seats under whatever rounds the
-/// top (a header bar, or the card's own top edge). Shared by a node body's
-/// memory footer and a preview node's image-info footer.
-pub(crate) fn footer_chrome(theme: &Theme, corner_radius: f32) -> Chrome {
-    Chrome::rounded(
-        theme.colors.surround_fill,
-        Corners::new(0.0, 0.0, corner_radius, corner_radius),
-    )
-}
-
-/// A card's title-bar chrome: the header fill, rounded on only its top
-/// two corners so it seats inside the card's own outer stroke — `corner_radius`
-/// should be [`CardTheme::inner_radius`](crate::gui::theme::card_theme::CardTheme::inner_radius),
-/// not the card's outer radius, else the band's corner leaves a wedge of the
-/// card's plain fill showing through. Used by a node body's header — the one
-/// title bar in the tree, kept here beside its footer peer.
-pub(crate) fn header_chrome(theme: &Theme, corner_radius: f32) -> Chrome {
-    Chrome::rounded(
-        theme.card.header_fill,
-        Corners::new(corner_radius, corner_radius, 0.0, 0.0),
-    )
-}
-
 /// The gap between the items of one row on a node card: a port's glyph and
 /// its label, a header's chips.
 pub(crate) const ROW_GAP: f32 = 4.0;
 
-/// Horizontal/vertical padding of a card's header band, named beside the
-/// footer pair below so a header and a footer on the same card can't be
-/// tuned apart by accident.
-pub(crate) const CARD_HEADER_PAD_X: f32 = 8.0;
-pub(crate) const CARD_HEADER_PAD_Y: f32 = 7.0;
-
-/// Horizontal/vertical padding of a card's fact-strip footer — shared by a
-/// node body's memory footer and a preview node's image-info footer.
-pub(crate) const CARD_FOOTER_PAD_X: f32 = 10.0;
-pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
-
-/// A small circle of radius `r` centred on `centre`, for the caller to fill.
-pub(crate) fn dot(centre: Vec2, r: f32) -> RectShape {
-    Shape::rect(Rect::new(centre.x - r, centre.y - r, 2.0 * r, 2.0 * r)).corners(r)
+/// A small circle of radius `r` centered on `center`, for the caller to fill.
+pub(crate) fn dot(center: Vec2, r: f32) -> RectShape {
+    Shape::rect(Rect::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r)).corners(r)
 }
 
 /// A right-pointing play triangle inscribed in an `s`-sized box, spanning
 /// `fill` of it, for the caller to fill.
 ///
-/// Nudged right by a fifth of its half-width: a play mark's visual centre sits
-/// left of its bounding box's, so a geometrically centred one reads as offset.
+/// Nudged right by a fifth of its half-width: a play mark's visual center sits
+/// left of its bounding box's, so a geometrically centered one reads as offset.
 /// Its points are pulled in by the corner radius because the SDF rounds by
 /// dilating — the glyph grows back out to the intended extents.
 ///
@@ -134,7 +65,7 @@ pub(crate) fn play_triangle(s: f32, fill: f32) -> TriangleShape {
     play_triangle_at(s, Vec2::splat(s * 0.5), fill)
 }
 
-/// [`play_triangle`] centred on `c` rather than on the box — for a mark that
+/// [`play_triangle`] centered on `c` rather than on the box — for a mark that
 /// shares its box with another, like the event-loop button's bar.
 pub(crate) fn play_triangle_at(s: f32, c: Vec2, fill: f32) -> TriangleShape {
     let half_h = s * fill * 0.5;
@@ -147,18 +78,6 @@ pub(crate) fn play_triangle_at(s: f32, c: Vec2, fill: f32) -> TriangleShape {
         c + Vec2::new(nudge + half_w - r, 0.0),
     )
     .radius(r)
-}
-
-/// The shared rounded-rect outline glyphs frame their contents in,
-/// centered in an `s`-sized button box.
-pub(crate) fn frame(ui: &mut Ui, s: f32, color: RgbaF32) {
-    let w = s * 0.62;
-    let o = (s - w) * 0.5;
-    ui.add_shape(
-        Shape::rect(Rect::new(o, o, w, w))
-            .corners(s * 0.08)
-            .border(Stroke::new(color, s * 0.06)),
-    );
 }
 
 /// An empty stretch panel pushing the following hstack siblings to the

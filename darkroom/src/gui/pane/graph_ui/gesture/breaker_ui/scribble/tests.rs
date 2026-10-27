@@ -33,15 +33,22 @@ fn begin_frame_clears_every_broken_collection() {
 
 #[test]
 fn add_point_skips_short_segments() {
-    // Samples below MIN_POINT_DISTANCE are dropped — a slow drag
+    // Samples below MIN_POINT_DISTANCE on screen are dropped — a slow drag
     // that crawls 1px/frame must not accumulate one point per frame.
     let mut b = scribble_at(Vec2::ZERO);
-    b.add_point(Vec2::new(1.0, 0.0));
-    b.add_point(Vec2::new(2.0, 0.0));
-    b.add_point(Vec2::new(3.0, 0.0));
+    b.add_point(Vec2::new(1.0, 0.0), 1.0);
+    b.add_point(Vec2::new(2.0, 0.0), 1.0);
+    b.add_point(Vec2::new(3.0, 0.0), 1.0);
     assert_eq!(b.points.len(), 1, "sub-4px samples must be dropped");
-    b.add_point(Vec2::new(10.0, 0.0));
+    b.add_point(Vec2::new(10.0, 0.0), 1.0);
     assert_eq!(b.points.len(), 2);
+
+    // Zoomed out to 0.1, 30 world units are 3 px on screen, dropped, and 50 are 5 px, kept.
+    let mut far = scribble_at(Vec2::ZERO);
+    far.add_point(Vec2::new(30.0, 0.0), 0.1);
+    assert_eq!(far.points.len(), 1, "3 px on screen");
+    far.add_point(Vec2::new(50.0, 0.0), 0.1);
+    assert_eq!(far.points.len(), 2, "5 px on screen");
 }
 
 #[test]
@@ -52,11 +59,17 @@ fn add_point_caps_total_length() {
     // 3000 · t = 2000.00006 is closer to 2000 than to the next f32 (2000.000122),
     // so the clamped point lands at exactly (2000, 0).
     let mut b = scribble_at(Vec2::ZERO);
-    b.add_point(Vec2::new(3000.0, 0.0));
+    b.add_point(Vec2::new(3000.0, 0.0), 1.0);
     assert_eq!(b.points, [Vec2::ZERO, Vec2::new(MAX_BREAKER_LENGTH, 0.0)]);
     assert_eq!(b.length, MAX_BREAKER_LENGTH);
-    b.add_point(Vec2::new(4000.0, 0.0));
+    b.add_point(Vec2::new(4000.0, 0.0), 1.0);
     assert_eq!(b.points.len(), 2, "no append past cap");
+
+    // The cap is on screen: zoomed out to 0.1, the same 3000 world units are 300 px, whole.
+    let mut far = scribble_at(Vec2::ZERO);
+    far.add_point(Vec2::new(3000.0, 0.0), 0.1);
+    assert_eq!(far.points, [Vec2::ZERO, Vec2::new(3000.0, 0.0)]);
+    assert_eq!(far.length, 300.0);
 }
 
 /// A polyline crosses a wire only when one of its segments properly crosses
@@ -89,7 +102,7 @@ fn intersects_wire_finds_a_proper_crossing() {
     for (points, expected, why) in cases {
         let mut b = scribble_at(points[0]);
         for &p in &points[1..] {
-            b.add_point(p);
+            b.add_point(p, 1.0);
         }
         assert_eq!(b.intersects_wire(&straight), expected, "{why}");
     }
@@ -107,7 +120,7 @@ fn intersects_wire_finds_a_proper_crossing() {
 fn restarting_a_scribble_keeps_the_buffer_the_last_one_grew() {
     let mut s = scribble_at(Vec2::ZERO);
     for i in 1..50 {
-        s.add_point(Vec2::new(i as f32 * 10.0, 0.0));
+        s.add_point(Vec2::new(i as f32 * 10.0, 0.0), 1.0);
     }
     assert_eq!(s.points.len(), 50, "every sample cleared both thresholds");
     let grown = s.points.capacity();
@@ -134,7 +147,7 @@ fn restarting_a_scribble_keeps_the_buffer_the_last_one_grew() {
 fn the_box_rejection_answers_as_the_segment_tests_do() {
     let mut b = scribble_at(Vec2::new(0.0, 0.0));
     for p in [(20.0, 30.0), (40.0, -10.0), (60.0, 25.0), (80.0, 0.0)] {
-        b.add_point(Vec2::from(p));
+        b.add_point(Vec2::from(p), 1.0);
     }
     assert_eq!((b.lo, b.hi), (Vec2::new(0.0, -10.0), Vec2::new(80.0, 30.0)));
 
@@ -149,12 +162,9 @@ fn the_box_rejection_answers_as_the_segment_tests_do() {
             })
     };
     let brute_wire = |wire: &Wire| {
-        (1..=BEZIER_SAMPLES).any(|i| {
-            let t0 = (i - 1) as f32 / BEZIER_SAMPLES as f32;
-            let t1 = i as f32 / BEZIER_SAMPLES as f32;
-            let a = if i == 1 { wire.p0 } else { wire.at(t0) };
+        wire.chords().any(|[a, c]| {
             b.segments()
-                .any(|segment| segments_intersect((a, wire.at(t1)), segment))
+                .any(|segment| segments_intersect((a, c), segment))
         })
     };
 

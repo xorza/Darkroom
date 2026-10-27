@@ -9,16 +9,16 @@ use crate::core::document::Document;
 use crate::core::document::internals::DocumentFixture;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::load_report::DocumentRepair;
+use crate::core::document::viewport::Viewport;
 use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::core::edit::relayout::Relayout;
 use crate::core::io::document;
 use crate::core::io::document::document_format::DocumentFormat;
 use crate::core::io::document::error::DocumentLoadError;
 use crate::core::io::document::saved_paths::SavedPaths;
-use crate::core::io::preferences::Preferences;
-use crate::core::open_document::{LaunchSource, Loaded, OpenDocument};
+use crate::core::open_document::{Launched, Loaded, OpenDocument};
 use crate::core::status_log::StatusLog;
 use scenarium::{
     Binding, BindingEntry, BindingRejection, Compiler, ConstValue, DataType, EventPort, FuncId,
@@ -46,6 +46,9 @@ fn empty_document_has_the_main_graph_tab() {
     assert_eq!(open.document.layout.all_tabs().count(), 1);
 }
 
+/// A remembered document comes back as the open one; none remembered is an
+/// empty document; an unloadable one degrades to an empty document, is
+/// reported, and is forgotten.
 #[test]
 fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     let dir = TempDir::new("darkroom-open-document");
@@ -57,56 +60,36 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
         DocumentFormat::Ron,
     )
     .unwrap();
-    let mut preferences = Preferences {
-        document_path: Some(path.clone()),
-        ..Preferences::default()
-    };
     let mut status = StatusLog::default();
+    let launch = |remembered: Option<&Path>, status: &mut StatusLog| {
+        let Launched {
+            open,
+            forgot_remembered,
+        } = OpenDocument::open_at_launch(None, remembered, status, &Library::default());
+        (open.path, forgot_remembered)
+    };
 
-    // A remembered path with reopening on comes back as the open document.
-    let open = OpenDocument::open_at_launch(
-        LaunchSource {
-            argument: None,
-            preferences: &mut preferences,
-        },
-        &mut status,
-        &Library::default(),
+    assert_eq!(
+        launch(Some(&path), &mut status),
+        (Some(path.clone()), false)
     );
-    assert_eq!(open.path, Some(path.clone()));
+    assert_eq!(launch(None, &mut status), (None, false));
+    assert_eq!(status.lines().count(), 0, "neither reports a failure");
 
-    // Reopening off: empty document, but the path stays remembered.
-    preferences.load_last_document = false;
-    let open = OpenDocument::open_at_launch(
-        LaunchSource {
-            argument: None,
-            preferences: &mut preferences,
-        },
-        &mut status,
-        &Library::default(),
+    assert_eq!(
+        launch(Some(Path::new("invalid.json")), &mut status),
+        (None, true)
     );
-    assert!(open.path.is_none());
-    assert_eq!(preferences.document_path, Some(path));
-    assert_eq!(status.lines().count(), 0, "neither path reports a failure");
-
-    // An unloadable path degrades to an empty document and is forgotten.
-    preferences.load_last_document = true;
-    preferences.document_path = Some("invalid.json".into());
-    let open = OpenDocument::open_at_launch(
-        LaunchSource {
-            argument: None,
-            preferences: &mut preferences,
-        },
-        &mut status,
-        &Library::default(),
-    );
-    assert!(open.path.is_none());
-    assert_eq!(preferences.document_path, None);
     assert_eq!(
         status.lines().collect::<Vec<_>>(),
         ["load failed: invalid.json must use the .darkroom extension"]
     );
 }
 
+/// A command-line document outranks the remembered one, which stands; an
+/// unloadable argument degrades to an empty document rather than to the
+/// remembered one, and still leaves the remembered one standing — it is not
+/// what failed.
 #[test]
 fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     let dir = TempDir::new("darkroom-open-document-argument");
@@ -118,14 +101,8 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
         DocumentFormat::Ron,
     )
     .unwrap();
-    let remembered = PathBuf::from("remembered.darkroom");
-    let mut preferences = Preferences {
-        document_path: Some(remembered.clone()),
-        // Off, and pointed at an unloadable file: a named document wins over
-        // both, and the preferences are untouched on the way through.
-        load_last_document: false,
-        ..Preferences::default()
-    };
+    // An unloadable remembered file: a named document wins over it untried.
+    let remembered = Path::new("remembered.darkroom");
     let mut status = StatusLog::default();
 
     // The `.` component is what proves the path went through
@@ -139,11 +116,12 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
         named.as_os_str(),
         "the fixture has to differ before the load"
     );
-    let open = OpenDocument::open_at_launch(
-        LaunchSource {
-            argument: Some(argument),
-            preferences: &mut preferences,
-        },
+    let Launched {
+        open,
+        forgot_remembered,
+    } = OpenDocument::open_at_launch(
+        Some(argument),
+        Some(remembered),
         &mut status,
         &Library::default(),
     );
@@ -151,29 +129,47 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
         open.path.as_deref().map(Path::as_os_str),
         Some(named.as_os_str())
     );
-    assert_eq!(preferences.document_path, Some(remembered.clone()));
+    assert!(!forgot_remembered);
     assert_eq!(status.lines().count(), 0);
 
-    // An unloadable argument degrades to an empty document rather than to the
-    // remembered one, and still leaves the remembered path standing — it is
-    // not what failed.
     let missing = dir.join("missing.darkroom");
-    let open = OpenDocument::open_at_launch(
-        LaunchSource {
-            argument: Some(missing.clone()),
-            preferences: &mut preferences,
-        },
+    let Launched {
+        open,
+        forgot_remembered,
+    } = OpenDocument::open_at_launch(
+        Some(missing.clone()),
+        Some(remembered),
         &mut status,
         &Library::default(),
     );
     assert!(open.path.is_none());
-    assert_eq!(preferences.document_path, Some(remembered));
+    assert!(!forgot_remembered, "the remembered one is not what failed");
     // The tail is the OS's own wording for a missing file, so only the part
     // we compose is pinned.
     let lines = status.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 1, "one failure, not two: {lines:?}");
     let prefix = format!("load failed: {}: ", missing.display());
     assert!(lines[0].starts_with(&prefix), "got {:?}", lines[0]);
+
+    // An empty argument has no absolute form, so it does not load, and says so.
+    let mut status = StatusLog::default();
+    let Launched {
+        open,
+        forgot_remembered,
+    } = OpenDocument::open_at_launch(
+        Some(PathBuf::new()),
+        Some(remembered),
+        &mut status,
+        &Library::default(),
+    );
+    assert!(open.path.is_none() && !forgot_remembered);
+    let lines = status.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("load failed: : "),
+        "got {:?}",
+        lines[0]
+    );
 }
 
 /// A node keeps the ports it was authored against. Loaded against a library whose func moved its
@@ -295,11 +291,12 @@ fn a_node_whose_ports_moved_loads_as_a_stub_and_attaches_again() {
     );
 }
 
-/// A drained batch whose one step is a frame of a held gesture folds into
-/// that gesture's entry. A frame that shares its batch with another edit is
-/// recorded with it as a plain entry, which seals the gesture before it.
+/// A drained batch whose every step joins a held gesture folds into that
+/// gesture's entry. A frame that shares its batch with another edit is
+/// recorded with it as a plain entry, which seals the gesture before it; a
+/// camera move between two frames records nothing and seals nothing.
 #[test]
-fn only_a_one_step_batch_is_a_gesture_frame() {
+fn only_a_batch_wholly_in_a_gesture_folds_into_it() {
     let fixture = DocumentFixture::sample();
     let (node, other) = (fixture.node(0), fixture.node(1));
     let DocumentFixture { document, library } = fixture;
@@ -320,12 +317,17 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
         queue.extend_graph(intents);
         assert_eq!(
             open.drain_requests(&mut queue, &library),
-            Relayout::NotNeeded,
+            EditFacts::NONE,
             "moving and selecting remeasure nothing"
         );
     };
 
     drain(&mut open, vec![frame(5.0)]);
+    let zoomed = Viewport {
+        pan: Vec2::new(30.0, 0.0),
+        zoom: 2.0,
+    };
+    drain(&mut open, vec![GraphIntent::SetViewport { to: zoomed }]);
     drain(&mut open, vec![frame(9.0)]);
     drain(
         &mut open,
@@ -341,14 +343,14 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
     let pos = |open: &OpenDocument| open.document.main_view.node_placements[&node].pos - start;
     assert_eq!(pos(&open), Vec2::new(20.0, 0.0));
     assert!(open.can_undo());
-    assert_eq!(open.undo(), Relayout::NotNeeded);
+    assert_eq!(open.undo(), EditFacts::NONE);
     assert_eq!(
         pos(&open),
         Vec2::new(12.0, 0.0),
         "the frame after the batch"
     );
     assert!(open.can_undo());
-    assert_eq!(open.undo(), Relayout::NotNeeded);
+    assert_eq!(open.undo(), EditFacts::NONE);
     assert_eq!(
         pos(&open),
         Vec2::new(9.0, 0.0),
@@ -356,13 +358,146 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
     );
     assert!(open.document.main_view.selected.is_empty());
     assert!(open.can_undo());
-    assert_eq!(open.undo(), Relayout::NotNeeded);
+    assert_eq!(open.undo(), EditFacts::NONE);
     assert_eq!(
         pos(&open),
         Vec2::ZERO,
-        "the two frames before it, as one entry"
+        "the two frames before it, as one entry, the zoom between them none"
     );
     assert!(!open.can_undo());
+    assert_eq!(
+        open.document.main_view.viewport, zoomed,
+        "no undo moves the camera"
+    );
+}
+
+/// The graph revision moves on a change of the node set alone, which the
+/// canvas sweeps its caches on, not on a move or a selection; an edit, its
+/// undo and its redo each leave the document dirty.
+#[test]
+fn the_revision_follows_the_node_set_and_every_edit_dirties() {
+    let fixture = DocumentFixture::sample();
+    let node = fixture.node(0);
+    let DocumentFixture { document, library } = fixture;
+    let mut open = OpenDocument::over(document);
+    let mut queue = DocumentQueue::default();
+    let mut drain = |open: &mut OpenDocument, intent: GraphIntent| {
+        queue.push_graph(intent);
+        let _ = open.drain_requests(&mut queue, &library);
+    };
+    let start = open.graph_revision();
+
+    let gesture = DocumentQueue::default().open_gesture();
+    let placed = open.document.main_view.node_placements[&node].pos;
+    drain(
+        &mut open,
+        GraphIntent::MoveSelection {
+            gesture,
+            members: Arc::from([DragStart {
+                item: ItemId::Node(node),
+                pos: placed,
+            }]),
+            offset: Vec2::new(5.0, 0.0),
+        },
+    );
+    drain(
+        &mut open,
+        GraphIntent::SetSelection {
+            to: BTreeSet::from([ItemId::Node(node)]),
+        },
+    );
+    assert_eq!(
+        open.graph_revision(),
+        start,
+        "a move and a selection keep it"
+    );
+    assert!(open.dirty, "a move is an edit");
+
+    drain(&mut open, GraphIntent::RemoveNode { node_id: node });
+    let removed = open.graph_revision();
+    assert_ne!(removed, start, "a removal changes the node set");
+    open.dirty = false;
+    let _ = open.undo();
+    assert!(open.dirty, "undo dirties");
+    let restored = open.graph_revision();
+    assert_ne!(restored, removed, "undo brings the node back");
+
+    open.dirty = false;
+    let _ = open.redo();
+    assert!(open.dirty, "redo dirties");
+    assert_ne!(open.graph_revision(), restored, "redo takes it out again");
+}
+
+/// Esc on a held gesture takes its whole entry back, an edit that joined it
+/// too: a node spawned in a drag and moved by it is gone, and nothing is left
+/// to undo. A cancel of a gesture an edit since sealed falls back on its move.
+#[test]
+fn a_cancel_takes_the_gesture_back_whole() {
+    let fixture = DocumentFixture::sample();
+    let node = fixture.node(0);
+    let DocumentFixture { document, library } = fixture;
+    let mut open = OpenDocument::over(document);
+    let before = open.document.clone();
+    let mut queue = DocumentQueue::default();
+    let gesture = queue.open_gesture();
+    let spawned = NodeId::unique();
+    let spawn = GraphIntent::add_node(
+        Vec2::new(40.0, 40.0),
+        spawned,
+        open.document.graph.find(node).unwrap().clone(),
+    );
+    let placed: Arc<[DragStart]> = Arc::from([DragStart {
+        item: ItemId::Node(spawned),
+        pos: Vec2::new(40.0, 40.0),
+    }]);
+    let frame = |x: f32| GraphIntent::MoveSelection {
+        gesture,
+        members: Arc::clone(&placed),
+        offset: Vec2::new(x, 0.0),
+    };
+    let drain = |open: &mut OpenDocument, queue: &mut DocumentQueue| {
+        let _ = open.drain_requests(queue, &library);
+    };
+
+    queue.extend_graph_in(gesture, [spawn]);
+    drain(&mut open, &mut queue);
+    queue.push_graph(frame(10.0));
+    drain(&mut open, &mut queue);
+    assert!(open.document.graph.find(spawned).is_some());
+    queue.push_cancel(gesture, frame(0.0));
+    drain(&mut open, &mut queue);
+    assert_eq!(
+        open.document, before,
+        "the spawn and its move are both gone"
+    );
+    assert!(!open.can_undo(), "and no entry is left");
+
+    // Sealed by an edit in between, the gesture is a packed entry the cancel
+    // leaves alone: the fallback move puts the member back as its own entry.
+    let start = open.document.main_view.node_placements[&node].pos;
+    let gesture = queue.open_gesture();
+    let members: Arc<[DragStart]> = Arc::from([DragStart {
+        item: ItemId::Node(node),
+        pos: start,
+    }]);
+    let moved = |x: f32| GraphIntent::MoveSelection {
+        gesture,
+        members: Arc::clone(&members),
+        offset: Vec2::new(x, 0.0),
+    };
+    queue.push_graph(moved(10.0));
+    drain(&mut open, &mut queue);
+    queue.push_graph(GraphIntent::SetSelection {
+        to: BTreeSet::from([ItemId::Node(node)]),
+    });
+    drain(&mut open, &mut queue);
+    queue.push_cancel(gesture, moved(0.0));
+    drain(&mut open, &mut queue);
+    assert_eq!(open.document.main_view.node_placements[&node].pos, start);
+    assert!(
+        open.can_undo(),
+        "the drag and the selection stay in the history"
+    );
 }
 
 /// A file can carry wiring on a port or event its func does not declare — no

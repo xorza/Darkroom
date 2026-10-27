@@ -108,3 +108,50 @@ fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValu
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use scenarium::{ConstValue, DataType, FuncInput, Library, TypeEntry, TypeId};
+
+    use crate::gui::graph_ctx::input_ctx::default_const_value;
+
+    /// A declared default wins; an enum without one takes its first registered variant, and an
+    /// unregistered one has none; `Any` starts blank; a scalar takes its type's zero; a custom
+    /// type without a default has no const at all.
+    #[test]
+    fn an_input_defaults_to_its_declared_value_else_its_types() {
+        let mut library = Library::default();
+        let mode = TypeId::from_u128(1);
+        library.register_type(
+            mode,
+            TypeEntry::enum_with_variants("Mode", vec!["Fast".into(), "Fine".into()]),
+        );
+        let input = |data_type: DataType| FuncInput::optional("x", data_type);
+        let declared = FuncInput {
+            default_value: Some(ConstValue::Int(5)),
+            ..input(DataType::Int)
+        };
+        for (port, expected) in [
+            (declared, Some(ConstValue::Int(5))),
+            (
+                input(DataType::Enum(mode)),
+                Some(ConstValue::Enum("Fast".into())),
+            ),
+            (input(DataType::Enum(TypeId::from_u128(2))), None),
+            (
+                input(DataType::Any),
+                Some(ConstValue::String(String::new())),
+            ),
+            (input(DataType::Int), Some(ConstValue::Int(0))),
+            (input(DataType::Float), Some(ConstValue::Float(0.0))),
+            (input(DataType::Custom(TypeId::from_u128(3))), None),
+        ] {
+            assert_eq!(
+                default_const_value(&library, &port),
+                expected,
+                "{:?}",
+                port.data_type
+            );
+        }
+    }
+}

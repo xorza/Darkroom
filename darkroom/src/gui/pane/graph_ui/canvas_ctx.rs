@@ -3,8 +3,8 @@
 
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::gesture::canvas_gesture::CanvasGesture;
-use crate::gui::pane::graph_ui::prepass_ctx::{Escape, PrepassCtx};
+use crate::gui::pane::graph_ui::prepass_ctx::{CanvasGesture, Escape, PrepassCtx};
+use crate::gui::port_ref::PortRef;
 use crate::gui::theme::Theme;
 
 /// The graph canvas for this frame: the graph, plus the three facts
@@ -34,11 +34,6 @@ impl<'a> CanvasCtx<'a> {
         Self { prepass, geometry }
     }
 
-    /// The canvas before its geometry, for a step it shares with the prepass.
-    pub(crate) const fn prepass(self) -> PrepassCtx<'a> {
-        self.prepass
-    }
-
     pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
         self.prepass.graph_ctx()
     }
@@ -59,6 +54,11 @@ impl<'a> CanvasCtx<'a> {
         self.prepass.input().gesture
     }
 
+    /// The source of the wire a release dropped on empty canvas this frame.
+    pub(super) const fn dropped_wire(self) -> Option<PortRef> {
+        self.prepass.input().dropped_wire
+    }
+
     /// Whether this frame's Esc cancels whatever gesture is in flight.
     pub(super) const fn cancelled(self) -> bool {
         self.prepass.cancelled()
@@ -68,17 +68,5 @@ impl<'a> CanvasCtx<'a> {
     /// flight.
     pub(super) const fn deselects(self) -> bool {
         matches!(self.prepass.input().escape, Escape::Deselects)
-    }
-
-    /// The same canvas with no gesture latched — for the one reader that has
-    /// to be told this frame's gesture is not for it (a right-click that just
-    /// ended a floating wire must not also open the palette). A derived
-    /// context rather than a `gesture` parameter beside this one, so there is
-    /// still exactly one answer in scope at the call site.
-    pub(super) const fn without_gesture(self) -> Self {
-        Self {
-            prepass: self.prepass.without_gesture(),
-            ..self
-        }
     }
 }

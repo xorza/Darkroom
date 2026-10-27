@@ -1,10 +1,9 @@
 //! Linux. See [`crate::platform`] for the surface every OS module implements.
 
 use std::ffi::OsString;
-use std::io;
 use std::path::PathBuf;
 
-use common::{env, process};
+use common::env;
 
 use palantir::HostHandle;
 
@@ -12,10 +11,6 @@ use palantir::HostHandle;
 /// the path as `%f`, so a document opened from a file manager arrives in argv
 /// and the CLI already reads it.
 pub(super) fn route_opened_documents<A>(_handle: HostHandle<A>, _open: fn(&mut A, PathBuf)) {}
-
-pub(super) fn open_url(url: &str) -> io::Result<()> {
-    process::spawn("xdg-open", [url])
-}
 
 /// `$XDG_CONFIG_HOME/darkroom`, or `~/.config/darkroom` when unset.
 pub(super) fn config_dir() -> Option<PathBuf> {

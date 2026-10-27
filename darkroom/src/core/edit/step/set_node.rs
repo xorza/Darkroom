@@ -1,13 +1,14 @@
 //! [`SetNode`]: a node added to the document or removed from it.
 
-use scenarium::{Binding, DetachedNode, NodeId};
+use scenarium::{Binding, DetachedNode, InputPort, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
 use crate::core::document::graph_view::NodePlacement;
 use crate::core::document::item_id::ItemId;
 use crate::core::document::wire_key::{DataWire, WireKey};
-use crate::core::edit::step::change::{Change, Direction};
+use crate::core::edit::edit_facts::EditFacts;
+use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
 
@@ -90,25 +91,27 @@ impl NodeEntry {
     }
 }
 
-/// The document's entry for one node, before and after: the whole entry, or
-/// none.
+/// A node's whole entry coming into the document or leaving it.
 ///
 /// Adding a node and removing one are the same edit in opposite directions,
 /// so both intents lower to this one step rather than to a pair that would
-/// have to keep their insert and remove halves in agreement. An insertion
-/// carries `from: None`, a removal `to: None`, and a write either puts the
-/// recorded entry back or takes the node out.
+/// have to keep their insert and remove halves in agreement: a write either
+/// puts the recorded entry back or takes the node out, as [`NodeEdit`] and
+/// the direction say.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetNode {
-    /// The node both halves are about. Read off the half that holds an entry,
-    /// so the anchor cannot disagree with the payload.
-    node_id: NodeId,
-    /// Exactly one half is `Some`: the step is an insertion or a removal,
-    /// never a replacement of one node by another.
-    node: Change<Option<NodeEntry>>,
+    entry: NodeEntry,
+    edit: NodeEdit,
     /// The routes of the wires a removal ends, and each tie that only they
     /// held. Empty for an insertion, which ends no wire.
     ties: SetTies,
+}
+
+/// Which way a [`SetNode`] moves its entry when it applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum NodeEdit {
+    Insertion,
+    Removal,
 }
 
 impl SetNode {
@@ -118,16 +121,13 @@ impl SetNode {
     /// wants the new node selected raises that as its own edit.
     pub(crate) fn insertion(detached: DetachedNode, placement: NodePlacement) -> Self {
         Self {
-            node_id: detached.node_id(),
-            node: Change {
-                from: None,
-                to: Some(NodeEntry {
-                    detached,
-                    home: Home::Graph,
-                    placement,
-                    selected: false,
-                }),
+            entry: NodeEntry {
+                detached,
+                home: Home::Graph,
+                placement,
+                selected: false,
             },
+            edit: NodeEdit::Insertion,
             ties: SetTies::default(),
         }
     }
@@ -136,35 +136,43 @@ impl SetNode {
     /// its wires; undo puts it back whole.
     pub(crate) const fn removal(entry: NodeEntry, ties: SetTies) -> Self {
         Self {
-            node_id: entry.detached.node_id(),
-            node: Change {
-                from: Some(entry),
-                to: None,
-            },
+            entry,
+            edit: NodeEdit::Removal,
             ties,
         }
     }
 
-    /// Drop the node, and check that what came out is what the other half
-    /// will put back.
+    /// The graph inputs a removal's node fed, which its removal leaves unbound;
+    /// none for an insertion.
+    pub(crate) fn fed_inputs(&self) -> impl Iterator<Item = InputPort> + '_ {
+        let node_id = self.entry.detached.node_id();
+        self.entry
+            .wires()
+            .filter(move |_| self.edit == NodeEdit::Removal)
+            .filter_map(move |wire| match wire {
+                WireKey::Data(DataWire { output, input }) if output.node_id == node_id => {
+                    Some(input)
+                }
+                WireKey::Data(_) | WireKey::Event(_) => None,
+            })
+    }
+
+    /// Drop the node, and check that what came out is what the step will put
+    /// back.
     ///
-    /// The two halves are this node's entire record, so a divergence means
-    /// the document held wiring the history never captured — which an undo
-    /// would silently discard. The check holds because a step is always
-    /// reverted against exactly the document its own apply produced: entries
-    /// replay in reverse, and so do the steps inside one.
-    fn take_out(&self, document: &mut Document, dir: Direction) {
-        let recorded = self
-            .node
-            .half(dir.reversed())
-            .as_ref()
-            .expect("a node step is an insertion or a removal, never two absences");
-        let removed = match recorded.home {
-            Home::Graph => document.remove_node(self.node_id),
-            Home::Stubs => document.remove_stub(self.node_id),
+    /// The entry is this node's whole record, so a divergence means the
+    /// document held wiring the history never captured — which an undo would
+    /// silently discard. The check holds because a step is always reverted
+    /// against exactly the document its own apply produced: entries replay in
+    /// reverse, and so do the steps inside one.
+    fn take_out(&self, document: &mut Document) {
+        let node_id = self.entry.detached.node_id();
+        let removed = match self.entry.home {
+            Home::Graph => document.remove_node(node_id),
+            Home::Stubs => document.remove_stub(node_id),
         };
-        assert_eq!(
-            removed, recorded.detached,
+        debug_assert_eq!(
+            removed, self.entry.detached,
             "removal diverged from the step that recorded it"
         );
     }
@@ -172,29 +180,32 @@ impl SetNode {
 
 impl Reversible for SetNode {
     fn write(&self, document: &mut Document, dir: Direction) {
-        match self.node.half(dir) {
-            Some(entry) => entry.restore(document),
-            None => self.take_out(document, dir),
+        match (self.edit, dir) {
+            (NodeEdit::Insertion, Direction::Forward)
+            | (NodeEdit::Removal, Direction::Backward) => {
+                self.entry.restore(document);
+            }
+            (NodeEdit::Insertion, Direction::Backward)
+            | (NodeEdit::Removal, Direction::Forward) => {
+                self.take_out(document);
+            }
         }
         self.ties.write(document, dir);
     }
 
+    /// A node always comes or goes.
     fn is_noop(&self) -> bool {
-        self.node.unchanged()
+        false
     }
 
     fn dirties_document(&self) -> bool {
         true
     }
 
-    /// A node arriving has no cached port offsets yet, so its wires have
-    /// nothing to anchor to until it has recorded once — and a removal is
-    /// true for its *revert*, which is exactly that arrival.
-    fn invalidates_cached_geometry(&self) -> bool {
-        true
-    }
-
-    fn changes_node_set(&self) -> bool {
-        true
+    fn facts(&self) -> EditFacts {
+        EditFacts {
+            node_set: true,
+            ..EditFacts::NONE
+        }
     }
 }

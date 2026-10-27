@@ -36,8 +36,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::draw_ctx::DrawCtx;
 use crate::gui::pane::graph_ui::node_ui::NodeDrawOutcome;
-use crate::gui::pane::graph_ui::node_ui::node_widget;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::elapsed::Elapsed;
@@ -208,7 +207,7 @@ impl InspectPanel<'_> {
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
             .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
         Panel::vstack()
-            .id(inspect_panel_wid(node.node_id))
+            .id(wid::inspect_panel(node.node_id))
             .pos(pos)
             .size((Sizing::fixed(PANEL_WIDTH), Sizing::HUG))
             .sense(Sense::CLICK)
@@ -231,7 +230,8 @@ impl InspectPanel<'_> {
 
                 // Status right under the title — the most-glanceable fact.
                 // The colored line is self-labeling; no section header.
-                let status_color = node_widget::exec_color(theme, node.exec_status())
+                let status_color = theme
+                    .exec_color(node.exec_status())
                     .unwrap_or(ui.theme().text.color);
                 let status = status_text(ui, node.exec_status());
                 line(
@@ -268,7 +268,7 @@ impl InspectPanel<'_> {
                     for input in node.inputs() {
                         let val = value_str(ui, input.binding());
                         InspectedPort {
-                            label: PortLabel::resolve(library, input.name(), input.data_type()),
+                            label: PortCaption::resolve(library, input.name(), input.data_type()),
                             value: Some(val),
                         }
                         .show(ui, theme);
@@ -279,7 +279,7 @@ impl InspectPanel<'_> {
                     section(ui, theme, "Outputs");
                     for output in node.outputs() {
                         InspectedPort {
-                            label: PortLabel::resolve(library, output.name(), output.data_type()),
+                            label: PortCaption::resolve(library, output.name(), output.data_type()),
                             value: None,
                         }
                         .show(ui, theme);
@@ -360,7 +360,7 @@ fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
 /// alone (an output that hasn't run).
 #[derive(Debug)]
 struct InspectedPort<'a> {
-    label: PortLabel<'a>,
+    label: PortCaption<'a>,
     value: Option<TextInput<'static>>,
 }
 
@@ -382,14 +382,14 @@ impl InspectedPort<'_> {
 /// name was headed anyway: an open panel builds no owned string per port per
 /// frame, in either case.
 #[derive(Debug)]
-struct PortLabel<'a> {
+struct PortCaption<'a> {
     name: &'a str,
     /// The declared type's display name, or `None` when it merely repeats
     /// `name` and the row would read as a stutter.
     type_name: Option<Cow<'a, str>>,
 }
 
-impl<'a> PortLabel<'a> {
+impl<'a> PortCaption<'a> {
     fn resolve(library: &'a Library, name: &'a str, data_type: &DataType) -> Self {
         let type_name = library.type_name(data_type);
         let type_name = (!type_name.eq_ignore_ascii_case(name)).then_some(type_name);
@@ -397,7 +397,7 @@ impl<'a> PortLabel<'a> {
     }
 }
 
-impl Display for PortLabel<'_> {
+impl Display for PortCaption<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)?;
         match &self.type_name {
@@ -455,16 +455,6 @@ fn status_text(ui: &mut Ui, status: &ExecStatus) -> TextInput<'static> {
     }
 }
 
-/// Stable id for a node's inspector toggle chip in the header.
-pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
-    wid::node("inspect_badge", node_id)
-}
-
-/// Stable id for a node's floating inspection panel.
-pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
-    wid::node("inspect_panel", node_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -488,7 +478,7 @@ mod tests {
             ("Output", &path_type, "Output · path"),
         ];
         for (name, data_type, expected) in cases {
-            let label = PortLabel::resolve(&lib, name, data_type);
+            let label = PortCaption::resolve(&lib, name, data_type);
             assert_eq!(label.to_string(), expected, "label for {name}");
             // The deduped case is the dominant one, and it must resolve to the
             // declaration's own `&str` with nothing appended: that is the whole

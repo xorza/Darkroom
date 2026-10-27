@@ -16,22 +16,17 @@ mod window_backend;
 pub mod window_link;
 
 use std::path::{self, Path, PathBuf};
-use std::process;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{env, fs};
+use common::{TempDir, env, fs};
 use glam::{UVec2, Vec2};
-use palantir::{InputEvent, Key, KeyText, Modifiers, PointerButton};
+use palantir::{InputEvent, Key, Modifiers, PointerButton};
 use serde::Serialize;
-use tracing::subscriber::{self, DefaultGuard};
-use tracing_subscriber::layer::SubscriberExt as _;
 
 use crate::core::io::document as io_document;
-use crate::driver::action::{Action, Chord, path};
+use crate::driver::action::{Action, path};
 use crate::driver::backend::Backend;
-use crate::driver::error::DriverError;
+use crate::driver::error::{ActFailure, DriverError};
 use crate::driver::locator::Locator;
 use crate::driver::log_ring::LogRing;
 use crate::driver::offscreen::Offscreen;
@@ -84,16 +79,14 @@ pub struct SessionConfig {
 #[derive(Debug)]
 pub struct Driver {
     backend: Backend,
-    session: SessionDir,
+    /// The session's own directory, which is RAM on a tmpfs `/tmp`.
+    session: TempDir,
     log: LogRing,
-    /// An offscreen driver's log layer, this thread's default while the driver lives; the window
-    /// logs on the main thread, into the layer [`crate::init_driven_tracing`] installs.
-    _log_guard: Option<DefaultGuard>,
-    /// How soon a second press makes a double click, which separate clicks wait out.
+    /// How soon a second press makes a double click, which separate presses wait out.
     double_click: Duration,
-    /// Whether the last pointer step was a click, so the next one waits out the double-click
-    /// window.
-    clicked: bool,
+    /// The UI time of the last press, at or after the frame that saw it, which the next press
+    /// waits out the double-click window from.
+    last_press: Option<Duration>,
     /// The runs the worker had ended when the last `act` began, which a run it starts ends past.
     runs_before: u64,
     /// Shots taken, which numbers the next one's file.
@@ -113,48 +106,30 @@ pub struct ActReport {
 }
 
 impl Driver {
-    /// A driver of an offscreen editor on an empty document, or [`DriverError::NoAdapter`] for
-    /// [`DisplayKind::Gpu`] on a machine with no usable adapter.
-    ///
-    /// One per thread at a time: its log layer is the thread's default subscriber while it lives,
-    /// and a second driver on the thread would take the first one's lines.
-    ///
-    /// # Panics
-    ///
-    /// When the session directory cannot be made.
-    pub fn new(config: SessionConfig) -> Result<Self, DriverError> {
-        let log = LogRing::default();
-        let log_guard = subscriber::set_default(tracing_subscriber::registry().with(log.clone()));
+    /// A driver of an offscreen editor on an empty document, whose logs `log` keeps once
+    /// [`crate::init_tracing`] feeds it, or [`DriverError::NoAdapter`] for [`DisplayKind::Gpu`] on
+    /// a machine with no usable adapter.
+    pub fn new(config: SessionConfig, log: LogRing) -> Result<Self, DriverError> {
         let offscreen = Offscreen::new(config)?;
-        Self::over(
-            Backend::Offscreen(Box::new(offscreen)),
-            log,
-            Some(log_guard),
-        )
+        Self::over(Backend::Offscreen(Box::new(offscreen)), log)
     }
 
     /// A driver of the editor in the desktop window `link` reaches, whose logs `log` keeps.
-    ///
-    /// # Panics
-    ///
-    /// When the session directory cannot be made.
     pub fn window(link: WindowLink, log: LogRing) -> Result<Self, DriverError> {
-        Self::over(Backend::Window(WindowBackend::new(link)), log, None)
+        Self::over(Backend::Window(WindowBackend::new(link)), log)
     }
 
-    fn over(
-        mut backend: Backend,
-        log: LogRing,
-        log_guard: Option<DefaultGuard>,
-    ) -> Result<Self, DriverError> {
-        let double_click = backend.read(|_, ui| ui.double_click_window())?;
+    fn over(mut backend: Backend, log: LogRing) -> Result<Self, DriverError> {
+        let double_click = backend.with_app(|_, ui| ui.double_click_window())?;
+        let temp = env::temp_dir();
+        let session =
+            TempDir::create_in(&temp, "driver").map_err(|source| io_error(&temp, source))?;
         let mut driver = Self {
             backend,
-            session: SessionDir::new(),
+            session,
             log,
-            _log_guard: log_guard,
             double_click,
-            clicked: false,
+            last_press: None,
             runs_before: 0,
             shots: 0,
         };
@@ -164,7 +139,7 @@ impl Driver {
 
     /// The directory this session's copies and files live in, removed when the driver drops.
     pub fn session_dir(&self) -> &Path {
-        &self.session.path
+        self.session.path()
     }
 
     /// Open the project at `document`, where `mode` says. A project that does not open leaves
@@ -188,23 +163,28 @@ impl Driver {
     /// An offscreen editor that quit opens again as a new app; a window that quit has closed.
     fn reopen(&mut self, document: Option<PathBuf>, step: &str) -> Result<(), DriverError> {
         self.backend.open(document)?;
-        self.clicked = false;
         self.backend.settle(step)?;
         Ok(())
     }
 
-    /// Play `actions` in order, settling after each.
-    pub fn act(&mut self, actions: &[Action]) -> Result<ActReport, DriverError> {
-        self.backend.running()?;
-        self.runs_before = self.backend.read(|app, _| app.run_state().runs_ended)?;
+    /// Play `actions` in order, settling after each; the first that fails stops the rest. A run
+    /// any of them starts is one [`Self::wait_run`] waits for.
+    pub fn act(&mut self, actions: &[Action]) -> Result<ActReport, ActFailure> {
+        let failed = |ran| move |error| ActFailure { ran, error };
+        self.backend.running().map_err(failed(0))?;
+        self.runs_before = self
+            .backend
+            .with_app(|app, _| app.run_state().runs_ended())
+            .map_err(failed(0))?;
         let mut frames = 0;
-        for action in actions {
-            frames += self.play(action)?;
+        for (ran, action) in actions.iter().enumerate() {
+            frames += self.play(action).map_err(failed(ran))?;
         }
         // Not `Self::state`, whose report takes the log lines a later `state` call is owed.
         let state = self
             .backend
-            .read(|app, ui| State::of(app, ui, Detail::Concise, None, Vec::new()))?;
+            .with_app(|app, ui| State::of(app, ui, Detail::Concise, None, Vec::new()))
+            .map_err(failed(actions.len()))?;
         Ok(ActReport {
             frames,
             selection: state.selection,
@@ -213,20 +193,20 @@ impl Driver {
         })
     }
 
-    /// The editor as its last frame shows it; a detailed report keeps the nodes whose name
-    /// contains `nodes`.
+    /// The editor as its last frame shows it, keeping the nodes whose name contains `nodes`, when
+    /// given.
     pub fn state(&mut self, detail: Detail, nodes: Option<&str>) -> Result<State, DriverError> {
         let log = self.log.drain();
         let nodes = nodes.map(str::to_owned);
         self.backend
-            .read(move |app, ui| State::of(app, ui, detail, nodes.as_deref(), log))
+            .with_app(move |app, ui| State::of(app, ui, detail, nodes.as_deref(), log))
     }
 
     /// The visible interactive widgets whose text contains `filter`, at most `limit`.
     pub fn ui(&mut self, filter: Option<&str>, limit: usize) -> Result<UiList, DriverError> {
         let filter = filter.map(str::to_owned);
         self.backend
-            .read(move |_, ui| UiList::of(ui, filter.as_deref(), limit))
+            .with_app(move |_, ui| UiList::of(ui, filter.as_deref(), limit))
     }
 
     /// A picture of `region` as a later frame paints it, scaled so that its longer side is at
@@ -239,13 +219,13 @@ impl Driver {
         assert!(max_side > 0, "a shot has at least one pixel a side");
         self.backend.running()?;
         self.shots += 1;
-        let dir = self.session.path.join("shots");
+        let dir = self.session.join("shots");
         let path = dir.join(format!("{:03}-{}.png", self.shots, region.slug()));
-        let shot = self.backend.shot(region, max_side, path);
+        let capture = self.backend.shot(region, max_side);
         // The session settles even when the shot fails, so the next call starts from a settled
         // frame.
         self.backend.settle(&format!("the shot of {region:?}"))?;
-        let shot = shot?;
+        let shot = Shot::new(capture?, max_side, path);
         fs::create_dir_all(&dir).map_err(|source| io_error(&dir, source))?;
         fs::write(&shot.path, &shot.png).map_err(|source| io_error(&shot.path, source))?;
         Ok(shot)
@@ -256,24 +236,24 @@ impl Driver {
     /// yet reads as idle, so the run's end, and not the worker's idleness, ends the wait.
     pub fn wait_run(&mut self, timeout: Duration) -> Result<(), DriverError> {
         self.backend.running()?;
-        let started = Instant::now();
+        let deadline = Instant::now() + timeout;
         let before = self.runs_before;
         loop {
             self.backend.settle("the run")?;
-            let (executing, ended) = self.backend.read(|app, _| {
+            let (executing, ended) = self.backend.with_app(|app, _| {
                 let run = app.run_state();
-                (run.activity.is_executing(), run.runs_ended)
+                (run.activity().is_executing(), run.runs_ended())
             })?;
             if ended > before && !executing && !self.backend.wake_pending() {
                 return Ok(());
             }
-            if started.elapsed() > timeout {
+            if Instant::now() > deadline {
                 return Err(DriverError::RunTimeout {
                     seconds: timeout.as_secs_f32(),
                 });
             }
-            // The worker posts on real time: give it a moment before the next frame.
-            thread::sleep(Duration::from_millis(5));
+            // The worker posts on real time and wakes the app when it does.
+            self.backend.wait_wake(deadline);
         }
     }
 
@@ -283,7 +263,6 @@ impl Driver {
     fn play(&mut self, action: &Action) -> Result<u32, DriverError> {
         let step = format!("{action:?}");
         let mut frames = 0;
-        let clicked = matches!(action, Action::Click { .. } | Action::DoubleClick(_));
         match action {
             Action::Move(at) => {
                 let point = self.point(at)?;
@@ -292,16 +271,18 @@ impl Driver {
             Action::Click { at, button, mods } => {
                 let point = self.point(at)?;
                 frames += self.hover(point, &step)?;
-                self.space_clicks();
+                self.space_press()?;
                 frames += self.press_and_release(*button, *mods)?;
+                self.note_press()?;
             }
             Action::DoubleClick(at) => {
                 let point = self.point(at)?;
                 frames += self.hover(point, &step)?;
-                self.space_clicks();
+                self.space_press()?;
                 for _ in 0..2 {
                     frames += self.press_and_release(PointerButton::Left, Modifiers::default())?;
                 }
+                self.note_press()?;
             }
             Action::Drag {
                 from,
@@ -313,7 +294,7 @@ impl Driver {
                 let start = self.point(from)?;
                 let end = self.point(to)?;
                 frames += self.hover(start, &step)?;
-                self.space_clicks();
+                self.space_press()?;
                 self.modifiers(*mods);
                 self.input(InputEvent::PointerPressed(*button));
                 // A frame between the steps, as a hand moves: the window's frames run on, and an
@@ -326,6 +307,7 @@ impl Driver {
                 self.input(InputEvent::PointerReleased(*button));
                 frames += self.frame()?;
                 self.modifiers(Modifiers::default());
+                self.note_press()?;
             }
             Action::Scroll { at, delta } => {
                 let point = self.point(at)?;
@@ -342,17 +324,12 @@ impl Driver {
                 self.input(InputEvent::Zoom(*factor));
             }
             Action::Key(chord) => {
-                let chord = Chord::parse(chord)?;
-                let text = match chord.key {
-                    Key::Char(c) if chord.types() => KeyText::from_char(c),
-                    _ => KeyText::EMPTY,
-                };
                 self.modifiers(chord.mods);
                 self.input(InputEvent::KeyDown {
                     key: chord.key,
                     repeat: false,
                     physical: Key::Other,
-                    text,
+                    text: chord.text(),
                 });
                 frames += self.frame()?;
                 self.modifiers(Modifiers::default());
@@ -361,10 +338,9 @@ impl Driver {
             Action::Answer(answer) => {
                 let answer = answer.clone();
                 self.backend
-                    .read(move |app, _| app.dialogs_mut().queue(answer))?;
+                    .with_app(move |app, _| app.dialogs_mut().queue(answer))?;
             }
         }
-        self.clicked = clicked;
         Ok(frames + self.backend.settle(&step)?)
     }
 
@@ -389,12 +365,28 @@ impl Driver {
         Ok(pressed? + released?)
     }
 
-    /// Wait out the double-click window after a click, so the next one starts a fresh run.
-    fn space_clicks(&mut self) {
-        if self.clicked {
+    /// Wait out what is left of the double-click window since the last press, so the next press
+    /// starts a fresh run, whatever actions came between them.
+    fn space_press(&mut self) -> Result<(), DriverError> {
+        let Some(pressed) = self.last_press else {
+            return Ok(());
+        };
+        let since = self.now()?.saturating_sub(pressed);
+        if since <= self.double_click {
             self.backend
-                .advance(self.double_click + Duration::from_millis(1));
+                .advance(self.double_click - since + Duration::from_millis(1));
         }
+        Ok(())
+    }
+
+    /// Take the frame just run as the last press's time, which is at or after the press.
+    fn note_press(&mut self) -> Result<(), DriverError> {
+        self.last_press = Some(self.now()?);
+        Ok(())
+    }
+
+    fn now(&mut self) -> Result<Duration, DriverError> {
+        self.backend.with_app(|_, ui| ui.now())
     }
 
     fn modifiers(&mut self, mods: Modifiers) {
@@ -413,7 +405,7 @@ impl Driver {
 
     fn point(&mut self, at: &Locator) -> Result<Vec2, DriverError> {
         let at = at.clone();
-        self.backend.read(move |app, ui| at.point(app, ui))?
+        self.backend.with_app(move |app, ui| at.point(app, ui))?
     }
 
     /// Copy the folder of `document` into the session directory, refusing one over
@@ -444,7 +436,7 @@ impl Driver {
                 limit: COPY_LIMIT,
             });
         }
-        let copy = self.session.path.join("project");
+        let copy = self.session.join("project");
         if fs::exists(&copy) {
             fs::remove_dir_all(&copy).map_err(|source| io_error(&copy, source))?;
         }
@@ -510,29 +502,6 @@ fn io_error(path: &Path, source: std::io::Error) -> DriverError {
     DriverError::Io {
         path: path.to_path_buf(),
         source,
-    }
-}
-
-/// The session's own directory under the system's temporary directory, which is RAM on a tmpfs
-/// `/tmp`; removed with everything in it when the session ends.
-#[derive(Debug)]
-struct SessionDir {
-    path: PathBuf,
-}
-
-impl SessionDir {
-    fn new() -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = env::temp_dir().join(format!("darkroom-driver-{}-{n}", process::id()));
-        fs::create_dir_all(&path).expect("the session directory is creatable");
-        Self { path }
-    }
-}
-
-impl Drop for SessionDir {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.path).ok();
     }
 }
 

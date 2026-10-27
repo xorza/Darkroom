@@ -281,4 +281,31 @@ fn int_speed_floors_then_scales() {
     // Above the floor it scales: 200 → 2/px, 1000 → 10/px.
     assert_eq!(int_speed(200), 2.0);
     assert_eq!(int_speed(1000), 10.0);
+    // The most negative count has no positive `i64`: |i64::MIN| = 2^63, and 2^63 · 0.01 as f64.
+    assert_eq!(int_speed(i64::MIN), 2_f64.powi(63) * 0.01);
+}
+
+/// A commit of the text an `Any` field showed changes nothing, whatever its kind would read
+/// back as: blank over `Null`, `42` over the string `"42"`. A real edit sets the tightest kind,
+/// and one that reads back as the value it replaced sets nothing.
+#[test]
+fn an_any_field_commits_only_a_real_edit() {
+    let text = |value: &str| ConstValue::String(value.to_string());
+    for (value, committed, set) in [
+        (ConstValue::Null, "", None),
+        (text("42"), "42", None),
+        (text("true"), "true", None),
+        (ConstValue::Float(3.0), "3.0", None),
+        (ConstValue::Int(5), "+5", None),
+        (ConstValue::Null, "7", Some(ConstValue::Int(7))),
+        (ConstValue::Int(42), "43", Some(ConstValue::Int(43))),
+        (text("a"), "b", Some(text("b"))),
+        (text("42"), "42.5", Some(ConstValue::Float(42.5))),
+    ] {
+        assert_eq!(
+            any_edit(committed, &value),
+            set,
+            "{committed:?} over {value:?}"
+        );
+    }
 }

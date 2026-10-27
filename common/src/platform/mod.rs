@@ -275,6 +275,11 @@ pub(crate) fn symlink_dir(original: &Path, link: &Path) -> io::Result<()> {
     files::symlink_dir(original, link)
 }
 
+/// Open `url` with the program the desktop opens it with, leaving that program running.
+pub(crate) fn open_url(url: &str) -> io::Result<()> {
+    os::open_url(url)
+}
+
 /// Make the renames in `parent` durable, where the system needs a directory synced for that.
 #[cfg_attr(
     not(unix),

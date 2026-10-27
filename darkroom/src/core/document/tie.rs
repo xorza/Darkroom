@@ -12,7 +12,7 @@ pub(crate) type TieId = Id<Tie>;
 /// [`GraphView::routes`](crate::core::document::graph_view::GraphView::routes).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Tie {
-    /// Canvas-world position of the band's centre.
+    /// Canvas-world position of the band's center.
     pub(crate) pos: Vec2,
     pub(crate) angle: TieAngle,
 }

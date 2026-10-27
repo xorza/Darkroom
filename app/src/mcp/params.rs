@@ -3,8 +3,10 @@
 
 use std::path::PathBuf;
 
+use darkroom::DialogAnswer;
 use darkroom::driver::OpenMode;
-use darkroom::driver::action::{Action, DRAG_STEPS, DialogAnswer};
+use darkroom::driver::action::{Action, Chord, DRAG_STEPS};
+use darkroom::driver::error::DriverError;
 use darkroom::driver::locator::{Locator, Side};
 use darkroom::driver::shot::Region;
 use darkroom::driver::state::Detail;
@@ -61,7 +63,7 @@ pub(crate) struct StateParams {
     /// ports, bindings and run status, the wires, the camera and the undo.
     #[serde(default)]
     pub(crate) detail: DetailParam,
-    /// For a detailed state, only the nodes whose name contains this.
+    /// Only the nodes whose name contains this, and the wires with one at either end.
     pub(crate) nodes: Option<String>,
 }
 
@@ -237,9 +239,12 @@ impl From<DetailParam> for Detail {
     }
 }
 
-impl From<ActionParam> for Action {
-    fn from(action: ActionParam) -> Self {
-        match action {
+/// A chord is parsed here, so a batch with a bad one is refused before any of it plays.
+impl TryFrom<ActionParam> for Action {
+    type Error = DriverError;
+
+    fn try_from(action: ActionParam) -> Result<Self, DriverError> {
+        Ok(match action {
             ActionParam::Move(at) => Self::Move(at.into()),
             ActionParam::Click { at, button, mods } => Self::Click {
                 at: at.into(),
@@ -268,10 +273,10 @@ impl From<ActionParam> for Action {
                 at: at.into(),
                 factor,
             },
-            ActionParam::Key(chord) => Self::Key(chord),
+            ActionParam::Key(chord) => Self::Key(Chord::parse(&chord)?),
             ActionParam::Type(text) => Self::Type(text),
             ActionParam::Answer(answer) => Self::Answer(answer.into()),
-        }
+        })
     }
 }
 

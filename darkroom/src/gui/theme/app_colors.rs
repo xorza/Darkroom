@@ -2,9 +2,13 @@
 //! surround, the shared inks, and the badge roster.
 
 use palantir::RgbaF32;
-use palantir::widget::Animatable;
 
+use crate::gui::theme::color;
 use crate::gui::theme::palette::Palette;
+
+/// How far a hovered link pulls toward white, further than a port's hover lift: a link is text,
+/// whose thin strokes need the larger step to read as lit.
+const LINK_HOVER_LIFT: f32 = 0.5;
 
 /// The colors that belong to no single widget — the surround, the
 /// shared inks, and the badge roster.
@@ -49,7 +53,7 @@ pub(crate) struct AppColors {
 }
 
 impl AppColors {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             selection_rect: p.selection_rect,
             wire_broken: p.wire_broken,
@@ -59,7 +63,7 @@ impl AppColors {
             tab_inactive: p.tab_inactive,
             badge_graph: p.badge_graph,
             link: p.badge_graph,
-            link_hovered: Animatable::lerp(p.badge_graph, RgbaF32::WHITE, 0.5),
+            link_hovered: color::toward(p.badge_graph, RgbaF32::WHITE, LINK_HOVER_LIFT),
             badge_sink: p.badge_sink,
             badge_cache: p.badge_cache,
             badge_impure: p.badge_impure,

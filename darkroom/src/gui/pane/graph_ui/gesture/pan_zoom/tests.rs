@@ -60,7 +60,7 @@ fn fit_target_centers_at_the_tighter_scale() {
             1.0,
             Vec2::new(350.0, 250.0),
         ),
-        // A zero-size box constrains no axis, so it is 1:1 and centred.
+        // A zero-size box constrains no axis, so it is 1:1 and centered.
         // pan = (400, 300) - (200, 200) = (200, 100).
         (
             Rect::new(200.0, 200.0, 0.0, 0.0),
@@ -81,7 +81,7 @@ fn fit_target_centers_at_the_tighter_scale() {
         assert_eq!(
             t.pan + bounds.center() * t.zoom,
             pane * 0.5,
-            "{bounds:?} centred"
+            "{bounds:?} centered"
         );
     }
 }

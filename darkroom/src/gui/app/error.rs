@@ -1,4 +1,5 @@
-//! Why a dialog's pick could not become an edit, and why an image of the window went nowhere.
+//! Why a dialog's pick could not become an edit, why an image of the window went nowhere, and
+//! why a driver's open left the editor as it was.
 
 use std::path::PathBuf;
 
@@ -23,5 +24,18 @@ pub(crate) enum ViewCaptureError {
         path: PathBuf,
         #[source]
         source: ImageError,
+    },
+}
+
+/// Why a driver's open, or its new document, left the editor as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DrivenOpenError {
+    /// The open document, at `document` or unsaved, has edits the open would discard.
+    Unsaved { document: Option<PathBuf> },
+    /// The file at `path` did not load; `status` is the editor's status line after it, which
+    /// names why.
+    NotOpened {
+        path: PathBuf,
+        status: Option<String>,
     },
 }

@@ -92,4 +92,19 @@ pub(crate) enum DocumentSaveError {
         #[source]
         source: io::Error,
     },
+    #[error("failed to write the archive {path}: {source}", path = .path.display())]
+    Archive {
+        path: PathBuf,
+        #[source]
+        source: ZipError,
+    },
+}
+
+/// Why writing a document's bytes into its file failed, before the save names the file.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum DocumentWriteError {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Archive(#[from] ZipError),
 }

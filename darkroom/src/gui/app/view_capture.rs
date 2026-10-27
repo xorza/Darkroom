@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use common::fs::{self, PublicationMode};
 use image::codecs::png::PngEncoder;
 use image::{ImageError, RgbaImage};
-use palantir::{Clipboard, Image, Screenshot, Ui};
+use palantir::{Clipboard, Image, Screenshot, ScreenshotId, Ui};
 
 use crate::gui::app::error::ViewCaptureError;
 
@@ -20,32 +20,34 @@ pub(crate) enum CaptureTarget {
 }
 
 /// A capture waiting on its screenshot: asked of the frame once, then delivered when the image
-/// lands. A frame's image comes a frame or more after the ask, so the target waits here.
+/// of its ask lands. A frame's image comes a frame or more after the ask, so the target waits
+/// here.
 #[derive(Debug)]
 pub(crate) struct ViewCapture {
     target: CaptureTarget,
-    asked: bool,
+    /// The ask, once it went out; a replayed pass of the asking frame asks again and gets the
+    /// same one.
+    asked: Option<ScreenshotId>,
 }
 
 impl ViewCapture {
     pub(crate) const fn new(target: CaptureTarget) -> Self {
         Self {
             target,
-            asked: false,
+            asked: None,
         }
     }
 
     /// Ask `ui`'s frame for an image of the whole window, once.
     pub(crate) fn ask(&mut self, ui: &mut Ui) {
-        if !self.asked {
-            ui.request_screenshot(None);
-            self.asked = true;
+        if self.asked.is_none() {
+            self.asked = Some(ui.request_screenshot(None));
         }
     }
 
-    /// Whether the ask went out, so an image that lands now is this capture's.
-    pub(crate) const fn asked(&self) -> bool {
-        self.asked
+    /// The image this capture asked for, in the frame `ui` it lands in.
+    pub(crate) fn landed<'ui>(&self, ui: &'ui Ui) -> Option<&'ui Screenshot> {
+        ui.screenshot_taken(self.asked?)
     }
 
     /// Put `shot` where the target says.
@@ -73,10 +75,13 @@ impl ViewCapture {
 /// `image`'s texels as the `image` crate holds them, for its codecs and filters.
 pub(crate) fn rgba_image(image: &Image) -> RgbaImage {
     let size = image.size();
+    // Through whole texels, then flattened: an exact-size map, where a flat map's unknown length
+    // regrows the buffer as it fills.
     let bytes = image
         .texels()
         .iter()
-        .flat_map(|texel| [texel.r, texel.g, texel.b, texel.a])
-        .collect();
+        .map(|texel| [texel.r, texel.g, texel.b, texel.a])
+        .collect::<Vec<_>>()
+        .into_flattened();
     RgbaImage::from_raw(size.x, size.y, bytes).expect("four bytes per texel")
 }

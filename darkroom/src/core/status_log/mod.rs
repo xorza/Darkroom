@@ -47,9 +47,9 @@ pub(crate) struct StatusMessage<'a> {
 pub(crate) struct StatusLog {
     /// The last failure or warning, sticky until a success of its family.
     slot: Option<StatusEntry>,
-    /// Every failure reported, oldest first. Test-only — see the module doc. A
-    /// `config`'d field rather than a gated wrapper because it cannot move: it is
-    /// the one piece of `StatusLog` that only tests observe.
+    /// Every failure reported, oldest first, which only tests read. A gated
+    /// field rather than a gated wrapper: a field cannot move to the end of
+    /// the file.
     #[cfg(test)]
     lines: Vec<String>,
 }

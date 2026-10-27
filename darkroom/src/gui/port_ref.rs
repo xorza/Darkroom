@@ -26,7 +26,7 @@ impl PortKind {
 /// One data port as the canvas addresses it: an input and an output in one
 /// key, so a wire drag, a hover and a geometry table can hold either end.
 /// Domain-keyed so UI passes derive its `WidgetId` (see
-/// `crate::gui::pane::graph_ui::node_ui::port_row::port_circle_wid`) without
+/// `wid::port_circle`) without
 /// threading a cache. Node ids are unique across the whole document, so no
 /// graph ref is needed alongside — enforced by
 /// [`Document::validate`](crate::core::document::Document::validate).

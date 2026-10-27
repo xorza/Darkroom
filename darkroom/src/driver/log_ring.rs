@@ -5,19 +5,31 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tracing::field::{Field, Visit};
-use tracing::{Event, Level, Subscriber};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::filter::{Filtered, LevelFilter};
 use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::registry::LookupSpan;
 
 /// Lines kept; older ones go first.
 const CAPACITY: usize = 200;
 
-/// A tracing layer keeping the last warnings and errors as lines, `LEVEL target: message`.
+/// The last warnings and errors logged, as lines, `LEVEL target: message`, which its
+/// filtered layer feeds.
 #[derive(Clone, Debug, Default)]
 pub struct LogRing {
     lines: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl LogRing {
+    /// The layer that fills the ring with warnings and errors. Filtered per layer: `RUST_LOG`
+    /// hides no warning from the ring, and an event no layer takes is never built.
+    pub(crate) fn layer<S>(&self) -> Filtered<RingLayer, LevelFilter, S>
+    where
+        S: Subscriber + for<'a> LookupSpan<'a>,
+    {
+        RingLayer(self.clone()).with_filter(LevelFilter::WARN)
+    }
+
     /// The lines logged since the last call, oldest first.
     pub(crate) fn drain(&self) -> Vec<String> {
         self.lines
@@ -28,16 +40,18 @@ impl LogRing {
     }
 }
 
-impl<S: Subscriber> Layer<S> for LogRing {
+/// The ring as a tracing layer, which only [`LogRing::layer`] hands out, so the ring holds
+/// warnings and errors alone whoever installs it.
+#[derive(Debug)]
+pub(crate) struct RingLayer(LogRing);
+
+impl<S: Subscriber> Layer<S> for RingLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let metadata = event.metadata();
-        if *metadata.level() > Level::WARN {
-            return;
-        }
         let mut message = Message::default();
         event.record(&mut message);
         let line = format!("{} {}: {}", metadata.level(), metadata.target(), message.0);
-        let mut lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut lines = self.0.lines.lock().unwrap_or_else(PoisonError::into_inner);
         if lines.len() == CAPACITY {
             lines.pop_front();
         }
@@ -76,7 +90,7 @@ mod tests {
     #[test]
     fn the_ring_keeps_the_last_warnings_and_errors() {
         let ring = LogRing::default();
-        let _guard = subscriber::set_default(tracing_subscriber::registry().with(ring.clone()));
+        let _guard = subscriber::set_default(tracing_subscriber::registry().with(ring.layer()));
         tracing::info!("skipped");
         tracing::warn!(port = 2, "a warning");
         tracing::error!("an error");

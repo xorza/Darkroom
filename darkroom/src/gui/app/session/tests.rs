@@ -1,4 +1,5 @@
-use glam::Vec2;
+use glam::{UVec2, Vec2};
+use palantir::internals::ui_harness::UiHarness;
 use palantir::{DockOperation, Key, Modifiers};
 use scenarium::{InputPort, NodeId, OutputPort};
 use std::sync::Arc;
@@ -9,13 +10,15 @@ use crate::core::document::item_id::ItemId;
 use crate::core::document::tab_ref::TabRef;
 use crate::core::document::tie::TieAngle;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::open_document::OpenDocument;
 use crate::core::preview_sink;
+use crate::gui::app::App;
 use crate::gui::app::session::internals::SessionHarness;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_command::FileCommand;
 use crate::gui::frame::app_command::RunCommand;
-use crate::gui::pane::graph_ui::node_ui::preview_row;
 use crate::gui::pane::graph_ui::toolbar;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::pane::image_viewer::ImageViewer;
 use crate::gui::state::preview_store;
 use crate::gui::state::preview_store::StoredContent;
@@ -28,7 +31,8 @@ const SETTLE_FRAMES: u32 = 32;
 /// window rather than after it.
 const AUDITED_FRAMES: usize = 64;
 
-/// The record path performs no heap operation once the editor has settled.
+/// A whole frame of the app performs no heap operation once the editor has settled: its
+/// `update`'s sweeps and every record pass, as the window runs them.
 ///
 /// Strict zero, because every allocation on this path would be the
 /// editor's own: a `format!` for a label palantir was going to copy into
@@ -39,21 +43,25 @@ const AUDITED_FRAMES: usize = 64;
 /// happen to trip the allocator.
 ///
 /// The scene is the one the record path is widest over: a graph pane of
-/// nodes, wires run through two ties, one selected and pinned, a preview
-/// card holding an image, and the status bar's memory readout, which
-/// recomputes its whole line every frame.
+/// nodes with const editors, wires run through two ties, one selected and pinned, a preview card
+/// holding an image, and the status bar's memory readout, which recomputes its whole line every
+/// frame.
 ///
 /// Each frame is audited on its own rather than summed, so a
 /// grow-on-the-Nth-frame allocation — a `Vec` doubling, a map rehash —
 /// fails on the frame that performed it.
 #[test]
 fn a_settled_frame_records_without_allocating() {
-    let mut fixture = DocumentFixture::probes(6);
-    let probes: [NodeId; 6] = std::array::from_fn(|i| fixture.node(i));
+    let mut ui = UiHarness::with_text(UVec2::new(1200, 800));
+    let mut app = App::offscreen(ui.ui());
+    let library = Arc::clone(app.runtime.library.cur());
+    let func = library.by_name("Brightness / Contrast").unwrap();
+    let mut fixture = DocumentFixture::default();
+    let nodes: [NodeId; 6] = std::array::from_fn(|_| fixture.add(func));
     let wires = [(0, 1), (1, 2), (0, 3)].map(|(from, to)| {
         fixture.wire(
-            OutputPort::new(probes[from], 0),
-            InputPort::new(probes[to], 0),
+            OutputPort::new(nodes[from], 0),
+            InputPort::new(nodes[to], 0),
         )
     });
     let tie = fixture.tie(Vec2::new(300.0, 120.0), wires);
@@ -61,20 +69,26 @@ fn a_settled_frame_records_without_allocating() {
     let view = &mut fixture.document.main_view;
     view.ties.get_mut(&tie).unwrap().angle = TieAngle::Pinned(30.0);
     view.selected.insert(ItemId::Tie(tie));
-    let node = fixture.add(&preview_sink::func(Arc::default()));
-    let mut test = SessionHarness::new(fixture);
-    test.run_state
-        .previews
-        .publish(node, preview_store::internals::opaque_image_value());
-    test.run_state.previews.settle(test.ui.ui());
-    // A reading, so the memory readout renders its longest form rather
-    // than the absent-figure path.
-    test.process_memory = 3 * 1024 * 1024;
-    test.prime(SETTLE_FRAMES);
+    let preview = fixture.add(&preview_sink::func(Arc::default()));
+    fixture.document.validate().unwrap();
+    app.adopt_document(OpenDocument::over(fixture.document));
+    app.run_state
+        .previews_mut()
+        .publish(preview, preview_store::internals::opaque_image_value());
+    app.run_state.previews_mut().settle(ui.ui());
+    // Each frame asked, as a wake asks one: a frame nothing asked for paints only and records
+    // nothing, which would audit nothing.
+    let full_frame = |ui: &mut UiHarness, app: &mut App| {
+        ui.ui().request_repaint();
+        ui.frame_app(app)
+    };
+    for _ in 0..SETTLE_FRAMES {
+        full_frame(&mut ui, &mut app);
+    }
 
     for frame in 0..AUDITED_FRAMES {
         let allocations = alloc_audit::allocations(|| {
-            let _ = test.frame();
+            full_frame(&mut ui, &mut app);
         });
         assert_eq!(
             allocations, 0,
@@ -95,13 +109,13 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     let node = fixture.add(&preview_sink::func(Arc::default()));
     let mut test = SessionHarness::new(fixture);
     test.run_state
-        .previews
+        .previews_mut()
         .publish(node, preview_store::internals::opaque_image_value());
-    test.run_state.previews.settle(test.ui.ui());
+    test.run_state.previews_mut().settle(test.ui.ui());
     test.prime(2);
 
     let resident = |test: &SessionHarness| {
-        let Some(StoredContent::Image(image)) = test.run_state.previews.get(node) else {
+        let Some(StoredContent::Image(image)) = test.run_state.previews().get(node) else {
             panic!("the landed image is the node's stored content");
         };
         image.is_full_resident()
@@ -111,7 +125,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
         "a card-only preview never uploads its full-resolution source"
     );
 
-    test.ui.click_on(preview_row::preview_image_wid(node));
+    test.ui.click_on(wid::preview_image(node));
     let _ = test.frame();
     assert!(
         test.session
@@ -129,7 +143,7 @@ fn a_viewer_opened_by_click_queues_its_full_image_in_that_same_frame() {
     );
     // Nothing between the click frame and the settle asks again, so a
     // conversion that lands is one that frame queued.
-    test.run_state.previews.settle(test.ui.ui());
+    test.run_state.previews_mut().settle(test.ui.ui());
     assert!(
         resident(&test),
         "the pass that drew the new tab queued its conversion"

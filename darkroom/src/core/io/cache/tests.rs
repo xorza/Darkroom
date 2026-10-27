@@ -25,14 +25,16 @@ fn cache_root_is_named_after_stem_beside_the_file() {
     );
 }
 
+/// A prepare creates the root and its self-ignoring `.gitignore`, and says so
+/// when it cannot: a root under a file is no folder to make.
 #[test]
-fn build_creates_dir_and_self_ignoring_gitignore() {
+fn prepare_creates_dir_and_self_ignoring_gitignore() {
     let dir = TempDir::new("darkroom-cache");
     let document_path = dir.join("scene.darkroom");
 
     let root = root(&document_path);
     assert!(!fs::exists(&root), "naming the root creates nothing");
-    prepare(&root);
+    prepare(&root).unwrap();
 
     assert_eq!(root, dir.join("scene.darkroom-cache"));
     assert!(fs::is_dir(&root), "cache dir created beside the document");
@@ -41,5 +43,12 @@ fn build_creates_dir_and_self_ignoring_gitignore() {
         fs::read_to_string(&gitignore).unwrap(),
         "*\n",
         "the cache folder ignores its own contents"
+    );
+
+    let blocker = dir.join("blocker");
+    fs::write(&blocker, b"x").unwrap();
+    assert!(
+        prepare(&blocker.join("cache")).is_err(),
+        "a file is in the way"
     );
 }

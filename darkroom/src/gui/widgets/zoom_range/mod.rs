@@ -64,13 +64,15 @@ impl ZoomRange {
     /// inputs before emitting/committing once. Standard zoom-about-cursor
     /// algebra: world point under cursor = `(pivot - pan) / zoom`; choose new
     /// pan so that same world point stays under the same screen pixel after
-    /// scaling. Clamps to this range; ignores non-finite / non-positive
-    /// factors.
+    /// scaling. Clamps to this range, widened to hold `v`'s own zoom, so a
+    /// zoom outside it — a fit to a tiny or a huge image — steps back toward it
+    /// and never against the step's direction; ignores non-finite /
+    /// non-positive factors.
     pub(crate) fn zoom_about(self, v: &mut Viewport, pivot_local: Vec2, factor: f32) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
         }
-        let new_zoom = self.clamp(v.zoom * factor);
+        let new_zoom = (v.zoom * factor).clamp(self.min.min(v.zoom), self.max.max(v.zoom));
         let effective = new_zoom / v.zoom;
         v.pan = pivot_local - (pivot_local - v.pan) * effective;
         v.zoom = new_zoom;

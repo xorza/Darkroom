@@ -3,8 +3,7 @@
 use palantir::SlotDefaults;
 use palantir::{Chrome, Spacing, TextEditTheme, TextStyleOverrides};
 
-/// Per-widget theme bundle for the inline-rename label⇄field widget
-/// (node title, boundary-port name, graph tab). The `text_edit`
+/// Per-widget theme bundle for the inline-rename label⇄field widget, the node title's. The `text_edit`
 /// look is stripped to the bare editor surface (no padding/margin, no
 /// border, transparent fill) so the field's `Hug` height equals its
 /// plain `Text` twin and the row doesn't reshape on a swap.
@@ -39,12 +38,7 @@ impl InlineRenameTheme {
             },
             ..text_edit.clone()
         };
-        for look in [
-            &mut style.looks.normal,
-            &mut style.looks.hovered,
-            &mut style.looks.active,
-            &mut style.looks.disabled,
-        ] {
+        for look in style.looks.each_mut() {
             look.chrome = Chrome::NONE;
         }
         Self { text_edit: style }
@@ -58,12 +52,7 @@ impl InlineRenameTheme {
     /// focused — mid-rename, on the widget whose whole contract is that
     /// the glyphs don't move when it opens.
     pub(crate) fn with_text(mut self, text: TextStyleOverrides) -> Self {
-        for look in [
-            &mut self.text_edit.looks.normal,
-            &mut self.text_edit.looks.hovered,
-            &mut self.text_edit.looks.active,
-            &mut self.text_edit.looks.disabled,
-        ] {
+        for look in self.text_edit.looks.each_mut() {
             look.text = text;
         }
         self

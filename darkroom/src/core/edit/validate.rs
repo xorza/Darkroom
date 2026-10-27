@@ -1,5 +1,5 @@
 //! The preconditions
-//! [`GraphIntent::into_step`](crate::core::edit::graph_intent::GraphIntent::into_step)
+//! [`GraphIntent::commit`](crate::core::edit::graph_intent::GraphIntent::commit)
 //! establishes before it will fold an intent into a step.
 //!
 //! Everything commits through that one entry, so these are the whole
@@ -24,6 +24,7 @@ use glam::Vec2;
 use scenarium::{Binding, BindingEntry, Func, Graph, Library, Node, NodeId};
 
 use crate::core::document::Document;
+use crate::core::document::tie::TieId;
 use crate::core::edit::error::{MalformedIntent, Role};
 
 /// An id the intent must actually name. A nil id is nothing a widget could
@@ -32,6 +33,14 @@ use crate::core::edit::error::{MalformedIntent, Role};
 pub(super) const fn non_nil_node(node_id: NodeId, role: Role) -> Result<(), MalformedIntent> {
     if node_id.is_nil() {
         return Err(MalformedIntent::NilNodeId { role });
+    }
+    Ok(())
+}
+
+/// A tie id the intent must actually name, malformed when nil for the same reason as a node's.
+pub(super) const fn non_nil_tie(tie: TieId, role: Role) -> Result<(), MalformedIntent> {
+    if tie.is_nil() {
+        return Err(MalformedIntent::NilTieId { role });
     }
     Ok(())
 }

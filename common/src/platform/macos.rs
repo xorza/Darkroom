@@ -1,9 +1,17 @@
-//! macOS: no limit on a process's memory to read, no table of memory-backed mounts, and the cache
-//! under `~/Library/Caches`.
+//! macOS: no limit on a process's memory to read, no table of memory-backed mounts, the cache
+//! under `~/Library/Caches`, and `open` for a URL.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use sysinfo::System;
+
+use crate::platform::unix;
+
+/// Open `url` with `open`, which Launch Services answers.
+pub(super) fn open_url(url: &str) -> io::Result<()> {
+    unix::spawn_detached("open", [url])
+}
 
 /// The host's available memory.
 pub(super) fn available_memory(system: &System) -> u64 {

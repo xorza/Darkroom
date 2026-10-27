@@ -17,13 +17,14 @@ mod mcp;
 use std::process::ExitCode;
 
 use clap::Parser;
+use darkroom::driver::log_ring::LogRing;
 
 use crate::cli::{Cli, Launch};
 
 fn main() -> ExitCode {
     match Cli::parse().launch() {
         Launch::Window { document } => {
-            darkroom::init_tracing();
+            darkroom::init_tracing(None);
             match darkroom::run(document) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
@@ -32,14 +33,19 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Launch::McpWindow { document } => mcp::serve_window(document),
+        Launch::McpWindow { document } => {
+            let log = LogRing::default();
+            darkroom::init_tracing(Some(&log));
+            mcp::serve_window(document, log)
+        }
         Launch::McpHeadless {
             document,
             size,
             scale,
         } => {
-            darkroom::init_tracing();
-            mcp::serve_headless(document, size, scale)
+            let log = LogRing::default();
+            darkroom::init_tracing(Some(&log));
+            mcp::serve_headless(document, size, scale, log)
         }
     }
 }

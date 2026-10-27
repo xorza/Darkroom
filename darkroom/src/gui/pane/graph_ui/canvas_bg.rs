@@ -150,20 +150,26 @@ mod tests {
     /// `[MIN_WRAP, MAX_WRAP]`, so the on-screen tile is spacing·[1, 2] px.
     #[test]
     fn wrap_multiplier_is_a_power_of_two_holding_screen_spacing_in_band() {
-        // zoom 1 → want zoom·m ∈ [1, 2]; m = 1 (k = 0).
-        assert_eq!(wrap_multiplier(1.0), 1.0);
-
-        for zoom in [0.1, 0.25, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0] {
-            let m = wrap_multiplier(zoom);
-            assert_eq!(
-                m.log2().fract().abs(),
-                0.0,
-                "zoom={zoom}: m={m} is not a power of two"
-            );
-            let normalized = zoom * m;
+        // m = 2^k with k the clamp of 0 into [ceil(log2(1 / zoom)), floor(log2(2 / zoom))]: a
+        // zoom on a band edge keeps the smaller power, as 2 → 1 and 4 → 1/2 show.
+        for (zoom, m) in [
+            (0.1, 16.0),
+            (0.25, 4.0),
+            (0.3, 4.0),
+            (0.5, 2.0),
+            (0.75, 2.0),
+            (1.0, 1.0),
+            (1.5, 1.0),
+            (2.0, 1.0),
+            (3.0, 0.5),
+            (4.0, 0.5),
+            (5.0, 0.25),
+        ] {
+            assert_eq!(wrap_multiplier(zoom), m, "zoom {zoom}");
             assert!(
-                (MIN_WRAP..=MAX_WRAP).contains(&normalized),
-                "zoom={zoom} normalized={normalized} out of band",
+                (MIN_WRAP..=MAX_WRAP).contains(&(zoom * m)),
+                "zoom {zoom}: {} out of band",
+                zoom * m
             );
         }
     }

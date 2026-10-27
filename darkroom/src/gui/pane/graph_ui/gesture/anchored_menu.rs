@@ -1,8 +1,6 @@
 use palantir::prelude::*;
 use palantir::{Anchor, ClickOutside, CloseHandle};
 
-use crate::gui::widgets::gesture_slot::GestureSlot;
-
 /// Shared open/close lifecycle + look for the canvas's anchored context
 /// popups (the node menu and the new-node palette). Owns only the
 /// surface-space anchor and the dismiss bookkeeping; each caller stores its
@@ -16,7 +14,7 @@ use crate::gui::widgets::gesture_slot::GestureSlot;
 #[derive(Default, Debug)]
 pub(crate) struct AnchoredMenu {
     /// The surface-space anchor the menu opened at.
-    anchor: GestureSlot<Vec2>,
+    anchor: Option<Vec2>,
 }
 
 /// Which canvas popup a menu records as, and how tall it may grow.
@@ -30,13 +28,13 @@ pub(crate) struct PopupShape {
 
 impl AnchoredMenu {
     /// Close the menu without a pick.
-    pub(crate) fn reset(&mut self) {
-        self.anchor.clear();
+    pub(crate) const fn reset(&mut self) {
+        self.anchor = None;
     }
 
     /// Open (or re-anchor) the menu at a surface-space point.
-    pub(crate) fn open_at(&mut self, anchor: Vec2) {
-        self.anchor.latch(anchor);
+    pub(crate) const fn open_at(&mut self, anchor: Vec2) {
+        self.anchor = Some(anchor);
     }
 
     /// Whether the menu is open.
@@ -45,7 +43,7 @@ impl AnchoredMenu {
     /// `None` for a closed menu anyway, but only *after* its arguments
     /// have been built.
     pub(crate) const fn is_open(&self) -> bool {
-        !self.anchor.is_idle()
+        self.anchor.is_some()
     }
 
     /// Show the menu when open, recording `body` inside the shared popup
@@ -63,7 +61,7 @@ impl AnchoredMenu {
             max_height,
         } = shape;
         // `None` for a menu that isn't open.
-        let anchor = *self.anchor.get()?;
+        let anchor = *self.anchor.as_ref()?;
         // Esc dismissal is owned by the `Dismiss` popup below (folds into
         // `resp.dismissed`) — no separate Escape poll here.
         //
@@ -92,7 +90,7 @@ impl AnchoredMenu {
             pick = body(ui, popup);
         });
         if pick.is_some() || resp.dismissed || resp.close_requested {
-            self.anchor.clear();
+            self.anchor = None;
         }
         pick
     }

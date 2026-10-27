@@ -21,6 +21,7 @@
 pub(crate) mod click_mode;
 pub(crate) mod drag_start;
 pub(crate) mod incoming_wires;
+pub(crate) mod node_property;
 pub(crate) mod route_insert;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -45,18 +46,18 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::click_mode::ClickMode;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::graph_intent::incoming_wires::IncomingWires;
+use crate::core::edit::graph_intent::node_property::NodeProperty;
 use crate::core::edit::graph_intent::route_insert::RouteInsert;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::set_depth::SetDepth;
 use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node::{NodeEntry, SetNode};
 use crate::core::edit::step::set_node_name::SetNodeName;
-use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
+use crate::core::edit::step::set_node_property::{PropertyChange, SetNodeProperty};
 use crate::core::edit::step::set_positions::{Move, SetPositions};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::TiesDraft;
-use crate::core::edit::step::set_viewport::SetViewport;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::edit::unwired;
 use crate::core::edit::validate;
@@ -136,18 +137,18 @@ pub(crate) enum GraphIntent {
         node_id: NodeId,
         to: NodeProperty,
     },
-    /// Move the graph camera. A frame of a held gesture names it, so its
-    /// frames fold into one undo entry; a one-shot jump names none.
+    /// Move the graph camera. Written straight into the document, it records
+    /// no undo step: `darkroom/AGENTS.md`, "Undo", "The camera is outside the
+    /// undo history".
     SetViewport {
         to: Viewport,
-        gesture: Option<GestureId>,
     },
-    /// Add (`subscribe = true`) or remove (`false`) an event subscription: an
-    /// event wire dropped on, or severed from, a subscription pin.
-    /// Idempotent — a no-op when the subscription already matches.
+    /// Add (`to = true`) or remove (`false`) an event subscription: an event
+    /// wire dropped on, or severed from, a subscription pin. Idempotent — a
+    /// no-op when the subscription already matches.
     SetSubscription {
         subscription: Subscription,
-        subscribe: bool,
+        to: bool,
     },
     /// Gather `wires` into a new tie at `pos`, which turns itself: what a tie
     /// line across wires leaves.
@@ -238,11 +239,12 @@ impl GraphIntent {
     /// offset position, const-value bindings copy verbatim, the data and
     /// event wires *among* the selected nodes are recreated against the
     /// clones with the ties inside them, and the
-    /// copies end up selected. A `Wire` whose source is
-    /// *outside* the selection goes as `incoming` says: dropped, leaving the
-    /// input's declared default as a wire removed on its own does
-    /// ([`unwired::binding`]), or kept pointing at the original external
-    /// producer. Empty when nothing is selected.
+    /// copies end up selected. A wire whose source is *outside* the selection,
+    /// a data wire or an event subscription, goes as `incoming` says: dropped,
+    /// leaving a data input's declared default as a wire removed on its own
+    /// does ([`unwired::binding`]), or kept on the original external producer
+    /// or emitter. Each clone and tie clone takes its id from `fresh`, a random
+    /// one in the editor, a counter in a test. Empty when nothing is selected.
     ///
     /// A list rather than an intent of its own: duplicating is an editor
     /// command built out of the vocabulary, not a graph primitive. The whole
@@ -261,6 +263,7 @@ impl GraphIntent {
         document: &Document,
         library: &Library,
         incoming: IncomingWires,
+        mut fresh: impl FnMut() -> u128,
     ) -> Vec<Self> {
         let (graph, view) = (&document.graph, &document.main_view);
         // Resolve the whole set first, in selection order: an edge is only
@@ -275,7 +278,7 @@ impl GraphIntent {
             let node = graph
                 .find(old_id)
                 .expect("a selected node is a graph node or a stub");
-            let new_id = NodeId::unique();
+            let new_id = NodeId::from_u128(fresh());
             clones.insert(old_id, new_id);
             sources.push((old_id, new_id, node));
         }
@@ -325,20 +328,23 @@ impl GraphIntent {
         }
         intents.extend(internal);
         for subscription in graph.subscriptions() {
-            if let (Some(&emitter), Some(&subscriber)) = (
-                clones.get(&subscription.event.node_id),
-                clones.get(&subscription.subscriber),
-            ) {
-                intents.push(Self::SetSubscription {
-                    subscription: Subscription::new(
-                        EventPort::new(emitter, subscription.event.event_idx),
-                        subscriber,
-                    ),
-                    subscribe: true,
-                });
-            }
+            let Some(&subscriber) = clones.get(&subscription.subscriber) else {
+                continue;
+            };
+            let emitter = match (clones.get(&subscription.event.node_id), incoming) {
+                (Some(&clone), _) => clone,
+                (None, IncomingWires::Keep) => subscription.event.node_id,
+                (None, IncomingWires::Drop) => continue,
+            };
+            intents.push(Self::SetSubscription {
+                subscription: Subscription::new(
+                    EventPort::new(emitter, subscription.event.event_idx),
+                    subscriber,
+                ),
+                to: true,
+            });
         }
-        let tie_clones = Self::duplicate_ties(view, &clones, &mut intents);
+        let tie_clones = Self::duplicate_ties(view, &clones, &mut fresh, &mut intents);
         intents.push(Self::SetSelection {
             to: clones
                 .values()
@@ -358,12 +364,13 @@ impl GraphIntent {
     fn duplicate_ties(
         view: &GraphView,
         clones: &HashMap<NodeId, NodeId>,
+        fresh: &mut impl FnMut() -> u128,
         intents: &mut Vec<Self>,
     ) -> Vec<TieId> {
         let tie_clones: BTreeMap<TieId, TieId> = view
             .ties_within(|node_id| clones.contains_key(&node_id))
             .into_iter()
-            .map(|tie| (tie, TieId::unique()))
+            .map(|tie| (tie, TieId::from_u128(fresh())))
             .collect();
         // Each cloned wire with the clones on its route, in route order. A
         // tie that also holds a wire leaving the set is not cloned, so its
@@ -442,7 +449,7 @@ impl GraphIntent {
     /// the payload could never have applied. ([`Self::MoveSelection`] and
     /// [`Self::SetSelection`] instead drop vanished members individually
     /// rather than refusing the whole intent.)
-    pub(crate) fn into_step(
+    fn into_step(
         self,
         document: &Document,
         library: &Library,
@@ -574,17 +581,19 @@ impl GraphIntent {
                     ties: ties.finish(),
                 })
             }
-            Self::SetSelection { to } => UndoStep::Selection(SetSelection {
-                selection: Change {
-                    from: view.selected.clone(),
-                    // The rubber band snapshots identities when the drag
-                    // starts, so an interleaved undo can remove one before
-                    // release. Keep the members that still have a widget
-                    // rather than recording a selection the view can't render.
-                    to: to.into_iter().filter(|&item| view.holds(item)).collect(),
-                },
-            }),
+            Self::SetSelection { to } => {
+                // The rubber band snapshots identities when the drag starts, so
+                // an interleaved undo can remove one before release. Keep the
+                // members that still have a widget rather than recording a
+                // selection the view can't render.
+                let to: BTreeSet<ItemId> =
+                    to.into_iter().filter(|&item| view.holds(item)).collect();
+                UndoStep::Selection(SetSelection {
+                    toggled: view.selected.symmetric_difference(&to).copied().collect(),
+                })
+            }
             Self::Raise { node_id } => {
+                validate::non_nil_node(node_id, Role::Raise)?;
                 let (Some(placement), Some(to)) =
                     (view.node_placements.get(&node_id), view.raised_z(node_id))
                 else {
@@ -602,31 +611,24 @@ impl GraphIntent {
                 let Some(node) = validate::live_node(graph, node_id, Role::SetNodeProperty)? else {
                     return Ok(None);
                 };
-                // Capture the *same* property's current value as `from`, so a
-                // revert writes a disable flag over a disable flag.
-                let from = match to {
-                    NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
-                    NodeProperty::RuntimeCache(_) => NodeProperty::RuntimeCache(node.cache),
-                };
-                UndoStep::NodeProperty(SetNodeProperty {
-                    node_id,
-                    property: Change { from, to },
-                })
-            }
-            Self::SetViewport { to, .. } => {
-                if !to.is_valid() {
-                    return Err(MalformedIntent::InvalidViewport);
-                }
-                UndoStep::Viewport(SetViewport {
-                    viewport: Change {
-                        from: view.viewport,
+                let property = match to {
+                    NodeProperty::Disabled(to) => PropertyChange::Disabled(Change {
+                        from: node.disabled,
                         to,
-                    },
-                })
+                    }),
+                    NodeProperty::RuntimeCache(to) => PropertyChange::RuntimeCache(Change {
+                        from: node.cache,
+                        to,
+                    }),
+                };
+                UndoStep::NodeProperty(SetNodeProperty { node_id, property })
+            }
+            Self::SetViewport { .. } => {
+                unreachable!("`commit` writes the camera, which no step records")
             }
             Self::SetSubscription {
                 subscription,
-                subscribe,
+                to: subscribe,
             } => {
                 let Subscription { event, subscriber } = subscription;
                 validate::non_nil_node(event.node_id, Role::SetSubscriptionEmitter)?;
@@ -662,6 +664,7 @@ impl GraphIntent {
                 })
             }
             Self::TieWires { tie, pos, wires } => {
+                validate::non_nil_tie(tie, Role::TieWires)?;
                 validate::finite_pos(pos, Role::TieWires)?;
                 if view.ties.contains_key(&tie) {
                     return Err(MalformedIntent::TieAlreadyExists { tie });
@@ -682,6 +685,7 @@ impl GraphIntent {
             }
             // A tie gone since the gesture started is stale: no step.
             Self::JoinTie { tie, wires } => {
+                validate::non_nil_tie(tie, Role::JoinTie)?;
                 if !view.ties.contains_key(&tie) {
                     return Ok(None);
                 }
@@ -690,6 +694,7 @@ impl GraphIntent {
                 UndoStep::Ties(ties.finish())
             }
             Self::RemoveTie { tie } => {
+                validate::non_nil_tie(tie, Role::RemoveTie)?;
                 if !view.ties.contains_key(&tie) {
                     return Ok(None);
                 }
@@ -698,6 +703,7 @@ impl GraphIntent {
                 UndoStep::Ties(ties.finish())
             }
             Self::SetTieAngle { tie, angle, .. } => {
+                validate::non_nil_tie(tie, Role::SetTieAngle)?;
                 if let TieAngle::Pinned(degrees) = angle
                     && !angle.is_valid()
                 {
@@ -713,6 +719,7 @@ impl GraphIntent {
             // A menu stays open across frames, so the wire may have left the
             // tie since it opened.
             Self::ReleaseWire { tie, wire } => {
+                validate::non_nil_tie(tie, Role::ReleaseWire)?;
                 if !view
                     .routes
                     .get(&wire)
@@ -732,7 +739,7 @@ impl GraphIntent {
     pub(crate) const fn gesture(&self) -> Option<GestureId> {
         match self {
             Self::MoveSelection { gesture, .. } => Some(*gesture),
-            Self::SetViewport { gesture, .. } | Self::SetTieAngle { gesture, .. } => *gesture,
+            Self::SetTieAngle { gesture, .. } => *gesture,
             _ => None,
         }
     }
@@ -758,21 +765,25 @@ impl GraphIntent {
         library: &Library,
         steps: &mut Vec<UndoStep>,
     ) -> Result<(), MalformedIntent> {
-        let fed: Vec<InputPort> = match &self {
-            Self::RemoveNode { node_id } => document
-                .graph
-                .wires()
-                .filter(|(_, producer)| producer.node_id == *node_id)
-                .map(|(consumer, _)| consumer)
-                .collect(),
-            _ => Vec::new(),
-        };
+        if let Self::SetViewport { to } = self {
+            if !to.is_valid() {
+                return Err(MalformedIntent::InvalidViewport);
+            }
+            document.main_view.viewport = to;
+            return Ok(());
+        }
         let Some(step) = self.into_step(document, library)? else {
             return Ok(());
         };
         if step.is_noop() {
             return Ok(());
         }
+        // Read off the removal's own record, which captured every wire it
+        // ends, before the step moves into the history.
+        let fed: Vec<InputPort> = match &step {
+            UndoStep::Node(node) => node.fed_inputs().collect(),
+            _ => Vec::new(),
+        };
         step.apply(document);
         steps.push(step);
         for input in fed {

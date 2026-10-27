@@ -55,10 +55,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         .center(out_port)
         .expect("a culled port still resolves, off the cached offset");
     // And it tracks the move rather than sticking where it last painted: the
-    // centre travelled exactly as far as the node did.
+    // center travelled as far as the node did. Within 0.01: both centers are a
+    // position plus the cached offset in f32, and near 6000 one rounding is
+    // about 0.0005, so a few of them stay far under the bound while a stale
+    // center would miss by thousands.
     assert!(
         (culled - anchored - shift).length() < 0.01,
-        "expected the centre to move by {shift:?}, got {:?}",
+        "expected the center to move by {shift:?}, got {:?}",
         culled - anchored,
     );
 
@@ -98,4 +101,41 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         None,
         "an evicted node's ports stop resolving",
     );
+}
+
+/// A drag frame moves its node in the drain between the prepass and the record, and the ports
+/// the record draws wires to sit on the moved node: each center keeps its offset from the node's
+/// position in the document the record reads, not the position before the move.
+#[test]
+fn a_dragged_nodes_ports_follow_it_in_the_frame_that_moves_it() {
+    let mut h = CanvasHarness::new(DocumentFixture::probes(2));
+    let node = h.node(0);
+    let port = PortRef::output(node, 0);
+    h.prime(2);
+    let pos = |h: &CanvasHarness| h.document().main_view.node_placements[&node].pos;
+    let offset = |h: &CanvasHarness| h.graph_ui.geometry().ports.center(port).unwrap() - pos(h);
+    let rest = offset(&h);
+
+    let grab = h.node_center(node);
+    h.ui.press_at(grab);
+    h.frame_applied();
+    let mut moves = 0;
+    for step in 1..=3 {
+        h.ui.drag_to(grab + Vec2::new(37.0, -21.0) * step as f32);
+        for _ in 0..2 {
+            let before = pos(&h);
+            h.frame_applied();
+            moves += usize::from(pos(&h) != before);
+            // Within f32 rounding: each frame measures the offset again off rects laid out at
+            // the moved position, whose sums round a few ulps apart; a frame behind is the
+            // whole step of about 43 px.
+            let drift = (offset(&h) - rest).abs().max_element();
+            assert!(
+                drift < 1e-3,
+                "step {step}: {:?} against {rest:?}",
+                offset(&h)
+            );
+        }
+    }
+    assert_eq!(moves, 3, "each step moved the node in one frame");
 }

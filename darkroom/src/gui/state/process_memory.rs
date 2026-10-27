@@ -7,7 +7,7 @@
 //! allocator's own retained arenas, which is why it reads well above the
 //! bar's `Cache` clause.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::ResidentMemory;
 
@@ -25,9 +25,10 @@ pub(crate) struct ProcessMemory {
     /// [`Self::sample`], which is also what that call hands back inside
     /// the throttle window.
     bytes: u64,
-    /// `None` until the first reading, which is what makes that first
-    /// [`Self::sample`] refresh instead of leaving `bytes` at zero.
-    last_sample: Option<Instant>,
+    /// The UI time of the last reading; `None` until the first, which is what
+    /// makes that first [`Self::sample`] refresh instead of leaving `bytes` at
+    /// zero.
+    last_sample: Option<Duration>,
 }
 
 impl ProcessMemory {
@@ -39,12 +40,12 @@ impl ProcessMemory {
         }
     }
 
-    /// Current resident bytes, refreshing at most once per
-    /// [`SAMPLE_INTERVAL`]. A call inside that window repeats the last
-    /// reading without touching the kernel, which is what makes this safe
-    /// to call from a replayable record pass: both passes of one frame
-    /// render the same figure.
-    pub(crate) fn sample(&mut self, now: Instant) -> u64 {
+    /// Current resident bytes at `now`, the frame's UI time, refreshing at most
+    /// once per [`SAMPLE_INTERVAL`]. A call inside that window repeats the last
+    /// reading without touching the kernel. Both record passes of a frame share
+    /// its `now`, so both render the same figure, and an offscreen session's
+    /// stepped clock steps the readings too.
+    pub(crate) fn sample(&mut self, now: Duration) -> u64 {
         if self.due(now) {
             self.bytes = self.resident.read();
         }
@@ -55,10 +56,10 @@ impl ProcessMemory {
     /// after it. The next reading is scheduled from `now` rather than from
     /// the previous due time, so a long stall resumes at the normal cadence
     /// instead of firing a catch-up burst.
-    fn due(&mut self, now: Instant) -> bool {
+    fn due(&mut self, now: Duration) -> bool {
         let due = match self.last_sample {
             None => true,
-            Some(last) => now.duration_since(last) >= SAMPLE_INTERVAL,
+            Some(last) => now.saturating_sub(last) >= SAMPLE_INTERVAL,
         };
         if due {
             self.last_sample = Some(now);
@@ -77,7 +78,7 @@ mod tests {
     #[test]
     fn due_gates_readings_to_one_per_interval() {
         let mut m = ProcessMemory::new();
-        let t0 = Instant::now();
+        let t0 = Duration::from_secs(5);
         let (interval, ms) = (SAMPLE_INTERVAL, Duration::from_millis(1));
 
         // Sampling at t=0: due again one interval later, then one interval
@@ -116,7 +117,7 @@ mod tests {
     fn sample_reports_a_live_reading_and_holds_it_between_refreshes() {
         let mut m = ProcessMemory::new();
         assert_eq!(m.bytes, 0, "no reading before the first sample");
-        let t0 = Instant::now();
+        let t0 = Duration::from_secs(5);
         let first = m.sample(t0);
         assert!(first > 0, "this process has a resident set");
         assert_eq!(

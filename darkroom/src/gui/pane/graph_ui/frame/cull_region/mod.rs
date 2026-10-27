@@ -8,7 +8,6 @@ use glam::Vec2;
 use palantir::{Rect, Size};
 
 use crate::core::document::viewport::Viewport;
-use crate::gui::pane::graph_ui::draw::wire::Wire;
 
 /// World-space slack added around the viewport so paint that extends past
 /// an element's layout rect (status-glow shadow, wire stroke width,
@@ -21,23 +20,14 @@ pub(crate) struct CullRegion {
 }
 
 impl CullRegion {
-    pub(crate) fn from_canvas(
-        outer_screen: Option<Rect>,
-        canvas_origin: Vec2,
-        viewport: &Viewport,
-    ) -> Self {
-        let visible = outer_screen.map(|outer| {
-            let outer_local = Rect {
-                min: outer.min - canvas_origin,
-                size: outer.size,
-            };
-            let min = viewport.to_world(outer_local.min);
-            let max = viewport.to_world(outer_local.max());
-            Rect {
-                min,
-                size: Size::new(max.x - min.x, max.y - min.y),
-            }
-            .inflated(CULL_MARGIN)
+    /// The region `viewport` shows of a canvas of `size`, which keeps everything while the
+    /// canvas has not been measured. The inner canvas fills the outer one, so their local
+    /// spaces share an origin.
+    pub(crate) fn from_size(size: Option<Size>, viewport: &Viewport) -> Self {
+        let visible = size.map(|size| {
+            let min = viewport.to_world(Vec2::ZERO);
+            let max = viewport.to_world(Vec2::new(size.w, size.h));
+            Rect::from_min_max(min, max).inflated(CULL_MARGIN)
         });
         Self { visible }
     }
@@ -45,10 +35,6 @@ impl CullRegion {
     /// Unmeasured nodes stay recorded until their size becomes known.
     pub(crate) fn keeps_node(self, rect: Option<Rect>) -> bool {
         rect.is_none_or(|rect| self.keeps_rect(rect))
-    }
-
-    pub(crate) fn keeps_wire(self, wire: &Wire) -> bool {
-        self.keeps_rect(wire.hull())
     }
 
     pub(crate) fn keeps_rect(self, rect: Rect) -> bool {

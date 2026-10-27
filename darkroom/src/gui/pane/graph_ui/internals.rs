@@ -2,10 +2,9 @@
 //! [`GraphUi`] recorded onto it, and the document both read.
 //!
 //! One type rather than a closure per test file because the subject under test
-//! is the same machinery in each case — [`Self::frame`] runs the sequence
-//! `MainWindow` runs, `prepass` → `draw`, and only the gesture driven
-//! through it differs. A test that skipped a phase would be exercising a
-//! frame the app never performs.
+//! is the same machinery in each case — a frame runs the phases `MainWindow`
+//! runs, `prepass` → `draw`, and only the gesture driven through it differs. A
+//! test that skipped a phase would be exercising a frame the app never performs.
 
 use palantir::DockOperation;
 use palantir::internals::ui_harness::UiHarness;
@@ -22,8 +21,7 @@ use crate::gui::frame::requests::Requests;
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph_ui::GraphUi;
 use crate::gui::pane::graph_ui::frame::canvas_geometry::CanvasGeometry;
-use crate::gui::pane::graph_ui::node_ui::port_row;
-use crate::gui::pane::graph_ui::node_ui::wid;
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
 use std::iter;
 
@@ -121,7 +119,12 @@ impl CanvasHarness {
             .document()
             .drain()
             .filter_map(|request| match request {
-                DocumentRequest::Graph(intent) => Some(intent),
+                // A test reads what a gesture raised: a cancel by the move it falls back on.
+                DocumentRequest::Graph(intent)
+                | DocumentRequest::InGesture { intent, .. }
+                | DocumentRequest::Cancel {
+                    otherwise: intent, ..
+                } => Some(intent),
                 DocumentRequest::View(op) => {
                     view_ops.push(op);
                     None
@@ -131,6 +134,23 @@ impl CanvasHarness {
         commands.clear();
         commands.extend(iter::from_fn(|| out.pop_app()));
         intents
+    }
+
+    /// One canvas frame as the window runs it: the prepass, its graph intents applied to the
+    /// document, then the record, which reads the document they left, as the session drains
+    /// them between the two. [`Self::frame`] hands its intents back unapplied instead, so a test
+    /// reads exactly what a gesture raised.
+    pub(crate) fn frame_applied(&mut self) {
+        let Self {
+            ui, graph_ui, ctx, ..
+        } = self;
+        let _ = ui.frame_value(|recorder: &mut Ui| {
+            let mut out = Requests::default();
+            graph_ui.prepass(recorder, ctx.graph_ctx(), &mut out);
+            let _ = ctx.open.drain_requests(out.document(), &ctx.library);
+            draw(graph_ui, ctx, recorder, &mut out);
+            out
+        });
     }
 
     /// `n` frames whose intents are discarded. Two is the minimum before
@@ -227,13 +247,13 @@ impl CanvasHarness {
     /// The point a wire drag leaves `port` from, or lands on — the snap scan
     /// tests the post-transform rect, so this is the one to aim at.
     pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
-        self.ui.center_of(port_row::port_circle_wid(port))
+        self.ui.center_of(wid::port_circle(port))
     }
 
     /// The cached world rect wires anchor to and the cull reads, or `None`
     /// once the node's entry has been evicted. Unlike [`Self::node_rect`] this
     /// survives the node being culled — that is the whole point of the cache.
-    pub(crate) fn node_world_rect(&mut self, node_id: NodeId) -> Option<Rect> {
+    pub(crate) fn node_world_rect(&self, node_id: NodeId) -> Option<Rect> {
         let Self { graph_ui, ctx, .. } = self;
         let node = ctx
             .graph_ctx()
@@ -246,13 +266,17 @@ impl CanvasHarness {
 /// The record body both frame drivers run.
 fn record(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui) -> Requests {
     let mut out = Requests::default();
-    let graph_ctx = ctx.graph_ctx();
-    graph_ui.prepass(recorder, graph_ctx, &mut out);
+    graph_ui.prepass(recorder, ctx.graph_ctx(), &mut out);
+    draw(graph_ui, ctx, recorder, &mut out);
+    out
+}
+
+/// The canvas's record half, inside the pane a dock gives it.
+fn draw(graph_ui: &mut GraphUi, ctx: &GraphCtxFixture, recorder: &mut Ui, out: &mut Requests) {
     Panel::vstack()
         .id_salt("pane")
         .size((Sizing::FILL, Sizing::FILL))
         .show(recorder, |ui| {
-            graph_ui.draw(ui, graph_ctx, &mut out);
+            graph_ui.draw(ui, ctx.graph_ctx(), out);
         });
-    out
 }

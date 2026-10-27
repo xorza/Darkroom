@@ -1,4 +1,5 @@
 use super::*;
+use crate::gui::pane::graph_ui::frame::wire::Wire;
 
 #[test]
 fn region_inverts_the_canvas_transform() {
@@ -10,11 +11,7 @@ fn region_inverts_the_canvas_transform() {
         pan: Vec2::new(100.0, 50.0),
         zoom: 2.0,
     };
-    let region = CullRegion::from_canvas(
-        Some(Rect::new(40.0, 30.0, 800.0, 600.0)),
-        Vec2::new(40.0, 30.0),
-        &vp,
-    );
+    let region = CullRegion::from_size(Some(Size::new(800.0, 600.0)), &vp);
     let r = region.visible.unwrap();
     assert_eq!(r.min, Vec2::new(-66.0, -41.0));
     assert_eq!(r.size, Size::new(432.0, 332.0));
@@ -26,14 +23,14 @@ fn region_inverts_the_canvas_transform() {
         pan: Vec2::ZERO,
         zoom: 0.5,
     };
-    let r2 = CullRegion::from_canvas(Some(Rect::new(0.0, 0.0, 800.0, 600.0)), Vec2::ZERO, &vp)
+    let r2 = CullRegion::from_size(Some(Size::new(800.0, 600.0)), &vp)
         .visible
         .unwrap();
     assert_eq!(r2.min, Vec2::new(-16.0, -16.0));
     assert_eq!(r2.size, Size::new(1632.0, 1232.0));
     assert_ne!(r.size, r2.size);
 
-    let unmeasured = CullRegion::from_canvas(None, Vec2::new(50.0, 25.0), &vp);
+    let unmeasured = CullRegion::from_size(None, &vp);
     assert_eq!(unmeasured.visible, None);
 }
 
@@ -68,17 +65,18 @@ fn wire_cull_uses_the_control_hull() {
     };
 
     // Both endpoints off-screen left/right, hull crosses the view.
-    assert!(region.keeps_wire(&flat(-50.0, 150.0)));
+    assert!(region.keeps_rect(flat(-50.0, 150.0).hull()));
     // Entirely right of the view.
-    assert!(!region.keeps_wire(&flat(200.0, 300.0)));
+    assert!(!region.keeps_rect(flat(200.0, 300.0).hull()));
     // Endpoints outside the view, but a handle drags the hull in —
     // the curve can bow into the viewport, so it must not cull.
-    assert!(region.keeps_wire(&Wire {
+    let bowed = Wire {
         p0: Vec2::new(150.0, -50.0),
         p1: Vec2::new(50.0, -50.0),
         p2: Vec2::new(50.0, 150.0),
         p3: Vec2::new(150.0, 150.0),
-    }));
+    };
+    assert!(region.keeps_rect(bowed.hull()));
     // No viewport → no culling.
-    assert!(CullRegion { visible: None }.keeps_wire(&flat(200.0, 300.0)));
+    assert!(CullRegion { visible: None }.keeps_rect(flat(200.0, 300.0).hull()));
 }

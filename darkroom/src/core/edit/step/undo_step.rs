@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::Direction;
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_depth::SetDepth;
@@ -14,7 +15,6 @@ use crate::core::edit::step::set_positions::SetPositions;
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
 use crate::core::edit::step::set_ties::SetTies;
-use crate::core::edit::step::set_viewport::SetViewport;
 
 /// One self-contained entry of the undo history: which kind of edit it is,
 /// and that kind's payload — the slot it touches with both halves of what
@@ -40,7 +40,6 @@ pub(crate) enum UndoStep {
     Selection(SetSelection),
     Depth(SetDepth),
     NodeProperty(SetNodeProperty),
-    Viewport(SetViewport),
     Subscription(SetSubscription),
     Ties(SetTies),
 }
@@ -67,12 +66,18 @@ impl UndoStep {
         self.kind().dirties_document()
     }
 
-    pub(crate) fn invalidates_cached_geometry(&self) -> bool {
-        self.kind().invalidates_cached_geometry()
+    pub(crate) fn facts(&self) -> EditFacts {
+        self.kind().facts()
     }
 
-    pub(crate) fn changes_node_set(&self) -> bool {
-        self.kind().changes_node_set()
+    /// Whether `next`, a later step of the same held gesture, is a frame of
+    /// this one, which [`Self::absorb`] folds in: a move after a move, a knob
+    /// turn after a knob turn.
+    pub(crate) const fn absorbs(&self, next: &Self) -> bool {
+        matches!(
+            (self, next),
+            (Self::Positions(_), Self::Positions(_)) | (Self::Ties(_), Self::Ties(_))
+        )
     }
 
     /// Fold `next`, a later frame of the same held gesture, into this step:
@@ -85,7 +90,6 @@ impl UndoStep {
     pub(crate) fn absorb(&mut self, next: &Self) {
         match (self, next) {
             (Self::Positions(open), Self::Positions(next)) => open.absorb(next),
-            (Self::Viewport(open), Self::Viewport(next)) => open.absorb(next),
             (Self::Ties(open), Self::Ties(next)) => open.absorb(next),
             (open, next) => panic!("a gesture cannot fold {next:?} into {open:?}"),
         }
@@ -106,7 +110,6 @@ impl UndoStep {
             Self::Selection(step) => step,
             Self::Depth(step) => step,
             Self::NodeProperty(step) => step,
-            Self::Viewport(step) => step,
             Self::Subscription(step) => step,
             Self::Ties(step) => step,
         }

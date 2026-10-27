@@ -4,6 +4,7 @@ use scenarium::Subscription;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
+use crate::core::edit::edit_facts::EditFacts;
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 use crate::core::edit::step::set_ties::SetTies;
@@ -43,13 +44,7 @@ impl Reversible for SetSubscription {
         true
     }
 
-    /// An event wire paints between glyphs that are already there; no node
-    /// remeasures.
-    fn invalidates_cached_geometry(&self) -> bool {
-        false
-    }
-
-    fn changes_node_set(&self) -> bool {
-        false
+    fn facts(&self) -> EditFacts {
+        EditFacts::NONE
     }
 }

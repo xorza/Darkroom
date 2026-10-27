@@ -13,8 +13,7 @@
 //! pending action input it runs *twice*, exactly as in production. That
 //! is deliberate — it is the behaviour under test. What a caller must
 //! not do is accumulate across frames on the assumption of one call per
-//! frame; [`Self::frame`] returns the first pass's command for the same
-//! reason `UiHarness::frame_value` returns pass A.
+//! frame; [`SessionHarness::frame`] returns the commands of every pass, in order.
 
 use glam::UVec2;
 use palantir::Ui;
@@ -23,7 +22,6 @@ use scenarium::Library;
 
 use crate::core::document::internals::DocumentFixture;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::core::open_document::OpenDocument;
 use crate::core::wake;
@@ -31,6 +29,7 @@ use crate::gui::app::session::Session;
 use crate::gui::frame::app_command::AppCommand;
 use crate::gui::frame::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::frame::frame_writes::FrameWrites;
+use crate::gui::frame::relayout::Relayout;
 use crate::gui::frame::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -88,15 +87,17 @@ impl SessionHarness {
     /// Push one intent through the real edit path, as a widget's does.
     /// Reports whether it stranded the canvas's cached geometry.
     pub(crate) fn apply(&mut self, intent: GraphIntent) -> Relayout {
-        self.session.open.apply_edit(intent, &self.library)
+        Relayout::after(self.session.open.apply_edit(intent, &self.library))
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does. Reports whether the batch stranded the canvas's cached geometry.
     pub(crate) fn drain(&mut self) -> Relayout {
-        self.session
-            .open
-            .drain_requests(self.requests.document(), &self.library)
+        Relayout::after(
+            self.session
+                .open
+                .drain_requests(self.requests.document(), &self.library),
+        )
     }
 
     /// Take back the last undoable entry. Reports whether there was one.
@@ -106,10 +107,8 @@ impl SessionHarness {
         took
     }
 
-    /// One editor frame. Returns the commands the **first** record pass
-    /// produced; a frame with pending action input records twice and the
-    /// second pass does not see the one-frame edges that raise most
-    /// commands.
+    /// One editor frame, `App::update`'s sweeps then its record passes. Returns the commands
+    /// every pass raised, in order; a frame with pending action input records twice.
     pub(crate) fn frame(&mut self) -> Vec<AppCommand> {
         let Self {
             ui,
@@ -121,16 +120,15 @@ impl SessionHarness {
             process_memory,
             requests,
         } = self;
-        // The part of `App::update` a frame's *content* depends on: it sweeps
-        // the preview store against the document, releasing what no node
-        // retains any more. The rest of `update` — the run projection, the
-        // cache sweeps — needs a `RuntimeHost` this harness has no reason to
-        // build, and no test reads what it produces.
+        // `App::update`'s sweeps, once a frame before its first pass: the preview store against
+        // the document, as the run projection's sync ends, and the window's caches. The rest of
+        // the sync drains a `RuntimeHost` this harness has no reason to build.
         //
         // Nothing here materializes a viewer's texture: the pane uploads its
         // own when it records, so an open tab draws at full resolution on the
         // frame it appears, in this harness exactly as in production.
-        run_state.previews.reconcile(&session.open.document);
+        run_state.previews_mut().reconcile(&session.open.document);
+        session.reconcile_caches();
         let ctx = AppCtx::new(theme, library, run_state).with_status(StatusInputs {
             message: None,
             process_memory: *process_memory,

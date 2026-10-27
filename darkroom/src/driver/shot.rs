@@ -16,8 +16,12 @@ use crate::driver::locator::Locator;
 use crate::gui::app::App;
 use crate::gui::app::view_capture;
 use crate::gui::main_window::dock_panes;
-use crate::gui::pane::graph_ui::node_ui::{port_row, wid};
+use crate::gui::pane::graph_ui::wid;
 use crate::gui::port_ref::PortRef;
+
+/// The characters of a region's name a shot's file name keeps: with its number and kind, well
+/// under the 255 bytes a file name may take.
+const SLUG_NAME_CUT: usize = 64;
 
 /// The space a node's shot leaves around its body, in logical pixels, so its wires' ends and
 /// its shadow show.
@@ -40,7 +44,7 @@ pub enum Region {
 pub struct Shot {
     /// The picture as a PNG file holds it.
     pub png: Vec<u8>,
-    /// Where the PNG was written, in the session directory.
+    /// Where the driver writes the PNG, in the session directory.
     pub path: PathBuf,
     /// Width and height in the picture's pixels.
     pub size: UVec2,
@@ -85,11 +89,12 @@ impl Region {
         }
     }
 
-    /// The name a shot of this region is written under: lowercase letters, digits and dashes.
+    /// The name a shot of this region is written under: lowercase letters, digits and dashes, a
+    /// name cut at [`SLUG_NAME_CUT`] characters so the file name fits every file system.
     pub(crate) fn slug(&self) -> String {
         let named = |kind: &str, name: &str| {
             let mut slug = format!("{kind}-");
-            slug.extend(name.chars().map(|c| {
+            slug.extend(name.chars().take(SLUG_NAME_CUT).map(|c| {
                 if c.is_ascii_alphanumeric() {
                     c.to_ascii_lowercase()
                 } else {
@@ -144,39 +149,60 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
         .ok_or(DriverError::OffScreen { locator })
 }
 
-impl Shot {
-    /// `screenshot` scaled so that its longer side is at most `max_side`, with the legend of
-    /// `app`'s nodes as `ui`'s frame lays them out.
+/// A screenshot and the legend of what it shows, read in the frame it landed in: what a backend
+/// hands the driver, which fits and encodes it away from the window's thread.
+#[derive(Debug)]
+pub(crate) struct Capture {
+    image: RgbaImage,
+    /// Placed in the picture a fit of `image` to the shot's longer side makes.
+    legend: Vec<LegendNode>,
+}
+
+impl Capture {
+    /// `screenshot`, with the legend of `app`'s nodes as `ui`'s frame lays them out, placed in
+    /// the picture a fit to `max_side` makes.
     pub(crate) fn of(
         screenshot: &Screenshot,
         max_side: u32,
         app: &App,
         ui: &Ui,
-        path: PathBuf,
     ) -> Result<Self, DriverError> {
         let region = screenshot.region();
         let image = screenshot.image().ok_or_else(|| DriverError::EmptyRegion {
             region: format!("{region:?}"),
         })?;
         let physical = image.size();
-        let picture = fit(&view_capture::rgba_image(image), max_side);
+        let size = fitted(physical, max_side);
+        let legend = Legend {
+            origin: (region.min * screenshot.scale()).floor(),
+            scale: screenshot.scale(),
+            factor: size.as_vec2() / physical.as_vec2(),
+            bounds: Rect::new(0.0, 0.0, size.x as f32, size.y as f32),
+        }
+        .nodes(app, ui);
+        Ok(Self {
+            image: view_capture::rgba_image(image),
+            legend,
+        })
+    }
+}
+
+impl Shot {
+    /// `capture` scaled so that its longer side is at most `max_side`, as a PNG, which `path`
+    /// names.
+    pub(crate) fn new(capture: Capture, max_side: u32, path: PathBuf) -> Self {
+        let picture = fit(capture.image, max_side);
         let size = UVec2::new(picture.width(), picture.height());
         let mut png = Vec::new();
         picture
             .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
             .expect("a PNG encodes into memory");
-        Ok(Self {
+        Self {
             png,
             path,
             size,
-            legend: Legend {
-                origin: (region.min * screenshot.scale()).floor(),
-                scale: screenshot.scale(),
-                factor: size.as_vec2() / physical.as_vec2(),
-                bounds: Rect::new(0.0, 0.0, size.x as f32, size.y as f32),
-            }
-            .nodes(app, ui),
-        })
+            legend: capture.legend,
+        }
     }
 }
 
@@ -206,7 +232,7 @@ impl Legend {
             };
             if let Ok(func) = library.func_of(&node) {
                 let port = |port: PortRef, name: &str| {
-                    self.place(ui.response_for(port_row::port_circle_wid(port)).rect)
+                    self.place(ui.response_for(wid::port_circle(port)).rect)
                         .map(|rect| LegendPort {
                             name: name.to_string(),
                             rect,
@@ -242,32 +268,37 @@ impl Legend {
     }
 }
 
-/// `image` scaled down so that its longer side is `max_side`, each side rounded to the nearest
-/// pixel, or as it is when it already fits. The filter averages in linear light, as the frame
-/// blends: averaging encoded bytes darkens every edge between a light and a dark pixel. A tent
-/// filter widened by the scale weighs every source pixel and adds no ringing at the hard edges a
-/// UI is made of.
-fn fit(image: &RgbaImage, max_side: u32) -> RgbaImage {
-    let longer = image.width().max(image.height());
+/// The size of a picture of `size` scaled down so that its longer side is `max_side`, each side
+/// rounded to the nearest pixel, or `size` when it already fits.
+fn fitted(size: UVec2, max_side: u32) -> UVec2 {
+    let longer = size.x.max(size.y);
     if longer <= max_side {
-        return image.clone();
+        return size;
     }
     let side = |len: u32| {
         let scaled =
             (u64::from(len) * u64::from(max_side) + u64::from(longer) / 2) / u64::from(longer);
         u32::try_from(scaled.max(1)).expect("a scaled side is at most `max_side`")
     };
-    let linear = Rgba32FImage::from_fn(image.width(), image.height(), |x, y| {
+    UVec2::new(side(size.x), side(size.y))
+}
+
+/// `image` at its [`fitted`] size. The filter averages in linear light, as the frame blends:
+/// averaging encoded bytes darkens every edge between a light and a dark pixel. A tent filter
+/// widened by the scale weighs every source pixel and adds no ringing at the hard edges a UI is
+/// made of.
+fn fit(image: RgbaImage, max_side: u32) -> RgbaImage {
+    let size = UVec2::new(image.width(), image.height());
+    let target = fitted(size, max_side);
+    if target == size {
+        return image;
+    }
+    let linear = Rgba32FImage::from_fn(size.x, size.y, |x, y| {
         let [r, g, b, a] = image.get_pixel(x, y).0;
         let color = RgbaF32::from_srgba(SrgbaU8 { r, g, b, a });
         Rgba([color.r, color.g, color.b, color.a])
     });
-    let scaled = imageops::resize(
-        &linear,
-        side(image.width()),
-        side(image.height()),
-        FilterType::Triangle,
-    );
+    let scaled = imageops::resize(&linear, target.x, target.y, FilterType::Triangle);
     RgbaImage::from_fn(scaled.width(), scaled.height(), |x, y| {
         let [r, g, b, a] = scaled.get_pixel(x, y).0;
         let bytes = RgbaF32::new(r, g, b, a).to_srgba();
@@ -279,10 +310,33 @@ fn fit(image: &RgbaImage, max_side: u32) -> RgbaImage {
 mod tests {
     use image::{Rgba, RgbaImage};
 
-    use crate::driver::shot::fit;
+    use glam::UVec2;
+
+    use crate::driver::shot::{Region, fit, fitted};
+
+    /// A slug keeps a name's ASCII letters and digits in lower case, a dash for anything else,
+    /// and the first 64 characters of a longer name; a region with no name is its kind.
+    #[test]
+    fn a_slug_names_the_region_in_a_file_name() {
+        let long = "a".repeat(100);
+        for (region, slug) in [
+            (Region::Window, "window".to_string()),
+            (
+                Region::Node("Brightness / Contrast".to_string()),
+                "node-brightness---contrast".to_string(),
+            ),
+            (
+                Region::Pane("Graph é".to_string()),
+                "pane-graph--".to_string(),
+            ),
+            (Region::Node(long), format!("node-{}", "a".repeat(64))),
+        ] {
+            assert_eq!(region.slug(), slug, "{region:?}");
+        }
+    }
 
     /// A 4 × 2 image of black and white columns, black first, fits a `max_side` of 2 as 2 × 1.
-    /// The tent, widened by 2, weighs the columns at its centre 3/4 each and the next ones out
+    /// The tent, widened by 2, weighs the columns at its center 3/4 each and the next ones out
     /// 1/4, over the columns the image has: the left pixel holds 3/4 white of 7/4, the right one
     /// 1/4 + 3/4 of 7/4. In linear light that is 3/7 and 4/7, which sRGB encodes as 175 and 199;
     /// a mean of the encoded bytes would give 109 and 146.
@@ -292,10 +346,30 @@ mod tests {
             let v = if x % 2 == 0 { 0 } else { 255 };
             Rgba([v, v, v, 255])
         });
-        let scaled = fit(&image, 2);
+        let scaled = fit(image.clone(), 2);
         assert_eq!((scaled.width(), scaled.height()), (2, 1));
         assert_eq!(scaled.get_pixel(0, 0).0, [175, 175, 175, 255]);
         assert_eq!(scaled.get_pixel(1, 0).0, [199, 199, 199, 255]);
-        assert_eq!(fit(&image, 4), image);
+        assert_eq!(fit(image.clone(), 4), image);
+    }
+
+    /// A fit keeps a size that fits, and scales one that does not so that its longer side is the
+    /// limit: 1000 of 1600 at 800 is 500, and 3 of 1001 at 10 rounds to 0.03, which keeps 1.
+    /// Odd sides round to the nearest: 999 of 1998 at 1000 is 499.5, which rounds up.
+    #[test]
+    fn a_fit_rounds_each_side_and_keeps_one_pixel() {
+        for (size, max_side, fitted_size) in [
+            ([5, 5], 5, [5, 5]),
+            ([1600, 1000], 800, [800, 500]),
+            ([1000, 1600], 800, [500, 800]),
+            ([1001, 3], 10, [10, 1]),
+            ([1998, 999], 1000, [1000, 500]),
+        ] {
+            assert_eq!(
+                fitted(UVec2::from(size), max_side),
+                UVec2::from(fitted_size),
+                "{size:?} at {max_side}"
+            );
+        }
     }
 }

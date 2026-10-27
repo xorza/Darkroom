@@ -1,7 +1,6 @@
 //! Test-only helpers, reachable from downstream crates' test targets under the
 //! `internals` feature without entering the released surface.
 
-pub(crate) mod temp_dir;
 pub(crate) mod temp_file;
 pub(crate) mod unreadable;
 
@@ -10,10 +9,9 @@ use std::ffi::OsString;
 use std::fs;
 use std::iter;
 use std::path::{Path, PathBuf};
-use std::process;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::fs::temp_dir;
 use crate::{FileSystem, platform};
 
 /// The environment variable that turns debug output on: any value does.
@@ -73,24 +71,21 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// A free path in [`FileSystem::disk_temp_dir`] nothing else will pick: `tag` says which fixture
-/// wants it, the process id separates concurrent test binaries, and the counter separates repeated
-/// calls within one. On disk, not on the tmpfs `/tmp` of Debian 13 and Arch: a frame-sized fixture
-/// there spends RAM, and lumos's frame store refuses to spill to a memory-backed directory at all.
-/// Straight in the temporary directory, without a root of its own, which a second user of a shared
-/// `/var/tmp` could not write into.
-///
-/// Shared by [`TempDir`](temp_dir::TempDir) and [`TempFile`](temp_file::TempFile),
-/// so the two cannot collide with each other either.
-fn unique_temp_path(tag: &str) -> PathBuf {
+/// Where a test's temporaries go: [`FileSystem::disk_temp_dir`]. On disk, not on the tmpfs `/tmp`
+/// of Debian 13 and Arch: a frame-sized fixture there spends RAM, and lumos's frame store refuses
+/// to spill to a memory-backed directory at all. Straight in the temporary directory, without a
+/// root of its own, which a second user of a shared `/var/tmp` could not write into.
+pub(crate) fn temp_root() -> &'static Path {
     static ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
         FileSystem::disk_temp_dir().expect("a temporary directory on disk: set `TMPDIR` to one")
     });
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    first_free(iter::repeat_with(|| {
-        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-        ROOT.join(format!("darkroom-{tag}-{}-{sequence}", process::id()))
-    }))
+    &ROOT
+}
+
+/// A free path in [`temp_root`] nothing else will pick, named as a [`TempDir`](crate::TempDir)
+/// is, from the one counter both share.
+fn unique_temp_path(tag: &str) -> PathBuf {
+    first_free(iter::repeat_with(|| temp_dir::candidate(temp_root(), tag)))
 }
 
 /// The first of `candidates` nothing occupies, not even a dangling link: a killed run leaves its
@@ -126,19 +121,10 @@ mod tests {
         fs::remove_dir(output.parent().unwrap()).unwrap();
     }
 
-    /// A temp path lies on disk, named for the workspace and its fixture, and skips every name a
-    /// file, a directory or a dangling link holds.
+    /// A temp path skips every name a file, a directory or a dangling link holds.
     #[test]
-    fn temp_paths_lie_on_disk_and_skip_taken_names() {
+    fn temp_paths_skip_taken_names() {
         let dir = TempDir::new("probe");
-        assert_eq!(
-            dir.path().parent().unwrap(),
-            FileSystem::disk_temp_dir().unwrap()
-        );
-        let name = dir.path().file_name().unwrap().to_string_lossy();
-        assert!(name.starts_with("darkroom-probe-"), "{name}");
-        assert_eq!(FileSystem::memory_backed(dir.path()), None);
-
         let taken = ["file", "dir", "link"].map(|name| dir.join(name));
         fs::write(&taken[0], b"").unwrap();
         fs::create_dir(&taken[1]).unwrap();

@@ -13,11 +13,11 @@ use std::path::PathBuf;
 
 use common::is_debug;
 use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
+use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use crate::core::io::preferences::Preferences;
 use crate::core::io::preferences::preferences_store::PreferencesStore;
 use crate::driver::log_ring::LogRing;
 use crate::driver::window_link::WindowLink;
@@ -26,11 +26,13 @@ use crate::gui::app::app_host::AppHost;
 use crate::gui::app::{App, LaunchInputs};
 use crate::gui::dialogs::{DialogFallback, Dialogs};
 
+pub use crate::gui::dialogs::DialogAnswer;
+
 /// Launch the Palantir desktop editor on `document` (the command-line
 /// argument, if there was one). The winit event loop owns the main thread, so
 /// this doesn't return until the window closes.
 pub fn run(document: Option<PathBuf>) -> Result<(), WinitHostError> {
-    run_window(document, |_| {})
+    run_driven(document, |_| {})
 }
 
 /// [`run`], handing `serve` the link a driver on another thread reaches the window through, on
@@ -39,35 +41,23 @@ pub fn run_driven(
     document: Option<PathBuf>,
     serve: impl FnOnce(WindowLink) + 'static,
 ) -> Result<(), WinitHostError> {
-    run_window(document, serve)
-}
-
-fn run_window(
-    document: Option<PathBuf>,
-    serve: impl FnOnce(WindowLink) + 'static,
-) -> Result<(), WinitHostError> {
     // Load preferences here, before the window exists, so a saved size /
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
-    let store = PreferencesStore::user();
-    let preferences = store.load();
+    let preferences = PreferencesStore::user().open();
     // Reverse-DNS, and exactly the basename of
     // `packaging/linux/com.cssodessa.darkroom.desktop` — that equality is what
     // ties the window to its launcher entry, so the shell groups the two and
     // takes the taskbar icon from the entry. Wayland windows carry no identity
     // at all without it.
-    let mut window = WindowConfig::new("Darkroom").with_app_id("com.cssodessa.darkroom");
-    if let Some(icon) = load_icon() {
-        window = window.with_icon(icon);
-    }
-    if let Ok(Preferences {
-        window: Some(w), ..
-    }) = &preferences
-    {
+    let mut window = WindowConfig::new("Darkroom")
+        .with_app_id("com.cssodessa.darkroom")
+        .with_icon(load_icon());
+    if let Some(w) = &preferences.preferences.window {
         window = window.with_inner_size(w.size).with_maximized(w.maximized);
-        if let Some(pos) = w.pos {
-            window = window.with_pos(pos);
+        if let Some(pos) = w.physical_pos {
+            window = window.with_physical_pos(pos);
         }
     }
     let host = WinitHost::builder(MAIN_WINDOW)
@@ -82,18 +72,22 @@ fn run_window(
             ui.set_debug_overlay(overlay);
 
             let dialogs = Dialogs::new(DialogFallback::Native);
-            let link = WindowLink::new(handle.clone(), dialogs.native_open());
+            let native_open = dialogs.native_open();
+            let link_handle = handle.clone();
             let app = App::new(
                 ui,
                 AppHost::Window(handle),
                 LaunchInputs {
                     preferences,
-                    store,
                     document,
                     dialogs,
                 },
             );
-            serve(link);
+            serve(WindowLink::new(
+                link_handle,
+                native_open,
+                app.pending_work(),
+            ));
             app
         })?;
 
@@ -106,44 +100,31 @@ fn run_window(
 /// Decode the baked-in window icon (PNG → RGBA8) for the title bar /
 /// taskbar. Honored on Windows and Linux; macOS ignores per-window icons —
 /// its Dock icon comes from the `.app` bundle (`[package.metadata.bundle]`
-/// in `Cargo.toml`). Returns `None` if the embedded asset ever fails to
-/// decode, degrading to the platform default rather than blocking startup.
-fn load_icon() -> Option<Image> {
+/// in `Cargo.toml`).
+fn load_icon() -> Image {
     static ICON_PNG: &[u8] = include_bytes!("../assets/icons/darkroom-256.png");
     let rgba = image::load_from_memory(ICON_PNG)
-        .inspect_err(|e| tracing::warn!("window icon decode failed: {e}"))
-        .ok()?
+        .expect("the embedded icon decodes, as a test holds")
         .to_rgba8();
     let (w, h) = rgba.dimensions();
-    Image::from_srgba8(UVec2::new(w, h), rgba.into_raw())
-        .inspect_err(|e| tracing::warn!("window icon rejected: {e}"))
-        .ok()
+    Image::from_srgba8(UVec2::new(w, h), rgba.into_raw()).expect("the embedded icon is RGBA8")
 }
 
-/// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
-/// `info`). `try_init` is a no-op if a subscriber is already installed. Stderr in every mode:
-/// MCP's stdio transport forbids any byte on stdout but its messages and allows logs on stderr
+/// The process's tracing: `RUST_LOG`-filtered lines on stderr (`info` without it), and the
+/// warnings and errors of every thread in `ring`, for a driver to report. `try_init` is a no-op
+/// if a subscriber is already installed. Stderr in every mode: MCP's stdio transport forbids any
+/// byte on stdout but its messages and allows logs on stderr
 /// (<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>).
-pub fn init_tracing() {
+pub fn init_tracing(ring: Option<&LogRing>) {
     tracing_subscriber::registry()
-        .with(log_filter())
-        .with(fmt::layer().with_writer(io::stderr))
+        .with(
+            fmt::layer()
+                .with_writer(io::stderr)
+                .with_filter(log_filter()),
+        )
+        .with(ring.map(LogRing::layer))
         .try_init()
         .ok();
-}
-
-/// [`init_tracing`], and a [`LogRing`] beside it that keeps the warnings and errors for a driver
-/// of the window to report: the window logs on the main thread, which no driver's own subscriber
-/// sees.
-pub fn init_driven_tracing() -> LogRing {
-    let log = LogRing::default();
-    tracing_subscriber::registry()
-        .with(log_filter())
-        .with(fmt::layer().with_writer(io::stderr))
-        .with(log.clone())
-        .try_init()
-        .ok();
-    log
 }
 
 /// `RUST_LOG`, or `info` without it.
@@ -172,7 +153,6 @@ mod tests {
 
     #[test]
     fn load_icon_decodes_embedded_png() {
-        let icon = load_icon().expect("the embedded icon decodes");
-        assert_eq!(icon.size(), UVec2::new(256, 256));
+        assert_eq!(load_icon().size(), UVec2::new(256, 256));
     }
 }
