@@ -1,4 +1,4 @@
-//! [`LogRing`]: the warnings and errors the editor logs, kept for the harness to report.
+//! [`LogRing`]: the warnings and errors the editor logs, kept for the driver to report.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -13,7 +13,7 @@ const CAPACITY: usize = 200;
 
 /// A tracing layer keeping the last warnings and errors as lines, `LEVEL target: message`.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct LogRing {
+pub struct LogRing {
     lines: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -69,7 +69,7 @@ mod tests {
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt as _;
 
-    use crate::internals::harness::log_ring::{CAPACITY, LogRing};
+    use crate::driver::log_ring::{CAPACITY, LogRing};
 
     /// Warnings and errors are kept and info is not; a drain empties the ring; past the capacity
     /// the oldest line goes first.

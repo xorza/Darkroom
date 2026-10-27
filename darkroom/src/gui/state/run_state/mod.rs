@@ -147,6 +147,11 @@ pub(crate) struct RunState {
     /// subsequent progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
     pub(crate) activity: WorkerActivity,
+    /// The runs the worker reported ended, completed or failed: a count that only grows, so a
+    /// reader that noted it before asking for a run knows when one ended after, however fast.
+    /// The worker merges the run commands of one batch into one run, so this counts runs, not
+    /// requests.
+    pub(crate) runs_ended: u64,
     /// RAM held by the worker's runtime cache (system RAM vs GPU VRAM), as of
     /// the last report that measured it: a completed run, or an install —
     /// which releases the values of every node the new program dropped, and
@@ -176,6 +181,7 @@ impl RunState {
             previews: PreviewStore::new(wake),
             compiled: None,
             activity: WorkerActivity::default(),
+            runs_ended: 0,
             cache_ram: RamUsage::default(),
             published: HashMap::new(),
         }
@@ -250,6 +256,7 @@ impl RunState {
             }
             WorkerReport::Error(error) => {
                 if matches!(&error, WorkerError::Exec { .. }) {
+                    self.runs_ended += 1;
                     self.clear();
                 }
                 status.error(StatusFamily::Run, error.to_string());
@@ -267,6 +274,7 @@ impl RunState {
                 // from an earlier event-loop tick.
                 status.succeeded(StatusFamily::Run);
                 self.activity = summary.activity;
+                self.runs_ended += 1;
                 self.replace_results(&summary);
             }
         }

@@ -176,6 +176,10 @@ pub(super) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_file(original, link)
 }
 
+pub(super) fn symlink_dir(original: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(original, link)
+}
+
 /// `MoveFileExW`, then, where it refuses because a handle holds the destination open — another
 /// writer checking it, a reader — the rename with POSIX semantics, which replaces a file that
 /// still has handles open. `std::fs::rename` takes the two in this order: every file system takes

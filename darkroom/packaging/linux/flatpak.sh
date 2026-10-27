@@ -110,7 +110,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
     --env=PATH="/usr/lib/sdk/rust-stable/bin:/app/bin:/usr/bin" \
     --env=CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" \
     "$WORK/sdk" \
-    cargo build --profile "$PROFILE" -p darkroom)
+    cargo build --profile "$PROFILE" -p darkroom-app)
 fi
 
 [ -x "$BIN" ] || { echo "error: no binary at $BIN" >&2; exit 1; }

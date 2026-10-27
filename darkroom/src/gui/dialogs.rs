@@ -1,29 +1,40 @@
-//! [`Dialogs`]: the file pickers `App` asks for paths through — native ones (rfd) in the window,
-//! scripted ones in the harness. Project byte⇄type plumbing lives in `crate::core::io::document`;
+//! [`Dialogs`]: the file pickers `App` asks for paths through — the answers a driver queued, then
+//! native ones (rfd) in the window. Project byte⇄type plumbing lives in `crate::core::io::document`;
 //! this side hands paths off to that GUI-free module. Failures degrade — a cancelled or failed
 //! pick returns `None` — rather than crashing. Everything else the shell does for us is in
 //! `crate::platform`.
 
-#[cfg(feature = "internals")]
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::fs;
 
 use crate::core::io::document;
-#[cfg(feature = "internals")]
-use crate::internals::harness::action::DialogAnswer;
+use crate::driver::action::DialogAnswer;
 
-/// Where `App`'s path picks are answered.
+/// Where `App`'s path picks are answered: the answers a driver queued, one per ask in order, then
+/// the fallback. A queued answer of the other shape reads as a cancel and logs an error, which the
+/// driver reports. `darkroom/AGENTS.md`, "The editor harness", "A dialog takes a queued
+/// answer, else asks the person".
 #[derive(Debug)]
-pub(crate) enum Dialogs {
-    /// The platform's file dialogs, which block until the user answers.
+pub(crate) struct Dialogs {
+    queued: VecDeque<DialogAnswer>,
+    fallback: DialogFallback,
+    /// Raised while a native dialog is open, which blocks the main thread until the person
+    /// answers: a driver on another thread reads it to say why the editor does not answer.
+    native_open: Arc<AtomicBool>,
+}
+
+/// What answers an ask with no queued answer left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DialogFallback {
+    /// The platform's file dialogs, which block until the person answers.
     Native,
-    /// Answers given ahead, one per ask in order: a session no one can see must not block on a
-    /// dialog. An ask with no answer left, or with an answer of the other shape, reads as a
-    /// cancel and logs an error, which the harness reports.
-    #[cfg(feature = "internals")]
-    Scripted(VecDeque<DialogAnswer>),
+    /// A cancel, and an error for the driver to report: a session no one can see must not block
+    /// on a dialog.
+    Refuse,
 }
 
 /// A kind of file a save names: the label of its dialog's filter, and the extension the save
@@ -65,98 +76,110 @@ impl SavedFile {
     }
 }
 
-#[cfg_attr(
-    not(feature = "internals"),
-    expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "the scripted answers, under `internals`, are what a pick mutates"
-    )
-)]
 impl Dialogs {
+    /// No answers queued, `fallback` behind them.
+    pub(crate) fn new(fallback: DialogFallback) -> Self {
+        Self {
+            queued: VecDeque::new(),
+            fallback,
+            native_open: Arc::default(),
+        }
+    }
+
+    /// The flag raised while a native dialog is open.
+    pub(crate) fn native_open(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.native_open)
+    }
+
+    /// Queue `answer` for the next ask the queue reaches.
+    pub(crate) fn queue(&mut self, answer: DialogAnswer) {
+        self.queued.push_back(answer);
+    }
+
     /// A project file to open, the picker starting beside `start`.
     pub(crate) fn project_open_path(&mut self, start: Option<&Path>) -> Option<PathBuf> {
-        match self {
-            Self::Native => pick_project_open_path(start),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => scripted_path(answers, "open a project"),
-        }
+        self.path("open a project", || pick_project_open_path(start))
     }
 
     /// Where to save a file of `kind`, the picker starting beside `start`; the extension is added.
     pub(crate) fn save_path(&mut self, kind: SavedFile, start: Option<&Path>) -> Option<PathBuf> {
-        match self {
-            Self::Native => pick_save_path(kind, start),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => scripted_path(answers, &format!("save a {}", kind.label))
-                .map(|path| kind.extended(path)),
+        let ask = format!("save a {}", kind.label);
+        match self.queued.pop_front() {
+            Some(answer) => queued_path(&ask, answer).map(|path| kind.extended(path)),
+            None => self.fall_back(&ask, || pick_save_path(kind, start)),
         }
     }
 
     /// One existing file with one of `extensions`, or any file for none.
     pub(crate) fn existing_file(&mut self, extensions: &[&str]) -> Option<PathBuf> {
-        match self {
-            Self::Native => pick_existing_file(extensions),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => scripted_path(answers, "pick a file"),
-        }
+        self.path("pick a file", || pick_existing_file(extensions))
     }
 
     /// Existing files with one of `extensions`, sorted, each once, at least one.
     pub(crate) fn existing_files(&mut self, extensions: &[&str]) -> Option<Vec<PathBuf>> {
-        match self {
-            Self::Native => pick_existing_files(extensions),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => match answers.pop_front() {
-                Some(DialogAnswer::Paths(paths)) => {
-                    normalize_file_selection(paths.into_iter().map(absolute).collect())
-                }
-                Some(DialogAnswer::Cancel) => None,
-                answer => unanswered("pick files", answer.as_ref()),
-            },
+        const ASK: &str = "pick files";
+        match self.queued.pop_front() {
+            Some(DialogAnswer::Paths(paths)) => {
+                normalize_file_selection(paths.into_iter().map(absolute).collect())
+            }
+            Some(DialogAnswer::Cancel) => None,
+            Some(answer) => unanswered(ASK, Some(&answer)),
+            None => self.fall_back(ASK, || pick_existing_files(extensions)),
         }
     }
 
     /// A file to create, with one of `extensions`.
     pub(crate) fn new_file(&mut self, extensions: &[&str]) -> Option<PathBuf> {
-        match self {
-            Self::Native => pick_new_file(extensions),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => scripted_path(answers, "name a new file"),
-        }
+        self.path("name a new file", || pick_new_file(extensions))
     }
 
     /// A directory.
     pub(crate) fn dir(&mut self) -> Option<PathBuf> {
-        match self {
-            Self::Native => pick_dir(),
-            #[cfg(feature = "internals")]
-            Self::Scripted(answers) => scripted_path(answers, "pick a folder"),
+        self.path("pick a folder", pick_dir)
+    }
+
+    /// A one-path ask: the next queued answer, else `native` behind the fallback.
+    fn path(&mut self, ask: &str, native: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+        match self.queued.pop_front() {
+            Some(answer) => queued_path(ask, answer),
+            None => self.fall_back(ask, native),
+        }
+    }
+
+    /// `native` for [`DialogFallback::Native`], the flag raised while it runs, else a refusal
+    /// of `ask`.
+    fn fall_back<T>(&self, ask: &str, native: impl FnOnce() -> Option<T>) -> Option<T> {
+        match self.fallback {
+            DialogFallback::Native => {
+                self.native_open.store(true, Ordering::Release);
+                let answer = native();
+                self.native_open.store(false, Ordering::Release);
+                answer
+            }
+            DialogFallback::Refuse => unanswered(ask, None),
         }
     }
 }
 
-/// The next scripted answer to a one-path ask.
-#[cfg(feature = "internals")]
-fn scripted_path(answers: &mut VecDeque<DialogAnswer>, ask: &str) -> Option<PathBuf> {
-    match answers.pop_front() {
-        Some(DialogAnswer::Path(path)) => Some(absolute(path)),
-        Some(DialogAnswer::Cancel) => None,
-        answer => unanswered(ask, answer.as_ref()),
+/// A queued answer to a one-path ask.
+fn queued_path(ask: &str, answer: DialogAnswer) -> Option<PathBuf> {
+    match answer {
+        DialogAnswer::Path(path) => Some(absolute(path)),
+        DialogAnswer::Cancel => None,
+        DialogAnswer::Paths(_) => unanswered(ask, Some(&answer)),
     }
 }
 
 /// `path` as a native dialog answers it: absolute, a relative one taken against the working
-/// directory, so a scripted pick holds what a document keeps in memory.
-#[cfg(feature = "internals")]
+/// directory, so a queued pick holds what a document keeps in memory.
 fn absolute(path: PathBuf) -> PathBuf {
     std::path::absolute(&path).unwrap_or(path)
 }
 
-/// A scripted ask with no answer of its shape: a cancel, and an error for the harness to report.
-#[cfg(feature = "internals")]
+/// An ask with no answer of its shape: a cancel, and an error for the driver to report.
 fn unanswered<T>(ask: &str, answer: Option<&DialogAnswer>) -> Option<T> {
     match answer {
-        None => tracing::error!("a dialog asked to {ask}, and no scripted answer was left"),
+        None => tracing::error!("a dialog asked to {ask}, and no queued answer was left"),
         Some(answer) => tracing::error!("a dialog asked to {ask}, and the answer was {answer:?}"),
     }
     None
@@ -234,9 +257,9 @@ mod tests {
 
     use common::{TempDir, fs};
 
-    use std::collections::VecDeque;
-
-    use crate::gui::dialogs::{DialogAnswer, Dialogs, SavedFile, normalize_file_selection};
+    use crate::gui::dialogs::{
+        DialogAnswer, DialogFallback, Dialogs, SavedFile, normalize_file_selection,
+    };
 
     /// A save adds its kind's extension to a bare name and puts it in place of another, and keeps
     /// one that matches without regard to case. Only an extended name that exists and differs
@@ -305,15 +328,17 @@ mod tests {
         );
     }
 
-    /// Scripted answers go to the asks in order, each of its own shape and absolute, as a native
+    /// Queued answers go to the asks in order, each of its own shape and absolute, as a native
     /// dialog's are: a relative one is taken against the working directory. The project save adds
     /// the extension, as the native one does; the file list comes back sorted and once each. A
-    /// cancel, an answer of the other shape, and an ask past the last answer all read as `None`.
+    /// cancel, an answer of the other shape, and an ask past the last answer all read as `None`,
+    /// the last one from the refusing fallback; an answer queued after that goes to the next ask.
     #[test]
-    fn scripted_answers_go_to_the_asks_in_order() {
+    fn queued_answers_go_to_the_asks_in_order_before_the_fallback() {
         // As a native dialog answers: absolute, so `/p` on Windows takes the working drive.
         let abs = |path: &str| path::absolute(path).unwrap();
-        let mut dialogs = Dialogs::Scripted(VecDeque::from([
+        let mut dialogs = Dialogs::new(DialogFallback::Refuse);
+        for answer in [
             DialogAnswer::Path(PathBuf::from("/p/scene.darkroom")),
             DialogAnswer::Path(PathBuf::from("/p/copy")),
             DialogAnswer::Paths(vec![PathBuf::from("/d/b.fit"), PathBuf::from("/d/a.fit")]),
@@ -321,7 +346,9 @@ mod tests {
             DialogAnswer::Paths(vec![PathBuf::from("/d/c.fit")]),
             DialogAnswer::Path(PathBuf::from("/d")),
             DialogAnswer::Path(PathBuf::from("inputs/x.fit")),
-        ]));
+        ] {
+            dialogs.queue(answer);
+        }
         assert_eq!(
             dialogs.project_open_path(None),
             Some(abs("/p/scene.darkroom"))
@@ -349,5 +376,9 @@ mod tests {
             "taken against the working directory"
         );
         assert_eq!(dialogs.dir(), None, "no answer left");
+        assert_eq!(dialogs.existing_files(&[]), None, "no answer left");
+
+        dialogs.queue(DialogAnswer::Path(PathBuf::from("/q")));
+        assert_eq!(dialogs.dir(), Some(abs("/q")), "a later answer wins again");
     }
 }

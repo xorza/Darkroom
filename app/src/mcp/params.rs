@@ -1,12 +1,13 @@
-//! The tools' inputs as an agent writes them, and their conversion to the harness's types. The
-//! JSON shape is this crate's: the harness's types carry no schema.
+//! The tools' inputs as an agent writes them, and their conversion to the driver's types. The
+//! JSON shape is this crate's: the driver's types carry no schema.
 
 use std::path::PathBuf;
 
-use darkroom::internals::harness::action::{Action, DRAG_STEPS, DialogAnswer};
-use darkroom::internals::harness::locator::{Locator, Side};
-use darkroom::internals::harness::shot::Region;
-use darkroom::internals::harness::state::Detail;
+use darkroom::driver::OpenMode;
+use darkroom::driver::action::{Action, DRAG_STEPS, DialogAnswer};
+use darkroom::driver::locator::{Locator, Side};
+use darkroom::driver::shot::Region;
+use darkroom::driver::state::Detail;
 use glam::Vec2;
 use palantir::{Modifiers, PointerButton, Rect};
 use rmcp::schemars::JsonSchema;
@@ -26,14 +27,21 @@ pub(crate) struct OpenParams {
     /// The `.darkroom` document to open, absolute or relative to the server's working directory;
     /// absent, a new unsaved document, which File ▸ Save As names.
     pub(crate) project: Option<PathBuf>,
-    /// Open the project where it is, so saves and its cache reach the original. By default its
-    /// folder is copied into the session first.
+    /// Copy the project's folder into the session's directory in RAM and open the copy, so
+    /// nothing the session does reaches the original. By default the project opens where it is,
+    /// as a person's Open does.
     #[serde(default)]
-    pub(crate) in_place: bool,
-    /// The window's `[width, height]` in physical pixels; the server's default when absent.
-    pub(crate) size: Option<[u32; 2]>,
-    /// Physical pixels per logical pixel; the server's default when absent.
-    pub(crate) scale: Option<f32>,
+    pub(crate) copy: bool,
+}
+
+impl OpenParams {
+    pub(crate) const fn mode(&self) -> OpenMode {
+        if self.copy {
+            OpenMode::Copy
+        } else {
+            OpenMode::InPlace
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -7,17 +7,15 @@ use palantir::HostHandle;
 use crate::core::wake::Wake;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::App;
-#[cfg(feature = "internals")]
 use crate::gui::app::offscreen_signals::OffscreenSignals;
 
-/// What runs the app's frames: the desktop window's host, or the harness. The app asks it for
+/// What runs the app's frames: the desktop window's host, or the driver. The app asks it for
 /// two things only, a wake when background work lands and a quit.
 #[derive(Debug)]
 pub(crate) enum AppHost {
     /// The winit host of the desktop window.
     Window(HostHandle<App>),
-    /// The harness, which runs every frame itself and reads what the app asked of it.
-    #[cfg(feature = "internals")]
+    /// The driver, which runs every frame itself and reads what the app asked of it.
     Offscreen(Arc<OffscreenSignals>),
 }
 
@@ -30,7 +28,6 @@ impl AppHost {
                 let handle = handle.clone();
                 Arc::new(move || handle.request_repaint(MAIN_WINDOW))
             }
-            #[cfg(feature = "internals")]
             Self::Offscreen(signals) => {
                 let signals = Arc::clone(signals);
                 Arc::new(move || signals.note_wake())
@@ -42,7 +39,6 @@ impl AppHost {
     pub(crate) fn quit(&self) {
         match self {
             Self::Window(handle) => handle.quit(),
-            #[cfg(feature = "internals")]
             Self::Offscreen(signals) => signals.note_quit(),
         }
     }

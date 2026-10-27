@@ -9,9 +9,9 @@ members = [
     "libraw",
     "lens",
     "darkroom",
-    "mcp",
+    "app",
 ]
-default-members = ["darkroom"]
+default-members = ["app"]
 exclude = ["palantir", "fits-well"]
 
 resolver = "3"
@@ -48,9 +48,9 @@ steps = [{ build = "clippy -p simd --all-targets --all-features --target aarch64
 [workspace.metadata.drive.commands.real-data]
 steps = [{ cargo = "test -p lumos --all-features", args = true }]
 
-# The editor's MCP server, which `.mcp.json` starts from `target/mcp/`.
+# The editor with its MCP server, which `.mcp.json` starts from `target/mcp/`.
 [workspace.metadata.drive.commands.mcp]
-steps = [{ build = "build -p darkroom-mcp --profile mcp" }]
+steps = [{ build = "build -p darkroom-app --profile mcp" }]
 
 [workspace.dependencies]
 common = { path = "common" }

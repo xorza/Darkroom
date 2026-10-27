@@ -1,5 +1,5 @@
 //! [`SessionThread`]: the one thread the editor lives on, and the edge where a panic in it ends
-//! the session instead of the server.
+//! the session, which the server ends with, rather than unwinding through the server.
 
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use common::thread as threads;
-use darkroom::internals::harness::error::HarnessError;
-use darkroom::internals::harness::{Harness, SessionConfig};
+use darkroom::driver::error::DriverError;
+use darkroom::driver::{Driver, OpenMode, SessionConfig};
 use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::sync::oneshot;
 
@@ -36,19 +36,19 @@ struct Request {
     reply: oneshot::Sender<CallToolResult>,
 }
 
-/// What the editor's thread holds between jobs.
+/// What the editor's thread holds between jobs: the driver until the session ends, then why it
+/// ended.
 #[derive(Debug)]
 pub(crate) struct Session {
-    /// What a new session is made with when `darkroom_open` names nothing else.
-    pub(crate) defaults: SessionConfig,
-    harness: Option<Harness>,
-    /// Why the last session ended, when it did not end by a new open.
+    driver: Option<Driver>,
     ended: Option<Ended>,
+    /// Told once, when the session ends, so the server ends with it.
+    on_end: Option<oneshot::Sender<Ended>>,
 }
 
-/// Why a session ended on its own.
-#[derive(Debug)]
-enum Ended {
+/// Why a session ended.
+#[derive(Clone, Debug)]
+pub(crate) enum Ended {
     /// The editor panicked, with this message and location.
     Panic(String),
     /// An action asked the editor to quit, as File ▸ Quit or Ctrl+Q do.
@@ -60,13 +60,31 @@ enum Ended {
 pub(crate) struct ToolError(pub(crate) String);
 
 impl SessionThread {
-    /// Start the editor's thread; its sessions are made with `defaults`.
-    pub(crate) fn new(defaults: SessionConfig) -> Self {
+    /// Start the editor's thread on the session `make` makes there, and the receiver told when
+    /// that session ends; or the error that kept the session from starting.
+    pub(crate) fn start(
+        make: impl FnOnce() -> Result<Driver, DriverError> + Send + 'static,
+    ) -> Result<(Self, oneshot::Receiver<Ended>), DriverError> {
         let (jobs, requests) = mpsc::channel();
+        let (started, startup) = mpsc::channel();
+        let (on_end, ended) = oneshot::channel();
         let panics: Arc<Mutex<Option<String>>> = Arc::default();
         let recorded = Arc::clone(&panics);
         let handle = threads::spawn("darkroom-mcp-session", move || {
-            serve(&requests, defaults, &recorded);
+            let driver = match make() {
+                Ok(driver) => driver,
+                Err(error) => {
+                    started.send(Err(error)).ok();
+                    return;
+                }
+            };
+            started.send(Ok(())).ok();
+            let session = Session {
+                driver: Some(driver),
+                ended: None,
+                on_end: Some(on_end),
+            };
+            serve(&requests, session, &recorded);
         });
         let session_thread = handle.thread().id();
         // The payload alone has no location; the hook sees both, for this thread's panics only.
@@ -82,9 +100,15 @@ impl SessionThread {
             }
             previous(info);
         }));
-        Self {
+        let thread = Self {
             jobs,
             _thread: Joined(Some(handle)),
+        };
+        // A thread that ends before it answers panicked, which the hook printed.
+        match startup.recv() {
+            Ok(Ok(())) => Ok((thread, ended)),
+            Ok(Err(error)) => Err(error),
+            Err(mpsc::RecvError) => panic!("the editor's thread panicked as the session started"),
         }
     }
 
@@ -106,13 +130,20 @@ impl SessionThread {
     }
 }
 
+/// An offscreen driver of `config` on `document`, or on a new document for none.
+pub(crate) fn launch(
+    config: SessionConfig,
+    document: Option<&Path>,
+) -> Result<Driver, DriverError> {
+    let mut driver = Driver::new(config)?;
+    if let Some(document) = document {
+        driver.open(document, OpenMode::InPlace)?;
+    }
+    Ok(driver)
+}
+
 /// Take jobs until the server drops its end, each inside the panic edge.
-fn serve(requests: &Receiver<Request>, defaults: SessionConfig, panics: &Mutex<Option<String>>) {
-    let mut session = Session {
-        defaults,
-        harness: None,
-        ended: None,
-    };
+fn serve(requests: &Receiver<Request>, mut session: Session, panics: &Mutex<Option<String>>) {
     while let Ok(Request { job, reply }) = requests.recv() {
         let result = match panic::catch_unwind(AssertUnwindSafe(|| job(&mut session))) {
             Ok(Ok(content)) => CallToolResult::success(content),
@@ -125,8 +156,8 @@ fn serve(requests: &Receiver<Request>, defaults: SessionConfig, panics: &Mutex<O
                     .unwrap_or_else(|| "a panic the hook did not see".to_string());
                 session.end(panic.clone());
                 CallToolResult::error(vec![ContentBlock::text(format!(
-                    "the editor panicked: {panic}. The session is closed; report the panic, and call \
-                     darkroom_open to start a new one."
+                    "the editor panicked: {panic}. The session is closed and the server ends with \
+                     it; report the panic."
                 ))])
             }
         };
@@ -136,56 +167,56 @@ fn serve(requests: &Receiver<Request>, defaults: SessionConfig, panics: &Mutex<O
 }
 
 impl Session {
-    /// The open session, or the error that says why none is.
-    pub(crate) fn harness(&mut self) -> Result<&mut Harness, ToolError> {
-        match (&mut self.harness, &self.ended) {
-            (Some(harness), _) => Ok(harness),
+    /// The session's driver, or the error that says how the session ended.
+    pub(crate) fn driver(&mut self) -> Result<&mut Driver, ToolError> {
+        match (&mut self.driver, &self.ended) {
+            (Some(driver), _) => Ok(driver),
             (None, Some(Ended::Panic(panic))) => Err(ToolError(format!(
-                "no project is open: the last session ended when the editor panicked: {panic}. Call \
-                 darkroom_open to start a new one."
+                "the session ended when the editor panicked: {panic}; the server is ending"
             ))),
             (None, Some(Ended::Quit)) => Err(ToolError(
-                "no project is open: the last session ended when an action quit the editor. Call \
-                 darkroom_open to start a new one."
+                "the session ended when an action quit the editor; the server is ending"
                     .to_string(),
             )),
-            (None, None) => Err(ToolError(
-                "no project is open; call darkroom_open first".to_string(),
-            )),
+            (None, None) => unreachable!("a session without a driver has ended"),
         }
     }
 
-    /// A new session of `config` on `project`, or on a new document for none, in place of any
-    /// open one. A project that does not open leaves no session, rather than an empty document
-    /// the agent did not ask for.
-    pub(crate) fn start(
+    /// Open `project` where `mode` says, or a new document for none, in place of the open one.
+    /// A project that does not open leaves the open one as it was.
+    pub(crate) fn open(
         &mut self,
-        config: SessionConfig,
         project: Option<&Path>,
-        in_place: bool,
-    ) -> Result<&mut Harness, HarnessError> {
-        // The old session first: its log layer is this thread's default until it drops.
-        self.harness = None;
-        self.ended = None;
-        let mut harness = Harness::new(config);
-        if let Some(project) = project {
-            harness.open(project, in_place)?;
+        mode: OpenMode,
+    ) -> Result<&mut Driver, ToolError> {
+        let driver = self.driver()?;
+        match project {
+            Some(project) => driver.open(project, mode)?,
+            None => driver.new_document()?,
         }
-        Ok(self.harness.insert(harness))
+        Ok(driver)
     }
 
-    /// Drop the session an action quit, as a window closes when its editor quits.
+    /// End the session an action quit, as a window closes when its editor quits.
     pub(crate) fn quit(&mut self) {
-        self.harness = None;
-        self.ended = Some(Ended::Quit);
+        self.driver = None;
+        self.ended(Ended::Quit);
     }
 
-    /// Drop the session a panic left, whose state no call can trust.
+    /// End the session a panic left, whose state no call can trust.
     fn end(&mut self, panic: String) {
         // Its drop may panic too, on the same broken state; the session is gone either way.
-        let harness = self.harness.take();
-        panic::catch_unwind(AssertUnwindSafe(move || drop(harness))).ok();
-        self.ended = Some(Ended::Panic(panic));
+        let driver = self.driver.take();
+        panic::catch_unwind(AssertUnwindSafe(move || drop(driver))).ok();
+        self.ended(Ended::Panic(panic));
+    }
+
+    fn ended(&mut self, ended: Ended) {
+        if let Some(on_end) = self.on_end.take() {
+            // The server already gone: no one waits for the end.
+            on_end.send(ended.clone()).ok();
+        }
+        self.ended = Some(ended);
     }
 }
 
@@ -204,8 +235,8 @@ impl fmt::Debug for Request {
     }
 }
 
-impl From<HarnessError> for ToolError {
-    fn from(error: HarnessError) -> Self {
+impl From<DriverError> for ToolError {
+    fn from(error: DriverError) -> Self {
         Self(error.to_string())
     }
 }

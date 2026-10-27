@@ -11,13 +11,13 @@ use palantir::{DockView, Rect, RgbaF32, Screenshot, SrgbaU8, Ui};
 use serde::Serialize;
 
 use crate::core::document::tab_ref::TabRef;
+use crate::driver::error::DriverError;
+use crate::driver::locator::Locator;
 use crate::gui::app::App;
 use crate::gui::app::view_capture;
 use crate::gui::main_window::dock_panes;
 use crate::gui::pane::graph_ui::node_ui::{port_row, wid};
 use crate::gui::port_ref::PortRef;
-use crate::internals::harness::error::HarnessError;
-use crate::internals::harness::locator::Locator;
 
 /// The space a node's shot leaves around its body, in logical pixels, so its wires' ends and
 /// its shadow show.
@@ -68,7 +68,7 @@ pub struct LegendPort {
 
 impl Region {
     /// The logical rect to ask a screenshot of, `None` for the whole window.
-    pub(crate) fn rect(&self, app: &App, ui: &Ui) -> Result<Option<Rect>, HarnessError> {
+    pub(crate) fn rect(&self, app: &App, ui: &Ui) -> Result<Option<Rect>, DriverError> {
         match self {
             Self::Window => Ok(None),
             Self::Pane(name) => pane(app, ui, name).map(Some),
@@ -108,7 +108,7 @@ impl Region {
 }
 
 /// The pane rect of the one group whose visible tab is named `name`.
-fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, HarnessError> {
+fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, DriverError> {
     let document = &app.open_document().document;
     let layout = &document.layout;
     let locator = format!("{:?}", Region::Pane(name.to_string()));
@@ -120,7 +120,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, HarnessError> {
     let group = match groups.as_slice() {
         [one] => one,
         [] => {
-            return Err(HarnessError::NotFound {
+            return Err(DriverError::NotFound {
                 locator,
                 nearest: layout
                     .active_tabs()
@@ -129,7 +129,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, HarnessError> {
             });
         }
         _ => {
-            return Err(HarnessError::Ambiguous {
+            return Err(DriverError::Ambiguous {
                 locator,
                 matches: groups
                     .iter()
@@ -141,7 +141,7 @@ fn pane(app: &App, ui: &Ui, name: &str) -> Result<Rect, HarnessError> {
     ui.response_for(DockView::pane_id(layout, group.id))
         .rect
         .filter(|rect| !rect.is_paint_empty())
-        .ok_or(HarnessError::OffScreen { locator })
+        .ok_or(DriverError::OffScreen { locator })
 }
 
 impl Shot {
@@ -153,13 +153,11 @@ impl Shot {
         app: &App,
         ui: &Ui,
         path: PathBuf,
-    ) -> Result<Self, HarnessError> {
+    ) -> Result<Self, DriverError> {
         let region = screenshot.region();
-        let image = screenshot
-            .image()
-            .ok_or_else(|| HarnessError::EmptyRegion {
-                region: format!("{region:?}"),
-            })?;
+        let image = screenshot.image().ok_or_else(|| DriverError::EmptyRegion {
+            region: format!("{region:?}"),
+        })?;
         let physical = image.size();
         let picture = fit(&view_capture::rgba_image(image), max_side);
         let size = UVec2::new(picture.width(), picture.height());
@@ -281,7 +279,7 @@ fn fit(image: &RgbaImage, max_side: u32) -> RgbaImage {
 mod tests {
     use image::{Rgba, RgbaImage};
 
-    use crate::internals::harness::shot::fit;
+    use crate::driver::shot::fit;
 
     /// A 4 × 2 image of black and white columns, black first, fits a `max_side` of 2 as 2 × 1.
     /// The tent, widened by 2, weighs the columns at its centre 3/4 each and the next ones out

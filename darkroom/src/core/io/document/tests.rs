@@ -300,7 +300,7 @@ fn relative_paths_that_leave_the_folder_are_listed() {
     let path = dir.join("scene.darkroom");
     internals::write_unchecked(&document, &path);
     assert_eq!(
-        internals::paths_leaving_folder(&path).unwrap(),
+        paths_leaving_folder(&path).unwrap(),
         ["../x.tiff", "a/../../y.tiff"]
     );
 }

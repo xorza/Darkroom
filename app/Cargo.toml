@@ -1,0 +1,57 @@
+[package]
+name = "darkroom-app"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Its docs would collide with the library's, of the same name.
+[[bin]]
+name = "darkroom"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+darkroom = { workspace = true }
+common = { workspace = true }
+palantir = { workspace = true }
+
+glam = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tracing = { workspace = true, features = ["std"] }
+rmcp = { workspace = true, features = ["base64", "macros", "server", "transport-io"] }
+clap = { workspace = true, features = [
+    "derive",
+    "error-context",
+    "help",
+    "std",
+    "suggestions",
+    "usage",
+] }
+
+[dev-dependencies]
+darkroom = { workspace = true, features = ["internals"] }
+common = { workspace = true, features = ["internals"] }
+rmcp = { workspace = true, features = ["client"] }
+tokio = { workspace = true, features = ["io-util"] }
+
+# Embeds the app icon in the .exe. Not gated on `cfg(windows)`, which a build-dependency takes
+# from the host: a build for Windows from another host needs it too.
+[build-dependencies]
+winresource = { workspace = true }
+
+# Regenerate the icons with darkroom/scripts/generate-icons.sh.
+[package.metadata.bundle]
+name = "darkroom"
+identifier = "com.cssodessa.darkroom"
+icon = [
+    "../darkroom/assets/icons/darkroom.icns",
+    "../darkroom/assets/icons/darkroom-512.png",
+    "../darkroom/assets/icons/darkroom-256.png",
+    "../darkroom/assets/icons/darkroom-128.png",
+]
+category = "GraphicsDesign"
+short_description = "Node-graph image pipeline editor"

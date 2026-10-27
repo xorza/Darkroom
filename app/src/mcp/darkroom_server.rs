@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use darkroom::internals::harness::action::Action;
-use darkroom::internals::harness::error::HarnessError;
-use darkroom::internals::harness::shot::{LegendNode, Region};
-use darkroom::internals::harness::state::{Detail, State};
-use darkroom::internals::harness::{ActReport, Harness, SessionConfig};
-use glam::UVec2;
+use darkroom::driver::action::Action;
+use darkroom::driver::error::DriverError;
+use darkroom::driver::shot::{LegendNode, Region};
+use darkroom::driver::state::{Detail, State};
+use darkroom::driver::{ActReport, Driver};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -19,22 +18,15 @@ use rmcp::model::{
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
 
-use crate::params::{
+use crate::mcp::params::{
     ActParams, MAX_SIDE, OpenParams, RUN_TIMEOUT_S, ShotParams, StateParams, UI_LIMIT, UiParams,
     WaitRunParams,
 };
-use crate::session_thread::{Session, SessionThread, ToolError};
-
-/// The largest window side a session takes, in physical pixels: wgpu's default
-/// `max_texture_dimension_2d`, which desktop adapters reach. palantir asks the adapter for its
-/// own limit, so an adapter below it panics on a larger window, and the session ends.
-const MAX_WINDOW_SIDE: u32 = 8192;
-/// The smallest scale a session takes: at a quarter, a 12 px label is 3 pixels high.
-const MIN_SCALE: f32 = 0.25;
+use crate::mcp::session_thread::{Session, SessionThread, ToolError};
 
 /// What the server tells an agent before its first call.
-const INSTRUCTIONS: &str = "Drives the darkroom node editor with no desktop. Open a project with \
-darkroom_open, play clicks, drags and keys with darkroom_act, read the editor as text with \
+const INSTRUCTIONS: &str = "Drives the darkroom node editor, offscreen or in its window. Open a \
+project with darkroom_open, play clicks, drags and keys with darkroom_act, read the editor as text with \
 darkroom_state and darkroom_ui, and look at it with darkroom_shot. Name things by what the editor \
 shows: a node by its name, a port by node, side and name, a widget by its text; use screen \
 points only for what has no name. Read state before a shot: text costs less.";
@@ -68,10 +60,10 @@ struct ShotLegend<'a> {
 
 #[tool_router]
 impl DarkroomServer {
-    /// A server whose sessions are made with `defaults` where `darkroom_open` names nothing else.
-    pub(crate) fn new(defaults: SessionConfig) -> Self {
+    /// A server of the session `session` holds.
+    pub(crate) fn new(session: SessionThread) -> Self {
         Self {
-            session: Arc::new(SessionThread::new(defaults)),
+            session: Arc::new(session),
             tool_router: Self::tool_router(),
         }
     }
@@ -85,28 +77,21 @@ impl DarkroomServer {
     }
 
     #[tool(
-        description = "Open a .darkroom project in a new editor session, closing any open one; \
-        with no project, a new unsaved document, which a Save As names. By default the project's \
-        folder is copied into the session's own directory in RAM and the copy opens, so nothing \
-        the session does reaches the original; in_place opens the original. \
+        description = "Open a .darkroom project in the editor, in place of the open document; \
+        with no project, a new unsaved document, which a Save As names. A project that does not \
+        open leaves the open document as it was. The project opens where \
+        it is, so saves reach the original; copy opens a copy of its folder in the session's own \
+        directory in RAM instead, so nothing the session does reaches the original. \
         Answers with the build the server runs, the session directory, and the editor's state. \
         Example: {\"project\": \"darkroom/sample/sample.darkroom\"}"
     )]
     async fn darkroom_open(&self, Parameters(params): Parameters<OpenParams>) -> CallToolResult {
         self.run(move |session| {
-            let mut config = session.defaults;
-            if let Some([w, h]) = params.size {
-                config.size = UVec2::new(w, h);
-            }
-            if let Some(scale) = params.scale {
-                config.scale = scale;
-            }
-            check_config(config)?;
-            let harness = session.start(config, params.project.as_deref(), params.in_place)?;
+            let driver = session.open(params.project.as_deref(), params.mode())?;
             json(&Opened {
                 build: env!("DARKROOM_BUILD"),
-                session_dir: harness.session_dir().to_path_buf(),
-                state: harness.state(Detail::Concise, None),
+                session_dir: driver.session_dir().to_path_buf(),
+                state: driver.state(Detail::Concise, None)?,
             })
         })
         .await
@@ -116,7 +101,7 @@ impl DarkroomServer {
         description = "Play input into the editor: clicks, double clicks, drags, scrolls, \
         pinches, key chords, typed text, and the answers file dialogs take. The editor settles \
         after each action; the first that fails stops the rest, and one that quits the editor \
-        closes the session. Name each place with a locator: \
+        ends the session and the server. Name each place with a locator: \
         node, header, port, text, world, screen, offset or nth. Answers with the selection, the \
         dirty flag and the focus, and with a shot when one is asked. Example: {\"actions\": \
         [{\"click\": {\"at\": {\"node\": \"Blur\"}}}, {\"drag\": {\"from\": {\"port\": {\"node\": \
@@ -126,19 +111,19 @@ impl DarkroomServer {
     )]
     async fn darkroom_act(&self, Parameters(params): Parameters<ActParams>) -> CallToolResult {
         self.run(move |session| {
-            let harness = session.harness()?;
+            let driver = session.driver()?;
             let count = params.actions.len();
             // One at a time, so a failure names the action it stopped at.
-            let mut report = harness.act(&[])?;
+            let mut report = driver.act(&[])?;
             for (idx, action) in params.actions.into_iter().enumerate() {
-                let step = match harness.act(&[Action::from(action)]) {
+                let step = match driver.act(&[Action::from(action)]) {
                     Ok(step) => step,
-                    Err(HarnessError::Quit) => {
+                    Err(DriverError::Quit) => {
                         session.quit();
                         return Ok(vec![ContentBlock::text(format!(
                             "The editor quit at action {} of {count}, as the action asked, and \
-                             the session is closed; the actions after it did not run. Call \
-                             darkroom_open to start a new one.",
+                             the session is closed; the actions after it did not run, and the \
+                             server ends.",
                             idx + 1
                         ))]);
                     }
@@ -156,7 +141,7 @@ impl DarkroomServer {
             }
             let mut content = json(&report)?;
             if let Some(shot) = params.shot {
-                content.extend(take_shot(harness, shot)?);
+                content.extend(take_shot(driver, shot)?);
             }
             Ok(content)
         })
@@ -173,8 +158,8 @@ impl DarkroomServer {
     )]
     async fn darkroom_state(&self, Parameters(params): Parameters<StateParams>) -> CallToolResult {
         self.run(move |session| {
-            let harness = session.harness()?;
-            json(&harness.state(params.detail.into(), params.nodes.as_deref()))
+            let driver = session.driver()?;
+            json(&driver.state(params.detail.into(), params.nodes.as_deref())?)
         })
         .await
     }
@@ -188,8 +173,8 @@ impl DarkroomServer {
     )]
     async fn darkroom_ui(&self, Parameters(params): Parameters<UiParams>) -> CallToolResult {
         self.run(move |session| {
-            let harness = session.harness()?;
-            json(&harness.ui(params.filter.as_deref(), params.limit.unwrap_or(UI_LIMIT)))
+            let driver = session.driver()?;
+            json(&driver.ui(params.filter.as_deref(), params.limit.unwrap_or(UI_LIMIT))?)
         })
         .await
     }
@@ -199,18 +184,19 @@ impl DarkroomServer {
         pane by its tab's name, a node by name with a margin, or a rect of the canvas. It is \
         scaled so that its longer side is at most max_side pixels, 1280 by default, and comes with \
         a legend of each visible node and port at its rect in the picture's pixels, so a point \
-        seen in it becomes a locator. Needs the GPU display. Read darkroom_state first: text \
+        seen in it becomes a locator. Read darkroom_state first: text \
         costs fewer tokens. Example: {\"region\": {\"node\": \"Blur\"}, \"max_side\": 800}"
     )]
     async fn darkroom_shot(&self, Parameters(params): Parameters<ShotParams>) -> CallToolResult {
-        self.run(move |session| take_shot(session.harness()?, params))
+        self.run(move |session| take_shot(session.driver()?, params))
             .await
     }
 
     #[tool(
-        description = "Wait until the graph's run on the editor's worker finishes and the \
-        editor settles, for at most timeout_s seconds, 60 by default. Start a run first, as with \
-        the toolbar's run button or a node's run chip. Example: {\"timeout_s\": 120}"
+        description = "Wait until a run the last darkroom_act started on the editor's worker \
+        finishes and the editor settles, for at most timeout_s seconds, 60 by default. Start the \
+        run in that darkroom_act, as with the toolbar's run button, a node's run chip or ctrl+r. \
+        Example: {\"timeout_s\": 120}"
     )]
     async fn darkroom_wait_run(
         &self,
@@ -223,9 +209,9 @@ impl DarkroomServer {
                     "timeout_s is {seconds}; give a number of seconds from 0"
                 ))
             })?;
-            let harness = session.harness()?;
-            harness.wait_run(timeout)?;
-            json(&harness.state(Detail::Concise, None))
+            let driver = session.driver()?;
+            driver.wait_run(timeout)?;
+            json(&driver.state(Detail::Concise, None)?)
         })
         .await
     }
@@ -245,14 +231,14 @@ impl ServerHandler for DarkroomServer {
 }
 
 /// A shot of `params`' region, as an image and its legend.
-fn take_shot(harness: &mut Harness, params: ShotParams) -> Result<Vec<ContentBlock>, ToolError> {
+fn take_shot(driver: &mut Driver, params: ShotParams) -> Result<Vec<ContentBlock>, ToolError> {
     let max_side = params.max_side.unwrap_or(MAX_SIDE);
     if max_side == 0 {
         return Err(ToolError(
             "max_side is 0; give the picture's longer side in pixels".to_string(),
         ));
     }
-    let shot = harness.shot(&Region::from(params.region), max_side)?;
+    let shot = driver.shot(&Region::from(params.region), max_side)?;
     // rmcp's own base64 encoder, which its prompt messages reach.
     let image = PromptMessage::new_image(Role::Assistant, &shot.png, "image/png", None, None);
     let mut content = vec![image.content];
@@ -269,23 +255,4 @@ fn json(value: &impl Serialize) -> Result<Vec<ContentBlock>, ToolError> {
     ContentBlock::json(value)
         .map(|block| vec![block])
         .map_err(|error| ToolError(format!("the answer did not serialize: {error}")))
-}
-
-/// Refuse a window no device can make or no one can read: a side of 0 or past
-/// [`MAX_WINDOW_SIDE`], or a scale under [`MIN_SCALE`].
-fn check_config(config: SessionConfig) -> Result<(), ToolError> {
-    let size = config.size;
-    if size.min_element() == 0 || size.max_element() > MAX_WINDOW_SIDE {
-        return Err(ToolError(format!(
-            "size is {}×{}; give each side from 1 to {MAX_WINDOW_SIDE} pixels",
-            size.x, size.y
-        )));
-    }
-    if !(config.scale.is_finite() && config.scale >= MIN_SCALE) {
-        return Err(ToolError(format!(
-            "scale is {}; give the physical pixels per logical pixel, {MIN_SCALE} or more",
-            config.scale
-        )));
-    }
-    Ok(())
 }

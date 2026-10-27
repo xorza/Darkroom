@@ -45,12 +45,16 @@ fn an_eviction_reaches_the_seed_cone_of_the_installed_program() {
 
 #[test]
 fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
-    let denoise_path = "/models/host-denoise.onnx";
-    let star_removal_path = "/models/host-stars.onnx";
+    let dir = TempDir::new("darkroom-runtime-host");
+    // Under the temp dir, so absolute on every platform: the host makes the paths absolute, and
+    // a rooted Unix path has no drive on Windows.
+    let model = |name: &str| dir.join(name).to_str().unwrap().to_owned();
+    let denoise_path = model("host-denoise.onnx");
+    let star_removal_path = model("host-stars.onnx");
     let mut preferences = Preferences {
         ml_models: MlModelPaths {
-            denoise: denoise_path.into(),
-            star_removal: star_removal_path.into(),
+            denoise: denoise_path.as_str().into(),
+            star_removal: star_removal_path.as_str().into(),
         },
         ..Preferences::default()
     };
@@ -59,26 +63,26 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     // Startup seeds the ML nodes' path inputs from the preferences.
     assert_eq!(
         ml_model_default(&host, "ML Denoise"),
-        Some(ConstValue::FsPath(denoise_path.to_owned()))
+        Some(ConstValue::FsPath(denoise_path))
     );
     assert_eq!(
         ml_model_default(&host, "ML Star Removal"),
-        Some(ConstValue::FsPath(star_removal_path.to_owned()))
+        Some(ConstValue::FsPath(star_removal_path))
     );
 
     // A later preferences edit republishes the library with the new paths.
-    let updated_denoise_path = "/models/updated-denoise.onnx";
-    let updated_star_removal_path = "/models/updated-stars.onnx";
-    preferences.ml_models.denoise = updated_denoise_path.into();
-    preferences.ml_models.star_removal = updated_star_removal_path.into();
+    let updated_denoise_path = model("updated-denoise.onnx");
+    let updated_star_removal_path = model("updated-stars.onnx");
+    preferences.ml_models.denoise = updated_denoise_path.as_str().into();
+    preferences.ml_models.star_removal = updated_star_removal_path.as_str().into();
     host.configure_ml_model_defaults(&preferences);
     assert_eq!(
         ml_model_default(&host, "ML Denoise"),
-        Some(ConstValue::FsPath(updated_denoise_path.to_owned()))
+        Some(ConstValue::FsPath(updated_denoise_path))
     );
     assert_eq!(
         ml_model_default(&host, "ML Star Removal"),
-        Some(ConstValue::FsPath(updated_star_removal_path.to_owned()))
+        Some(ConstValue::FsPath(updated_star_removal_path))
     );
 
     // The disk cache is memory-only until a document has a path, then
@@ -86,7 +90,6 @@ fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
     // Pointing the cache at a document creates nothing on disk: its root
     // appears, with its `.gitignore`, only when a compiled program holds a
     // disk-backed node that can write there.
-    let dir = TempDir::new("darkroom-runtime-host");
     let first_path = dir.join("first.darkroom");
     let second_path = dir.join("second.darkroom");
     let (first_root, second_root) = (cache::root(&first_path), cache::root(&second_path));

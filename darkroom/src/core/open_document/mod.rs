@@ -121,6 +121,11 @@ pub(crate) struct LaunchSource<'a> {
 }
 
 impl OpenDocument {
+    /// Whether an undo would take an entry back.
+    pub(crate) fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
     /// Apply a single `intent` and record it as its own undo entry. For edits
     /// raised outside a frame's drain — e.g. a file-picker result handled
     /// after the record. No-ops (and self-cancelling steps) are dropped, like
@@ -396,11 +401,6 @@ pub(crate) mod internals {
                 document,
                 ..Self::default()
             }
-        }
-
-        /// Whether an undo would take an entry back.
-        pub(crate) fn can_undo(&self) -> bool {
-            self.history.can_undo()
         }
     }
 }

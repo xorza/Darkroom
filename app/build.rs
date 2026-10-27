@@ -1,21 +1,48 @@
-//! Record the commit the server is built from, and whether the tree differed from it, so
-//! `darkroom_open` can say when a running server is older than the source.
+//! Embed the Windows application icon into the executable, and record the commit the binary is
+//! built from.
 //!
-//! The script reruns when the checkout moves or any workspace source changes, so the record
-//! follows an edit as the binary does.
+//! For a Windows target, compiles `darkroom/assets/icons/darkroom.ico` into the `.exe` as a Win32
+//! resource so Explorer, the taskbar, and Alt-Tab show the app icon. The target is read from
+//! `CARGO_CFG_TARGET_OS`: a build script runs on the host, so its own `cfg(windows)` is the
+//! host's, as winresource's README warns. A build from another host needs the resource compiler
+//! winresource names: `llvm-rc` for MSVC, MinGW's `windres` for GNU. The in-window title-bar icon
+//! is set separately at runtime — see `load_icon` in `darkroom/src/lib.rs`.
+//!
+//! The commit, and whether the tree differed from it, lets `darkroom_open` say when a running
+//! server is older than the source. The script reruns when the checkout moves or any workspace
+//! source changes, so the record follows an edit as the binary does.
 
 #![expect(
     clippy::disallowed_types,
     clippy::disallowed_methods,
-    reason = "a build script runs git and reads the workspace at build time, and `common` is not \
-              one of its dependencies"
+    reason = "a build script runs git, reads cargo's environment and reads the workspace at build \
+              time, and `common` is not one of its dependencies"
 )]
 
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const ICON: &str = "../darkroom/assets/icons/darkroom.ico";
+
 fn main() {
+    embed_icon();
+    record_build();
+}
+
+fn embed_icon() {
+    println!("cargo:rerun-if-changed={ICON}");
+    if env::var("CARGO_CFG_TARGET_OS").expect("cargo states the target OS") != "windows" {
+        return;
+    }
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon(ICON);
+    res.compile()
+        .expect("embed darkroom.ico into the Windows executable");
+}
+
+fn record_build() {
     let commit = git(&["rev-parse", "--short=12", "HEAD"]);
     let build = match (&commit, git(&["status", "--porcelain"])) {
         (Some(commit), Some(status)) if status.is_empty() => commit.clone(),

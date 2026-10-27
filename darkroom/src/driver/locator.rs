@@ -1,15 +1,15 @@
 //! [`Locator`]: where an action lands, named by what the editor shows rather than by pixels.
 
 use glam::Vec2;
-use palantir::internals::inspected_widget::InspectedWidget;
+use palantir::InspectedWidget;
 use palantir::{Rect, Ui};
 use scenarium::NodeId;
 
+use crate::driver::error::DriverError;
 use crate::gui::app::App;
 use crate::gui::pane::graph_ui::canvas;
 use crate::gui::pane::graph_ui::node_ui::{port_row, wid};
 use crate::gui::port_ref::PortRef;
-use crate::internals::harness::error::HarnessError;
 
 /// How many candidates a `NotFound` lists.
 const NEAREST: usize = 10;
@@ -50,11 +50,11 @@ pub enum Side {
 impl Locator {
     /// The window point this locator names in `app`'s current frame: a widget's centre, or the
     /// point itself.
-    pub(crate) fn point(&self, app: &App, ui: &Ui) -> Result<Vec2, HarnessError> {
+    pub(crate) fn point(&self, app: &App, ui: &Ui) -> Result<Vec2, DriverError> {
         match self {
             Self::World(point) => {
                 let canvas = ui.response_for(canvas::outer_wid()).rect.ok_or_else(|| {
-                    HarnessError::OffScreen {
+                    DriverError::OffScreen {
                         locator: format!("{self:?}"),
                     }
                 })?;
@@ -74,7 +74,7 @@ impl Locator {
     /// The visible rect, in the window's logical pixels, of the widget this locator names: a
     /// node's body, its title, a port circle, a text, or one of several of them. A point names
     /// no widget.
-    pub(crate) fn rect(&self, app: &App, ui: &Ui) -> Result<Rect, HarnessError> {
+    pub(crate) fn rect(&self, app: &App, ui: &Ui) -> Result<Rect, DriverError> {
         match self {
             Self::Node(node) => {
                 self.visible(ui.response_for(wid::body(find_node(self, app, node)?)).rect)
@@ -89,7 +89,7 @@ impl Locator {
             }
             Self::Text(text) => find_text(self, ui, text),
             Self::Nth(inner, n) => {
-                let not_found = |count: usize| HarnessError::NotFound {
+                let not_found = |count: usize| DriverError::NotFound {
                     locator: format!("{self:?}"),
                     nearest: vec![format!("{inner:?} has {count} matches")],
                 };
@@ -104,13 +104,13 @@ impl Locator {
                         let widget = matches.get(*n).ok_or_else(|| not_found(matches.len()))?;
                         Ok(widget.rect)
                     }
-                    _ => Err(HarnessError::NotFound {
+                    _ => Err(DriverError::NotFound {
                         locator: format!("{self:?}"),
                         nearest: vec!["Nth picks among Node or Text matches only".to_string()],
                     }),
                 }
             }
-            Self::World(_) | Self::Screen(_) | Self::Offset(..) => Err(HarnessError::NotFound {
+            Self::World(_) | Self::Screen(_) | Self::Offset(..) => Err(DriverError::NotFound {
                 locator: format!("{self:?}"),
                 nearest: vec!["a point names no widget".to_string()],
             }),
@@ -119,25 +119,25 @@ impl Locator {
 
     /// `rect`, the visible rect of what this locator names; `None` is a widget that did not
     /// record or that its clip hides.
-    fn visible(&self, rect: Option<Rect>) -> Result<Rect, HarnessError> {
+    fn visible(&self, rect: Option<Rect>) -> Result<Rect, DriverError> {
         rect.filter(|rect| !rect.is_paint_empty())
-            .ok_or_else(|| HarnessError::OffScreen {
+            .ok_or_else(|| DriverError::OffScreen {
                 locator: format!("{self:?}"),
             })
     }
 }
 
 /// The one node named `node` by its name or its id.
-fn find_node(locator: &Locator, app: &App, node: &str) -> Result<NodeId, HarnessError> {
+fn find_node(locator: &Locator, app: &App, node: &str) -> Result<NodeId, DriverError> {
     let graph = &app.open_document().document.graph;
     let matches = node_ids(app, node);
     match matches.as_slice() {
         [one] => Ok(*one),
-        [] => Err(HarnessError::NotFound {
+        [] => Err(DriverError::NotFound {
             locator: format!("{locator:?}"),
             nearest: nearest(graph.iter().map(|candidate| candidate.name.clone()), node),
         }),
-        _ => Err(HarnessError::Ambiguous {
+        _ => Err(DriverError::Ambiguous {
             locator: format!("{locator:?}"),
             matches: matches.iter().map(|id| format!("{node} ({id})")).collect(),
         }),
@@ -162,7 +162,7 @@ fn find_port(
     node_id: NodeId,
     side: Side,
     port: &str,
-) -> Result<PortRef, HarnessError> {
+) -> Result<PortRef, DriverError> {
     let node = app
         .open_document()
         .document
@@ -183,7 +183,7 @@ fn find_port(
                 .collect(),
         },
         Err(why) => {
-            return Err(HarnessError::NotFound {
+            return Err(DriverError::NotFound {
                 locator: format!("{locator:?}"),
                 nearest: vec![format!("the node's func does not resolve: {why:?}")],
             });
@@ -193,7 +193,7 @@ fn find_port(
         .iter()
         .position(|name| name == port)
         .or_else(|| port.parse().ok().filter(|idx| *idx < names.len()))
-        .ok_or_else(|| HarnessError::NotFound {
+        .ok_or_else(|| DriverError::NotFound {
             locator: format!("{locator:?}"),
             nearest: names.clone(),
         })?;
@@ -204,15 +204,15 @@ fn find_port(
 }
 
 /// The rect of the one visible interactive widget showing exactly `text`.
-fn find_text(locator: &Locator, ui: &Ui, text: &str) -> Result<Rect, HarnessError> {
+fn find_text(locator: &Locator, ui: &Ui, text: &str) -> Result<Rect, DriverError> {
     let (widgets, matches) = text_matches(ui, text);
     match matches.as_slice() {
         [one] => Ok(one.rect),
-        [] => Err(HarnessError::NotFound {
+        [] => Err(DriverError::NotFound {
             locator: format!("{locator:?}"),
             nearest: nearest(widgets.iter().map(|widget| widget.text.clone()), text),
         }),
-        _ => Err(HarnessError::Ambiguous {
+        _ => Err(DriverError::Ambiguous {
             locator: format!("{locator:?}"),
             matches: matches
                 .iter()

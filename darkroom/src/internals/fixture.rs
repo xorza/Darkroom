@@ -1,4 +1,4 @@
-//! Projects for a harness to open, made in code: what a test of the harness or of a client of it
+//! Projects for a driver to open, made in code: what a test of the driver or of a client of it
 //! starts from.
 
 use std::path::{Path, PathBuf};

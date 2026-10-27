@@ -7,8 +7,10 @@ use std::thread;
 
 use tokio::io::AsyncWriteExt as _;
 
-use crate::TempDir;
-use crate::fs::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
+use crate::fs::{
+    AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes, symlink, symlink_dir,
+};
+use crate::{FileSystem, TempDir};
 use crate::{internals, platform};
 
 #[test]
@@ -130,4 +132,31 @@ fn concurrent_publications_never_interleave() {
         "the final file is exactly one writer's complete payload"
     );
     assert!(internals::publication_temp_files(&path).is_empty());
+}
+
+/// A folder link opens as the folder it names, and reads as a link itself; a file link opens as
+/// its file. Both need the right to make links, which Windows grants only in Developer Mode or to
+/// an elevated process.
+#[test]
+fn a_folder_link_opens_as_its_folder_and_a_file_link_as_its_file() {
+    let dir = TempDir::new("common-links");
+    if !FileSystem::symlinks_allowed(dir.path()) {
+        return;
+    }
+    let folder = dir.join("folder");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("inside.txt"), b"x").unwrap();
+    symlink_dir(&folder, dir.join("folder-link")).unwrap();
+    symlink(folder.join("inside.txt"), dir.join("file-link")).unwrap();
+
+    let linked = dir.join("folder-link");
+    assert!(fs::metadata(&linked).unwrap().is_dir());
+    assert!(
+        fs::symlink_metadata(&linked)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(linked.join("inside.txt")).unwrap(), b"x");
+    assert_eq!(fs::read(dir.join("file-link")).unwrap(), b"x");
 }
