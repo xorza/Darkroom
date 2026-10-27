@@ -8,3 +8,9 @@
 - **darkroom: the lib test binary crashed with SIGSEGV on the ubuntu runner.** CI run 40434805558
   (master `4b3e7399b`, lavapipe) ended `cargo test -p darkroom --lib` with "signal: 11, SIGSEGV"
   before any test reported; the next run, 40437898986, did not crash. Locally it never crashed.
+- **imaginarium: `ops::affine_warp::gpu::tests::gpu_matches_cpu` fails on the windows runner.**
+  CI run 40453392481 (`ec5ca0c40`, windows-2025): wgpu "Validation Error", FXC D3DCompile
+  error X3511 at `affine_warp(145,5-15)`, "unable to unroll loop … (479 iterations)".
+- **fits-well: `run_of_views_on_four_workers_peaks_within_its_view_bytes` fails on the macOS
+  runner.** CI run 40453392481 (`ec5ca0c40`, macos-26), `tests/support/peak.rs:184`: "one
+  RICE_1 i16 from stream, order 0: held 60218 B at its peak, past its 60074 B".
