@@ -356,6 +356,6 @@ const fn node_shadow(theme: &Theme, status: &ExecStatus) -> Shadow {
         // sitting flatter than its neighbors. Kept a touch tighter than the
         // ambient shadow so the status reads as a crisp halo, not a bloom.
         Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
-        None => theme.card.elevation_shadow(10.0),
+        None => theme.card.resting_shadow(),
     }
 }
